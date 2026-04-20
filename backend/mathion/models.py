@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -72,3 +72,63 @@ class Sequence(Base):
     order: Mapped[int] = mapped_column(Integer, nullable=False)
 
     block: Mapped["Block"] = relationship(back_populates="sequences")
+    items: Mapped[list["Item"]] = relationship(back_populates="sequence", cascade="all, delete-orphan", order_by="Item.order")
+
+
+class Item(Base):
+    __tablename__ = "items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sequence_id: Mapped[int] = mapped_column(ForeignKey("sequences.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # static_page fields
+    content_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # video fields
+    video_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # interactive_app fields
+    script_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    sequence: Mapped["Sequence"] = relationship(back_populates="items")
+    questions: Mapped[list["Question"]] = relationship(back_populates="item", cascade="all, delete-orphan", order_by="Question.order")
+
+
+class Question(Base):
+    __tablename__ = "questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    text_md: Mapped[str] = mapped_column(Text, nullable=False)
+    text_html: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+    explanation_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    explanation_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # numeric_answer fields
+    correct_numeric: Mapped[float | None] = mapped_column(Float, nullable=True)
+    precision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # text_answer fields
+    correct_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    item: Mapped["Item"] = relationship(back_populates="questions")
+    options: Mapped[list["AnswerOption"]] = relationship(back_populates="question", cascade="all, delete-orphan", order_by="AnswerOption.order")
+
+
+class AnswerOption(Base):
+    __tablename__ = "answer_options"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
+    text: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    question: Mapped["Question"] = relationship(back_populates="options")

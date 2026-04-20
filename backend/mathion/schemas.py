@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -70,4 +71,27 @@ class SequenceResponse(BaseModel):
     title: str
     slug: str
     order: int
+    model_config = {"from_attributes": True}
+
+
+class ItemCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    type: Literal["static_page", "video", "quiz", "interactive_app"]
+    content_md: str | None = None
+    video_url: str | None = None
+    script_url: str | None = None
+
+
+class ItemResponse(BaseModel):
+    id: int
+    sequence_id: int
+    title: str
+    slug: str
+    order: int
+    type: str
+    content_md: str | None
+    content_html: str | None
+    video_url: str | None
+    script_url: str | None
     model_config = {"from_attributes": True}

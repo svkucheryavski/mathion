@@ -1,0 +1,91 @@
+from mathion.models import Block, Course, CourseVersion, Item, Sequence
+
+
+def _make_sequence(db):
+    course = Course(slug="stats", name="Stats", description="")
+    db.add(course)
+    db.commit()
+    version = CourseVersion(course_id=course.id, state="created", info_md="", info_html="")
+    db.add(version)
+    db.commit()
+    block = Block(version_id=version.id, title="B1", slug="b1", order=1, info="")
+    db.add(block)
+    db.commit()
+    seq = Sequence(block_id=block.id, title="S1", slug="s1", order=1)
+    db.add(seq)
+    db.commit()
+    db.refresh(seq)
+    return seq
+
+
+def test_create_static_page(db):
+    seq = _make_sequence(db)
+    item = Item(sequence_id=seq.id, title="Introduction", slug="introduction", order=1, type="static_page", content_md="# Hello", content_html="<h1>Hello</h1>")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    assert item.id is not None
+    assert item.type == "static_page"
+
+
+def test_create_video(db):
+    seq = _make_sequence(db)
+    item = Item(sequence_id=seq.id, title="Lecture", slug="lecture", order=1, type="video", video_url="https://youtube.com/watch?v=abc")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    assert item.type == "video"
+
+
+def test_create_quiz(db):
+    seq = _make_sequence(db)
+    item = Item(sequence_id=seq.id, title="Quiz 1", slug="quiz-1", order=1, type="quiz")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    assert item.type == "quiz"
+
+
+def test_create_interactive_app(db):
+    seq = _make_sequence(db)
+    item = Item(sequence_id=seq.id, title="Simulation", slug="simulation", order=1, type="interactive_app", script_url="https://example.com/app.js")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    assert item.script_url == "https://example.com/app.js"
+
+
+def _setup_sequence(client):
+    course = client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    seq = client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    return seq, version
+
+
+def test_api_create_static_page(client):
+    seq, version = _setup_sequence(client)
+    response = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+    })
+    assert response.status_code == 201
+    assert response.json()["type"] == "static_page"
+    assert response.json()["order"] == 1
+
+
+def test_api_create_video(client):
+    seq, version = _setup_sequence(client)
+    response = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Lecture", "slug": "lecture", "type": "video", "video_url": "https://youtube.com/watch?v=abc",
+    })
+    assert response.status_code == 201
+    assert response.json()["type"] == "video"
+
+
+def test_api_list_items(client):
+    seq, version = _setup_sequence(client)
+    client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I1", "slug": "i1", "type": "static_page", "content_md": "a"})
+    client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I2", "slug": "i2", "type": "video", "video_url": "https://example.com"})
+    response = client.get(f"/api/sequences/{seq['id']}/items")
+    assert response.status_code == 200
+    assert len(response.json()) == 2
