@@ -41,3 +41,33 @@ class VersionResponse(BaseModel):
     archived_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class BlockCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    info: str = ""
+
+
+class BlockResponse(BaseModel):
+    id: int
+    version_id: int
+    title: str
+    slug: str
+    order: int
+    info: str
+    model_config = {"from_attributes": True}
+
+
+class SequenceCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+class SequenceResponse(BaseModel):
+    id: int
+    block_id: int
+    title: str
+    slug: str
+    order: int
+    model_config = {"from_attributes": True}

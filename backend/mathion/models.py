@@ -45,3 +45,30 @@ class CourseVersion(Base):
     content_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     course: Mapped["Course"] = relationship(back_populates="versions")
+    blocks: Mapped[list["Block"]] = relationship(back_populates="version", cascade="all, delete-orphan", order_by="Block.order")
+
+
+class Block(Base):
+    __tablename__ = "blocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("course_versions.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+    info: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    version: Mapped["CourseVersion"] = relationship(back_populates="blocks")
+    sequences: Mapped[list["Sequence"]] = relationship(back_populates="block", cascade="all, delete-orphan", order_by="Sequence.order")
+
+
+class Sequence(Base):
+    __tablename__ = "sequences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    block_id: Mapped[int] = mapped_column(ForeignKey("blocks.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    block: Mapped["Block"] = relationship(back_populates="sequences")
