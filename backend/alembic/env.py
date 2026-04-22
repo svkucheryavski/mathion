@@ -15,6 +15,7 @@ from mathion.models import (  # noqa: F401
     Question,
     Sequence,
 )
+from mathion.models_auth import LoginPIN, Session, StudentEnrollment, User  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
