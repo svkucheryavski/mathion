@@ -1,4 +1,6 @@
-from mathion.models_auth import User
+from datetime import datetime, timedelta, timezone
+
+from mathion.models_auth import LoginPIN, Session, User
 
 
 def test_create_user(db):
@@ -34,3 +36,53 @@ def test_create_superuser(db):
     db.commit()
     db.refresh(user)
     assert user.is_superuser is True
+
+
+def test_create_session(db):
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    session = Session(
+        user_id=user.id,
+        token_hash="abc123hashed",
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    assert session.id is not None
+    assert session.user_id == user.id
+    assert session.created_at is not None
+    assert session.last_active_at is not None
+
+
+def test_create_pin(db):
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    pin = LoginPIN(
+        user_id=user.id,
+        pin_hash="hashed_pin_value",
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    )
+    db.add(pin)
+    db.commit()
+    db.refresh(pin)
+    assert pin.id is not None
+    assert pin.is_used is False
+
+
+def test_cascade_delete_user_deletes_sessions(db):
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    session = Session(
+        user_id=user.id,
+        token_hash="abc",
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    db.add(session)
+    db.commit()
+    db.delete(user)
+    db.commit()
+    assert db.query(Session).count() == 0

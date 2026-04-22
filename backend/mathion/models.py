@@ -154,4 +154,4 @@ class AnswerOption(Base):
     question: Mapped["Question"] = relationship(back_populates="options")
 
 
-from mathion.models_auth import User  # noqa: F401 — register model with Base
+from mathion.models_auth import User, Session, LoginPIN  # noqa: F401
