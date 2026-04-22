@@ -160,3 +160,22 @@ class UserResponse(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class EnrollRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+
+
+class EnrollBatchRequest(BaseModel):
+    emails: list[str] = Field(min_length=1)
+
+
+class EnrollmentResponse(BaseModel):
+    id: int
+    user_id: int
+    version_id: int
+    is_active: bool
+    user_email: str
+    user_full_name: str | None
+
+    model_config = {"from_attributes": True}
