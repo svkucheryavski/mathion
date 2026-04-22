@@ -135,3 +135,28 @@ class ItemResponse(BaseModel):
     video_url: str | None
     script_url: str | None
     model_config = {"from_attributes": True}
+
+
+class PinRequestSchema(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+
+
+class PinVerifySchema(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+    pin: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    duration_days: int = Field(ge=1, le=30)
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    full_name: str | None
+    is_superuser: bool
+    is_disabled: bool
+    photo_url: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=200)

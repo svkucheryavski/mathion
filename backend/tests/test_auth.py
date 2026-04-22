@@ -86,3 +86,79 @@ def test_cascade_delete_user_deletes_sessions(db):
     db.delete(user)
     db.commit()
     assert db.query(Session).count() == 0
+
+
+def test_api_request_pin(client, db):
+    user = User(email="alice@example.com", full_name="Alice")
+    db.add(user)
+    db.commit()
+    response = client.post("/api/auth/request-pin", json={"email": "alice@example.com"},
+                           headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    assert response.json()["message"] == "PIN sent"
+
+
+def test_api_request_pin_unknown_email(client):
+    response = client.post("/api/auth/request-pin", json={"email": "nobody@example.com"},
+                           headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    assert response.json()["message"] == "PIN sent"
+
+
+def test_api_verify_pin_and_login(client, db):
+    from mathion.auth import request_pin as _request_pin
+
+    user = User(email="alice@example.com", full_name="Alice")
+    db.add(user)
+    db.commit()
+
+    raw_pin = _request_pin(db, "alice@example.com")
+    response = client.post("/api/auth/verify-pin", json={
+        "email": "alice@example.com",
+        "pin": raw_pin,
+        "duration_days": 7,
+    }, headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["email"] == "alice@example.com"
+    assert "session_token" in response.cookies
+
+
+def test_api_verify_pin_wrong(client, db):
+    from mathion.auth import request_pin as _request_pin
+
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    _request_pin(db, "alice@example.com")
+    response = client.post("/api/auth/verify-pin", json={
+        "email": "alice@example.com",
+        "pin": "000000",
+        "duration_days": 7,
+    }, headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 401
+
+
+def test_api_get_profile(auth_client, test_user):
+    response = auth_client.get("/api/auth/me")
+    assert response.status_code == 200
+    assert response.json()["email"] == test_user.email
+
+
+def test_api_get_profile_unauthenticated(client):
+    response = client.get("/api/auth/me")
+    assert response.status_code == 401
+
+
+def test_api_logout(auth_client, db):
+    from mathion.models_auth import Session
+    response = auth_client.post("/api/auth/logout", headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    assert db.query(Session).count() == 0
+
+
+def test_api_update_profile(auth_client):
+    response = auth_client.patch("/api/auth/me", json={"full_name": "New Name"},
+                                 headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    assert response.json()["full_name"] == "New Name"
