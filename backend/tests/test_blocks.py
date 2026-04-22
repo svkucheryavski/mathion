@@ -116,3 +116,70 @@ def test_api_max_8_sequences(client):
         "title": "Seq 9", "slug": "seq-9",
     })
     assert resp.status_code == 409
+
+
+def _setup_version(client):
+    course = client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    return version
+
+
+def test_api_patch_block_title_in_created_state(client):
+    version = _setup_version(client)
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "slug": "b1", "info": ""}).json()
+    resp = client.patch(f"/api/blocks/{block['id']}", json={"title": "New Title"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "New Title"
+
+
+def test_api_patch_block_title_in_published_state(client):
+    """Title is in the allowed set for published state, so PATCH should succeed."""
+    version = _setup_version(client)
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "slug": "b1", "info": ""}).json()
+    seq = client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    client.post(f"/api/versions/{version['id']}/publish")
+    resp = client.patch(f"/api/blocks/{block['id']}", json={"title": "Updated Title"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Updated Title"
+
+
+def test_api_patch_block_in_archived_state(client):
+    """PATCH block in archived version must return 409."""
+    version = _setup_version(client)
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    seq = client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    client.post(f"/api/versions/{version['id']}/publish")
+    client.post(f"/api/versions/{version['id']}/archive")
+    resp = client.patch(f"/api/blocks/{block['id']}", json={"title": "Archived Title"})
+    assert resp.status_code == 409
+
+
+def test_api_delete_block_in_created_state(client):
+    version = _setup_version(client)
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    resp = client.delete(f"/api/blocks/{block['id']}")
+    assert resp.status_code == 204
+
+
+def test_api_delete_block_in_published_state(client):
+    """DELETE block in published version must return 409."""
+    version = _setup_version(client)
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"})
+    client.post(f"/api/versions/{version['id']}/publish")
+    resp = client.delete(f"/api/blocks/{block['id']}")
+    assert resp.status_code == 409
+
+
+def test_api_duplicate_block_slug_within_version(client):
+    """Creating two blocks with the same slug in the same version must fail."""
+    version = _setup_version(client)
+    client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "dup-slug", "info": ""})
+    resp = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B2", "slug": "dup-slug", "info": ""})
+    assert resp.status_code == 409
+
+
+def test_api_list_blocks_nonexistent_version(client):
+    """Listing blocks for a version that doesn't exist must return 404."""
+    resp = client.get("/api/versions/999/blocks")
+    assert resp.status_code == 404

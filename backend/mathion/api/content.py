@@ -20,6 +20,9 @@ def get_content_json(version_id: int, db: Session = Depends(get_db)):
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
 
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="This version is disabled")
+
     # Eager load the full tree using select() style
     blocks = db.execute(
         select(Block)

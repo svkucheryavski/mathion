@@ -81,3 +81,62 @@ def test_cascade_delete_item_deletes_questions(db):
     db.commit()
     assert db.query(Question).count() == 0
     assert db.query(AnswerOption).count() == 0
+
+
+def test_create_multiple_choice_question_multiple_correct(db):
+    """A multiple_choice question can have more than one correct answer option."""
+    item = _make_quiz_item(db)
+    q = Question(item_id=item.id, text_md="Pick all primes", text_html="<p>Pick all primes</p>",
+                 type="multiple_choice", order=1)
+    db.add(q)
+    db.commit()
+    db.add_all([
+        AnswerOption(question_id=q.id, text="2", is_correct=True, order=1),
+        AnswerOption(question_id=q.id, text="3", is_correct=True, order=2),
+        AnswerOption(question_id=q.id, text="4", is_correct=False, order=3),
+        AnswerOption(question_id=q.id, text="5", is_correct=True, order=4),
+    ])
+    db.commit()
+    db.refresh(q)
+    correct = [o for o in q.options if o.is_correct]
+    assert len(correct) == 3
+    assert q.type == "multiple_choice"
+
+
+def _make_version_db(db):
+    """Return (version, block, sequence, item) for use in cascade tests."""
+    course = Course(slug="cascade-test", name="Cascade", description="")
+    db.add(course)
+    db.commit()
+    version = CourseVersion(course_id=course.id, state="created", info_md="", info_html="")
+    db.add(version)
+    db.commit()
+    block = Block(version_id=version.id, title="B1", slug="b1", order=1, info="")
+    db.add(block)
+    db.commit()
+    seq = Sequence(block_id=block.id, title="S1", slug="s1", order=1)
+    db.add(seq)
+    db.commit()
+    item = Item(sequence_id=seq.id, title="Quiz", slug="quiz", order=1, type="quiz")
+    db.add(item)
+    db.commit()
+    q = Question(item_id=item.id, text_md="Q?", text_html="Q?", type="single_choice", order=1)
+    db.add(q)
+    db.commit()
+    opt = AnswerOption(question_id=q.id, text="A", is_correct=True, order=1)
+    db.add(opt)
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+def test_cascade_delete_version_full_tree(db):
+    """Deleting a version cascades through block → sequence → item → question → option."""
+    version = _make_version_db(db)
+    db.delete(version)
+    db.commit()
+    assert db.query(Block).count() == 0
+    assert db.query(Sequence).count() == 0
+    assert db.query(Item).count() == 0
+    assert db.query(Question).count() == 0
+    assert db.query(AnswerOption).count() == 0

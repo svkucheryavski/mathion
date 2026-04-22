@@ -89,3 +89,60 @@ def test_api_list_items(client):
     response = client.get(f"/api/sequences/{seq['id']}/items")
     assert response.status_code == 200
     assert len(response.json()) == 2
+
+
+def test_api_create_video_without_video_url(client):
+    """Creating a video item without video_url must return 422."""
+    seq, version = _setup_sequence(client)
+    response = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Lecture", "slug": "lecture", "type": "video",
+    })
+    assert response.status_code == 422
+
+
+def test_api_create_static_page_without_content_md(client):
+    """Creating a static_page item without content_md must return 422."""
+    seq, version = _setup_sequence(client)
+    response = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page",
+    })
+    assert response.status_code == 422
+
+
+def test_api_patch_item_content_md_in_published_state(client):
+    """content_md is in the published-editable set, so PATCH must succeed."""
+    seq, version = _setup_sequence(client)
+    item = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Old",
+    }).json()
+    # Need to publish: add a sequence to its block first (block already has 1 seq from _setup_sequence)
+    client.post(f"/api/versions/{version['id']}/publish")
+    resp = client.patch(f"/api/items/{item['id']}", json={"content_md": "# Updated"})
+    assert resp.status_code == 200
+    assert resp.json()["content_md"] == "# Updated"
+
+
+def test_api_delete_item_in_created_state(client):
+    seq, version = _setup_sequence(client)
+    item = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+    }).json()
+    resp = client.delete(f"/api/items/{item['id']}")
+    assert resp.status_code == 204
+
+
+def test_api_delete_item_in_published_state(client):
+    """DELETE item in published version must return 409."""
+    seq, version = _setup_sequence(client)
+    item = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+    }).json()
+    client.post(f"/api/versions/{version['id']}/publish")
+    resp = client.delete(f"/api/items/{item['id']}")
+    assert resp.status_code == 409
+
+
+def test_api_list_items_nonexistent_sequence(client):
+    """Listing items for a sequence that doesn't exist must return 404."""
+    resp = client.get("/api/sequences/999/items")
+    assert resp.status_code == 404

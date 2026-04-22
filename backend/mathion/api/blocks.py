@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404
@@ -43,7 +44,11 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
     next_order = (db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0) + 1
     block = Block(version_id=version_id, title=data.title, slug=data.slug, order=next_order, info=data.info)
     db.add(block)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A block with this slug already exists in this version")
     db.refresh(block)
     return block
 

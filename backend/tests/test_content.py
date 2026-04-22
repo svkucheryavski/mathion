@@ -88,3 +88,24 @@ def test_content_json_structure(client, db):
 def test_content_json_404(client):
     response = client.get("/api/versions/999/content")
     assert response.status_code == 404
+
+
+def test_content_json_empty_version(client):
+    """Content endpoint returns 200 with an empty blocks array for a version with no blocks."""
+    course = client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = client.get(f"/api/versions/{version['id']}/content")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["blocks"] == []
+    assert data["course"]["slug"] == "empty"
+    assert data["version"]["id"] == version["id"]
+
+
+def test_content_json_disabled_version_returns_403(client):
+    """Content endpoint returns 403 for a disabled version."""
+    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    client.post(f"/api/versions/{version['id']}/disable")
+    response = client.get(f"/api/versions/{version['id']}/content")
+    assert response.status_code == 403

@@ -119,3 +119,49 @@ def test_api_list_versions(client):
     response = client.get(f"/api/courses/{course['id']}/versions")
     assert response.status_code == 200
     assert len(response.json()) == 2
+
+
+def test_api_publish_version_no_blocks(client):
+    """Publish succeeds when the version has no blocks (empty course)."""
+    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 200
+    assert response.json()["state"] == "published"
+
+
+def test_api_publish_version_block_with_no_sequences_fails(client):
+    """Publish fails with 409 when a block has no sequences."""
+    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""})
+    response = client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 409
+
+
+def test_api_publish_version_block_with_sequences_succeeds(client):
+    """Publish succeeds when every block has at least one sequence."""
+    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"})
+    response = client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 200
+    assert response.json()["state"] == "published"
+
+
+def test_api_disable_enable_version(client):
+    """Disable a version, then enable it; is_disabled reflects each state."""
+    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    assert version["is_disabled"] is False
+
+    # Disable
+    resp = client.post(f"/api/versions/{version['id']}/disable")
+    assert resp.status_code == 200
+    assert resp.json()["is_disabled"] is True
+
+    # Re-enable
+    resp = client.post(f"/api/versions/{version['id']}/enable")
+    assert resp.status_code == 200
+    assert resp.json()["is_disabled"] is False

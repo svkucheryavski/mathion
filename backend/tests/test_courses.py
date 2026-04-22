@@ -83,3 +83,23 @@ def test_api_delete_course(client):
     assert response.status_code == 204
     response = client.get(f"/api/courses/{course_id}")
     assert response.status_code == 404
+
+
+def test_api_create_course_missing_slug(client):
+    response = client.post("/api/courses", json={"name": "Stats", "description": ""})
+    assert response.status_code == 422
+
+
+def test_api_create_course_invalid_slug_uppercase(client):
+    response = client.post("/api/courses", json={"slug": "Applied-Statistics", "name": "Stats", "description": ""})
+    assert response.status_code == 422
+
+
+def test_api_create_course_invalid_slug_spaces(client):
+    response = client.post("/api/courses", json={"slug": "applied statistics", "name": "Stats", "description": ""})
+    assert response.status_code == 422
+
+
+def test_api_create_course_empty_name(client):
+    response = client.post("/api/courses", json={"slug": "stats", "name": "", "description": ""})
+    assert response.status_code == 422
