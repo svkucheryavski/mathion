@@ -165,3 +165,52 @@ def test_invalidate_all_sessions(db):
 
     invalidate_all_sessions(db, user.id)
     assert db.query(Session).count() == 0
+
+
+def test_validate_session_expired(db):
+    """An expired session returns None."""
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    raw_token = "test_token_123"
+    session = Session(
+        user_id=user.id,
+        token_hash=hash_token(raw_token),
+        expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    db.add(session)
+    db.commit()
+    result = validate_session(db, raw_token)
+    assert result is None
+
+
+def test_request_pin_rate_limited(db):
+    """After max_pin_requests_per_hour PINs, further requests return None."""
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    # Request max allowed PINs (default is 3)
+    for _ in range(3):
+        result = request_pin(db, "alice@example.com")
+        assert result is not None
+    # Next should be rate limited
+    result = request_pin(db, "alice@example.com")
+    assert result is None
+
+
+def test_verify_pin_rate_limited_after_failures(db):
+    """After max_pin_failures_per_hour failed verifications, further attempts return None."""
+    from mathion.models_auth import RateLimitEntry
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+    # Create a valid PIN first
+    raw_pin = request_pin(db, "alice@example.com")
+    assert raw_pin is not None
+    # Simulate max_pin_failures_per_hour failures by inserting rate limit entries directly
+    for _ in range(5):
+        db.add(RateLimitEntry(key="pin_failure:alice@example.com"))
+    db.commit()
+    # Now even with a valid PIN, should be rate limited
+    result = verify_pin(db, "alice@example.com", raw_pin, duration_days=7)
+    assert result is None

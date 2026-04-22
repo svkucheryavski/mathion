@@ -56,3 +56,11 @@ class StudentEnrollment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     user: Mapped["User"] = relationship()
+
+
+class RateLimitEntry(Base):
+    __tablename__ = "rate_limit_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(300), nullable=False, index=True)  # e.g., "pin_request:alice@example.com"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

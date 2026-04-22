@@ -30,6 +30,12 @@ def get_optional_user(
     session_token: str | None = Cookie(default=None, alias="session_token"),
     db: Session = Depends(get_db),
 ) -> User | None:
+    """Return the current user if a valid session cookie is present, else None.
+
+    WARNING: This dependency does NOT check the X-Requested-With CSRF header.
+    It should NOT be used for mutating endpoints (POST/PATCH/DELETE) without
+    additional CSRF protection. Currently not used by any endpoint.
+    """
     if not session_token:
         return None
     return validate_session(db, session_token)

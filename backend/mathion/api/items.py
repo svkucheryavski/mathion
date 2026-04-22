@@ -32,6 +32,8 @@ def _get_version_for_item(db: Session, item: Item) -> CourseVersion:
 def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = _get_version_for_sequence(db, sequence_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add items to versions in 'created' state")
     # NOTE: order assignment is not safe under concurrent writes.
@@ -67,6 +69,8 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
 
     if version.state == "archived":
         raise HTTPException(status_code=409, detail="Cannot edit items in archived versions")
@@ -101,6 +105,8 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete items in 'created' state")
     db.delete(item)

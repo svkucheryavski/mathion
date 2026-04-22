@@ -155,4 +155,4 @@ class AnswerOption(Base):
     question: Mapped["Question"] = relationship(back_populates="options")
 
 
-from mathion.models_auth import User, Session, LoginPIN, StudentEnrollment  # noqa: F401
+from mathion.models_auth import User, Session, LoginPIN, StudentEnrollment, RateLimitEntry  # noqa: F401

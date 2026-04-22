@@ -39,6 +39,8 @@ def _get_version_state(db: Session, version_id: int) -> str:
 def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add blocks to versions in 'created' state")
     count = db.scalar(select(func.count()).where(Block.version_id == version_id))
@@ -73,6 +75,8 @@ def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     state = version.state
 
     if state == "archived":
@@ -99,6 +103,8 @@ def delete_block(block_id: int, db: Session = Depends(get_db), user: User = Depe
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     state = version.state
     if state != "created":
         raise HTTPException(status_code=409, detail="Can only delete blocks in 'created' state")
@@ -114,6 +120,8 @@ def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(g
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add sequences to versions in 'created' state")
     count = db.scalar(select(func.count()).where(Sequence.block_id == block_id))
@@ -150,6 +158,8 @@ def update_sequence(sequence_id: int, data: SequenceUpdate, db: Session = Depend
     block = get_or_404(db, Block, seq.block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     state = version.state
 
     if state == "archived":
@@ -177,6 +187,8 @@ def delete_sequence(sequence_id: int, db: Session = Depends(get_db), user: User 
     block = get_or_404(db, Block, seq.block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     state = version.state
     if state != "created":
         raise HTTPException(status_code=409, detail="Can only delete sequences in 'created' state")

@@ -165,8 +165,8 @@ def test_enrolled_student_can_access_content(auth_client, db, test_user):
     assert response.status_code == 200
 
 
-def test_inactive_enrollment_cannot_access_content(auth_client, db, test_user):
-    """Student with an inactive enrollment gets 403."""
+def test_inactive_enrollment_can_access_content(auth_client, db, test_user):
+    """Student with an inactive enrollment can still read content (preserved access per spec)."""
     _, version = _make_published_course(db)
 
     enrollment = StudentEnrollment(user_id=test_user.id, version_id=version.id, is_active=False)
@@ -174,7 +174,7 @@ def test_inactive_enrollment_cannot_access_content(auth_client, db, test_user):
     db.commit()
 
     response = auth_client.get(f"/api/versions/{version.id}/content")
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,36 @@ def test_course_admin_cannot_access_other_course_content(auth_client, db, test_u
 
 
 # ---------------------------------------------------------------------------
-# 6. Health check is public
+# 6. CSRF protection
+# ---------------------------------------------------------------------------
+
+def test_csrf_header_missing_on_post_returns_403(client, db):
+    """POST without X-Requested-With header should return 403."""
+    user = User(email="csrf@example.com", full_name="CSRF Test", is_superuser=True)
+    db.add(user)
+    db.commit()
+    from mathion.auth import request_pin, verify_pin
+    raw_pin = request_pin(db, user.email)
+    token = verify_pin(db, user.email, raw_pin, duration_days=7)
+    # Use raw TestClient without CSRF header
+    from fastapi.testclient import TestClient
+    from mathion.main import app
+    from mathion.database import get_db
+    raw_client = TestClient(app)
+    def override():
+        try:
+            yield db
+        finally:
+            pass
+    app.dependency_overrides[get_db] = override
+    raw_client.cookies.set("session_token", token)
+    response = raw_client.post("/api/courses", json={"slug": "test", "name": "T", "description": ""})
+    assert response.status_code == 403
+    app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# 7. Health check is public
 # ---------------------------------------------------------------------------
 
 def test_health_check_is_public(client):

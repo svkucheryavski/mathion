@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import get_or_404, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user, require_superuser
-from mathion.models import Course
-from mathion.models_auth import User
+from mathion.models import Course, CourseAdmin, CourseVersion
+from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import CourseCreate, CourseResponse, CourseUpdate
 
 router = APIRouter(tags=["courses"])
@@ -28,7 +28,25 @@ def create_course(data: CourseCreate, db: Session = Depends(get_db), user: User 
 
 @router.get("/api/courses", response_model=list[CourseResponse])
 def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    courses = db.execute(select(Course).offset(offset).limit(limit)).scalars().all()
+    if user.is_superuser:
+        courses = db.execute(select(Course).offset(offset).limit(limit)).scalars().all()
+        return courses
+
+    # Non-superuser: show courses where user is admin or has an active enrollment
+    admin_course_ids = db.execute(
+        select(CourseAdmin.course_id).where(CourseAdmin.user_id == user.id)
+    ).scalars().all()
+
+    enrolled_course_ids = db.execute(
+        select(CourseVersion.course_id)
+        .join(StudentEnrollment, StudentEnrollment.version_id == CourseVersion.id)
+        .where(StudentEnrollment.user_id == user.id, StudentEnrollment.is_active == True)  # noqa: E712
+    ).scalars().all()
+
+    visible_ids = set(admin_course_ids) | set(enrolled_course_ids)
+    if not visible_ids:
+        return []
+    courses = db.execute(select(Course).where(Course.id.in_(visible_ids)).offset(offset).limit(limit)).scalars().all()
     return courses
 
 

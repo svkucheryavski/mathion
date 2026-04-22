@@ -104,6 +104,8 @@ def revert_version(version_id: int, db: Session = Depends(get_db), user: User = 
 def delete_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete versions in 'created' state")
     db.delete(version)

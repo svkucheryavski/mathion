@@ -36,7 +36,23 @@ def _get_or_create_user(db: Session, email: str) -> User:
 
 
 def _enroll_user(db: Session, user: User, course_id: int, version: CourseVersion) -> StudentEnrollment:
-    """Deactivate any existing active enrollment for this user+course, then create new one."""
+    """Deactivate any existing active enrollment for this user+course, then create new one.
+
+    NOTE: There is a race condition risk for duplicate active enrollments on the same
+    version. PostgreSQL supports partial unique indexes which could enforce this at the
+    DB level, but SQLite does not. The check below mitigates the issue in application code.
+    """
+    # Check if already actively enrolled on the target version
+    existing_active = db.execute(
+        select(StudentEnrollment).where(
+            StudentEnrollment.user_id == user.id,
+            StudentEnrollment.version_id == version.id,
+            StudentEnrollment.is_active == True,  # noqa: E712
+        )
+    ).scalar_one_or_none()
+    if existing_active:
+        return existing_active  # Already enrolled on this version
+
     # Deactivate existing active enrollments for this user on any version of this course
     existing = db.execute(
         select(StudentEnrollment)
@@ -94,8 +110,9 @@ def enroll_batch(
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
     version = _get_newest_published_version(db, course_id)
+    unique_emails = list(dict.fromkeys(e.strip().lower() for e in data.emails))
     results = []
-    for email in data.emails:
+    for email in unique_emails:
         user = _get_or_create_user(db, email)
         enrollment = _enroll_user(db, user, course_id, version)
         results.append(enrollment)

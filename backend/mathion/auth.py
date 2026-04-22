@@ -1,12 +1,13 @@
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DBSession
 
 from mathion.config import settings
-from mathion.models_auth import LoginPIN, Session, User
+from mathion.models_auth import LoginPIN, RateLimitEntry, Session, User
 
 
 def hash_token(value: str) -> str:
@@ -16,7 +17,7 @@ def hash_token(value: str) -> str:
 
 
 def verify_pin_hash(raw_pin: str, pin_hash: str) -> bool:
-    return hash_token(raw_pin) == pin_hash
+    return hmac.compare_digest(hash_token(raw_pin), pin_hash)
 
 
 def generate_pin() -> str:
@@ -30,10 +31,24 @@ def generate_session_token() -> str:
 
 
 def request_pin(db: DBSession, email: str) -> str | None:
-    """Create a login PIN for the given email. Returns raw PIN or None if user not found."""
+    """Create a login PIN for the given email. Returns raw PIN or None if user not found or rate limited."""
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if not user or user.is_disabled:
         return None
+
+    # Rate limit: count PIN requests in last hour
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    request_count = db.scalar(
+        select(func.count()).where(
+            RateLimitEntry.key == f"pin_request:{email}",
+            RateLimitEntry.created_at > one_hour_ago,
+        )
+    )
+    if request_count >= settings.max_pin_requests_per_hour:
+        return None
+
+    # Record this request for rate limiting
+    db.add(RateLimitEntry(key=f"pin_request:{email}"))
 
     raw_pin = generate_pin()
     pin = LoginPIN(
@@ -52,6 +67,17 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
     if not user or user.is_disabled:
         return None
 
+    # Rate limit: count PIN verification failures in last hour
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    failure_count = db.scalar(
+        select(func.count()).where(
+            RateLimitEntry.key == f"pin_failure:{email}",
+            RateLimitEntry.created_at > one_hour_ago,
+        )
+    )
+    if failure_count >= settings.max_pin_failures_per_hour:
+        return None
+
     # Find valid, unused PIN
     pin = db.execute(
         select(LoginPIN)
@@ -64,6 +90,9 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
     ).scalar_one_or_none()
 
     if not pin or not verify_pin_hash(raw_pin, pin.pin_hash):
+        # Record failure for rate limiting
+        db.add(RateLimitEntry(key=f"pin_failure:{email}"))
+        db.commit()
         return None
 
     # Mark PIN as used
@@ -99,6 +128,16 @@ def validate_session(db: DBSession, raw_token: str) -> User | None:
         db.delete(session)
         db.commit()
         return None
+
+    # Throttled update of last_active_at (at most once every 5 minutes)
+    now = datetime.now(timezone.utc)
+    last_active = session.last_active_at
+    if last_active is not None and last_active.tzinfo is None:
+        # SQLite may store naive datetimes; treat as UTC
+        last_active = last_active.replace(tzinfo=timezone.utc)
+    if last_active is None or (now - last_active).total_seconds() > 300:
+        session.last_active_at = now
+        db.commit()
 
     return user
 

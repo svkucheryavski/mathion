@@ -38,11 +38,12 @@ def get_content_json(version_id: int, db: Session = Depends(get_db), user: User 
         ).scalar_one_or_none()
 
         if not is_admin:
+            # Allow any enrollment (active or inactive) on this specific version.
+            # Inactive enrollments preserve read access per spec.
             is_enrolled = db.execute(
                 select(StudentEnrollment).where(
                     StudentEnrollment.version_id == version_id,
                     StudentEnrollment.user_id == user.id,
-                    StudentEnrollment.is_active == True,
                 )
             ).scalar_one_or_none()
 

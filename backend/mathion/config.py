@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     pin_expiry_minutes: int = 10
     max_pin_requests_per_hour: int = 3
     max_pin_failures_per_hour: int = 5
+    cookie_secure: bool = False  # Set True in production (HTTPS)
 
     model_config = {"env_prefix": "MATHION_"}
 

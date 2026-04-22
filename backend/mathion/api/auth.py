@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from mathion.auth import destroy_session, request_pin, verify_pin
+from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models_auth import User
@@ -28,6 +29,7 @@ def api_verify_pin(data: PinVerifySchema, response: Response, db: Session = Depe
         value=token,
         httponly=True,
         samesite="lax",
+        secure=settings.cookie_secure,
         max_age=data.duration_days * 86400,
     )
 

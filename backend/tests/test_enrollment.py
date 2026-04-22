@@ -240,8 +240,8 @@ def test_api_non_admin_cannot_enroll(auth_client, db):
     assert "Course admin access required" in response.json()["detail"]
 
 
-def test_api_enroll_re_enrollment_deactivates_old(admin_client, db, superuser):
-    """Enrolling same student twice deactivates previous enrollment and creates new active one."""
+def test_api_enroll_same_version_returns_existing(admin_client, db, superuser):
+    """Enrolling same student on the same version returns the existing active enrollment."""
     course, version = _make_published_course(db)
     _add_course_admin(db, course.id, superuser.id)
 
@@ -254,7 +254,7 @@ def test_api_enroll_re_enrollment_deactivates_old(admin_client, db, superuser):
     assert r1.status_code == 201
     enrollment1_id = r1.json()["id"]
 
-    # Second enrollment (should deactivate first)
+    # Second enrollment on same version returns existing
     r2 = admin_client.post(
         f"/api/courses/{course.id}/enroll",
         json={"email": "student@example.com"},
@@ -262,14 +262,20 @@ def test_api_enroll_re_enrollment_deactivates_old(admin_client, db, superuser):
     )
     assert r2.status_code == 201
     enrollment2_id = r2.json()["id"]
-    assert enrollment2_id != enrollment1_id
+    assert enrollment2_id == enrollment1_id
 
-    # Check DB state
+    # Only one enrollment exists
     from sqlalchemy import select
-    e1 = db.get(StudentEnrollment, enrollment1_id)
-    e2 = db.get(StudentEnrollment, enrollment2_id)
-    # Refresh to get latest state
-    db.refresh(e1)
-    db.refresh(e2)
-    assert e1.is_active is False
-    assert e2.is_active is True
+    enrollments = db.execute(
+        select(StudentEnrollment).where(StudentEnrollment.user_id == r1.json()["user_id"])
+    ).scalars().all()
+    assert len(enrollments) == 1
+    assert enrollments[0].is_active is True
+
+
+def test_api_remove_nonexistent_student(admin_client, db, superuser):
+    """Removing a student that doesn't exist returns 404."""
+    course, _ = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.delete(f"/api/courses/{course.id}/students/9999")
+    assert response.status_code == 404
