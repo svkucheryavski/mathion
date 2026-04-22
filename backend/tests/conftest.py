@@ -6,6 +6,8 @@ from sqlalchemy.pool import StaticPool
 
 from mathion.database import Base, get_db
 from mathion.main import app
+from mathion.models_auth import User
+from mathion.auth import request_pin, verify_pin
 
 test_engine = create_engine(
     "sqlite://",
@@ -51,3 +53,37 @@ def client(db):
     app.dependency_overrides[get_db] = override_get_db
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def test_user(db):
+    user = User(email="test@example.com", full_name="Test User")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def superuser(db):
+    user = User(email="admin@example.com", full_name="Admin", is_superuser=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def auth_client(client, db, test_user):
+    raw_pin = request_pin(db, test_user.email)
+    token = verify_pin(db, test_user.email, raw_pin, duration_days=7)
+    client.cookies.set("session_token", token)
+    return client
+
+
+@pytest.fixture
+def admin_client(client, db, superuser):
+    raw_pin = request_pin(db, superuser.email)
+    token = verify_pin(db, superuser.email, raw_pin, duration_days=7)
+    client.cookies.set("session_token", token)
+    return client
