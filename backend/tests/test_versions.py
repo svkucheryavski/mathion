@@ -40,9 +40,9 @@ def test_version_belongs_to_course(db):
     assert len(course.versions) == 2
 
 
-def test_api_create_version(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    response = client.post(f"/api/courses/{course['id']}/versions", json={
+def test_api_create_version(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    response = admin_client.post(f"/api/courses/{course['id']}/versions", json={
         "info_md": "Course info",
         "max_quiz_attempts": 5,
     })
@@ -53,115 +53,115 @@ def test_api_create_version(client):
     assert data["is_disabled"] is False
 
 
-def test_api_publish_version(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    response = client.post(f"/api/versions/{version['id']}/publish")
+def test_api_publish_version(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 200
     assert response.json()["state"] == "published"
     assert response.json()["published_at"] is not None
 
 
-def test_api_archive_version(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/publish")
-    response = client.post(f"/api/versions/{version['id']}/archive")
+def test_api_archive_version(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    response = admin_client.post(f"/api/versions/{version['id']}/archive")
     assert response.status_code == 200
     assert response.json()["state"] == "archived"
     assert response.json()["archived_at"] is not None
 
 
-def test_api_revert_published_to_created(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/publish")
-    response = client.post(f"/api/versions/{version['id']}/revert")
+def test_api_revert_published_to_created(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    response = admin_client.post(f"/api/versions/{version['id']}/revert")
     assert response.status_code == 200
     assert response.json()["state"] == "created"
 
 
-def test_api_cannot_archive_created(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    response = client.post(f"/api/versions/{version['id']}/archive")
+def test_api_cannot_archive_created(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = admin_client.post(f"/api/versions/{version['id']}/archive")
     assert response.status_code == 409
 
 
-def test_api_cannot_revert_archived(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/publish")
-    client.post(f"/api/versions/{version['id']}/archive")
-    response = client.post(f"/api/versions/{version['id']}/revert")
+def test_api_cannot_revert_archived(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    admin_client.post(f"/api/versions/{version['id']}/archive")
+    response = admin_client.post(f"/api/versions/{version['id']}/revert")
     assert response.status_code == 409
 
 
-def test_api_delete_created_version(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    response = client.delete(f"/api/versions/{version['id']}")
+def test_api_delete_created_version(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = admin_client.delete(f"/api/versions/{version['id']}")
     assert response.status_code == 204
 
 
-def test_api_cannot_delete_published_version(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/publish")
-    response = client.delete(f"/api/versions/{version['id']}")
+def test_api_cannot_delete_published_version(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    response = admin_client.delete(f"/api/versions/{version['id']}")
     assert response.status_code == 409
 
 
-def test_api_list_versions(client):
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v1"})
-    client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"})
-    response = client.get(f"/api/courses/{course['id']}/versions")
+def test_api_list_versions(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v1"})
+    admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"})
+    response = admin_client.get(f"/api/courses/{course['id']}/versions")
     assert response.status_code == 200
     assert len(response.json()) == 2
 
 
-def test_api_publish_version_no_blocks(client):
+def test_api_publish_version_no_blocks(admin_client):
     """Publish succeeds when the version has no blocks (empty course)."""
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    response = client.post(f"/api/versions/{version['id']}/publish")
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 200
     assert response.json()["state"] == "published"
 
 
-def test_api_publish_version_block_with_no_sequences_fails(client):
+def test_api_publish_version_block_with_no_sequences_fails(admin_client):
     """Publish fails with 409 when a block has no sequences."""
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""})
-    response = client.post(f"/api/versions/{version['id']}/publish")
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 409
 
 
-def test_api_publish_version_block_with_sequences_succeeds(client):
+def test_api_publish_version_block_with_sequences_succeeds(admin_client):
     """Publish succeeds when every block has at least one sequence."""
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
-    client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"})
-    response = client.post(f"/api/versions/{version['id']}/publish")
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 200
     assert response.json()["state"] == "published"
 
 
-def test_api_disable_enable_version(client):
+def test_api_disable_enable_version(admin_client):
     """Disable a version, then enable it; is_disabled reflects each state."""
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     assert version["is_disabled"] is False
 
     # Disable
-    resp = client.post(f"/api/versions/{version['id']}/disable")
+    resp = admin_client.post(f"/api/versions/{version['id']}/disable")
     assert resp.status_code == 200
     assert resp.json()["is_disabled"] is True
 
     # Re-enable
-    resp = client.post(f"/api/versions/{version['id']}/enable")
+    resp = admin_client.post(f"/api/versions/{version['id']}/enable")
     assert resp.status_code == 200
     assert resp.json()["is_disabled"] is False

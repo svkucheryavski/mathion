@@ -1,5 +1,5 @@
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as BaseTestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -8,6 +8,23 @@ from mathion.database import Base, get_db
 from mathion.main import app
 from mathion.models_auth import User
 from mathion.auth import request_pin, verify_pin
+
+
+class CSRFTestClient(BaseTestClient):
+    def post(self, *args, **kwargs):
+        kwargs.setdefault("headers", {})
+        kwargs["headers"].setdefault("X-Requested-With", "mathion")
+        return super().post(*args, **kwargs)
+
+    def patch(self, *args, **kwargs):
+        kwargs.setdefault("headers", {})
+        kwargs["headers"].setdefault("X-Requested-With", "mathion")
+        return super().patch(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        kwargs.setdefault("headers", {})
+        kwargs["headers"].setdefault("X-Requested-With", "mathion")
+        return super().delete(*args, **kwargs)
 
 test_engine = create_engine(
     "sqlite://",
@@ -51,7 +68,7 @@ def client(db):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    yield CSRFTestClient(app)
     app.dependency_overrides.clear()
 
 

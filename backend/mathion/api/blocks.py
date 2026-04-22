@@ -3,9 +3,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404
+from mathion.api.helpers import get_or_404, require_course_admin
 from mathion.database import get_db
+from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Sequence
+from mathion.models_auth import User
 from mathion.schemas import (
     BlockCreate,
     BlockResponse,
@@ -34,8 +36,9 @@ def _get_version_state(db: Session, version_id: int) -> str:
 
 
 @router.post("/api/versions/{version_id}/blocks", status_code=201, response_model=BlockResponse)
-def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_db)):
+def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add blocks to versions in 'created' state")
     count = db.scalar(select(func.count()).where(Block.version_id == version_id))
@@ -56,8 +59,9 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
 
 
 @router.get("/api/versions/{version_id}/blocks", response_model=list[BlockResponse])
-def list_blocks(version_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
-    get_or_404(db, CourseVersion, version_id)
+def list_blocks(version_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
     blocks = db.execute(
         select(Block).where(Block.version_id == version_id).order_by(Block.order).offset(offset).limit(limit)
     ).scalars().all()
@@ -65,9 +69,11 @@ def list_blocks(version_id: int, limit: int = 100, offset: int = 0, db: Session 
 
 
 @router.patch("/api/blocks/{block_id}", response_model=BlockResponse)
-def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)):
+def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     block = get_or_404(db, Block, block_id)
-    state = _get_version_state(db, block.version_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
+    state = version.state
 
     if state == "archived":
         raise HTTPException(status_code=409, detail="Cannot edit blocks in archived versions")
@@ -89,9 +95,11 @@ def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/api/blocks/{block_id}", status_code=204)
-def delete_block(block_id: int, db: Session = Depends(get_db)):
+def delete_block(block_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     block = get_or_404(db, Block, block_id)
-    state = _get_version_state(db, block.version_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
+    state = version.state
     if state != "created":
         raise HTTPException(status_code=409, detail="Can only delete blocks in 'created' state")
     db.delete(block)
@@ -102,9 +110,10 @@ def delete_block(block_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/blocks/{block_id}/sequences", status_code=201, response_model=SequenceResponse)
-def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(get_db)):
+def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add sequences to versions in 'created' state")
     count = db.scalar(select(func.count()).where(Sequence.block_id == block_id))
@@ -125,8 +134,10 @@ def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(g
 
 
 @router.get("/api/blocks/{block_id}/sequences", response_model=list[SequenceResponse])
-def list_sequences(block_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
-    get_or_404(db, Block, block_id)
+def list_sequences(block_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    block = get_or_404(db, Block, block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
     sequences = db.execute(
         select(Sequence).where(Sequence.block_id == block_id).order_by(Sequence.order).offset(offset).limit(limit)
     ).scalars().all()
@@ -134,10 +145,12 @@ def list_sequences(block_id: int, limit: int = 100, offset: int = 0, db: Session
 
 
 @router.patch("/api/sequences/{sequence_id}", response_model=SequenceResponse)
-def update_sequence(sequence_id: int, data: SequenceUpdate, db: Session = Depends(get_db)):
+def update_sequence(sequence_id: int, data: SequenceUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     seq = get_or_404(db, Sequence, sequence_id)
     block = get_or_404(db, Block, seq.block_id)
-    state = _get_version_state(db, block.version_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
+    state = version.state
 
     if state == "archived":
         raise HTTPException(status_code=409, detail="Cannot edit sequences in archived versions")
@@ -159,10 +172,12 @@ def update_sequence(sequence_id: int, data: SequenceUpdate, db: Session = Depend
 
 
 @router.delete("/api/sequences/{sequence_id}", status_code=204)
-def delete_sequence(sequence_id: int, db: Session = Depends(get_db)):
+def delete_sequence(sequence_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     seq = get_or_404(db, Sequence, sequence_id)
     block = get_or_404(db, Block, seq.block_id)
-    state = _get_version_state(db, block.version_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
+    state = version.state
     if state != "created":
         raise HTTPException(status_code=409, detail="Can only delete sequences in 'created' state")
     db.delete(seq)

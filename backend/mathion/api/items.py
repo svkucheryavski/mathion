@@ -3,9 +3,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404
+from mathion.api.helpers import get_or_404, require_course_admin
 from mathion.database import get_db
+from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
+from mathion.models_auth import User
 from mathion.schemas import ItemCreate, ItemResponse, ItemUpdate
 
 router = APIRouter(tags=["items"])
@@ -27,8 +29,9 @@ def _get_version_for_item(db: Session, item: Item) -> CourseVersion:
 
 
 @router.post("/api/sequences/{sequence_id}/items", status_code=201, response_model=ItemResponse)
-def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db)):
+def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = _get_version_for_sequence(db, sequence_id)
+    require_course_admin(db, user, version.course_id)
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add items to versions in 'created' state")
     # NOTE: order assignment is not safe under concurrent writes.
@@ -50,8 +53,9 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
 
 
 @router.get("/api/sequences/{sequence_id}/items", response_model=list[ItemResponse])
-def list_items(sequence_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
-    get_or_404(db, Sequence, sequence_id)
+def list_items(sequence_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    version = _get_version_for_sequence(db, sequence_id)
+    require_course_admin(db, user, version.course_id)
     items = db.execute(
         select(Item).where(Item.sequence_id == sequence_id).order_by(Item.order).offset(offset).limit(limit)
     ).scalars().all()
@@ -59,9 +63,10 @@ def list_items(sequence_id: int, limit: int = 100, offset: int = 0, db: Session 
 
 
 @router.patch("/api/items/{item_id}", response_model=ItemResponse)
-def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db)):
+def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
+    require_course_admin(db, user, version.course_id)
 
     if version.state == "archived":
         raise HTTPException(status_code=409, detail="Cannot edit items in archived versions")
@@ -92,9 +97,10 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/api/items/{item_id}", status_code=204)
-def delete_item(item_id: int, db: Session = Depends(get_db)):
+def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
+    require_course_admin(db, user, version.course_id)
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete items in 'created' state")
     db.delete(item)

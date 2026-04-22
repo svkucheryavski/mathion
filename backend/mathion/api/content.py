@@ -3,13 +3,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from mathion.database import get_db
-from mathion.models import Block, CourseVersion, Item, Question, Sequence
+from mathion.dependencies import get_current_user
+from mathion.models import Block, CourseAdmin, CourseVersion, Item, Question, Sequence
+from mathion.models_auth import StudentEnrollment, User
 
 router = APIRouter(tags=["content"])
 
 
 @router.get("/api/versions/{version_id}/content")
-def get_content_json(version_id: int, db: Session = Depends(get_db)):
+def get_content_json(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     # C5: eager-load version.course using select() style
     version = db.execute(
         select(CourseVersion)
@@ -25,6 +27,27 @@ def get_content_json(version_id: int, db: Session = Depends(get_db)):
 
     if version.state not in ("published", "archived"):
         raise HTTPException(status_code=403, detail="This version is not published")
+
+    # Check access: superuser OR course admin OR enrolled student with active enrollment
+    if not user.is_superuser:
+        is_admin = db.execute(
+            select(CourseAdmin).where(
+                CourseAdmin.course_id == version.course_id,
+                CourseAdmin.user_id == user.id,
+            )
+        ).scalar_one_or_none()
+
+        if not is_admin:
+            is_enrolled = db.execute(
+                select(StudentEnrollment).where(
+                    StudentEnrollment.version_id == version_id,
+                    StudentEnrollment.user_id == user.id,
+                    StudentEnrollment.is_active == True,
+                )
+            ).scalar_one_or_none()
+
+            if not is_enrolled:
+                raise HTTPException(status_code=403, detail="Access denied")
 
     # Eager load the full tree using select() style
     blocks = db.execute(

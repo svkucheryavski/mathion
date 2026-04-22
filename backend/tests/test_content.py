@@ -1,19 +1,19 @@
 from mathion.models import AnswerOption, Item, Question
 
 
-def _build_course_with_quiz(client, db):
+def _build_course_with_quiz(admin_client, db):
     """Create a course with one block, one sequence, a static page and a quiz with questions."""
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Applied Statistics", "description": "Desc"}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "Welcome"}).json()
-    block = client.post(f"/api/versions/{version['id']}/blocks", json={
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Applied Statistics", "description": "Desc"}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "Welcome"}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
         "title": "Descriptive Stats", "slug": "descriptive-stats", "info": "Goals",
     }).json()
-    seq = client.post(f"/api/blocks/{block['id']}/sequences", json={
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
         "title": "Quantiles", "slug": "quantiles",
     }).json()
 
     # Static page via API
-    client.post(f"/api/sequences/{seq['id']}/items", json={
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={
         "title": "Introduction", "slug": "intro", "type": "static_page", "content_md": "# Intro",
     })
 
@@ -38,13 +38,13 @@ def _build_course_with_quiz(client, db):
     return course, version
 
 
-def test_content_json_structure(client, db):
-    course, version = _build_course_with_quiz(client, db)
+def test_content_json_structure(admin_client, db):
+    course, version = _build_course_with_quiz(admin_client, db)
 
     # Publish so the content endpoint allows access
-    client.post(f"/api/versions/{version['id']}/publish")
+    admin_client.post(f"/api/versions/{version['id']}/publish")
 
-    response = client.get(f"/api/versions/{version['id']}/content")
+    response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 200
     data = response.json()
 
@@ -88,25 +88,25 @@ def test_content_json_structure(client, db):
     assert "explanation_html" not in question
 
 
-def test_content_json_404(client):
-    response = client.get("/api/versions/999/content")
+def test_content_json_404(admin_client):
+    response = admin_client.get("/api/versions/999/content")
     assert response.status_code == 404
 
 
-def test_content_json_draft_version_returns_403(client):
+def test_content_json_draft_version_returns_403(admin_client):
     """Content endpoint returns 403 for a version in 'created' (draft) state."""
-    course = client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    response = client.get(f"/api/versions/{version['id']}/content")
+    course = admin_client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 403
 
 
-def test_content_json_empty_published_version(client):
+def test_content_json_empty_published_version(admin_client):
     """Content endpoint returns 200 with an empty blocks array for a published version with no blocks."""
-    course = client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/publish")
-    response = client.get(f"/api/versions/{version['id']}/content")
+    course = admin_client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 200
     data = response.json()
     assert data["blocks"] == []
@@ -114,10 +114,10 @@ def test_content_json_empty_published_version(client):
     assert data["version"]["id"] == version["id"]
 
 
-def test_content_json_disabled_version_returns_403(client):
+def test_content_json_disabled_version_returns_403(admin_client):
     """Content endpoint returns 403 for a disabled version."""
-    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    client.post(f"/api/versions/{version['id']}/disable")
-    response = client.get(f"/api/versions/{version['id']}/content")
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 403

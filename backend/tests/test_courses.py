@@ -26,8 +26,8 @@ def test_course_slug_unique(db):
         db.commit()
 
 
-def test_api_create_course(client):
-    response = client.post("/api/courses", json={
+def test_api_create_course(admin_client):
+    response = admin_client.post("/api/courses", json={
         "slug": "applied-statistics",
         "name": "Applied Statistics",
         "description": "Learn stats",
@@ -39,67 +39,67 @@ def test_api_create_course(client):
     assert data["id"] is not None
 
 
-def test_api_create_course_duplicate_slug(client):
-    client.post("/api/courses", json={"slug": "stats", "name": "S1", "description": ""})
-    response = client.post("/api/courses", json={"slug": "stats", "name": "S2", "description": ""})
+def test_api_create_course_duplicate_slug(admin_client):
+    admin_client.post("/api/courses", json={"slug": "stats", "name": "S1", "description": ""})
+    response = admin_client.post("/api/courses", json={"slug": "stats", "name": "S2", "description": ""})
     assert response.status_code == 409
 
 
-def test_api_list_courses(client):
-    client.post("/api/courses", json={"slug": "c1", "name": "Course 1", "description": ""})
-    client.post("/api/courses", json={"slug": "c2", "name": "Course 2", "description": ""})
-    response = client.get("/api/courses")
+def test_api_list_courses(admin_client):
+    admin_client.post("/api/courses", json={"slug": "c1", "name": "Course 1", "description": ""})
+    admin_client.post("/api/courses", json={"slug": "c2", "name": "Course 2", "description": ""})
+    response = admin_client.get("/api/courses")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
 
 
-def test_api_get_course(client):
-    create_resp = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": "Desc"})
+def test_api_get_course(admin_client):
+    create_resp = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": "Desc"})
     course_id = create_resp.json()["id"]
-    response = client.get(f"/api/courses/{course_id}")
+    response = admin_client.get(f"/api/courses/{course_id}")
     assert response.status_code == 200
     assert response.json()["slug"] == "stats"
 
 
-def test_api_get_course_not_found(client):
-    response = client.get("/api/courses/999")
+def test_api_get_course_not_found(auth_client):
+    response = auth_client.get("/api/courses/999")
     assert response.status_code == 404
 
 
-def test_api_update_course(client):
-    create_resp = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""})
+def test_api_update_course(admin_client):
+    create_resp = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""})
     course_id = create_resp.json()["id"]
-    response = client.patch(f"/api/courses/{course_id}", json={"name": "Applied Statistics"})
+    response = admin_client.patch(f"/api/courses/{course_id}", json={"name": "Applied Statistics"})
     assert response.status_code == 200
     assert response.json()["name"] == "Applied Statistics"
     assert response.json()["slug"] == "stats"  # unchanged
 
 
-def test_api_delete_course(client):
-    create_resp = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""})
+def test_api_delete_course(admin_client):
+    create_resp = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""})
     course_id = create_resp.json()["id"]
-    response = client.delete(f"/api/courses/{course_id}")
+    response = admin_client.delete(f"/api/courses/{course_id}")
     assert response.status_code == 204
-    response = client.get(f"/api/courses/{course_id}")
+    response = admin_client.get(f"/api/courses/{course_id}")
     assert response.status_code == 404
 
 
-def test_api_create_course_missing_slug(client):
-    response = client.post("/api/courses", json={"name": "Stats", "description": ""})
+def test_api_create_course_missing_slug(admin_client):
+    response = admin_client.post("/api/courses", json={"name": "Stats", "description": ""})
     assert response.status_code == 422
 
 
-def test_api_create_course_invalid_slug_uppercase(client):
-    response = client.post("/api/courses", json={"slug": "Applied-Statistics", "name": "Stats", "description": ""})
+def test_api_create_course_invalid_slug_uppercase(admin_client):
+    response = admin_client.post("/api/courses", json={"slug": "Applied-Statistics", "name": "Stats", "description": ""})
     assert response.status_code == 422
 
 
-def test_api_create_course_invalid_slug_spaces(client):
-    response = client.post("/api/courses", json={"slug": "applied statistics", "name": "Stats", "description": ""})
+def test_api_create_course_invalid_slug_spaces(admin_client):
+    response = admin_client.post("/api/courses", json={"slug": "applied statistics", "name": "Stats", "description": ""})
     assert response.status_code == 422
 
 
-def test_api_create_course_empty_name(client):
-    response = client.post("/api/courses", json={"slug": "stats", "name": "", "description": ""})
+def test_api_create_course_empty_name(admin_client):
+    response = admin_client.post("/api/courses", json={"slug": "stats", "name": "", "description": ""})
     assert response.status_code == 422
