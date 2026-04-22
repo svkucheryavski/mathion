@@ -41,6 +41,9 @@ def _build_course_with_quiz(client, db):
 def test_content_json_structure(client, db):
     course, version = _build_course_with_quiz(client, db)
 
+    # Publish so the content endpoint allows access
+    client.post(f"/api/versions/{version['id']}/publish")
+
     response = client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 200
     data = response.json()
@@ -90,10 +93,19 @@ def test_content_json_404(client):
     assert response.status_code == 404
 
 
-def test_content_json_empty_version(client):
-    """Content endpoint returns 200 with an empty blocks array for a version with no blocks."""
+def test_content_json_draft_version_returns_403(client):
+    """Content endpoint returns 403 for a version in 'created' (draft) state."""
     course = client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
     version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = client.get(f"/api/versions/{version['id']}/content")
+    assert response.status_code == 403
+
+
+def test_content_json_empty_published_version(client):
+    """Content endpoint returns 200 with an empty blocks array for a published version with no blocks."""
+    course = client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    client.post(f"/api/versions/{version['id']}/publish")
     response = client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 200
     data = response.json()

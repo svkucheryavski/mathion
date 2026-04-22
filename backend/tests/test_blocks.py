@@ -179,6 +179,15 @@ def test_api_duplicate_block_slug_within_version(client):
     assert resp.status_code == 409
 
 
+def test_api_duplicate_sequence_slug_within_block(client):
+    """Creating two sequences with the same slug in the same block must return 409."""
+    version = _setup_version(client)
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "dup-slug"})
+    resp = client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S2", "slug": "dup-slug"})
+    assert resp.status_code == 409
+
+
 def test_api_list_blocks_nonexistent_version(client):
     """Listing blocks for a version that doesn't exist must return 404."""
     resp = client.get("/api/versions/999/blocks")

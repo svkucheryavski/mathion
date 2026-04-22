@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -42,11 +42,11 @@ class CourseVersion(Base):
     info_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
     info_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
     max_quiz_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    content_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    content_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     course: Mapped["Course"] = relationship(back_populates="versions")
     blocks: Mapped[list["Block"]] = relationship(back_populates="version", cascade="all, delete-orphan", order_by="Block.order")
@@ -64,7 +64,7 @@ class Block(Base):
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False)
     info: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     version: Mapped["CourseVersion"] = relationship(back_populates="blocks")
     sequences: Mapped[list["Sequence"]] = relationship(back_populates="block", cascade="all, delete-orphan", order_by="Sequence.order")
@@ -81,7 +81,7 @@ class Sequence(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     block: Mapped["Block"] = relationship(back_populates="sequences")
     items: Mapped[list["Item"]] = relationship(back_populates="sequence", cascade="all, delete-orphan", order_by="Item.order")
@@ -110,7 +110,7 @@ class Item(Base):
     # interactive_app fields
     script_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     sequence: Mapped["Sequence"] = relationship(back_populates="items")
     questions: Mapped[list["Question"]] = relationship(back_populates="item", cascade="all, delete-orphan", order_by="Question.order")
@@ -129,13 +129,13 @@ class Question(Base):
     explanation_html: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # numeric_answer fields
-    correct_numeric: Mapped[float | None] = mapped_column(Float, nullable=True)
+    correct_numeric: Mapped[float | None] = mapped_column(Numeric(precision=20, scale=10), nullable=True)
     precision: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # text_answer fields
     correct_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     item: Mapped["Item"] = relationship(back_populates="questions")
     options: Mapped[list["AnswerOption"]] = relationship(back_populates="question", cascade="all, delete-orphan", order_by="AnswerOption.order")
@@ -149,6 +149,6 @@ class AnswerOption(Base):
     text: Mapped[str] = mapped_column(String(500), nullable=False)
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     question: Mapped["Question"] = relationship(back_populates="options")

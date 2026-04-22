@@ -41,6 +41,8 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
     count = db.scalar(select(func.count()).where(Block.version_id == version_id))
     if count >= MAX_BLOCKS:
         raise HTTPException(status_code=409, detail=f"Maximum {MAX_BLOCKS} blocks per version")
+    # NOTE: order assignment is not safe under concurrent writes.
+    # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
     next_order = (db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0) + 1
     block = Block(version_id=version_id, title=data.title, slug=data.slug, order=next_order, info=data.info)
     db.add(block)
@@ -108,10 +110,16 @@ def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(g
     count = db.scalar(select(func.count()).where(Sequence.block_id == block_id))
     if count >= MAX_SEQUENCES:
         raise HTTPException(status_code=409, detail=f"Maximum {MAX_SEQUENCES} sequences per block")
+    # NOTE: order assignment is not safe under concurrent writes.
+    # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
     next_order = (db.scalar(select(func.max(Sequence.order)).where(Sequence.block_id == block_id)) or 0) + 1
     seq = Sequence(block_id=block_id, title=data.title, slug=data.slug, order=next_order)
     db.add(seq)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="A sequence with this slug already exists in this block")
     db.refresh(seq)
     return seq
 

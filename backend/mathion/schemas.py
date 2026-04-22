@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CourseCreate(BaseModel):
@@ -82,6 +82,13 @@ class ItemCreate(BaseModel):
     video_url: str | None = None
     script_url: str | None = None
 
+    @field_validator("video_url", "script_url", mode="before")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
     @model_validator(mode="after")
     def check_type_fields(self):
         if self.type == "static_page" and not self.content_md:
@@ -107,6 +114,13 @@ class ItemUpdate(BaseModel):
     content_md: str | None = None
     video_url: str | None = None
     script_url: str | None = None
+
+    @field_validator("video_url", "script_url", mode="before")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
 
 
 class ItemResponse(BaseModel):

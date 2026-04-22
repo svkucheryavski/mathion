@@ -146,3 +146,63 @@ def test_api_list_items_nonexistent_sequence(client):
     """Listing items for a sequence that doesn't exist must return 404."""
     resp = client.get("/api/sequences/999/items")
     assert resp.status_code == 404
+
+
+def test_api_duplicate_item_slug_within_sequence(client):
+    """Creating two items with the same slug in the same sequence must return 409."""
+    seq, version = _setup_sequence(client)
+    client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "slug": "dup-slug", "type": "static_page", "content_md": "a",
+    })
+    resp = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I2", "slug": "dup-slug", "type": "static_page", "content_md": "b",
+    })
+    assert resp.status_code == 409
+
+
+def test_api_patch_static_page_nullify_content_md_returns_422(client):
+    """Patching a static_page to set content_md=None must return 422."""
+    seq, version = _setup_sequence(client)
+    item = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+    }).json()
+    resp = client.patch(f"/api/items/{item['id']}", json={"content_md": None})
+    assert resp.status_code == 422
+
+
+def test_api_patch_video_nullify_video_url_returns_422(client):
+    """Patching a video item to set video_url=None must return 422."""
+    seq, version = _setup_sequence(client)
+    item = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Lecture", "slug": "lecture", "type": "video", "video_url": "https://example.com/v",
+    }).json()
+    resp = client.patch(f"/api/items/{item['id']}", json={"video_url": None})
+    assert resp.status_code == 422
+
+
+def test_api_patch_interactive_app_nullify_script_url_returns_422(client):
+    """Patching an interactive_app item to set script_url=None must return 422."""
+    seq, version = _setup_sequence(client)
+    item = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App", "slug": "app", "type": "interactive_app", "script_url": "https://example.com/app.js",
+    }).json()
+    resp = client.patch(f"/api/items/{item['id']}", json={"script_url": None})
+    assert resp.status_code == 422
+
+
+def test_api_create_item_invalid_video_url(client):
+    """Creating a video item with an invalid URL must return 422."""
+    seq, version = _setup_sequence(client)
+    resp = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Lecture", "slug": "lecture", "type": "video", "video_url": "ftp://example.com/v",
+    })
+    assert resp.status_code == 422
+
+
+def test_api_create_item_invalid_script_url(client):
+    """Creating an interactive_app item with an invalid URL must return 422."""
+    seq, version = _setup_sequence(client)
+    resp = client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App", "slug": "app", "type": "interactive_app", "script_url": "not-a-url",
+    })
+    assert resp.status_code == 422
