@@ -1,14 +1,14 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, Course, CourseVersion, Sequence
-from mathion.models_auth import User
+from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionResponse
 
 router = APIRouter(tags=["versions"])
@@ -85,6 +85,14 @@ def revert_version(version_id: int, db: Session = Depends(get_db), user: User = 
     require_course_admin(db, user, version.course_id)
     if version.state != "published":
         raise HTTPException(status_code=409, detail=f"Cannot revert version in '{version.state}' state")
+    student_count = db.scalar(
+        select(func.count()).where(
+            StudentEnrollment.version_id == version_id,
+            StudentEnrollment.is_active == True,  # noqa: E712
+        )
+    )
+    if student_count > 0:
+        raise HTTPException(status_code=409, detail="Cannot revert: version has enrolled students")
     version.state = "created"
     version.published_at = None
     db.commit()

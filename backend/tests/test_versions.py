@@ -165,3 +165,24 @@ def test_api_disable_enable_version(admin_client):
     resp = admin_client.post(f"/api/versions/{version['id']}/enable")
     assert resp.status_code == 200
     assert resp.json()["is_disabled"] is False
+
+
+def test_api_cannot_revert_version_with_enrolled_students(admin_client, db):
+    from mathion.models_auth import StudentEnrollment, User
+
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+
+    # Enroll a student
+    student = User(email="student@example.com")
+    db.add(student)
+    db.commit()
+    enrollment = StudentEnrollment(user_id=student.id, version_id=version["id"], is_active=True)
+    db.add(enrollment)
+    db.commit()
+
+    # Try to revert — should fail
+    response = admin_client.post(f"/api/versions/{version['id']}/revert")
+    assert response.status_code == 409
+    assert "enrolled students" in response.json()["detail"]
