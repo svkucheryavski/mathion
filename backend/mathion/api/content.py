@@ -1,22 +1,29 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from mathion.database import get_db
-from mathion.models import Block, CourseVersion, Sequence, Item, Question
+from mathion.models import Block, CourseVersion, Item, Question, Sequence
 
 router = APIRouter(tags=["content"])
 
 
 @router.get("/api/versions/{version_id}/content")
 def get_content_json(version_id: int, db: Session = Depends(get_db)):
-    version = db.get(CourseVersion, version_id)
+    # C5: eager-load version.course using select() style
+    version = db.execute(
+        select(CourseVersion)
+        .options(joinedload(CourseVersion.course))
+        .where(CourseVersion.id == version_id)
+    ).scalar_one_or_none()
+
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
 
-    # Eager load the full tree
-    blocks = (
-        db.query(Block)
-        .filter(Block.version_id == version_id)
+    # Eager load the full tree using select() style
+    blocks = db.execute(
+        select(Block)
+        .where(Block.version_id == version_id)
         .options(
             joinedload(Block.sequences)
             .joinedload(Sequence.items)
@@ -24,8 +31,7 @@ def get_content_json(version_id: int, db: Session = Depends(get_db)):
             .joinedload(Question.options)
         )
         .order_by(Block.order)
-        .all()
-    )
+    ).unique().scalars().all()
 
     return {
         "course": {

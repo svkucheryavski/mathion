@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CourseCreate(BaseModel):
@@ -78,6 +78,32 @@ class ItemCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     type: Literal["static_page", "video", "quiz", "interactive_app"]
+    content_md: str | None = None
+    video_url: str | None = None
+    script_url: str | None = None
+
+    @model_validator(mode="after")
+    def check_type_fields(self):
+        if self.type == "static_page" and not self.content_md:
+            raise ValueError("content_md is required for static_page items")
+        if self.type == "video" and not self.video_url:
+            raise ValueError("video_url is required for video items")
+        if self.type == "interactive_app" and not self.script_url:
+            raise ValueError("script_url is required for interactive_app items")
+        return self
+
+
+class BlockUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    info: str | None = None
+
+
+class SequenceUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ItemUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
     content_md: str | None = None
     video_url: str | None = None
     script_url: str | None = None
