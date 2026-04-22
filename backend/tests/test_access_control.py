@@ -84,11 +84,21 @@ def test_auth_user_can_list_courses(auth_client):
     assert response.status_code == 200
 
 
-def test_auth_user_can_get_course(auth_client, db):
-    """Any authenticated user can get a specific course."""
-    course, _ = _make_published_course(db)
+def test_auth_user_can_get_course_if_enrolled(auth_client, db, test_user):
+    """An authenticated user can get a course they are enrolled in."""
+    course, version = _make_published_course(db)
+    enrollment = StudentEnrollment(user_id=test_user.id, version_id=version.id, is_active=True)
+    db.add(enrollment)
+    db.commit()
     response = auth_client.get(f"/api/courses/{course.id}")
     assert response.status_code == 200
+
+
+def test_auth_user_cannot_get_course_if_not_enrolled(auth_client, db):
+    """An authenticated user with no enrollment or admin role gets 403."""
+    course, _ = _make_published_course(db)
+    response = auth_client.get(f"/api/courses/{course.id}")
+    assert response.status_code == 403
 
 
 def test_regular_user_cannot_create_course(auth_client):

@@ -140,11 +140,21 @@ class ItemResponse(BaseModel):
 class PinRequestSchema(BaseModel):
     email: str = Field(min_length=1, max_length=254)
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
 
 class PinVerifySchema(BaseModel):
     email: str = Field(min_length=1, max_length=254)
     pin: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
     duration_days: int = Field(ge=1, le=30)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
 
 
 class UserResponse(BaseModel):
@@ -164,6 +174,11 @@ class UserUpdate(BaseModel):
 
 class EnrollRequest(BaseModel):
     email: str = Field(min_length=1, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
 
 
 class EnrollBatchRequest(BaseModel):

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
@@ -31,7 +32,12 @@ def _get_or_create_user(db: Session, email: str) -> User:
     if user is None:
         user = User(email=email, full_name=None)
         db.add(user)
-        db.flush()
+        try:
+            db.flush()  # flush to detect duplicate from concurrent request
+        except IntegrityError:
+            db.rollback()
+            # Re-query — the other concurrent request already created the user
+            user = db.execute(select(User).where(User.email == email)).scalar_one()
     return user
 
 

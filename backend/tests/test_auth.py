@@ -162,3 +162,76 @@ def test_api_update_profile(auth_client):
                                  headers={"X-Requested-With": "mathion"})
     assert response.status_code == 200
     assert response.json()["full_name"] == "New Name"
+
+
+def test_api_request_pin_without_csrf_header(client, db):
+    """POST to request-pin without CSRF header should return 403."""
+    from fastapi.testclient import TestClient
+    from mathion.main import app
+    from mathion.database import get_db as real_get_db
+
+    raw_client = TestClient(app)
+
+    def override():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[real_get_db] = override
+    response = raw_client.post("/api/auth/request-pin", json={"email": "test@example.com"})
+    assert response.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_api_verify_pin_without_csrf_header(client, db):
+    """POST to verify-pin without CSRF header should return 403."""
+    from fastapi.testclient import TestClient
+    from mathion.main import app
+    from mathion.database import get_db as real_get_db
+
+    raw_client = TestClient(app)
+
+    def override():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[real_get_db] = override
+    response = raw_client.post("/api/auth/verify-pin", json={
+        "email": "test@example.com", "pin": "123456", "duration_days": 7,
+    })
+    assert response.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_api_logout_without_csrf_header(client, db):
+    """POST to logout without CSRF header should return 403."""
+    from fastapi.testclient import TestClient
+    from mathion.main import app
+    from mathion.database import get_db as real_get_db
+
+    raw_client = TestClient(app)
+
+    def override():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[real_get_db] = override
+    response = raw_client.post("/api/auth/logout")
+    assert response.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_email_normalization_in_api_request_pin(client, db):
+    """request-pin endpoint normalizes mixed-case email via schema validator."""
+    user = User(email="alice@example.com", full_name="Alice")
+    db.add(user)
+    db.commit()
+    # Send mixed-case email — should still find the user (normalized by schema)
+    response = client.post("/api/auth/request-pin", json={"email": "ALICE@EXAMPLE.COM"},
+                           headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200

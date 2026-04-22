@@ -103,3 +103,46 @@ def test_api_create_course_invalid_slug_spaces(admin_client):
 def test_api_create_course_empty_name(admin_client):
     response = admin_client.post("/api/courses", json={"slug": "stats", "name": "", "description": ""})
     assert response.status_code == 422
+
+
+def test_api_get_course_forbidden_for_non_enrolled_user(client, db, test_user):
+    """Non-enrolled, non-admin user gets 403 when fetching a specific course."""
+    from mathion.auth import request_pin, verify_pin
+    from mathion.models import Course
+
+    # Create course directly in db (no superuser needed)
+    course = Course(slug="secret", name="Secret", description="")
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+
+    # Log in as test_user (regular user, not enrolled, not admin)
+    raw_pin = request_pin(db, test_user.email)
+    token = verify_pin(db, test_user.email, raw_pin, duration_days=7)
+    client.cookies.set("session_token", token)
+
+    response = client.get(f"/api/courses/{course.id}")
+    assert response.status_code == 403
+
+
+def test_api_get_course_allowed_for_course_admin(client, db, test_user):
+    """A course admin can fetch their course."""
+    from mathion.auth import request_pin, verify_pin
+    from mathion.models import Course, CourseAdmin
+
+    course = Course(slug="admincourse", name="Admin Course", description="")
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+
+    ca = CourseAdmin(course_id=course.id, user_id=test_user.id)
+    db.add(ca)
+    db.commit()
+
+    raw_pin = request_pin(db, test_user.email)
+    token = verify_pin(db, test_user.email, raw_pin, duration_days=7)
+    client.cookies.set("session_token", token)
+
+    response = client.get(f"/api/courses/{course.id}")
+    assert response.status_code == 200
+    assert response.json()["slug"] == "admincourse"

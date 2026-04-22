@@ -52,7 +52,28 @@ def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db
 
 @router.get("/api/courses/{course_id}", response_model=CourseResponse)
 def get_course(course_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return get_or_404(db, Course, course_id)
+    course = get_or_404(db, Course, course_id)
+    if not user.is_superuser:
+        # Check if user is a course admin
+        is_admin = db.execute(
+            select(CourseAdmin).where(
+                CourseAdmin.course_id == course_id,
+                CourseAdmin.user_id == user.id,
+            )
+        ).scalar_one_or_none()
+        if not is_admin:
+            # Check if user has any enrollment (active or inactive) on any version of this course
+            is_enrolled = db.execute(
+                select(StudentEnrollment)
+                .join(CourseVersion, CourseVersion.id == StudentEnrollment.version_id)
+                .where(
+                    CourseVersion.course_id == course_id,
+                    StudentEnrollment.user_id == user.id,
+                )
+            ).first()
+            if not is_enrolled:
+                raise HTTPException(status_code=403, detail="Access denied")
+    return course
 
 
 @router.patch("/api/courses/{course_id}", response_model=CourseResponse)

@@ -214,3 +214,42 @@ def test_verify_pin_rate_limited_after_failures(db):
     # Now even with a valid PIN, should be rate limited
     result = verify_pin(db, "alice@example.com", raw_pin, duration_days=7)
     assert result is None
+
+
+def test_request_pin_twice_then_verify_latest(db):
+    """Requesting PIN twice should work — old PIN invalidated, new one valid."""
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+
+    pin1 = request_pin(db, "alice@example.com")
+    pin2 = request_pin(db, "alice@example.com")
+
+    # Old PIN should be invalidated — verify with pin1 returns None
+    token = verify_pin(db, "alice@example.com", pin1, duration_days=7)
+    assert token is None  # pin1 was invalidated when pin2 was created
+
+    # New PIN should work
+    token = verify_pin(db, "alice@example.com", pin2, duration_days=7)
+    assert token is not None
+
+
+def test_email_normalization_in_request_pin(db):
+    """request_pin normalizes email to lowercase + stripped."""
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+
+    result = request_pin(db, "  ALICE@EXAMPLE.COM  ")
+    assert result is not None
+
+
+def test_email_normalization_in_verify_pin(db):
+    """verify_pin normalizes email so mixed-case lookups succeed."""
+    user = User(email="alice@example.com")
+    db.add(user)
+    db.commit()
+
+    raw_pin = request_pin(db, "alice@example.com")
+    token = verify_pin(db, "Alice@Example.COM", raw_pin, duration_days=7)
+    assert token is not None

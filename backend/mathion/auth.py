@@ -32,11 +32,14 @@ def generate_session_token() -> str:
 
 def request_pin(db: DBSession, email: str) -> str | None:
     """Create a login PIN for the given email. Returns raw PIN or None if user not found or rate limited."""
+    email = email.strip().lower()
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if not user or user.is_disabled:
         return None
 
-    # Rate limit: count PIN requests in last hour
+    # Rate limit: count PIN requests in last hour.
+    # NOTE: Rate limiting is approximate under concurrent requests.
+    # For strict enforcement on PostgreSQL, use SELECT ... FOR UPDATE on a per-email lock row.
     one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     request_count = db.scalar(
         select(func.count()).where(
@@ -46,6 +49,16 @@ def request_pin(db: DBSession, email: str) -> str | None:
     )
     if request_count >= settings.max_pin_requests_per_hour:
         return None
+
+    # Invalidate any existing unused PINs for this user
+    existing_pins = db.execute(
+        select(LoginPIN).where(
+            LoginPIN.user_id == user.id,
+            LoginPIN.is_used == False,  # noqa: E712
+        )
+    ).scalars().all()
+    for p in existing_pins:
+        p.is_used = True
 
     # Record this request for rate limiting
     db.add(RateLimitEntry(key=f"pin_request:{email}"))
@@ -63,6 +76,7 @@ def request_pin(db: DBSession, email: str) -> str | None:
 
 def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> str | None:
     """Verify a PIN and create a session. Returns session token or None."""
+    email = email.strip().lower()
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if not user or user.is_disabled:
         return None
@@ -78,7 +92,7 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
     if failure_count >= settings.max_pin_failures_per_hour:
         return None
 
-    # Find valid, unused PIN
+    # Find valid, unused PIN — use .first() as safety net against MultipleResultsFound
     pin = db.execute(
         select(LoginPIN)
         .where(
@@ -87,7 +101,7 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
             LoginPIN.expires_at > datetime.now(timezone.utc),
         )
         .order_by(LoginPIN.created_at.desc())
-    ).scalar_one_or_none()
+    ).scalars().first()
 
     if not pin or not verify_pin_hash(raw_pin, pin.pin_hash):
         # Record failure for rate limiting

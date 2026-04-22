@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -12,14 +12,22 @@ from mathion.schemas import PinRequestSchema, PinVerifySchema, UserResponse, Use
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _require_csrf(request: Request):
+    """Check CSRF header on public POST endpoints."""
+    if request.headers.get("X-Requested-With") != "mathion":
+        raise HTTPException(status_code=403, detail="Missing CSRF header")
+
+
 @router.post("/request-pin")
-def api_request_pin(data: PinRequestSchema, db: Session = Depends(get_db)):
+def api_request_pin(request: Request, data: PinRequestSchema, db: Session = Depends(get_db)):
+    _require_csrf(request)
     request_pin(db, data.email)
     return {"message": "PIN sent"}
 
 
 @router.post("/verify-pin")
-def api_verify_pin(data: PinVerifySchema, response: Response, db: Session = Depends(get_db)):
+def api_verify_pin(request: Request, data: PinVerifySchema, response: Response, db: Session = Depends(get_db)):
+    _require_csrf(request)
     token = verify_pin(db, data.email, data.pin, data.duration_days)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid or expired PIN")
@@ -33,7 +41,8 @@ def api_verify_pin(data: PinVerifySchema, response: Response, db: Session = Depe
         max_age=data.duration_days * 86400,
     )
 
-    user = db.execute(select(User).where(User.email == data.email)).scalar_one()
+    email = data.email.strip().lower()
+    user = db.execute(select(User).where(User.email == email)).scalar_one()
     return {"user": UserResponse.model_validate(user)}
 
 
@@ -53,10 +62,12 @@ def update_profile(data: UserUpdate, user: User = Depends(get_current_user), db:
 
 @router.post("/logout")
 def logout(
+    request: Request,
     response: Response,
     session_token: str | None = Cookie(default=None, alias="session_token"),
     db: Session = Depends(get_db),
 ):
+    _require_csrf(request)
     if session_token:
         destroy_session(db, session_token)
     response.delete_cookie("session_token")
