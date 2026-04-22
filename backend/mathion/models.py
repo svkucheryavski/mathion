@@ -152,3 +152,6 @@ class AnswerOption(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     question: Mapped["Question"] = relationship(back_populates="options")
+
+
+from mathion.models_auth import User  # noqa: F401 — register model with Base
