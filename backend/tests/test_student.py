@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
-from mathion.main import app
-from mathion.models import Block, Course, CourseVersion, Item, Sequence
+from mathion.models import Block, Course, CourseAdmin, CourseVersion, Item, Sequence
 from mathion.models_auth import StudentEnrollment, User, UserItemState
 
 
@@ -123,13 +122,19 @@ def _setup_enrolled_student(client, db):
 
 
 def _make_student_client(db, token):
-    """Create a TestClient with student auth. Use as context manager for safe cleanup."""
+    """Create a TestClient with student auth. Use as context manager for safe cleanup.
+
+    Saves and restores existing dependency overrides so it doesn't break
+    admin_client or other fixtures if called within the same test.
+    """
     from contextlib import contextmanager
     from fastapi.testclient import TestClient
+    from mathion.main import app
     from mathion.database import get_db
 
     @contextmanager
     def _ctx():
+        saved = dict(app.dependency_overrides)
         def override():
             try:
                 yield db
@@ -142,6 +147,7 @@ def _make_student_client(db, token):
             yield sc
         finally:
             app.dependency_overrides.clear()
+            app.dependency_overrides.update(saved)
 
     return _ctx()
 
@@ -329,12 +335,180 @@ def test_api_resolve_version_not_enrolled(auth_client):
 
 
 def test_api_resolve_version_no_enrollment(admin_client, db, auth_client):
-    # admin_client and auth_client share the same underlying client fixture,
-    # so we can't use admin_client after auth_client is created.
-    # Instead, create the course directly in the DB.
+    # Create course directly in DB — admin_client and auth_client share
+    # the same get_db override via the client fixture, so both work.
     course = Course(slug="physics", name="Physics", description="")
     db.add(course)
     db.commit()
 
     response = auth_client.get("/api/courses/physics/my-version")
     assert response.status_code == 404
+
+
+# --- Additional coverage tests from review ---
+
+
+def test_api_get_state_json_with_score(admin_client, db):
+    """Verify last_score dict is populated when score data exists."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+    intro_item = db.query(Item).filter_by(slug="intro").first()
+
+    state = UserItemState(
+        user_id=student.id,
+        item_id=intro_item.id,
+        is_covered=True,
+        time_spent=60,
+        attempt_count=2,
+        last_score_correct=3,
+        last_score_total=5,
+        last_answers=[{"q": 1, "a": "x"}],
+    )
+    db.add(state)
+    db.commit()
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get(f"/api/versions/{version['id']}/state")
+        assert response.status_code == 200
+        data = response.json()
+
+        item_state = data["items"][str(intro_item.id)]
+        assert item_state["last_score"] == {"correct": 3, "total": 5}
+        assert item_state["attempt_count"] == 2
+        assert item_state["last_answers"] == [{"q": 1, "a": "x"}]
+        assert item_state["max_attempts"] == 3  # default from version
+
+
+def test_api_get_state_json_course_admin_access(admin_client, db):
+    """Verify course admin (non-superuser) can access version state."""
+    from mathion.auth import request_pin, verify_pin
+
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Create a non-superuser course admin
+    admin_user = User(email="courseadmin@example.com", full_name="Course Admin")
+    db.add(admin_user)
+    db.commit()
+    ca = CourseAdmin(course_id=course["id"], user_id=admin_user.id)
+    db.add(ca)
+    db.commit()
+
+    raw_pin = request_pin(db, admin_user.email)
+    admin_token = verify_pin(db, admin_user.email, raw_pin, duration_days=7)
+
+    with _make_student_client(db, admin_token) as sc:
+        response = sc.get(f"/api/versions/{version['id']}/state")
+        assert response.status_code == 200
+
+
+def test_api_get_state_json_course_admin_disabled_version(admin_client, db):
+    """Verify course admin can access disabled version state."""
+    from mathion.auth import request_pin, verify_pin
+
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    admin_user = User(email="courseadmin@example.com", full_name="Course Admin")
+    db.add(admin_user)
+    db.commit()
+    ca = CourseAdmin(course_id=course["id"], user_id=admin_user.id)
+    db.add(ca)
+    db.commit()
+
+    # Disable the version
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+
+    raw_pin = request_pin(db, admin_user.email)
+    admin_token = verify_pin(db, admin_user.email, raw_pin, duration_days=7)
+
+    with _make_student_client(db, admin_token) as sc:
+        response = sc.get(f"/api/versions/{version['id']}/state")
+        assert response.status_code == 200
+
+
+def test_api_track_item_nonexistent_returns_404(admin_client, db):
+    """Track on nonexistent item returns 404."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    with _make_student_client(db, token) as sc:
+        response = sc.post("/api/items/999/track", json={"time_spent": 10},
+                           headers={"X-Requested-With": "mathion"})
+        assert response.status_code == 404
+
+
+def test_api_track_item_cross_version_denied(admin_client, db):
+    """Student enrolled in version A cannot track items from version B."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Create a second course with its own item
+    course2 = admin_client.post("/api/courses", json={"slug": "math", "name": "Math", "description": ""}).json()
+    v2 = admin_client.post(f"/api/courses/{course2['id']}/versions", json={"info_md": ""}).json()
+    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    s2 = admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    i2 = admin_client.post(f"/api/sequences/{s2['id']}/items", json={
+        "title": "Other", "slug": "other", "type": "static_page", "content_md": "# Other",
+    }).json()
+    admin_client.post(f"/api/versions/{v2['id']}/publish")
+
+    with _make_student_client(db, token) as sc:
+        response = sc.post(f"/api/items/{i2['id']}/track", json={"time_spent": 10},
+                           headers={"X-Requested-With": "mathion"})
+        assert response.status_code == 403
+
+
+def test_api_track_item_covered_stays_covered(admin_client, db):
+    """Once an item is covered, subsequent tracks without is_covered keep it covered."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+    intro_item = db.query(Item).filter_by(slug="intro").first()
+
+    with _make_student_client(db, token) as sc:
+        # Mark as covered
+        sc.post(f"/api/items/{intro_item.id}/track", json={"time_spent": 30, "is_covered": True},
+                headers={"X-Requested-With": "mathion"})
+        # Track again without is_covered
+        response = sc.post(f"/api/items/{intro_item.id}/track", json={"time_spent": 10},
+                           headers={"X-Requested-With": "mathion"})
+        assert response.status_code == 200
+        assert response.json()["is_covered"] is True
+        assert response.json()["time_spent"] == 40
+
+
+def test_api_my_courses_disabled_version_skipped(admin_client, db):
+    """Enrollments on disabled versions don't appear in my-courses."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/my-courses")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+def test_api_my_courses_dedup_multiple_enrollments(admin_client, db):
+    """Multiple enrollments in same course: only one entry shown (deduplication)."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Create second version, add structure, publish, and enroll
+    v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"}).json()
+    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S", "slug": "s"})
+    admin_client.post(f"/api/versions/{v2['id']}/publish")
+    enrollment2 = StudentEnrollment(user_id=student.id, version_id=v2["id"], is_active=True)
+    db.add(enrollment2)
+    db.commit()
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/my-courses")
+        data = response.json()
+        # Only one entry per course, regardless of how many enrollments
+        assert len(data) == 1
+
+
+def test_api_resolve_version_disabled_skipped(admin_client, db):
+    """resolve_my_version skips disabled versions."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/courses/stats/my-version")
+        assert response.status_code == 404

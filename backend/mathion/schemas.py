@@ -217,6 +217,20 @@ class TrackItemRequest(BaseModel):
     is_covered: bool | None = None  # set to True to mark covered; once covered, cannot be un-covered
 
 
+class TrackItemResponse(BaseModel):
+    item_id: int
+    is_covered: bool
+    time_spent: int
+    last_visited_at: datetime | None = None
+
+
+class MyVersionResponse(BaseModel):
+    course_slug: str
+    course_id: int
+    version_id: int
+    is_active: bool
+
+
 class MyCourseResponse(BaseModel):
     course: CourseResponse
     version_id: int
