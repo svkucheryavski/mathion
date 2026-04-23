@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import get_or_404, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Block, Course, CourseVersion, Sequence
+from mathion.models import AnswerOption, Block, Course, CourseVersion, Item, Question, Sequence
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionResponse
 
@@ -58,6 +58,52 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
                 status_code=409,
                 detail=f"Block '{block.title}' has no sequences. Every block must have at least one sequence to publish.",
             )
+
+    # Validate quiz completeness
+    quiz_items = db.execute(
+        select(Item)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version_id, Item.type == "quiz")
+    ).scalars().all()
+
+    for item in quiz_items:
+        questions = db.execute(
+            select(Question).where(Question.item_id == item.id)
+        ).scalars().all()
+        if not questions:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Quiz '{item.title}' has no questions. Every quiz must have at least one question to publish.",
+            )
+        for q in questions:
+            if q.type in ("single_choice", "multiple_choice"):
+                options = db.execute(
+                    select(AnswerOption).where(AnswerOption.question_id == q.id)
+                ).scalars().all()
+                if len(options) < 2:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Question '{q.text_md[:50]}' needs at least 2 options to publish.",
+                    )
+                correct_count = sum(1 for o in options if o.is_correct)
+                if correct_count == 0:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Question '{q.text_md[:50]}' needs at least one correct option to publish.",
+                    )
+            elif q.type == "numeric_answer":
+                if q.correct_numeric is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Question '{q.text_md[:50]}' is missing correct_numeric to publish.",
+                    )
+            elif q.type == "text_answer":
+                if not q.correct_text:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Question '{q.text_md[:50]}' is missing correct_text to publish.",
+                    )
 
     version.state = "published"
     version.published_at = datetime.now(timezone.utc)

@@ -186,3 +186,51 @@ def test_api_cannot_revert_version_with_enrolled_students(admin_client, db):
     response = admin_client.post(f"/api/versions/{version['id']}/revert")
     assert response.status_code == 409
     assert "enrolled students" in response.json()["detail"]
+
+
+def test_publish_quiz_without_questions_fails(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "q1", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 409
+    assert "question" in response.json()["detail"].lower()
+
+
+def test_publish_choice_question_without_options_fails(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "q2", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
+    admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "single_choice"})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 409
+    assert "option" in response.json()["detail"].lower()
+
+
+def test_publish_numeric_question_without_answer_fails(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "q3", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
+    admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "numeric_answer"})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 409
+    assert "correct_numeric" in response.json()["detail"].lower()
+
+
+def test_publish_complete_quiz_succeeds(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "q4", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
+    q = admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "single_choice"}).json()
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True})
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 200

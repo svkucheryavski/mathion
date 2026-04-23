@@ -47,7 +47,10 @@ def test_create_question_not_quiz_item(admin_client):
 
 def test_create_question_published_state_blocked(admin_client):
     ids = _make_quiz_via_api(admin_client)
-    # Need to add a sequence for publish validation
+    # Add a complete question so the quiz passes publish validation
+    admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Existing Q?", "type": "numeric_answer", "correct_numeric": 42, "precision": 0,
+    })
     admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
     response = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
         "text_md": "Q?", "type": "single_choice",
