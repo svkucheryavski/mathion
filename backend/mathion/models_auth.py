@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, ForeignKey, func
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, ForeignKey, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from mathion.database import Base
@@ -64,3 +64,25 @@ class RateLimitEntry(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(300), nullable=False, index=True)  # e.g., "pin_request:alice@example.com"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class UserItemState(Base):
+    __tablename__ = "user_item_states"
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_id", name="uq_user_item_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_covered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    time_spent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # seconds
+    last_visited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Quiz-specific fields
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_score_correct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_score_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    user: Mapped["User"] = relationship()
