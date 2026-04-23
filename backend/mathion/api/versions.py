@@ -115,8 +115,13 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
                         status_code=409,
                         detail=f"Question '{q.text_md[:50]}' is missing correct_numeric to publish.",
                     )
+                if q.precision is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Question '{q.text_md[:50]}' is missing precision to publish.",
+                    )
             elif q.type == "text_answer":
-                if not q.correct_text:
+                if not (q.correct_text or "").strip():
                     raise HTTPException(
                         status_code=409,
                         detail=f"Question '{q.text_md[:50]}' is missing correct_text to publish.",

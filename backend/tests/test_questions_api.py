@@ -186,12 +186,29 @@ def test_update_option_is_correct_published(admin_client):
         "text_md": "Q?", "type": "single_choice",
     }).json()
     opt1 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
-    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
+    opt2 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False}).json()
     admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
 
+    # Make B correct too (swap step 1 — temporarily 2 correct, publish validation catches this)
+    response = admin_client.patch(f"/api/options/{opt2['id']}", json={"is_correct": True})
+    assert response.status_code == 200
+    # Make A incorrect (swap step 2 — back to exactly 1 correct)
     response = admin_client.patch(f"/api/options/{opt1['id']}", json={"is_correct": False})
     assert response.status_code == 200
     assert response.json()["is_correct"] is False
+
+
+def test_update_option_cannot_remove_last_correct(admin_client):
+    """Cannot set the only correct option to false."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt1 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
+
+    response = admin_client.patch(f"/api/options/{opt1['id']}", json={"is_correct": False})
+    assert response.status_code == 422
 
 
 def test_delete_option(admin_client):

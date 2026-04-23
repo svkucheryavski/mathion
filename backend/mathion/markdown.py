@@ -1,5 +1,3 @@
-import re
-
 import nh3
 from markdown_it import MarkdownIt
 from mdit_py_plugins.dollarmath import dollarmath_plugin
@@ -27,8 +25,6 @@ _ALLOWED_ATTRS = {
 
 _URL_SCHEMES = {"http", "https", "mailto"}
 
-_JAVASCRIPT_URI_RE = re.compile(r"javascript\s*:", re.IGNORECASE)
-
 
 def render_markdown(text: str | None) -> str:
     """Convert Markdown to sanitized HTML.
@@ -36,13 +32,12 @@ def render_markdown(text: str | None) -> str:
     LaTeX math ($...$ and $$...$$) is rendered as <span class="math"> and
     <div class="math"> for client-side KaTeX rendering.
     Links get rel="noopener noreferrer" automatically via nh3.
-    javascript: URIs are stripped from both attributes (via nh3 url_schemes)
-    and any remaining text content.
+    javascript: URIs in href/src are stripped by nh3's url_schemes filter.
     """
     if not text:
         return ""
     html = _md.render(text)
-    sanitized = nh3.clean(
+    return nh3.clean(
         html,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRS,
@@ -50,6 +45,3 @@ def render_markdown(text: str | None) -> str:
         link_rel="noopener noreferrer",
         strip_comments=True,
     )
-    # Strip any remaining javascript: occurrences from text content
-    # (e.g. when markdown-it outputs a javascript: link as raw text rather than <a>)
-    return _JAVASCRIPT_URI_RE.sub("", sanitized)

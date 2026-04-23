@@ -45,10 +45,11 @@ def test_render_latex_block():
     assert "E = mc^2" in result
 
 
-def test_render_javascript_uri_stripped():
-    """javascript: URIs in links must be stripped by nh3."""
+def test_render_javascript_uri_not_linked():
+    """javascript: URIs must not appear in href attributes."""
     result = render_markdown("[click](javascript:alert(1))")
-    assert "javascript:" not in result
+    assert 'href="javascript:' not in result
+    assert "<a" not in result  # markdown-it refuses to create the link entirely
 
 
 def test_render_link_preserved():

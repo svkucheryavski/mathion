@@ -106,6 +106,12 @@ def update_question(question_id: int, data: QuestionUpdate, db: Session = Depend
     if "explanation_md" in updates:
         question.explanation_html = render_markdown(question.explanation_md)
 
+    # Validate invariants after update (prevent breaking published quiz)
+    if question.type == "numeric_answer" and question.correct_numeric is None:
+        raise HTTPException(status_code=422, detail="correct_numeric cannot be null for numeric_answer questions")
+    if question.type == "text_answer" and not (question.correct_text or "").strip():
+        raise HTTPException(status_code=422, detail="correct_text cannot be empty for text_answer questions")
+
     db.commit()
     db.refresh(question)
     return question
@@ -199,6 +205,17 @@ def update_option(option_id: int, data: OptionUpdate, db: Session = Depends(get_
 
     for field, value in updates.items():
         setattr(option, field, value)
+
+    # Validate: cannot remove the last correct option
+    if "is_correct" in updates and not option.is_correct:
+        # Option was just set to False — check at least one correct remains
+        all_options = db.execute(
+            select(AnswerOption).where(AnswerOption.question_id == option.question_id)
+        ).scalars().all()
+        correct_count = sum(1 for o in all_options if o.is_correct)
+        if correct_count == 0:
+            raise HTTPException(status_code=422, detail="At least one option must be correct")
+
     db.commit()
     db.refresh(option)
     return option
