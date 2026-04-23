@@ -271,3 +271,23 @@ class QuestionResponse(BaseModel):
     correct_text: str | None
 
     model_config = {"from_attributes": True}
+
+
+class OptionCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    is_correct: bool
+
+
+class OptionUpdate(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=500)
+    is_correct: bool | None = None
+
+
+class OptionResponse(BaseModel):
+    id: int
+    question_id: int
+    text: str
+    is_correct: bool
+    order: int
+
+    model_config = {"from_attributes": True}

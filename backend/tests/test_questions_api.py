@@ -124,3 +124,90 @@ def test_create_text_question_with_answer(admin_client):
     })
     assert response.status_code == 201
     assert response.json()["correct_text"] == "H2O"
+
+
+def test_create_option(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    response = admin_client.post(f"/api/questions/{q['id']}/options", json={
+        "text": "Answer A", "is_correct": False,
+    })
+    assert response.status_code == 201
+    data = response.json()
+    assert data["text"] == "Answer A"
+    assert data["is_correct"] is False
+    assert data["order"] == 1
+
+
+def test_create_option_non_choice_type_blocked(admin_client):
+    """Cannot add options to numeric_answer or text_answer questions."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "numeric_answer", "correct_numeric": 42, "precision": 0,
+    }).json()
+    response = admin_client.post(f"/api/questions/{q['id']}/options", json={
+        "text": "A", "is_correct": True,
+    })
+    assert response.status_code == 409
+
+
+def test_list_options(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": False})
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": True})
+    response = admin_client.get(f"/api/questions/{q['id']}/options")
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_update_option(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": False}).json()
+    response = admin_client.patch(f"/api/options/{opt['id']}", json={"text": "Updated A"})
+    assert response.status_code == 200
+    assert response.json()["text"] == "Updated A"
+
+
+def test_update_option_is_correct_published(admin_client):
+    """is_correct can be changed in published state."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt1 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
+    admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
+
+    response = admin_client.patch(f"/api/options/{opt1['id']}", json={"is_correct": False})
+    assert response.status_code == 200
+    assert response.json()["is_correct"] is False
+
+
+def test_delete_option(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
+    response = admin_client.delete(f"/api/options/{opt['id']}")
+    assert response.status_code == 204
+
+
+def test_delete_option_published_blocked(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
+    admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
+    response = admin_client.delete(f"/api/options/{opt['id']}")
+    assert response.status_code == 409
