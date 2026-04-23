@@ -188,3 +188,57 @@ def test_api_get_state_json_with_progress(admin_client, db):
 def test_api_get_state_json_unenrolled_returns_403(auth_client):
     response = auth_client.get("/api/versions/999/state")
     assert response.status_code in (403, 404)
+
+
+def test_api_track_item(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+    sc = _make_student_client(db, token)
+
+    from mathion.models import Item
+    items = db.query(Item).all()
+    intro_item = [i for i in items if i.slug == "intro"][0]
+
+    response = sc.post(f"/api/items/{intro_item.id}/track", json={
+        "time_spent": 45,
+    }, headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["time_spent"] == 45
+    assert data["is_covered"] is False
+
+    app.dependency_overrides.clear()
+
+
+def test_api_track_item_accumulates_time(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+    sc = _make_student_client(db, token)
+
+    from mathion.models import Item
+    items = db.query(Item).all()
+    intro_item = [i for i in items if i.slug == "intro"][0]
+
+    sc.post(f"/api/items/{intro_item.id}/track", json={"time_spent": 20},
+            headers={"X-Requested-With": "mathion"})
+    response = sc.post(f"/api/items/{intro_item.id}/track", json={"time_spent": 30},
+                       headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    assert response.json()["time_spent"] == 50  # accumulated
+
+    app.dependency_overrides.clear()
+
+
+def test_api_track_item_mark_covered(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+    sc = _make_student_client(db, token)
+
+    from mathion.models import Item
+    items = db.query(Item).all()
+    intro_item = [i for i in items if i.slug == "intro"][0]
+
+    response = sc.post(f"/api/items/{intro_item.id}/track", json={
+        "time_spent": 30, "is_covered": True,
+    }, headers={"X-Requested-With": "mathion"})
+    assert response.status_code == 200
+    assert response.json()["is_covered"] is True
+
+    app.dependency_overrides.clear()

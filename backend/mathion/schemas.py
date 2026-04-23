@@ -210,3 +210,8 @@ class StateJsonResponse(BaseModel):
     version_id: int
     current_item_id: int | None = None
     items: dict[str, ItemStateResponse]  # keyed by item ID as string
+
+
+class TrackItemRequest(BaseModel):
+    time_spent: int = Field(ge=0)  # seconds to add
+    is_covered: bool | None = None  # set to True to mark covered

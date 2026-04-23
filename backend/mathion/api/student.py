@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -7,7 +9,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, Course, CourseAdmin, CourseVersion, Item, Sequence
 from mathion.models_auth import StudentEnrollment, User, UserItemState
-from mathion.schemas import ItemStateResponse, StateJsonResponse
+from mathion.schemas import ItemStateResponse, StateJsonResponse, TrackItemRequest
 
 router = APIRouter(tags=["student"])
 
@@ -78,3 +80,40 @@ def get_state_json(version_id: int, user: User = Depends(get_current_user), db: 
         current_item_id=None,
         items=items_dict,
     )
+
+
+@router.post("/api/items/{item_id}/track")
+def track_item(item_id: int, data: TrackItemRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = get_or_404(db, Item, item_id)
+
+    # Verify user has access to this item's version
+    seq = db.get(Sequence, item.sequence_id)
+    block = db.get(Block, seq.block_id)
+    _check_version_access(db, user, block.version_id)
+
+    # Get or create state
+    state = db.execute(
+        select(UserItemState).where(
+            UserItemState.user_id == user.id,
+            UserItemState.item_id == item_id,
+        )
+    ).scalar_one_or_none()
+
+    if not state:
+        state = UserItemState(user_id=user.id, item_id=item_id, is_covered=False, time_spent=0)
+        db.add(state)
+
+    state.time_spent += data.time_spent
+    state.last_visited_at = datetime.now(timezone.utc)
+    if data.is_covered is True:
+        state.is_covered = True
+
+    db.commit()
+    db.refresh(state)
+
+    return {
+        "item_id": state.item_id,
+        "is_covered": state.is_covered,
+        "time_spent": state.time_spent,
+        "last_visited_at": state.last_visited_at.isoformat() if state.last_visited_at else None,
+    }
