@@ -1,0 +1,80 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from mathion.api.helpers import get_or_404
+from mathion.database import get_db
+from mathion.dependencies import get_current_user
+from mathion.models import Block, Course, CourseAdmin, CourseVersion, Item, Sequence
+from mathion.models_auth import StudentEnrollment, User, UserItemState
+from mathion.schemas import ItemStateResponse, StateJsonResponse
+
+router = APIRouter(tags=["student"])
+
+
+def _check_version_access(db: Session, user: User, version_id: int) -> CourseVersion:
+    """Verify user has access to this version (enrolled or admin or superuser)."""
+    version = get_or_404(db, CourseVersion, version_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if user.is_superuser:
+        return version
+    # Check course admin
+    is_admin = db.execute(
+        select(CourseAdmin).where(CourseAdmin.course_id == version.course_id, CourseAdmin.user_id == user.id)
+    ).scalar_one_or_none()
+    if is_admin:
+        return version
+    # Check enrollment (active or inactive)
+    is_enrolled = db.execute(
+        select(StudentEnrollment).where(
+            StudentEnrollment.version_id == version_id,
+            StudentEnrollment.user_id == user.id,
+        )
+    ).scalar_one_or_none()
+    if not is_enrolled:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return version
+
+
+@router.get("/api/versions/{version_id}/state", response_model=StateJsonResponse)
+def get_state_json(version_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    version = _check_version_access(db, user, version_id)
+
+    # Get all item IDs for this version
+    item_ids = db.execute(
+        select(Item.id)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version_id)
+    ).scalars().all()
+
+    # Get user states for these items
+    states = db.execute(
+        select(UserItemState).where(
+            UserItemState.user_id == user.id,
+            UserItemState.item_id.in_(item_ids),
+        )
+    ).scalars().all()
+
+    items_dict = {}
+    for s in states:
+        last_score = None
+        if s.last_score_correct is not None and s.last_score_total is not None:
+            last_score = {"correct": s.last_score_correct, "total": s.last_score_total}
+
+        items_dict[str(s.item_id)] = ItemStateResponse(
+            is_covered=s.is_covered,
+            time_spent=s.time_spent,
+            last_visited_at=s.last_visited_at,
+            attempt_count=s.attempt_count,
+            max_attempts=version.max_quiz_attempts,
+            last_score=last_score,
+            last_answers=s.last_answers,
+        )
+
+    return StateJsonResponse(
+        version_id=version_id,
+        current_item_id=None,
+        items=items_dict,
+    )

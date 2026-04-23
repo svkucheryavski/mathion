@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 
+from mathion.main import app
 from mathion.models import Block, Course, CourseVersion, Item, Sequence
-from mathion.models_auth import User, UserItemState
+from mathion.models_auth import StudentEnrollment, User, UserItemState
 
 
 def _make_item_and_user(db):
@@ -81,3 +82,109 @@ def test_update_item_state(db):
     assert state.time_spent == 120
     assert state.is_covered is True
     assert state.last_visited_at is not None
+
+
+def _setup_enrolled_student(client, db):
+    """Create course, publish version, create student, enroll, return (version, student, token).
+    Uses admin_client to set up course, then creates a student with their own session."""
+    from mathion.auth import request_pin, verify_pin
+
+    # Create course and version via admin
+    course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "Welcome"}).json()
+    block = client.post(f"/api/versions/{version['id']}/blocks", json={
+        "title": "B1", "slug": "b1", "info": "",
+    }).json()
+    seq = client.post(f"/api/blocks/{block['id']}/sequences", json={
+        "title": "S1", "slug": "s1",
+    }).json()
+    client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+    })
+    client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Quiz", "slug": "quiz", "type": "quiz",
+    })
+    client.post(f"/api/versions/{version['id']}/publish")
+
+    # Create student and enroll
+    student = User(email="student@example.com", full_name="Student")
+    db.add(student)
+    db.commit()
+    enrollment = StudentEnrollment(user_id=student.id, version_id=version["id"], is_active=True)
+    db.add(enrollment)
+    db.commit()
+
+    # Get student session
+    raw_pin = request_pin(db, student.email)
+    token = verify_pin(db, student.email, raw_pin, duration_days=7)
+
+    db.refresh(student)
+    return version, student, token, course
+
+
+def _make_student_client(db, token):
+    """Create a TestClient with student auth."""
+    from fastapi.testclient import TestClient
+    from mathion.main import app
+    from mathion.database import get_db
+    sc = TestClient(app)
+    def override():
+        try:
+            yield db
+        finally:
+            pass
+    app.dependency_overrides[get_db] = override
+    sc.cookies.set("session_token", token)
+    return sc
+
+
+def test_api_get_state_json(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+    sc = _make_student_client(db, token)
+
+    response = sc.get(f"/api/versions/{version['id']}/state")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["version_id"] == version["id"]
+    assert "items" in data
+    # No states yet — items dict should be empty
+    assert data["items"] == {}
+
+    app.dependency_overrides.clear()
+
+
+def test_api_get_state_json_with_progress(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Add some progress
+    from mathion.models import Item
+    items = db.query(Item).all()
+    intro_item = [i for i in items if i.slug == "intro"][0]
+
+    state = UserItemState(
+        user_id=student.id,
+        item_id=intro_item.id,
+        is_covered=True,
+        time_spent=120,
+    )
+    db.add(state)
+    db.commit()
+
+    sc = _make_student_client(db, token)
+
+    response = sc.get(f"/api/versions/{version['id']}/state")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert str(intro_item.id) in data["items"]
+    item_state = data["items"][str(intro_item.id)]
+    assert item_state["is_covered"] is True
+    assert item_state["time_spent"] == 120
+
+    app.dependency_overrides.clear()
+
+
+def test_api_get_state_json_unenrolled_returns_403(auth_client):
+    response = auth_client.get("/api/versions/999/state")
+    assert response.status_code in (403, 404)

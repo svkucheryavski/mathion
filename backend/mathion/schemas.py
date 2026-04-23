@@ -194,3 +194,19 @@ class EnrollmentResponse(BaseModel):
     user_full_name: str | None
 
     model_config = {"from_attributes": True}
+
+
+class ItemStateResponse(BaseModel):
+    is_covered: bool
+    time_spent: int
+    last_visited_at: datetime | None = None
+    attempt_count: int = 0
+    max_attempts: int = 3
+    last_score: dict | None = None  # {"correct": N, "total": N}
+    last_answers: list | dict | None = None
+
+
+class StateJsonResponse(BaseModel):
+    version_id: int
+    current_item_id: int | None = None
+    items: dict[str, ItemStateResponse]  # keyed by item ID as string
