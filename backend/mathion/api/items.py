@@ -9,7 +9,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
 from mathion.models_auth import User
-from mathion.schemas import ItemCreate, ItemResponse, ItemUpdate
+from mathion.schemas import ItemCreate, ItemResponse, ItemUpdate, ReorderRequest
 
 router = APIRouter(tags=["items"])
 
@@ -115,3 +115,20 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(status_code=409, detail="Can only delete items in 'created' state")
     db.delete(item)
     db.commit()
+
+
+@router.post("/api/sequences/{sequence_id}/items/reorder")
+def reorder_items(sequence_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    version = _get_version_for_sequence(db, sequence_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only reorder in 'created' state")
+    for entry in data.order:
+        item = db.get(Item, entry.id)
+        if not item or item.sequence_id != sequence_id:
+            raise HTTPException(status_code=400, detail=f"Item {entry.id} not found in this sequence")
+        item.order = entry.order
+    db.commit()
+    return {"status": "ok"}

@@ -291,3 +291,12 @@ class OptionResponse(BaseModel):
     order: int
 
     model_config = {"from_attributes": True}
+
+
+class ReorderItem(BaseModel):
+    id: int
+    order: int = Field(ge=1)
+
+
+class ReorderRequest(BaseModel):
+    order: list[ReorderItem] = Field(min_length=1)

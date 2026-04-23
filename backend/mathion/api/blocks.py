@@ -12,6 +12,7 @@ from mathion.schemas import (
     BlockCreate,
     BlockResponse,
     BlockUpdate,
+    ReorderRequest,
     SequenceCreate,
     SequenceResponse,
     SequenceUpdate,
@@ -112,6 +113,23 @@ def delete_block(block_id: int, db: Session = Depends(get_db), user: User = Depe
     db.commit()
 
 
+@router.post("/api/versions/{version_id}/blocks/reorder")
+def reorder_blocks(version_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only reorder in 'created' state")
+    for entry in data.order:
+        block = db.get(Block, entry.id)
+        if not block or block.version_id != version_id:
+            raise HTTPException(status_code=400, detail=f"Block {entry.id} not found in this version")
+        block.order = entry.order
+    db.commit()
+    return {"status": "ok"}
+
+
 # ==================== SEQUENCES ====================
 
 
@@ -194,3 +212,21 @@ def delete_sequence(sequence_id: int, db: Session = Depends(get_db), user: User 
         raise HTTPException(status_code=409, detail="Can only delete sequences in 'created' state")
     db.delete(seq)
     db.commit()
+
+
+@router.post("/api/blocks/{block_id}/sequences/reorder")
+def reorder_sequences(block_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    block = get_or_404(db, Block, block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only reorder in 'created' state")
+    for entry in data.order:
+        seq = db.get(Sequence, entry.id)
+        if not seq or seq.block_id != block_id:
+            raise HTTPException(status_code=400, detail=f"Sequence {entry.id} not found in this block")
+        seq.order = entry.order
+    db.commit()
+    return {"status": "ok"}

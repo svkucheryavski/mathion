@@ -8,7 +8,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence
 from mathion.models_auth import User
-from mathion.schemas import OptionCreate, OptionResponse, OptionUpdate, QuestionCreate, QuestionResponse, QuestionUpdate
+from mathion.schemas import OptionCreate, OptionResponse, OptionUpdate, QuestionCreate, QuestionResponse, QuestionUpdate, ReorderRequest
 
 router = APIRouter(tags=["questions"])
 
@@ -123,6 +123,23 @@ def delete_question(question_id: int, db: Session = Depends(get_db), user: User 
     db.commit()
 
 
+@router.post("/api/items/{item_id}/questions/reorder")
+def reorder_questions(item_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item, version = _get_version_for_item(db, item_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state == "archived":
+        raise HTTPException(status_code=409, detail="Cannot reorder in archived state")
+    for entry in data.order:
+        q = db.get(Question, entry.id)
+        if not q or q.item_id != item_id:
+            raise HTTPException(status_code=400, detail=f"Question {entry.id} not found in this item")
+        q.order = entry.order
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/api/questions/{question_id}/options", status_code=201, response_model=OptionResponse)
 def create_option(question_id: int, data: OptionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     question, version = _get_version_for_question(db, question_id)
@@ -189,3 +206,20 @@ def delete_option(option_id: int, db: Session = Depends(get_db), user: User = De
         raise HTTPException(status_code=409, detail="Can only delete options in 'created' state")
     db.delete(option)
     db.commit()
+
+
+@router.post("/api/questions/{question_id}/options/reorder")
+def reorder_options(question_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    question, version = _get_version_for_question(db, question_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only reorder options in 'created' state")
+    for entry in data.order:
+        opt = db.get(AnswerOption, entry.id)
+        if not opt or opt.question_id != question_id:
+            raise HTTPException(status_code=400, detail=f"Option {entry.id} not found in this question")
+        opt.order = entry.order
+    db.commit()
+    return {"status": "ok"}
