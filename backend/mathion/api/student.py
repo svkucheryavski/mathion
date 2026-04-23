@@ -220,6 +220,7 @@ def resolve_my_version(course_slug: str, user: User = Depends(get_current_user),
             StudentEnrollment.user_id == user.id,
         )
         .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc())
+        .limit(1)
     ).scalar_one_or_none()
 
     if not enrollment:

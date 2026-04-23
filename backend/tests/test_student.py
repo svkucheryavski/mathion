@@ -512,3 +512,24 @@ def test_api_resolve_version_disabled_skipped(admin_client, db):
     with _make_student_client(db, token) as sc:
         response = sc.get("/api/courses/stats/my-version")
         assert response.status_code == 404
+
+
+def test_api_resolve_version_multiple_enrollments(admin_client, db):
+    """resolve_my_version works when student has multiple enrollments in same course."""
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Create second version and enroll again (old enrollment stays)
+    v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"}).json()
+    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S", "slug": "s"})
+    admin_client.post(f"/api/versions/{v2['id']}/publish")
+    enrollment2 = StudentEnrollment(user_id=student.id, version_id=v2["id"], is_active=True)
+    db.add(enrollment2)
+    db.commit()
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/courses/stats/my-version")
+        assert response.status_code == 200
+        # Should not crash with MultipleResultsFound
+        data = response.json()
+        assert data["is_active"] is True
