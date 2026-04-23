@@ -300,3 +300,31 @@ def test_api_my_courses_empty(auth_client):
     response = auth_client.get("/api/my-courses")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_api_resolve_version(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/courses/stats/my-version")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["version_id"] == version["id"]
+        assert data["course_slug"] == "stats"
+
+
+def test_api_resolve_version_not_enrolled(auth_client):
+    response = auth_client.get("/api/courses/nonexistent/my-version")
+    assert response.status_code == 404
+
+
+def test_api_resolve_version_no_enrollment(admin_client, db, auth_client):
+    # admin_client and auth_client share the same underlying client fixture,
+    # so we can't use admin_client after auth_client is created.
+    # Instead, create the course directly in the DB.
+    course = Course(slug="physics", name="Physics", description="")
+    db.add(course)
+    db.commit()
+
+    response = auth_client.get("/api/courses/physics/my-version")
+    assert response.status_code == 404

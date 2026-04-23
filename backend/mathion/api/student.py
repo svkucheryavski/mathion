@@ -175,3 +175,32 @@ def my_courses(user: User = Depends(get_current_user), db: Session = Depends(get
         ))
 
     return results
+
+
+@router.get("/api/courses/{course_slug}/my-version")
+def resolve_my_version(course_slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Resolve a course slug to the user's enrolled version."""
+    course = db.execute(select(Course).where(Course.slug == course_slug)).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Find user's most recent enrollment on any version of this course
+    enrollment = db.execute(
+        select(StudentEnrollment)
+        .join(CourseVersion, CourseVersion.id == StudentEnrollment.version_id)
+        .where(
+            CourseVersion.course_id == course.id,
+            StudentEnrollment.user_id == user.id,
+        )
+        .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc())
+    ).scalar_one_or_none()
+
+    if not enrollment:
+        raise HTTPException(status_code=404, detail="Not enrolled in this course")
+
+    return {
+        "course_slug": course_slug,
+        "course_id": course.id,
+        "version_id": enrollment.version_id,
+        "is_active": enrollment.is_active,
+    }
