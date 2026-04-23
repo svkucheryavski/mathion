@@ -300,3 +300,16 @@ class ReorderItem(BaseModel):
 
 class ReorderRequest(BaseModel):
     order: list[ReorderItem] = Field(min_length=1)
+
+
+class QuizSubmitRequest(BaseModel):
+    answers: dict[str, list[int] | str]  # question_id -> [option_ids] or "value"
+
+
+class QuizSubmitResponse(BaseModel):
+    item_id: int
+    attempt_count: int
+    max_attempts: int
+    score_correct: int
+    score_total: int
+    can_retry: bool
