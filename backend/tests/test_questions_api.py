@@ -214,3 +214,82 @@ def test_delete_option_published_blocked(admin_client):
     admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
     response = admin_client.delete(f"/api/options/{opt['id']}")
     assert response.status_code == 409
+
+
+def test_create_question_non_admin_blocked(auth_client, db):
+    """Non-admin users cannot list questions (require_course_admin raises 403)."""
+    from mathion.models import Course, CourseVersion, Block, Sequence, Item
+    # Set up a quiz item directly in the DB so auth_client (non-superuser) can attempt access
+    course = Course(slug="na-course", name="NA", description="")
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+    version = CourseVersion(course_id=course.id, state="created", info_md="", info_html="")
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    block = Block(version_id=version.id, title="B", slug="b", order=1, info="")
+    db.add(block)
+    db.commit()
+    db.refresh(block)
+    seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
+    db.add(seq)
+    db.commit()
+    db.refresh(seq)
+    item = Item(sequence_id=seq.id, title="Quiz", slug="quiz", type="quiz", order=1)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    # auth_client is a regular (non-superuser) user with no course admin role
+    response = auth_client.get(f"/api/items/{item.id}/questions")
+    assert response.status_code == 403
+
+
+def test_create_question_disabled_version_blocked(admin_client):
+    """Cannot create questions on a disabled version."""
+    ids = _make_quiz_via_api(admin_client)
+    admin_client.post(f"/api/versions/{ids['version']['id']}/disable")
+    response = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    })
+    assert response.status_code == 403
+
+
+def test_update_question_archived_blocked(admin_client):
+    """Cannot update questions in archived versions."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "numeric_answer", "correct_numeric": 42, "precision": 0,
+    }).json()
+    # Need to add item to sequence for publish validation
+    admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
+    admin_client.post(f"/api/versions/{ids['version']['id']}/archive")
+    response = admin_client.patch(f"/api/questions/{q['id']}", json={"text_md": "Updated?"})
+    assert response.status_code == 409
+
+
+def test_create_option_disabled_version_blocked(admin_client):
+    """Cannot create options on a disabled version."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    admin_client.post(f"/api/versions/{ids['version']['id']}/disable")
+    response = admin_client.post(f"/api/questions/{q['id']}/options", json={
+        "text": "A", "is_correct": True,
+    })
+    assert response.status_code == 403
+
+
+def test_update_option_archived_blocked(admin_client):
+    """Cannot update options in archived versions."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
+    admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
+    admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
+    admin_client.post(f"/api/versions/{ids['version']['id']}/archive")
+    response = admin_client.patch(f"/api/options/{opt['id']}", json={"text": "Updated"})
+    assert response.status_code == 409

@@ -121,10 +121,17 @@ def reorder_blocks(version_id: int, data: ReorderRequest, db: Session = Depends(
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only reorder in 'created' state")
+
+    incoming_ids = {e.id for e in data.order}
+    incoming_orders = [e.order for e in data.order]
+    if len(set(incoming_orders)) != len(incoming_orders):
+        raise HTTPException(status_code=400, detail="Duplicate order values in request")
+    real_ids = set(db.scalars(select(Block.id).where(Block.version_id == version_id)).all())
+    if incoming_ids != real_ids:
+        raise HTTPException(status_code=400, detail="Reorder list must include every block in this version")
+
     for entry in data.order:
         block = db.get(Block, entry.id)
-        if not block or block.version_id != version_id:
-            raise HTTPException(status_code=400, detail=f"Block {entry.id} not found in this version")
         block.order = entry.order
     db.commit()
     return {"status": "ok"}
@@ -223,10 +230,17 @@ def reorder_sequences(block_id: int, data: ReorderRequest, db: Session = Depends
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only reorder in 'created' state")
+
+    incoming_ids = {e.id for e in data.order}
+    incoming_orders = [e.order for e in data.order]
+    if len(set(incoming_orders)) != len(incoming_orders):
+        raise HTTPException(status_code=400, detail="Duplicate order values in request")
+    real_ids = set(db.scalars(select(Sequence.id).where(Sequence.block_id == block_id)).all())
+    if incoming_ids != real_ids:
+        raise HTTPException(status_code=400, detail="Reorder list must include every sequence in this block")
+
     for entry in data.order:
         seq = db.get(Sequence, entry.id)
-        if not seq or seq.block_id != block_id:
-            raise HTTPException(status_code=400, detail=f"Sequence {entry.id} not found in this block")
         seq.order = entry.order
     db.commit()
     return {"status": "ok"}

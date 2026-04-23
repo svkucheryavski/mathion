@@ -148,6 +148,7 @@ def test_api_patch_block_in_archived_state(admin_client):
     version = _setup_version(admin_client)
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
     admin_client.post(f"/api/versions/{version['id']}/archive")
     resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "Archived Title"})
@@ -165,7 +166,8 @@ def test_api_delete_block_in_published_state(admin_client):
     """DELETE block in published version must return 409."""
     version = _setup_version(admin_client)
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
-    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"})
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
     resp = admin_client.delete(f"/api/blocks/{block['id']}")
     assert resp.status_code == 409

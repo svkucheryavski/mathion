@@ -125,10 +125,17 @@ def reorder_items(sequence_id: int, data: ReorderRequest, db: Session = Depends(
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only reorder in 'created' state")
+
+    incoming_ids = {e.id for e in data.order}
+    incoming_orders = [e.order for e in data.order]
+    if len(set(incoming_orders)) != len(incoming_orders):
+        raise HTTPException(status_code=400, detail="Duplicate order values in request")
+    real_ids = set(db.scalars(select(Item.id).where(Item.sequence_id == sequence_id)).all())
+    if incoming_ids != real_ids:
+        raise HTTPException(status_code=400, detail="Reorder list must include every item in this sequence")
+
     for entry in data.order:
         item = db.get(Item, entry.id)
-        if not item or item.sequence_id != sequence_id:
-            raise HTTPException(status_code=400, detail=f"Item {entry.id} not found in this sequence")
         item.order = entry.order
     db.commit()
     return {"status": "ok"}

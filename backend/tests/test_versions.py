@@ -144,7 +144,8 @@ def test_api_publish_version_block_with_sequences_succeeds(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
-    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"})
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 200
     assert response.json()["state"] == "published"
@@ -234,3 +235,15 @@ def test_publish_complete_quiz_succeeds(admin_client):
     admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False})
     response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 200
+
+
+def test_publish_text_question_without_answer_fails(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "q5", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
+    admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "text_answer"})
+    response = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert response.status_code == 409
+    assert "correct_text" in response.json()["detail"].lower()

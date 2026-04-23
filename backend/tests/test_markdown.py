@@ -30,3 +30,32 @@ def test_render_none():
 def test_render_code_block():
     result = render_markdown("```python\nprint('hello')\n```")
     assert "<code>" in result
+
+
+def test_render_latex_inline():
+    """Inline LaTeX $x_i$ should be wrapped in math span, not corrupted by emphasis."""
+    result = render_markdown("The variable $x_i$ is important")
+    # dollarmath plugin wraps in <span class="math">
+    assert "x_i" in result
+    assert "<em>" not in result  # underscore must not trigger emphasis
+
+
+def test_render_latex_block():
+    result = render_markdown("$$E = mc^2$$")
+    assert "E = mc^2" in result
+
+
+def test_render_javascript_uri_stripped():
+    """javascript: URIs in links must be stripped by nh3."""
+    result = render_markdown("[click](javascript:alert(1))")
+    assert "javascript:" not in result
+
+
+def test_render_link_preserved():
+    result = render_markdown("[example](https://example.com)")
+    assert 'href="https://example.com"' in result
+
+
+def test_render_image_preserved():
+    result = render_markdown("![alt text](https://example.com/img.png)")
+    assert 'src="https://example.com/img.png"' in result

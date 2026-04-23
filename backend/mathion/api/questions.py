@@ -129,12 +129,20 @@ def reorder_questions(item_id: int, data: ReorderRequest, db: Session = Depends(
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
-    if version.state == "archived":
-        raise HTTPException(status_code=409, detail="Cannot reorder in archived state")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only reorder questions in 'created' state")
+
+    # Validate: all children must be present, no duplicate orders
+    incoming_ids = {e.id for e in data.order}
+    incoming_orders = [e.order for e in data.order]
+    if len(set(incoming_orders)) != len(incoming_orders):
+        raise HTTPException(status_code=400, detail="Duplicate order values in request")
+    real_ids = set(db.scalars(select(Question.id).where(Question.item_id == item_id)).all())
+    if incoming_ids != real_ids:
+        raise HTTPException(status_code=400, detail="Reorder list must include every question in this item")
+
     for entry in data.order:
         q = db.get(Question, entry.id)
-        if not q or q.item_id != item_id:
-            raise HTTPException(status_code=400, detail=f"Question {entry.id} not found in this item")
         q.order = entry.order
     db.commit()
     return {"status": "ok"}
@@ -216,10 +224,17 @@ def reorder_options(question_id: int, data: ReorderRequest, db: Session = Depend
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only reorder options in 'created' state")
+
+    incoming_ids = {e.id for e in data.order}
+    incoming_orders = [e.order for e in data.order]
+    if len(set(incoming_orders)) != len(incoming_orders):
+        raise HTTPException(status_code=400, detail="Duplicate order values in request")
+    real_ids = set(db.scalars(select(AnswerOption.id).where(AnswerOption.question_id == question_id)).all())
+    if incoming_ids != real_ids:
+        raise HTTPException(status_code=400, detail="Reorder list must include every option in this question")
+
     for entry in data.order:
         opt = db.get(AnswerOption, entry.id)
-        if not opt or opt.question_id != question_id:
-            raise HTTPException(status_code=400, detail=f"Option {entry.id} not found in this question")
         opt.order = entry.order
     db.commit()
     return {"status": "ok"}

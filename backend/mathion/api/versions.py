@@ -59,6 +59,18 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
                 detail=f"Block '{block.title}' has no sequences. Every block must have at least one sequence to publish.",
             )
 
+    # Every sequence must have at least one item
+    sequences = db.execute(
+        select(Sequence).join(Block, Block.id == Sequence.block_id).where(Block.version_id == version_id)
+    ).scalars().all()
+    for seq in sequences:
+        item_exists = db.scalar(select(Item.id).where(Item.sequence_id == seq.id).limit(1))
+        if item_exists is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Sequence '{seq.title}' has no items. Every sequence must have at least one item to publish.",
+            )
+
     # Validate quiz completeness
     quiz_items = db.execute(
         select(Item)
@@ -92,6 +104,11 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
                         status_code=409,
                         detail=f"Question '{q.text_md[:50]}' needs at least one correct option to publish.",
                     )
+                if q.type == "single_choice" and correct_count != 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Single-choice question '{q.text_md[:50]}' must have exactly one correct option.",
+                    )
             elif q.type == "numeric_answer":
                 if q.correct_numeric is None:
                     raise HTTPException(
@@ -116,6 +133,8 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
 def archive_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "published":
         raise HTTPException(status_code=409, detail=f"Cannot archive version in '{version.state}' state")
     version.state = "archived"
@@ -129,6 +148,8 @@ def archive_version(version_id: int, db: Session = Depends(get_db), user: User =
 def revert_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "published":
         raise HTTPException(status_code=409, detail=f"Cannot revert version in '{version.state}' state")
     student_count = db.scalar(
