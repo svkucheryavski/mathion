@@ -15,18 +15,23 @@ router = APIRouter(tags=["student"])
 
 
 def _check_version_access(db: Session, user: User, version_id: int) -> CourseVersion:
-    """Verify user has access to this version (enrolled or admin or superuser)."""
+    """Verify user has access to this version (enrolled or admin or superuser).
+
+    Superusers and course admins can access disabled versions (needed for editing/debugging).
+    Students are blocked from disabled versions.
+    """
     version = get_or_404(db, CourseVersion, version_id)
-    if version.is_disabled:
-        raise HTTPException(status_code=403, detail="Version is disabled")
     if user.is_superuser:
         return version
-    # Check course admin
+    # Check course admin — admins can access disabled versions
     is_admin = db.execute(
         select(CourseAdmin).where(CourseAdmin.course_id == version.course_id, CourseAdmin.user_id == user.id)
     ).scalar_one_or_none()
     if is_admin:
         return version
+    # Students are blocked from disabled versions
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     # Check enrollment (active or inactive)
     is_enrolled = db.execute(
         select(StudentEnrollment).where(
@@ -86,9 +91,9 @@ def get_state_json(version_id: int, user: User = Depends(get_current_user), db: 
 def track_item(item_id: int, data: TrackItemRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     item = get_or_404(db, Item, item_id)
 
-    # Verify user has access to this item's version
-    seq = db.get(Sequence, item.sequence_id)
-    block = db.get(Block, seq.block_id)
+    # Verify user has access to this item's version via join
+    seq = get_or_404(db, Sequence, item.sequence_id, detail="Sequence not found")
+    block = get_or_404(db, Block, seq.block_id, detail="Block not found")
     _check_version_access(db, user, block.version_id)
 
     # Get or create state

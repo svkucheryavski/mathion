@@ -216,7 +216,7 @@ def test_api_get_state_json_nonexistent_version_returns_404(auth_client):
     assert response.status_code == 404
 
 
-def test_api_get_state_json_disabled_version_returns_403(admin_client, db):
+def test_api_get_state_json_disabled_version_student_gets_403(admin_client, db):
     version, student, token, course = _setup_enrolled_student(admin_client, db)
 
     # Disable the version
@@ -225,6 +225,16 @@ def test_api_get_state_json_disabled_version_returns_403(admin_client, db):
     with _make_student_client(db, token) as sc:
         response = sc.get(f"/api/versions/{version['id']}/state")
         assert response.status_code == 403
+
+
+def test_api_get_state_json_disabled_version_superuser_allowed(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Disable the version — superuser (admin_client) should still have access
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+
+    response = admin_client.get(f"/api/versions/{version['id']}/state")
+    assert response.status_code == 200
 
 
 def test_api_track_item(admin_client, db):

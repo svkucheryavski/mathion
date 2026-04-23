@@ -213,8 +213,8 @@ class StateJsonResponse(BaseModel):
 
 
 class TrackItemRequest(BaseModel):
-    time_spent: int = Field(ge=0)  # seconds to add
-    is_covered: bool | None = None  # set to True to mark covered
+    time_spent: int = Field(ge=0, le=86400)  # seconds to add (max 1 day per call)
+    is_covered: bool | None = None  # set to True to mark covered; once covered, cannot be un-covered
 
 
 class MyCourseResponse(BaseModel):
