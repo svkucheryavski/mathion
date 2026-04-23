@@ -81,7 +81,7 @@ class UserItemState(Base):
 
     # Quiz-specific fields
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    last_answers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_answers: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
     last_score_correct: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_score_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

@@ -80,3 +80,4 @@ def test_update_item_state(db):
 
     assert state.time_spent == 120
     assert state.is_covered is True
+    assert state.last_visited_at is not None
