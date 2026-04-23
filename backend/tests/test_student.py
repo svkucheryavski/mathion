@@ -264,3 +264,39 @@ def test_api_track_item_mark_covered(admin_client, db):
         }, headers={"X-Requested-With": "mathion"})
         assert response.status_code == 200
         assert response.json()["is_covered"] is True
+
+
+def test_api_my_courses(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/my-courses")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["course"]["slug"] == "stats"
+        assert data[0]["version_id"] == version["id"]
+        assert data[0]["total_items"] == 2
+        assert data[0]["covered_items"] == 0
+
+
+def test_api_my_courses_with_progress(admin_client, db):
+    version, student, token, course = _setup_enrolled_student(admin_client, db)
+
+    # Mark one item as covered
+    intro = db.query(Item).filter_by(slug="intro").first()
+    state = UserItemState(user_id=student.id, item_id=intro.id, is_covered=True, time_spent=60)
+    db.add(state)
+    db.commit()
+
+    with _make_student_client(db, token) as sc:
+        response = sc.get("/api/my-courses")
+        data = response.json()
+        assert data[0]["covered_items"] == 1
+        assert data[0]["total_items"] == 2
+
+
+def test_api_my_courses_empty(auth_client):
+    response = auth_client.get("/api/my-courses")
+    assert response.status_code == 200
+    assert response.json() == []

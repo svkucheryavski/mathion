@@ -215,3 +215,12 @@ class StateJsonResponse(BaseModel):
 class TrackItemRequest(BaseModel):
     time_spent: int = Field(ge=0)  # seconds to add
     is_covered: bool | None = None  # set to True to mark covered
+
+
+class MyCourseResponse(BaseModel):
+    course: CourseResponse
+    version_id: int
+    version_state: str
+    total_items: int
+    covered_items: int
+    is_active: bool

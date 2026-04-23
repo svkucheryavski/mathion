@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404
@@ -9,7 +9,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, Course, CourseAdmin, CourseVersion, Item, Sequence
 from mathion.models_auth import StudentEnrollment, User, UserItemState
-from mathion.schemas import ItemStateResponse, StateJsonResponse, TrackItemRequest
+from mathion.schemas import CourseResponse, ItemStateResponse, MyCourseResponse, StateJsonResponse, TrackItemRequest
 
 router = APIRouter(tags=["student"])
 
@@ -117,3 +117,61 @@ def track_item(item_id: int, data: TrackItemRequest, user: User = Depends(get_cu
         "time_spent": state.time_spent,
         "last_visited_at": state.last_visited_at.isoformat() if state.last_visited_at else None,
     }
+
+
+@router.get("/api/my-courses", response_model=list[MyCourseResponse])
+def my_courses(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    enrollments = db.execute(
+        select(StudentEnrollment)
+        .where(StudentEnrollment.user_id == user.id)
+        .order_by(StudentEnrollment.created_at.desc())
+    ).scalars().all()
+
+    results = []
+    seen_courses = set()
+
+    for enrollment in enrollments:
+        version = db.get(CourseVersion, enrollment.version_id)
+        if not version or version.is_disabled:
+            continue
+
+        # Only show the most recent enrollment per course
+        if version.course_id in seen_courses:
+            continue
+        seen_courses.add(version.course_id)
+
+        course = db.get(Course, version.course_id)
+
+        # Count total items in this version
+        total_items = db.scalar(
+            select(func.count())
+            .select_from(Item)
+            .join(Sequence, Sequence.id == Item.sequence_id)
+            .join(Block, Block.id == Sequence.block_id)
+            .where(Block.version_id == version.id)
+        )
+
+        # Count covered items for this user
+        covered_items = db.scalar(
+            select(func.count())
+            .select_from(UserItemState)
+            .join(Item, Item.id == UserItemState.item_id)
+            .join(Sequence, Sequence.id == Item.sequence_id)
+            .join(Block, Block.id == Sequence.block_id)
+            .where(
+                Block.version_id == version.id,
+                UserItemState.user_id == user.id,
+                UserItemState.is_covered == True,
+            )
+        )
+
+        results.append(MyCourseResponse(
+            course=CourseResponse.model_validate(course),
+            version_id=version.id,
+            version_state=version.state,
+            total_items=total_items or 0,
+            covered_items=covered_items or 0,
+            is_active=enrollment.is_active,
+        ))
+
+    return results
