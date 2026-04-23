@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.markdown import render_markdown
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
@@ -41,7 +42,7 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
     next_order = (db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0) + 1
     item = Item(
         sequence_id=sequence_id, title=data.title, slug=data.slug, order=next_order,
-        type=data.type, content_md=data.content_md, content_html="",
+        type=data.type, content_md=data.content_md, content_html=render_markdown(data.content_md),
         video_url=data.video_url, script_url=data.script_url,
     )
     db.add(item)
@@ -86,6 +87,9 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
 
     for field, value in updates.items():
         setattr(item, field, value)
+
+    if "content_md" in updates:
+        item.content_html = render_markdown(item.content_md)
 
     # Validate type invariants after applying patch
     if item.type == "static_page" and item.content_md is None:

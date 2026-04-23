@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.markdown import render_markdown
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence
@@ -57,11 +58,11 @@ def create_question(item_id: int, data: QuestionCreate, db: Session = Depends(ge
     question = Question(
         item_id=item_id,
         text_md=data.text_md,
-        text_html="",
+        text_html=render_markdown(data.text_md),
         type=data.type,
         order=next_order,
         explanation_md=data.explanation_md,
-        explanation_html="",
+        explanation_html=render_markdown(data.explanation_md),
         correct_numeric=data.correct_numeric,
         precision=data.precision,
         correct_text=data.correct_text,
@@ -99,6 +100,12 @@ def update_question(question_id: int, data: QuestionUpdate, db: Session = Depend
 
     for field, value in updates.items():
         setattr(question, field, value)
+
+    if "text_md" in updates:
+        question.text_html = render_markdown(question.text_md)
+    if "explanation_md" in updates:
+        question.explanation_html = render_markdown(question.explanation_md)
+
     db.commit()
     db.refresh(question)
     return question
