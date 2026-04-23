@@ -238,3 +238,36 @@ class MyCourseResponse(BaseModel):
     total_items: int
     covered_items: int
     is_active: bool
+
+
+class QuestionCreate(BaseModel):
+    text_md: str = Field(min_length=1)
+    type: Literal["single_choice", "multiple_choice", "numeric_answer", "text_answer"]
+    explanation_md: str | None = None
+    correct_numeric: float | None = None
+    precision: int | None = Field(default=None, ge=0)
+    correct_text: str | None = None
+
+
+class QuestionUpdate(BaseModel):
+    text_md: str | None = Field(default=None, min_length=1)
+    explanation_md: str | None = None
+    correct_numeric: float | None = None
+    precision: int | None = Field(default=None, ge=0)
+    correct_text: str | None = None
+
+
+class QuestionResponse(BaseModel):
+    id: int
+    item_id: int
+    text_md: str
+    text_html: str
+    type: str
+    order: int
+    explanation_md: str | None
+    explanation_html: str | None
+    correct_numeric: float | None
+    precision: int | None
+    correct_text: str | None
+
+    model_config = {"from_attributes": True}
