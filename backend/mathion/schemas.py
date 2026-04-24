@@ -313,3 +313,22 @@ class QuizSubmitResponse(BaseModel):
     score_correct: int
     score_total: int
     can_retry: bool
+
+
+class QuestionReveal(BaseModel):
+    id: int
+    type: str
+    text_html: str
+    explanation_html: str | None
+    correct_option_ids: list[int]
+    correct_numeric: float | None
+    correct_text: str | None
+    student_answer: list[int] | str | None
+
+
+class QuizRevealResponse(BaseModel):
+    item_id: int
+    attempt_count: int
+    score_correct: int
+    score_total: int
+    questions: list[QuestionReveal]

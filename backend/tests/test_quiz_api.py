@@ -168,3 +168,52 @@ def test_submit_non_quiz_item_rejected(admin_client, db):
         response = sc.post(f"/api/items/{item['id']}/submit", json={"answers": {}},
                            headers={"X-Requested-With": "mathion"})
         assert response.status_code == 409
+
+
+def test_reveal_after_max_attempts(admin_client, db):
+    data = _setup_quiz(admin_client, db)
+    answers = {
+        str(data["q1"]["id"]): [data["opt_b"]["id"]],
+        str(data["q2"]["id"]): "3.0",
+    }
+    with _make_student_client(db, data["token"]) as sc:
+        for _ in range(3):
+            sc.post(f"/api/items/{data['item']['id']}/submit",
+                    json={"answers": answers},
+                    headers={"X-Requested-With": "mathion"})
+
+        response = sc.get(f"/api/items/{data['item']['id']}/reveal")
+        assert response.status_code == 200
+        reveal = response.json()
+        assert len(reveal["questions"]) == 2
+
+        # Single choice question should show correct option
+        q1_reveal = [q for q in reveal["questions"] if q["id"] == data["q1"]["id"]][0]
+        assert data["opt_b"]["id"] in q1_reveal["correct_option_ids"]
+
+        # Numeric question should show correct value
+        q2_reveal = [q for q in reveal["questions"] if q["id"] == data["q2"]["id"]][0]
+        assert q2_reveal["correct_numeric"] == 3.0
+
+
+def test_reveal_before_max_attempts_blocked(admin_client, db):
+    data = _setup_quiz(admin_client, db)
+    answers = {
+        str(data["q1"]["id"]): [data["opt_b"]["id"]],
+        str(data["q2"]["id"]): "3.0",
+    }
+    with _make_student_client(db, data["token"]) as sc:
+        # Only 1 attempt (max is 3)
+        sc.post(f"/api/items/{data['item']['id']}/submit",
+                json={"answers": answers},
+                headers={"X-Requested-With": "mathion"})
+
+        response = sc.get(f"/api/items/{data['item']['id']}/reveal")
+        assert response.status_code == 403
+
+
+def test_reveal_without_any_attempt_blocked(admin_client, db):
+    data = _setup_quiz(admin_client, db)
+    with _make_student_client(db, data["token"]) as sc:
+        response = sc.get(f"/api/items/{data['item']['id']}/reveal")
+        assert response.status_code == 403

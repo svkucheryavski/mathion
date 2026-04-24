@@ -11,7 +11,7 @@ from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence
 from mathion.models_auth import StudentEnrollment, User, UserItemState
 from mathion.quiz import evaluate_question
-from mathion.schemas import QuizSubmitRequest, QuizSubmitResponse
+from mathion.schemas import QuestionReveal, QuizRevealResponse, QuizSubmitRequest, QuizSubmitResponse
 
 router = APIRouter(tags=["quiz"])
 
@@ -133,4 +133,60 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
         score_correct=score_correct,
         score_total=len(questions),
         can_retry=state.attempt_count < max_attempts,
+    )
+
+
+@router.get("/api/items/{item_id}/reveal", response_model=QuizRevealResponse)
+def reveal_quiz(item_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item, version = _check_quiz_access(db, user, item_id)
+
+    if item.type != "quiz":
+        raise HTTPException(status_code=409, detail="Not a quiz item")
+
+    # Get user state
+    state = db.execute(
+        select(UserItemState).where(
+            UserItemState.user_id == user.id,
+            UserItemState.item_id == item_id,
+        )
+    ).scalar_one_or_none()
+
+    if not state or state.attempt_count < version.max_quiz_attempts:
+        raise HTTPException(status_code=403, detail="Answers revealed only after all attempts are used")
+
+    # Load questions
+    questions = db.execute(
+        select(Question).where(Question.item_id == item_id).order_by(Question.order)
+    ).scalars().all()
+
+    last_answers = state.last_answers or {}
+
+    reveals = []
+    for q in questions:
+        correct_ids = []
+        if q.type in ("single_choice", "multiple_choice"):
+            correct_ids = list(db.scalars(
+                select(AnswerOption.id).where(
+                    AnswerOption.question_id == q.id,
+                    AnswerOption.is_correct == True,
+                )
+            ).all())
+
+        reveals.append(QuestionReveal(
+            id=q.id,
+            type=q.type,
+            text_html=q.text_html,
+            explanation_html=q.explanation_html,
+            correct_option_ids=correct_ids,
+            correct_numeric=float(q.correct_numeric) if q.correct_numeric is not None else None,
+            correct_text=q.correct_text,
+            student_answer=last_answers.get(str(q.id)),
+        ))
+
+    return QuizRevealResponse(
+        item_id=item_id,
+        attempt_count=state.attempt_count,
+        score_correct=state.last_score_correct or 0,
+        score_total=state.last_score_total or 0,
+        questions=reveals,
     )
