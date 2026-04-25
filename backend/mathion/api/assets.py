@@ -166,7 +166,16 @@ def serve_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    filepath = os.path.join(_asset_dir(version_id), filename)
+    dirpath = _asset_dir(version_id)
+    filepath = os.path.join(dirpath, filename)
+    # Defense in depth: ensure the resolved path stays inside the version's
+    # asset directory. Sanitization at upload already enforces this, but a
+    # belt-and-suspenders check costs one realpath call and prevents arbitrary
+    # file read if any future codepath persists a non-sanitized filename.
+    real_dir = os.path.realpath(dirpath)
+    real_path = os.path.realpath(filepath)
+    if os.path.commonpath([real_dir, real_path]) != real_dir:
+        raise HTTPException(status_code=404, detail="Asset not found")
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Asset file missing")
 
