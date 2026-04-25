@@ -49,8 +49,9 @@ def render_markdown(text: str | None) -> str:
     )
 
 
-_IMG_REF = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)')
-_LINK_REF = re.compile(r'(?<!!)\[[^\]]*\]\(([^)\s]+)\)')
+_TITLE = r'(?:\s+(?:"[^"]*"|\'[^\']*\'|\([^)]*\)))?'
+_IMG_REF = re.compile(r'!\[[^\]]*\]\(\s*([^)\s]+)' + _TITLE + r'\s*\)')
+_LINK_REF = re.compile(r'(?<!!)\[[^\]]*\]\(\s*([^)\s]+)' + _TITLE + r'\s*\)')
 _SKIP_PREFIXES = ("http://", "https://", "mailto:", "#")
 
 

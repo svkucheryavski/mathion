@@ -65,3 +65,22 @@ def test_full_render_with_asset_resolution():
     html = render_markdown(md)
     resolved = resolve_asset_urls(html, 99, {"data.png"})
     assert 'src="/assets/99/data.png"' in resolved
+
+
+def test_extract_link_with_title():
+    md = '[slides](slides.pdf "the title")'
+    assert extract_asset_filenames(md) == {"slides.pdf"}
+
+
+def test_extract_image_with_title():
+    md = "![chart](chart.png 'caption')"
+    assert extract_asset_filenames(md) == {"chart.png"}
+
+
+def test_resolve_does_not_overwrite_inside_text():
+    """A bare filename appearing in plain text must not be rewritten;
+    only attribute values inside src/href are rewritten.
+    """
+    html = '<p>The file is <code>data.png</code></p>'
+    result = resolve_asset_urls(html, 42, {"data.png"})
+    assert result == html
