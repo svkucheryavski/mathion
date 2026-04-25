@@ -1,7 +1,8 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 
 class CourseCreate(BaseModel):
@@ -27,6 +28,7 @@ class CourseResponse(BaseModel):
 class VersionCreate(BaseModel):
     info_md: str = ""
     max_quiz_attempts: int = Field(default=3, ge=1, le=10)
+    copy_assets_from: int | None = None
 
 
 class VersionResponse(BaseModel):
@@ -244,7 +246,7 @@ class QuestionCreate(BaseModel):
     text_md: str = Field(min_length=1)
     type: Literal["single_choice", "multiple_choice", "numeric_answer", "text_answer"]
     explanation_md: str | None = None
-    correct_numeric: float | None = None
+    correct_numeric: Decimal | None = None
     precision: int | None = Field(default=None, ge=0)
     correct_text: str | None = None
 
@@ -252,7 +254,7 @@ class QuestionCreate(BaseModel):
 class QuestionUpdate(BaseModel):
     text_md: str | None = Field(default=None, min_length=1)
     explanation_md: str | None = None
-    correct_numeric: float | None = None
+    correct_numeric: Decimal | None = None
     precision: int | None = Field(default=None, ge=0)
     correct_text: str | None = None
 
@@ -266,11 +268,16 @@ class QuestionResponse(BaseModel):
     order: int
     explanation_md: str | None
     explanation_html: str | None
-    correct_numeric: float | None
+    correct_numeric: Decimal | None
     precision: int | None
     correct_text: str | None
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("correct_numeric")
+    @classmethod
+    def serialize_decimal(cls, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
 
 class OptionCreate(BaseModel):
@@ -302,6 +309,19 @@ class ReorderRequest(BaseModel):
     order: list[ReorderItem] = Field(min_length=1)
 
 
+class AssetResponse(BaseModel):
+    id: int
+    version_id: int
+    filename: str
+    file_size: int
+    mime_type: str
+    uploaded_at: datetime
+    uploaded_by: int | None
+    is_referenced: bool = False
+
+    model_config = {"from_attributes": True}
+
+
 class QuizSubmitRequest(BaseModel):
     answers: dict[str, list[int] | str]  # question_id -> [option_ids] or "value"
 
@@ -321,9 +341,14 @@ class QuestionReveal(BaseModel):
     text_html: str
     explanation_html: str | None
     correct_option_ids: list[int]
-    correct_numeric: float | None
+    correct_numeric: Decimal | None
     correct_text: str | None
     student_answer: list[int] | str | None
+
+    @field_serializer("correct_numeric")
+    @classmethod
+    def serialize_decimal(cls, v: Decimal | None) -> float | None:
+        return float(v) if v is not None else None
 
 
 class QuizRevealResponse(BaseModel):
