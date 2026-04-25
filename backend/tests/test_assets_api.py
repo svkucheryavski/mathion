@@ -377,3 +377,81 @@ def test_item_no_asset_refs_works(admin_client, asset_tmpdir):
         "content_md": "Just text with [external](https://example.com)",
     }).json()
     assert item["content_html"]
+
+
+# ----- Task 9: version copy with assets -----
+
+
+def test_version_copy_assets(admin_client, db, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "copy-course", "name": "C", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+
+    admin_client.post(
+        f"/api/versions/{v1['id']}/assets",
+        files={"file": ("a.png", io.BytesIO(b"aaa"), "image/png")},
+    )
+    admin_client.post(
+        f"/api/versions/{v1['id']}/assets",
+        files={"file": ("b.pdf", io.BytesIO(b"bbb"), "application/pdf")},
+    )
+
+    v2 = admin_client.post(
+        f"/api/courses/{course['id']}/versions",
+        json={"info_md": "", "copy_assets_from": v1["id"]},
+    ).json()
+
+    assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
+    assert len(assets) == 2
+    filenames = {a["filename"] for a in assets}
+    assert filenames == {"a.png", "b.pdf"}
+
+    v2_dir = asset_tmpdir / "courses" / str(v2["id"])
+    assert (v2_dir / "a.png").read_bytes() == b"aaa"
+    assert (v2_dir / "b.pdf").read_bytes() == b"bbb"
+
+
+def test_version_copy_assets_wrong_course_rejected(admin_client, asset_tmpdir):
+    c1 = admin_client.post("/api/courses", json={"slug": "c1", "name": "C1", "description": ""}).json()
+    c2 = admin_client.post("/api/courses", json={"slug": "c2", "name": "C2", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{c1['id']}/versions", json={"info_md": ""}).json()
+
+    response = admin_client.post(
+        f"/api/courses/{c2['id']}/versions",
+        json={"info_md": "", "copy_assets_from": v1["id"]},
+    )
+    assert response.status_code == 400
+
+
+def test_version_copy_assets_size_check(admin_client, asset_tmpdir):
+    original = settings.max_course_size
+    settings.max_course_size = 10
+    try:
+        course = admin_client.post("/api/courses", json={"slug": "sc", "name": "S", "description": ""}).json()
+        v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+        # Bypass max_course_size for the source upload — it's a pre-existing version.
+        # Use max_file_size only by temporarily restoring max_course_size for upload.
+        settings.max_course_size = 10000
+        admin_client.post(
+            f"/api/versions/{v1['id']}/assets",
+            files={"file": ("big.png", io.BytesIO(b"x" * 20), "image/png")},
+        )
+        settings.max_course_size = 10
+        response = admin_client.post(
+            f"/api/courses/{course['id']}/versions",
+            json={"info_md": "", "copy_assets_from": v1["id"]},
+        )
+    finally:
+        settings.max_course_size = original
+    assert response.status_code == 400
+    assert "size" in response.json()["detail"].lower()
+
+
+def test_version_copy_no_assets_is_noop(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "empty", "name": "E", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v2 = admin_client.post(
+        f"/api/courses/{course['id']}/versions",
+        json={"info_md": "", "copy_assets_from": v1["id"]},
+    ).json()
+    assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
+    assert len(assets) == 0

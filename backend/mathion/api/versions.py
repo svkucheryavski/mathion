@@ -1,3 +1,5 @@
+import os
+import shutil
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,9 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import AnswerOption, Block, Course, CourseVersion, Item, Question, Sequence
+from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Sequence
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionResponse
 
@@ -18,6 +21,22 @@ router = APIRouter(tags=["versions"])
 def create_version(course_id: int, data: VersionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     get_or_404(db, Course, course_id)
     require_course_admin(db, user, course_id)
+
+    if data.copy_assets_from is not None:
+        source_version = get_or_404(db, CourseVersion, data.copy_assets_from)
+        if source_version.course_id != course_id:
+            raise HTTPException(status_code=400, detail="Source version belongs to a different course")
+        total_size = db.scalar(
+            select(func.coalesce(func.sum(Asset.file_size), 0)).where(
+                Asset.version_id == data.copy_assets_from
+            )
+        )
+        if total_size > settings.max_course_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source assets total size ({total_size}) exceeds limit ({settings.max_course_size})",
+            )
+
     version = CourseVersion(
         course_id=course_id,
         info_md=data.info_md,
@@ -25,6 +44,29 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
         max_quiz_attempts=data.max_quiz_attempts,
     )
     db.add(version)
+    db.flush()
+
+    if data.copy_assets_from is not None:
+        source_assets = db.execute(
+            select(Asset).where(Asset.version_id == data.copy_assets_from)
+        ).scalars().all()
+        if source_assets:
+            source_dir = os.path.join(settings.asset_path, "courses", str(data.copy_assets_from))
+            dest_dir = os.path.join(settings.asset_path, "courses", str(version.id))
+            os.makedirs(dest_dir, exist_ok=True)
+            for src_asset in source_assets:
+                db.add(Asset(
+                    version_id=version.id,
+                    filename=src_asset.filename,
+                    file_size=src_asset.file_size,
+                    mime_type=src_asset.mime_type,
+                    uploaded_by=user.id,
+                ))
+                src_path = os.path.join(source_dir, src_asset.filename)
+                dst_path = os.path.join(dest_dir, src_asset.filename)
+                if os.path.isfile(src_path):
+                    shutil.copy2(src_path, dst_path)
+
     db.commit()
     db.refresh(version)
     return version
