@@ -62,3 +62,53 @@ def render_with_assets(db: Session, version_id: int, content_md: str | None) -> 
             detail=f"Referenced assets not found in version: {', '.join(sorted(missing))}",
         )
     return resolve_asset_urls(html, version_id, ref_filenames)
+
+
+def sync_asset_references(
+    db: Session,
+    version_id: int,
+    content_mds: list[str | None],
+    owner: dict,
+) -> None:
+    """Sync AssetReference rows for a single owner (item/question/version-info).
+
+    `content_mds` is a list of markdown strings (e.g., a question's text_md
+    plus explanation_md). All referenced filenames across the list are
+    aggregated. `owner` is one of `{"item_id": x}`, `{"question_id": x}`,
+    `{"info_version_id": x}` and selects the rows to delete + the column to
+    set on new rows.
+
+    Call after `render_with_assets` has already validated that all referenced
+    assets exist in the version.
+    """
+    from sqlalchemy import delete as sa_delete
+    from mathion.markdown import extract_asset_filenames
+    from mathion.models import Asset, AssetReference
+
+    if list(owner.keys()) != [next(iter(owner))]:
+        raise ValueError("owner must contain exactly one key")
+    col_name = next(iter(owner))
+    col_value = owner[col_name]
+
+    all_filenames: set[str] = set()
+    for md in content_mds:
+        if md:
+            all_filenames |= extract_asset_filenames(md)
+
+    db.execute(
+        sa_delete(AssetReference).where(
+            getattr(AssetReference, col_name) == col_value,
+        )
+    )
+
+    if not all_filenames:
+        return
+
+    asset_ids = db.execute(
+        select(Asset.id).where(
+            Asset.version_id == version_id,
+            Asset.filename.in_(all_filenames),
+        )
+    ).scalars().all()
+    for aid in asset_ids:
+        db.add(AssetReference(asset_id=aid, **owner))

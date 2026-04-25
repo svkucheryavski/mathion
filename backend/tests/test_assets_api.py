@@ -486,6 +486,56 @@ def test_version_copy_no_assets_is_noop(admin_client, asset_tmpdir):
     assert len(assets) == 0
 
 
+def test_question_asset_marks_referenced(admin_client, asset_tmpdir):
+    """An asset used only in a question's text_md must show is_referenced=True
+    on the asset list, and force-delete must be required to remove it.
+    """
+    course = admin_client.post("/api/courses", json={"slug": "qref", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    asset = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
+    ).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Q", "slug": "q", "type": "quiz", "content_md": None,
+    }).json()
+    admin_client.post(f"/api/items/{item['id']}/questions", json={
+        "type": "single_choice",
+        "text_md": "Inspect ![chart](chart.png)",
+    })
+
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    chart = next(a for a in assets if a["filename"] == "chart.png")
+    assert chart["is_referenced"] is True
+
+    # Delete without force should be rejected
+    no_force = admin_client.delete(f"/api/assets/{asset['id']}")
+    assert no_force.status_code == 409
+
+
+def test_version_info_asset_marks_referenced(admin_client, asset_tmpdir):
+    """An asset only used in a version's info_md must also block non-force delete."""
+    course = admin_client.post("/api/courses", json={"slug": "vref", "name": "V", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(
+        f"/api/versions/{v1['id']}/assets",
+        files={"file": ("logo.png", io.BytesIO(b"png"), "image/png")},
+    )
+    v2 = admin_client.post(
+        f"/api/courses/{course['id']}/versions",
+        json={"info_md": "Welcome ![logo](logo.png)", "copy_assets_from": v1["id"]},
+    ).json()
+
+    assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
+    logo = next(a for a in assets if a["filename"] == "logo.png")
+    assert logo["is_referenced"] is True
+
+    no_force = admin_client.delete(f"/api/assets/{logo['id']}")
+    assert no_force.status_code == 409
+
+
 def test_question_save_resolves_asset_refs(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "qmd", "name": "Q", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()

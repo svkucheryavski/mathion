@@ -174,14 +174,17 @@ class Asset(Base):
 
 
 class AssetReference(Base):
+    """Tracks where an asset is referenced. Each row points to exactly one
+    owner via item_id, question_id, or info_version_id (info_md on a course
+    version). is_referenced for an asset is "any row exists for this asset_id".
+    """
     __tablename__ = "asset_references"
-    __table_args__ = (
-        UniqueConstraint("asset_id", "item_id", name="uq_asset_reference"),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
-    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=True, index=True)
+    question_id: Mapped[int | None] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=True, index=True)
+    info_version_id: Mapped[int | None] = mapped_column(ForeignKey("course_versions.id", ondelete="CASCADE"), nullable=True, index=True)
 
 
 from mathion.models_auth import User, Session, LoginPIN, StudentEnrollment, RateLimitEntry, UserItemState  # noqa: F401

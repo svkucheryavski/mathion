@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete as sa_delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin
-from mathion.markdown import extract_asset_filenames
+from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin, sync_asset_references
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Asset, AssetReference, Block, CourseVersion, Item, Sequence
+from mathion.models import Block, CourseVersion, Item, Sequence
 from mathion.models_auth import User
 from mathion.schemas import ItemCreate, ItemResponse, ItemUpdate, ReorderRequest
 
@@ -32,21 +31,7 @@ def _get_version_for_item(db: Session, item: Item) -> CourseVersion:
 def _process_content_md(db: Session, version: CourseVersion, item_id: int, content_md: str | None) -> str:
     """Render markdown with asset resolution and sync AssetReference rows for the item."""
     html = render_with_assets(db, version.id, content_md)
-    # Sync references — clear and re-add for this item
-    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
-    if not content_md:
-        return html
-    ref_filenames = extract_asset_filenames(content_md)
-    if not ref_filenames:
-        return html
-    asset_ids = db.execute(
-        select(Asset.id).where(
-            Asset.version_id == version.id,
-            Asset.filename.in_(ref_filenames),
-        )
-    ).scalars().all()
-    for aid in asset_ids:
-        db.add(AssetReference(asset_id=aid, item_id=item_id))
+    sync_asset_references(db, version.id, [content_md], {"item_id": item_id})
     return html
 
 
