@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -187,4 +187,75 @@ class AssetReference(Base):
     info_version_id: Mapped[int | None] = mapped_column(ForeignKey("course_versions.id", ondelete="CASCADE"), nullable=True, index=True)
 
 
-from mathion.models_auth import User, Session, LoginPIN, StudentEnrollment, RateLimitEntry, UserItemState  # noqa: F401
+class Run(Base):
+    __tablename__ = "runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("course_versions.id", ondelete="RESTRICT"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    groups_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    version: Mapped["CourseVersion"] = relationship()
+    teachers: Mapped[list["RunTeacher"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    groups: Mapped[list["Group"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    students: Mapped[list["RunStudent"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class RunTeacher(Base):
+    __tablename__ = "run_teachers"
+    __table_args__ = (
+        UniqueConstraint("run_id", "user_id", name="uq_run_teacher"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    run: Mapped["Run"] = relationship(back_populates="teachers")
+    user: Mapped["User"] = relationship()
+
+
+class Group(Base):
+    __tablename__ = "groups"
+    __table_args__ = (
+        UniqueConstraint("run_id", "name", name="uq_group_run_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    run: Mapped["Run"] = relationship(back_populates="groups")
+    students: Mapped[list["RunStudent"]] = relationship(back_populates="group")
+
+
+class RunStudent(Base):
+    __tablename__ = "run_students"
+    __table_args__ = (
+        UniqueConstraint("run_id", "user_id", name="uq_run_student"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    run: Mapped["Run"] = relationship(back_populates="students")
+    user: Mapped["User"] = relationship()
+    group: Mapped["Group | None"] = relationship(back_populates="students")
+
+
+from mathion.models_auth import (  # noqa: F401
+    User, Session, LoginPIN, StudentEnrollment, RateLimitEntry,
+    UserItemState, NotificationLogEntry,
+)
