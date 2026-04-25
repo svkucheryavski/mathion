@@ -114,6 +114,32 @@ def test_upload_non_admin_rejected(admin_client, db, test_user, asset_tmpdir):
     assert response.status_code == 403
 
 
+def test_upload_disk_failure_rolls_back_db(admin_client, db, asset_tmpdir):
+    """If disk write fails, no asset row may exist in the DB.
+
+    Simulates failure by placing a regular file where the version asset
+    directory should be created — os.makedirs will raise NotADirectoryError.
+    """
+    import os as _os
+    from mathion.models import Asset
+    course, version = _create_published_version(admin_client)
+    courses_dir = asset_tmpdir / "courses"
+    courses_dir.mkdir(parents=True, exist_ok=True)
+    # Block the version dir creation by putting a file there
+    (courses_dir / str(version["id"])).write_bytes(b"")
+
+    response = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("test.png", io.BytesIO(b"data"), "image/png")},
+    )
+    assert response.status_code >= 500
+
+    rows = db.execute(
+        __import__("sqlalchemy").select(Asset).where(Asset.version_id == version["id"])
+    ).scalars().all()
+    assert len(rows) == 0
+
+
 def test_upload_disabled_version_rejected(admin_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     admin_client.post(f"/api/versions/{version['id']}/disable")

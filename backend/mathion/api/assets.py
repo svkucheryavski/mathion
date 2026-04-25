@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -70,19 +71,33 @@ def upload_asset(
     )
     db.add(asset)
     try:
-        db.flush()
+        db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"Asset '{filename}' already exists in this version")
 
-    # Write file to disk
+    # Registry committed; now write file via temp+rename for atomicity.
+    # On any disk failure, roll back the registry row to avoid orphans.
     dirpath = _asset_dir(version_id)
-    os.makedirs(dirpath, exist_ok=True)
     filepath = os.path.join(dirpath, filename)
-    with open(filepath, "wb") as f:
-        f.write(content)
+    tmp_path: str | None = None
+    try:
+        os.makedirs(dirpath, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=dirpath, prefix=".upload-", suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        os.replace(tmp_path, filepath)
+        tmp_path = None
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        db.delete(asset)
+        db.commit()
+        raise HTTPException(status_code=500, detail="Failed to write asset to disk")
 
-    db.commit()
     db.refresh(asset)
     return asset
 
@@ -182,8 +197,12 @@ def delete_asset(
             )
 
     filepath = os.path.join(_asset_dir(asset.version_id), asset.filename)
-    if os.path.isfile(filepath):
-        os.remove(filepath)
-
     db.delete(asset)
     db.commit()
+    # Registry is the source of truth: a leftover file is harmless and
+    # can be reaped by ops; a row pointing to a missing file is worse.
+    if os.path.isfile(filepath):
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
