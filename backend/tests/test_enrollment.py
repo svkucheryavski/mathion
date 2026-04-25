@@ -240,6 +240,50 @@ def test_api_non_admin_cannot_enroll(auth_client, db):
     assert "Course admin access required" in response.json()["detail"]
 
 
+def test_api_enroll_after_deactivation_reactivates(admin_client, db, superuser):
+    """Re-enrolling a student who was previously removed must reactivate the existing
+    inactive row, not insert a duplicate. The unique constraint on
+    (user_id, version_id) makes the duplicate path fail with IntegrityError."""
+    course, version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+
+    # First enrollment
+    r1 = admin_client.post(
+        f"/api/courses/{course.id}/enroll",
+        json={"email": "rejoin@example.com"},
+        headers=CSRF,
+    )
+    assert r1.status_code == 201
+    user_id = r1.json()["user_id"]
+
+    # Remove the student (deactivates the enrollment)
+    r2 = admin_client.delete(
+        f"/api/courses/{course.id}/students/{user_id}",
+        headers=CSRF,
+    )
+    assert r2.status_code == 204
+
+    # Re-enroll — must reactivate, not insert duplicate
+    r3 = admin_client.post(
+        f"/api/courses/{course.id}/enroll",
+        json={"email": "rejoin@example.com"},
+        headers=CSRF,
+    )
+    assert r3.status_code == 201
+    assert r3.json()["is_active"] is True
+
+    # Exactly one enrollment row should exist for this user+version
+    from sqlalchemy import select
+    rows = db.execute(
+        select(StudentEnrollment).where(
+            StudentEnrollment.user_id == user_id,
+            StudentEnrollment.version_id == version.id,
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].is_active is True
+
+
 def test_api_enroll_same_version_returns_existing(admin_client, db, superuser):
     """Enrolling same student on the same version returns the existing active enrollment."""
     course, version = _make_published_course(db)

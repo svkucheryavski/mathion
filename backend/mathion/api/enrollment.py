@@ -48,29 +48,37 @@ def _enroll_user(db: Session, user: User, course_id: int, version: CourseVersion
     version. PostgreSQL supports partial unique indexes which could enforce this at the
     DB level, but SQLite does not. The check below mitigates the issue in application code.
     """
-    # Check if already actively enrolled on the target version
-    existing_active = db.execute(
+    # Check for any existing row (active or inactive) on the target version.
+    # The (user_id, version_id) unique constraint requires that we reactivate
+    # an existing inactive row rather than inserting a duplicate.
+    target_existing = db.execute(
         select(StudentEnrollment).where(
             StudentEnrollment.user_id == user.id,
             StudentEnrollment.version_id == version.id,
-            StudentEnrollment.is_active == True,  # noqa: E712
         )
     ).scalar_one_or_none()
-    if existing_active:
-        return existing_active  # Already enrolled on this version
+    if target_existing and target_existing.is_active:
+        return target_existing
 
-    # Deactivate existing active enrollments for this user on any version of this course
-    existing = db.execute(
+    # Deactivate any other active enrollments for this user across this course's versions
+    other_active = db.execute(
         select(StudentEnrollment)
         .join(CourseVersion, StudentEnrollment.version_id == CourseVersion.id)
         .where(
             StudentEnrollment.user_id == user.id,
             StudentEnrollment.is_active == True,  # noqa: E712
             CourseVersion.course_id == course_id,
+            StudentEnrollment.version_id != version.id,
         )
     ).scalars().all()
-    for enrollment in existing:
+    for enrollment in other_active:
         enrollment.is_active = False
+
+    if target_existing:
+        # Reactivate inactive row
+        target_existing.is_active = True
+        db.flush()
+        return target_existing
 
     enrollment = StudentEnrollment(user_id=user.id, version_id=version.id, is_active=True)
     db.add(enrollment)
