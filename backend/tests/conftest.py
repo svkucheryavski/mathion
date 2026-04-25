@@ -61,6 +61,7 @@ def db():
 
 @pytest.fixture
 def client(db):
+    """Bare unauthenticated TestClient. Sets up the db override for the request."""
     def override_get_db():
         try:
             yield db
@@ -90,17 +91,25 @@ def superuser(db):
     return user
 
 
+# auth_client and admin_client return INDEPENDENT TestClient instances with
+# their own cookie jars. Tests can request both in the same signature without
+# cookies overlapping. Both share the same db override via the `client`
+# fixture's setup (we depend on it for that side effect).
+
+
 @pytest.fixture
 def auth_client(client, db, test_user):
+    c = CSRFTestClient(app)
     raw_pin = request_pin(db, test_user.email)
     token = verify_pin(db, test_user.email, raw_pin, duration_days=7)
-    client.cookies.set("session_token", token)
-    return client
+    c.cookies.set("session_token", token)
+    return c
 
 
 @pytest.fixture
 def admin_client(client, db, superuser):
+    c = CSRFTestClient(app)
     raw_pin = request_pin(db, superuser.email)
     token = verify_pin(db, superuser.email, raw_pin, duration_days=7)
-    client.cookies.set("session_token", token)
-    return client
+    c.cookies.set("session_token", token)
+    return c

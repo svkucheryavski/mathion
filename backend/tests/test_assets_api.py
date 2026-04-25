@@ -2,7 +2,6 @@ import io
 
 import pytest
 
-from mathion.auth import request_pin, verify_pin
 from mathion.config import settings
 
 
@@ -13,12 +12,6 @@ def asset_tmpdir(tmp_path):
     settings.asset_path = str(tmp_path)
     yield tmp_path
     settings.asset_path = original
-
-
-def _switch_to_user(client, db, user):
-    raw_pin = request_pin(db, user.email)
-    token = verify_pin(db, user.email, raw_pin, duration_days=7)
-    client.cookies.set("session_token", token)
 
 
 def _create_published_version(admin_client):
@@ -104,10 +97,9 @@ def test_upload_version_total_exceeded(admin_client, asset_tmpdir):
     assert "total" in response.json()["detail"].lower()
 
 
-def test_upload_non_admin_rejected(admin_client, db, test_user, asset_tmpdir):
+def test_upload_non_admin_rejected(admin_client, auth_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
-    _switch_to_user(admin_client, db, test_user)
-    response = admin_client.post(
+    response = auth_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("test.png", io.BytesIO(b"a"), "image/png")},
     )
@@ -168,10 +160,9 @@ def test_list_assets(admin_client, asset_tmpdir):
     assert filenames == {"a.png", "b.pdf"}
 
 
-def test_list_assets_non_admin_rejected(admin_client, db, test_user, asset_tmpdir):
+def test_list_assets_non_admin_rejected(admin_client, auth_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
-    _switch_to_user(admin_client, db, test_user)
-    response = admin_client.get(f"/api/versions/{version['id']}/assets")
+    response = auth_client.get(f"/api/versions/{version['id']}/assets")
     assert response.status_code == 403
 
 
@@ -197,31 +188,29 @@ def test_serve_asset_as_admin(admin_client, asset_tmpdir):
     assert response.headers["content-type"] == "image/png"
 
 
-def test_serve_asset_as_enrolled_student(admin_client, db, test_user, asset_tmpdir):
+def test_serve_asset_as_enrolled_student(admin_client, auth_client, db, test_user, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("doc.pdf", io.BytesIO(b"pdf-bytes"), "application/pdf")},
     )
     _enroll_user(db, test_user.id, version["id"])
-    _switch_to_user(admin_client, db, test_user)
-    response = admin_client.get(f"/assets/{version['id']}/doc.pdf")
+    response = auth_client.get(f"/assets/{version['id']}/doc.pdf")
     assert response.status_code == 200
     assert response.content == b"pdf-bytes"
 
 
-def test_serve_asset_unenrolled_rejected(admin_client, db, test_user, asset_tmpdir):
+def test_serve_asset_unenrolled_rejected(admin_client, auth_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("test.png", io.BytesIO(b"data"), "image/png")},
     )
-    _switch_to_user(admin_client, db, test_user)
-    response = admin_client.get(f"/assets/{version['id']}/test.png")
+    response = auth_client.get(f"/assets/{version['id']}/test.png")
     assert response.status_code == 403
 
 
-def test_serve_asset_disabled_version_blocked(admin_client, db, test_user, asset_tmpdir):
+def test_serve_asset_disabled_version_blocked(admin_client, auth_client, db, test_user, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     admin_client.post(
         f"/api/versions/{version['id']}/assets",
@@ -229,8 +218,7 @@ def test_serve_asset_disabled_version_blocked(admin_client, db, test_user, asset
     )
     _enroll_user(db, test_user.id, version["id"])
     admin_client.post(f"/api/versions/{version['id']}/disable")
-    _switch_to_user(admin_client, db, test_user)
-    response = admin_client.get(f"/assets/{version['id']}/test.png")
+    response = auth_client.get(f"/assets/{version['id']}/test.png")
     assert response.status_code == 403
 
 
@@ -323,14 +311,13 @@ def test_delete_referenced_asset_force(admin_client, db, asset_tmpdir):
     assert response.status_code == 204
 
 
-def test_delete_asset_non_admin_rejected(admin_client, db, test_user, asset_tmpdir):
+def test_delete_asset_non_admin_rejected(admin_client, auth_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     upload = admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("x.png", io.BytesIO(b"data"), "image/png")},
     ).json()
-    _switch_to_user(admin_client, db, test_user)
-    response = admin_client.delete(f"/api/assets/{upload['id']}")
+    response = auth_client.delete(f"/api/assets/{upload['id']}")
     assert response.status_code == 403
 
 
