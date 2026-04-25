@@ -208,6 +208,22 @@ def test_serve_asset_disabled_version_blocked(admin_client, db, test_user, asset
     assert response.status_code == 403
 
 
+def test_serve_asset_disabled_version_blocks_admin(admin_client, asset_tmpdir):
+    """Disabled versions block all access — superusers and admins included.
+
+    Consistent with upload/delete which also reject 403 for admins on
+    disabled versions.
+    """
+    course, version = _create_published_version(admin_client)
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("test.png", io.BytesIO(b"data"), "image/png")},
+    )
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    response = admin_client.get(f"/assets/{version['id']}/test.png")
+    assert response.status_code == 403
+
+
 def test_serve_asset_not_found(admin_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     response = admin_client.get(f"/assets/{version['id']}/nonexistent.png")
@@ -455,3 +471,25 @@ def test_version_copy_no_assets_is_noop(admin_client, asset_tmpdir):
     ).json()
     assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
     assert len(assets) == 0
+
+
+def test_version_copy_fails_if_source_file_missing(admin_client, asset_tmpdir):
+    """If source DB rows reference files missing on disk, copy must fail
+    rather than silently create dangling registry rows in the new version.
+    """
+    import os
+    course = admin_client.post("/api/courses", json={"slug": "miss", "name": "M", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(
+        f"/api/versions/{v1['id']}/assets",
+        files={"file": ("a.png", io.BytesIO(b"data"), "image/png")},
+    )
+    # Simulate disk-only loss: remove the source file but keep the DB row
+    os.remove(asset_tmpdir / "courses" / str(v1["id"]) / "a.png")
+
+    response = admin_client.post(
+        f"/api/courses/{course['id']}/versions",
+        json={"info_md": "", "copy_assets_from": v1["id"]},
+    )
+    assert response.status_code == 500
+    assert "missing" in response.json()["detail"].lower()

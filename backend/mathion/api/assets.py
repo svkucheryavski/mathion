@@ -121,6 +121,9 @@ def serve_asset(
 ):
     version = get_or_404(db, CourseVersion, version_id)
 
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+
     if not user.is_superuser:
         is_admin = db.execute(
             select(CourseAdmin).where(
@@ -129,13 +132,11 @@ def serve_asset(
             )
         ).scalar_one_or_none()
         if not is_admin:
-            if version.is_disabled:
-                raise HTTPException(status_code=403, detail="Version is disabled")
             is_enrolled = db.execute(
                 select(StudentEnrollment).where(
                     StudentEnrollment.version_id == version_id,
                     StudentEnrollment.user_id == user.id,
-                    StudentEnrollment.is_active == True,
+                    StudentEnrollment.is_active == True,  # noqa: E712
                 )
             ).scalar_one_or_none()
             if not is_enrolled:
