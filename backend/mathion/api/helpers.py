@@ -1,8 +1,15 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mathion.database import Base
+
+
+def bump_content_updated_at(version) -> None:
+    """Mark a CourseVersion's content as updated (for ETag/cache invalidation)."""
+    version.content_updated_at = datetime.now(timezone.utc)
 
 
 def get_or_404(db: Session, model: type[Base], id: int, detail: str | None = None):

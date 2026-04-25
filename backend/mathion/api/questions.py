@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence
@@ -71,6 +71,7 @@ def create_question(item_id: int, data: QuestionCreate, db: Session = Depends(ge
     db.add(question)
     db.flush()
     sync_asset_references(db, version.id, [data.text_md, data.explanation_md], {"question_id": question.id})
+    bump_content_updated_at(version)
     db.commit()
     db.refresh(question)
     return question
@@ -110,6 +111,7 @@ def update_question(question_id: int, data: QuestionUpdate, db: Session = Depend
         question.explanation_html = render_with_assets(db, version.id, question.explanation_md)
     if "text_md" in updates or "explanation_md" in updates:
         sync_asset_references(db, version.id, [question.text_md, question.explanation_md], {"question_id": question.id})
+        bump_content_updated_at(version)
 
     # Validate invariants after update (prevent breaking published quiz)
     if question.type == "numeric_answer" and question.correct_numeric is None:

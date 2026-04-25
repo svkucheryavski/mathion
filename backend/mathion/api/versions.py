@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -184,8 +184,37 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
                         detail=f"Question '{q.text_md[:50]}' is missing correct_text to publish.",
                     )
 
+    # Re-render all markdown to capture current asset state. If any referenced
+    # asset is missing (e.g., force-deleted after the content was saved),
+    # render_with_assets raises 422 and the publish fails.
+    items_to_render = db.execute(
+        select(Item)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version_id)
+    ).scalars().all()
+    for item in items_to_render:
+        item.content_html = render_with_assets(db, version_id, item.content_md)
+        sync_asset_references(db, version_id, [item.content_md], {"item_id": item.id})
+
+    questions_to_render = db.execute(
+        select(Question)
+        .join(Item, Item.id == Question.item_id)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version_id)
+    ).scalars().all()
+    for q in questions_to_render:
+        q.text_html = render_with_assets(db, version_id, q.text_md)
+        q.explanation_html = render_with_assets(db, version_id, q.explanation_md)
+        sync_asset_references(db, version_id, [q.text_md, q.explanation_md], {"question_id": q.id})
+
+    version.info_html = render_with_assets(db, version_id, version.info_md)
+    sync_asset_references(db, version_id, [version.info_md], {"info_version_id": version.id})
+
     version.state = "published"
     version.published_at = datetime.now(timezone.utc)
+    bump_content_updated_at(version)
     db.commit()
     db.refresh(version)
     return version

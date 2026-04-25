@@ -76,7 +76,8 @@ def test_content_json_structure(admin_client, db):
 
     # CRITICAL: options must NOT contain is_correct
     question = quiz["questions"][0]
-    assert question["text_html"] == "<p>2+2?</p>"
+    # Publish re-renders all markdown, so text_html is the canonical render of text_md.
+    assert question["text_html"].strip() == "<p>2+2?</p>"
     assert len(question["options"]) == 2
     for opt in question["options"]:
         assert "is_correct" not in opt

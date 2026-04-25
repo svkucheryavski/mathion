@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
@@ -58,6 +58,7 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
         db.rollback()
         raise HTTPException(status_code=409, detail="An item with this slug already exists in this sequence")
     item.content_html = _process_content_md(db, version, item.id, data.content_md)
+    bump_content_updated_at(version)
     db.commit()
     db.refresh(item)
     return item
@@ -98,6 +99,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
 
     if "content_md" in updates:
         item.content_html = _process_content_md(db, version, item.id, item.content_md)
+        bump_content_updated_at(version)
 
     # Validate type invariants after applying patch
     if item.type == "static_page" and item.content_md is None:

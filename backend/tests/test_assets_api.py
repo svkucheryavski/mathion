@@ -515,6 +515,70 @@ def test_question_asset_marks_referenced(admin_client, asset_tmpdir):
     assert no_force.status_code == 409
 
 
+def test_publish_rerenders_and_fails_on_missing_asset(admin_client, asset_tmpdir):
+    """If an asset referenced by item content was force-deleted after the item
+    was saved, publishing the version must re-render and fail because the
+    referenced asset no longer exists.
+    """
+    course = admin_client.post("/api/courses", json={"slug": "rerender", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    upload = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
+    ).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "P", "slug": "p", "type": "static_page",
+        "content_md": "![chart](chart.png)",
+    })
+
+    # Force-delete the asset (cascades AssetReference rows but leaves item.content_md text alone)
+    force_resp = admin_client.delete(f"/api/assets/{upload['id']}?force=true")
+    assert force_resp.status_code == 204
+
+    # Publish must now fail because re-render of item content_md would 422
+    publish_resp = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert publish_resp.status_code == 422
+    assert "chart.png" in publish_resp.json()["detail"]
+
+
+def test_publish_bumps_content_updated_at(admin_client, db, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "bump", "name": "B", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "P", "slug": "p", "type": "static_page", "content_md": "hi",
+    })
+
+    from mathion.models import CourseVersion
+    before = db.get(CourseVersion, version["id"]).content_updated_at
+
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    db.expire_all()
+    after = db.get(CourseVersion, version["id"]).content_updated_at
+    assert after > before
+
+
+def test_item_save_bumps_content_updated_at(admin_client, db, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "ibump", "name": "I", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+
+    from mathion.models import CourseVersion
+    before = db.get(CourseVersion, version["id"]).content_updated_at
+
+    import time; time.sleep(0.01)
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "P", "slug": "p", "type": "static_page", "content_md": "hi",
+    })
+    db.expire_all()
+    after = db.get(CourseVersion, version["id"]).content_updated_at
+    assert after > before
+
+
 def test_version_info_asset_marks_referenced(admin_client, asset_tmpdir):
     """An asset only used in a version's info_md must also block non-force delete."""
     course = admin_client.post("/api/courses", json={"slug": "vref", "name": "V", "description": ""}).json()
