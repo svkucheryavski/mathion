@@ -147,3 +147,68 @@ def test_list_assets_non_admin_rejected(admin_client, db, test_user, asset_tmpdi
     _switch_to_user(admin_client, db, test_user)
     response = admin_client.get(f"/api/versions/{version['id']}/assets")
     assert response.status_code == 403
+
+
+# ----- Task 5: serve endpoint -----
+
+
+def _enroll_user(db, user_id, version_id):
+    from mathion.models_auth import StudentEnrollment
+    enrollment = StudentEnrollment(user_id=user_id, version_id=version_id, is_active=True)
+    db.add(enrollment)
+    db.commit()
+
+
+def test_serve_asset_as_admin(admin_client, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("test.png", io.BytesIO(b"png-content"), "image/png")},
+    )
+    response = admin_client.get(f"/assets/{version['id']}/test.png")
+    assert response.status_code == 200
+    assert response.content == b"png-content"
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_serve_asset_as_enrolled_student(admin_client, db, test_user, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"pdf-bytes"), "application/pdf")},
+    )
+    _enroll_user(db, test_user.id, version["id"])
+    _switch_to_user(admin_client, db, test_user)
+    response = admin_client.get(f"/assets/{version['id']}/doc.pdf")
+    assert response.status_code == 200
+    assert response.content == b"pdf-bytes"
+
+
+def test_serve_asset_unenrolled_rejected(admin_client, db, test_user, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("test.png", io.BytesIO(b"data"), "image/png")},
+    )
+    _switch_to_user(admin_client, db, test_user)
+    response = admin_client.get(f"/assets/{version['id']}/test.png")
+    assert response.status_code == 403
+
+
+def test_serve_asset_disabled_version_blocked(admin_client, db, test_user, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("test.png", io.BytesIO(b"data"), "image/png")},
+    )
+    _enroll_user(db, test_user.id, version["id"])
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    _switch_to_user(admin_client, db, test_user)
+    response = admin_client.get(f"/assets/{version['id']}/test.png")
+    assert response.status_code == 403
+
+
+def test_serve_asset_not_found(admin_client, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    response = admin_client.get(f"/assets/{version['id']}/nonexistent.png")
+    assert response.status_code == 404

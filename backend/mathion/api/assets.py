@@ -1,6 +1,7 @@
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,8 +11,8 @@ from mathion.assets import get_mime_type, sanitize_filename, validate_extension
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Asset, AssetReference, CourseVersion
-from mathion.models_auth import User
+from mathion.models import Asset, AssetReference, CourseAdmin, CourseVersion
+from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import AssetResponse
 
 router = APIRouter(tags=["assets"])
@@ -109,3 +110,48 @@ def list_assets(
         resp.is_referenced = ref_count > 0
         result.append(resp)
     return result
+
+
+@router.get("/assets/{version_id}/{filename}")
+def serve_asset(
+    version_id: int,
+    filename: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    version = get_or_404(db, CourseVersion, version_id)
+
+    if not user.is_superuser:
+        is_admin = db.execute(
+            select(CourseAdmin).where(
+                CourseAdmin.course_id == version.course_id,
+                CourseAdmin.user_id == user.id,
+            )
+        ).scalar_one_or_none()
+        if not is_admin:
+            if version.is_disabled:
+                raise HTTPException(status_code=403, detail="Version is disabled")
+            is_enrolled = db.execute(
+                select(StudentEnrollment).where(
+                    StudentEnrollment.version_id == version_id,
+                    StudentEnrollment.user_id == user.id,
+                    StudentEnrollment.is_active == True,
+                )
+            ).scalar_one_or_none()
+            if not is_enrolled:
+                raise HTTPException(status_code=403, detail="No access to this version")
+
+    asset = db.execute(
+        select(Asset).where(
+            Asset.version_id == version_id,
+            Asset.filename == filename,
+        )
+    ).scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    filepath = os.path.join(_asset_dir(version_id), filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="Asset file missing")
+
+    return FileResponse(filepath, media_type=asset.mime_type, filename=filename)
