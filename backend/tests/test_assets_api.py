@@ -212,3 +212,92 @@ def test_serve_asset_not_found(admin_client, asset_tmpdir):
     course, version = _create_published_version(admin_client)
     response = admin_client.get(f"/assets/{version['id']}/nonexistent.png")
     assert response.status_code == 404
+
+
+# ----- Task 6: delete endpoint -----
+
+
+def test_delete_asset(admin_client, db, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    upload = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("del.png", io.BytesIO(b"data"), "image/png")},
+    ).json()
+    path = asset_tmpdir / "courses" / str(version["id"]) / "del.png"
+    assert path.exists()
+
+    response = admin_client.delete(f"/api/assets/{upload['id']}")
+    assert response.status_code == 204
+    assert not path.exists()
+
+    response = admin_client.get(f"/api/versions/{version['id']}/assets")
+    assert len(response.json()) == 0
+
+
+def test_delete_referenced_asset_warns(admin_client, db, asset_tmpdir):
+    from sqlalchemy import select as sa_select
+    from mathion.models import Asset, AssetReference, Block, Item, Sequence
+    course, version = _create_published_version(admin_client)
+    upload = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("ref.png", io.BytesIO(b"data"), "image/png")},
+    ).json()
+
+    asset = db.get(Asset, upload["id"])
+    items = db.execute(
+        sa_select(Item)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version["id"])
+    ).scalars().all()
+    db.add(AssetReference(asset_id=asset.id, item_id=items[0].id))
+    db.commit()
+
+    response = admin_client.delete(f"/api/assets/{upload['id']}")
+    assert response.status_code == 409
+    assert "referenced" in response.json()["detail"].lower()
+
+
+def test_delete_referenced_asset_force(admin_client, db, asset_tmpdir):
+    from sqlalchemy import select as sa_select
+    from mathion.models import Asset, AssetReference, Block, Item, Sequence
+    course, version = _create_published_version(admin_client)
+    upload = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("ref2.png", io.BytesIO(b"data"), "image/png")},
+    ).json()
+
+    asset = db.get(Asset, upload["id"])
+    items = db.execute(
+        sa_select(Item)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version["id"])
+    ).scalars().all()
+    db.add(AssetReference(asset_id=asset.id, item_id=items[0].id))
+    db.commit()
+
+    response = admin_client.delete(f"/api/assets/{upload['id']}?force=true")
+    assert response.status_code == 204
+
+
+def test_delete_asset_non_admin_rejected(admin_client, db, test_user, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    upload = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("x.png", io.BytesIO(b"data"), "image/png")},
+    ).json()
+    _switch_to_user(admin_client, db, test_user)
+    response = admin_client.delete(f"/api/assets/{upload['id']}")
+    assert response.status_code == 403
+
+
+def test_delete_asset_disabled_version_rejected(admin_client, asset_tmpdir):
+    course, version = _create_published_version(admin_client)
+    upload = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("x.png", io.BytesIO(b"data"), "image/png")},
+    ).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    response = admin_client.delete(f"/api/assets/{upload['id']}")
+    assert response.status_code == 403

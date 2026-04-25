@@ -155,3 +155,34 @@ def serve_asset(
         raise HTTPException(status_code=404, detail="Asset file missing")
 
     return FileResponse(filepath, media_type=asset.mime_type, filename=filename)
+
+
+@router.delete("/api/assets/{asset_id}", status_code=204)
+def delete_asset(
+    asset_id: int,
+    force: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    asset = get_or_404(db, Asset, asset_id)
+    version = get_or_404(db, CourseVersion, asset.version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+
+    if not force:
+        ref_count = db.scalar(
+            select(func.count()).where(AssetReference.asset_id == asset_id)
+        )
+        if ref_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Asset '{asset.filename}' is referenced by {ref_count} item(s). Use ?force=true to delete.",
+            )
+
+    filepath = os.path.join(_asset_dir(asset.version_id), asset.filename)
+    if os.path.isfile(filepath):
+        os.remove(filepath)
+
+    db.delete(asset)
+    db.commit()
