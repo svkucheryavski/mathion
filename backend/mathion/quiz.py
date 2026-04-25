@@ -10,7 +10,16 @@ def evaluate_question(
     correct_text: str | None,
 ) -> bool:
     """Evaluate a single question answer. Returns True if correct."""
-    if q_type in ("single_choice", "multiple_choice"):
+    if q_type == "single_choice":
+        if not isinstance(student_answer, list) or len(student_answer) != 1:
+            return False
+        return set(student_answer) == correct_option_ids
+
+    if q_type == "multiple_choice":
+        if not isinstance(student_answer, list):
+            return False
+        if len(student_answer) != len(set(student_answer)):
+            return False
         return set(student_answer) == correct_option_ids
 
     if q_type == "numeric_answer":
@@ -20,7 +29,8 @@ def evaluate_question(
             student_val = Decimal(str(student_answer))
         except (InvalidOperation, ValueError):
             return False
-        tolerance = Decimal(10) ** (-precision)
+        # tolerance = half a unit in the last decimal place
+        tolerance = Decimal(5) * Decimal(10) ** (-(precision + 1))
         return abs(student_val - correct_numeric) <= tolerance
 
     if q_type == "text_answer":

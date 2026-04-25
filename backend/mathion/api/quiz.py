@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,7 @@ def _check_quiz_access(db: Session, user: User, item_id: int) -> tuple[Item, Cou
             select(StudentEnrollment).where(
                 StudentEnrollment.version_id == version.id,
                 StudentEnrollment.user_id == user.id,
+                StudentEnrollment.is_active == True,
             )
         ).scalar_one_or_none()
         if not is_enrolled:
@@ -85,7 +86,7 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
                 )
             ).scalar_one()
 
-    # Check max attempts
+    # Check max attempts — atomic increment to prevent race condition
     max_attempts = version.max_quiz_attempts
     if state.attempt_count >= max_attempts:
         raise HTTPException(status_code=409, detail="Max attempts reached")
@@ -115,13 +116,26 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
         ):
             score_correct += 1
 
-    # Update state — always reassign last_answers (never mutate in place)
-    state.attempt_count += 1
-    state.last_answers = dict(data.answers)  # full reassignment for SQLAlchemy JSON
-    state.last_score_correct = score_correct
-    state.last_score_total = len(questions)
-    state.last_visited_at = datetime.now(timezone.utc)
-    state.is_covered = True
+    # Atomic increment: only succeeds if attempt_count < max_attempts
+    rows_updated = db.execute(
+        update(UserItemState)
+        .where(
+            UserItemState.id == state.id,
+            UserItemState.attempt_count < max_attempts,
+        )
+        .values(
+            attempt_count=UserItemState.attempt_count + 1,
+            last_answers=dict(data.answers),
+            last_score_correct=score_correct,
+            last_score_total=len(questions),
+            last_visited_at=datetime.now(timezone.utc),
+            is_covered=True,
+        )
+    ).rowcount
+
+    if rows_updated == 0:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Max attempts reached")
 
     db.commit()
     db.refresh(state)
@@ -178,7 +192,7 @@ def reveal_quiz(item_id: int, user: User = Depends(get_current_user), db: Sessio
             text_html=q.text_html,
             explanation_html=q.explanation_html,
             correct_option_ids=correct_ids,
-            correct_numeric=float(q.correct_numeric) if q.correct_numeric is not None else None,
+            correct_numeric=q.correct_numeric,
             correct_text=q.correct_text,
             student_answer=last_answers.get(str(q.id)),
         ))

@@ -217,3 +217,79 @@ def test_reveal_without_any_attempt_blocked(admin_client, db):
     with _make_student_client(db, data["token"]) as sc:
         response = sc.get(f"/api/items/{data['item']['id']}/reveal")
         assert response.status_code == 403
+
+
+def test_submit_disabled_version_blocked(admin_client, db):
+    """Cannot submit quiz on a disabled version."""
+    data = _setup_quiz(admin_client, db)
+    admin_client.post(f"/api/versions/{data['version']['id']}/disable")
+
+    with _make_student_client(db, data["token"]) as sc:
+        response = sc.post(f"/api/items/{data['item']['id']}/submit", json={
+            "answers": {
+                str(data["q1"]["id"]): [data["opt_b"]["id"]],
+                str(data["q2"]["id"]): "3.0",
+            }
+        }, headers={"X-Requested-With": "mathion"})
+        assert response.status_code == 403
+
+
+def test_submit_response_no_answer_leak(admin_client, db):
+    """Submit response must not contain correct answers."""
+    data = _setup_quiz(admin_client, db)
+    with _make_student_client(db, data["token"]) as sc:
+        response = sc.post(f"/api/items/{data['item']['id']}/submit", json={
+            "answers": {
+                str(data["q1"]["id"]): [data["opt_b"]["id"]],
+                str(data["q2"]["id"]): "3.0",
+            }
+        }, headers={"X-Requested-With": "mathion"})
+        result = response.json()
+        assert "correct_option_ids" not in result
+        assert "correct_numeric" not in result
+        assert "correct_text" not in result
+
+
+def test_reveal_includes_student_answer_and_explanation(admin_client, db):
+    """Reveal response includes student's answers and explanation_html."""
+    data = _setup_quiz(admin_client, db)
+    answers = {
+        str(data["q1"]["id"]): [data["opt_b"]["id"]],
+        str(data["q2"]["id"]): "3.0",
+    }
+    with _make_student_client(db, data["token"]) as sc:
+        for _ in range(3):
+            sc.post(f"/api/items/{data['item']['id']}/submit",
+                    json={"answers": answers},
+                    headers={"X-Requested-With": "mathion"})
+
+        reveal = sc.get(f"/api/items/{data['item']['id']}/reveal").json()
+        q1_reveal = [q for q in reveal["questions"] if q["id"] == data["q1"]["id"]][0]
+        # student_answer should be included
+        assert q1_reveal["student_answer"] == [data["opt_b"]["id"]]
+        # explanation_html may be None but must be present in response
+        assert "explanation_html" in q1_reveal
+
+
+def test_submit_quiz_inactive_enrollment_blocked(admin_client, db):
+    """Deactivated student cannot submit quiz answers."""
+    from sqlalchemy import select
+    data = _setup_quiz(admin_client, db)
+    # Deactivate the enrollment
+    enrollment = db.execute(
+        select(StudentEnrollment).where(
+            StudentEnrollment.user_id == data["student"].id,
+            StudentEnrollment.version_id == data["version"]["id"],
+        )
+    ).scalar_one()
+    enrollment.is_active = False
+    db.commit()
+
+    with _make_student_client(db, data["token"]) as sc:
+        response = sc.post(f"/api/items/{data['item']['id']}/submit", json={
+            "answers": {
+                str(data["q1"]["id"]): [data["opt_b"]["id"]],
+                str(data["q2"]["id"]): "3.0",
+            }
+        }, headers={"X-Requested-With": "mathion"})
+        assert response.status_code == 403

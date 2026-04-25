@@ -48,6 +48,9 @@ class LoginPIN(Base):
 
 class StudentEnrollment(Base):
     __tablename__ = "student_enrollments"
+    __table_args__ = (
+        UniqueConstraint("user_id", "version_id", name="uq_student_enrollment"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
