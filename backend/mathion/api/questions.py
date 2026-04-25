@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
-from mathion.markdown import render_markdown
+from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence
@@ -55,14 +54,16 @@ def create_question(item_id: int, data: QuestionCreate, db: Session = Depends(ge
         raise HTTPException(status_code=409, detail="Can only add questions to quiz items")
 
     next_order = (db.scalar(select(func.max(Question.order)).where(Question.item_id == item_id)) or 0) + 1
+    text_html = render_with_assets(db, version.id, data.text_md)
+    explanation_html = render_with_assets(db, version.id, data.explanation_md)
     question = Question(
         item_id=item_id,
         text_md=data.text_md,
-        text_html=render_markdown(data.text_md),
+        text_html=text_html,
         type=data.type,
         order=next_order,
         explanation_md=data.explanation_md,
-        explanation_html=render_markdown(data.explanation_md),
+        explanation_html=explanation_html,
         correct_numeric=data.correct_numeric,
         precision=data.precision,
         correct_text=data.correct_text,
@@ -102,9 +103,9 @@ def update_question(question_id: int, data: QuestionUpdate, db: Session = Depend
         setattr(question, field, value)
 
     if "text_md" in updates:
-        question.text_html = render_markdown(question.text_md)
+        question.text_html = render_with_assets(db, version.id, question.text_md)
     if "explanation_md" in updates:
-        question.explanation_html = render_markdown(question.explanation_md)
+        question.explanation_html = render_with_assets(db, version.id, question.explanation_md)
 
     # Validate invariants after update (prevent breaking published quiz)
     if question.type == "numeric_answer" and question.correct_numeric is None:

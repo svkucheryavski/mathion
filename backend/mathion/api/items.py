@@ -3,8 +3,8 @@ from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
-from mathion.markdown import extract_asset_filenames, render_markdown, resolve_asset_urls
+from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin
+from mathion.markdown import extract_asset_filenames
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Asset, AssetReference, Block, CourseVersion, Item, Sequence
@@ -30,35 +30,23 @@ def _get_version_for_item(db: Session, item: Item) -> CourseVersion:
 
 
 def _process_content_md(db: Session, version: CourseVersion, item_id: int, content_md: str | None) -> str:
-    """Render markdown, validate asset refs, resolve URLs, sync AssetReference rows."""
+    """Render markdown with asset resolution and sync AssetReference rows for the item."""
+    html = render_with_assets(db, version.id, content_md)
+    # Sync references — clear and re-add for this item
+    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
     if not content_md:
-        db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
-        return render_markdown(content_md)
-
-    html = render_markdown(content_md)
+        return html
     ref_filenames = extract_asset_filenames(content_md)
     if not ref_filenames:
-        db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
         return html
-
-    existing = db.execute(
-        select(Asset).where(
+    asset_ids = db.execute(
+        select(Asset.id).where(
             Asset.version_id == version.id,
             Asset.filename.in_(ref_filenames),
         )
     ).scalars().all()
-    existing_map = {a.filename: a for a in existing}
-    missing = ref_filenames - set(existing_map.keys())
-    if missing:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Referenced assets not found in version: {', '.join(sorted(missing))}",
-        )
-
-    html = resolve_asset_urls(html, version.id, ref_filenames)
-    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
-    for asset in existing_map.values():
-        db.add(AssetReference(asset_id=asset.id, item_id=item_id))
+    for aid in asset_ids:
+        db.add(AssetReference(asset_id=aid, item_id=item_id))
     return html
 
 

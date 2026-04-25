@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.api.helpers import get_or_404, render_with_assets, require_course_admin
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -76,6 +76,10 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
                 src_path = os.path.join(source_dir, src_asset.filename)
                 dst_path = os.path.join(dest_dir, src_asset.filename)
                 shutil.copy2(src_path, dst_path)
+            db.flush()
+
+    # Render info_md after assets are in place so asset references resolve
+    version.info_html = render_with_assets(db, version.id, data.info_md)
 
     db.commit()
     db.refresh(version)

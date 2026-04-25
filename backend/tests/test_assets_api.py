@@ -499,6 +499,75 @@ def test_version_copy_no_assets_is_noop(admin_client, asset_tmpdir):
     assert len(assets) == 0
 
 
+def test_question_save_resolves_asset_refs(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "qmd", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
+    )
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Q", "slug": "q", "type": "quiz", "content_md": None,
+    }).json()
+    q = admin_client.post(f"/api/items/{item['id']}/questions", json={
+        "type": "single_choice",
+        "text_md": "What is shown? ![chart](chart.png)",
+        "explanation_md": "See ![chart](chart.png) again",
+    }).json()
+    assert f'/assets/{version["id"]}/chart.png' in q["text_html"]
+    assert f'/assets/{version["id"]}/chart.png' in q["explanation_html"]
+
+
+def test_question_save_rejects_missing_asset(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "qmd2", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Q", "slug": "q", "type": "quiz", "content_md": None,
+    }).json()
+    response = admin_client.post(f"/api/items/{item['id']}/questions", json={
+        "type": "single_choice",
+        "text_md": "Use ![missing](nope.png) here",
+    })
+    assert response.status_code == 422
+    assert "nope.png" in response.json()["detail"]
+
+
+def test_version_info_resolves_asset_refs(admin_client, asset_tmpdir):
+    """info_md on a version resolves asset references too. Since info_md
+    needs an asset to validate, the version is created empty, an asset is
+    uploaded, then info_md is set via patch... but there's no PATCH endpoint
+    yet for info_md. Cover at create-time using copy_assets_from."""
+    course = admin_client.post("/api/courses", json={"slug": "vimg", "name": "V", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(
+        f"/api/versions/{v1['id']}/assets",
+        files={"file": ("logo.png", io.BytesIO(b"png"), "image/png")},
+    )
+    # A new version copies the assets, then references one in its info_md
+    v2 = admin_client.post(
+        f"/api/courses/{course['id']}/versions",
+        json={
+            "info_md": "Welcome ![logo](logo.png)",
+            "copy_assets_from": v1["id"],
+        },
+    ).json()
+    assert f'/assets/{v2["id"]}/logo.png' in v2["info_html"]
+
+
+def test_version_info_rejects_missing_asset(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "vimg2", "name": "V", "description": ""}).json()
+    response = admin_client.post(
+        f"/api/courses/{course['id']}/versions",
+        json={"info_md": "Use ![x](nope.png)"},
+    )
+    assert response.status_code == 422
+    assert "nope.png" in response.json()["detail"]
+
+
 def test_version_copy_fails_if_source_file_missing(admin_client, asset_tmpdir):
     """If source DB rows reference files missing on disk, copy must fail
     rather than silently create dangling registry rows in the new version.
