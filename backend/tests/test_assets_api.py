@@ -301,3 +301,79 @@ def test_delete_asset_disabled_version_rejected(admin_client, asset_tmpdir):
     admin_client.post(f"/api/versions/{version['id']}/disable")
     response = admin_client.delete(f"/api/assets/{upload['id']}")
     assert response.status_code == 403
+
+
+# ----- Task 8: item save integration -----
+
+
+def test_item_save_resolves_asset_refs(admin_client, db, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "md-course", "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
+    )
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Page", "slug": "page", "type": "static_page",
+        "content_md": "See ![chart](chart.png) for details",
+    }).json()
+    assert f'/assets/{version["id"]}/chart.png' in item["content_html"]
+
+
+def test_item_save_rejects_missing_asset(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "md2", "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Page", "slug": "page", "type": "static_page",
+        "content_md": "See ![chart](nonexistent.png) here",
+    })
+    assert response.status_code == 422
+    assert "nonexistent.png" in response.json()["detail"]
+
+
+def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "md3", "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("a.png", io.BytesIO(b"a"), "image/png")},
+    )
+    admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("b.png", io.BytesIO(b"b"), "image/png")},
+    )
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "P", "slug": "p", "type": "static_page",
+        "content_md": "![img](a.png)",
+    }).json()
+
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    a_asset = [x for x in assets if x["filename"] == "a.png"][0]
+    b_asset = [x for x in assets if x["filename"] == "b.png"][0]
+    assert a_asset["is_referenced"] is True
+    assert b_asset["is_referenced"] is False
+
+    admin_client.patch(f"/api/items/{item['id']}", json={"content_md": "![img](b.png)"})
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    a_asset = [x for x in assets if x["filename"] == "a.png"][0]
+    b_asset = [x for x in assets if x["filename"] == "b.png"][0]
+    assert a_asset["is_referenced"] is False
+    assert b_asset["is_referenced"] is True
+
+
+def test_item_no_asset_refs_works(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "md4", "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "P", "slug": "p", "type": "static_page",
+        "content_md": "Just text with [external](https://example.com)",
+    }).json()
+    assert item["content_html"]

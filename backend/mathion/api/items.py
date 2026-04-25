@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
-from mathion.markdown import render_markdown
+from mathion.markdown import extract_asset_filenames, render_markdown, resolve_asset_urls
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Block, CourseVersion, Item, Sequence
+from mathion.models import Asset, AssetReference, Block, CourseVersion, Item, Sequence
 from mathion.models_auth import User
 from mathion.schemas import ItemCreate, ItemResponse, ItemUpdate, ReorderRequest
 
@@ -29,6 +29,39 @@ def _get_version_for_item(db: Session, item: Item) -> CourseVersion:
     return get_or_404(db, CourseVersion, block.version_id)
 
 
+def _process_content_md(db: Session, version: CourseVersion, item_id: int, content_md: str | None) -> str:
+    """Render markdown, validate asset refs, resolve URLs, sync AssetReference rows."""
+    if not content_md:
+        db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
+        return render_markdown(content_md)
+
+    html = render_markdown(content_md)
+    ref_filenames = extract_asset_filenames(content_md)
+    if not ref_filenames:
+        db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
+        return html
+
+    existing = db.execute(
+        select(Asset).where(
+            Asset.version_id == version.id,
+            Asset.filename.in_(ref_filenames),
+        )
+    ).scalars().all()
+    existing_map = {a.filename: a for a in existing}
+    missing = ref_filenames - set(existing_map.keys())
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Referenced assets not found in version: {', '.join(sorted(missing))}",
+        )
+
+    html = resolve_asset_urls(html, version.id, ref_filenames)
+    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
+    for asset in existing_map.values():
+        db.add(AssetReference(asset_id=asset.id, item_id=item_id))
+    return html
+
+
 @router.post("/api/sequences/{sequence_id}/items", status_code=201, response_model=ItemResponse)
 def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = _get_version_for_sequence(db, sequence_id)
@@ -42,15 +75,17 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
     next_order = (db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0) + 1
     item = Item(
         sequence_id=sequence_id, title=data.title, slug=data.slug, order=next_order,
-        type=data.type, content_md=data.content_md, content_html=render_markdown(data.content_md),
+        type=data.type, content_md=data.content_md, content_html="",
         video_url=data.video_url, script_url=data.script_url,
     )
     db.add(item)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An item with this slug already exists in this sequence")
+    item.content_html = _process_content_md(db, version, item.id, data.content_md)
+    db.commit()
     db.refresh(item)
     return item
 
@@ -89,7 +124,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
         setattr(item, field, value)
 
     if "content_md" in updates:
-        item.content_html = render_markdown(item.content_md)
+        item.content_html = _process_content_md(db, version, item.id, item.content_md)
 
     # Validate type invariants after applying patch
     if item.type == "static_page" and item.content_md is None:
