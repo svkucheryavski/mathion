@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -130,7 +131,7 @@ class Question(Base):
     explanation_html: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # numeric_answer fields
-    correct_numeric: Mapped[float | None] = mapped_column(Numeric(precision=20, scale=10), nullable=True)
+    correct_numeric: Mapped[Decimal | None] = mapped_column(Numeric(precision=20, scale=10), nullable=True)
     precision: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # text_answer fields
@@ -153,6 +154,34 @@ class AnswerOption(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     question: Mapped["Question"] = relationship(back_populates="options")
+
+
+class Asset(Base):
+    __tablename__ = "assets"
+    __table_args__ = (
+        UniqueConstraint("version_id", "filename", name="uq_asset_version_filename"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("course_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    version: Mapped["CourseVersion"] = relationship()
+
+
+class AssetReference(Base):
+    __tablename__ = "asset_references"
+    __table_args__ = (
+        UniqueConstraint("asset_id", "item_id", name="uq_asset_reference"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
 
 
 from mathion.models_auth import User, Session, LoginPIN, StudentEnrollment, RateLimitEntry, UserItemState  # noqa: F401
