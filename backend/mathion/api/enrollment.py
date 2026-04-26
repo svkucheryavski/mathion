@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_newest_published_version, get_or_404, require_course_admin
+from mathion.api.helpers import get_newest_published_version, get_or_404, get_or_create_user, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Course, CourseVersion
@@ -11,21 +10,6 @@ from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import EnrollBatchRequest, EnrollmentResponse, EnrollRequest
 
 router = APIRouter(tags=["enrollment"])
-
-
-def _get_or_create_user(db: Session, email: str) -> User:
-    """Return existing user by email, or create a new one with email only."""
-    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if user is None:
-        user = User(email=email, full_name=None)
-        db.add(user)
-        try:
-            db.flush()  # flush to detect duplicate from concurrent request
-        except IntegrityError:
-            db.rollback()
-            # Re-query — the other concurrent request already created the user
-            user = db.execute(select(User).where(User.email == email)).scalar_one()
-    return user
 
 
 def _enroll_user(db: Session, user: User, course_id: int, version: CourseVersion) -> StudentEnrollment:
@@ -94,7 +78,7 @@ def enroll_student(
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)
-    user = _get_or_create_user(db, data.email)
+    user = get_or_create_user(db, data.email)
     enrollment = _enroll_user(db, user, course_id, version)
     db.commit()
     db.refresh(enrollment)
@@ -114,7 +98,7 @@ def enroll_batch(
     unique_emails = list(dict.fromkeys(e.strip().lower() for e in data.emails))
     results = []
     for email in unique_emails:
-        user = _get_or_create_user(db, email)
+        user = get_or_create_user(db, email)
         enrollment = _enroll_user(db, user, course_id, version)
         results.append(enrollment)
     db.commit()

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mathion.database import Base
@@ -18,6 +19,23 @@ def get_or_404(db: Session, model: type[Base], id: int, detail: str | None = Non
         name = model.__name__
         raise HTTPException(status_code=404, detail=detail or f"{name} not found")
     return obj
+
+
+def get_or_create_user(db: Session, email: str):
+    """Return existing user by email, or create a new one with email only."""
+    from mathion.models_auth import User
+
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if user is None:
+        user = User(email=email, full_name=None)
+        db.add(user)
+        try:
+            db.flush()  # flush to detect duplicate from concurrent request
+        except IntegrityError:
+            db.rollback()
+            # Re-query — the other concurrent request already created the user
+            user = db.execute(select(User).where(User.email == email)).scalar_one()
+    return user
 
 
 def get_newest_published_version(db: Session, course_id: int):

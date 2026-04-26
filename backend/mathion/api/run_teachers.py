@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mathion.api.enrollment import _get_or_create_user
-from mathion.api.helpers import get_or_404, require_course_admin, require_run_admin_or_teacher
+from mathion.api.helpers import get_or_404, get_or_create_user, require_course_admin, require_run_admin_or_teacher
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseVersion, Run, RunTeacher
@@ -30,7 +29,7 @@ def add_teacher(run_id: int, data: RunTeacherCreate, db: Session = Depends(get_d
     version = get_or_404(db, CourseVersion, run.version_id)
     require_course_admin(db, user, version.course_id)
 
-    target = _get_or_create_user(db, data.email)
+    target = get_or_create_user(db, data.email)
     existing = db.execute(
         select(RunTeacher).where(RunTeacher.run_id == run_id, RunTeacher.user_id == target.id)
     ).scalar_one_or_none()
