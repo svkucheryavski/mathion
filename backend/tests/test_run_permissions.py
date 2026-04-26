@@ -5,10 +5,9 @@ from fastapi import HTTPException
 
 from mathion.api.helpers import require_run_admin_or_teacher
 from mathion.models import Course, CourseAdmin, CourseVersion, Run, RunTeacher
-from mathion.models_auth import User
 
 
-def _make_run(db, course_admin_user_email="admin@example.com"):
+def _make_run(db):
     course = Course(slug="c1", name="C1", description="")
     db.add(course)
     db.flush()
