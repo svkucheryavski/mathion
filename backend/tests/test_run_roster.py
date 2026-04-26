@@ -53,7 +53,7 @@ def test_group_capacity_enforced_at_10(admin_client, db, seed_publishable_versio
     assert response.status_code == 409
 
 
-def test_list_students(admin_client, db, seed_publishable_version):
+def test_list_students(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "a@example.com"})
     admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "b@example.com"})
@@ -121,7 +121,7 @@ def test_add_student_writes_run_enrolled_notification(admin_client, db, seed_pub
     assert rows[0].payload["run_id"] == run["id"]
 
 
-def test_unrelated_user_cannot_add_student(auth_client, admin_client, db, seed_publishable_version):
+def test_unrelated_user_cannot_add_student(auth_client, admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     response = auth_client.post(f"/api/runs/{run['id']}/students", json={"email": "x@example.com"})
     assert response.status_code == 403
@@ -152,7 +152,7 @@ def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db, s
     assert enrollment.is_active is True
 
 
-def test_batch_add_auto_creates_groups(admin_client, db, seed_publishable_version):
+def test_batch_add_auto_creates_groups(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version, groups_enabled=True)
     response = admin_client.post(
         f"/api/runs/{run['id']}/students/batch",

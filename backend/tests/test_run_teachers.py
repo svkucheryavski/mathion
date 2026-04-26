@@ -6,7 +6,7 @@ def _make_run(admin_client, seed_publishable_version):
     ).json()
 
 
-def test_add_teacher_creates_user_if_absent(admin_client, db, seed_publishable_version):
+def test_add_teacher_creates_user_if_absent(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     response = admin_client.post(
         f"/api/runs/{run['id']}/teachers", json={"email": "newteacher@example.com"}
