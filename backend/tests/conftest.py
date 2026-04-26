@@ -134,3 +134,30 @@ def teacher_client(client, db, teacher_user):
     token = verify_pin(db, teacher_user.email, raw_pin, duration_days=7)
     c.cookies.set("session_token", token)
     return c
+
+
+@pytest.fixture
+def seed_publishable_version(admin_client, db):
+    """Create a course + version with a single static-page item, then publish.
+    Returns a callable; tests do `course, version = seed_publishable_version()`.
+    Used across run/teacher/group/roster test files."""
+    from mathion.models import Block, Sequence, Item
+
+    def _seed(slug="stats", name="Stats"):
+        course = admin_client.post(
+            "/api/courses", json={"slug": slug, "name": name, "description": ""}
+        ).json()
+        version = admin_client.post(
+            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+        ).json()
+        block = Block(version_id=version["id"], title="B", slug="b", order=1)
+        db.add(block); db.flush()
+        seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
+        db.add(seq); db.flush()
+        db.add(Item(sequence_id=seq.id, title="I", slug="i", order=1, type="static_page",
+                    content_md="x", content_html="<p>x</p>"))
+        db.commit()
+        admin_client.post(f"/api/versions/{version['id']}/publish")
+        return course, version
+
+    return _seed

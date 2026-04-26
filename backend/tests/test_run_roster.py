@@ -1,8 +1,5 @@
-from tests.test_runs import _seed_minimal_publishable_version
-
-
-def _make_run(admin_client, db, groups_enabled=False):
-    course, _ = _seed_minimal_publishable_version(admin_client, db)
+def _make_run(admin_client, seed_publishable_version, groups_enabled=False):
+    course, _ = seed_publishable_version()
     return admin_client.post(
         f"/api/courses/{course['id']}/runs",
         json={
@@ -12,9 +9,9 @@ def _make_run(admin_client, db, groups_enabled=False):
     ).json()
 
 
-def test_add_student_creates_user_and_enrollment(admin_client, db):
+def test_add_student_creates_user_and_enrollment(admin_client, db, seed_publishable_version):
     from mathion.models_auth import StudentEnrollment, User
-    run = _make_run(admin_client, db)
+    run = _make_run(admin_client, seed_publishable_version)
     response = admin_client.post(
         f"/api/runs/{run['id']}/students", json={"email": "alice@example.com"}
     )
@@ -27,9 +24,9 @@ def test_add_student_creates_user_and_enrollment(admin_client, db):
     assert enrollment.is_active is True
 
 
-def test_add_student_with_group(admin_client, db):
+def test_add_student_with_group(admin_client, db, seed_publishable_version):
     from mathion.models import Group
-    run = _make_run(admin_client, db, groups_enabled=True)
+    run = _make_run(admin_client, seed_publishable_version, groups_enabled=True)
     g = Group(run_id=run["id"], name="A")
     db.add(g); db.commit(); db.refresh(g)
     response = admin_client.post(
@@ -39,10 +36,10 @@ def test_add_student_with_group(admin_client, db):
     assert response.json()["group_id"] == g.id
 
 
-def test_group_capacity_enforced_at_10(admin_client, db):
+def test_group_capacity_enforced_at_10(admin_client, db, seed_publishable_version):
     from mathion.models import Group, RunStudent
     from mathion.models_auth import User
-    run = _make_run(admin_client, db, groups_enabled=True)
+    run = _make_run(admin_client, seed_publishable_version, groups_enabled=True)
     g = Group(run_id=run["id"], name="A")
     db.add(g); db.flush()
     for i in range(10):
@@ -56,8 +53,8 @@ def test_group_capacity_enforced_at_10(admin_client, db):
     assert response.status_code == 409
 
 
-def test_list_students(admin_client, db):
-    run = _make_run(admin_client, db)
+def test_list_students(admin_client, db, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
     admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "a@example.com"})
     admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "b@example.com"})
     response = admin_client.get(f"/api/runs/{run['id']}/students")
@@ -65,9 +62,9 @@ def test_list_students(admin_client, db):
     assert len(response.json()) == 2
 
 
-def test_patch_student_change_group(admin_client, db):
+def test_patch_student_change_group(admin_client, db, seed_publishable_version):
     from mathion.models import Group
-    run = _make_run(admin_client, db, groups_enabled=True)
+    run = _make_run(admin_client, seed_publishable_version, groups_enabled=True)
     g1 = Group(run_id=run["id"], name="A"); db.add(g1)
     g2 = Group(run_id=run["id"], name="B"); db.add(g2)
     db.commit(); db.refresh(g1); db.refresh(g2)
@@ -81,9 +78,9 @@ def test_patch_student_change_group(admin_client, db):
     assert response.json()["group_id"] == g2.id
 
 
-def test_remove_student_deactivates_enrollment_when_no_other_run(admin_client, db):
+def test_remove_student_deactivates_enrollment_when_no_other_run(admin_client, db, seed_publishable_version):
     from mathion.models_auth import StudentEnrollment
-    run = _make_run(admin_client, db)
+    run = _make_run(admin_client, seed_publishable_version)
     s = admin_client.post(
         f"/api/runs/{run['id']}/students", json={"email": "x@example.com"}
     ).json()
@@ -95,9 +92,9 @@ def test_remove_student_deactivates_enrollment_when_no_other_run(admin_client, d
     assert enrollment.is_active is False
 
 
-def test_remove_student_keeps_enrollment_if_other_run_exists(admin_client, db):
+def test_remove_student_keeps_enrollment_if_other_run_exists(admin_client, db, seed_publishable_version):
     from mathion.models_auth import StudentEnrollment
-    course, _ = _seed_minimal_publishable_version(admin_client, db)
+    course, _ = seed_publishable_version()
     run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R1", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
     run2 = admin_client.post(f"/api/courses/{course['id']}/runs",
@@ -115,26 +112,26 @@ def test_remove_student_keeps_enrollment_if_other_run_exists(admin_client, db):
     assert enrollment.is_active is True
 
 
-def test_add_student_writes_run_enrolled_notification(admin_client, db):
+def test_add_student_writes_run_enrolled_notification(admin_client, db, seed_publishable_version):
     from mathion.models_auth import NotificationLogEntry
-    run = _make_run(admin_client, db)
+    run = _make_run(admin_client, seed_publishable_version)
     admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "a@example.com"})
     rows = db.query(NotificationLogEntry).filter_by(kind="run_enrolled").all()
     assert len(rows) == 1
     assert rows[0].payload["run_id"] == run["id"]
 
 
-def test_unrelated_user_cannot_add_student(auth_client, admin_client, db):
-    run = _make_run(admin_client, db)
+def test_unrelated_user_cannot_add_student(auth_client, admin_client, db, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
     response = auth_client.post(f"/api/runs/{run['id']}/students", json={"email": "x@example.com"})
     assert response.status_code == 403
 
 
-def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db):
+def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db, seed_publishable_version):
     """Regression: scalar_one_or_none would raise MultipleResultsFound when the
     user is in 2+ other runs on the same course. We use first()+limit(1)."""
     from mathion.models_auth import StudentEnrollment
-    course, _ = _seed_minimal_publishable_version(admin_client, db)
+    course, _ = seed_publishable_version()
     run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R1", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
     run2 = admin_client.post(f"/api/courses/{course['id']}/runs",

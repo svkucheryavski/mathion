@@ -741,6 +741,8 @@ git commit -m "feat: add Run CRUD endpoints"
 
 ### Task 6: Run teacher endpoints + run_teacher_assigned notification
 
+> Note: as of post-Task-8 cleanup, `_seed_minimal_publishable_version` was promoted to a conftest fixture `seed_publishable_version`. The plan retains the original style for historical fidelity, but new test code should request `seed_publishable_version()` instead of importing the standalone function.
+
 **Files:**
 - Create: `mathion/api/run_teachers.py`
 - Modify: `mathion/main.py`
