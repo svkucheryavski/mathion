@@ -201,3 +201,29 @@ def test_batch_add_no_group_field(admin_client, seed_publishable_version):
     )
     assert response.status_code == 207
     assert response.json()["results"][0]["status"] == "added"
+
+
+def test_batch_savepoint_rolls_back_auto_group_on_failure(admin_client, db, seed_publishable_version):
+    """Regression: when _enroll_user_in_run raises mid-row, a group auto-created
+    in the same row must roll back with the savepoint — no orphan groups."""
+    from mathion.models import Group
+    course, version = seed_publishable_version()
+    run = admin_client.post(f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
+              "groups_enabled": True}).json()
+
+    # Disable the version so _enroll_user_in_run will raise 403.
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+
+    # Single row with a brand-new group name. Enrollment will fail → savepoint
+    # must roll back the auto-created group.
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/batch",
+        json={"rows": [{"email": "x@example.com", "group": "Brand New Group"}]},
+    )
+    assert response.status_code == 207
+    assert response.json()["results"][0]["status"] == "error"
+
+    # Critical: no orphan group remains
+    groups = db.query(Group).filter_by(run_id=run["id"]).all()
+    assert len(groups) == 0, f"Expected no groups, found: {[g.name for g in groups]}"

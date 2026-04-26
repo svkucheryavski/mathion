@@ -1,5 +1,6 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -14,10 +15,13 @@ from mathion.models import CourseVersion, Group, Run, RunStudent
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import (
     RunStudentBatchRequest,
+    RunStudentBatchResponse,
     RunStudentCreate,
     RunStudentResponse,
     RunStudentUpdate,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["run_roster"])
 
@@ -123,7 +127,11 @@ def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
     db.commit()
 
 
-@router.post("/api/runs/{run_id}/students/batch")
+@router.post(
+    "/api/runs/{run_id}/students/batch",
+    status_code=207,
+    response_model=RunStudentBatchResponse,
+)
 def add_students_batch(
     run_id: int,
     data: RunStudentBatchRequest,
@@ -138,11 +146,11 @@ def add_students_batch(
         # User creation happens at the outer transaction; safe to keep even if
         # the per-row enrollment later fails.
         target = get_or_create_user(db, row.email)
-        if row.name and not target.full_name:
-            target.full_name = row.name
 
         sp = db.begin_nested()
         try:
+            if row.name and not target.full_name:
+                target.full_name = row.name
             gid: int | None = None
             if row.group:
                 g = db.execute(
@@ -155,15 +163,15 @@ def add_students_batch(
                 gid = g.id
 
             rs = _enroll_user_in_run(db, target, run, gid)
-            db.flush()
             sp.commit()
             results.append({"email": row.email, "status": "added", "group_id": rs.group_id})
         except HTTPException as e:
             sp.rollback()
             results.append({"email": row.email, "status": "error", "detail": e.detail})
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected error in batch student add for %s", row.email)
             sp.rollback()
-            results.append({"email": row.email, "status": "error", "detail": str(e)})
+            results.append({"email": row.email, "status": "error", "detail": "internal error"})
 
     db.commit()
-    return JSONResponse(status_code=207, content={"results": results})
+    return {"results": results}
