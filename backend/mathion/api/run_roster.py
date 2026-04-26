@@ -92,15 +92,19 @@ def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
     db.flush()
 
     # Deactivate StudentEnrollment iff no other RunStudent rows remain on this course's runs
+    # Joins CourseVersion so we also catch runs on OTHER versions of the same course.
+    # Use limit(1) + first() — scalar_one_or_none() would raise MultipleResultsFound
+    # when the user has 2+ other runs on this course.
     other = db.execute(
-        select(RunStudent)
+        select(RunStudent.id)
         .join(Run, Run.id == RunStudent.run_id)
         .join(CourseVersion, CourseVersion.id == Run.version_id)
         .where(
             RunStudent.user_id == user_id,
             CourseVersion.course_id == run.version.course_id,
         )
-    ).scalar_one_or_none()
+        .limit(1)
+    ).first()
     if other is None:
         enrollment = db.execute(
             select(StudentEnrollment).where(

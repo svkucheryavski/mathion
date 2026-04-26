@@ -128,3 +128,28 @@ def test_unrelated_user_cannot_add_student(auth_client, admin_client, db):
     run = _make_run(admin_client, db)
     response = auth_client.post(f"/api/runs/{run['id']}/students", json={"email": "x@example.com"})
     assert response.status_code == 403
+
+
+def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db):
+    """Regression: scalar_one_or_none would raise MultipleResultsFound when the
+    user is in 2+ other runs on the same course. We use first()+limit(1)."""
+    from mathion.models_auth import StudentEnrollment
+    course, _ = _seed_minimal_publishable_version(admin_client, db)
+    run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
+        json={"title": "R1", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
+    run2 = admin_client.post(f"/api/courses/{course['id']}/runs",
+        json={"title": "R2", "start_date": "2026-07-01", "end_date": "2026-12-01"}).json()
+    run3 = admin_client.post(f"/api/courses/{course['id']}/runs",
+        json={"title": "R3", "start_date": "2027-01-01", "end_date": "2027-06-01"}).json()
+    s = admin_client.post(f"/api/runs/{run1['id']}/students",
+        json={"email": "x@example.com"}).json()
+    admin_client.post(f"/api/runs/{run2['id']}/students", json={"email": "x@example.com"})
+    admin_client.post(f"/api/runs/{run3['id']}/students", json={"email": "x@example.com"})
+
+    # Remove from run1 — must not crash, must keep enrollment active.
+    response = admin_client.delete(f"/api/runs/{run1['id']}/students/{s['user_id']}")
+    assert response.status_code == 204
+    enrollment = db.query(StudentEnrollment).filter_by(
+        user_id=s["user_id"], version_id=run1["version_id"]
+    ).one()
+    assert enrollment.is_active is True

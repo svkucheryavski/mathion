@@ -115,10 +115,16 @@ def _enroll_user_in_run(db: Session, user, run, group_id: int | None):
     1. Group capacity check (max 10 if group_id given).
     2. Activate StudentEnrollment for run.version_id (deactivates other active
        enrollments on this course via the existing `_enroll_user`).
-    3. Create or update RunStudent row.
+    3. Create or update RunStudent row. If a RunStudent row already exists for
+       this (run, user), its `group_id` is OVERWRITTEN with the new value.
+       None means "unassign".
     4. Write a `run_enrolled` notification log row.
 
     Caller must commit. Raises HTTPException on capacity / disabled-version.
+
+    Note: the capacity check is a SELECT-count + INSERT, not atomic. Two
+    concurrent admins could both observe count=9 and both succeed. Real-world
+    impact is low (admin operations); a SAVEPOINT-based fix lands in Phase 9.
     """
     from sqlalchemy import func
     from mathion.api.enrollment import _enroll_user
