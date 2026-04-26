@@ -20,6 +20,21 @@ def get_or_404(db: Session, model: type[Base], id: int, detail: str | None = Non
     return obj
 
 
+def get_newest_published_version(db: Session, course_id: int):
+    """Return the most recently published version for the course, or raise 409."""
+    from mathion.models import CourseVersion
+
+    version = db.execute(
+        select(CourseVersion)
+        .where(CourseVersion.course_id == course_id, CourseVersion.state == "published")
+        .order_by(CourseVersion.published_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=409, detail="No published version exists for this course")
+    return version
+
+
 def require_course_admin(db: Session, user, course_id: int):
     """Verify user is course admin or superuser. Raises 403 if not."""
     if user.is_superuser:

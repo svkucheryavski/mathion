@@ -1,6 +1,3 @@
-from datetime import date
-
-
 def _seed_minimal_publishable_version(admin_client, db):
     """Create a course + version with a single static-page item, then publish.
     Returns (course_dict, version_dict). Imported by other test files."""

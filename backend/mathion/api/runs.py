@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mathion.api.enrollment import _get_newest_published_version
-from mathion.api.helpers import get_or_404, require_course_admin, require_run_admin_or_teacher
+from mathion.api.helpers import get_newest_published_version, get_or_404, require_course_admin, require_run_admin_or_teacher
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Course, CourseVersion, Run
@@ -17,7 +16,7 @@ router = APIRouter(tags=["runs"])
 def create_run(course_id: int, data: RunCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     get_or_404(db, Course, course_id)
     require_course_admin(db, user, course_id)
-    version = _get_newest_published_version(db, course_id)
+    version = get_newest_published_version(db, course_id)
     run = Run(
         version_id=version.id,
         title=data.title,

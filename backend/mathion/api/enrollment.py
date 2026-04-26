@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.api.helpers import get_newest_published_version, get_or_404, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Course, CourseVersion
@@ -11,19 +11,6 @@ from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import EnrollBatchRequest, EnrollmentResponse, EnrollRequest
 
 router = APIRouter(tags=["enrollment"])
-
-
-def _get_newest_published_version(db: Session, course_id: int) -> CourseVersion:
-    """Return the most recently published version for the course, or raise 409."""
-    version = db.execute(
-        select(CourseVersion)
-        .where(CourseVersion.course_id == course_id, CourseVersion.state == "published")
-        .order_by(CourseVersion.published_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if version is None:
-        raise HTTPException(status_code=409, detail="No published version exists for this course")
-    return version
 
 
 def _get_or_create_user(db: Session, email: str) -> User:
@@ -106,7 +93,7 @@ def enroll_student(
 ):
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
-    version = _get_newest_published_version(db, course_id)
+    version = get_newest_published_version(db, course_id)
     user = _get_or_create_user(db, data.email)
     enrollment = _enroll_user(db, user, course_id, version)
     db.commit()
@@ -123,7 +110,7 @@ def enroll_batch(
 ):
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
-    version = _get_newest_published_version(db, course_id)
+    version = get_newest_published_version(db, course_id)
     unique_emails = list(dict.fromkeys(e.strip().lower() for e in data.emails))
     results = []
     for email in unique_emails:
