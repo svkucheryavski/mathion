@@ -150,3 +150,54 @@ def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db, s
         user_id=s["user_id"], version_id=run1["version_id"]
     ).one()
     assert enrollment.is_active is True
+
+
+def test_batch_add_auto_creates_groups(admin_client, db, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version, groups_enabled=True)
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/batch",
+        json={"rows": [
+            {"name": "Alice", "email": "alice@example.com", "group": "Team A"},
+            {"name": "Bob",   "email": "bob@example.com",   "group": "Team B"},
+        ]},
+    )
+    assert response.status_code == 207
+    body = response.json()
+    assert len(body["results"]) == 2
+    assert all(r["status"] == "added" for r in body["results"])
+    groups = admin_client.get(f"/api/runs/{run['id']}/groups").json()
+    assert {g["name"] for g in groups} == {"Team A", "Team B"}
+
+
+def test_batch_add_per_row_errors_do_not_abort(admin_client, db, seed_publishable_version):
+    from mathion.models import Group, RunStudent
+    from mathion.models_auth import User
+    run = _make_run(admin_client, seed_publishable_version, groups_enabled=True)
+    g = Group(run_id=run["id"], name="Full")
+    db.add(g); db.flush()
+    for i in range(10):
+        u = User(email=f"f{i}@example.com")
+        db.add(u); db.flush()
+        db.add(RunStudent(run_id=run["id"], user_id=u.id, group_id=g.id))
+    db.commit()
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/batch",
+        json={"rows": [
+            {"email": "ok@example.com", "group": "OK"},
+            {"email": "fail@example.com", "group": "Full"},
+        ]},
+    )
+    assert response.status_code == 207
+    body = response.json()
+    assert body["results"][0]["status"] == "added"
+    assert body["results"][1]["status"] == "error"
+
+
+def test_batch_add_no_group_field(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version, groups_enabled=False)
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/batch",
+        json={"rows": [{"email": "x@example.com"}]},
+    )
+    assert response.status_code == 207
+    assert response.json()["results"][0]["status"] == "added"

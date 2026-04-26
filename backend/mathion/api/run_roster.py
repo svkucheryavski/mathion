@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -11,7 +12,12 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseVersion, Group, Run, RunStudent
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import RunStudentCreate, RunStudentResponse, RunStudentUpdate
+from mathion.schemas import (
+    RunStudentBatchRequest,
+    RunStudentCreate,
+    RunStudentResponse,
+    RunStudentUpdate,
+)
 
 router = APIRouter(tags=["run_roster"])
 
@@ -115,3 +121,49 @@ def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
         if enrollment:
             enrollment.is_active = False
     db.commit()
+
+
+@router.post("/api/runs/{run_id}/students/batch")
+def add_students_batch(
+    run_id: int,
+    data: RunStudentBatchRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_run_admin_or_teacher(db, user, run_id)
+    run = db.get(Run, run_id)
+    results = []
+
+    for row in data.rows:
+        # User creation happens at the outer transaction; safe to keep even if
+        # the per-row enrollment later fails.
+        target = get_or_create_user(db, row.email)
+        if row.name and not target.full_name:
+            target.full_name = row.name
+
+        sp = db.begin_nested()
+        try:
+            gid: int | None = None
+            if row.group:
+                g = db.execute(
+                    select(Group).where(Group.run_id == run_id, Group.name == row.group)
+                ).scalar_one_or_none()
+                if g is None:
+                    g = Group(run_id=run_id, name=row.group)
+                    db.add(g)
+                    db.flush()
+                gid = g.id
+
+            rs = _enroll_user_in_run(db, target, run, gid)
+            db.flush()
+            sp.commit()
+            results.append({"email": row.email, "status": "added", "group_id": rs.group_id})
+        except HTTPException as e:
+            sp.rollback()
+            results.append({"email": row.email, "status": "error", "detail": e.detail})
+        except Exception as e:  # noqa: BLE001
+            sp.rollback()
+            results.append({"email": row.email, "status": "error", "detail": str(e)})
+
+    db.commit()
+    return JSONResponse(status_code=207, content={"results": results})
