@@ -26,7 +26,7 @@ def test_add_teacher_writes_notification_log_row(admin_client, db, seed_publisha
     assert rows[0].payload["run_id"] == run["id"]
 
 
-def test_list_teachers(admin_client, db, seed_publishable_version):
+def test_list_teachers(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "a@example.com"})
     admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "b@example.com"})
@@ -35,7 +35,7 @@ def test_list_teachers(admin_client, db, seed_publishable_version):
     assert len(response.json()) == 2
 
 
-def test_remove_teacher(admin_client, db, seed_publishable_version):
+def test_remove_teacher(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     teacher = admin_client.post(
         f"/api/runs/{run['id']}/teachers", json={"email": "t@example.com"}
@@ -44,14 +44,14 @@ def test_remove_teacher(admin_client, db, seed_publishable_version):
     assert response.status_code == 204
 
 
-def test_duplicate_add_409(admin_client, db, seed_publishable_version):
+def test_duplicate_add_409(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "t@example.com"})
     response = admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "t@example.com"})
     assert response.status_code == 409
 
 
-def test_non_admin_cannot_add_teacher(auth_client, admin_client, db, seed_publishable_version):
+def test_non_admin_cannot_add_teacher(auth_client, admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     response = auth_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "x@example.com"})
     assert response.status_code == 403
