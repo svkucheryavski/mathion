@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
@@ -11,8 +11,8 @@ from mathion.api.helpers import (
 )
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Course, CourseVersion, Run
-from mathion.models_auth import User
+from mathion.models import Course, CourseVersion, Group, Run, RunStudent, RunTeacher
+from mathion.models_auth import NotificationLogEntry, User
 from mathion.schemas import RunCreate, RunResponse, RunUpdate
 
 router = APIRouter(tags=["runs"])
@@ -84,3 +84,77 @@ def delete_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(
         raise HTTPException(status_code=409, detail="Unpublish run before deleting")
     db.delete(run)
     db.commit()
+
+
+@router.post("/api/runs/{run_id}/publish", response_model=RunResponse)
+def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    run = get_or_404(db, Run, run_id)
+    require_course_admin_for_run(db, user, run)
+    if run.is_published:
+        raise HTTPException(status_code=409, detail="Run is already published")
+
+    violations: list[str] = []
+
+    teacher_count = db.scalar(
+        select(func.count(RunTeacher.id)).where(RunTeacher.run_id == run_id)
+    )
+    if teacher_count == 0:
+        violations.append("at least one teacher required")
+
+    if run.groups_enabled:
+        unassigned = db.scalar(
+            select(func.count(RunStudent.id)).where(
+                RunStudent.run_id == run_id, RunStudent.group_id.is_(None)
+            )
+        )
+        if unassigned > 0:
+            violations.append(f"{unassigned} student(s) unassigned to a group")
+
+        oversized = db.execute(
+            select(Group.id, Group.name, func.count(RunStudent.id))
+            .outerjoin(RunStudent, RunStudent.group_id == Group.id)
+            .where(Group.run_id == run_id)
+            .group_by(Group.id)
+            .having(func.count(RunStudent.id) > 10)
+        ).all()
+        for _, gname, cnt in oversized:
+            violations.append(f"group '{gname}' has {cnt} students (max 10)")
+
+    if violations:
+        raise HTTPException(status_code=409, detail="; ".join(violations))
+
+    run.is_published = True
+    db.flush()
+
+    # Lazy-load course slug for notification payload
+    course_slug = run.version.course.slug
+
+    students = db.execute(
+        select(RunStudent).where(RunStudent.run_id == run_id)
+    ).scalars().all()
+    for rs in students:
+        db.add(NotificationLogEntry(
+            user_id=rs.user_id,
+            kind="run_published",
+            payload={
+                "run_id": run.id,
+                "course_slug": course_slug,
+                "title": run.title,
+            },
+        ))
+
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+@router.post("/api/runs/{run_id}/unpublish", response_model=RunResponse)
+def unpublish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    run = get_or_404(db, Run, run_id)
+    require_course_admin_for_run(db, user, run)
+    if not run.is_published:
+        raise HTTPException(status_code=409, detail="Run is not published")
+    run.is_published = False
+    db.commit()
+    db.refresh(run)
+    return run
