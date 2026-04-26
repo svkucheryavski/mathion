@@ -109,6 +109,55 @@ def require_run_admin_or_teacher(db: Session, user, run_id: int):
         raise HTTPException(status_code=403, detail="Run admin or teacher access required")
 
 
+def _enroll_user_in_run(db: Session, user, run, group_id: int | None):
+    """Enroll a user in a run.
+
+    1. Group capacity check (max 10 if group_id given).
+    2. Activate StudentEnrollment for run.version_id (deactivates other active
+       enrollments on this course via the existing `_enroll_user`).
+    3. Create or update RunStudent row.
+    4. Write a `run_enrolled` notification log row.
+
+    Caller must commit. Raises HTTPException on capacity / disabled-version.
+    """
+    from sqlalchemy import func
+    from mathion.api.enrollment import _enroll_user
+    from mathion.models import CourseVersion, RunStudent
+    from mathion.models_auth import NotificationLogEntry
+
+    version = db.get(CourseVersion, run.version_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Run version is disabled")
+
+    if group_id is not None:
+        count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.group_id == group_id))
+        if count >= 10:
+            raise HTTPException(status_code=409, detail="Group capacity reached")
+
+    _enroll_user(db, user, version.course_id, version)
+
+    rs = db.execute(
+        select(RunStudent).where(RunStudent.run_id == run.id, RunStudent.user_id == user.id)
+    ).scalar_one_or_none()
+    if rs:
+        rs.group_id = group_id
+    else:
+        rs = RunStudent(run_id=run.id, user_id=user.id, group_id=group_id)
+        db.add(rs)
+        db.flush()
+
+    db.add(NotificationLogEntry(
+        user_id=user.id,
+        kind="run_enrolled",
+        payload={
+            "run_id": run.id,
+            "course_slug": version.course.slug,
+            "title": run.title,
+        },
+    ))
+    return rs
+
+
 def render_with_assets(db: Session, version_id: int, content_md: str | None) -> str:
     """Render markdown, validating and resolving asset references.
 
