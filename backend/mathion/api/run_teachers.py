@@ -2,10 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, get_or_create_user, require_course_admin, require_run_admin_or_teacher
+from mathion.api.helpers import (
+    get_or_404,
+    get_or_create_user,
+    require_course_admin_for_run,
+    require_run_admin_or_teacher,
+)
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import CourseVersion, Run, RunTeacher
+from mathion.models import Run, RunTeacher
 from mathion.models_auth import NotificationLogEntry, User
 from mathion.schemas import RunTeacherCreate, RunTeacherResponse
 
@@ -26,8 +31,7 @@ def _to_response(rt: RunTeacher) -> dict:
 @router.post("/api/runs/{run_id}/teachers", status_code=201, response_model=RunTeacherResponse)
 def add_teacher(run_id: int, data: RunTeacherCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
-    version = get_or_404(db, CourseVersion, run.version_id)
-    require_course_admin(db, user, version.course_id)
+    require_course_admin_for_run(db, user, run)
 
     target = get_or_create_user(db, data.email)
     existing = db.execute(
@@ -62,8 +66,7 @@ def list_teachers(run_id: int, db: Session = Depends(get_db), user: User = Depen
 @router.delete("/api/runs/{run_id}/teachers/{user_id}", status_code=204)
 def remove_teacher(run_id: int, user_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
-    version = get_or_404(db, CourseVersion, run.version_id)
-    require_course_admin(db, user, version.course_id)
+    require_course_admin_for_run(db, user, run)
     rt = db.execute(
         select(RunTeacher).where(RunTeacher.run_id == run_id, RunTeacher.user_id == user_id)
     ).scalar_one_or_none()

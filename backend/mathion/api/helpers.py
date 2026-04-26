@@ -68,6 +68,15 @@ def require_course_admin(db: Session, user, course_id: int):
         raise HTTPException(status_code=403, detail="Course admin access required")
 
 
+def require_course_admin_for_run(db: Session, user, run) -> None:
+    """Verify user is course admin for the run's course (or superuser).
+    Caller must have already loaded `run` (via get_or_404 etc)."""
+    from mathion.models import CourseVersion
+
+    version = get_or_404(db, CourseVersion, run.version_id)
+    require_course_admin(db, user, version.course_id)
+
+
 def require_run_admin_or_teacher(db: Session, user, run_id: int):
     """Verify user is a course admin of the run's course OR a RunTeacher of
     the run OR a superuser. Raises 404 if run missing, 403 if no access."""

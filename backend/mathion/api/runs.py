@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_newest_published_version, get_or_404, require_course_admin, require_run_admin_or_teacher
+from mathion.api.helpers import (
+    get_newest_published_version,
+    get_or_404,
+    require_course_admin,
+    require_course_admin_for_run,
+    require_run_admin_or_teacher,
+)
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Course, CourseVersion, Run
@@ -73,8 +79,7 @@ def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user:
 @router.delete("/api/runs/{run_id}", status_code=204)
 def delete_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
-    version = get_or_404(db, CourseVersion, run.version_id)
-    require_course_admin(db, user, version.course_id)
+    require_course_admin_for_run(db, user, run)
     if run.is_published:
         raise HTTPException(status_code=409, detail="Unpublish run before deleting")
     db.delete(run)
