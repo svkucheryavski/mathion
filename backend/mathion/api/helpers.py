@@ -35,6 +35,38 @@ def require_course_admin(db: Session, user, course_id: int):
         raise HTTPException(status_code=403, detail="Course admin access required")
 
 
+def require_run_admin_or_teacher(db: Session, user, run_id: int):
+    """Verify user is a course admin of the run's course OR a RunTeacher of
+    the run OR a superuser. Raises 404 if run missing, 403 if no access."""
+    from mathion.models import CourseAdmin, CourseVersion, Run, RunTeacher
+
+    if user.is_superuser:
+        run = db.get(Run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return
+
+    run = db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    version = db.get(CourseVersion, run.version_id)
+    is_course_admin = db.execute(
+        select(CourseAdmin).where(
+            CourseAdmin.course_id == version.course_id,
+            CourseAdmin.user_id == user.id,
+        )
+    ).scalar_one_or_none() is not None
+    is_run_teacher = db.execute(
+        select(RunTeacher).where(
+            RunTeacher.run_id == run_id,
+            RunTeacher.user_id == user.id,
+        )
+    ).scalar_one_or_none() is not None
+    if not (is_course_admin or is_run_teacher):
+        raise HTTPException(status_code=403, detail="Run admin or teacher access required")
+
+
 def render_with_assets(db: Session, version_id: int, content_md: str | None) -> str:
     """Render markdown, validating and resolving asset references.
 
