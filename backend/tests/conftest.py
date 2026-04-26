@@ -113,3 +113,24 @@ def admin_client(client, db, superuser):
     token = verify_pin(db, superuser.email, raw_pin, duration_days=7)
     c.cookies.set("session_token", token)
     return c
+
+
+@pytest.fixture
+def teacher_user(db):
+    user = User(email="teacher@example.com", full_name="Teacher User")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def teacher_client(client, db, teacher_user):
+    """An authenticated client for a non-admin user. Tests that need this user
+    to be a RunTeacher on a specific run must add the RunTeacher row directly
+    (the user is plain — not a course admin and not a superuser)."""
+    c = CSRFTestClient(app)
+    raw_pin = request_pin(db, teacher_user.email)
+    token = verify_pin(db, teacher_user.email, raw_pin, duration_days=7)
+    c.cookies.set("session_token", token)
+    return c
