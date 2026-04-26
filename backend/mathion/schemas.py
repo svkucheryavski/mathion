@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -357,3 +357,121 @@ class QuizRevealResponse(BaseModel):
     score_correct: int
     score_total: int
     questions: list[QuestionReveal]
+
+
+class RunCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    start_date: date
+    end_date: date
+    groups_enabled: bool = False
+
+    @model_validator(mode="after")
+    def check_date_order(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
+
+
+class RunUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    start_date: date | None = None
+    end_date: date | None = None
+    groups_enabled: bool | None = None
+
+
+class RunResponse(BaseModel):
+    id: int
+    version_id: int
+    title: str
+    start_date: date
+    end_date: date
+    groups_enabled: bool
+    is_published: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RunTeacherCreate(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class RunTeacherResponse(BaseModel):
+    id: int
+    run_id: int
+    user_id: int
+    user_email: str
+    user_full_name: str | None
+    created_at: datetime
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class GroupUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class GroupResponse(BaseModel):
+    id: int
+    run_id: int
+    name: str
+    student_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class RunStudentCreate(BaseModel):
+    email: str = Field(min_length=1, max_length=254)
+    group_id: int | None = None
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class RunStudentBatchRow(BaseModel):
+    name: str | None = None
+    email: str = Field(min_length=1, max_length=254)
+    group: str | None = None  # group name; auto-created if missing
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class RunStudentBatchRequest(BaseModel):
+    rows: list[RunStudentBatchRow] = Field(min_length=1)
+
+
+class RunStudentBatchResultRow(BaseModel):
+    email: str
+    status: Literal["added", "error"]
+    group_id: int | None = None
+    detail: str | None = None
+
+
+class RunStudentBatchResponse(BaseModel):
+    results: list[RunStudentBatchResultRow]
+
+
+class RunStudentUpdate(BaseModel):
+    group_id: int | None = None  # explicit None means unassign
+
+
+class RunStudentResponse(BaseModel):
+    id: int
+    run_id: int
+    user_id: int
+    user_email: str
+    user_full_name: str | None
+    group_id: int | None
+    created_at: datetime
