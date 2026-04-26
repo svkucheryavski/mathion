@@ -10,6 +10,7 @@ from mathion.api.items import router as items_router
 from mathion.api.questions import router as questions_router
 from mathion.api.quiz import router as quiz_router
 from mathion.api.assets import router as assets_router
+from mathion.api.run_teachers import router as run_teachers_router
 from mathion.api.runs import router as runs_router
 from mathion.api.versions import router as versions_router
 
@@ -26,6 +27,7 @@ app.include_router(questions_router)
 app.include_router(quiz_router)
 app.include_router(assets_router)
 app.include_router(runs_router)
+app.include_router(run_teachers_router)
 
 
 @app.get("/health")
