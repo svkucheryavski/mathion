@@ -20,6 +20,7 @@ Phase 7b ships standalone backend functionality. No frontend, no scheduled deadl
 - Email delivery (Phase 9 — Phase 7b writes `notification_log` rows with `sent_at = NULL`)
 - Student-facing run/mini-project UI (Phase 7c, when there is content to display)
 - Frontend (any phase)
+- **Mini-project unpublish** (out of scope by design — once published, a mini-project is permanently visible until force-deleted; see §Lifecycle)
 
 ## Architecture
 
@@ -64,12 +65,12 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 
 | Extension | Why |
 |---|---|
-| **`mini_projects.is_published` per-mini-project flag** | Visibility = `run.is_published AND mini_project.is_published`. Lets teachers stage mini-projects ahead and roll them out as the term progresses. Mirrors Phase 7a's run publish pattern at finer grain. |
-| **`mini_projects.first_submitted_at` lock marker** | Atomic lock for "free-but-immutable-after-submission" lifecycle. Set via `UPDATE … WHERE first_submitted_at IS NULL` at first submission. PATCH endpoint reads this to decide which fields are still mutable. |
-| **`submissions.submission_number` (int, ≥1)** | Sequential per `(mini_project_id, group_id)`. Drives filename uniqueness ("submission 1.pdf", "submission 2.pdf") and resubmission ordering. Combined with UNIQUE constraint to catch duplicate-numbered races. |
+| **`mini_projects.is_published` per-mini-project flag** | Visibility = `run.is_published AND mini_project.is_published`. Lets teachers stage mini-projects ahead and roll them out as the term progresses. Once flipped True, **never flips back** (no unpublish endpoint). Mini-project visibility is "off by default until ready, then permanent." |
+| **`mini_projects.first_submitted_at` lock marker** | Atomic lock for "free-but-immutable-after-submission" lifecycle. Set via `UPDATE … WHERE first_submitted_at IS NULL` at first submission. Lock is **orthogonal to visibility** — lock state and publish state are independent. |
+| **`submissions.submission_number` (int, ≥1)** | Sequential per `(mini_project_id, group_id)`. Drives filename uniqueness ("submission 1.pdf", "submission 2.pdf") and resubmission ordering. UNIQUE constraint catches duplicate-numbered races. |
 | **`submissions.file_size`** | Standard for any file-storing column. |
-| **`submissions.is_late`** | Bool, set at insert time when `submitted_at > soft_deadline`. Cheap denormalization for teacher dashboard queries (Phase 7c). |
-| **`evaluations.feedback_file_size`** | Sidecar for `feedback_file`. |
+| **`submissions.is_late`** | Bool, set at insert time when `submitted_at > soft_deadline`. **Recomputed when `soft_deadline` is extended** (PATCH endpoint runs `UPDATE submissions SET is_late = (submitted_at > new_soft_deadline) WHERE mini_project_id = ?`). Cheap denormalization for teacher dashboard queries (Phase 7c). |
+| **`groups.is_disabled` flag** (Phase 7a table extension) | New bool column. A group is disabled when membership has dissolved but submissions must be preserved (e.g., students dropped out). Disabled groups: read-only — no new students, no new submissions; existing data viewable. Mirrors `User.is_disabled` (`models_auth.py:16`) and `CourseVersion.is_disabled` (`models.py:43`). |
 | **`mini_projects` requires `groups_enabled = True`** | Submissions are group-scoped per spec; runs without groups can't host mini-projects. Single-person groups handle the individual-evaluation case. |
 | **`run.groups_enabled` lock extends** | Already locked at run publish (Phase 7a); now also locked once any mini-project exists. |
 | **`mini_project.title` is *not* a column** | Derived at response-serialization time as `f"Mini project for Block {block.order}"`. Keeps schema minimal. |
@@ -86,10 +87,10 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 | `assignment_md` | text NOT NULL | Markdown source |
 | `assignment_html` | text NOT NULL | rendered + sanitized HTML, references resolved against `RunAsset` |
 | `soft_deadline` | datetime tz nullable | warning trigger; sets `is_late` on later submissions |
-| `hard_deadline` | datetime tz nullable | initial-submission cutoff |
-| `resubmission_deadline` | datetime tz nullable | resubmission cutoff |
-| `is_published` | bool NOT NULL default False | per-mini-project visibility |
-| `first_submitted_at` | datetime tz nullable | atomic lock marker |
+| `hard_deadline` | datetime tz nullable in DB; required at publish | initial-submission cutoff |
+| `resubmission_deadline` | datetime tz nullable in DB; required at publish | resubmission cutoff (always set when published) |
+| `is_published` | bool NOT NULL default False | one-way flag — once True, can never flip back to False (no unpublish; only force-delete) |
+| `first_submitted_at` | datetime tz nullable | atomic lock marker; orthogonal to `is_published` |
 | `created_at` | datetime tz | server_default now() |
 | `updated_at` | datetime tz | server_default now(), onupdate now() |
 
@@ -101,9 +102,12 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 
 **App-level rules** (enforced on publish):
 - `hard_deadline IS NOT NULL`
-- `hard_deadline > now()` at publish time (warn if missing; reject if past)
+- `hard_deadline > now()` at publish time
 - `hard_deadline <= run.end_date`
-- If `resubmission_deadline IS NOT NULL`, must be `<= run.end_date`
+- `resubmission_deadline IS NOT NULL`
+- `resubmission_deadline <= run.end_date`
+- `hard_deadline <= resubmission_deadline` (already a CHECK, re-asserted at publish)
+- `run.is_published = True`
 
 ### `submissions`
 
@@ -111,13 +115,13 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 |---|---|---|
 | `id` | int PK | |
 | `mini_project_id` | int FK ON DELETE CASCADE | indexed |
-| `group_id` | int FK `groups.id`, ON DELETE RESTRICT | indexed; RESTRICT preserves submission history if a group is mistakenly deleted |
+| `group_id` | int FK `groups.id`, ON DELETE RESTRICT | indexed; permanently RESTRICT — submission history is sacred. To wipe submissions, use run-level `?force=true` delete |
 | `submission_number` | int NOT NULL | sequential per `(mini_project_id, group_id)`, starting at 1 |
 | `submitted_by` | int FK `users.id`, ON DELETE RESTRICT | who clicked submit (group member) |
 | `submitted_at` | datetime tz | server_default now() |
 | `file_path` | str(512) NOT NULL | relative path under `<asset_path>/submissions/` |
 | `file_size` | int NOT NULL, CHECK > 0 | |
-| `is_late` | bool NOT NULL default False | computed vs `mini_project.soft_deadline` at insert |
+| `is_late` | bool NOT NULL default False | computed vs `mini_project.soft_deadline` at insert; recomputed on deadline extension |
 | `is_resubmission` | bool NOT NULL default False | per spec line 448 |
 
 **Constraints:**
@@ -133,20 +137,18 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 |---|---|---|
 | `id` | int PK | |
 | `submission_id` | int FK ON DELETE CASCADE, **UNIQUE** | one evaluation per submission per spec line 458 |
-| `evaluated_by` | int FK `users.id`, ON DELETE RESTRICT | audit trail |
+| `evaluated_by` | int FK `users.id`, ON DELETE RESTRICT | actor who caused the evaluation outcome (see auto-accept policy below) |
 | `evaluated_at` | datetime tz | server_default now() |
 | `result` | str(20) NOT NULL | one of `rejected`, `major_revision`, `minor_revision`, `accepted` |
 | `score` | int nullable | optional per spec; CHECK 0–100 |
 | `feedback_text` | text nullable | optional short feedback |
 | `feedback_file` | str(512) nullable | path to feedback PDF |
-| `feedback_file_size` | int nullable | sidecar |
 | `created_at` / `updated_at` | datetime tz | |
 
 **Constraints:**
 - CHECK `result IN ('rejected', 'major_revision', 'minor_revision', 'accepted')`
 - CHECK `score IS NULL OR (score BETWEEN 0 AND 100)`
 - CHECK `result = 'accepted' OR feedback_file IS NOT NULL` — feedback file mandatory unless accepted (spec line 458)
-- CHECK `(feedback_file IS NULL AND feedback_file_size IS NULL) OR (feedback_file IS NOT NULL AND feedback_file_size > 0)` — null consistency
 
 ### `run_assets`
 
@@ -178,41 +180,58 @@ Parallel to `AssetReference` (Phase 6, `models.py:176`). Tracks references from 
 
 Single-arm polymorphism for now (only mini-projects reference run assets in 7b). If Phase 7c or later adds other run-scoped owners, extend with additional nullable arms following Phase 6's pattern (`models.py:185-187`).
 
-### Existing-table touches (none structural)
+### Existing-table touches
 
-No modifications to existing tables. `AssetReference` is *not* extended; mini-project files use the parallel `RunAssetReference` table.
+- `groups` (Phase 7a) — add `is_disabled BOOLEAN NOT NULL DEFAULT 0` column. Single-column ALTER, SQLite-compatible (no `batch_alter_table` required since no constraint changes).
+- `AssetReference` is *not* extended; mini-project files use the parallel `RunAssetReference` table.
 
 ## Lifecycle
 
-### Mini-project state
+### Mini-project state (lock orthogonal to visibility)
 
-A mini-project's *current state* is **derived** from columns:
+Two independent dimensions:
 
 ```
-draft       = NOT is_published
-published   = is_published AND first_submitted_at IS NULL
-locked      = is_published AND first_submitted_at IS NOT NULL
+visibility:  draft       = NOT is_published    (hidden from students)
+             published   = is_published        (visible — sticky True)
+
+lock state:  open        = first_submitted_at IS NULL    (editable per rules)
+             locked      = first_submitted_at IS NOT NULL  (content frozen)
 ```
 
-No formal state machine. `is_published` flips via `POST /api/mini-projects/{mid}/publish` and `POST /api/mini-projects/{mid}/unpublish` (matching Phase 7a's run publish pattern).
+Combined effective states:
+- **draft + open** — fully editable; not visible to students
+- **published + open** — fully editable; visible to students; no submissions yet
+- **published + locked** — content/files frozen; deadlines extend-only; visible to students; one or more groups have submitted
+
+**Note:** `is_published` is one-way True. There is no `POST /api/mini-projects/{mid}/unpublish` endpoint. Once a mini-project is published, the only way to remove it is `?force=true` delete (course-admin only). This deliberate design simplifies the state model and avoids the "lost visibility for already-submitted work" class of bugs.
 
 ### Edit rules
 
-| Field | Pre-publish | Published, no submissions | Post first submission |
+| Field | draft + open | published + open | published + locked |
 |---|---|---|---|
 | `assignment_md` / `assignment_html` | editable | editable | **locked** |
-| `soft_deadline` / `hard_deadline` / `resubmission_deadline` | editable | editable | **extend-only** (new value ≥ current value, both nullable→non-null allowed) |
-| Mini-project files (RunAssets) | add+remove freely | add+remove freely | add allowed; remove blocked if `assignment_md` references the file |
-| `is_published` (publish action) | editable | editable | editable |
-| `is_published` (unpublish action) | editable | editable | **blocked unless `?force=true`** (course admin only) |
+| `soft_deadline` / `hard_deadline` / `resubmission_deadline` | editable | editable | **extend-only** (new value > current value, both nullable→non-null allowed) |
+| Mini-project files (RunAssets) | add+remove freely | add+remove freely | **fully locked** (no add, no remove) |
+| `is_published` | editable (False→True only) | locked True | locked True |
 
-Locks gated by `mini_projects.first_submitted_at IS NOT NULL`, set atomically at first successful submission via:
+Lock semantics gated by `mini_projects.first_submitted_at IS NOT NULL`, set atomically at first successful submission via:
 
 ```sql
-UPDATE mini_projects SET first_submitted_at = COALESCE(first_submitted_at, now()) WHERE id = ?
+UPDATE mini_projects
+SET first_submitted_at = COALESCE(first_submitted_at, now())
+WHERE id = ?
 ```
 
-PATCH endpoint reads `first_submitted_at` within the same transaction as the field update; rejects locked-field changes if non-null.
+PATCH endpoint reads `first_submitted_at` within the same transaction as the field update; rejects locked-field changes if non-null. `SELECT … FOR UPDATE` used to serialize PATCH against concurrent first-submission (see §Concurrency Notes for SQLite caveat).
+
+**Soft-deadline extension special case:** when `soft_deadline` is extended (not when other deadlines are extended), all existing submissions on the mini-project have their `is_late` recomputed in the same transaction:
+
+```sql
+UPDATE submissions
+SET is_late = (submitted_at > :new_soft_deadline)
+WHERE mini_project_id = :mini_project_id
+```
 
 ### Publish-gate
 
@@ -220,36 +239,41 @@ PATCH endpoint reads `first_submitted_at` within the same transaction as the fie
 1. `hard_deadline IS NOT NULL`
 2. `hard_deadline > now()`
 3. `hard_deadline <= run.end_date`
-4. `resubmission_deadline IS NULL OR resubmission_deadline <= run.end_date`
-5. `soft_deadline <= hard_deadline` (if set)
-6. `run.is_published = True` (cannot publish a mini-project on an unpublished run)
+4. `resubmission_deadline IS NOT NULL`
+5. `resubmission_deadline <= run.end_date`
+6. `hard_deadline <= resubmission_deadline`
+7. `soft_deadline <= hard_deadline` (if `soft_deadline` set)
+8. `run.is_published = True` (cannot publish a mini-project on an unpublished run)
 
-If any condition fails, return 409 with violations list. Otherwise `is_published := True`.
-
-### Unpublish
-
-`POST /api/mini-projects/{mid}/unpublish` is course-admin or run-teacher.
-
-- If `first_submitted_at IS NULL`: succeeds. Flips `is_published` back to False.
-- If `first_submitted_at IS NOT NULL` AND no `?force=true`: returns 409 ("Mini-project has submissions; use ?force=true to override").
-- If `first_submitted_at IS NOT NULL` AND `?force=true`: course-admin only (not teacher); succeeds. Submissions and evaluations preserved; students lose visibility until republished.
+If any condition fails, return 409 with violations list. Otherwise `is_published := True`. **There is no unpublish counterpart.**
 
 ### Delete
 
 `DELETE /api/mini-projects/{mid}` is course-admin or run-teacher.
 
-- If `is_published=True` AND no `?force=true`: 409 ("Unpublish before deleting").
 - If `first_submitted_at IS NOT NULL` AND no `?force=true`: 409 ("Mini-project has submissions; use ?force=true").
-- With `?force=true` (course-admin only): cascades through submissions, evaluations, attached run-asset references; files on disk cleaned up in app code.
+- With `?force=true` (course-admin only): cascades through submissions, evaluations, attached run-asset references; files on disk cleaned up in app code (see §File Storage cleanup paths below).
+
+A draft mini-project (`is_published = False`, `first_submitted_at IS NULL`) deletes without force.
+A published mini-project without submissions deletes without force.
 
 ### Run delete (extended from Phase 7a)
 
 `DELETE /api/runs/{rid}` (course-admin only) is now blocked if any of:
-1. `is_published=True` (Phase 7a — must unpublish first)
+1. `is_published=True` (Phase 7a — must unpublish run first via existing endpoint)
 2. **`RunStudent` count > 0** (new — admin must clear roster via existing per-student remove endpoint)
-3. **Any submission exists for any mini-project on this run** (new)
+3. **Any submission exists for any mini-project on this run** (new — checked via the new `_has_submissions` helper)
 
-`DELETE /api/runs/{rid}?force=true` (course-admin only) cascades through everything: students, mini-projects, submissions, evaluations, run-assets, files on disk. UI surfaces high-risk confirmation per the platform spec line 59 pattern.
+`DELETE /api/runs/{rid}?force=true` (course-admin only) cascades through everything: students, mini-projects, submissions, evaluations, run-assets. Files on disk wiped from both `<asset_path>/runs/{run_id}/` and `<asset_path>/submissions/{run_id}/` trees. UI surfaces high-risk confirmation per the platform spec line 59 pattern.
+
+### Group disable (new in Phase 7b)
+
+A group whose members have dissolved (e.g., students dropped out) but whose submissions must persist as historical record can be **disabled** rather than deleted.
+
+- `PATCH /api/groups/{gid}` body `{"is_disabled": true}` — flips the flag. Course admin OR run teacher. Allowed regardless of student/submission count.
+- `PATCH /api/groups/{gid}` body `{"is_disabled": false}` — re-enables. Same auth.
+- Disabled groups: cannot accept new student additions (POST roster → 409); cannot accept new submissions (POST submission → 409). Existing students (if any), submissions, and evaluations remain accessible to admins/teachers.
+- `DELETE /api/groups/{gid}` is permanent and now requires the group to be empty of *both* students and submissions (existing Phase 7a check + new submissions check). For groups with submissions, disable instead.
 
 ## File Storage
 
@@ -277,12 +301,10 @@ Helpers in `mathion/api/helpers.py`:
 
 ```python
 def build_submission_filename(block_order: int, group_name: str, submission_number: int) -> str:
-    safe_name = sanitize_filename(f"block {block_order} - group {group_name} - submission {submission_number}.pdf")
-    return safe_name
+    return sanitize_filename(f"block {block_order} - group {group_name} - submission {submission_number}.pdf")
 
 def build_feedback_filename(block_order: int, group_name: str, submission_number: int) -> str:
-    safe_name = sanitize_filename(f"block {block_order} - group {group_name} - submission {submission_number} - feedback.pdf")
-    return safe_name
+    return sanitize_filename(f"block {block_order} - group {group_name} - submission {submission_number} - feedback.pdf")
 
 def submission_storage_dir(run_id: int, group_id: int) -> str:
     return os.path.join(settings.asset_path, "submissions", str(run_id), str(group_id))
@@ -297,11 +319,28 @@ def run_asset_storage_dir(run_id: int) -> str:
 
 Same realpath/commonpath check as Phase 6's `serve_asset` (`api/assets.py:175-178`). Replicated for submission download and run-asset download endpoints.
 
+### File-write rollback pattern
+
+Submission and feedback uploads follow the same temp+rename pattern as Phase 6's asset upload (`api/assets.py:79-99`):
+
+1. Insert DB row inside transaction (gives the `submission_number` / evaluation row).
+2. Write file via `tempfile.mkstemp` in the destination directory, then `os.replace` to the final path.
+3. On any disk failure: `db.rollback()` (or savepoint rollback for nested transactions) to remove the row, then unlink the temp file. Return 500.
+4. On any DB failure after disk write: unlink the file before raising.
+
+Disk and DB are kept consistent: a row with no file, or a file with no row, is never persisted at end-of-transaction.
+
 ### Markdown rendering for `assignment_md`
 
-New helper `render_with_run_assets(db, run_id, content_md)` in `helpers.py`, mirroring `render_with_assets` (`helpers.py:167`) but resolving against `RunAsset` (filtered by `run_id`) instead of `Asset`. Rewrites bare filenames to `/api/runs/{run_id}/assets/{filename}` paths in the rendered HTML. Used at mini-project save time.
+New helper `render_with_run_assets(db, run_id, content_md)` in `helpers.py`, mirroring `render_with_assets` (`helpers.py:167`) but resolving against `RunAsset` (filtered by `run_id`) instead of `Asset`. Rewrites bare filenames to `/api/runs/{run_id}/assets/{filename}` paths in the rendered HTML. Used at mini-project save time. Raises 422 if the markdown references a filename that doesn't exist in `RunAsset` for this run.
 
-`sync_run_asset_references(db, run_id, content_md, mini_project_id)` mirrors `sync_asset_references` (`helpers.py:203`), keeping `RunAssetReference` rows in sync with what the markdown actually references.
+`sync_run_asset_references(db, run_id, content_md, mini_project_id)` mirrors `sync_asset_references` (`helpers.py:203`): **deletes all `RunAssetReference` rows for the given `mini_project_id`, then re-inserts rows for filenames currently referenced in the markdown.** This handles markdown edits that remove references (the deleted-rows pass cleans them up).
+
+### Run-asset force-delete + locked mini-project
+
+If a `RunAsset` is force-deleted while still referenced by a *locked* mini-project's `assignment_md`, the rendered `assignment_html` already on disk is unchanged (it's frozen). A subsequent re-render (by the locked mini-project — which can't happen via PATCH since `assignment_md` is locked) does not occur. New mini-projects in `published + open` or `draft + open` state that reference the deleted file will 422 on next save. Existing locked mini-projects continue to render with the (now-broken) reference; the front-end will surface a missing file when serving the asset URL (404).
+
+This is acceptable: force-delete is the destructive escape hatch; broken historical references in locked content are the documented cost.
 
 ## API Surface
 
@@ -312,12 +351,20 @@ All endpoints require an authenticated user. Authorization in the right column. 
 | Method | Path | Auth |
 |---|---|---|
 | POST | `/api/runs/{rid}/mini-projects` | course admin OR run teacher (`require_run_admin_or_teacher`) |
-| GET | `/api/runs/{rid}/mini-projects` | course admin OR run teacher OR enrolled student (filtered to `is_published`) |
+| GET | `/api/runs/{rid}/mini-projects` | admins/teachers see all; students see those passing `mini_project_visible_to_student(run, mp)` |
 | GET | `/api/mini-projects/{mid}` | as above |
 | PATCH | `/api/mini-projects/{mid}` | course admin OR run teacher |
 | DELETE | `/api/mini-projects/{mid}` | course admin OR run teacher; `?force=true` course-admin-only |
 | POST | `/api/mini-projects/{mid}/publish` | course admin OR run teacher |
-| POST | `/api/mini-projects/{mid}/unpublish` | course admin OR run teacher; `?force=true` course-admin-only |
+
+There is no `unpublish` endpoint by design (see §Lifecycle).
+
+**Visibility helper** in `helpers.py`:
+```python
+def mini_project_visible_to_student(run, mini_project) -> bool:
+    return run.is_published and mini_project.is_published
+```
+Applied at the start of every student-path branch in mini-project, submission, and run-asset reads. Admins and run teachers bypass this check (see auth decorators).
 
 ### Mini-project file management (RunAsset)
 
@@ -325,7 +372,7 @@ All endpoints require an authenticated user. Authorization in the right column. 
 |---|---|---|
 | POST | `/api/runs/{rid}/assets` | course admin OR run teacher |
 | GET | `/api/runs/{rid}/assets` | course admin OR run teacher |
-| GET | `/api/runs/{rid}/assets/{filename}` | course admin OR run teacher OR enrolled student |
+| GET | `/api/runs/{rid}/assets/{filename}` | course admin OR run teacher; enrolled student gated by `mini_project_visible_to_student` for *some* mini-project that references this file |
 | DELETE | `/api/runs/{rid}/assets/{aid}` | course admin OR run teacher; 409 if referenced unless `?force=true` (course admin) |
 
 Mirrors Phase 6's asset endpoints (`api/assets.py`) with run-level authorization and run-scoped storage.
@@ -334,14 +381,16 @@ Mirrors Phase 6's asset endpoints (`api/assets.py`) with run-level authorization
 
 | Method | Path | Auth |
 |---|---|---|
-| POST | `/api/mini-projects/{mid}/submissions` | group member of any group on the run |
-| GET | `/api/mini-projects/{mid}/submissions` | course admin OR run teacher (lists all groups); group member (their group only) |
-| GET | `/api/submissions/{sid}` | course admin OR run teacher OR member of the submitting group |
+| POST | `/api/mini-projects/{mid}/submissions` | group member of any group on the run, gated by `mini_project_visible_to_student` |
+| GET | `/api/mini-projects/{mid}/submissions` | course admin OR run teacher (lists all groups); group member (their group only, gated by visibility) |
+| GET | `/api/submissions/{sid}` | course admin OR run teacher OR member of the submitting group (gated by visibility for non-admin/teacher) |
 | GET | `/api/submissions/{sid}/file` | as above (returns the PDF) |
 
 `POST` body is `multipart/form-data` with the PDF file. Server validates:
-- `mini_project.is_published == True` AND `mini_project.run.is_published == True`
+- `mini_project_visible_to_student(run, mini_project) == True` (i.e., both `run.is_published` AND `mini_project.is_published`)
+- `mini_project.first_submitted_at` does **not** affect submit eligibility (lock is for *editing*, not submitting).
 - Submitter is a member of exactly one group on `mini_project.run_id` (spec line 438: "one group per student per run"). Submission is recorded against that group. Submitters with no group membership on the run get 403.
+- Submitter's group is not disabled (`group.is_disabled = False`).
 - Group precondition for new initial submission:
   - No prior submission OR latest evaluation `result = 'rejected'`
 - Group precondition for resubmission:
@@ -352,9 +401,9 @@ Mirrors Phase 6's asset endpoints (`api/assets.py`) with run-level authorization
 
 Determines `submission_number = MAX(...) + 1` over the (mini_project, group). UNIQUE constraint catches concurrent races; retry once on IntegrityError, then 503.
 
-Sets `is_late = (submitted_at > mini_project.soft_deadline)`. Sets `is_resubmission = True` if latest evaluation is `major_revision` or `minor_revision`, else `False`.
+Sets `is_late = (submitted_at > mini_project.soft_deadline)` if `soft_deadline IS NOT NULL`, else False. Sets `is_resubmission = True` if latest evaluation is `major_revision` or `minor_revision`, else False.
 
-Atomically updates `mini_projects.first_submitted_at` via `UPDATE … WHERE first_submitted_at IS NULL`.
+Atomically updates `mini_projects.first_submitted_at` via `UPDATE mini_projects SET first_submitted_at = COALESCE(first_submitted_at, now()) WHERE id = ?`.
 
 ### Evaluation
 
@@ -368,15 +417,18 @@ Atomically updates `mini_projects.first_submitted_at` via `UPDATE … WHERE firs
 `POST` body includes `result`, optional `score`, optional `feedback_text`, and optional `feedback_file` (PDF, multipart). The `feedback_file` field is required iff `result != 'accepted'`.
 
 **Auto-acceptance for resubmissions** (per spec lines 462-464): if `submission.is_resubmission == True`, the system creates an evaluation with `result = 'accepted'` *atomically inside the submission transaction* — teachers do not evaluate auto-accepted resubmissions; the manual evaluation POST endpoint returns 409 in that case. The auto-evaluation row carries:
-- `evaluated_by` = the previous evaluator (the teacher who set `major_revision`/`minor_revision`)
+
+- `evaluated_by` = the *latest* `major_revision` / `minor_revision` evaluator's user_id (i.e., the actor who caused the revision-pending state). Policy: `evaluated_by` records "actor who caused the outcome" — a User reference, not a current-RunTeacher attestation. If that user has since been removed from the run (RunTeacher row deleted), the audit field still references the original actor; the User row itself is preserved by `ON DELETE RESTRICT`.
 - `evaluated_at` = the submission timestamp
 - `result` = `'accepted'`
 - `score`, `feedback_text`, `feedback_file` = NULL
-- An `evaluation_received` notification fires immediately to the group.
+- An `evaluation_received` notification fires immediately to current group members.
+
+**Auto-evaluation INSERT failure handling:** the auto-evaluation INSERT runs in the same DB transaction as the submission INSERT. If the auto-eval INSERT fails (e.g., the previous evaluator's User row was deleted via some path that bypassed RESTRICT — should not occur but defended in depth), the entire submission transaction rolls back: the submission row is removed, the file on disk is cleaned up via the rollback pattern in §File-write rollback. Group sees 500 with "Auto-evaluation failed; submission rejected"; teacher must investigate the prior-evaluator audit chain.
 
 UNIQUE on `submission_id` catches concurrent dual-create → 409 ("Already evaluated").
 
-`evaluation_received` notification log row is written for each member of the submitting group.
+`evaluation_received` notification log row is written for each **current** group member at evaluation time (not submission-time members). Rationale: notifications go to people who are currently affected; ex-members removed before evaluation no longer get notified. New members added between submission and evaluation *do* receive the notification (they're now part of the group's responsibility).
 
 ## Notifications
 
@@ -384,7 +436,9 @@ Phase 7b adds exactly **one** event-triggered notification kind. Scheduled remin
 
 | `kind` | Trigger | Recipients | Payload |
 |---|---|---|---|
-| `evaluation_received` | Teacher posts evaluation (or auto-accept fires) | All members of the submitting group | `{run_id, mini_project_id, submission_id, evaluation_id, result}` |
+| `evaluation_received` | Teacher posts evaluation OR auto-accept fires | Current members of the submitting group at evaluation time | `{run_id, mini_project_id, submission_id, evaluation_id, result}` |
+
+**Phase 9 deferred filtering:** `resubmission_deadline_approaching` notification (when implemented) fires only for groups whose latest evaluation is `major_revision` or `minor_revision` (no acceptance yet). Groups with accepted initial submissions or no pending revision do not receive this notification. Documented as Phase 9 implementation detail.
 
 Phase 7a's three kinds (`run_enrolled`, `run_published`, `run_teacher_assigned`) remain unchanged.
 
@@ -394,25 +448,30 @@ Phase 7a's three kinds (`run_enrolled`, `run_published`, `run_teacher_assigned`)
 |---|---|---|
 | Create mini-project on run with `groups_enabled=False` | 409 | "Run must have groups_enabled to host mini-projects" |
 | Edit `groups_enabled` on run with mini-project | 409 | "Cannot disable groups; mini-projects exist" |
-| Mini-project create on (run, block) where block.version_id ≠ run.version_id | 400 | "Block does not belong to this run's course version" |
+| Mini-project create on (run, block) where `block.version_id != run.version_id` | 400 | "Block does not belong to this run's course version" |
 | Duplicate (run_id, block_id) on create | 409 | "Mini-project already exists for this block" |
-| PATCH locked field while submissions exist | 409 | List violations: "assignment_md is locked", "deadline can only be extended" |
+| PATCH locked field while submissions exist | 409 | List violations: "assignment_md is locked", "deadline can only be extended", "files are locked" |
 | Publish mini-project while run is unpublished | 409 | "Cannot publish mini-project on unpublished run" |
 | Publish without `hard_deadline` | 409 | "hard_deadline required at publish" |
-| Publish with deadline past run.end_date | 409 | "Deadlines must fall within run end_date" |
+| Publish without `resubmission_deadline` | 409 | "resubmission_deadline required at publish" |
+| Publish with deadline past `run.end_date` | 409 | "Deadlines must fall within run end_date" |
 | Submit without group membership on the run | 403 | "Must be a member of a group on this run to submit" |
-| Submit before mini-project published (or run unpublished) | 403 | "Mini-project not visible" |
+| Submit while `mini_project_visible_to_student` is False | 403 | "Mini-project not visible" |
+| Submit to disabled group | 409 | "Group is disabled" |
+| Add student to disabled group | 409 | "Cannot add students to disabled group" |
 | Initial submission after `hard_deadline` | 409 | "Initial submission deadline passed" |
 | Resubmission after `resubmission_deadline` | 409 | "Resubmission deadline passed" |
-| Resubmission while evaluation status is `accepted` | 409 | "Already accepted; no further submission" |
+| Resubmission while latest evaluation is `accepted` | 409 | "Already accepted; no further submission" |
 | Submission while previous submission has no evaluation | 409 | "Previous submission pending evaluation" |
 | Cross-run group/mini-project mismatch | 400 | "Group does not belong to this run" |
 | Evaluate already-evaluated submission | 409 | "Already evaluated" |
+| Evaluate auto-accepted submission | 409 | "Submission was auto-accepted; cannot manually evaluate" |
 | Evaluate without `feedback_file` when result ≠ accepted | 422 | "feedback_file required for this result" |
+| Auto-evaluation INSERT failure | 500 | "Auto-evaluation failed; submission rejected" (transaction rolled back, file cleaned up) |
 | Delete RunAsset still referenced by `assignment_md` | 409 | "Asset is referenced by mini-project N. Use ?force=true to delete." |
 | Delete mini-project with submissions, no force | 409 | "Mini-project has submissions; use ?force=true" |
-| Unpublish mini-project with submissions, no force | 409 | "Mini-project has submissions; use ?force=true" |
 | Delete run with students or submissions, no force | 409 | "Run has students/submissions; clear roster or use ?force=true" |
+| Delete group with students or submissions | 409 | "Group has students or submissions; disable instead" |
 
 ## Concurrency Notes
 
@@ -433,9 +492,9 @@ Phase 7b follows Phase 7a's precedent: DB UNIQUE constraints preserve data integ
 These items were deferred from Phase 7a's final review and are addressed here because Phase 7b touches the same surface anyway:
 
 1. **Rename `_enroll_user_in_run` → `enroll_user_in_run`** (`helpers.py:112`). Cross-module helper shouldn't have leading underscore.
-2. **Replace `_has_submissions(run)` stub with real implementation** in `helpers.py`. Used by:
-   - `runs.py:patch_run` — existing end_date-lowering check (Phase 7a hook returned False)
-   - `runs.py:delete_run` — new check from Phase 7b's run-delete tightening
+2. **Add `_has_submissions(db, run) -> bool` helper** in `helpers.py` (does not currently exist in code despite earlier roadmap notes). Wire into:
+   - `runs.py:patch_run` — end_date-lowering check (currently unguarded; add the new check)
+   - `runs.py:delete_run` — Phase 7b's run-delete tightening (new check)
 3. **Add `# TODO(phase 9)` race comments** at `run_roster.py:patch_student` capacity check and `runs.py` publish-gate (currently only at `helpers.py:_enroll_user_in_run`).
 4. **Collapse `require_run_admin_or_teacher`** to take a loaded `Run` object (matching `require_course_admin_for_run`'s shape — `helpers.py:71`). Eliminates redundant `db.get(Run)` calls in routers.
 
@@ -443,7 +502,9 @@ Phase 7a item #5 (`run_teachers.py:add_teacher` SELECT-then-INSERT alignment) is
 
 ## Migration Strategy
 
-One Alembic migration adding five tables: `mini_projects`, `submissions`, `evaluations`, `run_assets`, `run_asset_references`. SQLite-compatible: all new tables, no `batch_alter_table` required. CHECK constraints declared inline. Designed to apply cleanly on Postgres.
+One Alembic migration adding five tables (`mini_projects`, `submissions`, `evaluations`, `run_assets`, `run_asset_references`) plus one column on `groups` (`is_disabled BOOLEAN NOT NULL DEFAULT 0`).
+
+The column add is SQLite-compatible without `batch_alter_table` because adding a NOT NULL column with a server-side default value is supported. CHECK constraints on new tables declared inline. Designed to apply cleanly on Postgres.
 
 Migration file: `<rev>_add_mini_projects_submissions_evaluations.py`.
 
@@ -453,13 +514,13 @@ Test files (TDD, mirroring Phase 7a structure):
 
 | File | Coverage |
 |---|---|
-| `tests/test_mini_projects.py` | CRUD, publish/unpublish gate, edit rules, lock semantics post-submission, force-unpublish |
-| `tests/test_run_assets.py` | Upload, list, serve, delete, reference tracking via assignment_md, force-delete-when-referenced |
-| `tests/test_submissions.py` | Initial vs resubmission flow, deadline enforcement, file storage layout, filename sanitization, late detection, cross-run integrity, group-member auth, retry-on-IntegrityError |
-| `tests/test_evaluations.py` | Evaluate with each result, feedback_file mandatory unless accepted, score validation, auto-accept for resubmissions, dual-evaluate race |
-| `tests/test_mini_project_notifications.py` | `evaluation_received` notification rows written |
+| `tests/test_mini_projects.py` | CRUD, publish gate (incl. resubmission_deadline-required), edit rules pre/post submission, lock semantics, no-unpublish behavior, delete-with-force |
+| `tests/test_run_assets.py` | Upload, list, serve, delete, reference tracking via assignment_md, force-delete-when-referenced, sanitization |
+| `tests/test_submissions.py` | Initial vs resubmission flow, deadline enforcement, file storage layout, filename sanitization, late detection (incl. recompute on soft_deadline extension), cross-run integrity, group-member auth, retry-on-IntegrityError, file-write rollback on DB failure, disabled-group rejection |
+| `tests/test_evaluations.py` | Evaluate with each result, feedback_file mandatory unless accepted, score validation, auto-accept for resubmissions (incl. evaluated_by = previous evaluator), dual-evaluate race, auto-eval failure rollback |
+| `tests/test_mini_project_notifications.py` | `evaluation_received` notification rows written to current group members |
 | Existing `tests/test_runs.py` extension | Run delete tightening (students-block, submissions-block, force) |
-| Existing `tests/test_groups.py` extension | Group delete blocked by submissions |
+| Existing `tests/test_groups.py` extension | Group delete blocked by submissions; disable/enable endpoint |
 
 Use existing `admin_client`, `auth_client`, `teacher_client`, and `seed_publishable_version` fixtures from `conftest.py`. Add `seed_run_with_groups` fixture that stages a published run with one group of two students. Test count delta target: ~50-70 tests.
 
@@ -467,7 +528,7 @@ Use existing `admin_client`, `auth_client`, `teacher_client`, and `seed_publisha
 
 - **Bulk operations** (move multiple students between groups, bulk submission download, ZIP export of all submissions): deferred to 7c.
 - **Student-facing mini-project view** (`/api/runs/{rid}/my-mini-projects`, my-submissions, my-evaluations): deferred to 7c.
-- **Scheduled deadline-approaching notifications** (soft / hard / resubmission): deferred to Phase 9 with the email scheduler.
+- **Scheduled deadline-approaching notifications** (soft / hard / resubmission): deferred to Phase 9 with the email scheduler. Resubmission-deadline reminder filters to groups with pending revision (see §Notifications).
 - **Teacher summary email** (after soft deadline): deferred to Phase 9.
 - **`INDEX evaluations.result`** for dashboard aggregation: deferred to 7c when actual query patterns are known.
 - **SQLite-portable concurrency (SAVEPOINT-based)**: deferred to Phase 9 SAVEPOINT cleanup.
@@ -475,16 +536,16 @@ Use existing `admin_client`, `auth_client`, `teacher_client`, and `seed_publisha
 
 ## Implementation Sequence (preview for the plan)
 
-1. Models + migration (MiniProject, Submission, Evaluation, RunAsset, RunAssetReference)
-2. Phase 7a cleanup: rename `_enroll_user_in_run`, replace `_has_submissions` stub, collapse `require_run_admin_or_teacher` signature, add Phase 9 TODO race markers
-3. Schemas (MiniProjectCreate/Update/Response, SubmissionResponse, EvaluationCreate/Update/Response, RunAssetResponse)
-4. RunAsset endpoints (parallel to Phase 6 assets, run-scoped)
-5. `render_with_run_assets` and `sync_run_asset_references` helpers
-6. Mini-project CRUD endpoints + publish/unpublish + lock semantics
-7. Submission endpoint with deadline/lifecycle gates
-8. Evaluation endpoint + auto-accept on resubmission
-9. `evaluation_received` notification row writes
-10. Run-delete tightening + group-delete extension (both with force flag)
+1. Models + migration (MiniProject, Submission, Evaluation, RunAsset, RunAssetReference; Group.is_disabled column add)
+2. Phase 7a cleanup: rename `_enroll_user_in_run`, add `_has_submissions` helper and wire into patch_run + delete_run, collapse `require_run_admin_or_teacher` signature, add Phase 9 TODO race markers
+3. Schemas (MiniProjectCreate/Update/Response, SubmissionResponse, EvaluationCreate/Update/Response, RunAssetResponse, GroupUpdate extension for is_disabled)
+4. RunAsset endpoints (parallel to Phase 6 assets, run-scoped, with file-write rollback pattern)
+5. `render_with_run_assets` and `sync_run_asset_references` helpers; `mini_project_visible_to_student` helper
+6. Mini-project CRUD + publish endpoint + lock semantics (no unpublish)
+7. Submission endpoint with deadline/lifecycle gates, file-write rollback, atomic `first_submitted_at` set, `is_late` recompute on `soft_deadline` extension
+8. Evaluation endpoint + auto-accept on resubmission (atomic inside submission transaction)
+9. `evaluation_received` notification row writes to current group members
+10. Run-delete tightening + group-delete check + group disable/enable endpoint
 11. File-storage helpers (filename builders, path defenses) wired through endpoints
 12. Final regression sweep against Phase 6/7a baseline
 
