@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -260,6 +260,15 @@ class MiniProject(Base):
     __tablename__ = "mini_projects"
     __table_args__ = (
         UniqueConstraint("run_id", "block_id", name="uq_mini_project_run_block"),
+        CheckConstraint(
+            "soft_deadline IS NULL OR hard_deadline IS NULL OR soft_deadline <= hard_deadline",
+            name="ck_mini_project_soft_le_hard",
+        ),
+        CheckConstraint(
+            "hard_deadline IS NULL OR resubmission_deadline IS NULL OR hard_deadline <= resubmission_deadline",
+            name="ck_mini_project_hard_le_resubmission",
+        ),
+        Index("ix_mini_projects_run_published", "run_id", "is_published"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -283,6 +292,12 @@ class Submission(Base):
     __tablename__ = "submissions"
     __table_args__ = (
         UniqueConstraint("mini_project_id", "group_id", "submission_number", name="uq_submission_number"),
+        CheckConstraint("submission_number >= 1", name="ck_submission_number_positive"),
+        CheckConstraint("file_size > 0", name="ck_submission_file_size_positive"),
+        Index(
+            "ix_submissions_latest",
+            "mini_project_id", "group_id", "submission_number",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -302,6 +317,20 @@ class Submission(Base):
 
 class Evaluation(Base):
     __tablename__ = "evaluations"
+    __table_args__ = (
+        CheckConstraint(
+            "result IN ('rejected', 'major_revision', 'minor_revision', 'accepted')",
+            name="ck_evaluation_result_enum",
+        ),
+        CheckConstraint(
+            "score IS NULL OR (score >= 0 AND score <= 100)",
+            name="ck_evaluation_score_range",
+        ),
+        CheckConstraint(
+            "result = 'accepted' OR feedback_file IS NOT NULL",
+            name="ck_evaluation_feedback_file_required",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True)
