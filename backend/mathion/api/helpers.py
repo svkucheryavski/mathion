@@ -158,6 +158,24 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
     return rs
 
 
+def _has_submissions(db: Session, run) -> bool:
+    """Return True if any Submission row exists for any mini-project on this run.
+
+    Used by:
+    - `runs.py:patch_run` — to block lowering `end_date` past `now()` while submissions exist
+    - `runs.py:delete_run` — to block deletion when submissions exist (force flag bypasses)
+    """
+    from sqlalchemy import exists
+    from mathion.models import MiniProject, Submission
+
+    return db.scalar(
+        select(exists().where(
+            Submission.mini_project_id == MiniProject.id,
+            MiniProject.run_id == run.id,
+        ))
+    ) or False
+
+
 def render_with_assets(db: Session, version_id: int, content_md: str | None) -> str:
     """Render markdown, validating and resolving asset references.
 

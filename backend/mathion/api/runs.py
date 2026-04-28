@@ -88,6 +88,9 @@ def delete_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(
 
 @router.post("/api/runs/{run_id}/publish", response_model=RunResponse)
 def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    # TODO(phase 9): publish-gate validation is read-then-write; a teacher
+    # could be removed concurrently between the count check and is_published
+    # update. Fix via SAVEPOINT-wrapped re-check in Phase 9.
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
     if run.is_published:
