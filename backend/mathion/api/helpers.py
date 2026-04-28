@@ -109,7 +109,7 @@ def require_run_admin_or_teacher(db: Session, user, run_id: int):
         raise HTTPException(status_code=403, detail="Run admin or teacher access required")
 
 
-def _enroll_user_in_run(db: Session, user, run, group_id: int | None):
+def enroll_user_in_run(db: Session, user, run, group_id: int | None):
     """Enroll a user in a run.
 
     1. Group capacity check (max 10 if group_id given).

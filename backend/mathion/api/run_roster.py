@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
-    _enroll_user_in_run,
+    enroll_user_in_run,
     get_or_create_user,
     require_run_admin_or_teacher,
 )
@@ -45,7 +45,7 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
             raise HTTPException(status_code=400, detail="Group not in this run")
 
     target = get_or_create_user(db, data.email)
-    rs = _enroll_user_in_run(db, target, run, data.group_id)
+    rs = enroll_user_in_run(db, target, run, data.group_id)
     db.commit()
     db.refresh(rs)
     return _to_response(rs)
@@ -162,7 +162,7 @@ def add_students_batch(
                     db.flush()
                 gid = g.id
 
-            rs = _enroll_user_in_run(db, target, run, gid)
+            rs = enroll_user_in_run(db, target, run, gid)
             sp.commit()
             results.append({"email": row.email, "status": "added", "group_id": rs.group_id})
         except HTTPException as e:
