@@ -25,31 +25,25 @@ def _make_run(db):
 
 def test_superuser_passes(db, superuser):
     _, run = _make_run(db)
-    require_run_admin_or_teacher(db, superuser, run.id)  # no exception
+    require_run_admin_or_teacher(db, superuser, run)  # no exception
 
 
 def test_course_admin_passes(db, test_user):
     course, run = _make_run(db)
     db.add(CourseAdmin(course_id=course.id, user_id=test_user.id))
     db.commit()
-    require_run_admin_or_teacher(db, test_user, run.id)  # no exception
+    require_run_admin_or_teacher(db, test_user, run)  # no exception
 
 
 def test_run_teacher_passes(db, test_user):
     _, run = _make_run(db)
     db.add(RunTeacher(run_id=run.id, user_id=test_user.id))
     db.commit()
-    require_run_admin_or_teacher(db, test_user, run.id)  # no exception
+    require_run_admin_or_teacher(db, test_user, run)  # no exception
 
 
 def test_unrelated_user_403(db, test_user):
     _, run = _make_run(db)
     with pytest.raises(HTTPException) as excinfo:
-        require_run_admin_or_teacher(db, test_user, run.id)
+        require_run_admin_or_teacher(db, test_user, run)
     assert excinfo.value.status_code == 403
-
-
-def test_run_not_found_404(db, superuser):
-    with pytest.raises(HTTPException) as excinfo:
-        require_run_admin_or_teacher(db, superuser, 9999)
-    assert excinfo.value.status_code == 404

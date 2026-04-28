@@ -51,15 +51,15 @@ def list_runs(course_id: int, db: Session = Depends(get_db), user: User = Depend
 
 @router.get("/api/runs/{run_id}", response_model=RunResponse)
 def get_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
-    run = db.get(Run, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     return run
 
 
 @router.patch("/api/runs/{run_id}", response_model=RunResponse)
 def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
-    run = db.get(Run, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     updates = data.model_dump(exclude_unset=True)
 
     if "groups_enabled" in updates and run.is_published:

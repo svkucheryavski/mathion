@@ -56,7 +56,8 @@ def add_teacher(run_id: int, data: RunTeacherCreate, db: Session = Depends(get_d
 
 @router.get("/api/runs/{run_id}/teachers", response_model=list[RunTeacherResponse])
 def list_teachers(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     rows = db.execute(
         select(RunTeacher).where(RunTeacher.run_id == run_id).order_by(RunTeacher.created_at)
     ).scalars().all()

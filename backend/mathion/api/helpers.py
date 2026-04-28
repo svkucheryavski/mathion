@@ -77,20 +77,14 @@ def require_course_admin_for_run(db: Session, user, run) -> None:
     require_course_admin(db, user, version.course_id)
 
 
-def require_run_admin_or_teacher(db: Session, user, run_id: int):
+def require_run_admin_or_teacher(db: Session, user, run) -> None:
     """Verify user is a course admin of the run's course OR a RunTeacher of
-    the run OR a superuser. Raises 404 if run missing, 403 if no access."""
-    from mathion.models import CourseAdmin, CourseVersion, Run, RunTeacher
+    the run OR a superuser. Raises 403 if no access. Caller is expected to
+    have already loaded `run` (via `get_or_404` or similar)."""
+    from mathion.models import CourseAdmin, CourseVersion, RunTeacher
 
     if user.is_superuser:
-        run = db.get(Run, run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Run not found")
         return
-
-    run = db.get(Run, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Run not found")
 
     version = db.get(CourseVersion, run.version_id)
     is_course_admin = db.execute(
@@ -101,7 +95,7 @@ def require_run_admin_or_teacher(db: Session, user, run_id: int):
     ).scalar_one_or_none() is not None
     is_run_teacher = db.execute(
         select(RunTeacher).where(
-            RunTeacher.run_id == run_id,
+            RunTeacher.run_id == run.id,
             RunTeacher.user_id == user.id,
         )
     ).scalar_one_or_none() is not None

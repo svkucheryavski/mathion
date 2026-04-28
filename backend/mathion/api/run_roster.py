@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
     enroll_user_in_run,
+    get_or_404,
     get_or_create_user,
     require_run_admin_or_teacher,
 )
@@ -37,8 +38,8 @@ def _to_response(rs: RunStudent) -> dict:
 @router.post("/api/runs/{run_id}/students", status_code=201, response_model=RunStudentResponse)
 def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
-    run = db.get(Run, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     if data.group_id is not None:
         g = db.get(Group, data.group_id)
         if g is None or g.run_id != run_id:
@@ -53,7 +54,8 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
 
 @router.get("/api/runs/{run_id}/students", response_model=list[RunStudentResponse])
 def list_students(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     rows = db.execute(
         select(RunStudent).where(RunStudent.run_id == run_id).order_by(RunStudent.created_at)
     ).scalars().all()
@@ -63,7 +65,8 @@ def list_students(run_id: int, db: Session = Depends(get_db), user: User = Depen
 @router.patch("/api/runs/{run_id}/students/{user_id}", response_model=RunStudentResponse)
 def patch_student(run_id: int, user_id: int, data: RunStudentUpdate,
                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     rs = db.execute(
         select(RunStudent).where(RunStudent.run_id == run_id, RunStudent.user_id == user_id)
     ).scalar_one_or_none()
@@ -90,8 +93,8 @@ def patch_student(run_id: int, user_id: int, data: RunStudentUpdate,
 @router.delete("/api/runs/{run_id}/students/{user_id}", status_code=204)
 def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
-    require_run_admin_or_teacher(db, user, run_id)
-    run = db.get(Run, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     rs = db.execute(
         select(RunStudent).where(RunStudent.run_id == run_id, RunStudent.user_id == user_id)
     ).scalar_one_or_none()
@@ -138,8 +141,8 @@ def add_students_batch(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    require_run_admin_or_teacher(db, user, run_id)
-    run = db.get(Run, run_id)
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
     results = []
 
     for row in data.rows:
