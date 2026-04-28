@@ -464,8 +464,8 @@ def upgrade() -> None:
         sa.Column("resubmission_deadline", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_published", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("first_submitted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.UniqueConstraint("run_id", "block_id", name="uq_mini_project_run_block"),
         sa.CheckConstraint(
             "soft_deadline IS NULL OR hard_deadline IS NULL OR soft_deadline <= hard_deadline",
@@ -488,7 +488,7 @@ def upgrade() -> None:
         sa.Column("group_id", sa.Integer(), sa.ForeignKey("groups.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("submission_number", sa.Integer(), nullable=False),
         sa.Column("submitted_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.Column("file_path", sa.String(512), nullable=False),
         sa.Column("file_size", sa.Integer(), nullable=False),
         sa.Column("is_late", sa.Boolean(), nullable=False, server_default=sa.text("0")),
@@ -509,15 +509,15 @@ def upgrade() -> None:
     op.create_table(
         "evaluations",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("evaluated_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("evaluated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("evaluated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.Column("result", sa.String(20), nullable=False),
         sa.Column("score", sa.Integer(), nullable=True),
         sa.Column("feedback_text", sa.Text(), nullable=True),
         sa.Column("feedback_file", sa.String(512), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.CheckConstraint(
             "result IN ('rejected', 'major_revision', 'minor_revision', 'accepted')",
             name="ck_evaluation_result_enum",
@@ -531,6 +531,7 @@ def upgrade() -> None:
             name="ck_evaluation_feedback_file_required",
         ),
     )
+    op.create_index(op.f("ix_evaluations_submission_id"), "evaluations", ["submission_id"], unique=True)
 
     # New table: run_assets
     op.create_table(
@@ -540,7 +541,7 @@ def upgrade() -> None:
         sa.Column("filename", sa.String(255), nullable=False),
         sa.Column("file_size", sa.Integer(), nullable=False),
         sa.Column("mime_type", sa.String(100), nullable=False),
-        sa.Column("uploaded_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("uploaded_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.Column("uploaded_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.UniqueConstraint("run_id", "filename", name="uq_run_asset_run_filename"),
     )
@@ -563,6 +564,7 @@ def downgrade() -> None:
     op.drop_table("run_asset_references")
     op.drop_index(op.f("ix_run_assets_run_id"), table_name="run_assets")
     op.drop_table("run_assets")
+    op.drop_index(op.f("ix_evaluations_submission_id"), table_name="evaluations")
     op.drop_table("evaluations")
     op.drop_index("ix_submissions_latest", table_name="submissions")
     op.drop_index(op.f("ix_submissions_group_id"), table_name="submissions")
