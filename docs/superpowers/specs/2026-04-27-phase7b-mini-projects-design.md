@@ -269,7 +269,7 @@ A published mini-project without submissions deletes without force.
 `DELETE /api/runs/{rid}` (course-admin only) without `?force=true` is blocked if any of:
 1. `is_published=True` (Phase 7a — must unpublish run first via existing endpoint)
 2. **`RunStudent` count > 0** (new — admin must clear roster via existing per-student remove endpoint)
-3. **Any submission exists for any mini-project on this run** (new — checked via the new `_has_submissions` helper)
+3. **Any submission exists for any mini-project on this run** (new — checked via the new `has_submissions` helper)
 
 `DELETE /api/runs/{rid}?force=true` (course-admin only) **overrides all three blocks above** — including a still-published run. The intent of force is "this run is being purged regardless of state." UI surfaces high-risk confirmation per the platform spec line 59 pattern.
 
@@ -514,7 +514,7 @@ Phase 7b follows Phase 7a's precedent: DB UNIQUE constraints preserve data integ
 These items were deferred from Phase 7a's final review and are addressed here because Phase 7b touches the same surface anyway:
 
 1. **Rename `_enroll_user_in_run` → `enroll_user_in_run`** (`helpers.py:112`). Cross-module helper shouldn't have leading underscore.
-2. **Add `_has_submissions(db, run) -> bool` helper** in `helpers.py` (does not currently exist in code despite earlier roadmap notes). Wire into:
+2. **Add `has_submissions(db, run) -> bool` helper** in `helpers.py` (does not currently exist in code despite earlier roadmap notes). Wire into:
    - `runs.py:patch_run` — end_date-lowering check (currently unguarded; add the new check)
    - `runs.py:delete_run` — Phase 7b's run-delete tightening (new check)
 3. **Add `# TODO(phase 9)` race comments** at `run_roster.py:patch_student` capacity check and `runs.py` publish-gate (currently only at `helpers.py:_enroll_user_in_run`).
@@ -559,7 +559,7 @@ Use existing `admin_client`, `auth_client`, `teacher_client`, and `seed_publisha
 ## Implementation Sequence (preview for the plan)
 
 1. Models + migration (MiniProject, Submission, Evaluation, RunAsset, RunAssetReference; Group.is_disabled column add)
-2. Phase 7a cleanup: rename `_enroll_user_in_run`, add `_has_submissions` helper and wire into patch_run + delete_run, collapse `require_run_admin_or_teacher` signature, add Phase 9 TODO race markers
+2. Phase 7a cleanup: rename `_enroll_user_in_run`, add `has_submissions` helper and wire into patch_run + delete_run, collapse `require_run_admin_or_teacher` signature, add Phase 9 TODO race markers
 3. Schemas (MiniProjectCreate/Update/Response, SubmissionResponse, EvaluationCreate/Update/Response, RunAssetResponse, GroupUpdate extension for is_disabled)
 4. RunAsset endpoints (parallel to Phase 6 assets, run-scoped, with file-write rollback pattern)
 5. `render_with_run_assets` and `sync_run_asset_references` helpers; `mini_project_visible_to_student` helper

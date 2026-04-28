@@ -47,3 +47,21 @@ def test_unrelated_user_403(db, test_user):
     with pytest.raises(HTTPException) as excinfo:
         require_run_admin_or_teacher(db, test_user, run)
     assert excinfo.value.status_code == 403
+
+
+# 404 on bad run_id is now the responsibility of each calling route handler
+# (via get_or_404), not the auth helper. These tests guard against any
+# route accidentally skipping that lookup. POST routes with required bodies
+# are excluded — Pydantic body validation runs before the route function,
+# masking 404 with 422; their 404 path is exercised in flow tests.
+@pytest.mark.parametrize("method,path", [
+    ("get", "/api/runs/999999"),
+    ("delete", "/api/runs/999999"),
+    ("post", "/api/runs/999999/publish"),
+    ("get", "/api/runs/999999/teachers"),
+    ("get", "/api/runs/999999/students"),
+    ("get", "/api/runs/999999/groups"),
+])
+def test_routes_return_404_for_unknown_run(admin_client, method, path):
+    response = getattr(admin_client, method)(path)
+    assert response.status_code == 404, f"{method.upper()} {path} returned {response.status_code}"

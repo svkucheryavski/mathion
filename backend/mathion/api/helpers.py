@@ -158,7 +158,7 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
     return rs
 
 
-def _has_submissions(db: Session, run) -> bool:
+def has_submissions(db: Session, run) -> bool:
     """Return True if any Submission row exists for any mini-project on this run.
 
     Used by:

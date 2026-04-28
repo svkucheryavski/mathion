@@ -18,8 +18,8 @@
 |------|---------------|
 | `mathion/models.py` | Add `MiniProject`, `Submission`, `Evaluation`, `RunAsset`, `RunAssetReference`; add `is_disabled` to `Group` |
 | `mathion/schemas.py` | Add MiniProject*/Submission*/Evaluation*/RunAsset* schemas; extend `GroupUpdate` with `is_disabled` |
-| `mathion/api/helpers.py` | Rename `_enroll_user_in_run` → `enroll_user_in_run`; collapse `require_run_admin_or_teacher`; add `_has_submissions`, `mini_project_visible_to_student`, `render_with_run_assets`, `sync_run_asset_references`, `build_submission_filename`, `build_feedback_filename`, `submission_storage_dir`, `run_asset_storage_dir` |
-| `mathion/api/runs.py` | Wire `_has_submissions` into `patch_run` end_date check; add submission-block + force-cascade to `delete_run` |
+| `mathion/api/helpers.py` | Rename `_enroll_user_in_run` → `enroll_user_in_run`; collapse `require_run_admin_or_teacher`; add `has_submissions`, `mini_project_visible_to_student`, `render_with_run_assets`, `sync_run_asset_references`, `build_submission_filename`, `build_feedback_filename`, `submission_storage_dir`, `run_asset_storage_dir` |
+| `mathion/api/runs.py` | Wire `has_submissions` into `patch_run` end_date check; add submission-block + force-cascade to `delete_run` |
 | `mathion/api/groups.py` | Add disable/enable via PATCH; tighten DELETE to also reject when submissions exist |
 | `mathion/api/run_roster.py` | Add `# TODO(phase 9)` race comments; reject student moves into disabled groups |
 | `mathion/api/mini_projects.py` | NEW — Mini-project CRUD + publish endpoint + lock semantics |
@@ -49,7 +49,7 @@ Address Phase 7a deferred items that Phase 7b depends on. Single commit per item
 - Modify: `mathion/api/run_teachers.py` (callers of renamed helper)
 - Modify: `mathion/api/runs.py` (callers of renamed helper + signature update for `require_run_admin_or_teacher` + add `# TODO(phase 9)` at publish-gate)
 - Modify: `tests/test_run_roster.py`, `tests/test_run_teachers.py` (any direct imports of `_enroll_user_in_run`)
-- Modify: `mathion/api/helpers.py` add `_has_submissions` helper
+- Modify: `mathion/api/helpers.py` add `has_submissions` helper
 
 - [ ] **Step 1: Run baseline tests to confirm green start**
 
@@ -178,12 +178,12 @@ Eliminates redundant db.get(Run) in routers. Matches the shape of
 require_course_admin_for_run (helpers.py:71)."
 ```
 
-- [ ] **Step 10: Add `_has_submissions` helper in `mathion/api/helpers.py`**
+- [ ] **Step 10: Add `has_submissions` helper in `mathion/api/helpers.py`**
 
 Append to `helpers.py`:
 
 ```python
-def _has_submissions(db: Session, run) -> bool:
+def has_submissions(db: Session, run) -> bool:
     """Return True if any Submission row exists for any mini-project on this run.
 
     Used by:
@@ -231,7 +231,7 @@ Expected: all 380 tests pass.
 ```bash
 cd backend
 git add mathion/api/helpers.py mathion/api/run_roster.py mathion/api/runs.py
-git commit -m "feat: add _has_submissions helper + Phase 9 race TODO markers
+git commit -m "feat: add has_submissions helper + Phase 9 race TODO markers
 
 Prerequisite helper for Phase 7b run-delete tightening. Race markers added
 at the two remaining unannotated spots (capacity, publish-gate)."
@@ -1297,7 +1297,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
-    _has_submissions,
+    has_submissions,
     get_or_404,
     mini_project_visible_to_student,
     render_with_run_assets,
@@ -2693,7 +2693,7 @@ def delete_run(
 ):
     import os
     import shutil
-    from mathion.api.helpers import _has_submissions, run_asset_storage_dir, submission_storage_dir
+    from mathion.api.helpers import has_submissions, run_asset_storage_dir, submission_storage_dir
     from mathion.config import settings
     from mathion.models import Evaluation, Group, MiniProject, RunAsset, RunAssetReference, RunStudent, RunTeacher, Submission
 
@@ -2706,7 +2706,7 @@ def delete_run(
         student_count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.run_id == run_id))
         if student_count and student_count > 0:
             raise HTTPException(status_code=409, detail="Run has students; clear roster or use ?force=true")
-        if _has_submissions(db, run):
+        if has_submissions(db, run):
             raise HTTPException(status_code=409, detail="Run has submissions; use ?force=true to override")
         # Simple delete (cascade via FKs handles teachers/groups/students)
         db.delete(run)
@@ -2741,7 +2741,7 @@ def delete_run(
                 pass
 ```
 
-- [ ] **Step 2: Add `_has_submissions` check in `patch_run` end_date logic**
+- [ ] **Step 2: Add `has_submissions` check in `patch_run` end_date logic**
 
 Find `patch_run` in `runs.py` and update the end_date validation:
 
@@ -2749,7 +2749,7 @@ Find `patch_run` in `runs.py` and update the end_date validation:
 @router.patch("/api/runs/{run_id}", response_model=RunResponse)
 def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from datetime import date as _date
-    from mathion.api.helpers import _has_submissions
+    from mathion.api.helpers import has_submissions
 
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
@@ -2771,7 +2771,7 @@ def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user:
 
     # Phase 7b: lowering end_date past today blocked when submissions exist
     if "end_date" in updates and updates["end_date"] < run.end_date:
-        if _has_submissions(db, run):
+        if has_submissions(db, run):
             raise HTTPException(status_code=409, detail="Cannot shorten run while submissions exist")
 
     for field, value in updates.items():
@@ -2826,7 +2826,7 @@ Expected: all PASS (existing + 2 new).
 ```bash
 cd backend
 git add mathion/api/runs.py tests/test_runs.py
-git commit -m "feat: tighten run delete; add force-delete cascade; wire _has_submissions into patch_run"
+git commit -m "feat: tighten run delete; add force-delete cascade; wire has_submissions into patch_run"
 ```
 
 ---
