@@ -416,6 +416,7 @@ class GroupCreate(BaseModel):
 
 class GroupUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
+    is_disabled: bool | None = None
 
 
 class GroupResponse(BaseModel):
@@ -475,3 +476,104 @@ class RunStudentResponse(BaseModel):
     user_full_name: str | None
     group_id: int | None
     created_at: datetime
+
+
+# ============================================================================
+# Phase 7b: Mini-Projects
+# ============================================================================
+
+class MiniProjectCreate(BaseModel):
+    block_id: int
+    assignment_md: str = Field(min_length=1)
+    soft_deadline: datetime | None = None
+    hard_deadline: datetime | None = None
+    resubmission_deadline: datetime | None = None
+
+
+class MiniProjectUpdate(BaseModel):
+    assignment_md: str | None = Field(default=None, min_length=1)
+    soft_deadline: datetime | None = None
+    hard_deadline: datetime | None = None
+    resubmission_deadline: datetime | None = None
+
+
+class MiniProjectResponse(BaseModel):
+    id: int
+    run_id: int
+    block_id: int
+    title: str  # derived: f"Mini project for Block {block.order}"
+    assignment_md: str
+    assignment_html: str
+    soft_deadline: datetime | None
+    hard_deadline: datetime | None
+    resubmission_deadline: datetime | None
+    is_published: bool
+    first_submitted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ============================================================================
+# Phase 7b: Submissions
+# ============================================================================
+
+class SubmissionResponse(BaseModel):
+    id: int
+    mini_project_id: int
+    group_id: int
+    submission_number: int
+    submitted_by: int
+    submitted_at: datetime
+    file_size: int
+    is_late: bool
+    is_resubmission: bool
+
+    model_config = {"from_attributes": True}
+
+
+# ============================================================================
+# Phase 7b: Evaluations
+# ============================================================================
+
+class EvaluationCreate(BaseModel):
+    result: str = Field(pattern="^(rejected|major_revision|minor_revision|accepted)$")
+    score: int | None = Field(default=None, ge=0, le=100)
+    feedback_text: str | None = None
+
+
+class EvaluationUpdate(BaseModel):
+    result: str | None = Field(default=None, pattern="^(rejected|major_revision|minor_revision|accepted)$")
+    score: int | None = Field(default=None, ge=0, le=100)
+    feedback_text: str | None = None
+
+
+class EvaluationResponse(BaseModel):
+    id: int
+    submission_id: int
+    evaluated_by: int
+    evaluated_at: datetime
+    result: str
+    score: int | None
+    feedback_text: str | None
+    feedback_file: str | None  # path; client uses /feedback-file endpoint to download
+
+    model_config = {"from_attributes": True}
+
+
+# ============================================================================
+# Phase 7b: Run-Assets
+# ============================================================================
+
+class RunAssetResponse(BaseModel):
+    id: int
+    run_id: int
+    filename: str
+    file_size: int
+    mime_type: str
+    uploaded_at: datetime
+    uploaded_by: int | None
+    is_referenced: bool = False
+
+    model_config = {"from_attributes": True}
