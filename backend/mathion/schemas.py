@@ -501,7 +501,7 @@ class MiniProjectResponse(BaseModel):
     id: int
     run_id: int
     block_id: int
-    title: str  # derived: f"Mini project for Block {block.order}"
+    title: str = ""  # service-populated: f"Mini project for Block {block.order}"
     assignment_md: str
     assignment_html: str
     soft_deadline: datetime | None
@@ -538,13 +538,13 @@ class SubmissionResponse(BaseModel):
 # ============================================================================
 
 class EvaluationCreate(BaseModel):
-    result: str = Field(pattern="^(rejected|major_revision|minor_revision|accepted)$")
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"]
     score: int | None = Field(default=None, ge=0, le=100)
     feedback_text: str | None = None
 
 
 class EvaluationUpdate(BaseModel):
-    result: str | None = Field(default=None, pattern="^(rejected|major_revision|minor_revision|accepted)$")
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"] | None = None
     score: int | None = Field(default=None, ge=0, le=100)
     feedback_text: str | None = None
 
@@ -554,10 +554,10 @@ class EvaluationResponse(BaseModel):
     submission_id: int
     evaluated_by: int
     evaluated_at: datetime
-    result: str
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"]
     score: int | None
     feedback_text: str | None
-    feedback_file: str | None  # path; client uses /feedback-file endpoint to download
+    has_feedback_file: bool = False
 
     model_config = {"from_attributes": True}
 
