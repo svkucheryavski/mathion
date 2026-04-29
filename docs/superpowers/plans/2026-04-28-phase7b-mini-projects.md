@@ -918,11 +918,13 @@ Append to `conftest.py`:
 
 ```python
 @pytest.fixture
-def seed_run_with_groups(admin_client, seed_publishable_version):
+def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
     """Create a published run with groups_enabled, two groups each with one student.
 
     Returns (run_dict, group_a, group_b, student_a, student_b). All entities are
-    committed and ready to use. Run is `is_published=True`.
+    committed and ready to use. Run is `is_published=True`. Requests asset_tmpdir
+    so any downstream file writes in test bodies (run-asset upload, submission,
+    feedback) are sandboxed to a per-test tmp dir.
     """
     def _factory():
         course, _ = seed_publishable_version()
