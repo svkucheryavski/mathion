@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,19 +6,37 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
-    has_submissions,
     get_or_404,
     mini_project_visible_to_student,
     render_with_run_assets,
     require_course_admin,
     require_run_admin_or_teacher,
+    submission_storage_dir,
     sync_run_asset_references,
 )
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Block, CourseVersion, MiniProject, Run, Submission
+from mathion.models import (
+    Block,
+    CourseVersion,
+    Evaluation,
+    MiniProject,
+    Run,
+    RunAssetReference,
+    Submission,
+)
 from mathion.models_auth import User
 from mathion.schemas import MiniProjectCreate, MiniProjectResponse, MiniProjectUpdate
+
+
+def _to_utc_aware(dt: datetime | None) -> datetime | None:
+    """Normalize a datetime read from the DB (which may be tz-naive on SQLite
+    or tz-aware on Postgres) to a tz-aware UTC datetime for safe comparisons."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 router = APIRouter(tags=["mini-projects"])
 
@@ -174,15 +193,15 @@ def patch_mini_project(
             violations.append("assignment_md is locked")
         for field in ("soft_deadline", "hard_deadline", "resubmission_deadline"):
             if field in updates:
-                old = getattr(mp, field)
-                new = updates[field]
+                old = _to_utc_aware(getattr(mp, field))
+                new = _to_utc_aware(updates[field])
                 # Allow NULL → non-NULL transition (only meaningful for soft_deadline)
                 if old is not None and new is not None and new <= old:
                     violations.append(f"{field} can only be extended (new must be > old)")
                 if old is not None and new is None:
                     violations.append(f"{field} cannot be set to NULL once locked")
     if violations:
-        raise HTTPException(status_code=409, detail=violations)
+        raise HTTPException(status_code=409, detail="; ".join(violations))
 
     soft_changed = "soft_deadline" in updates and updates["soft_deadline"] != mp.soft_deadline
     for field, value in updates.items():
@@ -220,10 +239,6 @@ def delete_mini_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    import os
-    from mathion.api.helpers import submission_storage_dir
-    from mathion.models import Evaluation, RunAssetReference
-
     mp = get_or_404(db, MiniProject, mp_id)
     run = get_or_404(db, Run, mp.run_id)
     require_run_admin_or_teacher(db, user, run)
@@ -290,21 +305,23 @@ def publish_mini_project(
         violations.append("hard_deadline required at publish")
     if mp.resubmission_deadline is None:
         violations.append("resubmission_deadline required at publish")
-    # SQLite returns naive datetimes; use naive UTC now for comparison.
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    if mp.hard_deadline is not None and mp.hard_deadline <= now:
+    now = datetime.now(timezone.utc)
+    hard_aware = _to_utc_aware(mp.hard_deadline)
+    soft_aware = _to_utc_aware(mp.soft_deadline)
+    resub_aware = _to_utc_aware(mp.resubmission_deadline)
+    if hard_aware is not None and hard_aware <= now:
         violations.append("hard_deadline must be in the future")
-    if mp.hard_deadline is not None and mp.hard_deadline.date() > run.end_date:
+    if hard_aware is not None and hard_aware.date() > run.end_date:
         violations.append("hard_deadline must fall within run end_date")
-    if mp.resubmission_deadline is not None and mp.resubmission_deadline.date() > run.end_date:
+    if resub_aware is not None and resub_aware.date() > run.end_date:
         violations.append("resubmission_deadline must fall within run end_date")
-    if mp.soft_deadline is not None and mp.hard_deadline is not None and mp.soft_deadline > mp.hard_deadline:
+    if soft_aware is not None and hard_aware is not None and soft_aware > hard_aware:
         violations.append("soft_deadline must be <= hard_deadline")
-    if mp.hard_deadline is not None and mp.resubmission_deadline is not None and mp.hard_deadline > mp.resubmission_deadline:
+    if hard_aware is not None and resub_aware is not None and hard_aware > resub_aware:
         violations.append("hard_deadline must be <= resubmission_deadline")
 
     if violations:
-        raise HTTPException(status_code=409, detail=violations)
+        raise HTTPException(status_code=409, detail="; ".join(violations))
 
     mp.is_published = True
     db.commit()
