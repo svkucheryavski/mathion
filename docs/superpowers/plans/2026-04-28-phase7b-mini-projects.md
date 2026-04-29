@@ -771,13 +771,21 @@ def build_feedback_filename(block_order: int, group_name: str, submission_number
 
 
 def submission_storage_dir(run_id: int, group_id: int) -> str:
-    """Filesystem directory for a group's submissions on a run."""
-    return os.path.join(settings.asset_path, "submissions", str(run_id), str(group_id))
+    """Filesystem directory for a group's submissions on a run.
+
+    Layout: <asset_path>/runs/{run_id}/submissions/{group_id}/. Lives under
+    the per-run tree so run force-delete wipes a single subtree.
+    """
+    return os.path.join(settings.asset_path, "runs", str(run_id), "submissions", str(group_id))
 
 
 def run_asset_storage_dir(run_id: int) -> str:
-    """Filesystem directory for run-scoped asset files."""
-    return os.path.join(settings.asset_path, "runs", str(run_id))
+    """Filesystem directory for run-scoped asset files.
+
+    Layout: <asset_path>/runs/{run_id}/assets/. Lives under the per-run tree
+    alongside submissions.
+    """
+    return os.path.join(settings.asset_path, "runs", str(run_id), "assets")
 ```
 
 - [ ] **Step 2: Add `mini_project_visible_to_student` helper**
@@ -2757,19 +2765,19 @@ def delete_run(
     if mp_ids:
         db.execute(RunAssetReference.__table__.delete().where(RunAssetReference.mini_project_id.in_(mp_ids)))
         db.execute(MiniProject.__table__.delete().where(MiniProject.id.in_(mp_ids)))
-    # Group and run_student/teacher cascade via FK on run delete; just delete RunAsset rows + files explicitly
-    asset_dir = run_asset_storage_dir(run_id)
-    sub_dir = os.path.join(settings.asset_path, "submissions", str(run_id))
+    # Group and run_student/teacher cascade via FK on run delete; just delete RunAsset rows + files explicitly.
+    # Storage layout puts everything under a single per-run tree, so one rmtree wipes both
+    # run-asset files and submission/feedback PDFs.
+    run_tree = os.path.join(settings.asset_path, "runs", str(run_id))
     db.execute(RunAsset.__table__.delete().where(RunAsset.run_id == run_id))
     db.delete(run)
     db.commit()
     # Disk cleanup last (after DB commit so we don't end up with files but no rows)
-    for d in (asset_dir, sub_dir):
-        if os.path.isdir(d):
-            try:
-                shutil.rmtree(d)
-            except OSError:
-                pass
+    if os.path.isdir(run_tree):
+        try:
+            shutil.rmtree(run_tree)
+        except OSError:
+            pass
 ```
 
 - [ ] **Step 2: Add `has_submissions` check in `patch_run` end_date logic**

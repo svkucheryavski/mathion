@@ -283,13 +283,21 @@ def build_feedback_filename(block_order: int, group_name: str, submission_number
 
 
 def submission_storage_dir(run_id: int, group_id: int) -> str:
-    """Filesystem directory for a group's submissions on a run."""
-    return os.path.join(settings.asset_path, "submissions", str(run_id), str(group_id))
+    """Filesystem directory for a group's submissions on a run.
+
+    Layout: <asset_path>/runs/{run_id}/submissions/{group_id}/. Lives under
+    the per-run tree so run force-delete (Task 11) wipes a single subtree.
+    """
+    return os.path.join(settings.asset_path, "runs", str(run_id), "submissions", str(group_id))
 
 
 def run_asset_storage_dir(run_id: int) -> str:
-    """Filesystem directory for run-scoped asset files."""
-    return os.path.join(settings.asset_path, "runs", str(run_id))
+    """Filesystem directory for run-scoped asset files.
+
+    Layout: <asset_path>/runs/{run_id}/assets/. Lives under the per-run tree
+    alongside submissions so run force-delete wipes a single subtree.
+    """
+    return os.path.join(settings.asset_path, "runs", str(run_id), "assets")
 
 
 def mini_project_visible_to_student(run, mini_project) -> bool:

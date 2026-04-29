@@ -119,7 +119,7 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 | `submission_number` | int NOT NULL | sequential per `(mini_project_id, group_id)`, starting at 1 |
 | `submitted_by` | int FK `users.id`, ON DELETE RESTRICT | who clicked submit (group member) |
 | `submitted_at` | datetime tz | server_default now() |
-| `file_path` | str(512) NOT NULL | relative path under `<asset_path>/submissions/` |
+| `file_path` | str(512) NOT NULL | relative path under `<asset_path>/runs/{run_id}/submissions/{group_id}/` |
 | `file_size` | int NOT NULL, CHECK > 0 | |
 | `is_late` | bool NOT NULL default False | computed vs `mini_project.soft_deadline` at insert; recomputed on deadline extension |
 | `is_resubmission` | bool NOT NULL default False | per spec line 448 |
@@ -152,7 +152,7 @@ These are decisions made during Phase 7b brainstorming that go beyond the master
 
 ### `run_assets`
 
-Parallel to `Asset` (Phase 6) but run-scoped. Storage at `<asset_path>/runs/{run_id}/{filename}`.
+Parallel to `Asset` (Phase 6) but run-scoped. Storage at `<asset_path>/runs/{run_id}/assets/{filename}`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -281,9 +281,9 @@ A published mini-project without submissions deletes without force.
 4. Delete all `mini_projects` (cascade-on-delete via `runs.id` — but ordered now since submissions/refs are gone)
 5. Delete all `groups` (now safe; submissions cleared in step 2; `RunStudent.group_id` was already SET NULL on student removal, but force-delete also clears all `run_students`)
 6. Delete all `run_teachers`, `run_students` (cascade-on-delete via `runs.id`)
-7. Delete `run_assets` rows + wipe `<asset_path>/runs/{run_id}/` directory tree
-8. Wipe `<asset_path>/submissions/{run_id}/` directory tree
-9. Delete `runs` row
+7. Delete `run_assets` rows
+8. Delete `runs` row
+9. After DB commit succeeds, `rmtree(<asset_path>/runs/{run_id}/)` — single per-run tree contains both run-asset files (`assets/`) and submission/feedback PDFs (`submissions/{group_id}/`)
 
 If any step fails mid-cascade, the entire transaction rolls back; no partial state.
 
@@ -298,7 +298,7 @@ A group whose members have dissolved (e.g., students dropped out) but whose subm
 
 ## File Storage
 
-Two disjoint trees under `settings.asset_path`:
+All Phase 7b files live in a unified per-run tree under `settings.asset_path`:
 
 ```
 <asset_path>/
@@ -306,15 +306,17 @@ Two disjoint trees under `settings.asset_path`:
     {version_id}/...                    (Phase 6, unchanged)
   runs/
     {run_id}/
-      dataset.csv
-      analysis-template.r               (RunAsset; mini-project markdown references these)
-  submissions/
-    {run_id}/
-      {group_id}/
-        block 1 - group 3-12a - submission 1.pdf
-        block 1 - group 3-12a - submission 1 - feedback.pdf
-        block 1 - group 3-12a - submission 2.pdf
+      assets/
+        dataset.csv
+        analysis-template.r             (RunAsset; mini-project markdown references these)
+      submissions/
+        {group_id}/
+          block-1-group-3-12a-submission-1.pdf
+          block-1-group-3-12a-submission-1-feedback.pdf
+          block-1-group-3-12a-submission-2.pdf
 ```
+
+The per-run tree means run force-delete is a single `rmtree(runs/{run_id})` — both run-asset files and submission/feedback PDFs disappear together.
 
 ### Filename generation
 
@@ -328,10 +330,10 @@ def build_feedback_filename(block_order: int, group_name: str, submission_number
     return sanitize_filename(f"block {block_order} - group {group_name} - submission {submission_number} - feedback.pdf")
 
 def submission_storage_dir(run_id: int, group_id: int) -> str:
-    return os.path.join(settings.asset_path, "submissions", str(run_id), str(group_id))
+    return os.path.join(settings.asset_path, "runs", str(run_id), "submissions", str(group_id))
 
 def run_asset_storage_dir(run_id: int) -> str:
-    return os.path.join(settings.asset_path, "runs", str(run_id))
+    return os.path.join(settings.asset_path, "runs", str(run_id), "assets")
 ```
 
 `sanitize_filename` from `mathion/assets.py:29-49` collapses spaces to hyphens and strips non-alphanumerics. Group name `"3-12a"` passes through unchanged; `"Group #1!"` becomes `"group-1"`. Result: filenames are safe by construction.
