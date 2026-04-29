@@ -164,9 +164,13 @@ def seed_publishable_version(admin_client, db):
     return _seed
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def asset_tmpdir(tmp_path):
-    """Override settings.asset_path to a tmp dir for the duration of the test."""
+    """Override settings.asset_path to a tmp dir for every test.
+
+    autouse=True ensures any unintended file write is sandboxed to the
+    per-test tmpdir, never the configured production asset_path.
+    """
     original = settings.asset_path
     settings.asset_path = str(tmp_path)
     yield tmp_path

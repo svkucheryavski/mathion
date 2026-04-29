@@ -16,7 +16,7 @@ from mathion.assets import get_mime_type, sanitize_filename, validate_extension
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Run, RunAsset, RunAssetReference
+from mathion.models import CourseAdmin, CourseVersion, Run, RunAsset, RunAssetReference, RunStudent, RunTeacher
 from mathion.models_auth import User
 from mathion.schemas import RunAssetResponse
 
@@ -126,13 +126,16 @@ def serve_run_asset(
     db: Session = Depends(get_db),
 ):
     run = get_or_404(db, Run, run_id)
+    # A run pinned to a disabled course version cannot serve assets — mirrors
+    # Phase 6's serve_asset gate (api/assets.py); a disabled version blocks
+    # access for everyone, including admins/teachers, so the check runs first.
+    version = db.get(CourseVersion, run.version_id)
+    if version is None or version.is_disabled:
+        raise HTTPException(status_code=403, detail="Run version is disabled")
     # Admin or teacher always allowed; student access requires run published.
     # (Phase 7b: per-mini-project visibility check is at the higher endpoint level;
     # for raw asset serve we use a coarse run.is_published check here.)
     if not user.is_superuser:
-        from mathion.models import CourseAdmin, CourseVersion, RunStudent, RunTeacher
-
-        version = db.get(CourseVersion, run.version_id)
         is_admin = db.execute(
             select(CourseAdmin).where(
                 CourseAdmin.course_id == version.course_id,
