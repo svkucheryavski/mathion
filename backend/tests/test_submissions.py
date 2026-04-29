@@ -49,6 +49,23 @@ def test_submit_blocks_non_group_member(admin_client, student_client_for, db, se
     assert response.status_code == 403
 
 
+def test_submit_enrolled_but_no_group(admin_client, student_client_for, db, seed_run_with_groups):
+    """Enrolled student with no group assignment cannot submit."""
+    run, _, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    from mathion.models import RunStudent
+    from mathion.models_auth import User
+    user = User(email="lonely@example.com", full_name="L")
+    db.add(user); db.commit()
+    db.add(RunStudent(run_id=run["id"], user_id=user.id, group_id=None))
+    db.commit()
+    lonely = student_client_for("lonely@example.com")
+    response = lonely.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    assert response.status_code == 403
+
+
 def test_submit_blocked_after_hard_deadline(admin_client, student_client_for, db, seed_run_with_groups):
     from mathion.models import Block, MiniProject, Run
     run, ga, _ = seed_run_with_groups()

@@ -186,7 +186,7 @@ def student_client_for(client, db):
     """
     def _factory(email: str) -> CSRFTestClient:
         raw_pin = request_pin(db, email)
-        assert raw_pin is not None
+        assert raw_pin is not None, f"request_pin returned None for {email}; user may not exist"
         token = verify_pin(db, email, raw_pin, duration_days=7)
         c = CSRFTestClient(app)
         c.cookies.set("session_token", token)

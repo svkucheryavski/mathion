@@ -15,6 +15,8 @@ from mathion.api.helpers import (
     submission_storage_dir,
 )
 from mathion.api.mini_projects import _is_admin_or_teacher, _to_utc_aware
+from mathion.assets import validate_extension
+from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, Evaluation, Group, MiniProject, Run, RunStudent, Submission
@@ -37,6 +39,10 @@ def _get_submitter_group(db: Session, run_id: int, user_id: int) -> Group | None
     return db.get(Group, rs.group_id)
 
 
+# TODO(phase 9): resubmission gate race — two members observing the same
+# 'major_revision'/'minor_revision' result can both pass the pending check
+# and submit twice for one revision cycle. Address via SAVEPOINT-based
+# retry or a per-mini-project advisory lock when we move to Postgres.
 def _latest_evaluation_result(db: Session, mini_project_id: int, group_id: int) -> tuple[str | None, int | None]:
     """Return (result, evaluator_user_id) of the latest evaluation for this group's
     latest submission on this mini-project. (None, None) if no submissions or no
@@ -109,11 +115,19 @@ def create_submission(
             raise HTTPException(status_code=409, detail="Resubmission deadline passed")
 
     # Read file
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    ext = validate_extension(file.filename)
+    if ext != "pdf":
         raise HTTPException(status_code=400, detail="Submission must be a PDF")
     content = file.file.read()
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > settings.max_file_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
+        )
 
     # Determine submission_number
     block = db.get(Block, mp.block_id)
@@ -125,7 +139,6 @@ def create_submission(
     ) or 0) + 1
 
     filename = build_submission_filename(block.order, group.name, next_num)
-    rel_path = os.path.join("submissions", str(run.id), str(group.id), filename)
 
     is_late = soft_aware is not None and now > soft_aware
 
@@ -134,10 +147,11 @@ def create_submission(
         group_id=group.id,
         submission_number=next_num,
         submitted_by=user.id,
-        file_path=rel_path,
+        file_path=filename,
         file_size=len(content),
         is_late=is_late,
         is_resubmission=is_resubmission,
+        submitted_at=now,
     )
     db.add(sub)
     try:
@@ -152,11 +166,11 @@ def create_submission(
             )
         ) or 0) + 1
         filename = build_submission_filename(block.order, group.name, next_num)
-        rel_path = os.path.join("submissions", str(run.id), str(group.id), filename)
         sub = Submission(
             mini_project_id=mp.id, group_id=group.id, submission_number=next_num,
-            submitted_by=user.id, file_path=rel_path, file_size=len(content),
+            submitted_by=user.id, file_path=filename, file_size=len(content),
             is_late=is_late, is_resubmission=is_resubmission,
+            submitted_at=now,
         )
         db.add(sub)
         try:
@@ -169,10 +183,11 @@ def create_submission(
     db.execute(
         MiniProject.__table__.update()
         .where(MiniProject.id == mp.id, MiniProject.first_submitted_at.is_(None))
-        .values(first_submitted_at=datetime.now(timezone.utc))
+        .values(first_submitted_at=now)
     )
 
-    # Auto-acceptance for resubmissions
+    # Auto-acceptance for resubmissions + notifications (manual-eval
+    # notifications fire in the evaluation endpoint instead).
     if is_resubmission:
         if prev_evaluator is None:
             raise HTTPException(status_code=500, detail="Auto-evaluation failed: no prior evaluator")
@@ -187,6 +202,25 @@ def create_submission(
         except IntegrityError:
             db.rollback()
             raise HTTPException(status_code=500, detail="Auto-evaluation failed; submission rejected")
+
+        member_ids = db.execute(
+            select(RunStudent.user_id).where(
+                RunStudent.run_id == run.id,
+                RunStudent.group_id == group.id,
+            )
+        ).scalars().all()
+        for uid in member_ids:
+            db.add(NotificationLogEntry(
+                user_id=uid,
+                kind="evaluation_received",
+                payload={
+                    "run_id": run.id,
+                    "mini_project_id": mp.id,
+                    "submission_id": sub.id,
+                    "evaluation_id": auto_eval.id,
+                    "result": "accepted",
+                },
+            ))
 
     # Write file via temp+rename
     abs_dir = submission_storage_dir(run.id, group.id)
@@ -208,29 +242,7 @@ def create_submission(
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to write submission to disk")
 
-    # Notification on auto-accept (manual-eval notifications fire in evaluation endpoint)
-    if is_resubmission:
-        member_ids = db.execute(
-            select(RunStudent.user_id).where(
-                RunStudent.run_id == run.id,
-                RunStudent.group_id == group.id,
-            )
-        ).scalars().all()
-        for uid in member_ids:
-            db.add(NotificationLogEntry(
-                user_id=uid,
-                kind="evaluation_received",
-                payload={
-                    "run_id": run.id,
-                    "mini_project_id": mp.id,
-                    "submission_id": sub.id,
-                    "evaluation_id": auto_eval.id,
-                    "result": "accepted",
-                },
-            ))
-
     db.commit()
-    db.refresh(sub)
     return sub
 
 
