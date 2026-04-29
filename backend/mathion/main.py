@@ -16,6 +16,7 @@ from mathion.api.run_assets import router as run_assets_router
 from mathion.api.run_roster import router as run_roster_router
 from mathion.api.run_teachers import router as run_teachers_router
 from mathion.api.runs import router as runs_router
+from mathion.api.submissions import router as submissions_router
 from mathion.api.versions import router as versions_router
 
 app = FastAPI(title="Mathion", version="0.1.0")
@@ -36,6 +37,7 @@ app.include_router(runs_router)
 app.include_router(run_teachers_router)
 app.include_router(groups_router)
 app.include_router(run_roster_router)
+app.include_router(submissions_router)
 
 
 @app.get("/health")

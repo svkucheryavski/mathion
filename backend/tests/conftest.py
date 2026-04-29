@@ -178,6 +178,23 @@ def asset_tmpdir(tmp_path):
 
 
 @pytest.fixture
+def student_client_for(client, db):
+    """Return a factory: email -> CSRFTestClient logged in as that user.
+
+    Uses the standard request_pin/verify_pin flow (same pattern as auth_client
+    and admin_client). The user must already exist in the db.
+    """
+    def _factory(email: str) -> CSRFTestClient:
+        raw_pin = request_pin(db, email)
+        assert raw_pin is not None
+        token = verify_pin(db, email, raw_pin, duration_days=7)
+        c = CSRFTestClient(app)
+        c.cookies.set("session_token", token)
+        return c
+    return _factory
+
+
+@pytest.fixture
 def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
     """Create a published run with groups_enabled, two groups each with one student.
 
