@@ -138,3 +138,64 @@ def test_lock_blocks_assignment_md_edit(admin_client, student_client_for, db, se
     )
     response = admin_client.patch(f"/api/mini-projects/{mp['id']}", json={"assignment_md": "new text"})
     assert response.status_code == 409
+
+
+def _make_submitted(admin_client, student_client_for, db, seed_run_with_groups):
+    """Create published mp, submit a PDF as alice. Returns (run, ga, mp, sub)."""
+    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    student = student_client_for("alice@example.com")
+    sub = student.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    return run, ga, mp, sub
+
+
+def test_resubmission_auto_accepts(admin_client, student_client_for, db, seed_run_with_groups):
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    # Teacher requests minor revision
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "minor_revision", "feedback_text": "Fix"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    # Group member resubmits
+    student = student_client_for("alice@example.com")
+    response = student.post(
+        f"/api/mini-projects/{sub['mini_project_id']}/submissions",
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    assert response.status_code == 201
+    new_sub = response.json()
+    assert new_sub["is_resubmission"] is True
+    # Auto-evaluation should exist
+    from mathion.models import Evaluation
+    ev = db.execute(select(Evaluation).where(Evaluation.submission_id == new_sub["id"])).scalar_one()
+    assert ev.result == "accepted"
+
+
+def test_rejected_resets_to_initial(admin_client, student_client_for, db, seed_run_with_groups):
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "rejected", "feedback_text": "wrong file"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    student = student_client_for("alice@example.com")
+    response = student.post(
+        f"/api/mini-projects/{sub['mini_project_id']}/submissions",
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert response.json()["is_resubmission"] is False  # fresh initial
+
+
+def test_accepted_blocks_resubmit(admin_client, student_client_for, db, seed_run_with_groups):
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    admin_client.post(f"/api/submissions/{sub['id']}/evaluation", data={"result": "accepted"})
+    student = student_client_for("alice@example.com")
+    response = student.post(
+        f"/api/mini-projects/{sub['mini_project_id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    assert response.status_code == 409
