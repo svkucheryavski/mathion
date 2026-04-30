@@ -36,6 +36,7 @@ def test_evaluate_accepted(admin_client, student_client_for, db, seed_run_with_g
     body = response.json()
     assert body["result"] == "accepted"
     assert body["score"] == 95
+    assert body["has_feedback_file"] is False
 
 
 def test_evaluate_revision_requires_feedback_file(admin_client, student_client_for, db, seed_run_with_groups):
@@ -55,3 +56,19 @@ def test_evaluate_already_evaluated_409(admin_client, student_client_for, db, se
                                  data={"result": "rejected"},
                                  files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")})
     assert response.status_code == 409
+
+
+def test_has_feedback_file_reflects_state(admin_client, student_client_for, db, seed_run_with_groups):
+    """Response field has_feedback_file must be True when feedback was uploaded."""
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    response = admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "minor_revision", "feedback_text": "Fix x"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-feedback"), "application/pdf")},
+    )
+    assert response.status_code == 201
+    assert response.json()["has_feedback_file"] is True
+    # And the GET endpoint also reflects it
+    response = admin_client.get(f"/api/submissions/{sub['id']}/evaluation")
+    assert response.status_code == 200
+    assert response.json()["has_feedback_file"] is True

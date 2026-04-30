@@ -29,6 +29,20 @@ router = APIRouter(tags=["evaluations"])
 ALLOWED_RESULTS = {"rejected", "major_revision", "minor_revision", "accepted"}
 
 
+def _serialize_evaluation(ev: Evaluation) -> dict:
+    """Return evaluation response dict with derived `has_feedback_file`."""
+    return {
+        "id": ev.id,
+        "submission_id": ev.submission_id,
+        "evaluated_by": ev.evaluated_by,
+        "evaluated_at": ev.evaluated_at,
+        "result": ev.result,
+        "score": ev.score,
+        "feedback_text": ev.feedback_text,
+        "has_feedback_file": ev.feedback_file is not None,
+    }
+
+
 @router.post("/api/submissions/{sid}/evaluation", status_code=201, response_model=EvaluationResponse)
 def create_evaluation(
     sid: int,
@@ -134,7 +148,7 @@ def create_evaluation(
 
     db.commit()
     db.refresh(ev)
-    return ev
+    return _serialize_evaluation(ev)
 
 
 @router.get("/api/submissions/{sid}/evaluation", response_model=EvaluationResponse)
@@ -155,7 +169,7 @@ def get_evaluation(
     ev = db.execute(select(Evaluation).where(Evaluation.submission_id == sid)).scalar_one_or_none()
     if ev is None:
         raise HTTPException(status_code=404, detail="Evaluation not found")
-    return ev
+    return _serialize_evaluation(ev)
 
 
 @router.patch("/api/evaluations/{eid}", response_model=EvaluationResponse)
@@ -178,7 +192,7 @@ def patch_evaluation(
         raise HTTPException(status_code=422, detail="feedback_file required for this result")
     db.commit()
     db.refresh(ev)
-    return ev
+    return _serialize_evaluation(ev)
 
 
 @router.get("/api/evaluations/{eid}/feedback-file")
