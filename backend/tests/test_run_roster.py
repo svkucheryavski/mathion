@@ -227,3 +227,27 @@ def test_batch_savepoint_rolls_back_auto_group_on_failure(admin_client, db, seed
     # Critical: no orphan group remains
     groups = db.query(Group).filter_by(run_id=run["id"]).all()
     assert len(groups) == 0, f"Expected no groups, found: {[g.name for g in groups]}"
+
+
+def test_batch_add_to_disabled_group_per_row_error(admin_client, seed_run_with_groups):
+    """Batch add to a disabled group produces a per-row error, not a global failure."""
+    run, ga, _ = seed_run_with_groups()
+    # Disable Group A
+    admin_client.patch(f"/api/groups/{ga['id']}", json={"is_disabled": True})
+    # Batch upload: one row pointing at the disabled group, one pointing at a new group
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/batch",
+        json={"rows": [
+            {"email": "ren@example.com", "group": "Group A"},
+            {"email": "stim@example.com", "group": "Group C"},  # new group, OK
+        ]},
+    )
+    assert response.status_code == 207
+    body = response.json()
+    rows = body["results"]
+    # First row error, second row added
+    error_row = next(r for r in rows if r["email"] == "ren@example.com")
+    ok_row = next(r for r in rows if r["email"] == "stim@example.com")
+    assert error_row["status"] == "error"
+    assert "disabled" in error_row["detail"].lower()
+    assert ok_row["status"] == "added"

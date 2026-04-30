@@ -170,6 +170,8 @@ def add_students_batch(
                     g = Group(run_id=run_id, name=row.group)
                     db.add(g)
                     db.flush()
+                elif g.is_disabled:
+                    raise HTTPException(status_code=409, detail=f"Cannot add students to disabled group '{row.group}'")
                 gid = g.id
 
             rs = enroll_user_in_run(db, target, run, gid)
