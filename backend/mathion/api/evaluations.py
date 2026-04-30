@@ -75,9 +75,11 @@ def create_evaluation(
     content: bytes | None = None
     if has_file:
         ext = validate_extension(file.filename)
+        if ext is None:
+            raise HTTPException(status_code=400, detail="File extension not allowed")
         if ext != "pdf":
             raise HTTPException(status_code=400, detail="feedback_file must be a PDF")
-        content = file.file.read()
+        content = file.file.read(settings.max_file_size + 1)
         if len(content) == 0:
             raise HTTPException(status_code=400, detail="Empty feedback file")
         if len(content) > settings.max_file_size:
