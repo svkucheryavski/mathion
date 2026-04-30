@@ -182,10 +182,22 @@ def test_patch_soft_deadline_recomputes_is_late(admin_client, db, seed_run_with_
     assert sub.is_late is True
 
 
-def test_disabled_version_blocks_student_list(admin_client, auth_client, db, seed_run_with_groups):
-    """Student-path GET on a run pinned to a disabled version returns 403."""
+def test_disabled_version_allows_historical_read(admin_client, auth_client, db, seed_run_with_groups):
+    """Disabled version still allows students to read historical mini-projects.
+
+    Under Semantics 2 ("no new work; reads still allowed"), a disabled version
+    must preserve students' academic record. The run's end_date is set to a past
+    date so the version can be disabled (no active runs invariant).
+    """
     run, mp = _create_mp(admin_client, db, seed_run_with_groups)
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
-    admin_client.post(f"/api/versions/{run['version_id']}/disable")
+    # Make run inactive (past end_date) so the version can be disabled
+    admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-01-01"})
+    disable_resp = admin_client.post(f"/api/versions/{run['version_id']}/disable")
+    assert disable_resp.status_code == 200
     response = auth_client.get(f"/api/runs/{run['id']}/mini-projects")
-    assert response.status_code == 403
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["id"] == mp["id"]
+    assert body[0]["is_published"] is True

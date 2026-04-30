@@ -139,12 +139,6 @@ def list_mini_projects(
     run = get_or_404(db, Run, run_id)
     is_priv = _is_admin_or_teacher(db, user, run)
 
-    # Pre-flight #5: reject disabled-version for student-path reads
-    if not is_priv:
-        version = db.get(CourseVersion, run.version_id)
-        if version is None or version.is_disabled:
-            raise HTTPException(status_code=403, detail="Run version is disabled")
-
     mps = db.execute(
         select(MiniProject).where(MiniProject.run_id == run_id).order_by(MiniProject.block_id)
     ).scalars().all()
@@ -162,12 +156,6 @@ def get_mini_project(
     mp = get_or_404(db, MiniProject, mp_id)
     run = db.get(Run, mp.run_id)
     is_priv = _is_admin_or_teacher(db, user, run)
-
-    # Pre-flight #5: reject disabled-version for student-path reads
-    if not is_priv:
-        version = db.get(CourseVersion, run.version_id)
-        if version is None or version.is_disabled:
-            raise HTTPException(status_code=403, detail="Run version is disabled")
 
     if not is_priv and not mini_project_visible_to_student(run, mp):
         raise HTTPException(status_code=403, detail="Mini-project not visible")

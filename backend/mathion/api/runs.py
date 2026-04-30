@@ -40,6 +40,8 @@ def create_run(course_id: int, data: RunCreate, db: Session = Depends(get_db), u
     get_or_404(db, Course, course_id)
     require_course_admin(db, user, course_id)
     version = get_newest_published_version(db, course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=409, detail="Cannot create run on a disabled course version")
     run = Run(
         version_id=version.id,
         title=data.title,
@@ -96,6 +98,16 @@ def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user:
     if "end_date" in updates and updates["end_date"] < run.end_date:
         if has_submissions(db, run):
             raise HTTPException(status_code=409, detail="Cannot shorten run while submissions exist")
+
+    # Phase 7b: extending end_date blocked when version is disabled (would re-activate
+    # a run pinned to a disabled version, contradicting the disabled-version invariant)
+    if "end_date" in updates and updates["end_date"] > run.end_date:
+        version = db.get(CourseVersion, run.version_id)
+        if version is not None and version.is_disabled:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot extend end_date on a run pinned to a disabled course version",
+            )
 
     for field, value in updates.items():
         setattr(run, field, value)
@@ -163,6 +175,9 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
     # update. Fix via SAVEPOINT-wrapped re-check in Phase 9.
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
+    version = db.get(CourseVersion, run.version_id)
+    if version is not None and version.is_disabled:
+        raise HTTPException(status_code=409, detail="Cannot publish run on a disabled course version")
     if run.is_published:
         raise HTTPException(status_code=409, detail="Run is already published")
 

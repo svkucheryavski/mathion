@@ -272,3 +272,47 @@ def test_delete_run_with_submissions_no_force(admin_client, student_client_for, 
     response = admin_client.delete(f"/api/runs/{run['id']}")
     assert response.status_code == 409
     assert "submissions" in response.json()["detail"].lower()
+
+
+def test_create_run_on_disabled_version_409(admin_client, db, seed_publishable_version):
+    course, version = seed_publishable_version()
+    response = admin_client.post(f"/api/versions/{version['id']}/disable")
+    assert response.status_code == 200
+    response = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R2", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    )
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_publish_run_on_disabled_version_409(admin_client, db, seed_publishable_version):
+    """Cannot publish an unpublished run if its version was disabled."""
+    course, version = seed_publishable_version()
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    ).json()
+    # Add a teacher so publish-gate passes (teachers required by publish-gate)
+    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+    # Disable version BEFORE publish
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    response = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_extend_end_date_on_disabled_version_run_409(admin_client, db, seed_publishable_version):
+    """Cannot extend end_date on a run pinned to a disabled version."""
+    course, version = seed_publishable_version()
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-30"},
+    ).json()
+    # Make run inactive (shortening) so disable succeeds, then disable
+    admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-04-01"})
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    # Now try to extend end_date forward — should 409
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-12-31"})
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()

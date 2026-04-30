@@ -107,18 +107,24 @@ def test_run_teacher_can_serve(admin_client, db, seed_run_with_groups):
     assert response.content == b"hello"
 
 
-def test_disabled_version_blocks_serve(admin_client, db, seed_run_with_groups):
-    """Run pinned to a disabled CourseVersion serves no assets — even to admins.
+def test_disabled_version_still_serves_historical(admin_client, db, seed_run_with_groups):
+    """Disabled version still serves historical run assets.
 
-    Mirrors Phase 6 serve_asset behavior; a disabled version must block
-    every actor uniformly.
+    Under Semantics 2 ("no new work; reads still allowed"), a disabled version
+    must keep historical reads working. We shorten the run's end_date to the
+    past so the version can be disabled (no active runs invariant), then
+    confirm the asset still serves.
     """
     run, _, _ = seed_run_with_groups()
     admin_client.post(f"/api/runs/{run['id']}/assets",
                       files={"file": ("d.csv", io.BytesIO(b"x"), "text/csv")})
-    admin_client.post(f"/api/versions/{run['version_id']}/disable")
+    # Make run inactive (past end_date) so the version can be disabled
+    admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-01-01"})
+    disable_resp = admin_client.post(f"/api/versions/{run['version_id']}/disable")
+    assert disable_resp.status_code == 200
     response = admin_client.get(f"/api/runs/{run['id']}/assets/d.csv")
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.content == b"x"
 
 
 def test_delete_referenced_409_without_force(admin_client, db, seed_run_with_groups):
