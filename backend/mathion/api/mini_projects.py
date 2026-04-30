@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
     get_or_404,
+    is_run_admin_or_teacher,
     mini_project_visible_to_student,
     render_with_run_assets,
     require_course_admin,
     require_run_admin_or_teacher,
     submission_storage_dir,
     sync_run_asset_references,
+    to_utc_aware,
 )
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -28,15 +30,6 @@ from mathion.models import (
 from mathion.models_auth import User
 from mathion.schemas import MiniProjectCreate, MiniProjectResponse, MiniProjectUpdate
 
-
-def _to_utc_aware(dt: datetime | None) -> datetime | None:
-    """Normalize a datetime read from the DB (which may be tz-naive on SQLite
-    or tz-aware on Postgres) to a tz-aware UTC datetime for safe comparisons."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 router = APIRouter(tags=["mini-projects"])
 
@@ -59,30 +52,6 @@ def _serialize_mini_project(db: Session, mp: MiniProject) -> dict:
         "created_at": mp.created_at,
         "updated_at": mp.updated_at,
     }
-
-
-def _is_admin_or_teacher(db: Session, user: User, run: Run) -> bool:
-    """Return True if user is course admin of run.course OR run teacher OR superuser."""
-    from mathion.models import CourseAdmin, RunTeacher
-
-    if user.is_superuser:
-        return True
-    version = db.get(CourseVersion, run.version_id)
-    is_admin = db.execute(
-        select(CourseAdmin).where(
-            CourseAdmin.course_id == version.course_id,
-            CourseAdmin.user_id == user.id,
-        )
-    ).scalar_one_or_none() is not None
-    if is_admin:
-        return True
-    is_teacher = db.execute(
-        select(RunTeacher).where(
-            RunTeacher.run_id == run.id,
-            RunTeacher.user_id == user.id,
-        )
-    ).scalar_one_or_none() is not None
-    return is_teacher
 
 
 @router.post("/api/runs/{run_id}/mini-projects", status_code=201, response_model=MiniProjectResponse)
@@ -137,7 +106,7 @@ def list_mini_projects(
     user: User = Depends(get_current_user),
 ):
     run = get_or_404(db, Run, run_id)
-    is_priv = _is_admin_or_teacher(db, user, run)
+    is_priv = is_run_admin_or_teacher(db, user, run)
 
     mps = db.execute(
         select(MiniProject).where(MiniProject.run_id == run_id).order_by(MiniProject.block_id)
@@ -155,7 +124,7 @@ def get_mini_project(
 ):
     mp = get_or_404(db, MiniProject, mp_id)
     run = db.get(Run, mp.run_id)
-    is_priv = _is_admin_or_teacher(db, user, run)
+    is_priv = is_run_admin_or_teacher(db, user, run)
 
     if not is_priv and not mini_project_visible_to_student(run, mp):
         raise HTTPException(status_code=403, detail="Mini-project not visible")
@@ -181,8 +150,8 @@ def patch_mini_project(
             violations.append("assignment_md is locked")
         for field in ("soft_deadline", "hard_deadline", "resubmission_deadline"):
             if field in updates:
-                old = _to_utc_aware(getattr(mp, field))
-                new = _to_utc_aware(updates[field])
+                old = to_utc_aware(getattr(mp, field))
+                new = to_utc_aware(updates[field])
                 # Allow NULL → non-NULL transition (only meaningful for soft_deadline)
                 if old is not None and new is not None and new <= old:
                     violations.append(f"{field} can only be extended (new must be > old)")
@@ -294,9 +263,9 @@ def publish_mini_project(
     if mp.resubmission_deadline is None:
         violations.append("resubmission_deadline required at publish")
     now = datetime.now(timezone.utc)
-    hard_aware = _to_utc_aware(mp.hard_deadline)
-    soft_aware = _to_utc_aware(mp.soft_deadline)
-    resub_aware = _to_utc_aware(mp.resubmission_deadline)
+    hard_aware = to_utc_aware(mp.hard_deadline)
+    soft_aware = to_utc_aware(mp.soft_deadline)
+    resub_aware = to_utc_aware(mp.resubmission_deadline)
     if hard_aware is not None and hard_aware <= now:
         violations.append("hard_deadline must be in the future")
     if hard_aware is not None and hard_aware.date() > run.end_date:

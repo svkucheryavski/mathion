@@ -16,6 +16,16 @@ def bump_content_updated_at(version) -> None:
     version.content_updated_at = datetime.now(timezone.utc)
 
 
+def to_utc_aware(dt: datetime | None) -> datetime | None:
+    """Normalize a datetime read from the DB (which may be tz-naive on SQLite
+    or tz-aware on Postgres) to a tz-aware UTC datetime for safe comparisons."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def get_or_404(db: Session, model: type[Base], id: int, detail: str | None = None):
     obj = db.get(model, id)
     if not obj:
@@ -104,6 +114,30 @@ def require_run_admin_or_teacher(db: Session, user, run) -> None:
     ).scalar_one_or_none() is not None
     if not (is_course_admin or is_run_teacher):
         raise HTTPException(status_code=403, detail="Run admin or teacher access required")
+
+
+def is_run_admin_or_teacher(db: Session, user, run) -> bool:
+    """Return True if user is course admin of run.course OR run teacher OR superuser."""
+    from mathion.models import CourseAdmin, CourseVersion, RunTeacher
+
+    if user.is_superuser:
+        return True
+    version = db.get(CourseVersion, run.version_id)
+    is_admin = db.execute(
+        select(CourseAdmin).where(
+            CourseAdmin.course_id == version.course_id,
+            CourseAdmin.user_id == user.id,
+        )
+    ).scalar_one_or_none() is not None
+    if is_admin:
+        return True
+    is_teacher = db.execute(
+        select(RunTeacher).where(
+            RunTeacher.run_id == run.id,
+            RunTeacher.user_id == user.id,
+        )
+    ).scalar_one_or_none() is not None
+    return is_teacher
 
 
 def enroll_user_in_run(db: Session, user, run, group_id: int | None):

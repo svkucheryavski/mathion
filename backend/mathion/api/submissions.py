@@ -12,10 +12,11 @@ from mathion.api.helpers import (
     build_submission_filename,
     get_or_404,
     get_submitter_group,
+    is_run_admin_or_teacher,
     mini_project_visible_to_student,
     submission_storage_dir,
+    to_utc_aware,
 )
-from mathion.api.mini_projects import _is_admin_or_teacher, _to_utc_aware
 from mathion.assets import validate_extension
 from mathion.config import settings
 from mathion.database import get_db
@@ -92,9 +93,9 @@ def create_submission(
 
     # Deadline gates
     now = datetime.now(timezone.utc)
-    hard_aware = _to_utc_aware(mp.hard_deadline)
-    soft_aware = _to_utc_aware(mp.soft_deadline)
-    resub_aware = _to_utc_aware(mp.resubmission_deadline)
+    hard_aware = to_utc_aware(mp.hard_deadline)
+    soft_aware = to_utc_aware(mp.soft_deadline)
+    resub_aware = to_utc_aware(mp.resubmission_deadline)
     if not is_resubmission:
         if hard_aware is not None and now > hard_aware:
             raise HTTPException(status_code=409, detail="Initial submission deadline passed")
@@ -242,7 +243,7 @@ def list_submissions(
 ):
     mp = get_or_404(db, MiniProject, mp_id)
     run = get_or_404(db, Run, mp.run_id)
-    if _is_admin_or_teacher(db, user, run):
+    if is_run_admin_or_teacher(db, user, run):
         subs = db.execute(
             select(Submission).where(Submission.mini_project_id == mp_id).order_by(Submission.submitted_at)
         ).scalars().all()
@@ -270,7 +271,7 @@ def get_submission(
     sub = get_or_404(db, Submission, sid)
     mp = db.get(MiniProject, sub.mini_project_id)
     run = db.get(Run, mp.run_id)
-    if _is_admin_or_teacher(db, user, run):
+    if is_run_admin_or_teacher(db, user, run):
         return sub
     if not mini_project_visible_to_student(run, mp):
         raise HTTPException(status_code=403, detail="Not visible")
@@ -289,7 +290,7 @@ def get_submission_file(
     sub = get_or_404(db, Submission, sid)
     mp = db.get(MiniProject, sub.mini_project_id)
     run = db.get(Run, mp.run_id)
-    if not _is_admin_or_teacher(db, user, run):
+    if not is_run_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Not visible")
         group = get_submitter_group(db, run.id, user.id)

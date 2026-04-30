@@ -11,11 +11,11 @@ from mathion.api.helpers import (
     build_feedback_filename,
     get_or_404,
     get_submitter_group,
+    is_run_admin_or_teacher,
     mini_project_visible_to_student,
     require_run_admin_or_teacher,
     submission_storage_dir,
 )
-from mathion.api.mini_projects import _is_admin_or_teacher
 from mathion.assets import validate_extension
 from mathion.config import settings
 from mathion.database import get_db
@@ -160,7 +160,7 @@ def get_evaluation(
     sub = get_or_404(db, Submission, sid)
     mp = db.get(MiniProject, sub.mini_project_id)
     run = get_or_404(db, Run, mp.run_id)
-    if not _is_admin_or_teacher(db, user, run):
+    if not is_run_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Not visible")
         group = get_submitter_group(db, run.id, user.id)
@@ -210,7 +210,7 @@ def get_feedback_file(
     sub = db.get(Submission, ev.submission_id)
     mp = db.get(MiniProject, sub.mini_project_id)
     run = get_or_404(db, Run, mp.run_id)
-    if not _is_admin_or_teacher(db, user, run):
+    if not is_run_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Not visible")
         group = get_submitter_group(db, run.id, user.id)
