@@ -200,10 +200,10 @@ def delete_mini_project(
     run = get_or_404(db, Run, mp.run_id)
     require_run_admin_or_teacher(db, user, run)
 
-    has_subs = mp.first_submitted_at is not None
-    if has_subs and not force:
-        raise HTTPException(status_code=409, detail="Mini-project has submissions; use ?force=true")
-    if has_subs and force:
+    is_locked = mp.first_submitted_at is not None
+    if is_locked and not force:
+        raise HTTPException(status_code=409, detail="Mini-project is locked (has submissions); use ?force=true")
+    if is_locked and force:
         # Course-admin only for force delete
         version = db.get(CourseVersion, run.version_id)
         require_course_admin(db, user, version.course_id)

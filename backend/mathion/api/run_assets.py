@@ -40,7 +40,7 @@ def upload_run_asset(
     if ext is None:
         raise HTTPException(status_code=400, detail=f"File extension not allowed: {file.filename}")
 
-    content = file.file.read()
+    content = file.file.read(settings.max_file_size + 1)
     if len(content) > settings.max_file_size:
         raise HTTPException(
             status_code=400,
@@ -66,7 +66,7 @@ def upload_run_asset(
     )
     db.add(asset)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail=f"Asset '{filename}' already exists in this run")
@@ -88,10 +88,10 @@ def upload_run_asset(
                 os.remove(tmp_path)
             except OSError:
                 pass
-        db.delete(asset)
-        db.commit()
-        raise HTTPException(status_code=500, detail="Failed to write asset to disk")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to write asset file")
 
+    db.commit()
     db.refresh(asset)
     return asset
 

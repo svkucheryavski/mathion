@@ -107,9 +107,11 @@ def create_submission(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
     ext = validate_extension(file.filename)
+    if ext is None:
+        raise HTTPException(status_code=400, detail="File extension not allowed")
     if ext != "pdf":
         raise HTTPException(status_code=400, detail="Submission must be a PDF")
-    content = file.file.read()
+    content = file.file.read(settings.max_file_size + 1)
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
     if len(content) > settings.max_file_size:

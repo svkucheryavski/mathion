@@ -199,3 +199,16 @@ def test_accepted_blocks_resubmit(admin_client, student_client_for, db, seed_run
         files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
     )
     assert response.status_code == 409
+
+
+def test_submit_disallowed_extension(admin_client, student_client_for, db, seed_run_with_groups):
+    """Uploading a file with a disallowed extension returns a clear error
+    (distinct from the 'must be a PDF' message used for allowed-but-wrong types)."""
+    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    student = student_client_for("alice@example.com")
+    response = student.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("malware.exe", io.BytesIO(b"MZ\x90\x00"), "application/octet-stream")},
+    )
+    assert response.status_code == 400
+    assert "File extension not allowed" in response.json()["detail"]
