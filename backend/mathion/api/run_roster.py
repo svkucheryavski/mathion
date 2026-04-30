@@ -44,6 +44,8 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
         g = db.get(Group, data.group_id)
         if g is None or g.run_id != run_id:
             raise HTTPException(status_code=400, detail="Group not in this run")
+        if g.is_disabled:
+            raise HTTPException(status_code=409, detail="Cannot add students to disabled group")
 
     target = get_or_create_user(db, data.email)
     rs = enroll_user_in_run(db, target, run, data.group_id)
@@ -80,6 +82,8 @@ def patch_student(run_id: int, user_id: int, data: RunStudentUpdate,
             g = db.get(Group, new_gid)
             if g is None or g.run_id != run_id:
                 raise HTTPException(status_code=400, detail="Group not in this run")
+            if g.is_disabled:
+                raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
             # TODO(phase 9): SELECT-count + UPDATE is not atomic; two concurrent moves
             # could both observe count=9 and both succeed. Real-world impact is low;
             # fix via SAVEPOINT in Phase 9 alongside _enroll_user_in_run capacity race.

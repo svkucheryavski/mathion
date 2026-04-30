@@ -423,6 +423,7 @@ class GroupResponse(BaseModel):
     id: int
     run_id: int
     name: str
+    is_disabled: bool = False
     student_count: int = 0
 
     model_config = {"from_attributes": True}

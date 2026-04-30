@@ -1,3 +1,10 @@
+import io
+
+from sqlalchemy import select
+
+from mathion.models import Block, Run
+
+
 def _make_run(admin_client, seed_publishable_version, groups_enabled=True):
     course, _ = seed_publishable_version()
     return admin_client.post(
@@ -74,3 +81,61 @@ def test_unrelated_user_cannot_create_group(auth_client, admin_client, db, seed_
     run = _make_run(admin_client, seed_publishable_version)
     response = auth_client.post(f"/api/runs/{run['id']}/groups", json={"name": "G"})
     assert response.status_code == 403
+
+
+def test_disable_group(admin_client, seed_run_with_groups):
+    _, ga, _ = seed_run_with_groups()
+    response = admin_client.patch(f"/api/groups/{ga['id']}", json={"is_disabled": True})
+    assert response.status_code == 200
+    assert response.json()["is_disabled"] is True
+
+
+def test_cannot_add_student_to_disabled_group(admin_client, seed_run_with_groups):
+    run, ga, _ = seed_run_with_groups()
+    admin_client.patch(f"/api/groups/{ga['id']}", json={"is_disabled": True})
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students",
+        json={"email": "new@example.com", "group_id": ga["id"]},
+    )
+    assert response.status_code == 409
+
+
+def test_cannot_move_student_into_disabled_group(admin_client, seed_run_with_groups):
+    run, ga, gb = seed_run_with_groups()
+    # alice is in ga, bob is in gb. Disable gb. Try to move alice into gb.
+    admin_client.patch(f"/api/groups/{gb['id']}", json={"is_disabled": True})
+    students = admin_client.get(f"/api/runs/{run['id']}/students").json()
+    alice = next(s for s in students if s["user_email"] == "alice@example.com")
+    response = admin_client.patch(
+        f"/api/runs/{run['id']}/students/{alice['user_id']}",
+        json={"group_id": gb["id"]},
+    )
+    assert response.status_code == 409
+
+
+def test_delete_group_with_submissions_409(admin_client, student_client_for, db, seed_run_with_groups):
+    run, ga, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={
+            "block_id": block.id,
+            "assignment_md": "x",
+            "hard_deadline": "2026-06-01T23:59:00Z",
+            "resubmission_deadline": "2026-06-15T23:59:00Z",
+        },
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    student = student_client_for("alice@example.com")
+    student.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    # Remove alice from group so the student-count check passes
+    students = admin_client.get(f"/api/runs/{run['id']}/students").json()
+    alice = next(s for s in students if s["user_email"] == "alice@example.com")
+    admin_client.delete(f"/api/runs/{run['id']}/students/{alice['user_id']}")
+    # Now group is empty of students but has submissions
+    response = admin_client.delete(f"/api/groups/{ga['id']}")
+    assert response.status_code == 409

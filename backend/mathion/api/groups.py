@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import get_or_404, require_run_admin_or_teacher
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Group, Run, RunStudent
+from mathion.models import Group, Run, RunStudent, Submission
 from mathion.models_auth import User
 from mathion.schemas import GroupCreate, GroupResponse, GroupUpdate
 
@@ -14,7 +14,7 @@ router = APIRouter(tags=["groups"])
 
 
 def _to_response(g: Group, count: int) -> dict:
-    return {"id": g.id, "run_id": g.run_id, "name": g.name, "student_count": count}
+    return {"id": g.id, "run_id": g.run_id, "name": g.name, "is_disabled": g.is_disabled, "student_count": count}
 
 
 @router.post("/api/runs/{run_id}/groups", status_code=201, response_model=GroupResponse)
@@ -72,5 +72,8 @@ def delete_group(group_id: int, db: Session = Depends(get_db), user: User = Depe
     count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.group_id == group_id))
     if count > 0:
         raise HTTPException(status_code=409, detail="Group has students; reassign or remove first")
+    sub_count = db.scalar(select(func.count(Submission.id)).where(Submission.group_id == group_id))
+    if sub_count and sub_count > 0:
+        raise HTTPException(status_code=409, detail="Group has submissions; disable instead")
     db.delete(g)
     db.commit()
