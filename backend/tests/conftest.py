@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from mathion.config import settings
 from mathion.database import Base, get_db
 from mathion.main import app
 from mathion.models_auth import User
@@ -161,3 +162,60 @@ def seed_publishable_version(admin_client, db):
         return course, version
 
     return _seed
+
+
+@pytest.fixture(autouse=True)
+def asset_tmpdir(tmp_path):
+    """Override settings.asset_path to a tmp dir for every test.
+
+    autouse=True ensures any unintended file write is sandboxed to the
+    per-test tmpdir, never the configured production asset_path.
+    """
+    original = settings.asset_path
+    settings.asset_path = str(tmp_path)
+    yield tmp_path
+    settings.asset_path = original
+
+
+@pytest.fixture
+def student_client_for(client, db):
+    """Return a factory: email -> CSRFTestClient logged in as that user.
+
+    Uses the standard request_pin/verify_pin flow (same pattern as auth_client
+    and admin_client). The user must already exist in the db.
+    """
+    def _factory(email: str) -> CSRFTestClient:
+        raw_pin = request_pin(db, email)
+        assert raw_pin is not None, f"request_pin returned None for {email}; user may not exist"
+        token = verify_pin(db, email, raw_pin, duration_days=7)
+        c = CSRFTestClient(app)
+        c.cookies.set("session_token", token)
+        return c
+    return _factory
+
+
+@pytest.fixture
+def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
+    """Create a published run with groups_enabled, two groups each with one student.
+
+    Returns a factory that creates (run, group_a, group_b). All entities are
+    committed and ready to use. Run is is_published=True. Asset writes are
+    redirected to tmp via asset_tmpdir.
+    """
+    def _factory():
+        course, _ = seed_publishable_version()
+        run_resp = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31", "groups_enabled": True},
+        )
+        assert run_resp.status_code == 201
+        run = run_resp.json()
+        admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+        ga = admin_client.post(f"/api/runs/{run['id']}/groups", json={"name": "Group A"}).json()
+        gb = admin_client.post(f"/api/runs/{run['id']}/groups", json={"name": "Group B"}).json()
+        admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "alice@example.com", "group_id": ga["id"]})
+        admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "bob@example.com", "group_id": gb["id"]})
+        pub = admin_client.post(f"/api/runs/{run['id']}/publish")
+        assert pub.status_code == 200
+        return run, ga, gb
+    return _factory

@@ -1,3 +1,10 @@
+import io
+
+from sqlalchemy import select
+
+from mathion.models import Block, Run
+
+
 def test_create_run_pins_to_newest_published_version(admin_client, seed_publishable_version):
     course, version = seed_publishable_version()
     response = admin_client.post(
@@ -188,3 +195,124 @@ def test_teacher_cannot_publish(teacher_client, admin_client, db, teacher_user, 
     db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id)); db.commit()
     response = teacher_client.post(f"/api/runs/{run['id']}/publish")
     assert response.status_code == 403
+
+
+def test_delete_run_with_students_409(admin_client, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    # Run is published; unpublish first
+    admin_client.post(f"/api/runs/{run['id']}/unpublish")
+    response = admin_client.delete(f"/api/runs/{run['id']}")
+    assert response.status_code == 409
+    assert "students" in response.json()["detail"].lower()
+
+
+def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
+    run, ga, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    response = admin_client.delete(f"/api/runs/{run['id']}?force=true")
+    assert response.status_code == 204
+    db.expire_all()
+    assert db.get(Run, run["id"]) is None
+
+
+def test_lower_end_date_blocked_by_submissions(admin_client, student_client_for, db, seed_run_with_groups):
+    """Cannot shorten run end_date once any submission exists."""
+    run, _, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    alice = student_client_for("alice@example.com")
+    alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    response = admin_client.patch(
+        f"/api/runs/{run['id']}",
+        json={"end_date": "2026-07-01"},
+    )
+    assert response.status_code == 409
+
+
+def test_delete_run_with_submissions_no_force(admin_client, student_client_for, db, seed_run_with_groups):
+    """Cannot delete (without force) a run that has submissions, even if unpublished."""
+    run, _, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    alice = student_client_for("alice@example.com")
+    alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    # Clear roster + unpublish so we hit the submissions gate, not the students/published gate
+    students = admin_client.get(f"/api/runs/{run['id']}/students").json()
+    for s in students:
+        admin_client.delete(f"/api/runs/{run['id']}/students/{s['user_id']}")
+    admin_client.post(f"/api/runs/{run['id']}/unpublish")
+    response = admin_client.delete(f"/api/runs/{run['id']}")
+    assert response.status_code == 409
+    assert "submissions" in response.json()["detail"].lower()
+
+
+def test_create_run_on_disabled_version_409(admin_client, db, seed_publishable_version):
+    course, version = seed_publishable_version()
+    response = admin_client.post(f"/api/versions/{version['id']}/disable")
+    assert response.status_code == 200
+    response = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R2", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    )
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_publish_run_on_disabled_version_409(admin_client, db, seed_publishable_version):
+    """Cannot publish an unpublished run if its version was disabled."""
+    course, version = seed_publishable_version()
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    ).json()
+    # Add a teacher so publish-gate passes (teachers required by publish-gate)
+    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+    # Disable version BEFORE publish
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    response = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_extend_end_date_on_disabled_version_run_409(admin_client, db, seed_publishable_version):
+    """Cannot extend end_date on a run pinned to a disabled version."""
+    course, version = seed_publishable_version()
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-30"},
+    ).json()
+    # Make run inactive (shortening) so disable succeeds, then disable
+    admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-04-01"})
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    # Now try to extend end_date forward — should 409
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-12-31"})
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()

@@ -18,8 +18,8 @@
 |------|---------------|
 | `mathion/models.py` | Add `MiniProject`, `Submission`, `Evaluation`, `RunAsset`, `RunAssetReference`; add `is_disabled` to `Group` |
 | `mathion/schemas.py` | Add MiniProject*/Submission*/Evaluation*/RunAsset* schemas; extend `GroupUpdate` with `is_disabled` |
-| `mathion/api/helpers.py` | Rename `_enroll_user_in_run` → `enroll_user_in_run`; collapse `require_run_admin_or_teacher`; add `_has_submissions`, `mini_project_visible_to_student`, `render_with_run_assets`, `sync_run_asset_references`, `build_submission_filename`, `build_feedback_filename`, `submission_storage_dir`, `run_asset_storage_dir` |
-| `mathion/api/runs.py` | Wire `_has_submissions` into `patch_run` end_date check; add submission-block + force-cascade to `delete_run` |
+| `mathion/api/helpers.py` | Rename `_enroll_user_in_run` → `enroll_user_in_run`; collapse `require_run_admin_or_teacher`; add `has_submissions`, `mini_project_visible_to_student`, `render_with_run_assets`, `sync_run_asset_references`, `build_submission_filename`, `build_feedback_filename`, `submission_storage_dir`, `run_asset_storage_dir` |
+| `mathion/api/runs.py` | Wire `has_submissions` into `patch_run` end_date check; add submission-block + force-cascade to `delete_run` |
 | `mathion/api/groups.py` | Add disable/enable via PATCH; tighten DELETE to also reject when submissions exist |
 | `mathion/api/run_roster.py` | Add `# TODO(phase 9)` race comments; reject student moves into disabled groups |
 | `mathion/api/mini_projects.py` | NEW — Mini-project CRUD + publish endpoint + lock semantics |
@@ -49,7 +49,7 @@ Address Phase 7a deferred items that Phase 7b depends on. Single commit per item
 - Modify: `mathion/api/run_teachers.py` (callers of renamed helper)
 - Modify: `mathion/api/runs.py` (callers of renamed helper + signature update for `require_run_admin_or_teacher` + add `# TODO(phase 9)` at publish-gate)
 - Modify: `tests/test_run_roster.py`, `tests/test_run_teachers.py` (any direct imports of `_enroll_user_in_run`)
-- Modify: `mathion/api/helpers.py` add `_has_submissions` helper
+- Modify: `mathion/api/helpers.py` add `has_submissions` helper
 
 - [ ] **Step 1: Run baseline tests to confirm green start**
 
@@ -178,12 +178,12 @@ Eliminates redundant db.get(Run) in routers. Matches the shape of
 require_course_admin_for_run (helpers.py:71)."
 ```
 
-- [ ] **Step 10: Add `_has_submissions` helper in `mathion/api/helpers.py`**
+- [ ] **Step 10: Add `has_submissions` helper in `mathion/api/helpers.py`**
 
 Append to `helpers.py`:
 
 ```python
-def _has_submissions(db: Session, run) -> bool:
+def has_submissions(db: Session, run) -> bool:
     """Return True if any Submission row exists for any mini-project on this run.
 
     Used by:
@@ -231,7 +231,7 @@ Expected: all 380 tests pass.
 ```bash
 cd backend
 git add mathion/api/helpers.py mathion/api/run_roster.py mathion/api/runs.py
-git commit -m "feat: add _has_submissions helper + Phase 9 race TODO markers
+git commit -m "feat: add has_submissions helper + Phase 9 race TODO markers
 
 Prerequisite helper for Phase 7b run-delete tightening. Race markers added
 at the two remaining unannotated spots (capacity, publish-gate)."
@@ -276,6 +276,15 @@ class MiniProject(Base):
     __tablename__ = "mini_projects"
     __table_args__ = (
         UniqueConstraint("run_id", "block_id", name="uq_mini_project_run_block"),
+        CheckConstraint(
+            "soft_deadline IS NULL OR hard_deadline IS NULL OR soft_deadline <= hard_deadline",
+            name="ck_mini_project_soft_le_hard",
+        ),
+        CheckConstraint(
+            "hard_deadline IS NULL OR resubmission_deadline IS NULL OR hard_deadline <= resubmission_deadline",
+            name="ck_mini_project_hard_le_resubmission",
+        ),
+        Index("ix_mini_project_run_published", "run_id", "is_published"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -299,6 +308,12 @@ class Submission(Base):
     __tablename__ = "submissions"
     __table_args__ = (
         UniqueConstraint("mini_project_id", "group_id", "submission_number", name="uq_submission_number"),
+        CheckConstraint("submission_number >= 1", name="ck_submission_number_positive"),
+        CheckConstraint("file_size > 0", name="ck_submission_file_size_positive"),
+        Index(
+            "ix_submission_latest_per_group",
+            "mini_project_id", "group_id", "submission_number",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -318,6 +333,20 @@ class Submission(Base):
 
 class Evaluation(Base):
     __tablename__ = "evaluations"
+    __table_args__ = (
+        CheckConstraint(
+            "result IN ('rejected', 'major_revision', 'minor_revision', 'accepted')",
+            name="ck_evaluation_result_enum",
+        ),
+        CheckConstraint(
+            "score IS NULL OR (score >= 0 AND score <= 100)",
+            name="ck_evaluation_score_range",
+        ),
+        CheckConstraint(
+            "result = 'accepted' OR feedback_file IS NOT NULL",
+            name="ck_evaluation_feedback_file_required",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True)
@@ -435,8 +464,8 @@ def upgrade() -> None:
         sa.Column("resubmission_deadline", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_published", sa.Boolean(), nullable=False, server_default=sa.text("0")),
         sa.Column("first_submitted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.UniqueConstraint("run_id", "block_id", name="uq_mini_project_run_block"),
         sa.CheckConstraint(
             "soft_deadline IS NULL OR hard_deadline IS NULL OR soft_deadline <= hard_deadline",
@@ -444,11 +473,11 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "hard_deadline IS NULL OR resubmission_deadline IS NULL OR hard_deadline <= resubmission_deadline",
-            name="ck_mini_project_hard_le_resub",
+            name="ck_mini_project_hard_le_resubmission",
         ),
     )
-    op.create_index("ix_mini_projects_run_id", "mini_projects", ["run_id"])
-    op.create_index("ix_mini_projects_block_id", "mini_projects", ["block_id"])
+    op.create_index(op.f("ix_mini_projects_run_id"), "mini_projects", ["run_id"])
+    op.create_index(op.f("ix_mini_projects_block_id"), "mini_projects", ["block_id"])
     op.create_index("ix_mini_projects_run_published", "mini_projects", ["run_id", "is_published"])
 
     # New table: submissions
@@ -459,7 +488,7 @@ def upgrade() -> None:
         sa.Column("group_id", sa.Integer(), sa.ForeignKey("groups.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("submission_number", sa.Integer(), nullable=False),
         sa.Column("submitted_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.Column("file_path", sa.String(512), nullable=False),
         sa.Column("file_size", sa.Integer(), nullable=False),
         sa.Column("is_late", sa.Boolean(), nullable=False, server_default=sa.text("0")),
@@ -468,40 +497,41 @@ def upgrade() -> None:
         sa.CheckConstraint("submission_number >= 1", name="ck_submission_number_positive"),
         sa.CheckConstraint("file_size > 0", name="ck_submission_file_size_positive"),
     )
-    op.create_index("ix_submissions_mini_project_id", "submissions", ["mini_project_id"])
-    op.create_index("ix_submissions_group_id", "submissions", ["group_id"])
+    op.create_index(op.f("ix_submissions_mini_project_id"), "submissions", ["mini_project_id"])
+    op.create_index(op.f("ix_submissions_group_id"), "submissions", ["group_id"])
     op.create_index(
-        "ix_submission_latest",
+        "ix_submissions_latest",
         "submissions",
-        ["mini_project_id", "group_id", sa.text("submission_number DESC")],
+        ["mini_project_id", "group_id", "submission_number"],
     )
 
     # New table: evaluations
     op.create_table(
         "evaluations",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("evaluated_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("evaluated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("evaluated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.Column("result", sa.String(20), nullable=False),
         sa.Column("score", sa.Integer(), nullable=True),
         sa.Column("feedback_text", sa.Text(), nullable=True),
         sa.Column("feedback_file", sa.String(512), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.CheckConstraint(
             "result IN ('rejected', 'major_revision', 'minor_revision', 'accepted')",
-            name="ck_evaluation_result",
+            name="ck_evaluation_result_enum",
         ),
         sa.CheckConstraint(
-            "score IS NULL OR (score BETWEEN 0 AND 100)",
+            "score IS NULL OR (score >= 0 AND score <= 100)",
             name="ck_evaluation_score_range",
         ),
         sa.CheckConstraint(
             "result = 'accepted' OR feedback_file IS NOT NULL",
-            name="ck_evaluation_feedback_required",
+            name="ck_evaluation_feedback_file_required",
         ),
     )
+    op.create_index(op.f("ix_evaluations_submission_id"), "evaluations", ["submission_id"], unique=True)
 
     # New table: run_assets
     op.create_table(
@@ -511,11 +541,11 @@ def upgrade() -> None:
         sa.Column("filename", sa.String(255), nullable=False),
         sa.Column("file_size", sa.Integer(), nullable=False),
         sa.Column("mime_type", sa.String(100), nullable=False),
-        sa.Column("uploaded_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("uploaded_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text('(CURRENT_TIMESTAMP)')),
         sa.Column("uploaded_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.UniqueConstraint("run_id", "filename", name="uq_run_asset_run_filename"),
     )
-    op.create_index("ix_run_assets_run_id", "run_assets", ["run_id"])
+    op.create_index(op.f("ix_run_assets_run_id"), "run_assets", ["run_id"])
 
     # New table: run_asset_references
     op.create_table(
@@ -524,24 +554,25 @@ def upgrade() -> None:
         sa.Column("run_asset_id", sa.Integer(), sa.ForeignKey("run_assets.id", ondelete="CASCADE"), nullable=False),
         sa.Column("mini_project_id", sa.Integer(), sa.ForeignKey("mini_projects.id", ondelete="CASCADE"), nullable=False),
     )
-    op.create_index("ix_run_asset_references_run_asset_id", "run_asset_references", ["run_asset_id"])
-    op.create_index("ix_run_asset_references_mini_project_id", "run_asset_references", ["mini_project_id"])
+    op.create_index(op.f("ix_run_asset_references_run_asset_id"), "run_asset_references", ["run_asset_id"])
+    op.create_index(op.f("ix_run_asset_references_mini_project_id"), "run_asset_references", ["mini_project_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_run_asset_references_mini_project_id", table_name="run_asset_references")
-    op.drop_index("ix_run_asset_references_run_asset_id", table_name="run_asset_references")
+    op.drop_index(op.f("ix_run_asset_references_mini_project_id"), table_name="run_asset_references")
+    op.drop_index(op.f("ix_run_asset_references_run_asset_id"), table_name="run_asset_references")
     op.drop_table("run_asset_references")
-    op.drop_index("ix_run_assets_run_id", table_name="run_assets")
+    op.drop_index(op.f("ix_run_assets_run_id"), table_name="run_assets")
     op.drop_table("run_assets")
+    op.drop_index(op.f("ix_evaluations_submission_id"), table_name="evaluations")
     op.drop_table("evaluations")
-    op.drop_index("ix_submission_latest", table_name="submissions")
-    op.drop_index("ix_submissions_group_id", table_name="submissions")
-    op.drop_index("ix_submissions_mini_project_id", table_name="submissions")
+    op.drop_index("ix_submissions_latest", table_name="submissions")
+    op.drop_index(op.f("ix_submissions_group_id"), table_name="submissions")
+    op.drop_index(op.f("ix_submissions_mini_project_id"), table_name="submissions")
     op.drop_table("submissions")
     op.drop_index("ix_mini_projects_run_published", table_name="mini_projects")
-    op.drop_index("ix_mini_projects_block_id", table_name="mini_projects")
-    op.drop_index("ix_mini_projects_run_id", table_name="mini_projects")
+    op.drop_index(op.f("ix_mini_projects_block_id"), table_name="mini_projects")
+    op.drop_index(op.f("ix_mini_projects_run_id"), table_name="mini_projects")
     op.drop_table("mini_projects")
     op.drop_column("groups", "is_disabled")
 ```
@@ -614,7 +645,7 @@ class MiniProjectResponse(BaseModel):
     id: int
     run_id: int
     block_id: int
-    title: str  # derived: f"Mini project for Block {block.order}"
+    title: str = ""  # service-populated: f"Mini project for Block {block.order}"
     assignment_md: str
     assignment_html: str
     soft_deadline: datetime | None
@@ -651,13 +682,13 @@ class SubmissionResponse(BaseModel):
 # ============================================================================
 
 class EvaluationCreate(BaseModel):
-    result: str = Field(pattern="^(rejected|major_revision|minor_revision|accepted)$")
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"]
     score: int | None = Field(default=None, ge=0, le=100)
     feedback_text: str | None = None
 
 
 class EvaluationUpdate(BaseModel):
-    result: str | None = Field(default=None, pattern="^(rejected|major_revision|minor_revision|accepted)$")
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"] | None = None
     score: int | None = Field(default=None, ge=0, le=100)
     feedback_text: str | None = None
 
@@ -667,10 +698,10 @@ class EvaluationResponse(BaseModel):
     submission_id: int
     evaluated_by: int
     evaluated_at: datetime
-    result: str
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"]
     score: int | None
     feedback_text: str | None
-    feedback_file: str | None  # path; client uses /feedback-file endpoint to download
+    has_feedback_file: bool = False  # service-populated: bool(eval.feedback_file)
 
     model_config = {"from_attributes": True}
 
@@ -740,13 +771,21 @@ def build_feedback_filename(block_order: int, group_name: str, submission_number
 
 
 def submission_storage_dir(run_id: int, group_id: int) -> str:
-    """Filesystem directory for a group's submissions on a run."""
-    return os.path.join(settings.asset_path, "submissions", str(run_id), str(group_id))
+    """Filesystem directory for a group's submissions on a run.
+
+    Layout: <asset_path>/runs/{run_id}/submissions/{group_id}/. Lives under
+    the per-run tree so run force-delete wipes a single subtree.
+    """
+    return os.path.join(settings.asset_path, "runs", str(run_id), "submissions", str(group_id))
 
 
 def run_asset_storage_dir(run_id: int) -> str:
-    """Filesystem directory for run-scoped asset files."""
-    return os.path.join(settings.asset_path, "runs", str(run_id))
+    """Filesystem directory for run-scoped asset files.
+
+    Layout: <asset_path>/runs/{run_id}/assets/. Lives under the per-run tree
+    alongside submissions.
+    """
+    return os.path.join(settings.asset_path, "runs", str(run_id), "assets")
 ```
 
 - [ ] **Step 2: Add `mini_project_visible_to_student` helper**
@@ -879,11 +918,13 @@ Append to `conftest.py`:
 
 ```python
 @pytest.fixture
-def seed_run_with_groups(admin_client, seed_publishable_version):
+def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
     """Create a published run with groups_enabled, two groups each with one student.
 
     Returns (run_dict, group_a, group_b, student_a, student_b). All entities are
-    committed and ready to use. Run is `is_published=True`.
+    committed and ready to use. Run is `is_published=True`. Requests asset_tmpdir
+    so any downstream file writes in test bodies (run-asset upload, submission,
+    feedback) are sandboxed to a per-test tmp dir.
     """
     def _factory():
         course, _ = seed_publishable_version()
@@ -1297,7 +1338,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
-    _has_submissions,
+    has_submissions,
     get_or_404,
     mini_project_visible_to_student,
     render_with_run_assets,
@@ -2693,7 +2734,7 @@ def delete_run(
 ):
     import os
     import shutil
-    from mathion.api.helpers import _has_submissions, run_asset_storage_dir, submission_storage_dir
+    from mathion.api.helpers import has_submissions, run_asset_storage_dir, submission_storage_dir
     from mathion.config import settings
     from mathion.models import Evaluation, Group, MiniProject, RunAsset, RunAssetReference, RunStudent, RunTeacher, Submission
 
@@ -2706,7 +2747,7 @@ def delete_run(
         student_count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.run_id == run_id))
         if student_count and student_count > 0:
             raise HTTPException(status_code=409, detail="Run has students; clear roster or use ?force=true")
-        if _has_submissions(db, run):
+        if has_submissions(db, run):
             raise HTTPException(status_code=409, detail="Run has submissions; use ?force=true to override")
         # Simple delete (cascade via FKs handles teachers/groups/students)
         db.delete(run)
@@ -2726,22 +2767,22 @@ def delete_run(
     if mp_ids:
         db.execute(RunAssetReference.__table__.delete().where(RunAssetReference.mini_project_id.in_(mp_ids)))
         db.execute(MiniProject.__table__.delete().where(MiniProject.id.in_(mp_ids)))
-    # Group and run_student/teacher cascade via FK on run delete; just delete RunAsset rows + files explicitly
-    asset_dir = run_asset_storage_dir(run_id)
-    sub_dir = os.path.join(settings.asset_path, "submissions", str(run_id))
+    # Group and run_student/teacher cascade via FK on run delete; just delete RunAsset rows + files explicitly.
+    # Storage layout puts everything under a single per-run tree, so one rmtree wipes both
+    # run-asset files and submission/feedback PDFs.
+    run_tree = os.path.join(settings.asset_path, "runs", str(run_id))
     db.execute(RunAsset.__table__.delete().where(RunAsset.run_id == run_id))
     db.delete(run)
     db.commit()
     # Disk cleanup last (after DB commit so we don't end up with files but no rows)
-    for d in (asset_dir, sub_dir):
-        if os.path.isdir(d):
-            try:
-                shutil.rmtree(d)
-            except OSError:
-                pass
+    if os.path.isdir(run_tree):
+        try:
+            shutil.rmtree(run_tree)
+        except OSError:
+            pass
 ```
 
-- [ ] **Step 2: Add `_has_submissions` check in `patch_run` end_date logic**
+- [ ] **Step 2: Add `has_submissions` check in `patch_run` end_date logic**
 
 Find `patch_run` in `runs.py` and update the end_date validation:
 
@@ -2749,7 +2790,7 @@ Find `patch_run` in `runs.py` and update the end_date validation:
 @router.patch("/api/runs/{run_id}", response_model=RunResponse)
 def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from datetime import date as _date
-    from mathion.api.helpers import _has_submissions
+    from mathion.api.helpers import has_submissions
 
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
@@ -2771,7 +2812,7 @@ def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user:
 
     # Phase 7b: lowering end_date past today blocked when submissions exist
     if "end_date" in updates and updates["end_date"] < run.end_date:
-        if _has_submissions(db, run):
+        if has_submissions(db, run):
             raise HTTPException(status_code=409, detail="Cannot shorten run while submissions exist")
 
     for field, value in updates.items():
@@ -2826,7 +2867,7 @@ Expected: all PASS (existing + 2 new).
 ```bash
 cd backend
 git add mathion/api/runs.py tests/test_runs.py
-git commit -m "feat: tighten run delete; add force-delete cascade; wire _has_submissions into patch_run"
+git commit -m "feat: tighten run delete; add force-delete cascade; wire has_submissions into patch_run"
 ```
 
 ---

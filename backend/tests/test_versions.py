@@ -247,3 +247,29 @@ def test_publish_text_question_without_answer_fails(admin_client):
     response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 409
     assert "correct_text" in response.json()["detail"].lower()
+
+
+def test_disable_version_with_active_run_409(admin_client, db, seed_publishable_version):
+    """Cannot disable version while an active run exists (published + not ended)."""
+    course, version = seed_publishable_version()
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    ).json()
+    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run['id']}/publish")
+    response = admin_client.post(f"/api/versions/{version['id']}/disable")
+    assert response.status_code == 409
+    assert "active" in response.json()["detail"].lower()
+
+
+def test_disable_version_with_only_inactive_runs_ok(admin_client, db, seed_publishable_version):
+    """Disable succeeds when all runs are inactive (unpublished or end_date past)."""
+    course, version = seed_publishable_version()
+    # Create unpublished run — inactive
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    ).json()
+    response = admin_client.post(f"/api/versions/{version['id']}/disable")
+    assert response.status_code == 200

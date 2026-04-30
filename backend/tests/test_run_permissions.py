@@ -25,31 +25,43 @@ def _make_run(db):
 
 def test_superuser_passes(db, superuser):
     _, run = _make_run(db)
-    require_run_admin_or_teacher(db, superuser, run.id)  # no exception
+    require_run_admin_or_teacher(db, superuser, run)  # no exception
 
 
 def test_course_admin_passes(db, test_user):
     course, run = _make_run(db)
     db.add(CourseAdmin(course_id=course.id, user_id=test_user.id))
     db.commit()
-    require_run_admin_or_teacher(db, test_user, run.id)  # no exception
+    require_run_admin_or_teacher(db, test_user, run)  # no exception
 
 
 def test_run_teacher_passes(db, test_user):
     _, run = _make_run(db)
     db.add(RunTeacher(run_id=run.id, user_id=test_user.id))
     db.commit()
-    require_run_admin_or_teacher(db, test_user, run.id)  # no exception
+    require_run_admin_or_teacher(db, test_user, run)  # no exception
 
 
 def test_unrelated_user_403(db, test_user):
     _, run = _make_run(db)
     with pytest.raises(HTTPException) as excinfo:
-        require_run_admin_or_teacher(db, test_user, run.id)
+        require_run_admin_or_teacher(db, test_user, run)
     assert excinfo.value.status_code == 403
 
 
-def test_run_not_found_404(db, superuser):
-    with pytest.raises(HTTPException) as excinfo:
-        require_run_admin_or_teacher(db, superuser, 9999)
-    assert excinfo.value.status_code == 404
+# 404 on bad run_id is now the responsibility of each calling route handler
+# (via get_or_404), not the auth helper. These tests guard against any
+# route accidentally skipping that lookup. POST routes with required bodies
+# are excluded — Pydantic body validation runs before the route function,
+# masking 404 with 422; their 404 path is exercised in flow tests.
+@pytest.mark.parametrize("method,path", [
+    ("get", "/api/runs/999999"),
+    ("delete", "/api/runs/999999"),
+    ("post", "/api/runs/999999/publish"),
+    ("get", "/api/runs/999999/teachers"),
+    ("get", "/api/runs/999999/students"),
+    ("get", "/api/runs/999999/groups"),
+])
+def test_routes_return_404_for_unknown_run(admin_client, method, path):
+    response = getattr(admin_client, method)(path)
+    assert response.status_code == 404, f"{method.upper()} {path} returned {response.status_code}"

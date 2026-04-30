@@ -5,15 +5,6 @@ import pytest
 from mathion.config import settings
 
 
-@pytest.fixture(autouse=True)
-def asset_tmpdir(tmp_path):
-    """Override asset_path to use a temp directory for tests."""
-    original = settings.asset_path
-    settings.asset_path = str(tmp_path)
-    yield tmp_path
-    settings.asset_path = original
-
-
 def _create_published_version(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "asset-course", "name": "AC", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()

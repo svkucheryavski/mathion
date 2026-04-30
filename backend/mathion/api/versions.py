@@ -1,6 +1,6 @@
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
@@ -10,7 +10,7 @@ from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Sequence
+from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Run, Sequence
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionResponse
 
@@ -274,6 +274,19 @@ def delete_version(version_id: int, db: Session = Depends(get_db), user: User = 
 def disable_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    today = date.today()
+    active_run = db.execute(
+        select(Run).where(
+            Run.version_id == version_id,
+            Run.is_published == True,  # noqa: E712
+            Run.end_date >= today,
+        ).limit(1)
+    ).scalar_one_or_none()
+    if active_run is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot disable version with active runs (published and not ended)",
+        )
     version.is_disabled = True
     db.commit()
     db.refresh(version)
