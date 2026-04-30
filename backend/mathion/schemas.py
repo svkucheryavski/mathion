@@ -537,12 +537,6 @@ class SubmissionResponse(BaseModel):
 # Phase 7b: Evaluations
 # ============================================================================
 
-class EvaluationCreate(BaseModel):
-    result: Literal["rejected", "major_revision", "minor_revision", "accepted"]
-    score: int | None = Field(default=None, ge=0, le=100)
-    feedback_text: str | None = None
-
-
 class EvaluationUpdate(BaseModel):
     result: Literal["rejected", "major_revision", "minor_revision", "accepted"] | None = None
     score: int | None = Field(default=None, ge=0, le=100)

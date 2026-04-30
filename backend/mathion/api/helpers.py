@@ -310,6 +310,21 @@ def mini_project_visible_to_student(run, mini_project) -> bool:
     return run.is_published and mini_project.is_published
 
 
+def get_submitter_group(db: Session, run_id: int, user_id: int):
+    """Return the (single) group on this run for the user, or None."""
+    from mathion.models import Group, RunStudent
+
+    rs = db.execute(
+        select(RunStudent).where(
+            RunStudent.run_id == run_id,
+            RunStudent.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if rs is None or rs.group_id is None:
+        return None
+    return db.get(Group, rs.group_id)
+
+
 def render_with_run_assets(db: Session, run_id: int, content_md: str | None) -> str:
     """Render markdown for mini-project assignment, validating asset refs.
 

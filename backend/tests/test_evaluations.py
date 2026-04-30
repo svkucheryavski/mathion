@@ -72,3 +72,46 @@ def test_has_feedback_file_reflects_state(admin_client, student_client_for, db, 
     response = admin_client.get(f"/api/submissions/{sub['id']}/evaluation")
     assert response.status_code == 200
     assert response.json()["has_feedback_file"] is True
+
+
+def test_get_evaluation_as_group_member(admin_client, student_client_for, db, seed_run_with_groups):
+    """A student in the submitting group can GET the evaluation."""
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "accepted", "score": "90"},
+    )
+    alice = student_client_for("alice@example.com")
+    response = alice.get(f"/api/submissions/{sub['id']}/evaluation")
+    assert response.status_code == 200
+    assert response.json()["result"] == "accepted"
+
+
+def test_post_evaluation_requires_admin_or_teacher(auth_client, admin_client, student_client_for, db, seed_run_with_groups):
+    """Plain authenticated user (not admin, not teacher) cannot create an evaluation."""
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    response = auth_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "accepted"},
+    )
+    assert response.status_code == 403
+
+
+def test_post_evaluation_blocked_on_resubmission(admin_client, student_client_for, db, seed_run_with_groups):
+    """Manual evaluation is blocked on auto-accepted resubmissions."""
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "minor_revision", "feedback_text": "Fix x"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    alice = student_client_for("alice@example.com")
+    resub = alice.post(
+        f"/api/mini-projects/{sub['mini_project_id']}/submissions",
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF-revision"), "application/pdf")},
+    ).json()
+    response = admin_client.post(
+        f"/api/submissions/{resub['id']}/evaluation",
+        data={"result": "accepted"},
+    )
+    assert response.status_code == 409

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import (
     build_submission_filename,
     get_or_404,
+    get_submitter_group,
     mini_project_visible_to_student,
     submission_storage_dir,
 )
@@ -19,24 +20,11 @@ from mathion.assets import validate_extension
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import Block, Evaluation, Group, MiniProject, Run, RunStudent, Submission
+from mathion.models import Block, Evaluation, MiniProject, Run, RunStudent, Submission
 from mathion.models_auth import NotificationLogEntry, User
 from mathion.schemas import SubmissionResponse
 
 router = APIRouter(tags=["submissions"])
-
-
-def _get_submitter_group(db: Session, run_id: int, user_id: int) -> Group | None:
-    """Return the (single) group on this run for the user, or None."""
-    rs = db.execute(
-        select(RunStudent).where(
-            RunStudent.run_id == run_id,
-            RunStudent.user_id == user_id,
-        )
-    ).scalar_one_or_none()
-    if rs is None or rs.group_id is None:
-        return None
-    return db.get(Group, rs.group_id)
 
 
 # TODO(phase 9): resubmission gate race — two members observing the same
@@ -74,7 +62,7 @@ def create_submission(
     if not mini_project_visible_to_student(run, mp):
         raise HTTPException(status_code=403, detail="Mini-project not visible")
 
-    group = _get_submitter_group(db, run.id, user.id)
+    group = get_submitter_group(db, run.id, user.id)
     if group is None:
         raise HTTPException(status_code=403, detail="Must be a member of a group on this run to submit")
     if group.is_disabled:
@@ -261,7 +249,7 @@ def list_submissions(
     else:
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Mini-project not visible")
-        group = _get_submitter_group(db, run.id, user.id)
+        group = get_submitter_group(db, run.id, user.id)
         if group is None:
             raise HTTPException(status_code=403, detail="Not a group member")
         subs = db.execute(
@@ -286,7 +274,7 @@ def get_submission(
         return sub
     if not mini_project_visible_to_student(run, mp):
         raise HTTPException(status_code=403, detail="Not visible")
-    group = _get_submitter_group(db, run.id, user.id)
+    group = get_submitter_group(db, run.id, user.id)
     if group is None or group.id != sub.group_id:
         raise HTTPException(status_code=403, detail="Not a member of submitting group")
     return sub
@@ -304,7 +292,7 @@ def get_submission_file(
     if not _is_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Not visible")
-        group = _get_submitter_group(db, run.id, user.id)
+        group = get_submitter_group(db, run.id, user.id)
         if group is None or group.id != sub.group_id:
             raise HTTPException(status_code=403, detail="Not a member of submitting group")
 

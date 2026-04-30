@@ -10,12 +10,12 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import (
     build_feedback_filename,
     get_or_404,
+    get_submitter_group,
     mini_project_visible_to_student,
     require_run_admin_or_teacher,
     submission_storage_dir,
 )
 from mathion.api.mini_projects import _is_admin_or_teacher
-from mathion.api.submissions import _get_submitter_group
 from mathion.assets import validate_extension
 from mathion.config import settings
 from mathion.database import get_db
@@ -57,7 +57,8 @@ def create_evaluation(
         raise HTTPException(status_code=422, detail=f"Invalid result: {result}")
     if score is not None and not (0 <= score <= 100):
         raise HTTPException(status_code=422, detail="score must be 0-100")
-    if result != "accepted" and file is None:
+    has_file = file is not None and bool(file.filename)
+    if result != "accepted" and not has_file:
         raise HTTPException(status_code=422, detail="feedback_file required for this result")
 
     sub = get_or_404(db, Submission, sid)
@@ -69,13 +70,10 @@ def create_evaluation(
         raise HTTPException(status_code=409, detail="Submission was auto-accepted; cannot manually evaluate")
 
     feedback_filename: str | None = None
-    feedback_size: int | None = None
     feedback_abs: str | None = None
     feedback_abs_dir: str | None = None
     content: bytes | None = None
-    if file is not None:
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No filename provided")
+    if has_file:
         ext = validate_extension(file.filename)
         if ext != "pdf":
             raise HTTPException(status_code=400, detail="feedback_file must be a PDF")
@@ -87,9 +85,11 @@ def create_evaluation(
                 status_code=400,
                 detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
             )
-        feedback_size = len(content)
         block = db.get(Block, mp.block_id)
         group = db.get(Group, sub.group_id)
+        # TODO(phase 9): if PATCH ever supports replacing feedback_file, the previous
+        # file at this path becomes orphaned. Either rename with a version suffix or
+        # delete-and-rewrite atomically.
         feedback_filename = build_feedback_filename(block.order, group.name, sub.submission_number)
         feedback_abs_dir = submission_storage_dir(run.id, sub.group_id)
         feedback_abs = os.path.join(feedback_abs_dir, feedback_filename)
@@ -159,11 +159,11 @@ def get_evaluation(
 ):
     sub = get_or_404(db, Submission, sid)
     mp = db.get(MiniProject, sub.mini_project_id)
-    run = db.get(Run, mp.run_id)
+    run = get_or_404(db, Run, mp.run_id)
     if not _is_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Not visible")
-        group = _get_submitter_group(db, run.id, user.id)
+        group = get_submitter_group(db, run.id, user.id)
         if group is None or group.id != sub.group_id:
             raise HTTPException(status_code=403, detail="Not a group member")
     ev = db.execute(select(Evaluation).where(Evaluation.submission_id == sid)).scalar_one_or_none()
@@ -186,10 +186,15 @@ def patch_evaluation(
     require_run_admin_or_teacher(db, user, run)
 
     updates = data.model_dump(exclude_unset=True)
+    new_result = updates.get("result", ev.result)
+    new_feedback_file = ev.feedback_file  # PATCH cannot modify feedback_file
+    if new_result != "accepted" and new_feedback_file is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot transition to non-accepted result via PATCH; PATCH cannot attach feedback_file (create a new evaluation instead)",
+        )
     for field, value in updates.items():
         setattr(ev, field, value)
-    if ev.result != "accepted" and ev.feedback_file is None:
-        raise HTTPException(status_code=422, detail="feedback_file required for this result")
     db.commit()
     db.refresh(ev)
     return _serialize_evaluation(ev)
@@ -204,11 +209,11 @@ def get_feedback_file(
     ev = get_or_404(db, Evaluation, eid)
     sub = db.get(Submission, ev.submission_id)
     mp = db.get(MiniProject, sub.mini_project_id)
-    run = db.get(Run, mp.run_id)
+    run = get_or_404(db, Run, mp.run_id)
     if not _is_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
             raise HTTPException(status_code=403, detail="Not visible")
-        group = _get_submitter_group(db, run.id, user.id)
+        group = get_submitter_group(db, run.id, user.id)
         if group is None or group.id != sub.group_id:
             raise HTTPException(status_code=403, detail="Not a group member")
     if ev.feedback_file is None:
