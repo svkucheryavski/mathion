@@ -1,3 +1,10 @@
+import io
+
+from sqlalchemy import select
+
+from mathion.models import Block, Run
+
+
 def test_create_run_pins_to_newest_published_version(admin_client, seed_publishable_version):
     course, version = seed_publishable_version()
     response = admin_client.post(
@@ -200,8 +207,6 @@ def test_delete_run_with_students_409(admin_client, seed_run_with_groups):
 
 
 def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
-    from sqlalchemy import select
-    from mathion.models import Block, Run
     run, ga, _ = seed_run_with_groups()
     run_obj = db.get(Run, run["id"])
     block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
@@ -216,3 +221,54 @@ def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
     assert response.status_code == 204
     db.expire_all()
     assert db.get(Run, run["id"]) is None
+
+
+def test_lower_end_date_blocked_by_submissions(admin_client, student_client_for, db, seed_run_with_groups):
+    """Cannot shorten run end_date once any submission exists."""
+    run, _, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    alice = student_client_for("alice@example.com")
+    alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    response = admin_client.patch(
+        f"/api/runs/{run['id']}",
+        json={"end_date": "2026-07-01"},
+    )
+    assert response.status_code == 409
+
+
+def test_delete_run_with_submissions_no_force(admin_client, student_client_for, db, seed_run_with_groups):
+    """Cannot delete (without force) a run that has submissions, even if unpublished."""
+    run, _, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    alice = student_client_for("alice@example.com")
+    alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    # Clear roster + unpublish so we hit the submissions gate, not the students/published gate
+    students = admin_client.get(f"/api/runs/{run['id']}/students").json()
+    for s in students:
+        admin_client.delete(f"/api/runs/{run['id']}/students/{s['user_id']}")
+    admin_client.post(f"/api/runs/{run['id']}/unpublish")
+    response = admin_client.delete(f"/api/runs/{run['id']}")
+    assert response.status_code == 409
+    assert "submissions" in response.json()["detail"].lower()

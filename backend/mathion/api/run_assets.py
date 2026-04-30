@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
     get_or_404,
+    require_course_admin_for_run,
     require_run_admin_or_teacher,
     run_asset_storage_dir,
 )
@@ -188,6 +189,8 @@ def delete_run_asset(
 ):
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
+    if force:
+        require_course_admin_for_run(db, user, run)
     asset = get_or_404(db, RunAsset, asset_id)
     if asset.run_id != run_id:
         raise HTTPException(status_code=404, detail="Asset not found in this run")

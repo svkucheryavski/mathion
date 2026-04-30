@@ -119,3 +119,48 @@ def test_disabled_version_blocks_serve(admin_client, db, seed_run_with_groups):
     admin_client.post(f"/api/versions/{run['version_id']}/disable")
     response = admin_client.get(f"/api/runs/{run['id']}/assets/d.csv")
     assert response.status_code == 403
+
+
+def test_delete_referenced_409_without_force(admin_client, db, seed_run_with_groups):
+    """Cannot delete a run-asset that is referenced by a mini-project."""
+    from mathion.models import Block, Run
+    from sqlalchemy import select as _select
+    run, _, _ = seed_run_with_groups()
+    asset = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("data.csv", io.BytesIO(b"x,y\n1,2"), "text/csv")},
+    ).json()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(_select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id,
+              "assignment_md": "Use [data.csv](data.csv) for the analysis.",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    )
+    response = admin_client.delete(f"/api/runs/{run['id']}/assets/{asset['id']}")
+    assert response.status_code == 409
+    assert "referenced" in response.json()["detail"].lower()
+
+
+def test_force_delete_referenced_as_admin(admin_client, db, seed_run_with_groups):
+    """Force-delete (course-admin) succeeds even when referenced by a mini-project."""
+    from mathion.models import Block, Run
+    from sqlalchemy import select as _select
+    run, _, _ = seed_run_with_groups()
+    asset = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("data.csv", io.BytesIO(b"x,y\n1,2"), "text/csv")},
+    ).json()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(_select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id,
+              "assignment_md": "Use [data.csv](data.csv) for the analysis.",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    )
+    response = admin_client.delete(f"/api/runs/{run['id']}/assets/{asset['id']}?force=true")
+    assert response.status_code == 204
