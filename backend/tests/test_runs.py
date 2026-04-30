@@ -188,3 +188,31 @@ def test_teacher_cannot_publish(teacher_client, admin_client, db, teacher_user, 
     db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id)); db.commit()
     response = teacher_client.post(f"/api/runs/{run['id']}/publish")
     assert response.status_code == 403
+
+
+def test_delete_run_with_students_409(admin_client, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    # Run is published; unpublish first
+    admin_client.post(f"/api/runs/{run['id']}/unpublish")
+    response = admin_client.delete(f"/api/runs/{run['id']}")
+    assert response.status_code == 409
+    assert "students" in response.json()["detail"].lower()
+
+
+def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
+    from sqlalchemy import select
+    from mathion.models import Block, Run
+    run, ga, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    response = admin_client.delete(f"/api/runs/{run['id']}?force=true")
+    assert response.status_code == 204
+    db.expire_all()
+    assert db.get(Run, run["id"]) is None
