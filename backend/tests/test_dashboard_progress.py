@@ -110,3 +110,106 @@ def test_progress_sequences_shape_and_order(admin_client, db):
     assert seqs[1]["total_items"] == 1 and seqs[1]["has_quiz_items"] is False
     assert seqs[2]["block_order"] == 2 and seqs[2]["sequence_order"] == 1
     assert seqs[2]["total_items"] == 1 and seqs[2]["has_quiz_items"] is False
+
+
+def test_progress_coverage_cell_math(admin_client, db):
+    """One sequence with 3 static items. Student covered 2 of 3."""
+    from mathion.models import Block, Sequence, Item, RunStudent
+    from mathion.models_auth import User, UserItemState
+
+    course = admin_client.post("/api/courses", json={"slug": "cov", "name": "Cov", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = Block(version_id=version["id"], title="B", slug="b", order=1)
+    db.add(block); db.flush()
+    seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
+    db.add(seq); db.flush()
+    items = [
+        Item(sequence_id=seq.id, title=f"I{i}", slug=f"i{i}", order=i, type="static_page", content_md="x", content_html="x")
+        for i in range(1, 4)
+    ]
+    db.add_all(items); db.flush()
+    item_ids = [i.id for i in items]
+    seq_id = seq.id
+    db.commit()
+
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    run = _publish_run(admin_client, db, course["id"])
+
+    student = User(email="cov@example.com", full_name="Cov S")
+    db.add(student); db.commit()
+    db.add(RunStudent(run_id=run["id"], user_id=student.id, group_id=None))
+    db.add(UserItemState(user_id=student.id, item_id=item_ids[0], is_covered=True, time_spent=0))
+    db.add(UserItemState(user_id=student.id, item_id=item_ids[1], is_covered=True, time_spent=0))
+    db.add(UserItemState(user_id=student.id, item_id=item_ids[2], is_covered=False, time_spent=0))
+    db.commit()
+
+    r = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["students"]) == 1
+    s = body["students"][0]
+    assert s["email"] == "cov@example.com"
+    assert s["coverage"] == [{"sequence_id": seq_id, "covered": 2, "total": 3}]
+    assert s["quizzes"] == [{"sequence_id": seq_id, "correct": None, "total": None}]
+
+
+def test_progress_quiz_cell_math(admin_client, db):
+    """One sequence with 1 quiz item (multi-choice 2 of 4 correct).
+    Student picks 1 of 2 correct -> cell {correct: 1, total: 2}."""
+    from mathion.models import Block, Sequence, Item, Question, AnswerOption, RunStudent
+    from mathion.models_auth import User, UserItemState
+
+    course = admin_client.post("/api/courses", json={"slug": "qz", "name": "Qz", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = Block(version_id=version["id"], title="B", slug="b", order=1)
+    db.add(block); db.flush()
+    seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
+    db.add(seq); db.flush()
+    qi = Item(sequence_id=seq.id, title="Q", slug="q", order=1, type="quiz")
+    db.add(qi); db.flush()
+    q = Question(item_id=qi.id, text_md="?", text_html="<p>?</p>", type="multiple_choice", order=1)
+    db.add(q); db.flush()
+    o1 = AnswerOption(question_id=q.id, text="a", is_correct=True, order=1)
+    o2 = AnswerOption(question_id=q.id, text="b", is_correct=False, order=2)
+    o3 = AnswerOption(question_id=q.id, text="c", is_correct=True, order=3)
+    o4 = AnswerOption(question_id=q.id, text="d", is_correct=False, order=4)
+    db.add_all([o1, o2, o3, o4]); db.flush()
+    seq_id = seq.id
+    db.commit()
+
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    run = _publish_run(admin_client, db, course["id"])
+
+    student = User(email="qz@example.com", full_name="Qz S")
+    db.add(student); db.commit()
+    db.add(RunStudent(run_id=run["id"], user_id=student.id, group_id=None))
+    # Simulate post-Phase-7c stored values (option-level): 1/2
+    db.add(UserItemState(user_id=student.id, item_id=qi.id, is_covered=True,
+                         attempt_count=1, last_answers={str(q.id): [o1.id]},
+                         last_score_correct=1, last_score_total=2, time_spent=0))
+    db.commit()
+
+    r = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress")
+    body = r.json()
+    s = body["students"][0]
+    assert s["coverage"][0] == {"sequence_id": seq_id, "covered": 1, "total": 1}
+    assert s["quizzes"][0] == {"sequence_id": seq_id, "correct": 1, "total": 2}
+
+
+def test_progress_quiz_cell_null_when_no_quiz_items(admin_client, db, seed_publishable_version):
+    """Sequence with only static items: quiz cell is {correct: null, total: null}."""
+    course, version = seed_publishable_version(slug="nq", name="NQ")
+    run = _publish_run(admin_client, db, course["id"])
+
+    from mathion.models import RunStudent
+    from mathion.models_auth import User
+    student = User(email="nq@example.com", full_name="NQ")
+    db.add(student); db.commit()
+    db.add(RunStudent(run_id=run["id"], user_id=student.id, group_id=None))
+    db.commit()
+
+    r = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress")
+    body = r.json()
+    s = body["students"][0]
+    assert s["quizzes"][0]["correct"] is None
+    assert s["quizzes"][0]["total"] is None
