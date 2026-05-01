@@ -91,30 +91,34 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
     if state.attempt_count >= max_attempts:
         raise HTTPException(status_code=409, detail="Max attempts reached")
 
-    # Evaluate each question
+    # Evaluate each question — option-level scoring (Phase 7c)
     score_correct = 0
+    score_total = 0
     for q in questions:
         student_answer = data.answers[str(q.id)]
 
-        # Get correct option IDs for choice questions
-        correct_ids = set()
+        correct_ids: set[int] = set()
+        all_ids: set[int] = set()
         if q.type in ("single_choice", "multiple_choice"):
-            correct_ids = set(db.scalars(
-                select(AnswerOption.id).where(
+            rows = db.execute(
+                select(AnswerOption.id, AnswerOption.is_correct).where(
                     AnswerOption.question_id == q.id,
-                    AnswerOption.is_correct == True,
                 )
-            ).all())
+            ).all()
+            all_ids = {r.id for r in rows}
+            correct_ids = {r.id for r in rows if r.is_correct}
 
-        if evaluate_question(
+        picks, total = evaluate_question(
             q_type=q.type,
             student_answer=student_answer,
             correct_option_ids=correct_ids,
+            all_option_ids=all_ids,
             correct_numeric=q.correct_numeric,
             precision=q.precision,
             correct_text=q.correct_text,
-        ):
-            score_correct += 1
+        )
+        score_correct += picks
+        score_total += total
 
     # Atomic increment: only succeeds if attempt_count < max_attempts
     rows_updated = db.execute(
@@ -127,7 +131,7 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
             attempt_count=UserItemState.attempt_count + 1,
             last_answers=dict(data.answers),
             last_score_correct=score_correct,
-            last_score_total=len(questions),
+            last_score_total=score_total,
             last_visited_at=datetime.now(timezone.utc),
             is_covered=True,
         )
@@ -145,7 +149,7 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
         attempt_count=state.attempt_count,
         max_attempts=max_attempts,
         score_correct=score_correct,
-        score_total=len(questions),
+        score_total=score_total,
         can_retry=state.attempt_count < max_attempts,
     )
 
