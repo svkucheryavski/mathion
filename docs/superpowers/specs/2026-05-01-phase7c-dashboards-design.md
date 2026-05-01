@@ -147,7 +147,7 @@ Errors: 404 Run not found · 403 Not admin/teacher of this run
 {
   "run": {
     "id": 17,
-    "name": "Spring 2026 — Group A",
+    "title": "Spring 2026 — Group A",
     "groups_enabled": true,
     "version_is_disabled": false
   },
@@ -235,7 +235,7 @@ Errors: 404 Run not found · 403 Not admin/teacher of this run
 {
   "run": {
     "id": 17,
-    "name": "Spring 2026 — Group A",
+    "title": "Spring 2026 — Group A",
     "groups_enabled": true
   },
   "mini_projects": [
