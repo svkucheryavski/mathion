@@ -45,6 +45,48 @@ def _setup_quiz(admin_client, db):
     }
 
 
+def _setup_multi_choice_quiz(admin_client, db, *, slug, email):
+    """Create a published course with a quiz containing one multiple_choice question.
+
+    Four options where indices 0 and 2 are correct. Returns dict with
+    `version`, `item`, `q`, `options` (list of 4), `student`, `token`.
+    """
+    from mathion.auth import request_pin, verify_pin
+
+    course = admin_client.post("/api/courses", json={"slug": slug, "name": slug.upper(), "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Q", "slug": "q", "type": "quiz",
+    }).json()
+
+    q = admin_client.post(f"/api/items/{item['id']}/questions", json={
+        "text_md": "pick 2", "type": "multiple_choice",
+    }).json()
+    o1 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "a", "is_correct": True}).json()
+    o2 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "b", "is_correct": False}).json()
+    o3 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "c", "is_correct": True}).json()
+    o4 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "d", "is_correct": False}).json()
+
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+
+    student = User(email=email, full_name=f"{slug.upper()} Student")
+    db.add(student)
+    db.commit()
+    db.add(StudentEnrollment(user_id=student.id, version_id=version["id"], is_active=True))
+    db.commit()
+    raw_pin = request_pin(db, student.email)
+    token = verify_pin(db, student.email, raw_pin, duration_days=7)
+    db.refresh(student)
+
+    return {
+        "version": version, "item": item,
+        "q": q, "options": [o1, o2, o3, o4],
+        "student": student, "token": token,
+    }
+
+
 def _make_student_client(db, token):
     """Create a TestClient with student auth. Context manager for safe cleanup."""
     from contextlib import contextmanager
@@ -293,3 +335,50 @@ def test_submit_quiz_inactive_enrollment_blocked(admin_client, db):
             }
         }, headers={"X-Requested-With": "mathion"})
         assert response.status_code == 403
+
+
+def test_submit_quiz_multi_choice_partial_credit(admin_client, db):
+    """1 of 2 correct picks → score_correct=1, score_total=2."""
+    ctx = _setup_multi_choice_quiz(admin_client, db, slug="mc", email="mc@example.com")
+    with _make_student_client(db, ctx["token"]) as sc:
+        r = sc.post(
+            f"/api/items/{ctx['item']['id']}/submit",
+            json={"answers": {str(ctx["q"]["id"]): [ctx["options"][0]["id"]]}},
+            headers={"X-Requested-With": "mathion"},
+        )
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["score_correct"] == 1
+        assert body["score_total"] == 2
+
+
+def test_submit_quiz_multi_choice_select_all_zero(admin_client, db):
+    """Select-all exploit blocked: max(0, 2-2)=0/2."""
+    ctx = _setup_multi_choice_quiz(admin_client, db, slug="ex", email="ex@example.com")
+    with _make_student_client(db, ctx["token"]) as sc:
+        all_opt_ids = [o["id"] for o in ctx["options"]]
+        r = sc.post(
+            f"/api/items/{ctx['item']['id']}/submit",
+            json={"answers": {str(ctx["q"]["id"]): all_opt_ids}},
+            headers={"X-Requested-With": "mathion"},
+        )
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["score_correct"] == 0
+        assert body["score_total"] == 2
+
+
+def test_submit_quiz_multi_choice_one_right_one_wrong_zero(admin_client, db):
+    """Strict subtraction at boundary: 1 right pick + 1 wrong pick → max(0, 1-1)=0/2."""
+    ctx = _setup_multi_choice_quiz(admin_client, db, slug="bd", email="bd@example.com")
+    with _make_student_client(db, ctx["token"]) as sc:
+        # options[0] is correct, options[1] is wrong
+        r = sc.post(
+            f"/api/items/{ctx['item']['id']}/submit",
+            json={"answers": {str(ctx["q"]["id"]): [ctx["options"][0]["id"], ctx["options"][1]["id"]]}},
+            headers={"X-Requested-With": "mathion"},
+        )
+        assert r.status_code == 200, r.json()
+        body = r.json()
+        assert body["score_correct"] == 0
+        assert body["score_total"] == 2
