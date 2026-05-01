@@ -4,6 +4,7 @@ from mathion.api.auth import router as auth_router
 from mathion.api.blocks import router as blocks_router
 from mathion.api.content import router as content_router
 from mathion.api.courses import router as courses_router
+from mathion.api.dashboard import router as dashboard_router
 from mathion.api.enrollment import router as enrollment_router
 from mathion.api.evaluations import router as evaluations_router
 from mathion.api.groups import router as groups_router
@@ -40,6 +41,7 @@ app.include_router(groups_router)
 app.include_router(run_roster_router)
 app.include_router(submissions_router)
 app.include_router(evaluations_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")
