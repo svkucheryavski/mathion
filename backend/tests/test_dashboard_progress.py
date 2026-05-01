@@ -213,3 +213,141 @@ def test_progress_quiz_cell_null_when_no_quiz_items(admin_client, db, seed_publi
     s = body["students"][0]
     assert s["quizzes"][0]["correct"] is None
     assert s["quizzes"][0]["total"] is None
+
+
+def test_progress_groups_disabled_run(admin_client, db, seed_publishable_version):
+    """Run with groups_enabled=false: students have null group_id and group_name."""
+    course, version = seed_publishable_version(slug="ng", name="NG")
+    run = _publish_run(admin_client, db, course["id"])  # _publish_run defaults groups_enabled=False
+
+    from mathion.models import RunStudent
+    s = User(email="ng@example.com", full_name="NG")
+    db.add(s); db.commit()
+    db.add(RunStudent(run_id=run["id"], user_id=s.id, group_id=None))
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress").json()
+    assert body["students"][0]["group_id"] is None
+    assert body["students"][0]["group_name"] is None
+    assert body["students"][0]["group_is_disabled"] is False
+
+
+def test_progress_disabled_group(admin_client, db, seed_publishable_version):
+    """Disabled group: group_is_disabled=true, members still visible."""
+    course, version = seed_publishable_version(slug="dg", name="DG")
+    # Create a run with groups_enabled=True for this test (publish via the
+    # standard helper flow: add a teacher, then call /publish).
+    r = admin_client.post(f"/api/courses/{course['id']}/runs", json={
+        "title": "R", "groups_enabled": True,
+        "start_date": "2026-01-01", "end_date": "2027-01-01",
+    }).json()
+    # Teachers POST takes {"email": ...}, not {"user_id": ...}.
+    admin_client.post(f"/api/runs/{r['id']}/teachers", json={"email": "dg-teacher@example.com"})
+    admin_client.post(f"/api/runs/{r['id']}/publish")
+
+    from mathion.models import Group, RunStudent
+    g = Group(run_id=r["id"], name="G1", is_disabled=True)
+    db.add(g); db.flush()
+    s = User(email="dg@example.com", full_name="DG")
+    db.add(s); db.flush()
+    db.add(RunStudent(run_id=r["id"], user_id=s.id, group_id=g.id))
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{r['id']}/dashboard/progress").json()
+    assert body["students"][0]["group_is_disabled"] is True
+    assert body["students"][0]["group_name"] == "G1"
+
+
+def test_progress_disabled_user(admin_client, db, seed_publishable_version):
+    course, version = seed_publishable_version(slug="du", name="DU")
+    run = _publish_run(admin_client, db, course["id"])
+
+    from mathion.models import RunStudent
+    s = User(email="du@example.com", full_name="DU", is_disabled=True)
+    db.add(s); db.commit()
+    db.add(RunStudent(run_id=run["id"], user_id=s.id, group_id=None))
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress").json()
+    assert body["students"][0]["user_is_disabled"] is True
+
+
+def test_progress_disabled_version(admin_client, db, seed_publishable_version):
+    """Disabled version: endpoint still 200s, version_is_disabled flagged.
+
+    The /api/versions/{id}/disable endpoint refuses to disable a version with
+    active published runs (returns 409). Since _publish_run produces a run that
+    is currently active (today's date falls within start/end), we set the flag
+    directly on the model to exercise the dashboard's reporting path.
+    """
+    from mathion.models import CourseVersion
+
+    course, version = seed_publishable_version(slug="dv", name="DV")
+    run = _publish_run(admin_client, db, course["id"])
+
+    v = db.get(CourseVersion, version["id"])
+    v.is_disabled = True
+    db.commit()
+
+    r = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress")
+    assert r.status_code == 200
+    assert r.json()["run"]["version_is_disabled"] is True
+
+
+def test_progress_run_with_zero_students(admin_client, db, seed_publishable_version):
+    course, version = seed_publishable_version(slug="zs", name="ZS")
+    run = _publish_run(admin_client, db, course["id"])
+
+    body = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress").json()
+    assert body["students"] == []
+    # Sequences still populated (1 sequence from seed_publishable_version)
+    assert len(body["sequences"]) == 1
+
+
+def test_progress_empty_sequence(admin_client, db, seed_publishable_version):
+    """Sequence with zero items: total_items=0, has_quiz_items=False.
+
+    Publishing a version requires every sequence to have >=1 item, so we can't
+    publish an empty-sequence version through the API. Instead, publish a valid
+    version first, then attach an additional empty Sequence to its block via
+    direct DB write — the dashboard query reads sequences regardless of state.
+    """
+    from mathion.models import Block, Sequence
+
+    course, version = seed_publishable_version(slug="es", name="ES")
+    run = _publish_run(admin_client, db, course["id"])
+
+    # Add a second, empty sequence to the existing block.
+    block = db.execute(
+        Block.__table__.select().where(Block.version_id == version["id"])
+    ).first()
+    db.add(Sequence(block_id=block.id, title="Empty", slug="empty", order=2))  # no items
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{run['id']}/dashboard/progress").json()
+    # Two sequences total; the second one (order=2) is the empty one.
+    assert len(body["sequences"]) == 2
+    empty_seq = body["sequences"][1]
+    assert empty_seq["total_items"] == 0
+    assert empty_seq["has_quiz_items"] is False
+
+
+def test_progress_unpublished_run(admin_client, db, seed_publishable_version):
+    """Unpublished run still returns 200 (admin/teacher preview).
+
+    The run is created via API but NOT published. Note: the admin still has access
+    via course-admin gate, so this exercises the admin path on an unpublished run.
+    """
+    course, version = seed_publishable_version(slug="up", name="UP")
+    # Create a run directly without publishing — bypasses the _publish_run helper.
+    r = admin_client.post(f"/api/courses/{course['id']}/runs", json={
+        "title": "R", "groups_enabled": False,
+        "start_date": "2026-01-01", "end_date": "2027-01-01",
+    }).json()
+    # Add teacher (not strictly needed for unpublished, but mirrors typical flow).
+    # Teachers POST takes {"email": ...}.
+    admin_client.post(f"/api/runs/{r['id']}/teachers", json={"email": "up-teacher@example.com"})
+    # Note: NOT calling /publish
+
+    resp = admin_client.get(f"/api/runs/{r['id']}/dashboard/progress")
+    assert resp.status_code == 200
