@@ -7,7 +7,19 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import get_or_404, require_run_admin_or_teacher
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import AnswerOption, Block, Group, Item, Question, Run, RunStudent, Sequence
+from mathion.models import (
+    AnswerOption,
+    Block,
+    Evaluation,
+    Group,
+    Item,
+    MiniProject,
+    Question,
+    Run,
+    RunStudent,
+    Sequence,
+    Submission,
+)
 from mathion.models_auth import User, UserItemState
 
 logger = logging.getLogger(__name__)
@@ -206,6 +218,55 @@ def get_progress(
     }
 
 
+def _derive_status(latest_sub, latest_eval) -> str:
+    if latest_sub is None:
+        return "not_submitted"
+    if latest_eval is None:
+        return "awaiting_eval"
+    r = latest_eval.result
+    if r in ("major_revision", "minor_revision"):
+        return "needs_revision"
+    if r == "accepted":
+        return "accepted"
+    if r == "rejected":
+        return "rejected"
+    return "awaiting_eval"  # defensive
+
+
+def _serialize_user_ref(user_id: int | None, full_name: str | None) -> dict | None:
+    if user_id is None:
+        return None
+    return {"user_id": user_id, "full_name": full_name}
+
+
+def _serialize_submission(sub, submitter_user_id, submitter_full_name) -> dict | None:
+    if sub is None:
+        return None
+    return {
+        "id": sub.id,
+        "submission_number": sub.submission_number,
+        "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+        "submitted_by": _serialize_user_ref(submitter_user_id, submitter_full_name),
+        "is_late": sub.is_late,
+        "is_resubmission": sub.is_resubmission,
+        "file_size": sub.file_size,
+    }
+
+
+def _serialize_evaluation(ev, evaluator_user_id, evaluator_full_name) -> dict | None:
+    if ev is None:
+        return None
+    return {
+        "id": ev.id,
+        "evaluated_at": ev.evaluated_at.isoformat() if ev.evaluated_at else None,
+        "evaluated_by": _serialize_user_ref(evaluator_user_id, evaluator_full_name),
+        "result": ev.result,
+        "score": ev.score,
+        "feedback_text": ev.feedback_text,
+        "has_feedback_file": ev.feedback_file is not None,
+    }
+
+
 @router.get("/api/runs/{run_id}/dashboard/mini-projects")
 def get_mini_projects(
     run_id: int,
@@ -214,12 +275,96 @@ def get_mini_projects(
 ):
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
-    # Stub — full body added in Tasks 8-9.
+
+    # 1. MPs and groups for this run
+    mps = db.execute(
+        select(MiniProject, Block)
+        .join(Block, Block.id == MiniProject.block_id)
+        .where(MiniProject.run_id == run_id)
+        .order_by(Block.order)
+    ).all()
+
+    groups = db.execute(
+        select(Group).where(Group.run_id == run_id).order_by(Group.id)
+    ).scalars().all()
+
+    # 2. Latest submission + evaluation per (mp, group). One pass.
+    if mps:
+        sub_rows = db.execute(
+            select(Submission, Evaluation, User.id, User.full_name)
+            .outerjoin(Evaluation, Evaluation.submission_id == Submission.id)
+            .outerjoin(User, User.id == Submission.submitted_by)
+            .where(Submission.mini_project_id.in_([mp.id for mp, _ in mps]))
+            .order_by(Submission.mini_project_id, Submission.group_id, Submission.submission_number.desc())
+        ).all()
+    else:
+        sub_rows = []
+
+    # Reduce to latest per (mp_id, group_id). Iteration is in DESC submission_number order
+    # so the first-seen (mp, group) pair is the latest.
+    latest_by_pair: dict[tuple[int, int], tuple] = {}
+    for sub, ev, sub_by_id, sub_by_name in sub_rows:
+        key = (sub.mini_project_id, sub.group_id)
+        if key not in latest_by_pair:
+            latest_by_pair[key] = (sub, ev, sub_by_id, sub_by_name)
+
+    # Pre-load evaluator user names
+    evaluator_ids = {ev.evaluated_by for (_, ev, _, _) in latest_by_pair.values() if ev is not None}
+    evaluators = {u.id: u for u in db.execute(
+        select(User).where(User.id.in_(evaluator_ids))
+    ).scalars().all()} if evaluator_ids else {}
+
+    # 3. Build response
+    mp_entries = []
+    for mp, block in mps:
+        group_entries = []
+        counts = {"total_groups": 0, "not_submitted": 0, "awaiting_eval": 0,
+                  "needs_revision": 0, "accepted": 0, "rejected": 0}
+        for g in groups:
+            entry = latest_by_pair.get((mp.id, g.id))
+            sub = ev = None
+            sub_by_id = sub_by_name = None
+            if entry is not None:
+                sub, ev, sub_by_id, sub_by_name = entry
+            status = _derive_status(sub, ev)
+
+            evaluator_id = evaluator_name = None
+            if ev is not None:
+                evaluator = evaluators.get(ev.evaluated_by)
+                if evaluator is not None:
+                    evaluator_id = evaluator.id
+                    evaluator_name = evaluator.full_name
+
+            group_entries.append({
+                "group_id": g.id,
+                "group_name": g.name,
+                "group_is_disabled": g.is_disabled,
+                "status": status,
+                "latest_submission": _serialize_submission(sub, sub_by_id, sub_by_name),
+                "latest_evaluation": _serialize_evaluation(ev, evaluator_id, evaluator_name),
+            })
+            counts["total_groups"] += 1
+            counts[status] += 1
+
+        mp_entries.append({
+            "id": mp.id,
+            "block_id": block.id,
+            "block_order": block.order,
+            "block_title": block.title,
+            "is_published": mp.is_published,
+            "first_submitted_at": mp.first_submitted_at.isoformat() if mp.first_submitted_at else None,
+            "soft_deadline": mp.soft_deadline.isoformat() if mp.soft_deadline else None,
+            "hard_deadline": mp.hard_deadline.isoformat() if mp.hard_deadline else None,
+            "resubmission_deadline": mp.resubmission_deadline.isoformat() if mp.resubmission_deadline else None,
+            "counts": counts,
+            "groups": group_entries,
+        })
+
     return {
         "run": {
             "id": run.id,
             "title": run.title,
             "groups_enabled": run.groups_enabled,
         },
-        "mini_projects": [],
+        "mini_projects": mp_entries,
     }

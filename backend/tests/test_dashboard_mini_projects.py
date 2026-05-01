@@ -54,3 +54,135 @@ def test_mp_dashboard_200_for_run_teacher(admin_client, seed_publishable_version
     db.commit()
     r = teacher_client.get(f"/api/runs/{run['id']}/dashboard/mini-projects")
     assert r.status_code == 200
+
+
+def _make_run_with_mp(admin_client, db, slug="mp"):
+    """Create a published run with one MP (block 1) and one student in one group."""
+    from datetime import datetime, timedelta, timezone
+
+    from mathion.models import Block, Group, Item, MiniProject, RunStudent, Sequence
+    from mathion.models_auth import User
+
+    course = admin_client.post(
+        "/api/courses", json={"slug": slug, "name": slug, "description": ""}
+    ).json()
+    version = admin_client.post(
+        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+    ).json()
+    block = Block(version_id=version["id"], title="B1", slug="b1", order=1)
+    db.add(block); db.flush()
+    seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
+    db.add(seq); db.flush()
+    db.add(Item(sequence_id=seq.id, title="I", slug="i", order=1, type="static_page",
+                content_md="x", content_html="x"))
+    db.commit()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    run = _publish_run(admin_client, db, course["id"], groups_enabled=True)
+
+    g = Group(run_id=run["id"], name="G1")
+    db.add(g); db.flush()
+    s = User(email=f"{slug}@example.com", full_name="S")
+    db.add(s); db.flush()
+    db.add(RunStudent(run_id=run["id"], user_id=s.id, group_id=g.id))
+    soft = datetime.now(timezone.utc) + timedelta(days=7)
+    hard = datetime.now(timezone.utc) + timedelta(days=14)
+    resub = datetime.now(timezone.utc) + timedelta(days=21)
+    mp = MiniProject(
+        run_id=run["id"], block_id=block.id,
+        assignment_md="x", assignment_html="x",
+        soft_deadline=soft, hard_deadline=hard, resubmission_deadline=resub,
+        is_published=True,
+    )
+    db.add(mp); db.commit()
+    return {"run": run, "group": g, "student": s, "mp": mp, "block": block}
+
+
+def test_mp_dashboard_status_not_submitted(admin_client, db):
+    ctx = _make_run_with_mp(admin_client, db, slug="ns")
+
+    body = admin_client.get(f"/api/runs/{ctx['run']['id']}/dashboard/mini-projects").json()
+    assert len(body["mini_projects"]) == 1
+    mp = body["mini_projects"][0]
+    assert mp["counts"]["total_groups"] == 1
+    assert mp["counts"]["not_submitted"] == 1
+    assert mp["groups"][0]["status"] == "not_submitted"
+    assert mp["groups"][0]["latest_submission"] is None
+    assert mp["groups"][0]["latest_evaluation"] is None
+
+
+def test_mp_dashboard_status_awaiting_eval(admin_client, db):
+    from datetime import datetime, timezone
+    from mathion.models import Submission
+    ctx = _make_run_with_mp(admin_client, db, slug="ae")
+    db.add(Submission(
+        mini_project_id=ctx["mp"].id, group_id=ctx["group"].id,
+        submitted_by=ctx["student"].id, submitted_at=datetime.now(timezone.utc),
+        file_path="x", submission_number=1, file_size=100, is_late=False, is_resubmission=False,
+    )); db.commit()
+
+    body = admin_client.get(f"/api/runs/{ctx['run']['id']}/dashboard/mini-projects").json()
+    g = body["mini_projects"][0]["groups"][0]
+    assert g["status"] == "awaiting_eval"
+    assert g["latest_submission"]["submission_number"] == 1
+    assert g["latest_evaluation"] is None
+
+
+def test_mp_dashboard_status_needs_revision(admin_client, db):
+    from datetime import datetime, timezone
+    from mathion.models import Evaluation, Submission
+    ctx = _make_run_with_mp(admin_client, db, slug="nr")
+    sub = Submission(
+        mini_project_id=ctx["mp"].id, group_id=ctx["group"].id,
+        submitted_by=ctx["student"].id, submitted_at=datetime.now(timezone.utc),
+        file_path="x", submission_number=1, file_size=100, is_late=False, is_resubmission=False,
+    )
+    db.add(sub); db.flush()
+    db.add(Evaluation(submission_id=sub.id, evaluated_by=ctx["student"].id,
+                      result="minor_revision", feedback_file="fb.pdf"))
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{ctx['run']['id']}/dashboard/mini-projects").json()
+    g = body["mini_projects"][0]["groups"][0]
+    assert g["status"] == "needs_revision"
+    assert g["latest_evaluation"]["result"] == "minor_revision"
+
+
+def test_mp_dashboard_status_accepted(admin_client, db):
+    from datetime import datetime, timezone
+    from mathion.models import Evaluation, Submission
+    ctx = _make_run_with_mp(admin_client, db, slug="ac")
+    sub = Submission(
+        mini_project_id=ctx["mp"].id, group_id=ctx["group"].id,
+        submitted_by=ctx["student"].id, submitted_at=datetime.now(timezone.utc),
+        file_path="x", submission_number=1, file_size=100, is_late=False, is_resubmission=False,
+    )
+    db.add(sub); db.flush()
+    db.add(Evaluation(submission_id=sub.id, evaluated_by=ctx["student"].id,
+                      result="accepted", score=90))
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{ctx['run']['id']}/dashboard/mini-projects").json()
+    g = body["mini_projects"][0]["groups"][0]
+    assert g["status"] == "accepted"
+    assert g["latest_evaluation"]["score"] == 90
+
+
+def test_mp_dashboard_status_rejected(admin_client, db):
+    from datetime import datetime, timezone
+    from mathion.models import Evaluation, Submission
+    ctx = _make_run_with_mp(admin_client, db, slug="rj")
+    sub = Submission(
+        mini_project_id=ctx["mp"].id, group_id=ctx["group"].id,
+        submitted_by=ctx["student"].id, submitted_at=datetime.now(timezone.utc),
+        file_path="x", submission_number=1, file_size=100, is_late=False, is_resubmission=False,
+    )
+    db.add(sub); db.flush()
+    db.add(Evaluation(submission_id=sub.id, evaluated_by=ctx["student"].id,
+                      result="rejected", feedback_file="fb.pdf"))
+    db.commit()
+
+    body = admin_client.get(f"/api/runs/{ctx['run']['id']}/dashboard/mini-projects").json()
+    g = body["mini_projects"][0]["groups"][0]
+    assert g["status"] == "rejected"
+    assert g["latest_evaluation"]["result"] == "rejected"
+    assert g["latest_evaluation"]["has_feedback_file"] is True
