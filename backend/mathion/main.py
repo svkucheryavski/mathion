@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 
 from mathion.api.auth import router as auth_router
 from mathion.api.blocks import router as blocks_router
@@ -22,6 +23,7 @@ from mathion.api.submissions import router as submissions_router
 from mathion.api.versions import router as versions_router
 
 app = FastAPI(title="Mathion", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(auth_router)
 app.include_router(courses_router)
 app.include_router(versions_router)
