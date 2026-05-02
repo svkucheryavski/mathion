@@ -188,6 +188,9 @@ def bulk_delete_students(
             else:
                 sp.rollback()
                 results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+        except HTTPException as e:
+            sp.rollback()
+            results.append({"user_id": uid, "status": "error", "detail": e.detail})
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected error in bulk-delete for user %s on run %s", uid, run_id)
             sp.rollback()
@@ -245,8 +248,14 @@ def bulk_move_students(
                 continue
 
             if data.group_id is not None:
+                # Scope count to this run as defense-in-depth: pre-flight already
+                # ensures target group belongs to this run, but a future regression
+                # there must not turn the cap into a global count across runs.
                 count = db.scalar(
-                    select(func.count(RunStudent.id)).where(RunStudent.group_id == data.group_id)
+                    select(func.count(RunStudent.id)).where(
+                        RunStudent.run_id == run_id,
+                        RunStudent.group_id == data.group_id,
+                    )
                 )
                 if count >= 10:
                     sp.rollback()
@@ -257,6 +266,9 @@ def bulk_move_students(
             db.flush()  # so next iteration's count includes this row
             sp.commit()
             results.append({"user_id": uid, "status": "ok", "group_id": data.group_id})
+        except HTTPException as e:
+            sp.rollback()
+            results.append({"user_id": uid, "status": "error", "detail": e.detail})
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected error in bulk-move for user %s on run %s", uid, run_id)
             sp.rollback()
