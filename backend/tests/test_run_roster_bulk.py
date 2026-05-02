@@ -439,3 +439,83 @@ def test_bulk_move_returns_207_even_when_all_succeed(admin_client, seed_publisha
         json={"user_ids": [a["user_id"]], "group_id": g["id"]},
     )
     assert response.status_code == 207
+
+
+# ---- contract tightening: error_code + summary ----------------------------
+
+def test_bulk_delete_error_rows_carry_stable_error_code(admin_client, seed_publishable_version):
+    """Frontend can switch on error_code without parsing free-form detail strings."""
+    run = _make_run(admin_client, seed_publishable_version)
+    a = _add_student(admin_client, run["id"], "a@example.com")
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-delete",
+        json={"user_ids": [a["user_id"], 9999]},
+    )
+    body = response.json()
+    rows = {r["user_id"]: r for r in body["results"]}
+    assert rows[a["user_id"]]["status"] == "ok"
+    assert rows[a["user_id"]]["error_code"] is None
+    assert rows[9999]["status"] == "error"
+    assert rows[9999]["error_code"] == "not_in_run"
+
+
+def test_bulk_delete_returns_summary(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    a = _add_student(admin_client, run["id"], "a@example.com")
+    b = _add_student(admin_client, run["id"], "b@example.com")
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-delete",
+        json={"user_ids": [a["user_id"], b["user_id"], 9999]},
+    )
+    body = response.json()
+    assert body["summary"] == {"total": 3, "ok": 2, "error": 1}
+
+
+def test_bulk_move_error_codes_distinguish_capacity_vs_not_in_run(
+    admin_client, seed_publishable_version
+):
+    """Capacity-reached and not-in-run are different errors; frontend should distinguish."""
+    run = _make_run(admin_client, seed_publishable_version)
+    full = _make_group(admin_client, run["id"], "Full")
+    # Fill Full to 10.
+    for i in range(10):
+        _add_student(admin_client, run["id"], f"f{i}@example.com", group_id=full["id"])
+    # One ungrouped student to attempt the move.
+    candidate = _add_student(admin_client, run["id"], "cand@example.com")
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [candidate["user_id"], 9999], "group_id": full["id"]},
+    )
+    body = response.json()
+    rows = {r["user_id"]: r for r in body["results"]}
+    assert rows[candidate["user_id"]]["status"] == "error"
+    assert rows[candidate["user_id"]]["error_code"] == "capacity_reached"
+    assert rows[9999]["status"] == "error"
+    assert rows[9999]["error_code"] == "not_in_run"
+
+
+def test_bulk_move_success_rows_have_null_error_code(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    a = _add_student(admin_client, run["id"], "a@example.com")
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [a["user_id"]], "group_id": g["id"]},
+    )
+    row = response.json()["results"][0]
+    assert row["status"] == "ok"
+    assert row["error_code"] is None
+
+
+def test_bulk_move_returns_summary(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    a = _add_student(admin_client, run["id"], "a@example.com")
+    b = _add_student(admin_client, run["id"], "b@example.com")
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [a["user_id"], b["user_id"], 9999], "group_id": g["id"]},
+    )
+    body = response.json()
+    assert body["summary"] == {"total": 3, "ok": 2, "error": 1}

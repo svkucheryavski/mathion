@@ -187,17 +187,29 @@ def bulk_delete_students(
                 results.append({"user_id": uid, "status": "ok"})
             else:
                 sp.rollback()
-                results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+                results.append({
+                    "user_id": uid, "status": "error",
+                    "detail": "Student not in run", "error_code": "not_in_run",
+                })
         except HTTPException as e:
             sp.rollback()
+            # No code: HTTPException from helpers is not a known per-row
+            # business error today; frontend should fall back to detail.
             results.append({"user_id": uid, "status": "error", "detail": e.detail})
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected error in bulk-delete for user %s on run %s", uid, run_id)
             sp.rollback()
-            results.append({"user_id": uid, "status": "error", "detail": "internal error"})
+            results.append({
+                "user_id": uid, "status": "error",
+                "detail": "internal error", "error_code": "internal_error",
+            })
 
     db.commit()
-    return {"results": results}
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    return {
+        "results": results,
+        "summary": {"total": len(results), "ok": ok_count, "error": len(results) - ok_count},
+    }
 
 
 @router.post(
@@ -215,6 +227,10 @@ def bulk_move_students(
     require_run_admin_or_teacher(db, user, run)
 
     # Pre-flight: validate target group (whole-call failure on bad target).
+    # Frontend contract: if target is disabled, filter user_ids client-side
+    # before calling. The whole-call 409 here intentionally rejects the call
+    # even when every uid is already in the disabled target — this trades a
+    # niche no-op carve-out for a simple, structural target-validity invariant.
     if data.group_id is not None:
         g = db.get(Group, data.group_id)
         if g is None or g.run_id != run_id:
@@ -238,7 +254,10 @@ def bulk_move_students(
             ).scalar_one_or_none()
             if rs is None:
                 sp.rollback()
-                results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+                results.append({
+                    "user_id": uid, "status": "error",
+                    "detail": "Student not in run", "error_code": "not_in_run",
+                })
                 continue
 
             # Already in target → no-op success, skip capacity charge.
@@ -259,7 +278,11 @@ def bulk_move_students(
                 )
                 if count >= 10:
                     sp.rollback()
-                    results.append({"user_id": uid, "status": "error", "detail": "Group capacity reached"})
+                    results.append({
+                        "user_id": uid, "status": "error",
+                        "detail": "Group capacity reached",
+                        "error_code": "capacity_reached",
+                    })
                     continue
 
             rs.group_id = data.group_id
@@ -268,11 +291,20 @@ def bulk_move_students(
             results.append({"user_id": uid, "status": "ok", "group_id": data.group_id})
         except HTTPException as e:
             sp.rollback()
+            # No code: HTTPException raised mid-loop is not a known per-row
+            # business error today; frontend should fall back to detail.
             results.append({"user_id": uid, "status": "error", "detail": e.detail})
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected error in bulk-move for user %s on run %s", uid, run_id)
             sp.rollback()
-            results.append({"user_id": uid, "status": "error", "detail": "internal error"})
+            results.append({
+                "user_id": uid, "status": "error",
+                "detail": "internal error", "error_code": "internal_error",
+            })
 
     db.commit()
-    return {"results": results}
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    return {
+        "results": results,
+        "summary": {"total": len(results), "ok": ok_count, "error": len(results) - ok_count},
+    }

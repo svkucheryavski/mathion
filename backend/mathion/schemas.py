@@ -473,6 +473,22 @@ def _no_duplicate_user_ids(v: list[int]) -> list[int]:
     return v
 
 
+# Stable identifiers for known per-row error categories. Frontend should
+# switch on these instead of parsing free-form `detail` strings. `None` means
+# the error wasn't categorized (e.g., an unexpected exception); use `detail`.
+BulkRosterErrorCode = Literal[
+    "not_in_run",        # user is not enrolled in this run
+    "capacity_reached",  # target group is at the 10-student cap
+    "internal_error",    # unexpected exception during per-row processing
+]
+
+
+class BulkOpSummary(BaseModel):
+    total: int
+    ok: int
+    error: int
+
+
 class RunStudentBulkMoveRequest(BaseModel):
     user_ids: list[int] = Field(min_length=1, max_length=200)
     group_id: int | None = None  # explicit None means unassign
@@ -488,10 +504,12 @@ class RunStudentBulkMoveResultRow(BaseModel):
     status: Literal["ok", "error"]
     group_id: int | None = None  # populated on success (target group, or null for unassign)
     detail: str | None = None    # populated on error
+    error_code: BulkRosterErrorCode | None = None  # stable code on error rows
 
 
 class RunStudentBulkMoveResponse(BaseModel):
     results: list[RunStudentBulkMoveResultRow]
+    summary: BulkOpSummary
 
 
 class RunStudentBulkDeleteRequest(BaseModel):
@@ -507,10 +525,12 @@ class RunStudentBulkDeleteResultRow(BaseModel):
     user_id: int
     status: Literal["ok", "error"]
     detail: str | None = None  # populated on error
+    error_code: BulkRosterErrorCode | None = None  # stable code on error rows
 
 
 class RunStudentBulkDeleteResponse(BaseModel):
     results: list[RunStudentBulkDeleteResultRow]
+    summary: BulkOpSummary
 
 
 class RunStudentUpdate(BaseModel):
