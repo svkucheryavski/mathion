@@ -311,6 +311,16 @@ def test_bulk_move_capacity_fills_mid_loop(admin_client, db, seed_publishable_ve
     assert results[3]["status"] == "error"
     assert results[3]["detail"] == "Group capacity reached"
 
+    # DB-state assertion: failed rows must remain in source, not silently
+    # land in dst, even if the HTTP error message is right.
+    db.expire_all()
+    for m in movers[:2]:
+        rs = db.query(RunStudent).filter_by(run_id=run["id"], user_id=m["user_id"]).one()
+        assert rs.group_id == dst["id"]
+    for m in movers[2:]:
+        rs = db.query(RunStudent).filter_by(run_id=run["id"], user_id=m["user_id"]).one()
+        assert rs.group_id == src["id"]
+
 
 def test_bulk_move_noop_plus_fill_mix(admin_client, db, seed_publishable_version):
     """Regression-locking case from the spec.
@@ -355,6 +365,13 @@ def test_bulk_move_noop_plus_fill_mix(admin_client, db, seed_publishable_version
     assert results[2]["user_id"] == user_z["user_id"]
     assert results[2]["status"] == "error"
     assert results[2]["detail"] == "Group capacity reached"
+
+    # DB-state invariant: B must end at exactly 10 (the cap), never above.
+    # Locks the no-op-before-capacity ordering: if user_X were ever charged
+    # against capacity, B would land at 11.
+    db.expire_all()
+    final_b_count = db.query(RunStudent).filter_by(group_id=b["id"]).count()
+    assert final_b_count == 10
 
 
 def test_bulk_move_mixed_results(admin_client, seed_publishable_version):
