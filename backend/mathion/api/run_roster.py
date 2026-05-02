@@ -8,12 +8,13 @@ from mathion.api.helpers import (
     enroll_user_in_run,
     get_or_404,
     get_or_create_user,
+    remove_run_student,
     require_run_admin_or_teacher,
 )
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import CourseVersion, Group, Run, RunStudent
-from mathion.models_auth import StudentEnrollment, User
+from mathion.models import Group, Run, RunStudent
+from mathion.models_auth import User
 from mathion.schemas import (
     RunStudentBatchRequest,
     RunStudentBatchResponse,
@@ -102,38 +103,8 @@ def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
-    rs = db.execute(
-        select(RunStudent).where(RunStudent.run_id == run_id, RunStudent.user_id == user_id)
-    ).scalar_one_or_none()
-    if not rs:
+    if not remove_run_student(db, run, user_id):
         raise HTTPException(status_code=404, detail="Student not in run")
-
-    db.delete(rs)
-    db.flush()
-
-    # Deactivate StudentEnrollment iff no other RunStudent rows remain on this course's runs
-    # Joins CourseVersion so we also catch runs on OTHER versions of the same course.
-    # Use limit(1) + first() — scalar_one_or_none() would raise MultipleResultsFound
-    # when the user has 2+ other runs on this course.
-    other = db.execute(
-        select(RunStudent.id)
-        .join(Run, Run.id == RunStudent.run_id)
-        .join(CourseVersion, CourseVersion.id == Run.version_id)
-        .where(
-            RunStudent.user_id == user_id,
-            CourseVersion.course_id == run.version.course_id,
-        )
-        .limit(1)
-    ).first()
-    if other is None:
-        enrollment = db.execute(
-            select(StudentEnrollment).where(
-                StudentEnrollment.user_id == user_id,
-                StudentEnrollment.version_id == run.version_id,
-            )
-        ).scalar_one_or_none()
-        if enrollment:
-            enrollment.is_active = False
     db.commit()
 
 

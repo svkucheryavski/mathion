@@ -251,3 +251,35 @@ def test_batch_add_to_disabled_group_per_row_error(admin_client, seed_run_with_g
     assert error_row["status"] == "error"
     assert "disabled" in error_row["detail"].lower()
     assert ok_row["status"] == "added"
+
+
+def test_remove_run_student_helper_returns_false_for_unknown_user(db, seed_publishable_version, admin_client):
+    from mathion.api.helpers import remove_run_student
+    from mathion.models import Run
+
+    run_data = _make_run(admin_client, seed_publishable_version)
+    run = db.get(Run, run_data["id"])
+    result = remove_run_student(db, run, user_id=99999)
+    assert result is False
+
+
+def test_remove_run_student_helper_deletes_and_returns_true(db, seed_publishable_version, admin_client):
+    from mathion.api.helpers import remove_run_student
+    from mathion.models import Run, RunStudent
+    from mathion.models_auth import StudentEnrollment
+
+    run_data = _make_run(admin_client, seed_publishable_version)
+    run = db.get(Run, run_data["id"])
+    s = admin_client.post(
+        f"/api/runs/{run_data['id']}/students", json={"email": "x@example.com"}
+    ).json()
+    db.expire_all()  # refresh ORM state to see API-side commits
+
+    result = remove_run_student(db, run, user_id=s["user_id"])
+    db.commit()
+    assert result is True
+    assert db.query(RunStudent).filter_by(run_id=run.id, user_id=s["user_id"]).first() is None
+    enrollment = db.query(StudentEnrollment).filter_by(
+        user_id=s["user_id"], version_id=run.version_id
+    ).one()
+    assert enrollment.is_active is False
