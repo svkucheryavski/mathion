@@ -195,6 +195,53 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
     return rs
 
 
+def remove_run_student(db: Session, run, user_id: int) -> bool:
+    """Remove a student from a run.
+
+    1. Look up RunStudent for (run.id, user_id). Return False if not found.
+    2. Delete the RunStudent row and flush.
+    3. Check whether the user has any other RunStudent on any version of
+       the same course (joins Run -> CourseVersion -> course_id).
+    4. If no siblings remain, set StudentEnrollment.is_active = False
+       for (user_id, run.version_id).
+    5. Caller must commit.
+
+    Returns True if a row was deleted, False if no matching RunStudent.
+    """
+    from mathion.models import CourseVersion, Run, RunStudent
+    from mathion.models_auth import StudentEnrollment
+
+    rs = db.execute(
+        select(RunStudent).where(RunStudent.run_id == run.id, RunStudent.user_id == user_id)
+    ).scalar_one_or_none()
+    if rs is None:
+        return False
+
+    db.delete(rs)
+    db.flush()
+
+    other = db.execute(
+        select(RunStudent.id)
+        .join(Run, Run.id == RunStudent.run_id)
+        .join(CourseVersion, CourseVersion.id == Run.version_id)
+        .where(
+            RunStudent.user_id == user_id,
+            CourseVersion.course_id == run.version.course_id,
+        )
+        .limit(1)
+    ).first()
+    if other is None:
+        enrollment = db.execute(
+            select(StudentEnrollment).where(
+                StudentEnrollment.user_id == user_id,
+                StudentEnrollment.version_id == run.version_id,
+            )
+        ).scalar_one_or_none()
+        if enrollment:
+            enrollment.is_active = False
+    return True
+
+
 def has_submissions(db: Session, run) -> bool:
     """Return True if any Submission row exists for any mini-project on this run.
 

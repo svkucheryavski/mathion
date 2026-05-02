@@ -8,15 +8,20 @@ from mathion.api.helpers import (
     enroll_user_in_run,
     get_or_404,
     get_or_create_user,
+    remove_run_student,
     require_run_admin_or_teacher,
 )
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import CourseVersion, Group, Run, RunStudent
-from mathion.models_auth import StudentEnrollment, User
+from mathion.models import Group, Run, RunStudent
+from mathion.models_auth import User
 from mathion.schemas import (
     RunStudentBatchRequest,
     RunStudentBatchResponse,
+    RunStudentBulkDeleteRequest,
+    RunStudentBulkDeleteResponse,
+    RunStudentBulkMoveRequest,
+    RunStudentBulkMoveResponse,
     RunStudentCreate,
     RunStudentResponse,
     RunStudentUpdate,
@@ -102,38 +107,8 @@ def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
-    rs = db.execute(
-        select(RunStudent).where(RunStudent.run_id == run_id, RunStudent.user_id == user_id)
-    ).scalar_one_or_none()
-    if not rs:
+    if not remove_run_student(db, run, user_id):
         raise HTTPException(status_code=404, detail="Student not in run")
-
-    db.delete(rs)
-    db.flush()
-
-    # Deactivate StudentEnrollment iff no other RunStudent rows remain on this course's runs
-    # Joins CourseVersion so we also catch runs on OTHER versions of the same course.
-    # Use limit(1) + first() — scalar_one_or_none() would raise MultipleResultsFound
-    # when the user has 2+ other runs on this course.
-    other = db.execute(
-        select(RunStudent.id)
-        .join(Run, Run.id == RunStudent.run_id)
-        .join(CourseVersion, CourseVersion.id == Run.version_id)
-        .where(
-            RunStudent.user_id == user_id,
-            CourseVersion.course_id == run.version.course_id,
-        )
-        .limit(1)
-    ).first()
-    if other is None:
-        enrollment = db.execute(
-            select(StudentEnrollment).where(
-                StudentEnrollment.user_id == user_id,
-                StudentEnrollment.version_id == run.version_id,
-            )
-        ).scalar_one_or_none()
-        if enrollment:
-            enrollment.is_active = False
     db.commit()
 
 
@@ -184,6 +159,108 @@ def add_students_batch(
             logger.exception("Unexpected error in batch student add for %s", row.email)
             sp.rollback()
             results.append({"email": row.email, "status": "error", "detail": "internal error"})
+
+    db.commit()
+    return {"results": results}
+
+
+@router.post(
+    "/api/runs/{run_id}/students/bulk-delete",
+    status_code=207,
+    response_model=RunStudentBulkDeleteResponse,
+)
+def bulk_delete_students(
+    run_id: int,
+    data: RunStudentBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
+
+    results = []
+    for uid in data.user_ids:
+        sp = db.begin_nested()
+        try:
+            if remove_run_student(db, run, uid):
+                sp.commit()
+                results.append({"user_id": uid, "status": "ok"})
+            else:
+                sp.rollback()
+                results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected error in bulk-delete for user %s on run %s", uid, run_id)
+            sp.rollback()
+            results.append({"user_id": uid, "status": "error", "detail": "internal error"})
+
+    db.commit()
+    return {"results": results}
+
+
+@router.post(
+    "/api/runs/{run_id}/students/bulk-move",
+    status_code=207,
+    response_model=RunStudentBulkMoveResponse,
+)
+def bulk_move_students(
+    run_id: int,
+    data: RunStudentBulkMoveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
+
+    # Pre-flight: validate target group (whole-call failure on bad target).
+    if data.group_id is not None:
+        g = db.get(Group, data.group_id)
+        if g is None or g.run_id != run_id:
+            raise HTTPException(status_code=400, detail="Group not in this run")
+        if g.is_disabled:
+            raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
+
+    # TODO(phase 9): SELECT-count + UPDATE per row is non-atomic, and the bulk
+    # version widens the window because the outer transaction commits only
+    # after the whole loop. Two concurrent bulk-moves into the same near-full
+    # group can both succeed past 10. Real-world impact is low; fix via
+    # SELECT FOR UPDATE on Postgres alongside single-PATCH at run_roster.py:87.
+    results = []
+    for uid in data.user_ids:
+        sp = db.begin_nested()
+        try:
+            rs = db.execute(
+                select(RunStudent).where(
+                    RunStudent.run_id == run_id, RunStudent.user_id == uid
+                )
+            ).scalar_one_or_none()
+            if rs is None:
+                sp.rollback()
+                results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+                continue
+
+            # Already in target → no-op success, skip capacity charge.
+            if rs.group_id == data.group_id:
+                sp.commit()
+                results.append({"user_id": uid, "status": "ok", "group_id": data.group_id})
+                continue
+
+            if data.group_id is not None:
+                count = db.scalar(
+                    select(func.count(RunStudent.id)).where(RunStudent.group_id == data.group_id)
+                )
+                if count >= 10:
+                    sp.rollback()
+                    results.append({"user_id": uid, "status": "error", "detail": "Group capacity reached"})
+                    continue
+
+            rs.group_id = data.group_id
+            db.flush()  # so next iteration's count includes this row
+            sp.commit()
+            results.append({"user_id": uid, "status": "ok", "group_id": data.group_id})
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected error in bulk-move for user %s on run %s", uid, run_id)
+            sp.rollback()
+            results.append({"user_id": uid, "status": "error", "detail": "internal error"})
 
     db.commit()
     return {"results": results}
