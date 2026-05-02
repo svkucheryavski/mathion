@@ -465,6 +465,52 @@ class RunStudentBatchResponse(BaseModel):
     results: list[RunStudentBatchResultRow]
 
 
+# ---- Phase 7d: bulk roster operations ---------------------------------------
+
+class RunStudentBulkMoveRequest(BaseModel):
+    user_ids: list[int] = Field(min_length=1, max_length=200)
+    group_id: int | None = None  # explicit None means unassign
+
+    @field_validator("user_ids")
+    @classmethod
+    def no_duplicates(cls, v: list[int]) -> list[int]:
+        if len(set(v)) != len(v):
+            raise ValueError("user_ids must not contain duplicates")
+        return v
+
+
+class RunStudentBulkMoveResultRow(BaseModel):
+    user_id: int
+    status: Literal["ok", "error"]
+    group_id: int | None = None  # populated on success (target group, or null for unassign)
+    detail: str | None = None    # populated on error
+
+
+class RunStudentBulkMoveResponse(BaseModel):
+    results: list[RunStudentBulkMoveResultRow]
+
+
+class RunStudentBulkDeleteRequest(BaseModel):
+    user_ids: list[int] = Field(min_length=1, max_length=200)
+
+    @field_validator("user_ids")
+    @classmethod
+    def no_duplicates(cls, v: list[int]) -> list[int]:
+        if len(set(v)) != len(v):
+            raise ValueError("user_ids must not contain duplicates")
+        return v
+
+
+class RunStudentBulkDeleteResultRow(BaseModel):
+    user_id: int
+    status: Literal["ok", "error"]
+    detail: str | None = None  # populated on error
+
+
+class RunStudentBulkDeleteResponse(BaseModel):
+    results: list[RunStudentBulkDeleteResultRow]
+
+
 class RunStudentUpdate(BaseModel):
     group_id: int | None = None  # explicit None means unassign
 
