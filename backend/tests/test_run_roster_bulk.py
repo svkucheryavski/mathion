@@ -1,7 +1,5 @@
 """Bulk roster operation tests — POST /students/bulk-delete and bulk-move."""
 
-import pytest
-
 
 def _make_run(admin_client, seed_publishable_version, groups_enabled=True, slug="stats", name="Stats"):
     course, _ = seed_publishable_version(slug=slug, name=name)
