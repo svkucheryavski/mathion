@@ -67,9 +67,10 @@ def test_bulk_delete_happy_path_with_enrollment_cascade(admin_client, db, seed_p
     """3 students removed; 2 had no other run on the course (enrollment deactivated);
     1 also exists on a sibling run on the same course (enrollment stays active).
 
-    Uses two runs on the SAME published version — this still exercises the
-    cross-version cascade query because the `Run -> CourseVersion -> course_id`
-    join finds any sibling RunStudent on the same course regardless of version.
+    Uses two runs on the SAME published version — exercises the cross-run
+    sibling check (run.id-level), not the cross-version branch. The
+    cross-version branch is locked by existing single-DELETE tests in
+    test_run_roster.py.
     """
     from mathion.models_auth import StudentEnrollment
 
