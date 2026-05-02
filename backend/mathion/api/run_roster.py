@@ -18,6 +18,8 @@ from mathion.models_auth import User
 from mathion.schemas import (
     RunStudentBatchRequest,
     RunStudentBatchResponse,
+    RunStudentBulkDeleteRequest,
+    RunStudentBulkDeleteResponse,
     RunStudentCreate,
     RunStudentResponse,
     RunStudentUpdate,
@@ -155,6 +157,39 @@ def add_students_batch(
             logger.exception("Unexpected error in batch student add for %s", row.email)
             sp.rollback()
             results.append({"email": row.email, "status": "error", "detail": "internal error"})
+
+    db.commit()
+    return {"results": results}
+
+
+@router.post(
+    "/api/runs/{run_id}/students/bulk-delete",
+    status_code=207,
+    response_model=RunStudentBulkDeleteResponse,
+)
+def bulk_delete_students(
+    run_id: int,
+    data: RunStudentBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
+
+    results = []
+    for uid in data.user_ids:
+        sp = db.begin_nested()
+        try:
+            if remove_run_student(db, run, uid):
+                sp.commit()
+                results.append({"user_id": uid, "status": "ok"})
+            else:
+                sp.rollback()
+                results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected error in bulk-delete for user %s on run %s", uid, run_id)
+            sp.rollback()
+            results.append({"user_id": uid, "status": "error", "detail": "internal error"})
 
     db.commit()
     return {"results": results}
