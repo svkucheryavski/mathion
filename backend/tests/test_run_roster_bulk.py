@@ -393,3 +393,42 @@ def test_bulk_move_mixed_results(admin_client, seed_publishable_version):
     assert by_uid[99999]["detail"] == "Student not in run"
     assert by_uid[b["user_id"]]["status"] == "ok"
     assert by_uid[b["user_id"]]["group_id"] == g["id"]
+
+
+# ---- bulk-move auth + 422 (endpoint-level) ---------------------------------
+
+def test_bulk_move_rejects_empty_and_oversize_lists(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    r1 = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [], "group_id": g["id"]},
+    )
+    assert r1.status_code == 422
+    r2 = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": list(range(201)), "group_id": g["id"]},
+    )
+    assert r2.status_code == 422
+
+
+def test_bulk_move_rejects_duplicates(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [1, 1, 2], "group_id": g["id"]},
+    )
+    assert response.status_code == 422
+    assert "duplicates" in response.text
+
+
+def test_bulk_move_returns_207_even_when_all_succeed(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    a = _add_student(admin_client, run["id"], "a@example.com")
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [a["user_id"]], "group_id": g["id"]},
+    )
+    assert response.status_code == 207
