@@ -187,3 +187,192 @@ def test_bulk_move_returns_409_for_disabled_group(admin_client, seed_publishable
     )
     assert response.status_code == 409
     assert response.json()["detail"] == "Cannot move student into disabled group"
+
+
+# ---- bulk-move per-row -----------------------------------------------------
+
+def test_bulk_move_happy_path(admin_client, db, seed_publishable_version):
+    from mathion.models import RunStudent
+
+    run = _make_run(admin_client, seed_publishable_version)
+    src = _make_group(admin_client, run["id"], "Source")
+    dst = _make_group(admin_client, run["id"], "Dest")
+    s1 = _add_student(admin_client, run["id"], "s1@example.com", group_id=src["id"])
+    s2 = _add_student(admin_client, run["id"], "s2@example.com", group_id=src["id"])
+    s3 = _add_student(admin_client, run["id"], "s3@example.com", group_id=src["id"])
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={
+            "user_ids": [s1["user_id"], s2["user_id"], s3["user_id"]],
+            "group_id": dst["id"],
+        },
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert len(results) == 3
+    assert all(r["status"] == "ok" for r in results)
+    assert all(r["group_id"] == dst["id"] for r in results)
+
+    db.expire_all()
+    for s in [s1, s2, s3]:
+        rs = db.query(RunStudent).filter_by(run_id=run["id"], user_id=s["user_id"]).one()
+        assert rs.group_id == dst["id"]
+
+
+def test_bulk_move_already_in_target_is_noop(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    s = _add_student(admin_client, run["id"], "s@example.com", group_id=g["id"])
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [s["user_id"]], "group_id": g["id"]},
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert results[0]["status"] == "ok"
+    assert results[0]["group_id"] == g["id"]
+
+
+def test_bulk_move_unassign_with_null_group(admin_client, db, seed_publishable_version):
+    from mathion.models import RunStudent
+
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    s = _add_student(admin_client, run["id"], "s@example.com", group_id=g["id"])
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [s["user_id"]], "group_id": None},
+    )
+    assert response.status_code == 207
+    assert response.json()["results"][0]["status"] == "ok"
+    assert response.json()["results"][0]["group_id"] is None
+
+    db.expire_all()
+    rs = db.query(RunStudent).filter_by(run_id=run["id"], user_id=s["user_id"]).one()
+    assert rs.group_id is None
+
+
+def test_bulk_move_unassigns_already_unassigned_student_as_noop(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    s = _add_student(admin_client, run["id"], "s@example.com")  # no group
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [s["user_id"]], "group_id": None},
+    )
+    assert response.status_code == 207
+    assert response.json()["results"][0]["status"] == "ok"
+
+
+def test_bulk_move_user_not_in_run_returns_per_row_error(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [99999], "group_id": g["id"]},
+    )
+    assert response.status_code == 207
+    row = response.json()["results"][0]
+    assert row["status"] == "error"
+    assert row["detail"] == "Student not in run"
+
+
+def test_bulk_move_capacity_fills_mid_loop(admin_client, db, seed_publishable_version):
+    """Target has room for 2; 4 movers requested. First 2 succeed, last 2 fail."""
+    from mathion.models import RunStudent
+    from mathion.models_auth import User
+
+    run = _make_run(admin_client, seed_publishable_version)
+    src = _make_group(admin_client, run["id"], "Source")
+    dst = _make_group(admin_client, run["id"], "Dest")
+    # Pre-fill dst with 8 students.
+    for i in range(8):
+        u = User(email=f"prefill{i}@example.com")
+        db.add(u); db.flush()
+        db.add(RunStudent(run_id=run["id"], user_id=u.id, group_id=dst["id"]))
+    db.commit()
+
+    movers = [_add_student(admin_client, run["id"], f"m{i}@example.com", group_id=src["id"])
+              for i in range(4)]
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [m["user_id"] for m in movers], "group_id": dst["id"]},
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert results[0]["status"] == "ok"
+    assert results[1]["status"] == "ok"
+    assert results[2]["status"] == "error"
+    assert results[2]["detail"] == "Group capacity reached"
+    assert results[3]["status"] == "error"
+    assert results[3]["detail"] == "Group capacity reached"
+
+
+def test_bulk_move_noop_plus_fill_mix(admin_client, db, seed_publishable_version):
+    """Regression-locking case from the spec.
+
+    Target B has 9 students (room for 1). user_X is already in B; user_Y and
+    user_Z are in C. Request: [user_X, user_Y, user_Z]. Expected:
+    - user_X: ok no-op (B unchanged at 9)
+    - user_Y: ok (B fills to 10)
+    - user_Z: error capacity
+    """
+    from mathion.models import RunStudent
+    from mathion.models_auth import User
+
+    run = _make_run(admin_client, seed_publishable_version)
+    b = _make_group(admin_client, run["id"], "B")
+    c = _make_group(admin_client, run["id"], "C")
+
+    # Pre-fill B with 8 students (we'll add user_X bringing it to 9).
+    for i in range(8):
+        u = User(email=f"bfill{i}@example.com")
+        db.add(u); db.flush()
+        db.add(RunStudent(run_id=run["id"], user_id=u.id, group_id=b["id"]))
+    db.commit()
+
+    user_x = _add_student(admin_client, run["id"], "x@example.com", group_id=b["id"])  # in B; B=9
+    user_y = _add_student(admin_client, run["id"], "y@example.com", group_id=c["id"])  # in C
+    user_z = _add_student(admin_client, run["id"], "z@example.com", group_id=c["id"])  # in C
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={
+            "user_ids": [user_x["user_id"], user_y["user_id"], user_z["user_id"]],
+            "group_id": b["id"],
+        },
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert results[0]["user_id"] == user_x["user_id"]
+    assert results[0]["status"] == "ok"
+    assert results[1]["user_id"] == user_y["user_id"]
+    assert results[1]["status"] == "ok"
+    assert results[2]["user_id"] == user_z["user_id"]
+    assert results[2]["status"] == "error"
+    assert results[2]["detail"] == "Group capacity reached"
+
+
+def test_bulk_move_mixed_results(admin_client, seed_publishable_version):
+    """One success, one not-in-run, one already-in-target."""
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "G")
+    a = _add_student(admin_client, run["id"], "a@example.com")  # ungrouped
+    b = _add_student(admin_client, run["id"], "b@example.com", group_id=g["id"])  # already in G
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [a["user_id"], 99999, b["user_id"]], "group_id": g["id"]},
+    )
+    assert response.status_code == 207
+    by_uid = {r["user_id"]: r for r in response.json()["results"]}
+    assert by_uid[a["user_id"]]["status"] == "ok"
+    assert by_uid[a["user_id"]]["group_id"] == g["id"]
+    assert by_uid[99999]["status"] == "error"
+    assert by_uid[99999]["detail"] == "Student not in run"
+    assert by_uid[b["user_id"]]["status"] == "ok"
+    assert by_uid[b["user_id"]]["group_id"] == g["id"]

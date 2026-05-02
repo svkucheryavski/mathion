@@ -219,9 +219,48 @@ def bulk_move_students(
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
 
-    # Per-row processing comes in Task 5; for now return empty results so the
-    # endpoint exists and pre-flight tests pass.
-    results = []  # filled by Task 5
+    # TODO(phase 9): SELECT-count + UPDATE per row is non-atomic, and the bulk
+    # version widens the window because the outer transaction commits only
+    # after the whole loop. Two concurrent bulk-moves into the same near-full
+    # group can both succeed past 10. Real-world impact is low; fix via
+    # SELECT FOR UPDATE on Postgres alongside single-PATCH at run_roster.py:87.
+    results = []
+    for uid in data.user_ids:
+        sp = db.begin_nested()
+        try:
+            rs = db.execute(
+                select(RunStudent).where(
+                    RunStudent.run_id == run_id, RunStudent.user_id == uid
+                )
+            ).scalar_one_or_none()
+            if rs is None:
+                sp.rollback()
+                results.append({"user_id": uid, "status": "error", "detail": "Student not in run"})
+                continue
+
+            # Already in target → no-op success, skip capacity charge.
+            if rs.group_id == data.group_id:
+                sp.commit()
+                results.append({"user_id": uid, "status": "ok", "group_id": data.group_id})
+                continue
+
+            if data.group_id is not None:
+                count = db.scalar(
+                    select(func.count(RunStudent.id)).where(RunStudent.group_id == data.group_id)
+                )
+                if count >= 10:
+                    sp.rollback()
+                    results.append({"user_id": uid, "status": "error", "detail": "Group capacity reached"})
+                    continue
+
+            rs.group_id = data.group_id
+            db.flush()  # so next iteration's count includes this row
+            sp.commit()
+            results.append({"user_id": uid, "status": "ok", "group_id": data.group_id})
+        except Exception:  # noqa: BLE001
+            logger.exception("Unexpected error in bulk-move for user %s on run %s", uid, run_id)
+            sp.rollback()
+            results.append({"user_id": uid, "status": "error", "detail": "internal error"})
 
     db.commit()
     return {"results": results}
