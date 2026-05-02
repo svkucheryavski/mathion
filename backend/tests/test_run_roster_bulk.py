@@ -174,9 +174,7 @@ def test_bulk_move_returns_400_when_group_belongs_to_other_run(admin_client, see
     assert response.json()["detail"] == "Group not in this run"
 
 
-def test_bulk_move_returns_409_for_disabled_group(admin_client, db, seed_publishable_version):
-    from mathion.models import Group
-
+def test_bulk_move_returns_409_for_disabled_group(admin_client, seed_publishable_version):
     run = _make_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "Group A")
     a = _add_student(admin_client, run["id"], "a@example.com")
