@@ -3,8 +3,8 @@
 import pytest
 
 
-def _make_run(admin_client, seed_publishable_version, groups_enabled=True):
-    course, _ = seed_publishable_version()
+def _make_run(admin_client, seed_publishable_version, groups_enabled=True, slug="stats", name="Stats"):
+    course, _ = seed_publishable_version(slug=slug, name=name)
     return admin_client.post(
         f"/api/courses/{course['id']}/runs",
         json={
@@ -139,3 +139,53 @@ def test_bulk_delete_returns_207_even_when_all_succeed(admin_client, seed_publis
         json={"user_ids": [a["user_id"]]},
     )
     assert response.status_code == 207
+
+
+# ---- bulk-move pre-flight --------------------------------------------------
+
+def test_bulk_move_requires_admin_or_teacher(admin_client, auth_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    response = auth_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [1], "group_id": 1},
+    )
+    assert response.status_code == 403
+
+
+def test_bulk_move_returns_404_for_missing_run(admin_client):
+    response = admin_client.post(
+        "/api/runs/9999/students/bulk-move",
+        json={"user_ids": [1], "group_id": 1},
+    )
+    assert response.status_code == 404
+
+
+def test_bulk_move_returns_400_when_group_belongs_to_other_run(admin_client, seed_publishable_version):
+    run1 = _make_run(admin_client, seed_publishable_version, slug="mv1", name="MV1")
+    run2 = _make_run(admin_client, seed_publishable_version, slug="mv2", name="MV2")
+    g_other = _make_group(admin_client, run2["id"], "Group X")
+    a = _add_student(admin_client, run1["id"], "a@example.com")
+
+    response = admin_client.post(
+        f"/api/runs/{run1['id']}/students/bulk-move",
+        json={"user_ids": [a["user_id"]], "group_id": g_other["id"]},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Group not in this run"
+
+
+def test_bulk_move_returns_409_for_disabled_group(admin_client, db, seed_publishable_version):
+    from mathion.models import Group
+
+    run = _make_run(admin_client, seed_publishable_version)
+    g = _make_group(admin_client, run["id"], "Group A")
+    a = _add_student(admin_client, run["id"], "a@example.com")
+    # Disable the group.
+    admin_client.patch(f"/api/groups/{g['id']}", json={"is_disabled": True})
+
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/bulk-move",
+        json={"user_ids": [a["user_id"]], "group_id": g["id"]},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Cannot move student into disabled group"

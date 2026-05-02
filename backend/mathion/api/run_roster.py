@@ -20,6 +20,8 @@ from mathion.schemas import (
     RunStudentBatchResponse,
     RunStudentBulkDeleteRequest,
     RunStudentBulkDeleteResponse,
+    RunStudentBulkMoveRequest,
+    RunStudentBulkMoveResponse,
     RunStudentCreate,
     RunStudentResponse,
     RunStudentUpdate,
@@ -190,6 +192,36 @@ def bulk_delete_students(
             logger.exception("Unexpected error in bulk-delete for user %s on run %s", uid, run_id)
             sp.rollback()
             results.append({"user_id": uid, "status": "error", "detail": "internal error"})
+
+    db.commit()
+    return {"results": results}
+
+
+@router.post(
+    "/api/runs/{run_id}/students/bulk-move",
+    status_code=207,
+    response_model=RunStudentBulkMoveResponse,
+)
+def bulk_move_students(
+    run_id: int,
+    data: RunStudentBulkMoveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
+
+    # Pre-flight: validate target group (whole-call failure on bad target).
+    if data.group_id is not None:
+        g = db.get(Group, data.group_id)
+        if g is None or g.run_id != run_id:
+            raise HTTPException(status_code=400, detail="Group not in this run")
+        if g.is_disabled:
+            raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
+
+    # Per-row processing comes in Task 5; for now return empty results so the
+    # endpoint exists and pre-flight tests pass.
+    results = []  # filled by Task 5
 
     db.commit()
     return {"results": results}
