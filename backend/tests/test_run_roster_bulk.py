@@ -371,6 +371,15 @@ def test_bulk_move_noop_plus_fill_mix(admin_client, db, seed_publishable_version
     final_b_count = db.query(RunStudent).filter_by(group_id=b["id"]).count()
     assert final_b_count == 10
 
+    # Per-user invariants: even with a correct count, individual placement
+    # must be right — user_X stayed (no-op), user_Y moved, user_Z did not.
+    rs_x = db.query(RunStudent).filter_by(run_id=run["id"], user_id=user_x["user_id"]).one()
+    assert rs_x.group_id == b["id"]
+    rs_y = db.query(RunStudent).filter_by(run_id=run["id"], user_id=user_y["user_id"]).one()
+    assert rs_y.group_id == b["id"]
+    rs_z = db.query(RunStudent).filter_by(run_id=run["id"], user_id=user_z["user_id"]).one()
+    assert rs_z.group_id == c["id"]
+
 
 def test_bulk_move_mixed_results(admin_client, seed_publishable_version):
     """One success, one not-in-run, one already-in-target."""
