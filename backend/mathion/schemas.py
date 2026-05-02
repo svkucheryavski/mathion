@@ -467,6 +467,12 @@ class RunStudentBatchResponse(BaseModel):
 
 # ---- Phase 7d: bulk roster operations ---------------------------------------
 
+def _no_duplicate_user_ids(v: list[int]) -> list[int]:
+    if len(set(v)) != len(v):
+        raise ValueError("user_ids must not contain duplicates")
+    return v
+
+
 class RunStudentBulkMoveRequest(BaseModel):
     user_ids: list[int] = Field(min_length=1, max_length=200)
     group_id: int | None = None  # explicit None means unassign
@@ -474,9 +480,7 @@ class RunStudentBulkMoveRequest(BaseModel):
     @field_validator("user_ids")
     @classmethod
     def no_duplicates(cls, v: list[int]) -> list[int]:
-        if len(set(v)) != len(v):
-            raise ValueError("user_ids must not contain duplicates")
-        return v
+        return _no_duplicate_user_ids(v)
 
 
 class RunStudentBulkMoveResultRow(BaseModel):
@@ -496,9 +500,7 @@ class RunStudentBulkDeleteRequest(BaseModel):
     @field_validator("user_ids")
     @classmethod
     def no_duplicates(cls, v: list[int]) -> list[int]:
-        if len(set(v)) != len(v):
-            raise ValueError("user_ids must not contain duplicates")
-        return v
+        return _no_duplicate_user_ids(v)
 
 
 class RunStudentBulkDeleteResultRow(BaseModel):
