@@ -247,7 +247,7 @@ New file `backend/tests/test_run_roster_bulk.py`. Reuses fixtures from `test_run
 
 The same single-PATCH race documented at `run_roster.py:87` applies to bulk-move: two concurrent bulk requests targeting the same near-full group can both pass the per-row count check and both succeed past 10 students.
 
-**Widened window (worse than single PATCH):** the outer transaction commits only after the whole loop, so concurrent reads from a sibling bulk request see the pre-loop state of the target group until the final commit. The race window scales with batch size — O(N rows) instead of O(1). At Mathion's scale (admin-only roster operations, single-school deployment, runs capped at ~200) this is acceptable, but it must be documented honestly so the Phase 9 fix is properly scoped.
+**Widened window (worse than single PATCH):** the outer transaction commits only after the whole loop, so concurrent reads from a sibling bulk request see the pre-loop state of the target group until the final commit. The exposure window grows roughly linearly with the number of rows processed — single PATCH commits immediately after one mutation; bulk holds N successful mutations uncommitted until the loop ends. At Mathion's scale (admin-only roster operations, single-school deployment, runs capped at ~200) this is acceptable, but it must be documented honestly so the Phase 9 fix is properly scoped.
 
 Mark a TODO inline at the bulk-move handler matching the existing pattern at `run_roster.py:87`. Phase 9 covers both single and bulk via `SELECT FOR UPDATE` on Postgres roster mutations.
 
