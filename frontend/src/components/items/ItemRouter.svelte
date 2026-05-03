@@ -3,6 +3,7 @@
   import { assertNever } from '../../lib/types';
   import PageItem from './PageItem.svelte';
   import VideoItem from './VideoItem.svelte';
+  import QuizItem from './QuizItem.svelte';
   import UnsupportedItem from './UnsupportedItem.svelte';
 
   let { item, state: vstate }: { item: Item; state: VersionState } = $props();
@@ -14,7 +15,7 @@
 {:else if item.type === 'video'}
   <VideoItem {item} {isCovered} />
 {:else if item.type === 'quiz'}
-  <UnsupportedItem type="quiz" />
+  <QuizItem {item} />
 {:else if item.type === 'mini_project'}
   <UnsupportedItem type="mini_project" />
 {:else if item.type === 'interactive_app'}
