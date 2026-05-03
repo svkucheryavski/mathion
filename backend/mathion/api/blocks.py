@@ -4,9 +4,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_course_admin
-from mathion.markdown import render_markdown
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
+from mathion.markdown import render_markdown
 from mathion.models import Block, CourseVersion, Sequence
 from mathion.models_auth import User
 from mathion.schemas import (
