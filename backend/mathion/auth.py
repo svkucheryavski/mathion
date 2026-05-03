@@ -71,6 +71,8 @@ def request_pin(db: DBSession, email: str) -> str | None:
     )
     db.add(pin)
     db.commit()
+    if settings.debug:
+        print(f"[auth] PIN for {email}: {raw_pin}", flush=True)
     return raw_pin
 
 

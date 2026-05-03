@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     max_pin_requests_per_hour: int = 3
     max_pin_failures_per_hour: int = 5
     cookie_secure: bool = False  # Set True in production (HTTPS)
+    # Dev-only: when MATHION_DEBUG=1, generated login PINs are printed to
+    # stdout (visible in the uvicorn terminal). MUST be off in production.
+    debug: bool = False
     # Absolute path to the built frontend (Vite dist/). Resolved against the
     # backend package, NOT process CWD, so deploys are deterministic. Override
     # via MATHION_FRONTEND_DIST.
