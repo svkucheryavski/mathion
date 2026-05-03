@@ -1,3 +1,6 @@
+<script lang="ts">
+</script>
+
 <div class="spinner" role="status" aria-label="Loading"></div>
 
 <style>
