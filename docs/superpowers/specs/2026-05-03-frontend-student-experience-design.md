@@ -53,7 +53,7 @@ mathion/
     │   │   ├── router.svelte.ts   # ~50-line history-API router using $state (note: .svelte.ts because runes outside .svelte require this extension)
     │   │   ├── api.ts             # fetch wrapper, error mapping, CSRF
     │   │   ├── auth.svelte.ts     # request-pin / verify-pin / logout / bootstrapSession (.svelte.ts: exports $state)
-    │   │   ├── events.ts          # tiny callback registry (e.g. onUnauthorized) injected at boot to break the api↔auth↔router cycle
+    │   │   ├── events.ts          # plain .ts (no runes) — tiny callback registry (e.g. onUnauthorized) injected at boot to break the api↔auth↔router cycle
     │   │   ├── coverage.svelte.ts # active-time + Page-Visibility-gated tracker (factory: createCoverageTracker(itemId))
     │   │   ├── types.ts           # hand-written types mirroring backend schemas (typed discriminated unions for Item.type and Question.type)
     │   │   ├── format.ts          # tiny date / duration / number formatters
@@ -129,7 +129,9 @@ Three runtime layers, each modular:
 - **Production serving:** SPA is served by FastAPI's `StaticFiles` mount with `html=True` (SPA fallback). This requires a small backend addition — see §10. The mount must come AFTER all `/api/*` routers in `main.py`.
 - **Dev serving:** Vite dev server on `:5173`, FastAPI on `:8000`, Vite proxies `/api/*` → `:8000`. The frontend always uses relative `/api/*` paths so the same code works in both modes.
 
-**Module dependency rule (cycle prevention):** `lib/api.ts` does NOT import from `lib/auth.svelte.ts` or `lib/router.svelte.ts`. Instead, `lib/events.ts` exports a tiny callback registry (`onUnauthorized(cb)`, `emitUnauthorized()`); `main.ts` wires `events.onUnauthorized` to `(path) => { session.user = null; router.navigate('/login?next=' + ...); }` at boot. `api.ts` calls `events.emitUnauthorized(currentPath)` on 401. This breaks the api↔auth↔router cycle that ESM partial-init would otherwise expose.
+**Module dependency rule (cycle prevention):** `lib/api.ts` does NOT import from `lib/auth.svelte.ts` or `lib/router.svelte.ts`. Instead, `lib/events.ts` (plain `.ts` — no runes, so no `.svelte.ts` extension) exports a tiny callback registry (`onUnauthorized(cb)`, `emitUnauthorized(path)`); `main.ts` wires `events.onUnauthorized` to `(path) => { clearSession(); router.navigate('/login?next=' + safeNext(path)); }` at boot. `api.ts` calls `events.emitUnauthorized(currentPath)` on 401. This breaks the api↔auth↔router cycle that ESM partial-init would otherwise expose.
+
+**Pre-wire safety:** `events.ts` initialises with a default no-op listener that, in dev (`import.meta.env.DEV`), `console.error`s `'events.onUnauthorized fired before main.ts wired it'`. This catches the brief window between module side-effects and `main.ts`'s wiring step. In prod the default is a silent no-op (avoids leaking diagnostics into production logs).
 
 ---
 
@@ -157,19 +159,21 @@ Inside `SequencePlayer`, the *current item* is in the URL hash: `…/seq/42#item
 
 ### Route guards (single layer in `App.svelte`)
 
-- On every route change (path-level, not hash-level), if the route requires auth and `session.user === null`, navigate to `/login?next=<encoded current path>`.
-- On successful login, read `next` from the query string and navigate there. **`next` is validated**: must start with `/` AND not start with `//` (open-redirect guard); otherwise default to `/courses`.
+- On every route change (path-level, not hash-level), if the route requires auth and `session.user === null`, navigate to `/login?next=<encoded path+search+hash>`. **Hash is preserved** so `/courses/foo/seq/12#item=87` resumes correctly after login.
+- On successful login, read `next` from the query string and navigate there. **`next` is validated as same-origin** using the URL constructor — `new URL(next, location.origin)`; if `result.origin !== location.origin` OR if it raises (malformed input, decoded `javascript:`, backslash variants), fall back to `/courses`.
 
 ### Backend errors
 
 | Status | Behavior |
 |---|---|
-| 401 | `lib/api.ts` calls `events.emitUnauthorized(currentPath)` (UNLESS request was made with `{ skipAuthRedirect: true }` — used by `bootstrapSession`). The wired handler clears `session.user` and navigates to `/login?next=...`. |
-| 403 | Page-level inline panel ("You don't have access to this course"). No redirect. |
-| 404 | Page-level inline panel. UI distinguishes between "course doesn't exist" vs "you're not enrolled" via copy on the CourseView page (both backend cases return 404 from `/api/courses/:slug/my-version`). |
-| 422 | FastAPI returns `detail: ValidationError[]` (an array). `ApiError.detail` is typed as `string \| ValidationErrorDetail[]`. Forms render per-field inline errors; non-form contexts fall back to a toast. |
-| 409 with `error_code` | Page-level inline panel using a code → friendly-message map. **Note:** in slice 1 no endpoint actually returns `error_code` (only bulk-roster endpoints do). The map is forward-compatible scaffolding; keep it minimal. |
-| 5xx / network | Toast (top-right, auto-dismiss 5 s). |
+| 401 | `lib/api.ts` calls `events.emitUnauthorized(currentPath)` (UNLESS request was made with `{ skipAuthRedirect: true }` — used by `bootstrapSession`). The wired handler clears `session.user` and navigates to `/login?next=...` (with hash preserved). |
+| 403 | Page-level inline panel ("You don't have access to this course"). No redirect. **`SequencePlayer`'s coverage tracker silently stops on 403 from `/track`** (e.g., admin archived the version mid-session) — the toast path is suppressed for that case to avoid a 15 s repeat. |
+| 404 | Page-level inline panel. **`/api/courses/:slug/my-version` returns the same `{detail:"Not found"}` for both "course doesn't exist" and "user not enrolled" — the spec previously claimed UI could distinguish; it cannot from one request. The CourseView 404 panel uses one neutral message: "This course isn't available to you. Ask your teacher for an invite link, or check the URL."** |
+| 409 | Page-level inline panel. Known strings to map: `"Max attempts reached"` (quiz submit retry past cap), `"Quiz has no questions"` (admin error — should already be guarded by §7 empty-state). |
+| 422 | FastAPI returns `detail: ValidationError[]` (an array). `ApiError.detail` is typed as `string \| ValidationErrorDetail[]`. Forms call `e.validationErrors()` and render per-field inline errors; non-form contexts call `e.displayMessage` (always-string) and toast. |
+| 429 | Rate-limit (e.g., `request-pin` is capped at `max_pin_requests_per_hour=3`). **Form-level inline message**: "Too many attempts. Please try again later." Do NOT lump into 5xx/toast bucket. |
+| 5xx / network | Toast (top-right, auto-dismiss 5 s) using `e.displayMessage`. |
+| `error_code` (forward-compat) | Page-level inline panel using a code → friendly-message map. **Note:** in slice 1 no endpoint actually returns `error_code` (only bulk-roster endpoints do). The map is forward-compatible scaffolding; keep it minimal. |
 
 ---
 
@@ -186,20 +190,34 @@ class ApiError extends Error {
     public detail: string | ValidationErrorDetail[],
     public errorCode?: string,
   ) { super(typeof detail === 'string' ? detail : 'Validation error'); }
+
+  // Always-stringified human message — useful in toasts and panels.
+  get displayMessage(): string {
+    return typeof this.detail === 'string' ? this.detail : 'Please correct the highlighted fields.';
+  }
+
+  // Form consumers call this to render per-field errors; returns null when not a 422.
+  validationErrors(): ValidationErrorDetail[] | null {
+    return Array.isArray(this.detail) ? this.detail : null;
+  }
 }
 
 type RequestOpts = RequestInit & { skipAuthRedirect?: boolean };
 
 async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
   const { skipAuthRedirect, headers: callerHeaders, ...init } = opts;
-  const res = await fetch(path, {
-    credentials: 'include',
-    ...init,
-    // headers MUST come last in this object so callerHeaders can extend (not override) X-Requested-With.
-    headers: { 'X-Requested-With': 'mathion', ...(callerHeaders ?? {}) },
-  });
+  // Build headers via the Headers class so X-Requested-With is set LAST and
+  // therefore wins over any caller-provided value (a regression in the previous
+  // revision had the spread order reversed). Caller headers are still
+  // honored for everything else (e.g. Content-Type).
+  const headers = new Headers(callerHeaders ?? {});
+  headers.set('X-Requested-With', 'mathion');
+
+  const res = await fetch(path, { credentials: 'include', ...init, headers });
+
   if (res.status === 401 && !skipAuthRedirect) {
-    events.emitUnauthorized(location.pathname + location.search);
+    // Preserve hash so e.g. `/courses/foo/seq/12#item=87` survives the login bounce.
+    events.emitUnauthorized(location.pathname + location.search + location.hash);
     throw new ApiError(401, 'Not authenticated');
   }
   if (!res.ok) {
@@ -275,7 +293,7 @@ All store modules use the `.svelte.ts` extension (required for `$state` outside 
 | Store (file) | Shape | Helpers exported | Purpose |
 |---|---|---|---|
 | `session.svelte.ts` | `{ user: User \| null; loading: boolean }` | `clearSession()` | Bootstrapped at app start; updated by login/logout. |
-| `currentCourse.svelte.ts` | `{ slug, versionId, course, version, blocks } \| null` | `loadCourse(slug)`, `clearCourse()`, `markItemCovered(itemId)` | In-tab cache so navigating CourseView ↔ SequencePlayer doesn't refetch. Cleared on logout (wired in `main.ts`). Not persisted to `localStorage` (avoids stale data after admin edits). **`SequencePlayer` calls `loadCourse(slug)` if the cache is empty or the slug doesn't match — direct URL entry / refresh / bookmark always works.** |
+| `currentCourse.svelte.ts` | `{ slug, versionId, course, version, blocks } \| null` | `loadCourse(slug)`, `clearCourse()`, `markItemCovered(itemId)` | In-tab cache so navigating CourseView ↔ SequencePlayer doesn't refetch. Cleared on logout (wired in `main.ts`). Not persisted to `localStorage` (avoids stale data after admin edits). **`SequencePlayer` calls `loadCourse(slug)` if the cache is empty or the slug doesn't match — direct URL entry / refresh / bookmark always works.** **Single-flight + abortable**: keep an in-flight `Promise` keyed by slug; reuse it if a second call comes in for the same slug; if a call comes in for a *different* slug, abort the previous via `AbortController` and start the new one. Prevents mount/unmount/remount races from swapping cached data. |
 | `toasts.svelte.ts` | `Toast[]` | `pushToast(msg, kind?)` | Push-and-auto-dismiss notifications. `<Toaster />` renders the list. |
 
 Page-scoped state lives at the page level (`$state` rune inside the `.svelte` file). It does not belong in a global store if it doesn't outlive the page.
@@ -293,7 +311,7 @@ No global error store — errors surface where they happen (form-level, page-lev
 | `Login.svelte` | nothing on mount | email step → PIN step inline; remember-me selector (1 / 7 / 30 days, default 7); calls `lib/auth.svelte.ts` |
 | `CourseList.svelte` | `GET /api/my-courses` | grid of `CourseCard`. Empty state: "You're not enrolled in any courses yet — ask your teacher for an invite." |
 | `CourseView.svelte` | `GET /api/courses/:slug/my-version`, then `/api/versions/:id/content` + `/api/versions/:id/state` (parallel). 404 distinguishes "course doesn't exist" vs "not enrolled" via UI copy. | header + `BlockGroup` list (vertical block tree). Empty state: "This course has no published blocks yet." |
-| `SequencePlayer.svelte` | **Always calls `currentCourse.loadCourse(slug)` if the cache is empty or the slug doesn't match** (handles direct URL entry, refresh, bookmark). `POST /api/items/:id/track` for time-spent + coverage. Hash item changes do not refetch. | top item strip + `ItemRouter` + bottom prev/next. Empty state for sequence with zero items: "This sequence has no items yet." |
+| `SequencePlayer.svelte` | **Always calls `currentCourse.loadCourse(slug)` if the cache is empty or the slug doesn't match** (handles direct URL entry, refresh, bookmark). `POST /api/items/:id/track` for time-spent + coverage. Hash item changes do not refetch. **Initial item resolution**: if URL hash is `#item=<id>` and the id exists in this sequence, use it; otherwise fall back to the most recently visited item in this sequence (derived from `state.items[].last_visited_at` — backend's `current_item_id` is always `None` and cannot be used); otherwise use the first item. | top item strip + `ItemRouter` + bottom prev/next. Empty state for sequence with zero items: "This sequence has no items yet." |
 | `NotFound.svelte` | nothing | static |
 
 ### Course components
@@ -301,19 +319,19 @@ No global error store — errors surface where they happen (form-level, page-lev
 | Component | Responsibility |
 |---|---|
 | `CourseCard.svelte` | Course title + version + progress bar (`covered_items / total_items`) + "Continue" link to `/courses/:slug` |
-| `BlockGroup.svelte` | One block: title, `info_html`, collapsible list of `SequenceLink`. **Default state: expanded** (closed only if user explicitly collapsed in this tab; not persisted). |
+| `BlockGroup.svelte` | One block: title, `info_html` (rendered between the title and the sequence list — wrapped in `{#if block.info_html}` so empty values produce no padding/wrapper element), collapsible list of `SequenceLink`. **Default state: expanded** (closed only if user explicitly collapsed in this tab; not persisted). |
 | `SequenceLink.svelte` | One row: title, item count, **coverage indicator = small "n / total" text + check mark when n === total**, link to player. |
 | `ItemIcon.svelte` | One icon in the sequence-player strip; props: `{ type, state, title, onclick }` (callback prop, not event). Coverage state via background color: covered / current / not-yet. Title shown on hover. |
 
 ### Item viewers
 
-`ItemRouter.svelte` dispatches by `item.type` using a typed discriminated union (compiler-checked exhaustiveness). **Backend type strings are `static_page`, `video`, `quiz` — match `Item.type` exactly.**
+`ItemRouter.svelte` dispatches by `item.type` using a typed discriminated union over the **full backend `Item.type` union** (`static_page`, `video`, `quiz`, `mini_project`, `interactive_app`). For non-slice-1 types it renders `<UnsupportedItem type={item.type} />` — a small placeholder component showing "This item type isn't available in this view yet." The exhaustiveness check is satisfied (no fallthrough), and future slices replace the placeholder branch with a real component without touching the union or the dispatch logic.
 
 | Component | Notes |
 |---|---|
-| `PageItem.svelte` | Renders `{@html item.content_html}` (sanitized server-side at write-time). Coverage timer comes from `lib/coverage.svelte.ts` (`createCoverageTracker(itemId, { type: 'static_page' })`) — the timer accrues active time from `performance.now()` deltas while `document.visibilityState === 'visible'`, NOT by interval count. At 30 s accumulated → `track(is_covered=true)`. **Trust boundary note**: `{@html ...}` is safe ONLY because the backend pre-sanitises with `bleach`. Any future content source (math rendering, draft preview, imports) MUST pass through the same sanitiser. |
+| `PageItem.svelte` | Renders `{@html item.content_html}` (sanitized server-side at write-time). Coverage timer comes from `lib/coverage.svelte.ts` (`createCoverageTracker(itemId, { type: 'static_page' })`) — the timer accrues active time from `performance.now()` deltas while `document.visibilityState === 'visible'`, NOT by interval count. Each `/track` POST is **clamped to ≤ 60 s of `time_spent`** so a tab returning after a long absence doesn't post a single huge value (well under the backend's 86400 cap; also prevents anomalous "10-hour reading session" spikes). On `403` from `/track` — e.g., admin archived the version mid-session — the tracker **silently stops** for the rest of the page lifetime; no toast. At 30 s accumulated active time → `track(is_covered=true)`. **Trust boundary note**: `{@html ...}` is safe ONLY because the backend pre-sanitises with `bleach`. Any future content source (math rendering, draft preview, imports) MUST pass through the same sanitiser. |
 | `VideoItem.svelte` | `<iframe>` embed. Explicit "Mark as watched" button is the covered trigger. Documented compromise. |
-| `QuizItem.svelte` | Renders all questions, single Submit button. **Submit is disabled until every question has an answer.** Submit enters loading state immediately on click (single-flight; prevents double-submit). On success: shows aggregate `{score_correct} / {score_total}` and "Try again" button if `attempt_count < max_quiz_attempts`. **Per-question correctness is NOT shown after each submit** — backend `POST /api/items/:id/submit` returns aggregate only. Per-question reveal becomes available only after all attempts are exhausted (backend `GET /api/items/:id/reveal` returns 403 until then). When attempts are exhausted, render a "Show correct answers" link that fetches `/reveal`. On submit failure (5xx / network): keep answers in state, surface a toast, allow retry. Quiz coverage is set on first successful submit (any score). |
+| `QuizItem.svelte` | Renders all questions, single Submit button. **Special case**: if the quiz has zero questions, render "This quiz has no questions yet." and hide Submit (matches backend `409 "Quiz has no questions"` so we never attempt the call). **Submit is disabled until every question has an answer.** Single-flight via **promise reuse, not just `disabled`**: a `let inflight: Promise<...> \| null = $state(null)` guards re-entry — if Submit is clicked again while `inflight` is set, the existing promise is reused. This closes the race window between `$state` batching and the user double-clicking. On success: shows aggregate `{score_correct} / {score_total}` and "Try again" button if `attempt_count < max_quiz_attempts`. **"Try again" CLEARS the answer state** (fresh attempt — simpler state machine and cleaner UX expectation). **Per-question correctness is NOT shown after each submit** — backend `POST /api/items/:id/submit` returns aggregate only. Per-question reveal becomes available only after all attempts are exhausted (backend `GET /api/items/:id/reveal` returns 403 until then). When attempts are exhausted, render a "Show correct answers" link that fetches `/reveal`. On submit failure (5xx / network): keep answers in state, surface a toast (`e.displayMessage`), allow retry. Quiz coverage is set on first successful submit (any score). |
 
 ### Quiz subcomponents (one per backend question type)
 
@@ -327,7 +345,12 @@ components/items/quiz/
 
 Each takes a callback prop `onanswer={(ans) => ...}` and calls it on every change. `QuizItem` collects answers in a `$state` map keyed by question_id and submits.
 
-**Numeric questions, V1 limitation:** `precision` and `unit` fields exist on the backend `Question` model but are NOT exposed in the `/api/versions/:id/content` payload at slice 1. Frontend numeric input is therefore tolerance-blind on the UI side (no decimal-separator hint, no unit suffix) — the backend still scores correctly using its stored `precision`. If the user finds this insufficient in practice, exposing `precision`/`unit` is a small follow-up.
+**Numeric questions, V1 limitation:** `precision` and `unit` fields exist on the backend `Question` model but are NOT exposed in the `/api/versions/:id/content` payload at slice 1 — they only appear in the `/reveal` payload. Frontend numeric input is therefore tolerance-blind on the UI side (no decimal-separator hint, no unit suffix) — the backend still scores correctly using its stored `precision`. If the user finds this insufficient in practice, exposing `precision`/`unit` in `/content` is a small follow-up.
+
+**Quiz state types (mirroring backend wire shape):**
+- `state.items[].last_answers` is `Record<string, number[] | string> | null` (keys are question_ids as strings; values are option-id arrays for choice questions or strings for numeric/text).
+- Submit request body: `{ answers: Record<string, number[] | string> }` — must contain every question_id in the quiz.
+- Submit response: `{ item_id, attempt_count, max_attempts, score_correct, score_total, can_retry }`.
 
 ### UI primitives (`components/ui/`)
 
@@ -398,6 +421,13 @@ Backend endpoint: `POST /api/items/:id/track` accepting `{ time_spent: int (seco
 
 **Single module:** all of the above lives in `src/lib/coverage.svelte.ts` exposing `createCoverageTracker(itemId, opts)` returning `{ start(), stop(), markCovered() }`. `PageItem`, `VideoItem`, `QuizItem` all use it (each with its own covered-trigger condition). This factoring pays off in Slice 2 when `MiniProjectItem` and `InteractiveAppItem` need the same behavior.
 
+**Lifecycle requirements** (must be in implementation):
+- `start()` is **idempotent** — re-calling it (e.g., due to `$effect` re-run on reactive deps) doesn't double-attach `visibilitychange` listeners or reset accumulated time.
+- `stop()` removes the `visibilitychange` listener, cancels the 15 s POST interval, and flushes any pending `time_spent` delta in a final POST.
+- Consumers wire start/stop via `$effect`'s **cleanup return** (`$effect(() => { tracker.start(); return () => tracker.stop(); })`) — NOT via Svelte 4's `onMount`/`onDestroy`.
+- Each `track()` POST is clamped to ≤ 60 s of `time_spent` per call (see PageItem note).
+- Test seam: `createCoverageTracker(itemId, { now?, postTrack? })` accepts optional `now` (clock injection) and `postTrack` (transport override) so unit tests can advance time and assert POST payloads without a real clock or network.
+
 ---
 
 ## 10. Backend dependencies + small additions
@@ -422,13 +452,20 @@ Backend endpoint: `POST /api/items/:id/track` accepting `{ time_spent: int (seco
 Add at the very end of `main.py`, AFTER all `app.include_router(...)` calls:
 
 ```python
+from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
-app.mount(
-    "/",
-    StaticFiles(directory=settings.frontend_dist, html=True),
-    name="spa",
-)
+# Conditional mount: only attach when the build artifact exists. Otherwise
+# StaticFiles(html=True) raises at init when the directory is missing —
+# which would break every backend test before a frontend build has run,
+# and break `uvicorn` startup in pure-backend dev. The check happens once
+# at import time; in production deploys the dist directory always exists.
+if Path(settings.frontend_dist).is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=settings.frontend_dist, html=True, check_dir=False),
+        name="spa",
+    )
 ```
 
 Plus a new setting in `mathion/config.py`:
@@ -437,21 +474,34 @@ Plus a new setting in `mathion/config.py`:
 frontend_dist: str = "../frontend/dist"   # overridable via MATHION_FRONTEND_DIST
 ```
 
-The `html=True` flag makes any unmatched non-`/api/*` path serve `index.html`, giving SPA history-routing fallback for free. Routes registered before the mount (`/api/*`, `/health`) are unaffected — they keep returning JSON.
+The `html=True` flag makes any unmatched non-`/api/*` path serve `index.html`, giving SPA history-routing fallback for free. Routes registered before the mount (`/api/*`, `/health`, `/assets/...`) are unaffected — they keep returning JSON / file content.
 
-Tests: `/health` still works; `/api/courses/missing/my-version` still returns JSON 404 (not index.html); `/courses/some-deep-spa-path` returns index.html with status 200.
+**Important caveat (from review):** with the SPA mount in place, an unknown `/api/foo` no longer reaches the catch-all SPA fallback — FastAPI's router-matching exhausts before the mount is consulted, and unmatched `/api/*` paths return JSON 404 from FastAPI. That's the desired behavior; documenting so a future contributor doesn't add a routes-vs-mount catch-all by mistake.
+
+Tests:
+- `/health` still works (router match, no SPA).
+- `/api/courses/missing/my-version` still returns JSON 404 (router match → 404, not SPA fallback).
+- `/courses/some-deep-spa-path` returns `index.html` with status 200 (SPA fallback).
+- Backend tests run cleanly without a frontend build (the conditional mount means missing `dist/` is fine).
 
 **A2 — `Block.info_html` column with write-time rendering.**
 
-Add a sibling `info_html` column to `Block` (matches `CourseVersion.info_html` and `Item.content_html` pattern):
+Add a sibling `info_html` column to `Block` (matches `CourseVersion.info_html` and `Item.content_html` pattern). **Both `info` (raw markdown) and `info_html` (rendered HTML) ship in `/content`** — the raw `info` stays so admin/editor flows can edit. Frontend reads `info_html`; admin will read `info` later.
 
-- New column on `blocks` table — Alembic migration adds the column nullable, backfills HTML from existing `info` markdown (one-shot data migration), then makes it `NOT NULL DEFAULT ''`.
-- `Block` model gets `info_html: Mapped[str]`.
-- The block-creation/update path renders markdown to HTML at write-time using the existing `mathion.markdown.render_markdown`.
-- `mathion/api/content.py:_serialize_block` returns `info_html` (in addition to or instead of `info`).
-- Tests: write a block with markdown, read back via `/content`, assert HTML rendering. Migration roundtrip test.
+Concrete steps:
 
-This finally lands the Phase 6 deferred item ("`Block.info` has no `info_html` field") without scope drift — it's the same render-at-write pattern already used elsewhere in the schema.
+1. **Model**: add `info_html: Mapped[str] = mapped_column(Text, nullable=False, default="")` to `Block` in `mathion/models.py` (next to existing `info` column).
+2. **Alembic migration** (Python data migration, NOT raw SQL — needs to call `render_with_assets`):
+   - `op.add_column('blocks', sa.Column('info_html', sa.Text(), nullable=True))`
+   - Data migration: iterate rows, render each `info` to HTML using the existing helper `mathion.api.helpers.render_with_assets(db, block.version_id, block.info)` (asset-aware to match the `CourseVersion.info_html` and `Item.content_html` pattern), write to `info_html`. Empty `info` → empty `info_html`.
+   - `op.alter_column('blocks', 'info_html', nullable=False, server_default='')`.
+3. **Write paths in `mathion/api/blocks.py`**:
+   - `:53` (create endpoint): after setting `block.info = data.info`, also set `block.info_html = render_with_assets(db, version_id, data.info)` and call `sync_asset_references(db, ...)` to register asset refs (matches the existing pattern in `versions.py:82,212` and item write paths).
+   - `:96` (update endpoint): same — re-render on every PATCH that touches `info`.
+4. **Read path**: `mathion/api/content.py:_serialize_block` adds `"info_html": block.info_html` to the returned dict (keep existing `"info": block.info` too — ambiguity in the previous draft is resolved: ship both).
+5. **Tests**: write a block with markdown including an asset reference (`![alt](/assets/.../foo.png)`), read back via `/content`, assert `info_html` contains the rewritten asset URL. Migration roundtrip: existing block with `info="hello **world**"` → `info_html="<p>hello <strong>world</strong></p>"` after upgrade.
+
+This finally lands the Phase 6 deferred item ("`Block.info` has no `info_html` field") using the existing asset-aware rendering — consistent with how `CourseVersion.info_html` and `Item.content_html` already work.
 
 ### Summary
 
@@ -495,9 +545,10 @@ No NEW endpoints. Two small backend additions (~1 file change + 1 migration + ~3
 
 This slice establishes patterns that later slices (teacher tools, course creator, run management) will follow:
 
-- `lib/api.ts`, `lib/auth.ts`, `lib/router.ts`, `lib/stores/session.ts` are reusable foundations — built once, not re-invented.
+- `lib/api.ts`, `lib/auth.svelte.ts`, `lib/router.svelte.ts`, `lib/stores/session.svelte.ts`, `lib/events.ts`, `lib/coverage.svelte.ts` are reusable foundations — built once, not re-invented.
 - `components/ui/` primitives (Button, Input, FormRow, Spinner, Toast) are shared across all slices.
 - Style variables in `base.css` are the theming surface — design polish lands once and applies everywhere.
 - The route table grows; the router code does not.
+- `ItemRouter`'s discriminated union covers all backend `Item.type` values; future slices replace the `<UnsupportedItem>` placeholder branches with real components without restructuring.
 
 When the next slice is brainstormed, only its slice-specific pages, components, and any new endpoints need fresh design.
