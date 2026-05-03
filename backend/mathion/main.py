@@ -83,19 +83,21 @@ def _api_not_found(rest: str):
 _frontend_dist = Path(settings.frontend_dist)
 if _frontend_dist.is_dir():
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route(
+        "/{full_path:path}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
     def _spa_fallback(full_path: str) -> FileResponse:
-        """Serve static files if they exist; otherwise return index.html."""
         candidate = _frontend_dist / full_path
-        # Resolve to prevent path-traversal attacks; ensure candidate stays
-        # inside the dist tree before serving it.
+        # Path-traversal guard: a resolved candidate must stay inside dist/.
+        # If it doesn't, return a 404 rather than the SPA shell so malformed
+        # paths fail explicitly instead of silently rendering the app.
         try:
             candidate = candidate.resolve()
-            dist_resolved = _frontend_dist.resolve()
-            candidate.relative_to(dist_resolved)  # raises ValueError if outside
+            candidate.relative_to(_frontend_dist.resolve())
         except ValueError:
-            pass
-        else:
-            if candidate.is_file():
-                return FileResponse(candidate)
+            raise HTTPException(status_code=404)
+        if candidate.is_file():
+            return FileResponse(candidate)
         return FileResponse(_frontend_dist / "index.html")

@@ -1,7 +1,6 @@
 """SPA static-mount + /api catch-all behavior."""
 import importlib
 
-import pytest
 from fastapi.testclient import TestClient
 
 
