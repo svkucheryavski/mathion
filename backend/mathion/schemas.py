@@ -59,6 +59,7 @@ class BlockResponse(BaseModel):
     slug: str
     order: int
     info: str
+    info_html: str = ""
     model_config = {"from_attributes": True}
 
 
