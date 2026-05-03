@@ -9,8 +9,15 @@ export async function bootstrapSession(): Promise<void> {
     const u = await api.get<User>('/api/auth/me', { skipAuthRedirect: true });
     session.user = u;
   } catch (e: unknown) {
-    if (!(e instanceof ApiError && e.status === 401)) throw e;
-    session.user = null;
+    if (e instanceof ApiError && e.status === 401) {
+      session.user = null;
+    } else {
+      // Network error or 5xx — leave user=null, surface a toast for visibility.
+      session.user = null;
+      const msg = e instanceof ApiError ? e.displayMessage : 'Could not contact server.';
+      const { pushToast } = await import('../stores/toasts.svelte');
+      pushToast(msg, 'error');
+    }
   } finally {
     session.loading = false;
   }
