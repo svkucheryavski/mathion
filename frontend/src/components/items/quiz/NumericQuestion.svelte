@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { NumericQuestion } from '../../../lib/types';
 
-  let { question, value, onanswer }: {
+  let { question, value, onanswer, disabled = false, correctValue = null }: {
     question: NumericQuestion;
     value: number[] | string | undefined;
     onanswer: (ans: string) => void;
+    disabled?: boolean;
+    correctValue?: number | null;
   } = $props();
 
   const text = $derived(typeof value === 'string' ? value : '');
@@ -16,12 +18,17 @@
     type="text"
     inputmode="decimal"
     value={text}
+    {disabled}
     oninput={(e) => onanswer((e.currentTarget as HTMLInputElement).value)}
   />
+  {#if correctValue !== null}
+    <p class="correct-line">Correct answer: <strong>{correctValue}</strong></p>
+  {/if}
 </div>
 
 <style>
   .row { margin-bottom: var(--space-3); }
   .text :global(p) { margin: 0 0 var(--space-2) 0; }
   input { padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius); width: 160px; }
+  .correct-line { margin: var(--space-1) 0 0 0; color: var(--success); font-size: 0.9rem; }
 </style>

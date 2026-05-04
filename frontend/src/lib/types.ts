@@ -13,22 +13,20 @@ export type User = {
 
 // ---- Course list ----
 export type CourseListItem = {
-  course_id: number;
-  course_slug: string;
-  course_title: string;
+  course: { id: number; slug: string; name: string; description: string };
   version_id: number;
   version_state: 'created' | 'published' | 'archived';
   covered_items: number;
   total_items: number;
+  is_active: boolean;
 };
 
 // ---- Course tree (`/api/versions/:id/content`) ----
 export type VersionContent = {
+  course: { name: string; slug: string };
   version: {
     id: number;
-    course_id: number;
     state: 'created' | 'published' | 'archived';
-    info_md: string;
     info_html: string;
     max_quiz_attempts: number;
   };
@@ -157,15 +155,23 @@ export type QuizSubmitResponse = {
 };
 
 // ---- Quiz reveal ----
+export type QuestionReveal = {
+  id: number;
+  type: Question['type'];
+  text_html: string;
+  explanation_html: string | null;
+  correct_option_ids: number[];
+  correct_numeric: number | null;
+  correct_text: string | null;
+  student_answer: number[] | string | null;
+};
+
 export type QuizRevealResponse = {
   item_id: number;
-  questions: {
-    id: number;
-    type: Question['type'];
-    correct_options?: number[];
-    correct_value?: string | number;
-    explanation_html?: string;
-  }[];
+  attempt_count: number;
+  score_correct: number;
+  score_total: number;
+  questions: QuestionReveal[];
 };
 
 // ---- Toasts ----

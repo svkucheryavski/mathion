@@ -5,8 +5,8 @@
   let { course }: { course: CourseListItem } = $props();
 </script>
 
-<a class="card" href={`/courses/${course.course_slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course.course_slug}`); }}>
-  <h3>{course.course_title}</h3>
+<a class="card" href={`/courses/${course.course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course.course.slug}`); }}>
+  <h3>{course.course.name}</h3>
   <div class="progress">{formatProgress(course.covered_items, course.total_items)}</div>
 </a>
 

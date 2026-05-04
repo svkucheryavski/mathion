@@ -16,6 +16,51 @@
   let inflight = $state<Promise<QuizSubmitResponse> | null>(null);
   let lastResult = $state<QuizSubmitResponse | null>(null);
   let revealed = $state<QuizRevealResponse | null>(null);
+  let autoRevealed = $state(false); // tracks "exhausted on mount" branch so we hide retry UI
+
+  const revealById = $derived(
+    revealed === null
+      ? null
+      : Object.fromEntries(revealed.questions.map((r) => [r.id, r])),
+  );
+
+  const locked = $derived(lastResult !== null || revealed !== null);
+
+  const attemptsUsed = $derived(
+    lastResult?.attempt_count
+    ?? revealed?.attempt_count
+    ?? currentCourse.value?.state.items[String(item.id)]?.attempt_count
+    ?? 0,
+  );
+
+  // Resolve the value to display per question: pre-fill from the student's
+  // last submitted answers (revealed.student_answer) when we auto-loaded the
+  // reveal; otherwise use the in-progress `answers` map.
+  function valueFor(qid: number): number[] | string | undefined {
+    const r = revealById?.[qid];
+    if (r && autoRevealed && r.student_answer !== null && r.student_answer !== undefined) {
+      return r.student_answer;
+    }
+    return answers[String(qid)];
+  }
+
+  // Auto-load reveal when the state shows attempts already exhausted (e.g.,
+  // user reopens an item after using all attempts in a previous session).
+  $effect(() => {
+    const max = currentCourse.value?.version.max_quiz_attempts;
+    const st = currentCourse.value?.state.items[String(item.id)];
+    if (
+      max !== undefined &&
+      st !== undefined &&
+      st.attempt_count >= max &&
+      revealed === null &&
+      lastResult === null &&
+      inflight === null
+    ) {
+      autoRevealed = true;
+      void revealAnswers();
+    }
+  });
 
   const allAnswered = $derived(
     item.questions.every((q) => {
@@ -52,6 +97,7 @@
     answers = {};
     lastResult = null;
     revealed = null;
+    autoRevealed = false;
   }
 
   async function revealAnswers(): Promise<void> {
@@ -87,51 +133,45 @@
   <article class="quiz">
     <h2>{item.title}</h2>
     {#each item.questions as q (q.id)}
+      {@const r = revealById?.[q.id] ?? null}
       {#if q.type === 'single_choice'}
-        <SingleChoice question={q} value={answers[String(q.id)]} onanswer={(a) => setAnswer(q.id, a)} />
+        <SingleChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+          disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
       {:else if q.type === 'multiple_choice'}
-        <MultiChoice question={q} value={answers[String(q.id)]} onanswer={(a) => setAnswer(q.id, a)} />
+        <MultiChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+          disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
       {:else if q.type === 'numeric_answer'}
-        <Numeric question={q} value={answers[String(q.id)]} onanswer={(a) => setAnswer(q.id, a)} />
+        <Numeric question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+          disabled={locked} correctValue={r?.correct_numeric ?? null} />
       {:else if q.type === 'text_answer'}
-        <Text question={q} value={answers[String(q.id)]} onanswer={(a) => setAnswer(q.id, a)} />
+        <Text question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+          disabled={locked} correctValue={r?.correct_text ?? null} />
+      {/if}
+      {#if r?.explanation_html}
+        <div class="exp">{@html r.explanation_html}</div>
       {/if}
     {/each}
 
-    {#if !lastResult}
+    {#if !locked}
       <Button onclick={submit} loading={inflight !== null} disabled={!allAnswered || inflight !== null}>
         Submit
       </Button>
     {:else}
-      <div class="result">
-        <p><strong>Score:</strong> {lastResult.score_correct} / {lastResult.score_total}</p>
-        <p class="meta">Attempt {lastResult.attempt_count} of {lastResult.max_attempts}</p>
-        {#if lastResult.can_retry}
-          <Button onclick={tryAgain}>Try again</Button>
-        {:else if !revealed}
-          <Button variant="secondary" onclick={revealAnswers}>Show correct answers</Button>
-        {/if}
-      </div>
-      {#if revealed}
-        <div class="reveal">
-          <h3>Correct answers</h3>
-          <ul>
-            {#each revealed.questions as r (r.id)}
-              <li>
-                Q{r.id}:
-                {#if r.correct_options}
-                  options {r.correct_options.join(', ')}
-                {:else if r.correct_value !== undefined}
-                  {r.correct_value}
-                {/if}
-                {#if r.explanation_html}<div class="exp">{@html r.explanation_html}</div>{/if}
-              </li>
-            {/each}
-          </ul>
+      {@const max = currentCourse.value?.version.max_quiz_attempts ?? 0}
+      {@const score = lastResult ? { correct: lastResult.score_correct, total: lastResult.score_total, attempt: lastResult.attempt_count, max: lastResult.max_attempts, canRetry: lastResult.can_retry } : revealed ? { correct: revealed.score_correct, total: revealed.score_total, attempt: revealed.attempt_count, max, canRetry: revealed.attempt_count < max } : null}
+      {#if score}
+        <div class="result">
+          <p><strong>Score:</strong> {score.correct} / {score.total}</p>
+          <p class="meta">Attempt {score.attempt} of {score.max}</p>
+          {#if score.canRetry}
+            <Button onclick={tryAgain}>Try again</Button>
+          {:else if lastResult && !revealed}
+            <Button variant="secondary" onclick={revealAnswers}>Show correct answers</Button>
+          {/if}
         </div>
       {/if}
     {/if}
-    <p class="hint">Maximum {currentCourse.value?.version.max_quiz_attempts ?? '?'} attempts per quiz.</p>
+    <p class="hint">Maximum {currentCourse.value?.version.max_quiz_attempts ?? '?'} attempts per quiz ({attemptsUsed} used).</p>
   </article>
 {/if}
 
@@ -141,7 +181,11 @@
   .result { padding: var(--space-3); margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
   .meta { color: var(--muted); font-size: 0.875rem; }
   .hint { color: var(--muted); font-size: 0.875rem; margin-top: var(--space-3); }
-  .reveal { margin-top: var(--space-3); }
-  .reveal li { margin-bottom: var(--space-2); }
-  .exp { color: var(--muted); margin-top: var(--space-1); }
+  .exp {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: calc(-1 * var(--space-2)) 0 var(--space-3) var(--space-3);
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--border);
+  }
 </style>

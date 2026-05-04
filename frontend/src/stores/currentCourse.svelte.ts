@@ -5,7 +5,7 @@ import type { BlockContent, ItemStateEntry, VersionContent, VersionState } from 
 type CourseSnapshot = {
   slug: string;
   versionId: number;
-  course: { id: number; slug: string; title: string };
+  course: { id: number; slug: string; name: string };
   version: VersionContent['version'];
   blocks: BlockContent[];
   state: VersionState;
@@ -41,7 +41,7 @@ export function loadCourse(slug: string): Promise<void> {
   const controller = new AbortController();
   const promise = (async () => {
     try {
-      const my = await api.get<{ version_id: number; course: { id: number; slug: string; title: string } }>(
+      const my = await api.get<{ course_slug: string; course_id: number; version_id: number; is_active: boolean }>(
         `/api/courses/${encodeURIComponent(startedSlug)}/my-version`,
         { signal: controller.signal },
       );
@@ -54,7 +54,7 @@ export function loadCourse(slug: string): Promise<void> {
       currentCourse.value = {
         slug: startedSlug,
         versionId: my.version_id,
-        course: my.course,
+        course: { id: my.course_id, slug: content.course.slug, name: content.course.name },
         version: content.version,
         blocks: content.blocks,
         state,

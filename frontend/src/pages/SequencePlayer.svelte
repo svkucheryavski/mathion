@@ -123,13 +123,13 @@
     <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← Course</Button>
   {:else if sequence.items.length === 0}
     <header>
-      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← {currentCourse.value?.course.title}</Button>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← {currentCourse.value?.course.name}</Button>
       <h1>{sequence.title}</h1>
     </header>
     <p class="empty">This sequence has no items yet.</p>
   {:else}
     <header>
-      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← {currentCourse.value?.course.title}</Button>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← {currentCourse.value?.course.name}</Button>
       <h1>{sequence.title}</h1>
     </header>
 

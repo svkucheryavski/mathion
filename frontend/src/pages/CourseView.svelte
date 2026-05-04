@@ -44,7 +44,7 @@
   {:else if currentCourse.value}
     <header>
       <Button variant="ghost" onclick={() => navigate('/courses')}>← Courses</Button>
-      <h1>{currentCourse.value.course.title}</h1>
+      <h1>{currentCourse.value.course.name}</h1>
     </header>
     {#if currentCourse.value.version.info_html}
       <div class="info">{@html currentCourse.value.version.info_html}</div>

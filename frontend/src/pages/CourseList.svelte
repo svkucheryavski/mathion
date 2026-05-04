@@ -38,7 +38,7 @@
     <p class="empty">You're not enrolled in any courses yet — ask your teacher for an invite.</p>
   {:else}
     <div class="grid">
-      {#each courses as c (c.course_id)}
+      {#each courses as c (c.course.id)}
         <CourseCard course={c} />
       {/each}
     </div>

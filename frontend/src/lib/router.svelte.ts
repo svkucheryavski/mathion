@@ -81,6 +81,9 @@ export function safeNext(next: string, origin: string): string {
   try {
     const u = new URL(next, origin);
     if (u.origin !== origin) return '/courses';
+    // Never bounce back to /login — would trap users who arrived via a
+    // compound `?next=/login?next=...` URL built up by redirect loops.
+    if (u.pathname === '/login') return '/courses';
     return u.pathname + u.search + u.hash;
   } catch {
     return '/courses';

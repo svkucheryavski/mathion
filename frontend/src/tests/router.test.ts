@@ -61,5 +61,10 @@ describe('lib/router', () => {
     it('falls back on empty / invalid', () => {
       expect(safeNext('', 'http://localhost')).toBe('/courses');
     });
+
+    it('falls back when target is /login (prevents loop trap)', () => {
+      expect(safeNext('/login', 'http://localhost')).toBe('/courses');
+      expect(safeNext('/login?next=/login', 'http://localhost')).toBe('/courses');
+    });
   });
 });

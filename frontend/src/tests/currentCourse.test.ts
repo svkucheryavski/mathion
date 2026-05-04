@@ -20,8 +20,8 @@ describe('stores/currentCourse', () => {
     __test__setSlots({
       slug: 's',
       versionId: 1,
-      course: { id: 1, slug: 's', title: 'T' },
-      version: { id: 1, course_id: 1, state: 'published', info_md: '', info_html: '', max_quiz_attempts: 3 },
+      course: { id: 1, slug: 's', name: 'T' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
     });
@@ -34,8 +34,8 @@ describe('stores/currentCourse', () => {
     __test__setSlots({
       slug: 's',
       versionId: 1,
-      course: { id: 1, slug: 's', title: 'T' },
-      version: { id: 1, course_id: 1, state: 'published', info_md: '', info_html: '', max_quiz_attempts: 3 },
+      course: { id: 1, slug: 's', name: 'T' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: {
         version_id: 1,
@@ -52,8 +52,8 @@ describe('stores/currentCourse', () => {
     __test__setSlots({
       slug: 's',
       versionId: 1,
-      course: { id: 1, slug: 's', title: 'T' },
-      version: { id: 1, course_id: 1, state: 'published', info_md: '', info_html: '', max_quiz_attempts: 3 },
+      course: { id: 1, slug: 's', name: 'T' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: {
         version_id: 1,
@@ -70,8 +70,8 @@ describe('stores/currentCourse', () => {
     __test__setSlots({
       slug: 's',
       versionId: 1,
-      course: { id: 1, slug: 's', title: 'T' },
-      version: { id: 1, course_id: 1, state: 'published', info_md: '', info_html: '', max_quiz_attempts: 3 },
+      course: { id: 1, slug: 's', name: 'T' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
     });
