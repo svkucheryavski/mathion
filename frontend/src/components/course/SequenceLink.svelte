@@ -13,7 +13,7 @@
 </script>
 
 <a class="row" {href} onclick={(e) => { e.preventDefault(); navigate(href); }}>
-  <span class="title">{sequence.title}</span>
+  <span class="title">S{sequence.order}. {sequence.title}</span>
   <span class="progress">
     {formatProgress(covered, total)}
     {#if covered === total && total > 0}<span class="check">✓</span>{/if}

@@ -34,6 +34,12 @@
       .find((s) => String(s.id) === sequenceId) ?? null,
   );
 
+  const currentBlock = $derived(
+    currentCourse.value?.blocks.find(
+      (b) => b.sequences.some((s) => String(s.id) === sequenceId),
+    ) ?? null,
+  );
+
   // Initial item resolution: hash → last_visited_at → first.
   function resolveInitialItemId(seq: SequenceContent): number | null {
     if (seq.items.length === 0) return null;
@@ -90,13 +96,32 @@
     sequence && currentItemId !== null ? sequence.items.findIndex((it) => it.id === currentItemId) : -1,
   );
 
+  // Flat course-wide ordering: every item paired with its sequence id, in display order.
+  // Used by Previous/Next so they advance across sequence (and block) boundaries.
+  type FlatRef = { itemId: number; sequenceId: number };
+  const flatItems = $derived<FlatRef[]>(
+    currentCourse.value
+      ? currentCourse.value.blocks.flatMap((b) =>
+          b.sequences.flatMap((s) =>
+            s.items.map((it) => ({ itemId: it.id, sequenceId: s.id })),
+          ),
+        )
+      : [],
+  );
+
+  const flatIndex = $derived(
+    currentItemId === null ? -1 : flatItems.findIndex((x) => x.itemId === currentItemId),
+  );
+
+  function gotoFlat(target: FlatRef): void {
+    navigate(`/courses/${courseSlug}/seq/${target.sequenceId}#item=${target.itemId}`, { replace: true });
+  }
+
   function previous(): void {
-    if (sequence && currentIndex > 0) selectItem(sequence.items[currentIndex - 1].id);
+    if (flatIndex > 0) gotoFlat(flatItems[flatIndex - 1]);
   }
   function next(): void {
-    if (sequence && currentIndex >= 0 && currentIndex < sequence.items.length - 1) {
-      selectItem(sequence.items[currentIndex + 1].id);
-    }
+    if (flatIndex >= 0 && flatIndex < flatItems.length - 1) gotoFlat(flatItems[flatIndex + 1]);
   }
 
   function iconState(itemId: number): 'covered' | 'current' | 'not-yet' {
@@ -123,14 +148,22 @@
     <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← Course</Button>
   {:else if sequence.items.length === 0}
     <header>
-      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← {currentCourse.value?.course.name}</Button>
-      <h1>{sequence.title}</h1>
+      <a class="crumb course" href={`/courses/${courseSlug}`}
+        onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>
+        ← {currentCourse.value?.course.name}
+      </a>
+      {#if currentBlock}<div class="crumb block">B{currentBlock.order}. {currentBlock.title}</div>{/if}
+      <h1>S{sequence.order}. {sequence.title}</h1>
     </header>
     <p class="empty">This sequence has no items yet.</p>
   {:else}
     <header>
-      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← {currentCourse.value?.course.name}</Button>
-      <h1>{sequence.title}</h1>
+      <a class="crumb course" href={`/courses/${courseSlug}`}
+        onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>
+        ← {currentCourse.value?.course.name}
+      </a>
+      {#if currentBlock}<div class="crumb block">B{currentBlock.order}. {currentBlock.title}</div>{/if}
+      <h1>S{sequence.order}. {sequence.title}</h1>
     </header>
 
     <nav class="strip" aria-label="Items">
@@ -147,15 +180,20 @@
     </main>
 
     <footer>
-      <Button variant="secondary" onclick={previous} disabled={currentIndex <= 0}>← Previous</Button>
-      <Button variant="secondary" onclick={next} disabled={currentIndex >= sequence.items.length - 1}>Next →</Button>
+      <Button variant="secondary" onclick={previous} disabled={flatIndex <= 0}>← Previous</Button>
+      <Button variant="secondary" onclick={next} disabled={flatIndex < 0 || flatIndex >= flatItems.length - 1}>Next →</Button>
     </footer>
   {/if}
 </div>
 
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  header { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
+  header h1 { margin: var(--space-1) 0 0 0; }
+  .crumb { font-size: 0.9rem; line-height: 1.3; }
+  .crumb.course { color: var(--primary); text-decoration: none; align-self: flex-start; }
+  .crumb.course:hover { text-decoration: underline; }
+  .crumb.block { color: var(--muted); }
   .strip {
     display: flex;
     gap: var(--space-2);

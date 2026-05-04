@@ -9,7 +9,7 @@
 
 <section class="block">
   <header onclick={() => (expanded = !expanded)}>
-    <h2>{block.title}</h2>
+    <h2>B{block.order}. {block.title}</h2>
     <span class="toggle">{expanded ? '▾' : '▸'}</span>
   </header>
   {#if expanded}
