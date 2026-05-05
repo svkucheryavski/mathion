@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse
 
 from mathion.api.auth import router as auth_router
 from mathion.api.blocks import router as blocks_router
@@ -21,6 +24,7 @@ from mathion.api.run_teachers import router as run_teachers_router
 from mathion.api.runs import router as runs_router
 from mathion.api.submissions import router as submissions_router
 from mathion.api.versions import router as versions_router
+from mathion.config import settings
 
 app = FastAPI(title="Mathion", version="0.1.0")
 app.add_middleware(GZipMiddleware, minimum_size=1024)
@@ -49,3 +53,51 @@ app.include_router(dashboard_router)
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# The two SPA additions MUST come AFTER the include_router() calls above AND
+# AFTER /health — a Starlette Mount registered first would shadow /health
+# because mounts match every prefix below them.
+
+# Guard 1: explicit catch-all for unknown /api/* so router typos return JSON
+# 404 rather than falling through to the SPA fallback and getting index.html
+# (without this, unknown /api/foo would serve the SPA shell with a 200 —
+# silently masking API typos in production).
+@app.api_route(
+    "/api/{rest:path}",
+    methods=["GET", "POST", "PATCH", "DELETE", "PUT", "HEAD", "OPTIONS"],
+)
+def _api_not_found(rest: str):
+    raise HTTPException(status_code=404, detail="Not Found")
+
+
+# Guard 2: conditional SPA fallback. Starlette 1.x StaticFiles(html=True)
+# no longer serves index.html as a universal catch-all for unknown paths, so
+# we implement the SPA pattern manually:
+#   - If the requested path resolves to an actual file inside dist/, serve it
+#     (handles JS bundles, CSS, images, etc.).
+#   - Otherwise serve index.html, letting the SPA router handle the path in
+#     the browser.
+# The entire block is skipped when the dist directory is missing so that
+# pure-backend dev / CI without a frontend build still works.
+_frontend_dist = Path(settings.frontend_dist)
+if _frontend_dist.is_dir():
+
+    @app.api_route(
+        "/{full_path:path}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    def _spa_fallback(full_path: str) -> FileResponse:
+        candidate = _frontend_dist / full_path
+        # Path-traversal guard: a resolved candidate must stay inside dist/.
+        # If it doesn't, return a 404 rather than the SPA shell so malformed
+        # paths fail explicitly instead of silently rendering the app.
+        try:
+            candidate = candidate.resolve()
+            candidate.relative_to(_frontend_dist.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404)
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_frontend_dist / "index.html")

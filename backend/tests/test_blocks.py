@@ -194,3 +194,29 @@ def test_api_list_blocks_nonexistent_version(admin_client):
     """Listing blocks for a version that doesn't exist must return 404."""
     resp = admin_client.get("/api/versions/999/blocks")
     assert resp.status_code == 404
+
+
+def test_create_block_renders_info_html(admin_client):
+    version = _setup_version(admin_client)
+    response = admin_client.post(
+        f"/api/versions/{version['id']}/blocks",
+        json={"title": "B1", "slug": "b1", "info": "Goal **A**"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["info"] == "Goal **A**"
+    assert body["info_html"] == "<p>Goal <strong>A</strong></p>\n"
+
+
+def test_update_block_re_renders_info_html(admin_client):
+    version = _setup_version(admin_client)
+    block = admin_client.post(
+        f"/api/versions/{version['id']}/blocks",
+        json={"title": "B1", "slug": "b1", "info": "old"},
+    ).json()
+    response = admin_client.patch(
+        f"/api/blocks/{block['id']}",
+        json={"info": "new **bold**"},
+    )
+    assert response.status_code == 200
+    assert response.json()["info_html"] == "<p>new <strong>bold</strong></p>\n"

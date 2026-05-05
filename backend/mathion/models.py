@@ -66,6 +66,7 @@ class Block(Base):
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False)
     info: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    info_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     version: Mapped["CourseVersion"] = relationship(back_populates="blocks")

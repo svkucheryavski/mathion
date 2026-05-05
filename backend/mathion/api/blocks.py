@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from mathion.api.helpers import get_or_404, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
+from mathion.markdown import render_markdown
 from mathion.models import Block, CourseVersion, Sequence
 from mathion.models_auth import User
 from mathion.schemas import (
@@ -50,7 +51,14 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
     next_order = (db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0) + 1
-    block = Block(version_id=version_id, title=data.title, slug=data.slug, order=next_order, info=data.info)
+    block = Block(
+        version_id=version_id,
+        title=data.title,
+        slug=data.slug,
+        order=next_order,
+        info=data.info,
+        info_html=render_markdown(data.info or ""),
+    )
     db.add(block)
     try:
         db.commit()
@@ -94,6 +102,8 @@ def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)
 
     for field, value in updates.items():
         setattr(block, field, value)
+        if field == "info":
+            block.info_html = render_markdown(value or "")
     db.commit()
     db.refresh(block)
     return block

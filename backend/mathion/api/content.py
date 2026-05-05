@@ -81,6 +81,7 @@ def get_content_json(version_id: int, db: Session = Depends(get_db), user: User 
                 "slug": block.slug,
                 "order": block.order,
                 "info": block.info,
+                "info_html": block.info_html,
                 "sequences": sorted(
                     [
                         {
