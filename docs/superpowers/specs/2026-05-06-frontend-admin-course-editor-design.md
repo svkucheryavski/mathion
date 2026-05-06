@@ -60,7 +60,7 @@ frontend/src/
 │       └── ItemEditPage.svelte
 └── components/
     └── editor/                               # NEW
-        ├── ItemTypePicker.svelte             # `<fieldset>` of `<label>` wrapping visually-hidden `<input type="radio">` + an inline icon glyph; selected state styled via `:has(:checked)`. Does NOT reuse `ItemIcon.svelte` (which is a `<button>` — wrong semantics inside a radio group).
+        ├── ItemTypePicker.svelte             # `<fieldset>` of `<label>` wrapping visually-hidden `<input type="radio">` + an inline icon glyph; selected state mirrored via Svelte `class:selected` binding (no `:has(:checked)` dependency). Does NOT reuse `ItemIcon.svelte` (which is a `<button>` — wrong semantics inside a radio group).
         ├── MarkdownEditor.svelte             # textarea + Preview tab; props: { versionId, value (`$bindable()`) }
         └── DirtyGuard.svelte                 # uses router.svelte.ts navigation guard + window.beforeunload
 ```
@@ -127,7 +127,7 @@ Delete buttons live on each entity's own edit page (one click deeper than the li
 **Item creation flow** addresses the validator constraints (`ItemCreate` rejects empty `content_md` for `static_page` and missing `video_url` for `video`):
 
 1. Click "+ New item" on `SequenceEditPage` — a 2-step inline form opens.
-2. Step 1: `ItemTypePicker` — `<fieldset>` with `<label>` per type wrapping a visually-hidden `<input type="radio">` plus an inline icon glyph. Selected state styled via the parent label's `:has(:checked)` selector. Real `<input type="radio">` keeps keyboard navigation and screen-reader semantics correct.
+2. Step 1: `ItemTypePicker` — `<fieldset>` with `<label>` per type wrapping a visually-hidden `<input type="radio">` plus an inline icon glyph. Selected state mirrored to a `class:selected` binding on the label (Svelte reactive `class:` directive, no CSS-`:has()` dependency — keeps the styling robust across older Safari/Chrome). Real `<input type="radio">` keeps keyboard navigation and screen-reader semantics correct.
 3. Step 2: title + slug + the type-specific required field:
    - `static_page` → a small `content_md` textarea seeded with `# {title}\n` (so the `ItemCreate` validator passes with non-empty content; `# {title}` is a sensible h1 the author will likely keep).
    - `video` → `video_url` input (`type="url"`, required, http(s) accepted by backend).

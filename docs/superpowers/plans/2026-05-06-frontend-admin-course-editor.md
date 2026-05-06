@@ -1399,7 +1399,10 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run test
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C /Users/svkucheryavski/Documents/Developing/mathion add frontend/src/lib/types.ts frontend/src/components frontend/src/pages
+git -C /Users/svkucheryavski/Documents/Developing/mathion add frontend/src/lib/types.ts
+# If `npm run check` flagged consumers (likely just CourseCard.svelte), stage them
+# explicitly by name — avoid `git add frontend/src/components frontend/src/pages`
+# which would sweep up unrelated work-in-progress files.
 git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(frontend): types for admin-tree and is_admin/Optional fields"
 ```
 
@@ -1842,8 +1845,8 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 ### Task 16: CourseList admin Edit affordance + admin-only row UX
 
 **Files:**
-- Modify: `frontend/src/pages/CourseList.svelte` (existing)
-- Modify: `frontend/src/components/course/CourseCard.svelte` (existing — admin-only treatment)
+- Modify: `frontend/src/components/course/CourseCard.svelte` (existing — admin badge + Edit link)
+- (Read-only) `frontend/src/pages/CourseList.svelte` — no code edit; the page already iterates `/api/my-courses` rows verbatim and CourseCard handles per-row admin presentation. The page's empty-state copy stays as-is for slice 1.
 
 - [ ] **Step 1: Read current CourseList + CourseCard** to ground the edit.
 
@@ -1863,9 +1866,10 @@ Replace the body with:
   import { formatProgress } from '../../lib/format';
   import { navigate } from '../../lib/router.svelte';
   let { course }: { course: CourseListItem } = $props();
-  const adminOnly = course.is_admin && course.version_id === null;
-  const studentHref = `/courses/${course.course.slug}`;
-  const editHref = `/courses/${course.course.slug}/edit`;
+  // $derived keeps these reactive if `course` props update (e.g. after a list refetch).
+  const adminOnly = $derived(course.is_admin && course.version_id === null);
+  const studentHref = $derived(`/courses/${course.course.slug}`);
+  const editHref = $derived(`/courses/${course.course.slug}/edit`);
 </script>
 
 <div class="card">
@@ -1900,9 +1904,9 @@ Replace the body with:
 </style>
 ```
 
-- [ ] **Step 3: Verify CourseList.svelte still consumes the new shape**
+- [ ] **Step 3: Verify CourseList.svelte still type-checks against the new shape**
 
-`pages/CourseList.svelte` already iterates the response; the type change in Task 11 ensures `version_id: number | null` is honored. If `npm run check` complains about a `null` access, guard appropriately.
+`pages/CourseList.svelte` only iterates rows and forwards them to CourseCard — no field access on `version_id`, so `npm run check` should be clean. If a regression slips in, guard `null` appropriately.
 
 - [ ] **Step 4: Run check + tests**
 
@@ -1913,7 +1917,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C /Users/svkucheryavski/Documents/Developing/mathion add frontend/src/components/course/CourseCard.svelte frontend/src/pages/CourseList.svelte
+git -C /Users/svkucheryavski/Documents/Developing/mathion add frontend/src/components/course/CourseCard.svelte
 git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(frontend): admin Edit affordance on CourseList rows"
 ```
 
@@ -2109,6 +2113,9 @@ Replace stub with:
   }
 
   async function transition(v: Version, action: 'disable' | 'enable') {
+    // Spec §8: all state transitions follow confirm → POST → refetch / toast.
+    const verb = action === 'disable' ? 'Disable' : 'Enable';
+    if (!confirm(`${verb} version ${v.id}?`)) return;
     try {
       await api.post(`/api/versions/${v.id}/${action}`);
       await load();
@@ -2155,7 +2162,9 @@ Replace stub with:
             <textarea bind:value={info_md} rows="3"></textarea>
           </label>
           <label>Max quiz attempts
-            <Input type="number" min="1" max="10" bind:value={max_quiz_attempts} />
+            <!-- Raw <input> — `Input.svelte` doesn't accept min/max; opening it up
+                 would be unrelated work. Native browser validation gives min/max bounds. -->
+            <input type="number" min="1" max="10" bind:value={max_quiz_attempts} />
           </label>
           <Button type="submit">Create</Button>
         </form>
@@ -2227,17 +2236,244 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 **Files:**
 - Modify: `frontend/src/pages/editor/VersionEditPage.svelte`
 
-- [ ] **Step 1: Implement.** Behavior:
-1. Resolve `versionId` from route param (number); call `loadAdminTree(Number(versionId))` if cache stale or missing.
-2. Render breadcrumb (`Courses › courseSlug › Edit › v{id}`).
-3. **Permissions banner** if `is_disabled` ("This version is disabled — editing is not allowed").
-4. **Version-meta form** (info_md textarea + max_quiz_attempts number input) — gated by `canEditVersionMeta`. Tracker via `makeDirtyTracker`. Save calls `PATCH /api/versions/${vid}` then `loadAdminTree(vid, { force: true })` then `tracker.reset({ info_md, max_quiz_attempts })`. Use `<DirtyGuard isDirty={() => tracker.isDirty} />`.
-5. **Block list** with ↑/↓, **Open** → block edit page; "+ New block" inline form (title, slug, info=""). Reorder calls `POST /api/versions/${vid}/blocks/reorder` with the full ordering, then `loadAdminTree(vid, {force:true})`.
-6. **State actions row**: Publish / Archive / Revert / Disable / Enable / Delete — each shown only when corresponding `versionPermissions(...)` flag is true. **All disabled while form dirty** with tooltip "Save or discard changes first."
+- [ ] **Step 1: Implement.** Replace the stub with the page below. Behavior summary:
+1. Read `versionId` from route param (string → `Number(...)`); ensure admin-tree loaded for it (`loadAdminTree`).
+2. Breadcrumb + disabled banner if applicable.
+3. Version-meta form (`info_md`, `max_quiz_attempts`) — gated by `canEditVersionMeta`. Save → `PATCH /api/versions/${vid}` → `loadAdminTree(vid, { force: true })` → `tracker.reset(...)`. `DirtyGuard` watches `tracker.isDirty`.
+4. Block list with ↑/↓ + Open + "+ New block" inline form. Reorder calls `POST /api/versions/${vid}/blocks/reorder` with `{ order: [{id, order}, …] }`, then refetch.
+5. State actions row (Publish / Archive / Revert / Disable / Enable / Delete) gated by `versionPermissions`, ALL disabled while dirty, every action goes through `confirm(...)` → POST → refetch / navigate / toast.
 
-Inline-document the dirty-button rule with a `disabled={tracker.isDirty || !canPublish}` style and `title={tracker.isDirty ? 'Save or discard changes first' : ''}`.
+```svelte
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { api, ApiError } from '../../lib/api';
+  import { navigate } from '../../lib/router.svelte';
+  import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import Button from '../../components/ui/Button.svelte';
+  import Spinner from '../../components/ui/Spinner.svelte';
+  import { toasts } from '../../stores/toasts.svelte';
+  import type { AdminTreeBlock } from '../../lib/types';
 
-(See `VersionsPage` for the API shape and toasts pattern. The reorder logic should construct `{ order: [{id, order}, ...] }` and POST it.)
+  let { courseSlug, versionId }: { courseSlug: string; versionId: string } = $props();
+  const vid = $derived(Number(versionId));
+
+  const tree = $derived(currentEditorVersion.value);
+  const v = $derived(tree?.version);
+  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+
+  // Form tracker initialized after first load.
+  type Meta = { info_md: string; max_quiz_attempts: number };
+  let tracker = $state<ReturnType<typeof makeDirtyTracker<Meta>> | null>(null);
+
+  // New-block form
+  let creating = $state(false);
+  let newTitle = $state('');
+  let newSlug = $state('');
+
+  async function ensureLoaded() {
+    if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
+    if (currentEditorVersion.value && !tracker) {
+      const cur = currentEditorVersion.value.version;
+      tracker = makeDirtyTracker<Meta>({ info_md: cur.info_md, max_quiz_attempts: cur.max_quiz_attempts });
+    }
+  }
+
+  async function saveMeta() {
+    if (!tracker) return;
+    try {
+      await api.patch(`/api/versions/${vid}`, {
+        info_md: tracker.current.info_md,
+        max_quiz_attempts: tracker.current.max_quiz_attempts,
+      });
+      await loadAdminTree(vid, { force: true });
+      const cur = currentEditorVersion.value!.version;
+      tracker.reset({ info_md: cur.info_md, max_quiz_attempts: cur.max_quiz_attempts });
+      toasts.add({ kind: 'success', message: 'Saved' });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+    }
+  }
+  function discard() {
+    if (!tracker || !v) return;
+    tracker.reset({ info_md: v.info_md, max_quiz_attempts: v.max_quiz_attempts });
+  }
+
+  async function createBlock() {
+    try {
+      await api.post(`/api/versions/${vid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
+      newTitle = ''; newSlug = ''; creating = false;
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Could not create block' });
+    }
+  }
+
+  async function reorder(idx: number, dir: -1 | 1) {
+    if (!tree) return;
+    const blocks = [...tree.blocks];
+    const target = idx + dir;
+    if (target < 0 || target >= blocks.length) return;
+    [blocks[idx], blocks[target]] = [blocks[target], blocks[idx]];
+    const order = blocks.map((b, i) => ({ id: b.id, order: i + 1 }));
+    try {
+      await api.post(`/api/versions/${vid}/blocks/reorder`, { order });
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Reorder failed' });
+      await loadAdminTree(vid, { force: true });
+    }
+  }
+
+  async function transition(action: 'publish' | 'archive' | 'revert' | 'disable' | 'enable') {
+    if (tracker?.isDirty) return;
+    const prompts: Record<string, string> = {
+      publish: `Publish version ${vid}? Students will see it.`,
+      archive: `Archive version ${vid}?`,
+      revert: `Revert version ${vid} to created?`,
+      disable: `Disable version ${vid}?`,
+      enable: `Enable version ${vid}?`,
+    };
+    if (!confirm(prompts[action])) return;
+    try {
+      await api.post(`/api/versions/${vid}/${action}`);
+      await loadAdminTree(vid, { force: true });
+      toasts.add({ kind: 'success', message: `Version ${action}d` });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : `Could not ${action}` });
+    }
+  }
+
+  async function deleteVersion() {
+    if (tracker?.isDirty) return;
+    if (!confirm(`Delete version ${vid}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/versions/${vid}`);
+      navigate(`/courses/${courseSlug}/edit`);
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+    }
+  }
+
+  onMount(() => { void ensureLoaded(); });
+  $effect(() => { void ensureLoaded(); });  // re-run if vid changes
+</script>
+
+<div class="page">
+  {#if !tree || !v || tree.version.id !== vid}
+    <Spinner />
+  {:else}
+    <header>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+      <h1>{tree.course.name} · v{v.id} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>
+    </header>
+
+    {#if v.is_disabled}
+      <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
+    {/if}
+
+    {#if tracker && perms?.canEditVersionMeta}
+      <section class="meta">
+        <h2>Version info</h2>
+        <label>Info (markdown)
+          <textarea bind:value={tracker.current.info_md} rows="4"></textarea>
+        </label>
+        <label>Max quiz attempts
+          <input type="number" min="1" max="10" bind:value={tracker.current.max_quiz_attempts} />
+        </label>
+        <div class="row">
+          <Button onclick={saveMeta} disabled={!tracker.isDirty}>Save</Button>
+          <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty}>Discard</Button>
+        </div>
+      </section>
+    {/if}
+
+    <section class="blocks">
+      <div class="head">
+        <h2>Blocks</h2>
+        {#if perms?.canEditStructure}
+          <Button onclick={() => (creating = !creating)}>{creating ? 'Cancel' : '+ New block'}</Button>
+        {/if}
+      </div>
+      {#if creating}
+        <form class="create" onsubmit={(e) => { e.preventDefault(); createBlock(); }}>
+          <input placeholder="Title" bind:value={newTitle} required />
+          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9-]+" />
+          <Button type="submit">Create</Button>
+        </form>
+      {/if}
+      {#if tree.blocks.length === 0}
+        <p class="empty">No blocks yet.</p>
+      {:else}
+        <ul>
+          {#each tree.blocks as b, i (b.id)}
+            <li class="row">
+              <strong>B{i + 1}. {b.title}</strong>
+              <div class="actions">
+                {#if perms?.canEditStructure}
+                  <Button variant="ghost" disabled={i === 0} onclick={() => reorder(i, -1)} title="Move up">↑</Button>
+                  <Button variant="ghost" disabled={i === tree.blocks.length - 1} onclick={() => reorder(i, 1)} title="Move down">↓</Button>
+                {/if}
+                <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${b.id}`)}>Open</Button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    {#if perms}
+      <section class="state-actions">
+        {#if perms.canPublish}
+          <Button disabled={tracker?.isDirty} title={tracker?.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('publish')}>Publish</Button>
+        {/if}
+        {#if perms.canArchive}
+          <Button disabled={tracker?.isDirty} title={tracker?.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('archive')}>Archive</Button>
+        {/if}
+        {#if perms.canRevert}
+          <Button disabled={tracker?.isDirty} title={tracker?.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('revert')}>Revert</Button>
+        {/if}
+        {#if perms.canDisable}
+          <Button variant="ghost" disabled={tracker?.isDirty} onclick={() => transition('disable')}>Disable</Button>
+        {/if}
+        {#if perms.canEnable}
+          <Button variant="ghost" disabled={tracker?.isDirty} onclick={() => transition('enable')}>Enable</Button>
+        {/if}
+        {#if perms.canDeleteVersion}
+          <Button variant="ghost" disabled={tracker?.isDirty} onclick={deleteVersion}>Delete</Button>
+        {/if}
+      </section>
+    {/if}
+
+    {#if tracker}
+      <DirtyGuard isDirty={() => tracker!.isDirty} />
+    {/if}
+  {/if}
+</div>
+
+<style>
+  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .state { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; margin-left: var(--space-2); }
+  .state-created { background: #ffeac0; color: #663; }
+  .state-published { background: #ddf3dd; color: #265; }
+  .state-archived { background: #eee; color: #555; }
+  .state.disabled { background: #fdd; color: #833; }
+  .banner { background: #fff3cd; border-left: 3px solid #d99; padding: var(--space-2); }
+  .meta, .blocks, .state-actions { margin: var(--space-4) 0; }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta textarea, .meta input[type=number] { width: 100%; }
+  .head { display: flex; justify-content: space-between; align-items: center; }
+  .create { display: flex; gap: var(--space-2); margin: var(--space-2) 0; }
+  .create input { flex: 1; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+  .actions { display: flex; gap: var(--space-2); }
+  .state-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .empty { color: var(--muted); }
+</style>
+```
 
 - [ ] **Step 2: Run check**
 
@@ -2247,7 +2483,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check
 
 - [ ] **Step 3: Manual smoke**
 
-Start backend (`cd backend && .venv/bin/uvicorn mathion.main:app --reload`) and frontend (`cd frontend && npm run dev`). Seed via `cd backend && PYTHONPATH=. .venv/bin/python scripts/seed_demo.py`. Log in as `dev@mathion.test`, hit `/courses/<slug>/edit/v/<vid>`, exercise: edit info_md → Save → reload page → persists; reorder block ↑/↓ → backend persists; create block → appears in list; Publish flow with empty block → 409 toast.
+Start backend (`cd backend && .venv/bin/uvicorn mathion.main:app --reload`) and frontend (`cd frontend && npm run dev`). Seed via `cd backend && PYTHONPATH=. .venv/bin/python scripts/seed_demo.py`. Log in as `dev@mathion.test`, hit `/courses/<slug>/edit/v/<vid>`, exercise: edit info_md → Save → reload page → persists; reorder block ↑/↓ → backend persists; create block → appears in list; Publish flow with empty block → 409 toast; navigate away while dirty → confirm prompt.
 
 - [ ] **Step 4: Commit**
 
@@ -2263,14 +2499,191 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 **Files:**
 - Modify: `frontend/src/pages/editor/BlockEditPage.svelte`
 
-- [ ] **Step 1: Implement.** Behavior:
-1. Read `versionId` and `blockId` from route params.
-2. Ensure admin-tree loaded for this version (`loadAdminTree`); locate `block` in tree, 404 page if not found or `block.version_id !== Number(versionId)` (deep-link hierarchy validation).
-3. **Edit form** for `title` + `info` (gated by `canEditTextFields`). Uses `makeDirtyTracker` + `DirtyGuard`. Save → `PATCH /api/blocks/${blockId}` → `loadAdminTree(versionId, { force: true })` → reset.
-4. **Sequences list** with ↑/↓ + Open + "+ New sequence" form (title + slug). Reorder → `POST /api/blocks/${blockId}/sequences/reorder`.
-5. **"Delete this block" button** at bottom — gated by `canEditStructure && block.sequences.length === 0`. Tooltip when disabled: "Remove sequences first" or "Only allowed in 'created' state". On confirm + 204 → navigate up to `/courses/${courseSlug}/edit/v/${versionId}`.
+- [ ] **Step 1: Implement.** Replace stub with the page below. Behavior summary:
+1. Read `versionId` + `blockId` from route params (string → `Number(...)`); ensure admin-tree loaded.
+2. Deep-link validation: locate block in tree, render 404 if not found or `block.version_id !== Number(versionId)` (per spec §3 "Deep link hierarchy validation").
+3. Edit form for `title` + `info` (gated by `canEditTextFields`). `makeDirtyTracker` + `DirtyGuard`. Save → `PATCH /api/blocks/${blockId}` → refetch → `tracker.reset(...)`.
+4. Sequences list with ↑/↓ + Open + "+ New sequence" form (title + slug). Reorder → `POST /api/blocks/${blockId}/sequences/reorder`.
+5. "Delete this block" button at bottom — gated by `canEditStructure && block.sequences.length === 0`. Tooltip when disabled: "Remove sequences first" or "Only allowed in 'created' state". Confirm → DELETE → navigate up.
 
-(Mirror VersionEditPage's tracker + DirtyGuard + state-action-disabled-while-dirty pattern.)
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { api, ApiError } from '../../lib/api';
+  import { navigate } from '../../lib/router.svelte';
+  import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import Button from '../../components/ui/Button.svelte';
+  import Spinner from '../../components/ui/Spinner.svelte';
+  import { toasts } from '../../stores/toasts.svelte';
+
+  let { courseSlug, versionId, blockId }: { courseSlug: string; versionId: string; blockId: string } = $props();
+  const vid = $derived(Number(versionId));
+  const bid = $derived(Number(blockId));
+
+  const tree = $derived(currentEditorVersion.value);
+  const v = $derived(tree?.version);
+  const block = $derived(tree?.blocks.find((b) => b.id === bid));
+  const valid = $derived(!!block && block.version_id === vid);
+  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+
+  type Form = { title: string; info: string };
+  let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
+
+  let creating = $state(false);
+  let newTitle = $state('');
+  let newSlug = $state('');
+
+  async function ensureLoaded() {
+    if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
+    if (block && !tracker) tracker = makeDirtyTracker<Form>({ title: block.title, info: block.info });
+  }
+
+  async function save() {
+    if (!tracker) return;
+    try {
+      await api.patch(`/api/blocks/${bid}`, { title: tracker.current.title, info: tracker.current.info });
+      await loadAdminTree(vid, { force: true });
+      const b = currentEditorVersion.value!.blocks.find((x) => x.id === bid)!;
+      tracker.reset({ title: b.title, info: b.info });
+      toasts.add({ kind: 'success', message: 'Saved' });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+    }
+  }
+  function discard() { if (tracker && block) tracker.reset({ title: block.title, info: block.info }); }
+
+  async function createSequence() {
+    try {
+      await api.post(`/api/blocks/${bid}/sequences`, { title: newTitle, slug: newSlug });
+      newTitle = ''; newSlug = ''; creating = false;
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Could not create sequence' });
+    }
+  }
+
+  async function reorder(idx: number, dir: -1 | 1) {
+    if (!block) return;
+    const seqs = [...block.sequences];
+    const target = idx + dir;
+    if (target < 0 || target >= seqs.length) return;
+    [seqs[idx], seqs[target]] = [seqs[target], seqs[idx]];
+    const order = seqs.map((s, i) => ({ id: s.id, order: i + 1 }));
+    try {
+      await api.post(`/api/blocks/${bid}/sequences/reorder`, { order });
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Reorder failed' });
+      await loadAdminTree(vid, { force: true });
+    }
+  }
+
+  async function deleteBlock() {
+    if (tracker?.isDirty || !block || !perms?.canEditStructure || block.sequences.length > 0) return;
+    if (!confirm(`Delete block "${block.title}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/blocks/${bid}`);
+      navigate(`/courses/${courseSlug}/edit/v/${vid}`);
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+    }
+  }
+
+  onMount(() => { void ensureLoaded(); });
+  $effect(() => { void ensureLoaded(); });
+</script>
+
+<div class="page">
+  {#if !tree || tree.version.id !== vid}
+    <Spinner />
+  {:else if !valid || !block || !v}
+    <h1>Not found</h1>
+    <p>This block does not belong to this version.</p>
+    <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← Back</Button>
+  {:else if tracker && perms}
+    <header>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← v{vid}</Button>
+      <h1>Block: {block.title}</h1>
+    </header>
+
+    {#if perms.canEditTextFields}
+      <section class="meta">
+        <label>Title <input bind:value={tracker.current.title} required /></label>
+        <label>Info (markdown) <textarea bind:value={tracker.current.info} rows="3"></textarea></label>
+        <div class="row">
+          <Button onclick={save} disabled={!tracker.isDirty}>Save</Button>
+          <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty}>Discard</Button>
+        </div>
+      </section>
+    {/if}
+
+    <section class="seqs">
+      <div class="head">
+        <h2>Sequences</h2>
+        {#if perms.canEditStructure}
+          <Button onclick={() => (creating = !creating)}>{creating ? 'Cancel' : '+ New sequence'}</Button>
+        {/if}
+      </div>
+      {#if creating}
+        <form class="create" onsubmit={(e) => { e.preventDefault(); createSequence(); }}>
+          <input placeholder="Title" bind:value={newTitle} required />
+          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9-]+" />
+          <Button type="submit">Create</Button>
+        </form>
+      {/if}
+      {#if block.sequences.length === 0}
+        <p class="empty">No sequences yet.</p>
+      {:else}
+        <ul>
+          {#each block.sequences as s, i (s.id)}
+            <li class="row">
+              <strong>S{i + 1}. {s.title}</strong>
+              <div class="actions">
+                {#if perms.canEditStructure}
+                  <Button variant="ghost" disabled={i === 0} onclick={() => reorder(i, -1)}>↑</Button>
+                  <Button variant="ghost" disabled={i === block.sequences.length - 1} onclick={() => reorder(i, 1)}>↓</Button>
+                {/if}
+                <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${s.id}`)}>Open</Button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    {#if perms.canEditStructure}
+      <section class="danger">
+        <Button
+          variant="ghost"
+          disabled={tracker.isDirty || block.sequences.length > 0}
+          title={tracker.isDirty ? 'Save or discard changes first' : block.sequences.length > 0 ? 'Remove sequences first' : ''}
+          onclick={deleteBlock}
+        >Delete this block</Button>
+      </section>
+    {/if}
+
+    <DirtyGuard isDirty={() => tracker!.isDirty} />
+  {/if}
+</div>
+
+<style>
+  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .meta, .seqs, .danger { margin: var(--space-4) 0; }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta input, .meta textarea { width: 100%; }
+  .head { display: flex; justify-content: space-between; align-items: center; }
+  .create { display: flex; gap: var(--space-2); margin: var(--space-2) 0; }
+  .create input { flex: 1; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+  .actions { display: flex; gap: var(--space-2); }
+  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .empty { color: var(--muted); }
+</style>
+```
 
 - [ ] **Step 2: Run check + manual smoke**
 
@@ -2278,7 +2691,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check
 ```
 
-Smoke: open a block → edit title → Save → see persisted; create a sequence; try delete with a sequence present → button disabled with tooltip; remove the sequence → delete works.
+Smoke: open a block → edit title → Save → see persisted; create a sequence; try delete with a sequence present → button disabled with tooltip; remove the sequence → delete works; visit a URL with a mismatched block id (e.g. `.../v/3/blocks/999`) → "Not found" page renders.
 
 - [ ] **Step 3: Commit**
 
@@ -2344,21 +2757,227 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 **Files:**
 - Modify: `frontend/src/pages/editor/SequenceEditPage.svelte`
 
-- [ ] **Step 1: Implement.** Behavior:
-1. Read `versionId`, `blockId`, `sequenceId`. Ensure admin-tree loaded; deep-link validate.
-2. **Edit form** for `sequence.title` (gated by `canEditTextFields`). Tracker + DirtyGuard.
-3. **Items list** with ↑/↓ + Open + per-row icon (use existing `ItemIcon.svelte` with the item type — render only the static glyph, no progress state).
-4. **"+ New item" 2-step inline form**:
-   - Step 1: `<ItemTypePicker bind:value={newType} />`.
-   - Step 2: `title`, `slug`, plus type-specific:
-     - `static_page` → small `content_md` textarea seeded with `# {title}\n` (pre-fill once title is set; updateable).
-     - `video` → `video_url` input (`type="url"`, required).
-   - Submit: `POST /api/sequences/${sequenceId}/items` with `{ title, slug, type, content_md?, video_url? }`. On 201 → refetch tree + navigate into the new item.
-5. **"Delete this sequence" button** — gated by `canEditStructure && sequence.items.length === 0`. Tooltip when disabled.
+- [ ] **Step 1: Implement.** Replace stub with the page below. Behavior summary:
+1. Read all three params; ensure admin-tree loaded; deep-link validate (`block.version_id===vid` and `seq.block_id===bid`).
+2. Title-edit form (gated by `canEditTextFields`).
+3. Items list with ↑/↓ + Open + per-row `ItemIcon` (existing component, used in its existing `<button>` mode for the row link — passes `state="not-yet"` so it renders a flat glyph).
+4. "+ New item" 2-step form: pick type with `ItemTypePicker`, then collect `title` + `slug`; for `static_page` pre-fill `content_md = '# {title}\n'`; for `video` collect `video_url`. POST → refetch → navigate into new item.
+5. "Delete this sequence" button — gated by `canEditStructure && sequence.items.length === 0`.
+
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { api, ApiError } from '../../lib/api';
+  import { navigate } from '../../lib/router.svelte';
+  import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import ItemTypePicker from '../../components/editor/ItemTypePicker.svelte';
+  import ItemIcon from '../../components/course/ItemIcon.svelte';
+  import Button from '../../components/ui/Button.svelte';
+  import Spinner from '../../components/ui/Spinner.svelte';
+  import { toasts } from '../../stores/toasts.svelte';
+
+  let { courseSlug, versionId, blockId, sequenceId }: {
+    courseSlug: string; versionId: string; blockId: string; sequenceId: string;
+  } = $props();
+  const vid = $derived(Number(versionId));
+  const bid = $derived(Number(blockId));
+  const sid = $derived(Number(sequenceId));
+
+  const tree = $derived(currentEditorVersion.value);
+  const v = $derived(tree?.version);
+  const block = $derived(tree?.blocks.find((b) => b.id === bid));
+  const seq = $derived(block?.sequences.find((s) => s.id === sid));
+  const valid = $derived(!!seq && !!block && block.version_id === vid && seq.block_id === bid);
+  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+
+  type Form = { title: string };
+  let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
+
+  let creating = $state(false);
+  let newType = $state<'static_page' | 'video'>('static_page');
+  let newTitle = $state('');
+  let newSlug = $state('');
+  let newContentMd = $state('');
+  let newVideoUrl = $state('');
+
+  // Auto-seed content_md from title for static_page (only while user hasn't typed in body yet).
+  let contentMdTouched = $state(false);
+  $effect(() => {
+    if (newType === 'static_page' && !contentMdTouched) {
+      newContentMd = newTitle ? `# ${newTitle}\n` : '';
+    }
+  });
+
+  async function ensureLoaded() {
+    if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
+    if (seq && !tracker) tracker = makeDirtyTracker<Form>({ title: seq.title });
+  }
+
+  async function save() {
+    if (!tracker) return;
+    try {
+      await api.patch(`/api/sequences/${sid}`, { title: tracker.current.title });
+      await loadAdminTree(vid, { force: true });
+      const s = currentEditorVersion.value!.blocks.find((b) => b.id === bid)!.sequences.find((x) => x.id === sid)!;
+      tracker.reset({ title: s.title });
+      toasts.add({ kind: 'success', message: 'Saved' });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+    }
+  }
+  function discard() { if (tracker && seq) tracker.reset({ title: seq.title }); }
+
+  async function createItem() {
+    const body: Record<string, unknown> = { title: newTitle, slug: newSlug, type: newType };
+    if (newType === 'static_page') body.content_md = newContentMd;
+    if (newType === 'video') body.video_url = newVideoUrl;
+    try {
+      const item = await api.post<{ id: number }>(`/api/sequences/${sid}/items`, body);
+      await loadAdminTree(vid, { force: true });
+      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${item.id}`);
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Could not create item' });
+    }
+  }
+
+  async function reorder(idx: number, dir: -1 | 1) {
+    if (!seq) return;
+    const items = [...seq.items];
+    const target = idx + dir;
+    if (target < 0 || target >= items.length) return;
+    [items[idx], items[target]] = [items[target], items[idx]];
+    const order = items.map((it, i) => ({ id: it.id, order: i + 1 }));
+    try {
+      await api.post(`/api/sequences/${sid}/items/reorder`, { order });
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Reorder failed' });
+      await loadAdminTree(vid, { force: true });
+    }
+  }
+
+  async function deleteSequence() {
+    if (tracker?.isDirty || !seq || !perms?.canEditStructure || seq.items.length > 0) return;
+    if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/sequences/${sid}`);
+      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`);
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+    }
+  }
+
+  onMount(() => { void ensureLoaded(); });
+  $effect(() => { void ensureLoaded(); });
+</script>
+
+<div class="page">
+  {#if !tree || tree.version.id !== vid}
+    <Spinner />
+  {:else if !valid || !seq || !block || !v}
+    <h1>Not found</h1>
+    <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`)}>← Back</Button>
+  {:else if tracker && perms}
+    <header>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`)}>← {block.title}</Button>
+      <h1>Sequence: {seq.title}</h1>
+    </header>
+
+    {#if perms.canEditTextFields}
+      <section class="meta">
+        <label>Title <input bind:value={tracker.current.title} required /></label>
+        <div class="row">
+          <Button onclick={save} disabled={!tracker.isDirty}>Save</Button>
+          <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty}>Discard</Button>
+        </div>
+      </section>
+    {/if}
+
+    <section class="items">
+      <div class="head">
+        <h2>Items</h2>
+        {#if perms.canEditStructure}
+          <Button onclick={() => (creating = !creating)}>{creating ? 'Cancel' : '+ New item'}</Button>
+        {/if}
+      </div>
+      {#if creating}
+        <form class="create" onsubmit={(e) => { e.preventDefault(); createItem(); }}>
+          <ItemTypePicker bind:value={newType} />
+          <input placeholder="Title" bind:value={newTitle} required />
+          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9-]+" />
+          {#if newType === 'static_page'}
+            <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} oninput={() => (contentMdTouched = true)} required></textarea>
+          {:else if newType === 'video'}
+            <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required />
+          {/if}
+          <Button type="submit">Create</Button>
+        </form>
+      {/if}
+      {#if seq.items.length === 0}
+        <p class="empty">No items yet.</p>
+      {:else}
+        <ul>
+          {#each seq.items as it, i (it.id)}
+            <li class="row">
+              <div class="title">
+                <ItemIcon item={{ id: it.id, type: it.type as never, title: it.title }} state="not-yet" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${it.id}`)} />
+                <strong>{it.title}</strong>
+              </div>
+              <div class="actions">
+                {#if perms.canEditStructure}
+                  <Button variant="ghost" disabled={i === 0} onclick={() => reorder(i, -1)}>↑</Button>
+                  <Button variant="ghost" disabled={i === seq.items.length - 1} onclick={() => reorder(i, 1)}>↓</Button>
+                {/if}
+                <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${it.id}`)}>Open</Button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    {#if perms.canEditStructure}
+      <section class="danger">
+        <Button
+          variant="ghost"
+          disabled={tracker.isDirty || seq.items.length > 0}
+          title={tracker.isDirty ? 'Save or discard changes first' : seq.items.length > 0 ? 'Remove items first' : ''}
+          onclick={deleteSequence}
+        >Delete this sequence</Button>
+      </section>
+    {/if}
+
+    <DirtyGuard isDirty={() => tracker!.isDirty} />
+  {/if}
+</div>
+
+<style>
+  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .meta, .items, .danger { margin: var(--space-4) 0; }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta input { width: 100%; }
+  .head { display: flex; justify-content: space-between; align-items: center; }
+  .create { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
+  .create input, .create textarea { width: 100%; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+  .title { display: flex; align-items: center; gap: var(--space-2); }
+  .actions { display: flex; gap: var(--space-2); }
+  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .empty { color: var(--muted); }
+</style>
+```
 
 - [ ] **Step 2: Run check + manual smoke**
 
-Smoke: create a static_page item with title "Intro" → form pre-fills `# Intro\n`; submit → backend accepts; navigates into ItemEditPage. Try video with empty URL → form prevents submit. Try delete sequence with items → button disabled.
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check
+```
+
+Smoke: create a static_page item with title "Intro" → form pre-fills `# Intro\n`; submit → navigates into ItemEditPage. Try video with empty URL → form prevents submit. Try delete sequence with items → button disabled.
 
 - [ ] **Step 3: Commit**
 
@@ -2447,15 +3066,166 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 **Files:**
 - Modify: `frontend/src/pages/editor/ItemEditPage.svelte`
 
-- [ ] **Step 1: Implement.** Behavior:
-1. Read all four ids from route. Ensure admin-tree loaded; deep-link validate (item.sequence_id matches param, etc.).
+- [ ] **Step 1: Implement.** Replace stub with the page below. Behavior summary:
+1. Read all four ids; ensure admin-tree loaded; deep-link validate hierarchy.
 2. Switch on `item.type`:
-   - `static_page` → `MarkdownEditor` for `content_md`, plain `Input` for `title`. Tracker covers `{ title, content_md }`. Save → `PATCH /api/items/${iid}` → refetch + reset.
-   - `video` → `Input` for `title`, `Input type="url"` for `video_url`. Tracker covers `{ title, video_url }`.
-   - `quiz` or `interactive_app` → read-only panel: title, type, "Not editable in this slice" message; for quiz, count of questions if available (admin-tree doesn't currently include questions — say "Questions are managed via the API in slice 1; quiz authoring UI lands in slice 2"). Show a Delete button still gated by `canEditStructure`.
-3. "Delete this item" button at bottom — gated by `canEditStructure`. Confirm + 204 → navigate up to sequence.
+   - `static_page` → `MarkdownEditor` (`bind:value`) for `content_md`, raw `<input>` for `title`. Tracker covers `{ title, content_md }`.
+   - `video` → raw `<input>` for `title`, `<input type="url">` for `video_url`. Tracker covers `{ title, video_url }`.
+   - `quiz` / `interactive_app` → read-only panel showing title, type, and (for quiz) `questions_count` (now provided by admin-tree per Commit A). Delete button still works.
+3. Save → `PATCH /api/items/${iid}` → refetch + `tracker.reset(...)`. Delete → confirm → DELETE → navigate up.
 
-(Reuse the tracker + DirtyGuard + dirty-disables-state-actions pattern from VersionEditPage / BlockEditPage.)
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { api, ApiError } from '../../lib/api';
+  import { navigate } from '../../lib/router.svelte';
+  import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import MarkdownEditor from '../../components/editor/MarkdownEditor.svelte';
+  import Button from '../../components/ui/Button.svelte';
+  import Spinner from '../../components/ui/Spinner.svelte';
+  import { toasts } from '../../stores/toasts.svelte';
+
+  let { courseSlug, versionId, blockId, sequenceId, itemId }: {
+    courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
+  } = $props();
+  const vid = $derived(Number(versionId));
+  const bid = $derived(Number(blockId));
+  const sid = $derived(Number(sequenceId));
+  const iid = $derived(Number(itemId));
+
+  const tree = $derived(currentEditorVersion.value);
+  const v = $derived(tree?.version);
+  const block = $derived(tree?.blocks.find((b) => b.id === bid));
+  const seq = $derived(block?.sequences.find((s) => s.id === sid));
+  const item = $derived(seq?.items.find((it) => it.id === iid));
+  const valid = $derived(!!item && !!seq && !!block && block.version_id === vid && seq.block_id === bid && item.sequence_id === sid);
+  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+  const editable = $derived(item?.type === 'static_page' || item?.type === 'video');
+
+  // Type unions for the tracker — `string | null` allowed thanks to widened
+  // `makeDirtyTracker` constraint.
+  type StaticForm = { title: string; content_md: string | null };
+  type VideoForm = { title: string; video_url: string | null };
+  let tracker = $state<ReturnType<typeof makeDirtyTracker<StaticForm>>
+                     | ReturnType<typeof makeDirtyTracker<VideoForm>> | null>(null);
+
+  async function ensureLoaded() {
+    if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
+    if (item && !tracker && editable) {
+      if (item.type === 'static_page') tracker = makeDirtyTracker<StaticForm>({ title: item.title, content_md: item.content_md });
+      else if (item.type === 'video') tracker = makeDirtyTracker<VideoForm>({ title: item.title, video_url: item.video_url });
+    }
+  }
+
+  async function save() {
+    if (!tracker || !item) return;
+    const body: Record<string, unknown> = { title: tracker.current.title };
+    if (item.type === 'static_page') body.content_md = (tracker.current as StaticForm).content_md;
+    if (item.type === 'video') body.video_url = (tracker.current as VideoForm).video_url;
+    try {
+      await api.patch(`/api/items/${iid}`, body);
+      await loadAdminTree(vid, { force: true });
+      const fresh = currentEditorVersion.value!.blocks.find((b) => b.id === bid)!.sequences.find((s) => s.id === sid)!.items.find((it) => it.id === iid)!;
+      if (fresh.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: fresh.title, content_md: fresh.content_md });
+      else if (fresh.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url });
+      toasts.add({ kind: 'success', message: 'Saved' });
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+    }
+  }
+  function discard() {
+    if (!tracker || !item) return;
+    if (item.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: item.title, content_md: item.content_md });
+    else if (item.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: item.title, video_url: item.video_url });
+  }
+
+  async function deleteItem() {
+    if (tracker?.isDirty || !item || !perms?.canEditStructure) return;
+    if (!confirm(`Delete item "${item.title}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/items/${iid}`);
+      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`);
+    } catch (e) {
+      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+    }
+  }
+
+  onMount(() => { void ensureLoaded(); });
+  $effect(() => { void ensureLoaded(); });
+</script>
+
+<div class="page">
+  {#if !tree || tree.version.id !== vid}
+    <Spinner />
+  {:else if !valid || !item || !v}
+    <h1>Not found</h1>
+    <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`)}>← Back</Button>
+  {:else if perms}
+    <header>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`)}>← {seq!.title}</Button>
+      <h1>Item: {item.title} <span class="type">{item.type}</span></h1>
+    </header>
+
+    {#if editable && tracker && perms.canEditTextFields}
+      <section class="meta">
+        <label>Title <input bind:value={tracker.current.title} required /></label>
+        {#if item.type === 'static_page'}
+          <label>Content (markdown)
+            <MarkdownEditor versionId={vid} bind:value={(tracker.current as StaticForm).content_md as unknown as string} />
+          </label>
+        {:else if item.type === 'video'}
+          <label>Video URL
+            <input type="url" bind:value={(tracker.current as VideoForm).video_url} required placeholder="https://…" />
+          </label>
+        {/if}
+        <div class="row">
+          <Button onclick={save} disabled={!tracker.isDirty}>Save</Button>
+          <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty}>Discard</Button>
+        </div>
+      </section>
+    {:else if !editable}
+      <section class="readonly">
+        <p><em>Not editable in this slice.</em></p>
+        {#if item.type === 'quiz'}
+          <p>{item.questions_count} question{item.questions_count === 1 ? '' : 's'}. Quiz authoring UI lands in slice 2; questions are managed via the API for now.</p>
+        {:else}
+          <p>Interactive-app editing lands in slice 2.</p>
+        {/if}
+      </section>
+    {/if}
+
+    {#if perms.canEditStructure}
+      <section class="danger">
+        <Button
+          variant="ghost"
+          disabled={tracker?.isDirty ?? false}
+          title={tracker?.isDirty ? 'Save or discard changes first' : ''}
+          onclick={deleteItem}
+        >Delete this item</Button>
+      </section>
+    {/if}
+
+    {#if tracker}
+      <DirtyGuard isDirty={() => tracker!.isDirty} />
+    {/if}
+  {/if}
+</div>
+
+<style>
+  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .type { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; background: #eef; color: #335; margin-left: var(--space-2); }
+  .meta, .readonly, .danger { margin: var(--space-4) 0; }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta input { width: 100%; }
+  .row { display: flex; gap: var(--space-2); }
+  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .readonly { padding: var(--space-3); background: #f7f7f7; border-radius: var(--radius); }
+</style>
+```
 
 - [ ] **Step 2: Run check + manual smoke**
 
@@ -2463,7 +3233,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check
 ```
 
-Smoke: edit a static_page → Save → reload → persists. Try Preview tab. Open a quiz item → see read-only panel. Delete a static_page item.
+Smoke: edit a static_page → Save → reload → persists. Try Preview tab. Open a quiz item → see "N questions" + read-only panel. Delete a static_page item.
 
 - [ ] **Step 3: Commit**
 
