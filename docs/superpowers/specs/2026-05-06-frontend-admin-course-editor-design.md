@@ -82,12 +82,12 @@ Reused from the student MVP, unmodified: `lib/api.ts`, `lib/auth.svelte.ts`, `li
 | 3 | `courses.py` | Add `GET /api/courses/by-slug/{slug}` returning `CourseResponse`. **Course-admin-gated only** (not the broader visibility rules of `get_course`) — this is an admin entry point, so non-admins get 403/404. **Route placement:** insert between `list_courses` (`courses.py:50`) and `get_course` (`courses.py:53`) so FastAPI's declaration-order matching reaches the slug route before the int-typed `{course_id}` route and avoids a 422. | ~15 LOC + 3 tests |
 | 4 | `versions.py` | Add `PATCH /api/versions/{vid}` accepting `info_md` and `max_quiz_attempts`. Allowed only when `state == "created"` and not `is_disabled`. Re-renders `info_html` via `render_with_assets`, re-syncs asset references, and calls `bump_content_updated_at(version)` for ETag consistency. New `VersionUpdate` schema (matches existing `*Update` naming convention — `BlockUpdate`, `ItemUpdate`, `SequenceUpdate`). | ~30 LOC + 5 tests |
 | 5 | `versions.py` | Add `POST /api/versions/{vid}/render` accepting `{content_md: string}`, returning `{html: string}`. **Course-admin-gated.** Allowed in any state **except** `is_disabled` (returns 403). No persistence. Uses `render_with_assets`. New `VersionRenderRequest` / `VersionRenderResponse` schemas. | ~20 LOC + 3 tests |
-| 6 | `content.py` (extend) | Add `GET /api/versions/{vid}/admin-tree`. **Course-admin-gated** (no enrolled-student fallback). **Allowed in every state including `is_disabled` and `created`** — admins must reach disabled versions to enable them, and reach created versions to edit them. Returns the same nested shape as `/content` plus `content_md`, `info_md`, parent FKs (`block.version_id`, `sequence.block_id`, `item.sequence_id`), and admin-only fields. New `AdminTreeResponse` schema (or untyped dict response, matching existing `/content` style). | ~50 LOC + 5 tests |
-| 7 | `blocks.py` `delete_block` | After existing state check (`state != "created"` → 409), count sequences; if ≥ 1 → `409 "Cannot delete block: remove its sequences first."` Order matters: state error wins. | ~5 LOC + 2 tests |
-| 8 | `blocks.py` `delete_sequence` | After existing state check, count items; if ≥ 1 → `409 "Cannot delete sequence: remove its items first."` | ~5 LOC + 2 tests |
+| 6 | `content.py` (extend) | Add `GET /api/versions/{vid}/admin-tree`. **Course-admin-gated** (no enrolled-student fallback). **Allowed in every state including `is_disabled` and `created`** — admins must reach disabled versions to enable them, and reach created versions to edit them. Returns the same nested shape as `/content` plus `content_md`, `info_md`, parent FKs (`block.version_id`, `sequence.block_id`, `item.sequence_id`), and admin-only fields. New `AdminTreeResponse` schema (or untyped dict response, matching existing `/content` style). | ~50 LOC + 6 tests |
+| 7 | `blocks.py` `delete_block` | After existing state check (`state != "created"` → 409), count sequences; if ≥ 1 → `409 "Cannot delete block: remove its sequences first."` Order matters: state error wins. | ~5 LOC + 3 tests |
+| 8 | `blocks.py` `delete_sequence` | After existing state check, count items; if ≥ 1 → `409 "Cannot delete sequence: remove its items first."` | ~5 LOC + 3 tests |
 | 9 | `versions.py` `publish_version` | Add `is_disabled` check at the top: `if version.is_disabled: raise 403 "Version is disabled"`. Currently missing — required so the §10 read-only matrix is actually enforced server-side (`canPublish` is `False` when `is_disabled`). Mirrors the `is_disabled` gate present on `archive_version`/`revert_version`. | ~3 LOC + 1 test |
 
-Approximate totals: ~170 LOC backend, ~30 new backend tests. No DB schema migration.
+Approximate totals: ~170 LOC backend, ~32 new backend tests. No DB schema migration.
 
 **Schema naming convention.** New Pydantic models follow the existing `*Update` / `*Request` / `*Response` pattern: `VersionUpdate` (PATCH body), `VersionRenderRequest`, `VersionRenderResponse`, `AdminTreeResponse` (or untyped). `MyCourseResponse` gets the new fields above. `CourseResponse` gets `is_admin`.
 
@@ -151,37 +151,60 @@ export const currentEditorVersion = $state<{
 }>({ value: null, loading: false, error: null });
 
 // Module-level single-flight + stale-guard state.
-let inflightVersionId: number | null = null;
+let inflight: { versionId: number; promise: Promise<void> } | null = null;
 let token = 0;
 
-export async function loadAdminTree(versionId: number): Promise<void> {
-  // Single-flight: a request for the same versionId already in flight is a no-op.
-  if (inflightVersionId === versionId) return;
-  inflightVersionId = versionId;
-  const myToken = ++token;
+/**
+ * loadAdminTree(versionId, { force }) — fetches the admin tree.
+ *
+ * Read dedupe: callers requesting the *same* versionId while a fetch is in
+ * flight share the same Promise, so each `await` resolves only after data is
+ * available (no caller proceeds before the tree is loaded).
+ *
+ * Force refetch: callers passing { force: true } always start a new request,
+ * regardless of any in-flight call. Use after mutations (PATCH/POST/DELETE)
+ * to ensure the cache reflects the write — never skip a refetch.
+ *
+ * Stale-guard: a request whose token is older than the latest token discards
+ * its result (token is bumped on every new call, including force).
+ */
+export async function loadAdminTree(
+  versionId: number,
+  opts: { force?: boolean } = {},
+): Promise<void> {
+  // Read dedupe: same versionId in flight, no force → return the same promise.
+  if (!opts.force && inflight && inflight.versionId === versionId) {
+    return inflight.promise;
+  }
 
+  const myToken = ++token;
   currentEditorVersion.loading = true;
   currentEditorVersion.error = null;
 
-  try {
-    const tree = await api.get<AdminTree>(`/api/versions/${versionId}/admin-tree`);
-    if (myToken !== token) return;            // stale-guard: a newer call has started
-    currentEditorVersion.value = tree;
-  } catch (e) {
-    if (myToken !== token) return;            // stale-guard: drop stale errors too
-    currentEditorVersion.error =
-      e instanceof ApiError ? e.displayMessage : 'Could not load version.';
-  } finally {
-    if (myToken === token) {
-      currentEditorVersion.loading = false;
-      inflightVersionId = null;
+  const promise = (async () => {
+    try {
+      const tree = await api.get<AdminTree>(`/api/versions/${versionId}/admin-tree`);
+      if (myToken !== token) return;          // stale-guard: a newer call has started
+      currentEditorVersion.value = tree;
+    } catch (e) {
+      if (myToken !== token) return;
+      currentEditorVersion.error =
+        e instanceof ApiError ? e.displayMessage : 'Could not load version.';
+    } finally {
+      if (myToken === token) {
+        currentEditorVersion.loading = false;
+        if (inflight && inflight.promise === promise) inflight = null;
+      }
     }
-  }
+  })();
+
+  inflight = { versionId, promise };
+  return promise;
 }
 
 export function clearEditorVersion(): void {
   token++; // invalidate any in-flight call
-  inflightVersionId = null;
+  inflight = null;
   currentEditorVersion.value = null;
   currentEditorVersion.error = null;
   currentEditorVersion.loading = false;
@@ -190,9 +213,13 @@ export function clearEditorVersion(): void {
 
 The store exposes named actions (`loadAdminTree`, `clearEditorVersion`) so pages don't reach into `.value` to mutate it. Mirrors `currentCourse.svelte.ts` (`loadCourse` / `clearCourse`) — both single-flight against their key (versionId vs courseSlug) and use a token counter so a slow response for an older key never overwrites a newer one's value.
 
-**On page load.** If `currentEditorVersion.value?.id !== Number(params.versionId)`, the page calls `loadAdminTree(Number(params.versionId))` before rendering. Sub-pages (block / sequence / item) read directly from the cached tree.
+**Call sites:**
+- Page mount → `await loadAdminTree(versionId)` (read-dedupes against any concurrent mount).
+- After mutation (PATCH/POST/DELETE) → `await loadAdminTree(versionId, { force: true })` so the refetch is never skipped by a coincidental in-flight read.
 
-**After mutations.** The page that performed the mutation calls `loadAdminTree(versionId)` again to refetch before re-rendering or navigating. Optimistic updates are slice-2 polish.
+**On page load.** If `currentEditorVersion.value?.id !== Number(params.versionId)`, the page `await`s `loadAdminTree(Number(params.versionId))` before rendering. Sub-pages (block / sequence / item) read directly from the cached tree.
+
+**After mutations.** The page that performed the mutation `await`s `loadAdminTree(versionId, { force: true })` to refetch before re-rendering or navigating. The `force` flag is required so the refetch isn't deduped against a coincidental in-flight read. Optimistic updates are slice-2 polish.
 
 **Concurrency.** Last-write-wins for now. The backend already documents that order assignment is not safe under concurrent writes (`blocks.py:51`, `items.py:46`). The frontend mitigates by refetching the tree after every mutation and treating 400/409 reorder failures as "refresh and retry — toast the message and force a tree reload". A real `SELECT FOR UPDATE` fix lands with the broader Phase 9 concurrency sweep.
 
@@ -431,11 +458,11 @@ Backend enforces these rules: the existing `disable`/`archive`/`revert`/`delete`
 | `PATCH /api/versions/{vid}` | `tests/test_versions.py` | 5 (created OK, published 409, archived 409, disabled 403, info_html re-render + `bump_content_updated_at` bump) |
 | `POST /api/versions/{vid}/render` | `tests/test_versions.py` | 3 (admin OK, non-admin 403, disabled 403) |
 | `GET /api/versions/{vid}/admin-tree` | `tests/test_content.py` (or new) | 6 (created OK, published OK, archived OK, disabled OK for admin, non-admin 403, response includes `content_md`/`info_md`/parent FKs) |
-| Block delete-with-sequences guard | `tests/test_blocks.py` | 2 (empty→204, non-empty→409, state error precedes child-count error) |
-| Sequence delete-with-items guard | `tests/test_blocks.py` | 2 (empty→204, non-empty→409, state error precedes child-count error) |
+| Block delete-with-sequences guard | `tests/test_blocks.py` | 3 (empty→204, non-empty→409, state error precedes child-count error) |
+| Sequence delete-with-items guard | `tests/test_blocks.py` | 3 (empty→204, non-empty→409, state error precedes child-count error) |
 | `publish_version` `is_disabled` gate (new) | `tests/test_versions.py` | 1 (disabled→403) |
 
-≈ 30 new backend tests using the existing in-process FastAPI test client + tmp-DB fixture. No infra change.
+≈ 32 new backend tests using the existing in-process FastAPI test client + tmp-DB fixture. No infra change.
 
 ### Frontend tests (vitest, plain `.ts`)
 
@@ -492,6 +519,6 @@ A plan will be written separately by the writing-plans skill. As an initial sket
 14. Frontend: `MarkdownEditor` (with Preview). Wired into `ItemEditPage`.
 15. Frontend: `App.svelte` `componentMap` entries for the 5 new pages.
 16. Read-only state gating across pages — verify every page consults `versionPermissions`.
-18. Manual smoke pass + production build verification.
+17. Manual smoke pass + production build verification.
 
 Each step lands on a feature branch off `main` (no worktrees), with backend tests passing per `backend/.venv/bin/pytest` and frontend tests passing per `npm run check && npm run test`.
