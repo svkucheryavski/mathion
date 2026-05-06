@@ -82,7 +82,7 @@ Reused from the student MVP, unmodified: `lib/api.ts`, `lib/auth.svelte.ts`, `li
 | 3 | `courses.py` | Add `GET /api/courses/by-slug/{slug}` returning `CourseResponse`. **Course-admin-gated only** (not the broader visibility rules of `get_course`) — this is an admin entry point, so non-admins get 403/404. **Route placement:** insert between `list_courses` (`courses.py:50`) and `get_course` (`courses.py:53`) so FastAPI's declaration-order matching reaches the slug route before the int-typed `{course_id}` route and avoids a 422. | ~15 LOC + 3 tests |
 | 4 | `versions.py` | Add `PATCH /api/versions/{vid}` accepting `info_md` and `max_quiz_attempts`. Allowed only when `state == "created"` and not `is_disabled`. Re-renders `info_html` via `render_with_assets`, re-syncs asset references, and calls `bump_content_updated_at(version)` for ETag consistency. New `VersionUpdate` schema (matches existing `*Update` naming convention — `BlockUpdate`, `ItemUpdate`, `SequenceUpdate`). | ~30 LOC + 5 tests |
 | 5 | `versions.py` | Add `POST /api/versions/{vid}/render` accepting `{content_md: string}`, returning `{html: string}`. **Course-admin-gated.** Allowed in any state **except** `is_disabled` (returns 403). No persistence. Uses `render_with_assets`. New `VersionRenderRequest` / `VersionRenderResponse` schemas. | ~20 LOC + 3 tests |
-| 6 | `content.py` (extend) | Add `GET /api/versions/{vid}/admin-tree`. **Course-admin-gated** (no enrolled-student fallback). **Allowed in every state including `is_disabled` and `created`** — admins must reach disabled versions to enable them, and reach created versions to edit them. Returns the same nested shape as `/content` plus `content_md`, `info_md`, parent FKs (`block.version_id`, `sequence.block_id`, `item.sequence_id`), and admin-only fields. New `AdminTreeResponse` schema (or untyped dict response, matching existing `/content` style). | ~50 LOC + 6 tests |
+| 6 | `content.py` (extend) | Add `GET /api/versions/{vid}/admin-tree`. **Course-admin-gated** (no enrolled-student fallback). **Allowed in every state including `is_disabled` and `created`** — admins must reach disabled versions to enable them, and reach created versions to edit them. Returns the same nested shape as `/content` plus `content_md`, `info_md`, parent FKs (`block.version_id`, `sequence.block_id`, `item.sequence_id`), per-item `questions_count` (so quiz `ItemEditPage` can display "N questions"), and admin-only fields. New `AdminTreeResponse` schema (or untyped dict response, matching existing `/content` style). | ~55 LOC + 7 tests |
 | 7 | `blocks.py` `delete_block` | After existing state check (`state != "created"` → 409), count sequences; if ≥ 1 → `409 "Cannot delete block: remove its sequences first."` Order matters: state error wins. | ~5 LOC + 3 tests |
 | 8 | `blocks.py` `delete_sequence` | After existing state check, count items; if ≥ 1 → `409 "Cannot delete sequence: remove its items first."` | ~5 LOC + 3 tests |
 | 9 | `versions.py` `publish_version` | Add `is_disabled` check at the top: `if version.is_disabled: raise 403 "Version is disabled"`. Currently missing — required so the §10 read-only matrix is actually enforced server-side (`canPublish` is `False` when `is_disabled`). Mirrors the `is_disabled` gate present on `archive_version`/`revert_version`. | ~3 LOC + 1 test |
@@ -249,7 +249,8 @@ The store exposes named actions (`loadAdminTree`, `clearEditorVersion`) so pages
               "title": "What is a limit", "slug": "what-is-limit",
               "order": 1, "type": "static_page",
               "content_md": "...", "content_html": "...",
-              "video_url": null, "script_url": null
+              "video_url": null, "script_url": null,
+              "questions_count": 0
             }
           ]
         }
@@ -457,7 +458,7 @@ Backend enforces these rules: the existing `disable`/`archive`/`revert`/`delete`
 | `GET /api/courses/by-slug/{slug}` | `tests/test_courses.py` | 3 (admin 200, non-admin 403, unknown slug 404) |
 | `PATCH /api/versions/{vid}` | `tests/test_versions.py` | 5 (created OK, published 409, archived 409, disabled 403, info_html re-render + `bump_content_updated_at` bump) |
 | `POST /api/versions/{vid}/render` | `tests/test_versions.py` | 3 (admin OK, non-admin 403, disabled 403) |
-| `GET /api/versions/{vid}/admin-tree` | `tests/test_content.py` (or new) | 6 (created OK, published OK, archived OK, disabled OK for admin, non-admin 403, response includes `content_md`/`info_md`/parent FKs) |
+| `GET /api/versions/{vid}/admin-tree` | `tests/test_content.py` (or new) | 7 (created OK, published OK, archived OK, disabled OK for admin, non-admin 403, response includes `content_md`/`info_md`/parent FKs, per-item `questions_count` populated for quiz items) |
 | Block delete-with-sequences guard | `tests/test_blocks.py` | 3 (empty→204, non-empty→409, state error precedes child-count error) |
 | Sequence delete-with-items guard | `tests/test_blocks.py` | 3 (empty→204, non-empty→409, state error precedes child-count error) |
 | `publish_version` `is_disabled` gate (new) | `tests/test_versions.py` | 1 (disabled→403) |

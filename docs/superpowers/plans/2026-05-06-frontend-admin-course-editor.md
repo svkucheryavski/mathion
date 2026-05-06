@@ -70,24 +70,15 @@ def test_course_response_is_admin_for_superuser(admin_client):
     assert all(c["is_admin"] is True for c in listed)
 
 
-def test_course_response_is_admin_for_course_admin(client, db, test_user):
+def test_course_response_is_admin_for_course_admin(auth_client, admin_client, db, test_user):
     """A non-superuser CourseAdmin sees is_admin=true on their course."""
-    from mathion.models import Course, CourseAdmin
-    from mathion.auth import request_pin, verify_pin
-    from mathion.tests.conftest import CSRFTestClient  # available via tests/conftest
-    course = Course(slug="c", name="C", description="")
-    db.add(course); db.commit(); db.refresh(course)
-    db.add(CourseAdmin(course_id=course.id, user_id=test_user.id))
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "c", "name": "C", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
     db.commit()
-    raw = request_pin(db, test_user.email)
-    token = verify_pin(db, test_user.email, raw, duration_days=7)
-    # Use the auth_client pattern inline (test_user → CSRF client with token cookie)
-    from fastapi.testclient import TestClient as Base
-    # Use the existing app via the same db override the `client` fixture set up
-    from mathion.main import app
-    c = Base(app)
-    c.cookies.set("session_token", token)
-    r = c.get(f"/api/courses/{course.id}")
+    r = auth_client.get(f"/api/courses/{course['id']}")
     assert r.status_code == 200
     assert r.json()["is_admin"] is True
 
@@ -167,7 +158,12 @@ Then update each endpoint that returns a `CourseResponse` to set the field on th
   out.is_admin = _is_admin_for(db, user, course.id)
   return out
   ```
-- In `update_course` (`return course`): replace with same shape as `get_course`.
+- In `update_course` (`return course`): replace with
+  ```python
+  out = CourseResponse.model_validate(course)
+  out.is_admin = _is_admin_for(db, user, course.id)
+  return out
+  ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -196,20 +192,14 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(backen
 Append to `backend/tests/test_courses.py`:
 
 ```python
-def test_by_slug_admin(client, db, test_user):
-    from mathion.models import Course, CourseAdmin
-    from mathion.auth import request_pin, verify_pin
-    from fastapi.testclient import TestClient as Base
-    from mathion.main import app
-    course = Course(slug="calc", name="Calc", description="")
-    db.add(course); db.commit(); db.refresh(course)
-    db.add(CourseAdmin(course_id=course.id, user_id=test_user.id))
+def test_by_slug_admin(auth_client, admin_client, db, test_user):
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "calc", "name": "Calc", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
     db.commit()
-    raw = request_pin(db, test_user.email)
-    token = verify_pin(db, test_user.email, raw, duration_days=7)
-    c = Base(app)
-    c.cookies.set("session_token", token)
-    r = c.get("/api/courses/by-slug/calc")
+    r = auth_client.get("/api/courses/by-slug/calc")
     assert r.status_code == 200
     assert r.json()["slug"] == "calc"
     assert r.json()["is_admin"] is True
@@ -278,26 +268,18 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(backen
 Append to `backend/tests/test_student.py`:
 
 ```python
-def test_my_courses_admin_only_row(client, db, test_user):
+def test_my_courses_admin_only_row(auth_client, admin_client, db, test_user):
     """Admin-not-enrolled sees their course with version_id=None."""
-    from mathion.models import Course, CourseAdmin
-    from mathion.auth import request_pin, verify_pin
-    from fastapi.testclient import TestClient as Base
-    from mathion.main import app
-    course = Course(slug="adm", name="Adm", description="")
-    db.add(course); db.commit(); db.refresh(course)
-    db.add(CourseAdmin(course_id=course.id, user_id=test_user.id))
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "adm", "name": "Adm", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
     db.commit()
-    raw = request_pin(db, test_user.email)
-    token = verify_pin(db, test_user.email, raw, duration_days=7)
-    c = Base(app)
-    c.cookies.set("session_token", token)
-    r = c.get("/api/my-courses")
-    assert r.status_code == 200
-    rows = r.json()
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["course"]["slug"] == "adm"
+    rows = auth_client.get("/api/my-courses").json()
+    matches = [r for r in rows if r["course"]["slug"] == "adm"]
+    assert len(matches) == 1
+    row = matches[0]
     assert row["is_admin"] is True
     assert row["version_id"] is None
     assert row["version_state"] is None
@@ -326,13 +308,10 @@ def test_my_courses_enrolled_only_unchanged(auth_client, admin_client, db, test_
     assert row["is_active"] is True
 
 
-def test_my_courses_admin_and_enrolled_merged(client, admin_client, db, test_user):
+def test_my_courses_admin_and_enrolled_merged(auth_client, admin_client, db, test_user):
     """User who is both admin and enrolled sees one row with both fields populated."""
     from mathion.models import CourseAdmin
     from mathion.models_auth import StudentEnrollment
-    from mathion.auth import request_pin, verify_pin
-    from fastapi.testclient import TestClient as Base
-    from mathion.main import app
     course = admin_client.post(
         "/api/courses", json={"slug": "both", "name": "Both", "description": ""}
     ).json()
@@ -343,11 +322,7 @@ def test_my_courses_admin_and_enrolled_merged(client, admin_client, db, test_use
     db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
     db.add(StudentEnrollment(user_id=test_user.id, version_id=version["id"], is_active=True))
     db.commit()
-    raw = request_pin(db, test_user.email)
-    token = verify_pin(db, test_user.email, raw, duration_days=7)
-    c = Base(app)
-    c.cookies.set("session_token", token)
-    rows = c.get("/api/my-courses").json()
+    rows = auth_client.get("/api/my-courses").json()
     matches = [r for r in rows if r["course"]["slug"] == "both"]
     assert len(matches) == 1, "admin+enrolled must merge to a single row"
     row = matches[0]
@@ -700,7 +675,7 @@ def test_publish_disabled_version_returns_403(admin_client):
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytest tests/test_versions.py::test_publish_disabled_version_returns_403 -v
 ```
-Expected: currently returns 409 (state-not-created? or different) instead of 403.
+Expected: currently returns 200 (publish succeeds even though version is disabled — `disable` only flips `is_disabled`, leaves `state="created"`, so the existing state-check passes). The new test asserts 403 → fails with `assert 200 == 403`.
 
 - [ ] **Step 3: Add the gate**
 
@@ -1031,6 +1006,30 @@ def test_admin_tree_returns_parent_fks_and_md(admin_client):
     assert body["blocks"][0]["sequences"][0]["items"][0]["sequence_id"] == seq["id"]
     assert body["blocks"][0]["sequences"][0]["items"][0]["content_md"] == "foo"
     assert body["version"]["info_md"] == "v-info"
+
+
+def test_admin_tree_includes_questions_count(admin_client, db):
+    """Quiz ItemEditPage needs `questions_count` to show 'N questions' (spec §3, ItemEditPage)."""
+    from mathion.models import Block, Sequence, Item, Question
+    course = admin_client.post("/api/courses", json={"slug": "q", "name": "Q", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = Block(version_id=version["id"], title="B", slug="b", order=1)
+    db.add(block); db.flush()
+    seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
+    db.add(seq); db.flush()
+    quiz = Item(sequence_id=seq.id, title="Q1", slug="q1", order=1, type="quiz")
+    static = Item(sequence_id=seq.id, title="P1", slug="p1", order=2, type="static_page",
+                  content_md="x", content_html="<p>x</p>")
+    db.add_all([quiz, static]); db.flush()
+    db.add_all([
+        Question(item_id=quiz.id, prompt="a", order=1, kind="single"),
+        Question(item_id=quiz.id, prompt="b", order=2, kind="single"),
+    ])
+    db.commit()
+    body = admin_client.get(f"/api/versions/{version['id']}/admin-tree").json()
+    items = {it["slug"]: it for it in body["blocks"][0]["sequences"][0]["items"]}
+    assert items["q1"]["questions_count"] == 2
+    assert items["p1"]["questions_count"] == 0
 ```
 
 - [ ] **Step 2: Run + observe failure**
@@ -1063,6 +1062,7 @@ def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = 
         .options(
             joinedload(Block.sequences)
             .joinedload(Sequence.items)
+            .joinedload(Item.questions)  # for `questions_count` per item
         )
         .order_by(Block.order)
     ).unique().scalars().all()
@@ -1112,6 +1112,7 @@ def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = 
                                         "content_html": it.content_html,
                                         "video_url": it.video_url,
                                         "script_url": it.script_url,
+                                        "questions_count": len(it.questions) if it.questions is not None else 0,
                                     }
                                     for it in s.items
                                 ],
@@ -1134,7 +1135,7 @@ def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = 
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytest tests/test_admin_tree.py -v
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytest -q
 ```
-Expected: 6 new tests pass; full suite still green.
+Expected: 7 new tests pass; full suite still green.
 
 - [ ] **Step 5: Commit**
 
@@ -1327,6 +1328,7 @@ export type AdminTreeItem = {
   content_html: string | null;
   video_url: string | null;
   script_url: string | null;
+  questions_count: number;
 };
 
 export type AdminTreeSequence = {
@@ -2410,7 +2412,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytest -q
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check && npm run test
 ```
-Expected: all green; new backend test count = baseline + 32; new frontend tests for router-guards / versionPermissions / dirty / currentEditorVersion all pass.
+Expected: all green; new backend test count = baseline + 33; new frontend tests for router-guards / versionPermissions / dirty / currentEditorVersion all pass.
 
 - [ ] **Step 2: Manual smoke per spec §11 checklist**
 
@@ -2435,7 +2437,7 @@ gh pr create --title "feat: course-admin editor (slice 1)" --body "$(cat <<'EOF'
 - 5 new editor pages (Versions, VersionEdit, BlockEdit, SequenceEdit, ItemEdit)
 - 3 new editor components (ItemTypePicker, MarkdownEditor, DirtyGuard)
 - 4 new lib/store modules (versionPermissions, dirty, currentEditorVersion store, router beforeNavigate hook)
-- ~32 new backend tests; ~12 new frontend tests; manual smoke pass complete
+- ~33 new backend tests; ~12 new frontend tests; manual smoke pass complete
 
 ## Spec
 docs/superpowers/specs/2026-05-06-frontend-admin-course-editor-design.md
