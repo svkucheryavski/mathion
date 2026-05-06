@@ -1160,13 +1160,13 @@ Read: `frontend/src/lib/router.svelte.ts` (whole file).
 
 - [ ] **Step 2: Write failing tests**
 
-Append to `frontend/src/tests/router.test.ts`:
+`frontend/src/tests/router.test.ts` already imports `describe, it, expect` at the top of the file (existing test). Append the new block but **add only the new symbols** (`beforeEach`, `vi`) to the existing import line, then add a fresh import for the new exports. Append after the existing `describe(...)` blocks:
 
 ```ts
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import {
-  navigate, registerNavigationGuard, currentRoute,
-} from '../lib/router.svelte';
+// Add to the existing top-of-file import:
+//   import { describe, it, expect, beforeEach, vi } from 'vitest';
+// (extend the line; do NOT add a second `import { describe, it, expect } from 'vitest'`).
+import { navigate, registerNavigationGuard, currentRoute } from '../lib/router.svelte';
 
 describe('navigation guards', () => {
   beforeEach(() => {
@@ -1198,6 +1198,31 @@ describe('navigation guards', () => {
     const dispose = registerNavigationGuard(async () => false);
     await navigate('/courses');
     expect(currentRoute.path).toBe('/');
+    dispose();
+  });
+
+  it('popstate cancellation restores URL via pushState (no Back/Forward direction guess)', async () => {
+    // Set up: navigate forward through two paths so we have history to go back to.
+    await navigate('/courses');
+    await navigate('/courses/foo');
+    expect(currentRoute.path).toBe('/courses/foo');
+
+    // Register a guard that blocks navigation away.
+    const dispose = registerNavigationGuard(() => false);
+
+    // Simulate a Back press: dispatch popstate after history.back() resolves.
+    const popped = new Promise<void>((res) => {
+      const handler = () => { window.removeEventListener('popstate', handler); res(); };
+      window.addEventListener('popstate', handler);
+    });
+    history.back();
+    await popped;
+    // Allow the router's popstate handler to run its async guard chain + pushState restore.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // URL should be restored to /courses/foo, not the prior /courses entry.
+    expect(location.pathname).toBe('/courses/foo');
+    expect(currentRoute.path).toBe('/courses/foo');
     dispose();
   });
 });
@@ -1543,6 +1568,17 @@ describe('makeDirtyTracker', () => {
     t.reset({ count: 5 });
     expect(t.isDirty).toBe(false);
   });
+
+  it('handles nullable string fields (e.g., video_url, content_md)', () => {
+    const t = makeDirtyTracker<{ video_url: string | null }>({ video_url: null });
+    expect(t.isDirty).toBe(false);
+    t.current.video_url = 'https://x';
+    expect(t.isDirty).toBe(true);
+    t.reset({ video_url: 'https://x' });
+    expect(t.isDirty).toBe(false);
+    t.current.video_url = null;
+    expect(t.isDirty).toBe(true);
+  });
 });
 ```
 
@@ -1557,7 +1593,12 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run test -
 Create `frontend/src/lib/dirty.svelte.ts`:
 
 ```ts
-type Allowed = string | number;
+// Tracker holds the form-shape: titles/slugs/markdown/URLs (string or null
+// from the backend) and `max_quiz_attempts` (number). Pages that read from
+// admin-tree fields like `video_url: string | null` and `content_md: string | null`
+// pass them through unchanged — `null` is preserved end-to-end (the backend
+// accepts `null` for "leave as-is" or as a real value depending on the schema).
+type Allowed = string | number | null;
 
 export function makeDirtyTracker<T extends Record<string, Allowed>>(initial: T) {
   let snapshot: T = { ...initial };
@@ -1608,6 +1649,7 @@ Create `frontend/src/tests/currentEditorVersion.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import * as apiModule from '../lib/api';
 import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../stores/currentEditorVersion.svelte';
 
 const tree = (id: number) => ({
@@ -1623,40 +1665,34 @@ describe('currentEditorVersion', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('loads a tree and stores it', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(tree(3)), { status: 200 }),
-    );
+    vi.spyOn(apiModule.api, 'get').mockResolvedValue(tree(3));
     await loadAdminTree(3);
     expect(currentEditorVersion.value?.version.id).toBe(3);
   });
 
   it('dedupes concurrent reads of the same versionId', async () => {
-    const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(tree(3)), { status: 200 }),
-    );
+    const mock = vi.spyOn(apiModule.api, 'get').mockResolvedValue(tree(3));
     await Promise.all([loadAdminTree(3), loadAdminTree(3), loadAdminTree(3)]);
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
   it('force=true does NOT dedupe (post-mutation refetch)', async () => {
-    const mock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(tree(3)), { status: 200 }),
-    );
+    const mock = vi.spyOn(apiModule.api, 'get').mockResolvedValue(tree(3));
     await loadAdminTree(3);
     await loadAdminTree(3, { force: true });
     expect(mock).toHaveBeenCalledTimes(2);
   });
 
   it('stale-guard: a slow response for an older versionId does not overwrite', async () => {
-    let resolveFirst: (v: Response) => void;
-    const slow = new Promise<Response>((r) => { resolveFirst = r; });
-    const mock = vi.spyOn(globalThis, 'fetch')
-      .mockImplementationOnce(() => slow)
-      .mockResolvedValueOnce(new Response(JSON.stringify(tree(4)), { status: 200 }));
+    let resolveFirst: (v: unknown) => void;
+    const slow = new Promise((r) => { resolveFirst = r; });
+    vi.spyOn(apiModule.api, 'get')
+      .mockImplementationOnce(() => slow as Promise<unknown>)
+      .mockResolvedValueOnce(tree(4));
     const p1 = loadAdminTree(3);
     const p2 = loadAdminTree(4);
     await p2;
-    resolveFirst!(new Response(JSON.stringify(tree(3)), { status: 200 }));
+    resolveFirst!(tree(3));
     await p1;
     expect(currentEditorVersion.value?.version.id).toBe(4);
   });
@@ -1900,17 +1936,53 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId/items/:itemId', component: 'ItemEditPage', auth: true },
 ```
 
-- [ ] **Step 2: Create page stubs** so `App.svelte` can import them. For each of the 5 pages:
+- [ ] **Step 2: Create page stubs** so `App.svelte` can import them. **Param-passing contract.** App.svelte already spreads matched route params into the page (`<Comp {...matched.params} />`, see `App.svelte:39`). Each page declares its expected params as named `$props()`. Slug-strings are passed verbatim; numeric route params arrive as **strings** and must be coerced via `Number(...)` (see spec §3 "Route param strings vs tree IDs"). Stubs:
 
 ```svelte
-<!-- frontend/src/pages/editor/VersionsPage.svelte (and the four others) -->
+<!-- VersionsPage.svelte -->
 <script lang="ts">
-  let _params: Record<string, string> = $props();
+  let { courseSlug }: { courseSlug: string } = $props();
 </script>
-<div class="page"><h1>VersionsPage (stub)</h1></div>
+<div class="page"><h1>VersionsPage (stub) — {courseSlug}</h1></div>
 ```
 
-(Replace `VersionsPage` with each of the other names. The stubs are filled in subsequent tasks.)
+```svelte
+<!-- VersionEditPage.svelte -->
+<script lang="ts">
+  let { courseSlug, versionId }: { courseSlug: string; versionId: string } = $props();
+</script>
+<div class="page"><h1>VersionEditPage (stub) — {courseSlug} v{versionId}</h1></div>
+```
+
+```svelte
+<!-- BlockEditPage.svelte -->
+<script lang="ts">
+  let { courseSlug, versionId, blockId }: {
+    courseSlug: string; versionId: string; blockId: string;
+  } = $props();
+</script>
+<div class="page"><h1>BlockEditPage (stub) — {courseSlug}/v{versionId}/b{blockId}</h1></div>
+```
+
+```svelte
+<!-- SequenceEditPage.svelte -->
+<script lang="ts">
+  let { courseSlug, versionId, blockId, sequenceId }: {
+    courseSlug: string; versionId: string; blockId: string; sequenceId: string;
+  } = $props();
+</script>
+<div class="page"><h1>SequenceEditPage (stub) — {courseSlug}/v{versionId}/b{blockId}/s{sequenceId}</h1></div>
+```
+
+```svelte
+<!-- ItemEditPage.svelte -->
+<script lang="ts">
+  let { courseSlug, versionId, blockId, sequenceId, itemId }: {
+    courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
+  } = $props();
+</script>
+<div class="page"><h1>ItemEditPage (stub) — {courseSlug}/v{versionId}/b{blockId}/s{sequenceId}/i{itemId}</h1></div>
+```
 
 - [ ] **Step 3: Wire `App.svelte`**
 

@@ -61,7 +61,7 @@ frontend/src/
 └── components/
     └── editor/                               # NEW
         ├── ItemTypePicker.svelte             # `<fieldset>` of `<label>` wrapping visually-hidden `<input type="radio">` + an inline icon glyph; selected state styled via `:has(:checked)`. Does NOT reuse `ItemIcon.svelte` (which is a `<button>` — wrong semantics inside a radio group).
-        ├── MarkdownEditor.svelte             # textarea + Preview tab; props: { versionId, value, onchange }
+        ├── MarkdownEditor.svelte             # textarea + Preview tab; props: { versionId, value (`$bindable()`) }
         └── DirtyGuard.svelte                 # uses router.svelte.ts navigation guard + window.beforeunload
 ```
 
@@ -266,13 +266,15 @@ Includes `content_md` / `info_md` so the editor can populate forms without extra
 
 ## 5. Save / dirty / discard flow
 
-Each form snapshot is captured on mount as a plain object — only the form-shaped subset of the entity, not the full server payload. Dirty detection is a **shallow value compare** between the live form values and the snapshot (`for (k of keys) if (form[k] !== snap[k]) return true`). Current editor forms hold strings (titles, slugs, markdown, URLs) and one number (`max_quiz_attempts`); both compare correctly with `!==` so no deep-equal helper is needed and no JS dep is pulled in.
+Each form snapshot is captured on mount as a plain object — only the form-shaped subset of the entity, not the full server payload. Dirty detection is a **shallow value compare** between the live form values and the snapshot (`for (k of keys) if (form[k] !== snap[k]) return true`). Current editor forms hold strings (titles, slugs, markdown, URLs — sometimes nullable, e.g. `video_url`, `content_md`) and one number (`max_quiz_attempts`); all compare correctly with `!==` so no deep-equal helper is needed and no JS dep is pulled in.
 
 `lib/dirty.svelte.ts` exposes:
 
 ```ts
-// T can hold strings (most forms) and primitive numbers (max_quiz_attempts).
-export function makeDirtyTracker<T extends Record<string, string | number>>(initial: T): {
+// T fields can be strings (most forms), primitive numbers (max_quiz_attempts),
+// or null — admin-tree fields like `video_url` and `content_md` are
+// `string | null` and we preserve `null` end-to-end (the backend accepts it).
+export function makeDirtyTracker<T extends Record<string, string | number | null>>(initial: T): {
   current: T;          // reactive form values ($state-backed)
   isDirty: boolean;    // reactive (read via tracker.isDirty; do NOT destructure)
   reset(next: T): void; // re-snapshot to a form-shaped object (NOT the raw server response)
@@ -342,14 +344,13 @@ Structural ops on *another* page (no active dirty tracker) commit immediately as
 `MarkdownEditor.svelte` props:
 
 ```ts
-let { versionId, value, onchange }: {
+let { versionId, value = $bindable() }: {
   versionId: number;
   value: string;
-  onchange: (next: string) => void;
 } = $props();
 ```
 
-Two tabs: **Edit** (textarea bound via `value` + `onchange`) and **Preview**.
+Two tabs: **Edit** (textarea two-way-bound via `bind:value` — the Svelte 5 idiom; callers use `<MarkdownEditor versionId={vid} bind:value={tracker.current.content_md} />`, and dirty-tracking happens automatically because the tracker's `current` is `$state`-backed) and **Preview**.
 
 - Switching to Preview calls `POST /api/versions/{versionId}/render` with `{content_md: value}` and shows the returned HTML.
 - No debounce — only re-fetches on tab switch.
