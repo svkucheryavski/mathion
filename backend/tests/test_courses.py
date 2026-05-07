@@ -187,3 +187,27 @@ def test_course_response_is_admin_false_for_enrolled_student(auth_client, admin_
     r = auth_client.get(f"/api/courses/{course['id']}")
     assert r.status_code == 200
     assert r.json()["is_admin"] is False
+
+
+def test_by_slug_admin(auth_client, admin_client, db, test_user):
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "calc", "name": "Calc", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
+    db.commit()
+    r = auth_client.get("/api/courses/by-slug/calc")
+    assert r.status_code == 200
+    assert r.json()["slug"] == "calc"
+    assert r.json()["is_admin"] is True
+
+
+def test_by_slug_non_admin_forbidden(auth_client, admin_client):
+    admin_client.post("/api/courses", json={"slug": "calc", "name": "Calc", "description": ""})
+    r = auth_client.get("/api/courses/by-slug/calc")
+    assert r.status_code == 403
+
+
+def test_by_slug_unknown(auth_client):
+    r = auth_client.get("/api/courses/by-slug/nope")
+    assert r.status_code == 404

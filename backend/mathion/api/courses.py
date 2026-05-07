@@ -69,6 +69,18 @@ def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db
     ]
 
 
+@router.get("/api/courses/by-slug/{slug}", response_model=CourseResponse)
+def get_course_by_slug(slug: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    course = db.execute(select(Course).where(Course.slug == slug)).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not _is_admin_for(db, user, course.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    out = CourseResponse.model_validate(course)
+    out.is_admin = True
+    return out
+
+
 @router.get("/api/courses/{course_id}", response_model=CourseResponse)
 def get_course(course_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     course = get_or_404(db, Course, course_id)
