@@ -283,7 +283,7 @@ def test_delete_sequence_with_items_blocked(admin_client):
 
 def test_delete_sequence_state_error_precedes_child_count(admin_client, db, seed_publishable_version):
     from mathion.models import Sequence
-    _, version = seed_publishable_version()
+    seed_publishable_version()
     seq = db.execute(select(Sequence)).scalar()
     r = admin_client.delete(f"/api/sequences/{seq.id}")
     assert r.status_code == 409
