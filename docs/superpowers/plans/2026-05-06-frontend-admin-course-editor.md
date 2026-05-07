@@ -1840,6 +1840,57 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
 ---
 
+### Task 15b: Extend `Button.svelte` with `title?: string`
+
+The editor pages need to surface dirty/state-disabled tooltips ("Save or discard changes first", "Remove sequences first") through `<Button title="…">`. Existing `Button.svelte` doesn't accept `title`. One-line widening of an existing component used everywhere in the app.
+
+**Files:**
+- Modify: `frontend/src/components/ui/Button.svelte`
+
+- [ ] **Step 1: Update the props block + DOM attribute**
+
+Replace the `$props()` destructure and the `<button …>` opening tag:
+
+```svelte
+<script lang="ts">
+  type Variant = 'primary' | 'secondary' | 'ghost';
+  let {
+    variant = 'primary' as Variant,
+    type = 'button' as 'button' | 'submit',
+    disabled = false,
+    loading = false,
+    title = '' as string,
+    onclick = undefined as (() => void) | undefined,
+    children,
+  } = $props();
+</script>
+
+<button
+  {type}
+  class="btn {variant}"
+  {disabled}
+  {title}
+  {onclick}
+>
+```
+
+- [ ] **Step 2: Verify nothing else regresses**
+
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run check && npm run test
+```
+
+Existing call sites don't pass `title`, so the default `''` keeps the DOM attribute empty (browsers ignore an empty `title`). No existing test should change.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git -C /Users/svkucheryavski/Documents/Developing/mathion add frontend/src/components/ui/Button.svelte
+git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(frontend): Button accepts title prop for tooltips"
+```
+
+---
+
 ## Phase 3 — Frontend pages
 
 ### Task 16: CourseList admin Edit affordance + admin-only row UX
@@ -2064,9 +2115,8 @@ Replace stub with:
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import Button from '../../components/ui/Button.svelte';
-  import Input from '../../components/ui/Input.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
-  import { toasts } from '../../stores/toasts.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
 
   let { courseSlug }: { courseSlug: string } = $props();
 
@@ -2108,7 +2158,7 @@ Replace stub with:
       navigate(`/courses/${courseSlug}/edit/v/${v.id}`);
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Failed to create version';
-      toasts.add({ kind: 'error', message: msg });
+      pushToast(msg, 'error');
     }
   }
 
@@ -2121,7 +2171,7 @@ Replace stub with:
       await load();
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : `Could not ${action}`;
-      toasts.add({ kind: 'error', message: msg });
+      pushToast(msg, 'error');
     }
   }
 
@@ -2132,7 +2182,7 @@ Replace stub with:
       await load();
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Could not delete';
-      toasts.add({ kind: 'error', message: msg });
+      pushToast(msg, 'error');
     }
   }
 
@@ -2245,7 +2295,6 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
 ```svelte
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
@@ -2254,19 +2303,23 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
-  import { toasts } from '../../stores/toasts.svelte';
-  import type { AdminTreeBlock } from '../../lib/types';
+  import { pushToast } from '../../stores/toasts.svelte';
 
   let { courseSlug, versionId }: { courseSlug: string; versionId: string } = $props();
   const vid = $derived(Number(versionId));
 
   const tree = $derived(currentEditorVersion.value);
+  const loadError = $derived(currentEditorVersion.error);
   const v = $derived(tree?.version);
-  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+  const slugMatches = $derived(!!tree && tree.course.slug === courseSlug);
+  const ready = $derived(!!tree && tree.version.id === vid && slugMatches);
+  const perms = $derived(v ? versionPermissions(v) : null);
 
-  // Form tracker initialized after first load.
+  // Form tracker initialized after first load. We rebuild it whenever the
+  // active vid changes so switching versions doesn't keep stale form values.
   type Meta = { info_md: string; max_quiz_attempts: number };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<Meta>> | null>(null);
+  let trackerVid = $state<number | null>(null);
 
   // New-block form
   let creating = $state(false);
@@ -2275,9 +2328,10 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
   async function ensureLoaded() {
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
-    if (currentEditorVersion.value && !tracker) {
+    if (currentEditorVersion.value && trackerVid !== vid) {
       const cur = currentEditorVersion.value.version;
       tracker = makeDirtyTracker<Meta>({ info_md: cur.info_md, max_quiz_attempts: cur.max_quiz_attempts });
+      trackerVid = vid;
     }
   }
 
@@ -2291,9 +2345,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await loadAdminTree(vid, { force: true });
       const cur = currentEditorVersion.value!.version;
       tracker.reset({ info_md: cur.info_md, max_quiz_attempts: cur.max_quiz_attempts });
-      toasts.add({ kind: 'success', message: 'Saved' });
+      pushToast('Saved', 'success');
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     }
   }
   function discard() {
@@ -2307,7 +2361,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       newTitle = ''; newSlug = ''; creating = false;
       await loadAdminTree(vid, { force: true });
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Could not create block' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create block', 'error');
     }
   }
 
@@ -2322,7 +2376,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.post(`/api/versions/${vid}/blocks/reorder`, { order });
       await loadAdminTree(vid, { force: true });
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Reorder failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
       await loadAdminTree(vid, { force: true });
     }
   }
@@ -2340,9 +2394,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     try {
       await api.post(`/api/versions/${vid}/${action}`);
       await loadAdminTree(vid, { force: true });
-      toasts.add({ kind: 'success', message: `Version ${action}d` });
+      pushToast(`Version ${action}d`, 'success');
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : `Could not ${action}` });
+      pushToast(e instanceof ApiError ? e.displayMessage : `Could not ${action}`, 'error');
     }
   }
 
@@ -2353,17 +2407,25 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.delete(`/api/versions/${vid}`);
       navigate(`/courses/${courseSlug}/edit`);
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     }
   }
 
-  onMount(() => { void ensureLoaded(); });
-  $effect(() => { void ensureLoaded(); });  // re-run if vid changes
+  // $effect runs on mount and re-runs when `vid` changes. No separate onMount.
+  $effect(() => { void ensureLoaded(); });
 </script>
 
 <div class="page">
-  {#if !tree || !v || tree.version.id !== vid}
+  {#if loadError && (!tree || tree.version.id !== vid)}
+    <h1>Couldn't load</h1>
+    <p>{loadError}</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+  {:else if !ready || !v || !tracker}
     <Spinner />
+  {:else if !slugMatches}
+    <h1>Not found</h1>
+    <p>This version does not belong to course "{courseSlug}".</p>
+    <Button onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Back</Button>
   {:else}
     <header>
       <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
@@ -2374,7 +2436,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
     {/if}
 
-    {#if tracker && perms?.canEditVersionMeta}
+    {#if perms?.canEditVersionMeta}
       <section class="meta">
         <h2>Version info</h2>
         <label>Info (markdown)
@@ -2394,7 +2456,11 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       <div class="head">
         <h2>Blocks</h2>
         {#if perms?.canEditStructure}
-          <Button onclick={() => (creating = !creating)}>{creating ? 'Cancel' : '+ New block'}</Button>
+          <Button
+            disabled={tracker.isDirty}
+            title={tracker.isDirty ? 'Save or discard changes first' : ''}
+            onclick={() => (creating = !creating)}
+          >{creating ? 'Cancel' : '+ New block'}</Button>
         {/if}
       </div>
       {#if creating}
@@ -2413,8 +2479,8 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
               <strong>B{i + 1}. {b.title}</strong>
               <div class="actions">
                 {#if perms?.canEditStructure}
-                  <Button variant="ghost" disabled={i === 0} onclick={() => reorder(i, -1)} title="Move up">↑</Button>
-                  <Button variant="ghost" disabled={i === tree.blocks.length - 1} onclick={() => reorder(i, 1)} title="Move down">↓</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || i === tree.blocks.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
                 {/if}
                 <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${b.id}`)}>Open</Button>
               </div>
@@ -2427,29 +2493,27 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     {#if perms}
       <section class="state-actions">
         {#if perms.canPublish}
-          <Button disabled={tracker?.isDirty} title={tracker?.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('publish')}>Publish</Button>
+          <Button disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('publish')}>Publish</Button>
         {/if}
         {#if perms.canArchive}
-          <Button disabled={tracker?.isDirty} title={tracker?.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('archive')}>Archive</Button>
+          <Button disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('archive')}>Archive</Button>
         {/if}
         {#if perms.canRevert}
-          <Button disabled={tracker?.isDirty} title={tracker?.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('revert')}>Revert</Button>
+          <Button disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('revert')}>Revert</Button>
         {/if}
         {#if perms.canDisable}
-          <Button variant="ghost" disabled={tracker?.isDirty} onclick={() => transition('disable')}>Disable</Button>
+          <Button variant="ghost" disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('disable')}>Disable</Button>
         {/if}
         {#if perms.canEnable}
-          <Button variant="ghost" disabled={tracker?.isDirty} onclick={() => transition('enable')}>Enable</Button>
+          <Button variant="ghost" disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''} onclick={() => transition('enable')}>Enable</Button>
         {/if}
         {#if perms.canDeleteVersion}
-          <Button variant="ghost" disabled={tracker?.isDirty} onclick={deleteVersion}>Delete</Button>
+          <Button variant="ghost" disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''} onclick={deleteVersion}>Delete</Button>
         {/if}
       </section>
     {/if}
 
-    {#if tracker}
-      <DirtyGuard isDirty={() => tracker!.isDirty} />
-    {/if}
+    <DirtyGuard isDirty={() => tracker.isDirty} />
   {/if}
 </div>
 
@@ -2508,7 +2572,6 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
 ```svelte
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
@@ -2517,20 +2580,22 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
-  import { toasts } from '../../stores/toasts.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
 
   let { courseSlug, versionId, blockId }: { courseSlug: string; versionId: string; blockId: string } = $props();
   const vid = $derived(Number(versionId));
   const bid = $derived(Number(blockId));
 
   const tree = $derived(currentEditorVersion.value);
+  const loadError = $derived(currentEditorVersion.error);
   const v = $derived(tree?.version);
   const block = $derived(tree?.blocks.find((b) => b.id === bid));
-  const valid = $derived(!!block && block.version_id === vid);
-  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+  const valid = $derived(!!tree && tree.course.slug === courseSlug && !!block && block.version_id === vid);
+  const perms = $derived(v ? versionPermissions(v) : null);
 
   type Form = { title: string; info: string };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
+  let trackerBid = $state<number | null>(null);
 
   let creating = $state(false);
   let newTitle = $state('');
@@ -2538,7 +2603,11 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
   async function ensureLoaded() {
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
-    if (block && !tracker) tracker = makeDirtyTracker<Form>({ title: block.title, info: block.info });
+    const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === bid);
+    if (fresh && trackerBid !== bid) {
+      tracker = makeDirtyTracker<Form>({ title: fresh.title, info: fresh.info });
+      trackerBid = bid;
+    }
   }
 
   async function save() {
@@ -2548,9 +2617,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await loadAdminTree(vid, { force: true });
       const b = currentEditorVersion.value!.blocks.find((x) => x.id === bid)!;
       tracker.reset({ title: b.title, info: b.info });
-      toasts.add({ kind: 'success', message: 'Saved' });
+      pushToast('Saved', 'success');
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     }
   }
   function discard() { if (tracker && block) tracker.reset({ title: block.title, info: block.info }); }
@@ -2561,7 +2630,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       newTitle = ''; newSlug = ''; creating = false;
       await loadAdminTree(vid, { force: true });
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Could not create sequence' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create sequence', 'error');
     }
   }
 
@@ -2576,7 +2645,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.post(`/api/blocks/${bid}/sequences/reorder`, { order });
       await loadAdminTree(vid, { force: true });
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Reorder failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
       await loadAdminTree(vid, { force: true });
     }
   }
@@ -2588,16 +2657,19 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.delete(`/api/blocks/${bid}`);
       navigate(`/courses/${courseSlug}/edit/v/${vid}`);
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     }
   }
 
-  onMount(() => { void ensureLoaded(); });
   $effect(() => { void ensureLoaded(); });
 </script>
 
 <div class="page">
-  {#if !tree || tree.version.id !== vid}
+  {#if loadError && (!tree || tree.version.id !== vid)}
+    <h1>Couldn't load</h1>
+    <p>{loadError}</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← v{vid}</Button>
+  {:else if !tree || tree.version.id !== vid}
     <Spinner />
   {:else if !valid || !block || !v}
     <h1>Not found</h1>
@@ -2624,7 +2696,11 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       <div class="head">
         <h2>Sequences</h2>
         {#if perms.canEditStructure}
-          <Button onclick={() => (creating = !creating)}>{creating ? 'Cancel' : '+ New sequence'}</Button>
+          <Button
+            disabled={tracker.isDirty}
+            title={tracker.isDirty ? 'Save or discard changes first' : ''}
+            onclick={() => (creating = !creating)}
+          >{creating ? 'Cancel' : '+ New sequence'}</Button>
         {/if}
       </div>
       {#if creating}
@@ -2643,8 +2719,8 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
               <strong>S{i + 1}. {s.title}</strong>
               <div class="actions">
                 {#if perms.canEditStructure}
-                  <Button variant="ghost" disabled={i === 0} onclick={() => reorder(i, -1)}>↑</Button>
-                  <Button variant="ghost" disabled={i === block.sequences.length - 1} onclick={() => reorder(i, 1)}>↓</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || i === block.sequences.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
                 {/if}
                 <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${s.id}`)}>Open</Button>
               </div>
@@ -2665,7 +2741,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       </section>
     {/if}
 
-    <DirtyGuard isDirty={() => tracker!.isDirty} />
+    <DirtyGuard isDirty={() => tracker.isDirty} />
   {/if}
 </div>
 
@@ -2760,13 +2836,12 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 - [ ] **Step 1: Implement.** Replace stub with the page below. Behavior summary:
 1. Read all three params; ensure admin-tree loaded; deep-link validate (`block.version_id===vid` and `seq.block_id===bid`).
 2. Title-edit form (gated by `canEditTextFields`).
-3. Items list with ↑/↓ + Open + per-row `ItemIcon` (existing component, used in its existing `<button>` mode for the row link — passes `state="not-yet"` so it renders a flat glyph).
+3. Items list with ↑/↓ + Open + per-row inline glyph keyed off `it.type` (kept inline rather than reusing `ItemIcon.svelte`, which expects a full `Item` discriminated union).
 4. "+ New item" 2-step form: pick type with `ItemTypePicker`, then collect `title` + `slug`; for `static_page` pre-fill `content_md = '# {title}\n'`; for `video` collect `video_url`. POST → refetch → navigate into new item.
 5. "Delete this sequence" button — gated by `canEditStructure && sequence.items.length === 0`.
 
 ```svelte
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
@@ -2774,10 +2849,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import ItemTypePicker from '../../components/editor/ItemTypePicker.svelte';
-  import ItemIcon from '../../components/course/ItemIcon.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
-  import { toasts } from '../../stores/toasts.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
 
   let { courseSlug, versionId, blockId, sequenceId }: {
     courseSlug: string; versionId: string; blockId: string; sequenceId: string;
@@ -2787,14 +2861,16 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   const sid = $derived(Number(sequenceId));
 
   const tree = $derived(currentEditorVersion.value);
+  const loadError = $derived(currentEditorVersion.error);
   const v = $derived(tree?.version);
   const block = $derived(tree?.blocks.find((b) => b.id === bid));
   const seq = $derived(block?.sequences.find((s) => s.id === sid));
-  const valid = $derived(!!seq && !!block && block.version_id === vid && seq.block_id === bid);
-  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+  const valid = $derived(!!tree && tree.course.slug === courseSlug && !!seq && !!block && block.version_id === vid && seq.block_id === bid);
+  const perms = $derived(v ? versionPermissions(v) : null);
 
   type Form = { title: string };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
+  let trackerSid = $state<number | null>(null);
 
   let creating = $state(false);
   let newType = $state<'static_page' | 'video'>('static_page');
@@ -2813,7 +2889,11 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
   async function ensureLoaded() {
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
-    if (seq && !tracker) tracker = makeDirtyTracker<Form>({ title: seq.title });
+    const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === bid)?.sequences.find((s) => s.id === sid);
+    if (fresh && trackerSid !== sid) {
+      tracker = makeDirtyTracker<Form>({ title: fresh.title });
+      trackerSid = sid;
+    }
   }
 
   async function save() {
@@ -2823,9 +2903,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await loadAdminTree(vid, { force: true });
       const s = currentEditorVersion.value!.blocks.find((b) => b.id === bid)!.sequences.find((x) => x.id === sid)!;
       tracker.reset({ title: s.title });
-      toasts.add({ kind: 'success', message: 'Saved' });
+      pushToast('Saved', 'success');
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     }
   }
   function discard() { if (tracker && seq) tracker.reset({ title: seq.title }); }
@@ -2839,7 +2919,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await loadAdminTree(vid, { force: true });
       navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${item.id}`);
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Could not create item' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create item', 'error');
     }
   }
 
@@ -2854,7 +2934,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.post(`/api/sequences/${sid}/items/reorder`, { order });
       await loadAdminTree(vid, { force: true });
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Reorder failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
       await loadAdminTree(vid, { force: true });
     }
   }
@@ -2866,16 +2946,19 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.delete(`/api/sequences/${sid}`);
       navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`);
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     }
   }
 
-  onMount(() => { void ensureLoaded(); });
   $effect(() => { void ensureLoaded(); });
 </script>
 
 <div class="page">
-  {#if !tree || tree.version.id !== vid}
+  {#if loadError && (!tree || tree.version.id !== vid)}
+    <h1>Couldn't load</h1>
+    <p>{loadError}</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`)}>← Back</Button>
+  {:else if !tree || tree.version.id !== vid}
     <Spinner />
   {:else if !valid || !seq || !block || !v}
     <h1>Not found</h1>
@@ -2900,7 +2983,11 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       <div class="head">
         <h2>Items</h2>
         {#if perms.canEditStructure}
-          <Button onclick={() => (creating = !creating)}>{creating ? 'Cancel' : '+ New item'}</Button>
+          <Button
+            disabled={tracker.isDirty}
+            title={tracker.isDirty ? 'Save or discard changes first' : ''}
+            onclick={() => (creating = !creating)}
+          >{creating ? 'Cancel' : '+ New item'}</Button>
         {/if}
       </div>
       {#if creating}
@@ -2923,13 +3010,18 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
           {#each seq.items as it, i (it.id)}
             <li class="row">
               <div class="title">
-                <ItemIcon item={{ id: it.id, type: it.type as never, title: it.title }} state="not-yet" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${it.id}`)} />
+                <span class="glyph" aria-hidden="true">
+                  {it.type === 'static_page' ? '📄'
+                    : it.type === 'video' ? '▶'
+                    : it.type === 'quiz' ? '?'
+                    : '⌘'}
+                </span>
                 <strong>{it.title}</strong>
               </div>
               <div class="actions">
                 {#if perms.canEditStructure}
-                  <Button variant="ghost" disabled={i === 0} onclick={() => reorder(i, -1)}>↑</Button>
-                  <Button variant="ghost" disabled={i === seq.items.length - 1} onclick={() => reorder(i, 1)}>↓</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || i === seq.items.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
                 {/if}
                 <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${it.id}`)}>Open</Button>
               </div>
@@ -2950,7 +3042,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       </section>
     {/if}
 
-    <DirtyGuard isDirty={() => tracker!.isDirty} />
+    <DirtyGuard isDirty={() => tracker.isDirty} />
   {/if}
 </div>
 
@@ -2965,6 +3057,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   .create input, .create textarea { width: 100%; }
   .row { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
   .title { display: flex; align-items: center; gap: var(--space-2); }
+  .glyph { width: 24px; text-align: center; opacity: 0.65; }
   .actions { display: flex; gap: var(--space-2); }
   .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
   .empty { color: var(--muted); }
@@ -3076,7 +3169,6 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 
 ```svelte
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
@@ -3086,7 +3178,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   import MarkdownEditor from '../../components/editor/MarkdownEditor.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
-  import { toasts } from '../../stores/toasts.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
 
   let { courseSlug, versionId, blockId, sequenceId, itemId }: {
     courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
@@ -3097,26 +3189,34 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   const iid = $derived(Number(itemId));
 
   const tree = $derived(currentEditorVersion.value);
+  const loadError = $derived(currentEditorVersion.error);
   const v = $derived(tree?.version);
   const block = $derived(tree?.blocks.find((b) => b.id === bid));
   const seq = $derived(block?.sequences.find((s) => s.id === sid));
   const item = $derived(seq?.items.find((it) => it.id === iid));
-  const valid = $derived(!!item && !!seq && !!block && block.version_id === vid && seq.block_id === bid && item.sequence_id === sid);
-  const perms = $derived(v ? versionPermissions(v.state, v.is_disabled) : null);
+  const valid = $derived(!!tree && tree.course.slug === courseSlug && !!item && !!seq && !!block && block.version_id === vid && seq.block_id === bid && item.sequence_id === sid);
+  const perms = $derived(v ? versionPermissions(v) : null);
   const editable = $derived(item?.type === 'static_page' || item?.type === 'video');
 
-  // Type unions for the tracker — `string | null` allowed thanks to widened
-  // `makeDirtyTracker` constraint.
-  type StaticForm = { title: string; content_md: string | null };
-  type VideoForm = { title: string; video_url: string | null };
+  // Tracker form-shape: coerce nullable backend fields to '' so MarkdownEditor.value
+  // (typed `string`) and the URL <input> (no null) can bind directly. On save we send
+  // the string verbatim — empty string represents "no content"; backend accepts it.
+  type StaticForm = { title: string; content_md: string };
+  type VideoForm = { title: string; video_url: string };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<StaticForm>>
                      | ReturnType<typeof makeDirtyTracker<VideoForm>> | null>(null);
+  let trackerIid = $state<number | null>(null);
 
   async function ensureLoaded() {
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
-    if (item && !tracker && editable) {
-      if (item.type === 'static_page') tracker = makeDirtyTracker<StaticForm>({ title: item.title, content_md: item.content_md });
-      else if (item.type === 'video') tracker = makeDirtyTracker<VideoForm>({ title: item.title, video_url: item.video_url });
+    const fresh = currentEditorVersion.value
+      ?.blocks.find((b) => b.id === bid)
+      ?.sequences.find((s) => s.id === sid)
+      ?.items.find((it) => it.id === iid);
+    if (fresh && trackerIid !== iid && (fresh.type === 'static_page' || fresh.type === 'video')) {
+      if (fresh.type === 'static_page') tracker = makeDirtyTracker<StaticForm>({ title: fresh.title, content_md: fresh.content_md ?? '' });
+      else tracker = makeDirtyTracker<VideoForm>({ title: fresh.title, video_url: fresh.video_url ?? '' });
+      trackerIid = iid;
     }
   }
 
@@ -3129,17 +3229,17 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.patch(`/api/items/${iid}`, body);
       await loadAdminTree(vid, { force: true });
       const fresh = currentEditorVersion.value!.blocks.find((b) => b.id === bid)!.sequences.find((s) => s.id === sid)!.items.find((it) => it.id === iid)!;
-      if (fresh.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: fresh.title, content_md: fresh.content_md });
-      else if (fresh.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url });
-      toasts.add({ kind: 'success', message: 'Saved' });
+      if (fresh.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: fresh.title, content_md: fresh.content_md ?? '' });
+      else if (fresh.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url ?? '' });
+      pushToast('Saved', 'success');
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Save failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     }
   }
   function discard() {
     if (!tracker || !item) return;
-    if (item.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: item.title, content_md: item.content_md });
-    else if (item.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: item.title, video_url: item.video_url });
+    if (item.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: item.title, content_md: item.content_md ?? '' });
+    else if (item.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: item.title, video_url: item.video_url ?? '' });
   }
 
   async function deleteItem() {
@@ -3149,16 +3249,19 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       await api.delete(`/api/items/${iid}`);
       navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`);
     } catch (e) {
-      toasts.add({ kind: 'error', message: e instanceof ApiError ? e.displayMessage : 'Delete failed' });
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     }
   }
 
-  onMount(() => { void ensureLoaded(); });
   $effect(() => { void ensureLoaded(); });
 </script>
 
 <div class="page">
-  {#if !tree || tree.version.id !== vid}
+  {#if loadError && (!tree || tree.version.id !== vid)}
+    <h1>Couldn't load</h1>
+    <p>{loadError}</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`)}>← Back</Button>
+  {:else if !tree || tree.version.id !== vid}
     <Spinner />
   {:else if !valid || !item || !v}
     <h1>Not found</h1>
@@ -3173,12 +3276,14 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       <section class="meta">
         <label>Title <input bind:value={tracker.current.title} required /></label>
         {#if item.type === 'static_page'}
+          {@const t = tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>}
           <label>Content (markdown)
-            <MarkdownEditor versionId={vid} bind:value={(tracker.current as StaticForm).content_md as unknown as string} />
+            <MarkdownEditor versionId={vid} bind:value={t.current.content_md} />
           </label>
         {:else if item.type === 'video'}
+          {@const t = tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>}
           <label>Video URL
-            <input type="url" bind:value={(tracker.current as VideoForm).video_url} required placeholder="https://…" />
+            <input type="url" bind:value={t.current.video_url} required placeholder="https://…" />
           </label>
         {/if}
         <div class="row">
@@ -3209,7 +3314,8 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     {/if}
 
     {#if tracker}
-      <DirtyGuard isDirty={() => tracker!.isDirty} />
+      {@const t = tracker}
+      <DirtyGuard isDirty={() => t.isDirty} />
     {/if}
   {/if}
 </div>
