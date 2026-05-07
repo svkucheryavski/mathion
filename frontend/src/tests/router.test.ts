@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { matchRoute, safeNext } from '../lib/router.svelte';
+import { navigate, registerNavigationGuard, currentRoute } from '../lib/router.svelte';
 
 describe('lib/router', () => {
   describe('matchRoute', () => {
@@ -66,5 +67,65 @@ describe('lib/router', () => {
       expect(safeNext('/login', 'http://localhost')).toBe('/courses');
       expect(safeNext('/login?next=/login', 'http://localhost')).toBe('/courses');
     });
+  });
+});
+
+describe('navigation guards', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    history.replaceState(null, '', '/');
+    currentRoute.path = '/';
+    currentRoute.search = '';
+    currentRoute.hash = '';
+  });
+
+  it('cancels navigate when a guard returns false', async () => {
+    const dispose = registerNavigationGuard(() => false);
+    await navigate('/courses');
+    expect(currentRoute.path).toBe('/');
+    dispose();
+  });
+
+  it('proceeds when guards return true', async () => {
+    const dispose = registerNavigationGuard(() => true);
+    await navigate('/courses');
+    expect(currentRoute.path).toBe('/courses');
+    dispose();
+  });
+
+  it('disposer removes the guard', async () => {
+    const dispose = registerNavigationGuard(() => false);
+    dispose();
+    await navigate('/courses');
+    expect(currentRoute.path).toBe('/courses');
+  });
+
+  it('async guards are awaited', async () => {
+    const dispose = registerNavigationGuard(async () => false);
+    await navigate('/courses');
+    expect(currentRoute.path).toBe('/');
+    dispose();
+  });
+
+  it('popstate cancellation restores URL via pushState (no Back/Forward direction guess)', async () => {
+    // Seed two history entries beyond '/'.
+    await navigate('/courses');
+    await navigate('/courses/foo');
+    expect(currentRoute.path).toBe('/courses/foo');
+
+    const dispose = registerNavigationGuard(() => false);
+
+    const popped = new Promise<void>((res) => {
+      const handler = () => { window.removeEventListener('popstate', handler); res(); };
+      window.addEventListener('popstate', handler);
+    });
+    history.back();
+    await popped;
+    // Allow the router's async popstate handler to run its guard chain + pushState restore.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(location.pathname).toBe('/courses/foo');
+    expect(currentRoute.path).toBe('/courses/foo');
+    dispose();
   });
 });

@@ -21,27 +21,67 @@ export const currentRoute = $state<{
   hash: typeof location !== 'undefined' ? location.hash : '',
 });
 
-export function navigate(path: string, opts: { replace?: boolean } = {}): void {
-  if (opts.replace) {
-    history.replaceState(null, '', path);
-  } else {
-    history.pushState(null, '', path);
+type NavGuard = () => boolean | Promise<boolean>;
+const guards: NavGuard[] = [];
+let suppressGuards = false;
+let lastResolvedPath = typeof location !== 'undefined'
+  ? location.pathname + location.search + location.hash
+  : '/';
+
+export function registerNavigationGuard(g: NavGuard): () => void {
+  guards.push(g);
+  return () => {
+    const i = guards.indexOf(g);
+    if (i >= 0) guards.splice(i, 1);
+  };
+}
+
+async function runGuards(): Promise<boolean> {
+  if (suppressGuards) return true;
+  for (const g of guards) {
+    const ok = await g();
+    if (!ok) return false;
   }
-  // Sync currentRoute manually — pushState/replaceState don't fire popstate.
+  return true;
+}
+
+function applyLocationToRoute(): void {
   currentRoute.path = location.pathname;
   currentRoute.search = location.search;
   currentRoute.hash = location.hash;
 }
 
-export function startRouter(): void {
-  window.addEventListener('popstate', () => {
-    currentRoute.path = location.pathname;
-    currentRoute.search = location.search;
-    currentRoute.hash = location.hash;
+export async function navigate(path: string, opts: { replace?: boolean } = {}): Promise<void> {
+  const target = path;
+  const current = currentRoute.path + currentRoute.search + currentRoute.hash;
+  if (target === current) return;
+  if (!(await runGuards())) return;
+  if (opts.replace) history.replaceState(null, '', path);
+  else history.pushState(null, '', path);
+  applyLocationToRoute();
+  lastResolvedPath = location.pathname + location.search + location.hash;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', async () => {
+    if (suppressGuards) return;
+    if (!(await runGuards())) {
+      suppressGuards = true;
+      history.pushState(null, '', lastResolvedPath);
+      suppressGuards = false;
+      return;
+    }
+    applyLocationToRoute();
+    lastResolvedPath = location.pathname + location.search + location.hash;
   });
   window.addEventListener('hashchange', () => {
     currentRoute.hash = location.hash;
+    lastResolvedPath = location.pathname + location.search + location.hash;
   });
+}
+
+export function startRouter(): void {
+  // No-op — handlers register at module load. Kept for back-compat.
 }
 
 /** Match a path against a route table; null if no match. */
