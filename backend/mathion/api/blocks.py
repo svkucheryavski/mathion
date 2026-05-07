@@ -120,7 +120,7 @@ def delete_block(block_id: int, db: Session = Depends(get_db), user: User = Depe
         raise HTTPException(status_code=409, detail="Can only delete blocks in 'created' state")
     has_seq = db.scalar(select(Sequence.id).where(Sequence.block_id == block_id).limit(1))
     if has_seq is not None:
-        raise HTTPException(status_code=409, detail="Cannot delete block: remove its sequences first.")
+        raise HTTPException(status_code=409, detail="Cannot delete block: remove its sequences first")
     db.delete(block)
     db.commit()
 

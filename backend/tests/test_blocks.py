@@ -250,7 +250,7 @@ def test_delete_block_state_error_precedes_child_count(admin_client, db, seed_pu
     """On a published version (state forbids delete), the state error wins over child-count
     so the more actionable message surfaces."""
     from mathion.models import Block
-    course, version = seed_publishable_version()
+    _, version = seed_publishable_version()
     block = db.execute(select(Block).where(Block.version_id == version["id"])).scalar_one()
     r = admin_client.delete(f"/api/blocks/{block.id}")
     assert r.status_code == 409
