@@ -174,7 +174,6 @@ def test_course_response_is_admin_for_course_admin(auth_client, admin_client, db
 
 def test_course_response_is_admin_false_for_enrolled_student(auth_client, admin_client, db, test_user):
     """Enrolled-but-not-admin sees is_admin=false."""
-    from mathion.models import CourseVersion
     from mathion.models_auth import StudentEnrollment
     course = admin_client.post(
         "/api/courses", json={"slug": "c2", "name": "C2", "description": ""}
