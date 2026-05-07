@@ -286,3 +286,45 @@ def test_publish_disabled_version_returns_403(admin_client):
     r = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert r.status_code == 403
     assert "disabled" in r.json()["detail"].lower()
+
+
+def test_patch_version_info_md_in_created(admin_client, db):
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "old"}).json()
+    before = db.get(CourseVersion, version["id"]).content_updated_at
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "new # heading"})
+    assert r.status_code == 200
+    assert r.json()["info_md"] == "new # heading"
+    assert "<" in r.json()["info_html"]
+    after = db.get(CourseVersion, version["id"]).content_updated_at
+    assert after > before
+
+
+def test_patch_version_max_quiz_attempts(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"max_quiz_attempts": 5})
+    assert r.status_code == 200
+    assert r.json()["max_quiz_attempts"] == 5
+
+
+def test_patch_version_published_409(admin_client, seed_publishable_version):
+    _, version = seed_publishable_version()
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
+    assert r.status_code == 409
+
+
+def test_patch_version_archived_409(admin_client, seed_publishable_version):
+    _, version = seed_publishable_version()
+    admin_client.post(f"/api/versions/{version['id']}/archive")
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
+    assert r.status_code == 409
+
+
+def test_patch_version_disabled_403(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
+    assert r.status_code == 403

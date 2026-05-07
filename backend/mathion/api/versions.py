@@ -12,7 +12,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Run, Sequence
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import VersionCreate, VersionResponse
+from mathion.schemas import VersionCreate, VersionResponse, VersionUpdate
 
 router = APIRouter(tags=["versions"])
 
@@ -82,6 +82,34 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
     version.info_html = render_with_assets(db, version.id, data.info_md)
     sync_asset_references(db, version.id, [data.info_md], {"info_version_id": version.id})
 
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+@router.patch("/api/versions/{version_id}", response_model=VersionResponse)
+def update_version(
+    version_id: int,
+    data: VersionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only edit version meta in 'created' state")
+
+    updates = data.model_dump(exclude_unset=True)
+    if "info_md" in updates:
+        version.info_md = updates["info_md"]
+        version.info_html = render_with_assets(db, version.id, updates["info_md"])
+        sync_asset_references(db, version.id, [updates["info_md"]], {"info_version_id": version.id})
+    if "max_quiz_attempts" in updates:
+        version.max_quiz_attempts = updates["max_quiz_attempts"]
+
+    bump_content_updated_at(version)
     db.commit()
     db.refresh(version)
     return version

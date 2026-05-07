@@ -32,6 +32,11 @@ class VersionCreate(BaseModel):
     copy_assets_from: int | None = None
 
 
+class VersionUpdate(BaseModel):
+    info_md: str | None = None
+    max_quiz_attempts: int | None = Field(default=None, ge=1, le=10)
+
+
 class VersionResponse(BaseModel):
     id: int
     course_id: int
