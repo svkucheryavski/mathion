@@ -21,6 +21,7 @@ class CourseResponse(BaseModel):
     slug: str
     name: str
     description: str
+    is_admin: bool = False  # populated per-request; defaults False so model_validate(course) keeps working
 
     model_config = {"from_attributes": True}
 

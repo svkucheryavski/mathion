@@ -13,6 +13,17 @@ from mathion.schemas import CourseCreate, CourseResponse, CourseUpdate
 router = APIRouter(tags=["courses"])
 
 
+def _is_admin_for(db: Session, user: User, course_id: int) -> bool:
+    if user.is_superuser:
+        return True
+    return db.execute(
+        select(CourseAdmin.user_id).where(
+            CourseAdmin.course_id == course_id,
+            CourseAdmin.user_id == user.id,
+        )
+    ).scalar_one_or_none() is not None
+
+
 @router.post("/api/courses", status_code=201, response_model=CourseResponse)
 def create_course(data: CourseCreate, db: Session = Depends(get_db), user: User = Depends(require_superuser)):
     course = Course(slug=data.slug, name=data.name, description=data.description)
@@ -23,14 +34,19 @@ def create_course(data: CourseCreate, db: Session = Depends(get_db), user: User 
         db.rollback()
         raise HTTPException(status_code=409, detail="Course with this slug already exists")
     db.refresh(course)
-    return course
+    out = CourseResponse.model_validate(course)
+    out.is_admin = True  # creator is the superuser per require_superuser
+    return out
 
 
 @router.get("/api/courses", response_model=list[CourseResponse])
 def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if user.is_superuser:
         courses = db.execute(select(Course).offset(offset).limit(limit)).scalars().all()
-        return courses
+        return [
+            CourseResponse.model_validate(c).model_copy(update={"is_admin": _is_admin_for(db, user, c.id)})
+            for c in courses
+        ]
 
     # Non-superuser: show courses where user is admin or has an active enrollment
     admin_course_ids = db.execute(
@@ -47,7 +63,10 @@ def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db
     if not visible_ids:
         return []
     courses = db.execute(select(Course).where(Course.id.in_(visible_ids)).offset(offset).limit(limit)).scalars().all()
-    return courses
+    return [
+        CourseResponse.model_validate(c).model_copy(update={"is_admin": _is_admin_for(db, user, c.id)})
+        for c in courses
+    ]
 
 
 @router.get("/api/courses/{course_id}", response_model=CourseResponse)
@@ -73,7 +92,9 @@ def get_course(course_id: int, db: Session = Depends(get_db), user: User = Depen
             ).first()
             if not is_enrolled:
                 raise HTTPException(status_code=403, detail="Access denied")
-    return course
+    out = CourseResponse.model_validate(course)
+    out.is_admin = _is_admin_for(db, user, course.id)
+    return out
 
 
 @router.patch("/api/courses/{course_id}", response_model=CourseResponse)
@@ -84,7 +105,9 @@ def update_course(course_id: int, data: CourseUpdate, db: Session = Depends(get_
         setattr(course, field, value)
     db.commit()
     db.refresh(course)
-    return course
+    out = CourseResponse.model_validate(course)
+    out.is_admin = _is_admin_for(db, user, course.id)
+    return out
 
 
 @router.delete("/api/courses/{course_id}", status_code=204)
