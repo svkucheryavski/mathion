@@ -237,11 +237,12 @@ class MyVersionResponse(BaseModel):
 
 class MyCourseResponse(BaseModel):
     course: CourseResponse
-    version_id: int
-    version_state: str
-    total_items: int
-    covered_items: int
-    is_active: bool
+    version_id: int | None = None
+    version_state: str | None = None
+    total_items: int = 0
+    covered_items: int = 0
+    is_active: bool = False
+    is_admin: bool = False
 
 
 class QuestionCreate(BaseModel):
