@@ -226,9 +226,12 @@ def delete_sequence(sequence_id: int, db: Session = Depends(get_db), user: User 
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
-    state = version.state
-    if state != "created":
+    if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete sequences in 'created' state")
+    from mathion.models import Item
+    has_item = db.scalar(select(Item.id).where(Item.sequence_id == sequence_id).limit(1))
+    if has_item is not None:
+        raise HTTPException(status_code=409, detail="Cannot delete sequence: remove its items first")
     db.delete(seq)
     db.commit()
 
