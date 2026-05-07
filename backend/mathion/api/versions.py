@@ -102,6 +102,8 @@ def update_version(
         raise HTTPException(status_code=409, detail="Can only edit version meta in 'created' state")
 
     updates = data.model_dump(exclude_unset=True)
+    if not updates:
+        return version
     if "info_md" in updates:
         version.info_md = updates["info_md"]
         version.info_html = render_with_assets(db, version.id, updates["info_md"])

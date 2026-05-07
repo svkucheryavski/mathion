@@ -296,7 +296,7 @@ def test_patch_version_info_md_in_created(admin_client, db):
     r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "new # heading"})
     assert r.status_code == 200
     assert r.json()["info_md"] == "new # heading"
-    assert "<" in r.json()["info_html"]
+    assert "<p" in r.json()["info_html"]
     after = db.get(CourseVersion, version["id"]).content_updated_at
     assert after > before
 
@@ -328,3 +328,14 @@ def test_patch_version_disabled_403(admin_client):
     admin_client.post(f"/api/versions/{version['id']}/disable")
     r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
     assert r.status_code == 403
+
+
+def test_patch_version_empty_body_is_noop(admin_client, db):
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    before = db.get(CourseVersion, version["id"]).content_updated_at
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={})
+    assert r.status_code == 200
+    after = db.get(CourseVersion, version["id"]).content_updated_at
+    assert after == before
