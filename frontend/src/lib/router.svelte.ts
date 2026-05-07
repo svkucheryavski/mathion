@@ -112,10 +112,17 @@ if (typeof window !== 'undefined') {
     if (suppressGuards) return;
     if (!(await runGuards())) {
       // F1: try/finally so a throwing pushState cannot leave suppressGuards=true
-      // permanently, short-circuiting all future guard checks.
+      // permanently, short-circuiting all future guard checks. The catch swallows
+      // the throw so it doesn't escape the async handler as an unhandled rejection;
+      // the restore failed but there is nothing further the router can do.
       try {
         suppressGuards = true;
-        history.pushState(null, '', lastResolvedPath);
+        try {
+          history.pushState(null, '', lastResolvedPath);
+        } catch {
+          // restore failed; URL bar may now disagree with currentRoute, but
+          // future navigates remain gated correctly.
+        }
       } finally {
         suppressGuards = false;
       }

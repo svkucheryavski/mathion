@@ -187,18 +187,20 @@ describe('navigation guards', () => {
     __resetGuardsForTests();
   });
 
-  // F5: Hash-only navigate bypasses guards and commits the new hash.
+  // F5: Hash-only navigate bypasses guards (guard never invoked) and commits the new hash.
   it('hash-only navigate bypasses guards and commits new hash', async () => {
     // Start at /courses (no hash).
     await navigate('/courses');
     expect(currentRoute.path).toBe('/courses');
 
-    // Register a blocking guard.
-    const dispose = registerNavigationGuard(() => false);
+    // Spy on the guard so we can assert it was NOT called for hash-only changes.
+    const guardSpy = vi.fn(() => false);
+    const dispose = registerNavigationGuard(guardSpy);
 
-    // Navigate to the same path with a hash — guards must be skipped.
+    // Navigate to the same path with a hash — guards must be skipped entirely.
     await navigate('/courses#section-2');
 
+    expect(guardSpy).not.toHaveBeenCalled();
     expect(currentRoute.hash).toBe('#section-2');
     expect(currentRoute.path).toBe('/courses');
     dispose();
@@ -210,5 +212,52 @@ describe('navigation guards', () => {
     await navigate('/x', { force: true });
     expect(currentRoute.path).toBe('/x');
     dispose();
+  });
+
+  // F1: a throwing pushState during popstate restore must not leave guards
+  // permanently bypassed. The try/finally in the popstate handler is what
+  // guarantees this; without it, suppressGuards would stay true forever.
+  it('throwing pushState during popstate restore does not leave guards bypassed', async () => {
+    // Seed two history entries beyond '/'.
+    await navigate('/a');
+    await navigate('/b');
+
+    // Block any pop-style navigation.
+    const dispose = registerNavigationGuard(() => false);
+
+    // Make pushState throw exactly once (the next call), then restore.
+    const realPush = history.pushState;
+    let throwOnce = true;
+    history.pushState = function (...args: Parameters<typeof realPush>) {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error('simulated pushState failure');
+      }
+      return realPush.apply(this, args);
+    };
+
+    // Trigger Back; the popstate handler will run guards, then attempt the
+    // restore pushState (which will throw).
+    const popped = new Promise<void>((res) => {
+      const handler = () => { window.removeEventListener('popstate', handler); res(); };
+      window.addEventListener('popstate', handler);
+    });
+    history.back();
+    try { await popped; } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 0));
+
+    history.pushState = realPush;
+    dispose();
+
+    // After the throw, guards must still gate navigation. Register a blocking
+    // guard and try to navigate — if suppressGuards leaked true, this would
+    // commit; with the try/finally fix, it should be cancelled.
+    const blockerSpy = vi.fn(() => false);
+    const blockerDispose = registerNavigationGuard(blockerSpy);
+    const beforePath = currentRoute.path;
+    await navigate('/should-not-commit');
+    expect(blockerSpy).toHaveBeenCalled();
+    expect(currentRoute.path).toBe(beforePath);
+    blockerDispose();
   });
 });
