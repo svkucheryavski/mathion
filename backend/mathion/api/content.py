@@ -104,6 +104,91 @@ def get_content_json(version_id: int, db: Session = Depends(get_db), user: User 
     }
 
 
+@router.get("/api/versions/{version_id}/admin-tree")
+def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from mathion.api.helpers import require_course_admin
+    version = db.execute(
+        select(CourseVersion)
+        .options(joinedload(CourseVersion.course))
+        .where(CourseVersion.id == version_id)
+    ).scalar_one_or_none()
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    require_course_admin(db, user, version.course_id)
+
+    blocks = db.execute(
+        select(Block)
+        .where(Block.version_id == version_id)
+        .options(
+            joinedload(Block.sequences)
+            .joinedload(Sequence.items)
+            .joinedload(Item.questions)
+        )
+        .order_by(Block.order)
+    ).unique().scalars().all()
+
+    return {
+        "course": {"id": version.course.id, "name": version.course.name, "slug": version.course.slug},
+        "version": {
+            "id": version.id,
+            "course_id": version.course_id,
+            "state": version.state,
+            "is_disabled": version.is_disabled,
+            "info_md": version.info_md,
+            "info_html": version.info_html,
+            "max_quiz_attempts": version.max_quiz_attempts,
+            "created_at": version.created_at.isoformat() if version.created_at else None,
+            "published_at": version.published_at.isoformat() if version.published_at else None,
+            "archived_at": version.archived_at.isoformat() if version.archived_at else None,
+            "content_updated_at": version.content_updated_at.isoformat() if version.content_updated_at else None,
+        },
+        "blocks": [
+            {
+                "id": b.id,
+                "version_id": b.version_id,
+                "title": b.title,
+                "slug": b.slug,
+                "order": b.order,
+                "info": b.info,
+                "info_html": b.info_html,
+                "sequences": sorted(
+                    [
+                        {
+                            "id": s.id,
+                            "block_id": s.block_id,
+                            "title": s.title,
+                            "slug": s.slug,
+                            "order": s.order,
+                            "items": sorted(
+                                [
+                                    {
+                                        "id": it.id,
+                                        "sequence_id": it.sequence_id,
+                                        "title": it.title,
+                                        "slug": it.slug,
+                                        "order": it.order,
+                                        "type": it.type,
+                                        "content_md": it.content_md,
+                                        "content_html": it.content_html,
+                                        "video_url": it.video_url,
+                                        "script_url": it.script_url,
+                                        "questions_count": len(it.questions) if it.questions is not None else 0,
+                                    }
+                                    for it in s.items
+                                ],
+                                key=lambda x: x["order"],
+                            ),
+                        }
+                        for s in b.sequences
+                    ],
+                    key=lambda x: x["order"],
+                ),
+            }
+            for b in blocks
+        ],
+    }
+
+
 def _serialize_item(item):
     result = {
         "id": item.id,
