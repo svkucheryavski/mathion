@@ -2312,7 +2312,6 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   const loadError = $derived(currentEditorVersion.error);
   const v = $derived(tree?.version);
   const slugMatches = $derived(!!tree && tree.course.slug === courseSlug);
-  const ready = $derived(!!tree && tree.version.id === vid && slugMatches);
   const perms = $derived(v ? versionPermissions(v) : null);
 
   // Form tracker initialized after first load. We rebuild it whenever the
@@ -2420,13 +2419,18 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     <h1>Couldn't load</h1>
     <p>{loadError}</p>
     <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
-  {:else if !ready || !v || !tracker}
+  {:else if !tree || tree.version.id !== vid}
     <Spinner />
   {:else if !slugMatches}
     <h1>Not found</h1>
     <p>This version does not belong to course "{courseSlug}".</p>
     <Button onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Back</Button>
+  {:else if !v || !tracker}
+    <Spinner />
   {:else}
+    {#if loadError}
+      <p class="banner err">{loadError}</p>
+    {/if}
     <header>
       <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
       <h1>{tree.course.name} · v{v.id} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>
@@ -2467,7 +2471,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
         <form class="create" onsubmit={(e) => { e.preventDefault(); createBlock(); }}>
           <input placeholder="Title" bind:value={newTitle} required />
           <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9-]+" />
-          <Button type="submit">Create</Button>
+          <Button type="submit" disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
         </form>
       {/if}
       {#if tree.blocks.length === 0}
@@ -2526,6 +2530,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   .state-archived { background: #eee; color: #555; }
   .state.disabled { background: #fdd; color: #833; }
   .banner { background: #fff3cd; border-left: 3px solid #d99; padding: var(--space-2); }
+  .banner.err { background: #fdd; border-left-color: #a33; color: #833; }
   .meta, .blocks, .state-actions { margin: var(--space-4) 0; }
   .meta label { display: block; margin: var(--space-2) 0; }
   .meta textarea, .meta input[type=number] { width: 100%; }
@@ -2676,6 +2681,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     <p>This block does not belong to this version.</p>
     <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← Back</Button>
   {:else if tracker && perms}
+    {#if loadError}
+      <p class="banner err">{loadError}</p>
+    {/if}
     <header>
       <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← v{vid}</Button>
       <h1>Block: {block.title}</h1>
@@ -2707,7 +2715,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
         <form class="create" onsubmit={(e) => { e.preventDefault(); createSequence(); }}>
           <input placeholder="Title" bind:value={newTitle} required />
           <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9-]+" />
-          <Button type="submit">Create</Button>
+          <Button type="submit" disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
         </form>
       {/if}
       {#if block.sequences.length === 0}
@@ -2748,6 +2756,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
   header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .banner.err { background: #fdd; border-left: 3px solid #a33; padding: var(--space-2); color: #833; }
   .meta, .seqs, .danger { margin: var(--space-4) 0; }
   .meta label { display: block; margin: var(--space-2) 0; }
   .meta input, .meta textarea { width: 100%; }
@@ -2964,6 +2973,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     <h1>Not found</h1>
     <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`)}>← Back</Button>
   {:else if tracker && perms}
+    {#if loadError}
+      <p class="banner err">{loadError}</p>
+    {/if}
     <header>
       <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`)}>← {block.title}</Button>
       <h1>Sequence: {seq.title}</h1>
@@ -3000,7 +3012,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
           {:else if newType === 'video'}
             <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required />
           {/if}
-          <Button type="submit">Create</Button>
+          <Button type="submit" disabled={tracker.isDirty} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
         </form>
       {/if}
       {#if seq.items.length === 0}
@@ -3049,6 +3061,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
   header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .banner.err { background: #fdd; border-left: 3px solid #a33; padding: var(--space-2); color: #833; }
   .meta, .items, .danger { margin: var(--space-4) 0; }
   .meta label { display: block; margin: var(--space-2) 0; }
   .meta input { width: 100%; }
@@ -3213,9 +3226,13 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
       ?.blocks.find((b) => b.id === bid)
       ?.sequences.find((s) => s.id === sid)
       ?.items.find((it) => it.id === iid);
-    if (fresh && trackerIid !== iid && (fresh.type === 'static_page' || fresh.type === 'video')) {
+    if (fresh && trackerIid !== iid) {
+      // Reset for every iid change — null out for non-editable types so the
+      // DirtyGuard, Save/Discard, and Delete dirty-gate aren't fed by a stale
+      // tracker from a previously-viewed editable item.
       if (fresh.type === 'static_page') tracker = makeDirtyTracker<StaticForm>({ title: fresh.title, content_md: fresh.content_md ?? '' });
-      else tracker = makeDirtyTracker<VideoForm>({ title: fresh.title, video_url: fresh.video_url ?? '' });
+      else if (fresh.type === 'video') tracker = makeDirtyTracker<VideoForm>({ title: fresh.title, video_url: fresh.video_url ?? '' });
+      else tracker = null;  // quiz / interactive_app — read-only, no tracker
       trackerIid = iid;
     }
   }
@@ -3267,6 +3284,9 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
     <h1>Not found</h1>
     <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`)}>← Back</Button>
   {:else if perms}
+    {#if loadError}
+      <p class="banner err">{loadError}</p>
+    {/if}
     <header>
       <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`)}>← {seq!.title}</Button>
       <h1>Item: {item.title} <span class="type">{item.type}</span></h1>
@@ -3324,6 +3344,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
   header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
   .type { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; background: #eef; color: #335; margin-left: var(--space-2); }
+  .banner.err { background: #fdd; border-left: 3px solid #a33; padding: var(--space-2); color: #833; }
   .meta, .readonly, .danger { margin: var(--space-4) 0; }
   .meta label { display: block; margin: var(--space-2) 0; }
   .meta input { width: 100%; }
