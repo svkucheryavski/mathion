@@ -3177,7 +3177,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion commit -m "feat(fronte
 2. Switch on `item.type`:
    - `static_page` → `MarkdownEditor` (`bind:value`) for `content_md`, raw `<input>` for `title`. Tracker covers `{ title, content_md }`.
    - `video` → raw `<input>` for `title`, `<input type="url">` for `video_url`. Tracker covers `{ title, video_url }`.
-   - `quiz` / `interactive_app` → read-only panel showing title, type, and (for quiz) `questions_count` (now provided by admin-tree per Commit A). Delete button still works.
+   - `quiz` / `interactive_app` → read-only panel showing title, type, and (for quiz) `questions_count` (provided by admin-tree, see Task 9). Delete button still works.
 3. Save → `PATCH /api/items/${iid}` → refetch + `tracker.reset(...)`. Delete → confirm → DELETE → navigate up.
 
 ```svelte
