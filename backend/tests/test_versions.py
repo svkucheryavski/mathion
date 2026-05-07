@@ -368,3 +368,30 @@ def test_render_endpoint_disabled_403(admin_client):
         f"/api/versions/{version['id']}/render", json={"content_md": "x"}
     )
     assert r.status_code == 403
+
+
+def test_patch_version_explicit_null_is_noop(admin_client, db):
+    """Explicit null on Optional fields must not be written through to non-null columns."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "seed"}).json()
+    before_md = db.get(CourseVersion, version["id"]).info_md
+    before_max = db.get(CourseVersion, version["id"]).max_quiz_attempts
+    r = admin_client.patch(
+        f"/api/versions/{version['id']}",
+        json={"info_md": None, "max_quiz_attempts": None},
+    )
+    assert r.status_code == 200
+    after = db.get(CourseVersion, version["id"])
+    assert after.info_md == before_md
+    assert after.max_quiz_attempts == before_max
+
+
+def test_list_versions_ordered_newest_first(admin_client):
+    """VersionsPage relies on a deterministic order — newest version comes first."""
+    course = admin_client.post("/api/courses", json={"slug": "ord", "name": "Ord", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v1"}).json()
+    v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"}).json()
+    v3 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v3"}).json()
+    rows = admin_client.get(f"/api/courses/{course['id']}/versions").json()
+    assert [r["id"] for r in rows] == [v3["id"], v2["id"], v1["id"]]

@@ -610,3 +610,24 @@ def test_my_courses_no_role_sees_empty(auth_client):
     """Plain user with no enrollments and no admin role sees []."""
     rows = auth_client.get("/api/my-courses").json()
     assert rows == []
+
+
+def test_my_courses_active_enrollment_wins_over_newer_inactive(auth_client, admin_client, db, test_user):
+    """Two enrollments in same course: active one wins over a newer inactive one (matches resolve_my_version)."""
+    from mathion.models_auth import StudentEnrollment
+    course = admin_client.post(
+        "/api/courses", json={"slug": "ord", "name": "Ord", "description": ""}
+    ).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{v1['id']}/publish")
+    admin_client.post(f"/api/versions/{v2['id']}/publish")
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=v1["id"], is_active=True))
+    db.commit()
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=v2["id"], is_active=False))
+    db.commit()
+    rows = auth_client.get("/api/my-courses").json()
+    matches = [r for r in rows if r["course"]["slug"] == "ord"]
+    assert len(matches) == 1
+    assert matches[0]["version_id"] == v1["id"]
+    assert matches[0]["is_active"] is True

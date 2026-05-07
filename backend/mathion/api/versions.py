@@ -101,7 +101,7 @@ def update_version(
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only edit version meta in 'created' state")
 
-    updates = data.model_dump(exclude_unset=True)
+    updates = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
     if not updates:
         return version
     if "info_md" in updates:
@@ -136,7 +136,11 @@ def list_versions(course_id: int, limit: int = 100, offset: int = 0, db: Session
     get_or_404(db, Course, course_id)
     require_course_admin(db, user, course_id)
     versions = db.execute(
-        select(CourseVersion).where(CourseVersion.course_id == course_id).offset(offset).limit(limit)
+        select(CourseVersion)
+        .where(CourseVersion.course_id == course_id)
+        .order_by(CourseVersion.created_at.desc(), CourseVersion.id.desc())
+        .offset(offset)
+        .limit(limit)
     ).scalars().all()
     return versions
 
