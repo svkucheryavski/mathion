@@ -13,7 +13,7 @@ onUnauthorized((path) => {
   clearSession();
   clearCourse();
   clearToasts();
-  navigate(`/login?next=${encodeURIComponent(safeNext(path, location.origin))}`);
+  navigate(`/login?next=${encodeURIComponent(safeNext(path, location.origin))}`, { force: true });
 });
 
 // Step 2: start router (popstate + hashchange listeners).

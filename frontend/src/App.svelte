@@ -28,7 +28,7 @@
     }
     if (matched && matched.route.auth && session.user === null && !session.loading) {
       const next = encodeURIComponent(currentRoute.path + currentRoute.search + currentRoute.hash);
-      navigate(`/login?next=${next}`, { replace: true });
+      navigate(`/login?next=${next}`, { replace: true, force: true });
     }
   });
 </script>
