@@ -101,6 +101,8 @@ def list_versions(course_id: int, limit: int = 100, offset: int = 0, db: Session
 def publish_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail=f"Cannot publish version in '{version.state}' state")
 

@@ -273,3 +273,16 @@ def test_disable_version_with_only_inactive_runs_ok(admin_client, db, seed_publi
     ).json()
     response = admin_client.post(f"/api/versions/{version['id']}/disable")
     assert response.status_code == 200
+
+
+def test_publish_disabled_version_returns_403(admin_client):
+    course = admin_client.post(
+        "/api/courses", json={"slug": "d", "name": "D", "description": ""}
+    ).json()
+    version = admin_client.post(
+        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+    ).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    r = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert r.status_code == 403
+    assert "disabled" in r.json()["detail"].lower()
