@@ -339,3 +339,32 @@ def test_patch_version_empty_body_is_noop(admin_client, db):
     assert r.status_code == 200
     after = db.get(CourseVersion, version["id"]).content_updated_at
     assert after == before
+
+
+def test_render_endpoint_admin(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "r", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = admin_client.post(
+        f"/api/versions/{version['id']}/render", json={"content_md": "# hello"}
+    )
+    assert r.status_code == 200
+    assert "<h1>" in r.json()["html"].lower() or "<h1" in r.json()["html"]
+
+
+def test_render_endpoint_non_admin_403(auth_client, admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "r", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = auth_client.post(
+        f"/api/versions/{version['id']}/render", json={"content_md": "# x"}
+    )
+    assert r.status_code == 403
+
+
+def test_render_endpoint_disabled_403(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "r", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    r = admin_client.post(
+        f"/api/versions/{version['id']}/render", json={"content_md": "x"}
+    )
+    assert r.status_code == 403

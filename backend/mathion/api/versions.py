@@ -12,7 +12,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Run, Sequence
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import VersionCreate, VersionResponse, VersionUpdate
+from mathion.schemas import VersionCreate, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
 
 router = APIRouter(tags=["versions"])
 
@@ -115,6 +115,20 @@ def update_version(
     db.commit()
     db.refresh(version)
     return version
+
+
+@router.post("/api/versions/{version_id}/render", response_model=VersionRenderResponse)
+def render_version_md(
+    version_id: int,
+    data: VersionRenderRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    return VersionRenderResponse(html=render_with_assets(db, version.id, data.content_md))
 
 
 @router.get("/api/courses/{course_id}/versions", response_model=list[VersionResponse])

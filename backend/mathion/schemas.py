@@ -37,6 +37,14 @@ class VersionUpdate(BaseModel):
     max_quiz_attempts: int | None = Field(default=None, ge=1, le=10)
 
 
+class VersionRenderRequest(BaseModel):
+    content_md: str
+
+
+class VersionRenderResponse(BaseModel):
+    html: str
+
+
 class VersionResponse(BaseModel):
     id: int
     course_id: int
