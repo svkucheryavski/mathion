@@ -19,7 +19,7 @@ def _make_course_with_one_item(admin_client, content_md="hello"):
 
 
 def test_admin_tree_in_created_state(admin_client):
-    course, version, block, seq, item = _make_course_with_one_item(admin_client)
+    _, version, block, seq, _item = _make_course_with_one_item(admin_client)
     r = admin_client.get(f"/api/versions/{version['id']}/admin-tree")
     assert r.status_code == 200
     body = r.json()
@@ -64,7 +64,7 @@ def test_admin_tree_non_admin_403(auth_client, admin_client):
 
 def test_admin_tree_returns_parent_fks_and_md(admin_client):
     """Frontend deep-link validation reads block.version_id, sequence.block_id, item.sequence_id."""
-    course, version, block, seq, item = _make_course_with_one_item(admin_client, content_md="foo")
+    _, version, block, seq, _item = _make_course_with_one_item(admin_client, content_md="foo")
     body = admin_client.get(f"/api/versions/{version['id']}/admin-tree").json()
     assert body["blocks"][0]["version_id"] == version["id"]
     assert body["blocks"][0]["sequences"][0]["block_id"] == block["id"]
