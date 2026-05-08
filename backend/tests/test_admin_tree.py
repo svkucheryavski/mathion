@@ -95,3 +95,18 @@ def test_admin_tree_includes_questions_count(admin_client, db):
     items = {it["slug"]: it for it in body["blocks"][0]["sequences"][0]["items"]}
     assert items["q1"]["questions_count"] == 2
     assert items["p1"]["questions_count"] == 0
+
+
+def test_admin_tree_timestamps_match_typescript_contract(admin_client):
+    """`created_at` and `content_updated_at` are server-default non-null columns;
+    the JSON shape must always emit them as ISO strings (matches TS frontend
+    types `AdminTreeVersion.{created_at, content_updated_at}: string`).
+    `published_at` and `archived_at` remain nullable until the version transitions."""
+    course = admin_client.post("/api/courses", json={"slug": "ts", "name": "T", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    body = admin_client.get(f"/api/versions/{version['id']}/admin-tree").json()
+    v = body["version"]
+    assert isinstance(v["created_at"], str) and v["created_at"]
+    assert isinstance(v["content_updated_at"], str) and v["content_updated_at"]
+    assert v["published_at"] is None
+    assert v["archived_at"] is None

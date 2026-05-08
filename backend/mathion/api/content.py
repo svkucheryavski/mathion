@@ -137,10 +137,10 @@ def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = 
             "info_md": version.info_md,
             "info_html": version.info_html,
             "max_quiz_attempts": version.max_quiz_attempts,
-            "created_at": version.created_at.isoformat() if version.created_at else None,
+            "created_at": version.created_at.isoformat(),
             "published_at": version.published_at.isoformat() if version.published_at else None,
             "archived_at": version.archived_at.isoformat() if version.archived_at else None,
-            "content_updated_at": version.content_updated_at.isoformat() if version.content_updated_at else None,
+            "content_updated_at": version.content_updated_at.isoformat(),
         },
         "blocks": [
             {
