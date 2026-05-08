@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { versionPermissions } from '../lib/versionPermissions';
+import { versionPermissions, type VersionLifecycleState } from '../lib/versionPermissions';
 
-const cases: Array<[string, boolean, Partial<ReturnType<typeof versionPermissions>>]> = [
+const cases: Array<[VersionLifecycleState, boolean, Partial<ReturnType<typeof versionPermissions>>]> = [
   ['created', false, {
     canEditVersionMeta: true, canEditStructure: true, canEditTextFields: true,
     canPublish: true, canArchive: false, canRevert: false,
@@ -30,7 +30,7 @@ describe('versionPermissions', () => {
   }
 
   it('is_disabled overrides everything except canEnable', () => {
-    for (const state of ['created', 'published', 'archived']) {
+    for (const state of ['created', 'published', 'archived'] as const) {
       const got = versionPermissions({ state, is_disabled: true });
       expect(got.canEnable).toBe(true);
       expect(got.canEditVersionMeta).toBe(false);
@@ -42,5 +42,21 @@ describe('versionPermissions', () => {
       expect(got.canDisable).toBe(false);
       expect(got.canDeleteVersion).toBe(false);
     }
+  });
+
+  it('unknown state value (e.g. typo) fails closed — no permission granted', () => {
+    // Defensive: if the API ever returns an unexpected state (or a typo slips
+    // past the type narrowing at the boundary), the helper must not falsely
+    // grant any action. canEnable stays tied to is_disabled and is unaffected.
+    const got = versionPermissions({ state: 'creted' as VersionLifecycleState, is_disabled: false });
+    expect(got.canEditVersionMeta).toBe(false);
+    expect(got.canEditStructure).toBe(false);
+    expect(got.canEditTextFields).toBe(false);
+    expect(got.canPublish).toBe(false);
+    expect(got.canArchive).toBe(false);
+    expect(got.canRevert).toBe(false);
+    expect(got.canDisable).toBe(false);
+    expect(got.canEnable).toBe(false);
+    expect(got.canDeleteVersion).toBe(false);
   });
 });

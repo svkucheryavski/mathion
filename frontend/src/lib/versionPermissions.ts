@@ -1,3 +1,5 @@
+export type VersionLifecycleState = 'created' | 'published' | 'archived';
+
 export type VersionPermissions = {
   canEditVersionMeta: boolean;
   canEditStructure:   boolean;
@@ -10,7 +12,7 @@ export type VersionPermissions = {
   canDeleteVersion:   boolean;
 };
 
-export function versionPermissions(v: { state: string; is_disabled: boolean }): VersionPermissions {
+export function versionPermissions(v: { state: VersionLifecycleState; is_disabled: boolean }): VersionPermissions {
   const created = v.state === 'created' && !v.is_disabled;
   const published = v.state === 'published' && !v.is_disabled;
   const archived = v.state === 'archived' && !v.is_disabled;
