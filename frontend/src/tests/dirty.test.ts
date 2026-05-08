@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { flushSync } from 'svelte';
 import { makeDirtyTracker } from '../lib/dirty.svelte';
+import { observeIsDirty } from './observeIsDirty.svelte';
 
 describe('makeDirtyTracker', () => {
   it('starts clean and turns dirty on change', () => {
@@ -65,20 +67,34 @@ describe('makeDirtyTracker', () => {
   it('reset clears dirty (value-level) even when current already equals the new value', () => {
     // Value-level repro of the codex-flagged Critical scenario: user types 'b',
     // clicks Save, server confirms with 'b'. Page calls reset({ title: 'b' }).
-    // Direct read of t.isDirty must return false. NOTE: This test verifies the
-    // getter returns the correct value but cannot exercise reactive
-    // subscription invalidation — vitest's transform here does not wire up the
-    // Svelte 5 effect scheduler for `.svelte.ts` modules, so `$effect.root`
-    // does not run. The reactive-consumer path (Save button disabled state,
-    // DirtyGuard) is exercised end-to-end in component-level tests / smoke
-    // checks once DirtyGuard (Task 15) and the editor pages land. The
-    // implementation is structured so snapshot[k] = next[k] notifies even when
-    // current[k] = next[k] is a same-value write — see comments in
-    // dirty.svelte.ts for the rationale.
+    // Direct read of t.isDirty must return false. The reactive-consumer
+    // counterpart is verified by the next test.
     const t = makeDirtyTracker({ title: 'a' });
     t.current.title = 'b';
     expect(t.isDirty).toBe(true);
     t.reset({ title: 'b' });
     expect(t.isDirty).toBe(false);
+  });
+
+  it('reactive consumer reruns when reset() makes current a same-value write', () => {
+    // Discriminating repro of the codex Round 1 Critical: subscribe a $effect
+    // to t.isDirty and verify it reruns after the post-save reset. With the
+    // old closure-variable snapshot, snapshot reassignment would not notify
+    // and current[k] = 'b' would be a same-value write Svelte 5 skips — so
+    // the effect would NOT rerun and observed would stay at [false, true].
+    // With the $state snapshot, snapshot[k] going 'a' → 'b' notifies the
+    // effect, and observed reaches [false, true, false].
+    const t = makeDirtyTracker({ title: 'a' });
+    const { observed, cleanup } = observeIsDirty(t);
+    expect(observed).toEqual([false]);
+
+    t.current.title = 'b';
+    flushSync();
+    expect(observed).toEqual([false, true]);
+
+    t.reset({ title: 'b' });
+    flushSync();
+    expect(observed).toEqual([false, true, false]);
+    cleanup();
   });
 });

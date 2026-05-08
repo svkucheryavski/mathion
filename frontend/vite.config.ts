@@ -3,6 +3,11 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 export default defineConfig({
   plugins: [svelte()],
+  // Under vitest, resolve `svelte` to its browser entry so the client runtime
+  // is loaded — `flushSync`, `mount`, etc. are otherwise noops in the server
+  // entry, which makes $effect/$state-based reactivity untestable in unit
+  // tests. Scoped to `process.env.VITEST` so dev/build behavior is unchanged.
+  resolve: process.env.VITEST ? { conditions: ['browser'] } : {},
   server: {
     port: 5173,
     proxy: {
