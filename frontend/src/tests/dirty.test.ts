@@ -45,4 +45,34 @@ describe('makeDirtyTracker', () => {
     t.current.video_url = null;
     expect(t.isDirty).toBe(true);
   });
+
+  it('same-value reassignment stays clean (no spurious dirty)', () => {
+    const t = makeDirtyTracker({ title: 'a' });
+    expect(t.isDirty).toBe(false);
+    t.current.title = 'a'; // same as initial
+    expect(t.isDirty).toBe(false);
+  });
+
+  it('multi-field: only one dirty flips isDirty; reverting clears it', () => {
+    const t = makeDirtyTracker({ title: 'a', slug: 's' });
+    expect(t.isDirty).toBe(false);
+    t.current.title = 'b';
+    expect(t.isDirty).toBe(true);
+    t.current.title = 'a'; // revert to original
+    expect(t.isDirty).toBe(false);
+  });
+
+  it('reset clears dirty even when current already equals the new value (post-save reactivity)', () => {
+    // Repro for the codex-flagged Critical: user types 'b', clicks Save, server
+    // confirms with 'b'. Page calls reset({ title: 'b' }). The current[k] = 'b'
+    // assignment is a same-value write (Svelte 5 skips notifications). With a
+    // plain (non-$state) snapshot, the snapshot reassignment also wouldn't
+    // notify, leaving reactive consumers stuck on isDirty=true. With a $state
+    // snapshot, snapshot[k] going 'a' → 'b' notifies, forcing re-evaluation.
+    const t = makeDirtyTracker({ title: 'a' });
+    t.current.title = 'b';
+    expect(t.isDirty).toBe(true);
+    t.reset({ title: 'b' });
+    expect(t.isDirty).toBe(false);
+  });
 });
