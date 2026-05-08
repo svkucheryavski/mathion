@@ -62,13 +62,19 @@ describe('makeDirtyTracker', () => {
     expect(t.isDirty).toBe(false);
   });
 
-  it('reset clears dirty even when current already equals the new value (post-save reactivity)', () => {
-    // Repro for the codex-flagged Critical: user types 'b', clicks Save, server
-    // confirms with 'b'. Page calls reset({ title: 'b' }). The current[k] = 'b'
-    // assignment is a same-value write (Svelte 5 skips notifications). With a
-    // plain (non-$state) snapshot, the snapshot reassignment also wouldn't
-    // notify, leaving reactive consumers stuck on isDirty=true. With a $state
-    // snapshot, snapshot[k] going 'a' → 'b' notifies, forcing re-evaluation.
+  it('reset clears dirty (value-level) even when current already equals the new value', () => {
+    // Value-level repro of the codex-flagged Critical scenario: user types 'b',
+    // clicks Save, server confirms with 'b'. Page calls reset({ title: 'b' }).
+    // Direct read of t.isDirty must return false. NOTE: This test verifies the
+    // getter returns the correct value but cannot exercise reactive
+    // subscription invalidation — vitest's transform here does not wire up the
+    // Svelte 5 effect scheduler for `.svelte.ts` modules, so `$effect.root`
+    // does not run. The reactive-consumer path (Save button disabled state,
+    // DirtyGuard) is exercised end-to-end in component-level tests / smoke
+    // checks once DirtyGuard (Task 15) and the editor pages land. The
+    // implementation is structured so snapshot[k] = next[k] notifies even when
+    // current[k] = next[k] is a same-value write — see comments in
+    // dirty.svelte.ts for the rationale.
     const t = makeDirtyTracker({ title: 'a' });
     t.current.title = 'b';
     expect(t.isDirty).toBe(true);
