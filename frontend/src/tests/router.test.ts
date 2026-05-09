@@ -6,6 +6,7 @@ import {
   currentRoute,
   __resetGuardsForTests,
 } from '../lib/router.svelte';
+import { routes as appRoutes } from '../routes';
 
 describe('lib/router', () => {
   describe('matchRoute', () => {
@@ -42,14 +43,19 @@ describe('lib/router', () => {
       expect(matchRoute(routes, '/courses/algebra-1/extra/bits')).toBeNull();
     });
 
-    it('matches admin editor routes', () => {
-      const routes = [
-        { path: '/courses/:courseSlug/edit', component: 'VersionsPage', auth: true },
-        { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId/items/:itemId', component: 'ItemEditPage', auth: true },
-      ];
-      const m = matchRoute(routes, '/courses/calc/edit/v/3/blocks/12/sequences/47/items/87');
-      expect(m?.route.component).toBe('ItemEditPage');
-      expect(m?.params).toEqual({ courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' });
+    // Asserts the real `routes` table from src/routes.ts wires every editor
+    // path to the right component with the right params. Using the real table
+    // (not a local literal) means a typo in routes.ts would fail this test.
+    it.each([
+      ['/courses/calc/edit',                                                      'VersionsPage',     { courseSlug: 'calc' }],
+      ['/courses/calc/edit/v/3',                                                  'VersionEditPage',  { courseSlug: 'calc', versionId: '3' }],
+      ['/courses/calc/edit/v/3/blocks/12',                                        'BlockEditPage',    { courseSlug: 'calc', versionId: '3', blockId: '12' }],
+      ['/courses/calc/edit/v/3/blocks/12/sequences/47',                           'SequenceEditPage', { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47' }],
+      ['/courses/calc/edit/v/3/blocks/12/sequences/47/items/87',                  'ItemEditPage',     { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' }],
+    ] as const)('routes.ts wires %s → %s', (path, component, params) => {
+      const m = matchRoute(appRoutes, path);
+      expect(m?.route.component).toBe(component);
+      expect(m?.params).toEqual(params);
     });
   });
 
