@@ -41,6 +41,16 @@ describe('lib/router', () => {
     it('does not partial-match', () => {
       expect(matchRoute(routes, '/courses/algebra-1/extra/bits')).toBeNull();
     });
+
+    it('matches admin editor routes', () => {
+      const routes = [
+        { path: '/courses/:courseSlug/edit', component: 'VersionsPage', auth: true },
+        { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId/items/:itemId', component: 'ItemEditPage', auth: true },
+      ];
+      const m = matchRoute(routes, '/courses/calc/edit/v/3/blocks/12/sequences/47/items/87');
+      expect(m?.route.component).toBe('ItemEditPage');
+      expect(m?.params).toEqual({ courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' });
+    });
   });
 
   describe('safeNext', () => {
