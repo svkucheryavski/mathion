@@ -5,6 +5,7 @@
     type = 'button' as 'button' | 'submit',
     disabled = false,
     loading = false,
+    title = '' as string,
     onclick = undefined as (() => void) | undefined,
     children,
   } = $props();
@@ -14,6 +15,7 @@
   {type}
   class="btn {variant}"
   {disabled}
+  {title}
   {onclick}
 >
   {#if loading}<span class="spinner"></span>{/if}
