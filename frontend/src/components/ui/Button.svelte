@@ -5,7 +5,7 @@
     type = 'button' as 'button' | 'submit',
     disabled = false,
     loading = false,
-    title = '' as string,
+    title = undefined as string | undefined,
     onclick = undefined as (() => void) | undefined,
     children,
   } = $props();
