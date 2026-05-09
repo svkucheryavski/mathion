@@ -1,9 +1,11 @@
 <script lang="ts">
   // Mounts a guard that intercepts in-app navigation AND browser unload while
-  // the parent has unsaved changes. `isDirty` is passed as a callback (not a
-  // value) so the parent's reactive $state reads through it on every check
-  // — passing the value directly would freeze the dirty state at mount time
-  // because component props don't re-evaluate without rerunning the script.
+  // the parent has unsaved changes. `isDirty` is a callback (not a boolean)
+  // so the navigation-guard closure dereferences the parent's $state on every
+  // check; capturing a boolean prop here would freeze the value at the moment
+  // of registration — Svelte 5 $props() ARE reactive on prop changes, but the
+  // closure passed to registerNavigationGuard is built once inside onMount
+  // and never re-runs, so it would hold a stale capture of the old boolean.
   import { onMount } from 'svelte';
   import { registerNavigationGuard } from '../../lib/router.svelte';
 
