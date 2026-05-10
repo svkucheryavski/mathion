@@ -41,13 +41,30 @@
   let newContentMd = $state('');
   let newVideoUrl = $state('');
 
-  // Auto-seed content_md from title for static_page (only while user hasn't typed in body yet).
+  // Auto-seed content_md from title for static_page (only while user hasn't
+  // typed in body yet). Gated on `creating` so the effect doesn't churn while
+  // the form is collapsed, and gated on `newTitle` being non-empty so that
+  // clearing the title doesn't silently wipe the textarea (required-invalid
+  // and surprising). Once user types in the body, contentMdTouched sticks.
   let contentMdTouched = $state(false);
   $effect(() => {
-    if (newType === 'static_page' && !contentMdTouched) {
-      newContentMd = newTitle ? `# ${newTitle}\n` : '';
+    if (creating && newType === 'static_page' && !contentMdTouched && newTitle) {
+      newContentMd = `# ${newTitle}\n`;
     }
   });
+
+  function resetCreateForm() {
+    newType = 'static_page';
+    newTitle = '';
+    newSlug = '';
+    newContentMd = '';
+    newVideoUrl = '';
+    contentMdTouched = false;
+  }
+  function toggleCreating() {
+    if (creating) resetCreateForm();
+    creating = !creating;
+  }
 
   async function ensureLoaded() {
     if (!vidValid || !bidValid || !sidValid) return;
@@ -107,14 +124,28 @@
   }
 
   async function createItem() {
+    // Pin route IDs + slug at POST-start. Without this, a navigation race
+    // mid-await would let `loadAdminTree(vid, ...)` and the `navigate(...)`
+    // below read live (and possibly different) values, sending the user to
+    // the wrong destination after a race. Sister save() pins for the same
+    // reason.
+    const savedVid = vid;
+    const savedBid = bid;
+    const savedSid = sid;
+    const savedSlug = courseSlug;
     const body: Record<string, unknown> = { title: newTitle, slug: newSlug, type: newType };
     if (newType === 'static_page') body.content_md = newContentMd;
     if (newType === 'video') body.video_url = newVideoUrl;
     busy = true;
     try {
-      const item = await api.post<{ id: number }>(`/api/sequences/${sid}/items`, body);
-      await loadAdminTree(vid, { force: true });
-      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${item.id}`);
+      const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
+      await loadAdminTree(savedVid, { force: true });
+      // Defense-in-depth: navigate unmounts this page so form state is gone
+      // anyway, but matching sister createSequence's reset keeps behavior
+      // consistent if a future refactor stops navigating away.
+      resetCreateForm();
+      creating = false;
+      navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create item', 'error');
     } finally {
@@ -202,7 +233,7 @@
           <Button
             disabled={tracker.isDirty || busy}
             title={tracker.isDirty ? 'Save or discard changes first' : ''}
-            onclick={() => (creating = !creating)}
+            onclick={toggleCreating}
           >{creating ? 'Cancel' : '+ New item'}</Button>
         {/if}
       </div>
