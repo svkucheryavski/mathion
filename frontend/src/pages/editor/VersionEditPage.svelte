@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
-  import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
@@ -11,6 +12,9 @@
 
   let { courseSlug, versionId }: { courseSlug: string; versionId: string } = $props();
   const vid = $derived(Number(versionId));
+  // Hand-crafted /v/foo URL → Number('foo') is NaN → /api/versions/NaN/admin-tree
+  // would 422. Treat NaN as a route-shape error and refuse to fetch.
+  const vidValid = $derived(Number.isInteger(vid) && vid > 0);
 
   const tree = $derived(currentEditorVersion.value);
   const loadError = $derived(currentEditorVersion.error);
@@ -34,8 +38,9 @@
   let newSlug = $state('');
 
   async function ensureLoaded() {
+    if (!vidValid) return;
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
-    if (currentEditorVersion.value && trackerVid !== vid) {
+    if (currentEditorVersion.value && currentEditorVersion.value.version.id === vid && trackerVid !== vid) {
       const cur = currentEditorVersion.value.version;
       tracker = makeDirtyTracker<Meta>({ info_md: cur.info_md, max_quiz_attempts: cur.max_quiz_attempts });
       trackerVid = vid;
@@ -59,8 +64,13 @@
         max_quiz_attempts: n,
       });
       await loadAdminTree(vid, { force: true });
-      const cur = currentEditorVersion.value!.version;
-      tracker.reset({ info_md: cur.info_md, max_quiz_attempts: cur.max_quiz_attempts });
+      // Refetch may have failed silently (store keeps prior `value` and sets
+      // `error`). Only snapshot if the store actually holds the version we
+      // just saved — otherwise the tracker would baseline against stale data.
+      const fresh = currentEditorVersion.value;
+      if (fresh && fresh.version.id === vid) {
+        tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+      }
       pushToast('Saved', 'success');
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
@@ -119,7 +129,12 @@
     try {
       await api.post(`/api/versions/${vid}/${action}`);
       await loadAdminTree(vid, { force: true });
-      pushToast(`Version ${action}d`, 'success');
+      // Past-tense map — the naive `${action}d` produces "publishd"/"revertd".
+      const past: Record<typeof action, string> = {
+        publish: 'published', archive: 'archived', revert: 'reverted',
+        disable: 'disabled', enable: 'enabled',
+      };
+      pushToast(`Version ${past[action]}`, 'success');
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : `Could not ${action}`, 'error');
     } finally {
@@ -144,10 +159,19 @@
   // $effect runs on mount and re-runs when `vid` changes. Same prop-change
   // refetch pattern as VersionsPage / CourseView.
   $effect(() => { void vid; void ensureLoaded(); });
+
+  // Drop the cached AdminTree on unmount so the next editor entry doesn't
+  // briefly render the previous course's tree before its own fetch resolves
+  // — store docstring (currentEditorVersion.svelte.ts:5) requires this.
+  onDestroy(() => clearEditorVersion());
 </script>
 
 <div class="page">
-  {#if loadError && (!tree || tree.version.id !== vid)}
+  {#if !vidValid}
+    <h1>Bad URL</h1>
+    <p>Version "{versionId}" is not a valid id.</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+  {:else if loadError && (!tree || tree.version.id !== vid)}
     <h1>Couldn't load</h1>
     <p>{loadError}</p>
     <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
@@ -202,7 +226,10 @@
       {#if creating}
         <form class="create" onsubmit={(e) => { e.preventDefault(); createBlock(); }}>
           <input placeholder="Title" bind:value={newTitle} required />
-          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9-]+" />
+          <!-- Mirrors backend regex schemas.py: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+               (HTML auto-anchors patterns). The looser [a-z0-9-]+ would let
+               --foo / foo-- pass the browser then 422 at the server. -->
+          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" />
           <Button type="submit" disabled={tracker.isDirty || busy} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
         </form>
       {/if}
