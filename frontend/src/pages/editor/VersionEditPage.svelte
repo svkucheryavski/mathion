@@ -57,21 +57,31 @@
       pushToast('Max quiz attempts must be a whole number between 1 and 10', 'error');
       return;
     }
+    // Capture the values + vid at PATCH-time so a rapid v3→v4 navigation
+    // mid-await can't make us reset the tracker against the wrong version.
+    const savedVid = vid;
+    const sentInfoMd = tracker.current.info_md;
+    const sentAttempts = n;
     busy = true;
     try {
-      await api.patch(`/api/versions/${vid}`, {
-        info_md: tracker.current.info_md,
-        max_quiz_attempts: n,
-      });
-      await loadAdminTree(vid, { force: true });
-      // Refetch may have failed silently (store keeps prior `value` and sets
-      // `error`). Only snapshot if the store actually holds the version we
-      // just saved — otherwise the tracker would baseline against stale data.
+      await api.patch(`/api/versions/${savedVid}`, { info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
+      await loadAdminTree(savedVid, { force: true });
+      // The store leaves `value` untouched on refetch error — it only sets
+      // `error`. So a "fresh.version.id === savedVid" check would happily
+      // pass on a failed refetch (prior value has the same id) and reset
+      // tracker against stale pre-PATCH data. Read `error` directly.
       const fresh = currentEditorVersion.value;
-      if (fresh && fresh.version.id === vid) {
+      const refetchOk = !currentEditorVersion.error && !!fresh && fresh.version.id === savedVid;
+      if (refetchOk) {
         tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+        pushToast('Saved', 'success');
+      } else {
+        // PATCH succeeded server-side but the follow-up GET failed (or the
+        // user navigated away). Baseline against what we PATCHed so the
+        // tracker isn't stuck dirty against pre-save values.
+        tracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
+        pushToast('Saved (refresh failed — reload to see latest)', 'error');
       }
-      pushToast('Saved', 'success');
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     } finally {
