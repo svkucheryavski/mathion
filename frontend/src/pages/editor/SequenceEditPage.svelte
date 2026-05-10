@@ -32,6 +32,8 @@
   type Form = { title: string };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
   let trackerSid = $state<number | null>(null);
+  // C-I3: companion to trackerSid — see BlockEditPage for rationale.
+  let trackerVid = $state<number | null>(null);
   let busy = $state(false);
 
   let creating = $state(false);
@@ -79,9 +81,10 @@
     // Only rebuilds when sid changes. Concurrent-admin edits to the same
     // sequence won't auto-resync into a clean tracker — workaround: navigate
     // away and back, or save and accept whatever the server returned.
-    if (fresh && trackerSid !== sid) {
+    if (fresh && (trackerSid !== sid || trackerVid !== vid)) {
       tracker = makeDirtyTracker<Form>({ title: fresh.title });
       trackerSid = sid;
+      trackerVid = vid;
     }
   }
 
@@ -282,8 +285,8 @@
               </div>
               <div class="actions">
                 {#if perms.canEditStructure}
-                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
-                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === seq.items.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'} aria-label="Move up">↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === seq.items.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'} aria-label="Move down">↓</Button>
                 {/if}
                 <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}/items/${it.id}`)} disabled={busy}>Open</Button>
               </div>

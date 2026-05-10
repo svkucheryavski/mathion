@@ -26,6 +26,12 @@
   type Form = { title: string; info: string };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
   let trackerBid = $state<number | null>(null);
+  // C-I3: companion to trackerBid. Today this page unmounts on a vid switch
+  // (App.svelte tears down + onDestroy clears the AdminTree), so a same-bid
+  // collision across versions can't happen. But if the editor ever becomes
+  // a single SPA shell with persistent components, two versions sharing a
+  // block id would silently leak stale form values. Defensive future-proof.
+  let trackerVid = $state<number | null>(null);
   let busy = $state(false);
 
   let creating = $state(false);
@@ -46,9 +52,10 @@
     // that mutate this block's title/info while the tracker is clean are
     // not auto-resynced — the user must navigate away and back, or save
     // and accept whatever the server returned.
-    if (fresh && trackerBid !== bid) {
+    if (fresh && (trackerBid !== bid || trackerVid !== vid)) {
       tracker = makeDirtyTracker<Form>({ title: fresh.title, info: fresh.info });
       trackerBid = bid;
+      trackerVid = vid;
     }
   }
 
@@ -226,8 +233,8 @@
               <strong>S{i + 1}. {s.title}</strong>
               <div class="actions">
                 {#if perms.canEditStructure}
-                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
-                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === block.sequences.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'} aria-label="Move up">↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === block.sequences.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'} aria-label="Move down">↓</Button>
                 {/if}
                 <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${s.id}`)} disabled={busy}>Open</Button>
               </div>

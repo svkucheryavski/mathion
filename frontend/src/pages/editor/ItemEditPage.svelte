@@ -41,6 +41,8 @@
   let tracker = $state<ReturnType<typeof makeDirtyTracker<StaticForm>>
                      | ReturnType<typeof makeDirtyTracker<VideoForm>> | null>(null);
   let trackerIid = $state<number | null>(null);
+  // C-I3: companion to trackerIid — see BlockEditPage for rationale.
+  let trackerVid = $state<number | null>(null);
   let busy = $state(false);
   // Suppress the inline "couldn't load" banner after a successful save whose
   // post-save refetch failed. The toast already covered it; the form is
@@ -73,7 +75,7 @@
       ?.items.find((it) => it.id === iid);
     // Rebuild only on iid change. Concurrent-admin edits to the same item
     // won't auto-resync — workaround: navigate away and back.
-    if (fresh && trackerIid !== iid) {
+    if (fresh && (trackerIid !== iid || trackerVid !== vid)) {
       // Reset for every iid change — null out for non-editable types so the
       // DirtyGuard, Save/Discard, and Delete dirty-gate aren't fed by a stale
       // tracker from a previously-viewed editable item.
@@ -81,6 +83,7 @@
       else if (fresh.type === 'video') tracker = makeDirtyTracker<VideoForm>({ title: fresh.title, video_url: fresh.video_url ?? '' });
       else tracker = null;  // quiz / interactive_app — read-only, no tracker
       trackerIid = iid;
+      trackerVid = vid;
     }
   }
 

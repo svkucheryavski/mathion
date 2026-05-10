@@ -274,8 +274,8 @@
               <strong>B{i + 1}. {b.title}</strong>
               <div class="actions">
                 {#if perms?.canEditStructure}
-                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
-                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === tree.blocks.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'} aria-label="Move up">↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === tree.blocks.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'} aria-label="Move down">↓</Button>
                 {/if}
                 <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${b.id}`)} disabled={busy}>Open</Button>
               </div>

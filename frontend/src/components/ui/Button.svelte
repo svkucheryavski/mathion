@@ -6,6 +6,10 @@
     disabled = false,
     loading = false,
     title = undefined as string | undefined,
+    // Forward aria-label so icon-only buttons (reorder ↑/↓) can announce
+    // their purpose to screen readers. Visible glyph stays for sighted
+    // users; the title attribute also supplies a tooltip.
+    'aria-label': ariaLabel = undefined as string | undefined,
     onclick = undefined as (() => void) | undefined,
     children,
   } = $props();
@@ -16,6 +20,7 @@
   class="btn {variant}"
   {disabled}
   {title}
+  aria-label={ariaLabel}
   {onclick}
 >
   {#if loading}<span class="spinner"></span>{/if}

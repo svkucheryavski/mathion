@@ -5,7 +5,11 @@
   // enforce that constraint at the call site. Widen this union if the
   // product scope expands.
   type ItemType = 'static_page' | 'video';
-  let { value = $bindable<ItemType>('static_page') }: { value: ItemType } = $props();
+  // Canonical Svelte 5 form: `$bindable()` without a type argument; the
+  // prop type `value: ItemType` constrains it. The previous
+  // `$bindable<ItemType>('static_page')` default is dead code — every call
+  // site (SequenceEditPage) binds `value`, so the default never lands.
+  let { value = $bindable() }: { value: ItemType } = $props();
 </script>
 
 <fieldset class="picker">

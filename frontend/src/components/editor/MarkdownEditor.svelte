@@ -44,21 +44,25 @@
 </script>
 
 <div class="editor">
-  <div role="tablist" class="tabs">
-    <button type="button" role="tab" aria-selected={mode === 'edit'} onclick={() => setMode('edit')}>Edit</button>
-    <button type="button" role="tab" aria-selected={mode === 'preview'} onclick={() => setMode('preview')}>Preview</button>
+  <!-- Plain toggle buttons rather than role="tablist". The full WAI-ARIA
+       tablist contract (arrow-key navigation, aria-controls, tabindex
+       cycling) is overkill for a two-state Edit/Preview switch. aria-pressed
+       communicates the active state to screen readers. -->
+  <div class="tabs">
+    <button type="button" aria-pressed={mode === 'edit'} onclick={() => setMode('edit')}>Edit</button>
+    <button type="button" aria-pressed={mode === 'preview'} onclick={() => setMode('preview')}>Preview</button>
   </div>
   {#if mode === 'edit'}
-    <textarea role="tabpanel" bind:value rows="14" spellcheck="false"></textarea>
+    <textarea bind:value rows="14" spellcheck="false"></textarea>
   {:else if loading}
-    <div role="tabpanel" class="preview"><em>Rendering…</em></div>
+    <div class="preview"><em>Rendering…</em></div>
   {:else if error}
-    <div role="tabpanel" class="preview err">{error}</div>
+    <div class="preview err">{error}</div>
   {:else}
     <!-- {@html} is safe here only because the backend's /render endpoint
          (Task 8) sanitizes the output server-side. The frontend MUST NOT
          render markdown locally without that round-trip. -->
-    <div role="tabpanel" class="preview">{@html html ?? ''}</div>
+    <div class="preview">{@html html ?? ''}</div>
   {/if}
 </div>
 
@@ -66,7 +70,7 @@
   .editor { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
   .tabs { display: flex; border-bottom: 1px solid var(--border); }
   .tabs button { background: none; border: 0; padding: var(--space-2) var(--space-3); cursor: pointer; }
-  .tabs button[aria-selected="true"] { background: var(--surface, #f7f7f7); font-weight: 600; }
+  .tabs button[aria-pressed="true"] { background: var(--surface, #f7f7f7); font-weight: 600; }
   textarea { width: 100%; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
   .preview { padding: var(--space-3); min-height: 200px; }
   .preview.err { color: #a33; }
