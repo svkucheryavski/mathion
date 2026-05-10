@@ -190,7 +190,19 @@ export type ValidationErrorDetail = {
 };
 
 // ---- Admin tree (`/api/versions/:id/admin-tree`) ----
-export type AdminTreeVersion = {
+// CourseResponse — single-course payload from /api/courses/by-slug/{slug}.
+export type Course = {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  is_admin: boolean;
+};
+
+// VersionResponse — list/detail payload from /api/courses/{cid}/versions and
+// /api/versions/{vid}. AdminTreeVersion adds `content_updated_at` for the
+// admin-tree response only; do not conflate the two.
+export type Version = {
   id: number;
   course_id: number;
   state: 'created' | 'published' | 'archived';
@@ -201,6 +213,9 @@ export type AdminTreeVersion = {
   created_at: string;
   published_at: string | null;
   archived_at: string | null;
+};
+
+export type AdminTreeVersion = Version & {
   content_updated_at: string;
 };
 
