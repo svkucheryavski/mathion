@@ -111,6 +111,14 @@ if (typeof window !== 'undefined') {
   const popHandler = async () => {
     if (suppressGuards) return;
     if (!(await runGuards())) {
+      // D-I3: a concurrent navigate() during the guard await may have
+      // already brought location back to lastResolvedPath (user pressed
+      // Back, guard rejected, but a programmatic navigate ran during the
+      // await). In that case the URL is already where it should be — push
+      // would either be a no-op same-URL push or, worse, clobber a
+      // legitimate concurrent route change that happened to share the path.
+      const here = location.pathname + location.search + location.hash;
+      if (here === lastResolvedPath) return;
       // F1: try/finally so a throwing pushState cannot leave suppressGuards=true
       // permanently, short-circuiting all future guard checks. The catch swallows
       // the throw so it doesn't escape the async handler as an unhandled rejection;

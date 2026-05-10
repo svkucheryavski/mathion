@@ -276,4 +276,50 @@ describe('navigation guards', () => {
     expect(currentRoute.path).toBe(beforePath);
     blockerDispose();
   });
+
+  // D-I3: popstate guard-cancel restore must skip pushState when a concurrent
+  // navigate() already brought location back to lastResolvedPath. Without the
+  // skip, the restore pushState clobbers the legitimate concurrent navigate.
+  it('popstate restore is skipped when location already matches lastResolvedPath', async () => {
+    // Seed history: '/' → '/a' → '/b'. lastResolvedPath now '/b'.
+    await navigate('/a');
+    await navigate('/b');
+    expect(currentRoute.path).toBe('/b');
+
+    // Slow guard so we can interleave a concurrent location change during
+    // the popstate await.
+    let resolveGuard!: (v: boolean) => void;
+    const slow = new Promise<boolean>((r) => { resolveGuard = r; });
+    const dispose = registerNavigationGuard(() => slow);
+
+    // history.back() fires popstate synchronously; URL becomes '/a' and the
+    // popstate handler awaits the guard.
+    const popped = new Promise<void>((res) => {
+      const handler = () => { window.removeEventListener('popstate', handler); res(); };
+      window.addEventListener('popstate', handler);
+    });
+    history.back();
+    await popped;
+    expect(location.pathname).toBe('/a');
+
+    // While the popstate handler is awaiting the (slow) guard, push '/b'
+    // back onto history directly — simulating a concurrent navigate() that
+    // already moved location to lastResolvedPath ('/b'). Spy on pushState
+    // so we can detect any subsequent restore pushState the popstate
+    // handler might emit when its guard resolves.
+    history.pushState(null, '', '/b');
+    const realPush = history.pushState;
+    const pushSpy = vi.fn(realPush.bind(history));
+    history.pushState = pushSpy as typeof history.pushState;
+
+    // Resolve the guard with `false` (cancel). The popstate handler
+    // resumes, sees location ('/b') === lastResolvedPath ('/b'), and must
+    // NOT pushState — the URL is already where it should be.
+    resolveGuard(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pushSpy).not.toHaveBeenCalled();
+
+    history.pushState = realPush;
+    dispose();
+  });
 });
