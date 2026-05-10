@@ -5,6 +5,7 @@
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import ItemTypePicker from '../../components/editor/ItemTypePicker.svelte';
   import Button from '../../components/ui/Button.svelte';
@@ -42,6 +43,10 @@
   let newSlug = $state('');
   let newContentMd = $state('');
   let newVideoUrl = $state('');
+  // Inline create-form errors per spec §6 (422 / 409-slug → inline).
+  let createErrors = $state<FieldErrors>({});
+  let createGlobalError = $state<string | null>(null);
+  function clearCreateErrors() { createErrors = {}; createGlobalError = null; }
 
   // Auto-seed content_md from title for static_page (only while user hasn't
   // typed in body yet). Gated on `creating` so the effect doesn't churn while
@@ -65,6 +70,7 @@
   }
   function toggleCreating() {
     if (creating) resetCreateForm();
+    clearCreateErrors();
     creating = !creating;
   }
 
@@ -142,6 +148,7 @@
     const body: Record<string, unknown> = { title: newTitle, slug: newSlug, type: newType };
     if (newType === 'static_page') body.content_md = newContentMd;
     if (newType === 'video') body.video_url = newVideoUrl;
+    clearCreateErrors();
     busy = true;
     try {
       const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
@@ -153,7 +160,18 @@
       creating = false;
       navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create item', 'error');
+      // Spec §6: 422 / 409-slug → inline. Known fields depend on item type;
+      // include all relevant per-type fields so a 422 on `content_md` (e.g.
+      // empty string for static_page) lands inline on that input.
+      const known = newType === 'static_page'
+        ? ['title', 'slug', 'content_md', 'type']
+        : ['title', 'slug', 'video_url', 'type'];
+      const mapped = mapCreateError(e, known);
+      createErrors = mapped.fieldErrors;
+      createGlobalError = mapped.globalMessage;
+      if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(mapped.globalMessage, 'error');
+      }
     } finally {
       busy = false;
     }
@@ -256,15 +274,28 @@
       {#if creating}
         <form class="create" onsubmit={(e) => { e.preventDefault(); createItem(); }}>
           <ItemTypePicker bind:value={newType} />
-          <input placeholder="Title" bind:value={newTitle} required />
-          <!-- Mirrors backend ItemCreate slug regex schemas.py:
-               ^[a-z0-9]+(?:-[a-z0-9]+)*$ (HTML auto-anchors). -->
-          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" />
+          <div class="field">
+            <input placeholder="Title" bind:value={newTitle} required oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+            {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+          </div>
+          <div class="field">
+            <!-- Mirrors backend ItemCreate slug regex schemas.py:
+                 ^[a-z0-9]+(?:-[a-z0-9]+)*$ (HTML auto-anchors). -->
+            <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+            {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
+          </div>
           {#if newType === 'static_page'}
-            <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} oninput={() => (contentMdTouched = true)} required></textarea>
+            <div class="field">
+              <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
+              {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
+            </div>
           {:else if newType === 'video'}
-            <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required />
+            <div class="field">
+              <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
+              {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
+            </div>
           {/if}
+          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
           <Button type="submit" disabled={tracker.isDirty || busy} loading={busy} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
         </form>
       {/if}
@@ -321,6 +352,9 @@
   .head { display: flex; justify-content: space-between; align-items: center; }
   .create { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
   .create input, .create textarea { width: 100%; }
+  .create .field { display: flex; flex-direction: column; }
+  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
+  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   .title { display: flex; align-items: center; gap: var(--space-2); }
   .glyph { width: 24px; text-align: center; opacity: 0.65; }

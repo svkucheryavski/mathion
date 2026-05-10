@@ -5,6 +5,7 @@
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
@@ -36,6 +37,15 @@
   let creating = $state(false);
   let newTitle = $state('');
   let newSlug = $state('');
+  // Inline errors per spec §6: 422 / 409-slug land here, not in a toast.
+  let createErrors = $state<FieldErrors>({});
+  let createGlobalError = $state<string | null>(null);
+  function clearCreateErrors() { createErrors = {}; createGlobalError = null; }
+  function toggleCreateBlock() {
+    if (creating) { newTitle = ''; newSlug = ''; }
+    clearCreateErrors();
+    creating = !creating;
+  }
 
   async function ensureLoaded() {
     if (!vidValid) return;
@@ -106,13 +116,22 @@
     // `vid` reactively rebind and the post-POST refetch land on v4 instead
     // of the v3 we just mutated.
     const savedVid = vid;
+    clearCreateErrors();
     busy = true;
     try {
       await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
       newTitle = ''; newSlug = ''; creating = false;
       await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create block', 'error');
+      // Spec §6: 422 / 409-slug → inline field errors. Only toast a global
+      // message when there are no field-level errors (otherwise the inline
+      // display already covers it).
+      const mapped = mapCreateError(e, ['title', 'slug']);
+      createErrors = mapped.fieldErrors;
+      createGlobalError = mapped.globalMessage;
+      if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(mapped.globalMessage, 'error');
+      }
     } finally {
       busy = false;
     }
@@ -251,17 +270,24 @@
           <Button
             disabled={tracker.isDirty || busy}
             title={tracker.isDirty ? 'Save or discard changes first' : ''}
-            onclick={() => (creating = !creating)}
+            onclick={toggleCreateBlock}
           >{creating ? 'Cancel' : '+ New block'}</Button>
         {/if}
       </div>
       {#if creating}
         <form class="create" onsubmit={(e) => { e.preventDefault(); createBlock(); }}>
-          <input placeholder="Title" bind:value={newTitle} required />
-          <!-- Mirrors backend regex schemas.py: ^[a-z0-9]+(?:-[a-z0-9]+)*$
-               (HTML auto-anchors patterns). The looser [a-z0-9-]+ would let
-               --foo / foo-- pass the browser then 422 at the server. -->
-          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" />
+          <div class="field">
+            <input placeholder="Title" bind:value={newTitle} required oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+            {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+          </div>
+          <div class="field">
+            <!-- Mirrors backend regex schemas.py: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+                 (HTML auto-anchors patterns). The looser [a-z0-9-]+ would let
+                 --foo / foo-- pass the browser then 422 at the server. -->
+            <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+            {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
+          </div>
+          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
           <Button type="submit" disabled={tracker.isDirty || busy} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
         </form>
       {/if}
@@ -326,8 +352,11 @@
   .meta label { display: block; margin: var(--space-2) 0; }
   .meta textarea, .meta input[type=number] { width: 100%; }
   .head { display: flex; justify-content: space-between; align-items: center; }
-  .create { display: flex; gap: var(--space-2); margin: var(--space-2) 0; }
-  .create input { flex: 1; }
+  .create { display: flex; gap: var(--space-2); margin: var(--space-2) 0; flex-wrap: wrap; align-items: flex-start; }
+  .create input { flex: 1; width: 100%; }
+  .create .field { flex: 1; display: flex; flex-direction: column; }
+  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
+  .form-err { color: var(--danger); font-size: 0.9rem; flex-basis: 100%; margin: 0; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
   .state-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); border-top: 1px solid var(--border); }
