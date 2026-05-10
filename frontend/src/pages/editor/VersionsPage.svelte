@@ -48,11 +48,12 @@
   async function createVersion() {
     if (!course) return;
     // bind:value on <input type="number"> yields null when empty and NaN on
-    // partial input; both fail the backend's ge=1/le=10 constraint with a
-    // generic 422. Validate client-side before POST.
+    // partial input; decimals (e.g. 5.5) parse cleanly but the backend
+    // requires int (Pydantic ge=1/le=10) and 422s with an opaque message.
+    // Validate client-side before POST.
     const n = max_quiz_attempts;
-    if (typeof n !== 'number' || !Number.isFinite(n) || n < 1 || n > 10) {
-      pushToast('Max quiz attempts must be between 1 and 10', 'error');
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 10) {
+      pushToast('Max quiz attempts must be a whole number between 1 and 10', 'error');
       return;
     }
     busy = true;
@@ -123,7 +124,7 @@
           <label>Max quiz attempts
             <!-- Raw <input> — `Input.svelte` doesn't accept min/max; opening it up
                  would be unrelated work. Native browser validation gives min/max bounds. -->
-            <input type="number" min="1" max="10" required bind:value={max_quiz_attempts} />
+            <input type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} />
           </label>
           <Button type="submit" disabled={busy} loading={busy}>Create</Button>
         </form>
