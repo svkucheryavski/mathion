@@ -69,21 +69,24 @@
     busy = true;
     try {
       await api.patch(`/api/versions/${savedVid}`, { info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
-      await loadAdminTree(savedVid, { force: true });
-      // The store leaves `value` untouched on refetch error — it only sets
-      // `error`. So a "fresh.version.id === savedVid" check would happily
-      // pass on a failed refetch (prior value has the same id) and reset
-      // tracker against stale pre-PATCH data. Read `error` directly.
-      const fresh = currentEditorVersion.value;
-      const refetchOk = !currentEditorVersion.error && !!fresh && fresh.version.id === savedVid;
-      if (refetchOk) {
-        savedTracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+      const result = await loadAdminTree(savedVid, { force: true });
+      if (result === 'discarded') {
+        // Refetch was invalidated by a newer navigation/clear (typically the
+        // user navigated away mid-await — onDestroy runs clearEditorVersion).
+        // PATCH itself succeeded; do not show "refresh failed". The tracker
+        // is unmounting anyway, so reset is unnecessary.
+        pushToast('Saved', 'success');
+      } else if (result === 'ok') {
+        const fresh = currentEditorVersion.value;
+        if (fresh && fresh.version.id === savedVid) {
+          savedTracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+        }
         pushToast('Saved', 'success');
       } else {
-        // PATCH succeeded server-side but the follow-up GET failed (or the
-        // store load was invalidated by a newer navigation). Baseline against
-        // the values we PATCHed so the tracker isn't stuck dirty against
-        // pre-save values. Toast severity is 'info' — the save itself worked.
+        // result === 'error': PATCH succeeded server-side but the follow-up
+        // GET failed. Baseline against the values we PATCHed so the tracker
+        // isn't stuck dirty against pre-save values. Severity is 'info' —
+        // the save itself worked.
         savedTracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
         pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }

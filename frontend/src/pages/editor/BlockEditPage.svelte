@@ -64,16 +64,19 @@
     busy = true;
     try {
       await api.patch(`/api/blocks/${savedBid}`, { title: sentTitle, info: sentInfo });
-      await loadAdminTree(savedVid, { force: true });
-      // Refetch may have failed silently — store keeps prior `value` and only
-      // sets `error`. Read error directly. On failure, baseline against the
-      // values we sent (server accepted them) so the form isn't stuck dirty.
-      const fresh = currentEditorVersion.value?.blocks.find((x) => x.id === savedBid);
-      const refetchOk = !currentEditorVersion.error && !!fresh;
-      if (refetchOk) {
-        savedTracker.reset({ title: fresh.title, info: fresh.info });
+      const result = await loadAdminTree(savedVid, { force: true });
+      if (result === 'discarded') {
+        // Refetch invalidated by newer navigation/clear (e.g. user navigated
+        // away mid-await — onDestroy runs clearEditorVersion). Save succeeded;
+        // skip the misleading "refresh failed" toast.
+        pushToast('Saved', 'success');
+      } else if (result === 'ok') {
+        const fresh = currentEditorVersion.value?.blocks.find((x) => x.id === savedBid);
+        if (fresh) savedTracker.reset({ title: fresh.title, info: fresh.info });
         pushToast('Saved', 'success');
       } else {
+        // result === 'error': refetch GET failed. Baseline against sent
+        // values so the form isn't stuck dirty against pre-save values.
         savedTracker.reset({ title: sentTitle, info: sentInfo });
         pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }

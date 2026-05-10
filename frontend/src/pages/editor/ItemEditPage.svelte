@@ -115,25 +115,30 @@
     busy = true;
     try {
       await api.patch(`/api/items/${savedIid}`, body);
-      await loadAdminTree(savedVid, { force: true });
-      // Read currentEditorVersion.error directly — store leaves `value`
-      // untouched on refetch error and only sets `.error`. On refetch
-      // failure, baseline against the values we PATCHed (server accepted
-      // them) so the form isn't stuck dirty against pre-save values.
-      const fresh = currentEditorVersion.value
-        ?.blocks.find((b) => b.id === savedBid)
-        ?.sequences.find((s) => s.id === savedSid)
-        ?.items.find((x) => x.id === savedIid);
-      const refetchOk = !currentEditorVersion.error && !!fresh && fresh.type === savedItemType;
-      if (refetchOk) {
-        if (savedItemType === 'static_page') {
-          (savedTracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: fresh.title, content_md: fresh.content_md ?? '' });
-        } else if (savedItemType === 'video') {
-          (savedTracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url ?? '' });
+      const result = await loadAdminTree(savedVid, { force: true });
+      if (result === 'discarded') {
+        // Refetch invalidated by newer navigation/clear (e.g. user navigated
+        // away mid-await — onDestroy runs clearEditorVersion). Save succeeded;
+        // skip the misleading "refresh failed" toast and don't toggle the
+        // banner-suppression flag (the page is unmounting anyway).
+        pushToast('Saved', 'success');
+      } else if (result === 'ok') {
+        const fresh = currentEditorVersion.value
+          ?.blocks.find((b) => b.id === savedBid)
+          ?.sequences.find((s) => s.id === savedSid)
+          ?.items.find((x) => x.id === savedIid);
+        if (fresh && fresh.type === savedItemType) {
+          if (savedItemType === 'static_page') {
+            (savedTracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: fresh.title, content_md: fresh.content_md ?? '' });
+          } else if (savedItemType === 'video') {
+            (savedTracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url ?? '' });
+          }
         }
         postSaveRefetchFailed = false;
         pushToast('Saved', 'success');
       } else {
+        // result === 'error': refetch GET failed. Baseline against sent
+        // values (server accepted them) so the form isn't stuck dirty.
         if (savedItemType === 'static_page') {
           (savedTracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: sentTitle, content_md: sentContentMd ?? '' });
         } else if (savedItemType === 'video') {
