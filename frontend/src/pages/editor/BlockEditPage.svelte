@@ -35,7 +35,17 @@
   async function ensureLoaded() {
     if (!vidValid || !bidValid) return;
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
-    const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === bid);
+    // Guard against a silent loadAdminTree failure: the store keeps the
+    // previous `value` on error and only sets `.error`, so a same-id block
+    // from the prior version could match `find()` and seed the tracker
+    // with stale data. Require the store value to be for the active vid.
+    const cur = currentEditorVersion.value;
+    if (!cur || cur.version.id !== vid) return;
+    const fresh = cur.blocks.find((b) => b.id === bid);
+    // We only rebuild the tracker when bid changes. Concurrent-admin edits
+    // that mutate this block's title/info while the tracker is clean are
+    // not auto-resynced — the user must navigate away and back, or save
+    // and accept whatever the server returned.
     if (fresh && trackerBid !== bid) {
       tracker = makeDirtyTracker<Form>({ title: fresh.title, info: fresh.info });
       trackerBid = bid;
@@ -74,6 +84,10 @@
     }
   }
   function discard() {
+    // Intentionally reads LIVE `block` (not a captured baseline like save()
+    // does). Discard means "throw away my edits and show whatever the server
+    // currently has" — if a refetch landed between Edit-start and Discard,
+    // we want the freshest values, not the ones the user started from.
     if (tracker && block) tracker.reset({ title: block.title, info: block.info });
   }
 
