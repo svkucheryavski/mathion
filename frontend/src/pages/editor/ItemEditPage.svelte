@@ -42,10 +42,27 @@
                      | ReturnType<typeof makeDirtyTracker<VideoForm>> | null>(null);
   let trackerIid = $state<number | null>(null);
   let busy = $state(false);
+  // Suppress the inline "couldn't load" banner after a successful save whose
+  // post-save refetch failed. The toast already covered it; the form is
+  // showing the values we PATCHed (server accepted), so the banner reads as
+  // a contradiction. Cleared on the next ensureLoaded that succeeds.
+  let postSaveRefetchFailed = $state(false);
+
+  // Block save when a video item has empty video_url. Server requires a non-empty
+  // value (item invariant), so without this gate a programmatic clear (or the
+  // user clearing the field then hitting Cmd+S) would PATCH '' and 422 / corrupt
+  // state. <input type="url" required> only catches the form-submit path.
+  const videoUrlEmpty = $derived(
+    item?.type === 'video' && tracker
+      ? (tracker.current as VideoForm).video_url.trim() === ''
+      : false,
+  );
 
   async function ensureLoaded() {
     if (!vidValid || !bidValid || !sidValid || !iidValid) return;
     if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
+    // A successful refetch clears the post-save banner-suppression flag.
+    if (!currentEditorVersion.error) postSaveRefetchFailed = false;
     // Guard against silent loadAdminTree failure: store leaves `value`
     // untouched on refetch error and only sets `.error`, so a same-id item from the prior version could
     // match `find()` and seed the tracker with stale data.
@@ -86,6 +103,13 @@
       body.content_md = sentContentMd;
     } else if (savedItemType === 'video') {
       sentVideoUrl = (savedTracker.current as VideoForm).video_url;
+      // Defensive client-side guard: backend item invariant requires non-empty
+      // video_url. The Save button is also disabled in this state, but a
+      // programmatic invocation could bypass that. Toast and bail.
+      if (sentVideoUrl.trim() === '') {
+        pushToast('Video URL is required', 'error');
+        return;
+      }
       body.video_url = sentVideoUrl;
     }
     busy = true;
@@ -107,6 +131,7 @@
         } else if (savedItemType === 'video') {
           (savedTracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url ?? '' });
         }
+        postSaveRefetchFailed = false;
         pushToast('Saved', 'success');
       } else {
         if (savedItemType === 'static_page') {
@@ -114,6 +139,9 @@
         } else if (savedItemType === 'video') {
           (savedTracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: sentTitle, video_url: sentVideoUrl ?? '' });
         }
+        // Banner would say "couldn't load" while the form shows the values we
+        // just sent — misleading. Suppress until next successful refetch.
+        postSaveRefetchFailed = true;
         pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }
     } catch (e) {
@@ -147,6 +175,10 @@
       navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}`);
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      // Refetch on failure: a 403 from a state transition (e.g. version got
+      // published mid-confirm) means our cached `perms` is stale and the
+      // Delete button would otherwise stay enabled against the new state.
+      await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -174,7 +206,7 @@
     <h1>Not found</h1>
     <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${sid}`)}>← Back</Button>
   {:else if perms}
-    {#if loadError}
+    {#if loadError && !postSaveRefetchFailed}
       <p class="banner err">{loadError}</p>
     {/if}
     <header>
@@ -197,7 +229,12 @@
           </label>
         {/if}
         <div class="row">
-          <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
+          <Button
+            onclick={save}
+            disabled={!tracker.isDirty || busy || videoUrlEmpty}
+            loading={busy}
+            title={videoUrlEmpty ? 'Video URL is required' : ''}
+          >Save</Button>
           <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
         </div>
       </section>
@@ -206,9 +243,13 @@
         <p><em>Not editable in this slice.</em></p>
         {#if item.type === 'quiz'}
           <p>{item.questions_count} question{item.questions_count === 1 ? '' : 's'}. Quiz authoring UI lands in slice 2; questions are managed via the API for now.</p>
-        {:else}
+        {:else if item.type === 'interactive_app'}
           <p>Interactive-app editing lands in slice 2.</p>
         {/if}
+        <!-- Intentionally no {:else} fallback: when a future item type is
+             added to the union (e.g. mini_project), this section silently
+             falls through to just the "Not editable" headline rather than
+             mislabeling the new type as Interactive-app. -->
       </section>
     {/if}
 
@@ -223,10 +264,12 @@
       </section>
     {/if}
 
-    {#if tracker}
-      {@const t = tracker}
-      <DirtyGuard isDirty={() => t.isDirty} />
-    {/if}
+    <!-- Closure must re-read live `tracker` on every invocation. {@const t = tracker}
+         + isDirty={() => t.isDirty} would snapshot the original tracker reference at
+         template-render time; DirtyGuard.onMount runs ONCE and would close over the
+         stale t even after ensureLoaded reassigns tracker on iid change. Same class
+         as the Task-13 closure-snapshot bug. -->
+    <DirtyGuard isDirty={() => tracker?.isDirty ?? false} />
   {/if}
 </div>
 
