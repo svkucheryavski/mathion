@@ -7,9 +7,11 @@
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import MarkdownEditor from '../../components/editor/MarkdownEditor.svelte';
+  import VideoFrame from '../../components/items/VideoFrame.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { safeIframeUrl } from '../../lib/safeIframeUrl';
 
   let { courseSlug, versionId, blockId, sequenceId, itemId }: {
     courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
@@ -58,6 +60,30 @@
     item?.type === 'video' && tracker
       ? (tracker.current as VideoForm).video_url.trim() === ''
       : false,
+  );
+
+  // Debounced live preview for the video editor. Re-rendering the iframe on
+  // every keystroke would spam network requests and visibly thrash the player;
+  // 500ms after the last edit is the sweet spot. Validation via safeIframeUrl
+  // keeps javascript:/data: out of the iframe src and silently hides the
+  // preview for partial / malformed input rather than showing a broken page.
+  let videoPreviewUrl = $state<string | null>(null);
+  $effect(() => {
+    if (item?.type !== 'video' || !tracker) {
+      videoPreviewUrl = null;
+      return;
+    }
+    const raw = (tracker.current as VideoForm).video_url;
+    const handle = setTimeout(() => {
+      videoPreviewUrl = safeIframeUrl(raw);
+    }, 500);
+    return () => clearTimeout(handle);
+  });
+
+  // Readonly preview (disabled / archived versions): server value is fixed, so
+  // no debounce — derive directly from item.video_url.
+  const readonlyVideoPreviewUrl = $derived(
+    item?.type === 'video' ? safeIframeUrl(item.video_url) : null,
   );
 
   async function ensureLoaded() {
@@ -235,6 +261,14 @@
           <label>Video URL
             <input type="url" bind:value={t.current.video_url} required placeholder="https://…" />
           </label>
+          <small class="hint">
+            Use a YouTube or Vimeo <strong>embed</strong> URL (e.g.
+            <code>https://www.youtube.com/embed/VIDEO_ID</code>) — regular
+            watch URLs won't load in an iframe.
+          </small>
+          {#if videoPreviewUrl}
+            <VideoFrame src={videoPreviewUrl} title={t.current.title || 'Video preview'} />
+          {/if}
         {/if}
         <div class="row">
           <Button
@@ -259,7 +293,12 @@
           <MarkdownEditor versionId={vid} value={item.content_md ?? ''} readOnly />
         {:else if item.type === 'video'}
           <h3>{item.title}</h3>
-          {#if item.video_url}
+          {#if readonlyVideoPreviewUrl}
+            <VideoFrame src={readonlyVideoPreviewUrl} title={item.title} />
+            <p><a href={readonlyVideoPreviewUrl} target="_blank" rel="noopener noreferrer">{readonlyVideoPreviewUrl}</a></p>
+          {:else if item.video_url}
+            <!-- URL stored on the server but rejected by safeIframeUrl (legacy
+                 data, non-http(s) scheme). Show the link only — never iframe. -->
             <p><a href={item.video_url} target="_blank" rel="noopener noreferrer">{item.video_url}</a></p>
           {:else}
             <p><em>No video URL</em></p>
@@ -312,4 +351,6 @@
   .row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
   .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
   .readonly { padding: var(--space-3); background: #f7f7f7; border-radius: var(--radius); }
+  .hint { display: block; margin: 0 0 var(--space-2) 0; color: var(--muted, #666); font-size: 0.85rem; }
+  .hint code { background: rgba(0, 0, 0, 0.06); padding: 0 0.25rem; border-radius: 3px; font-size: 0.85em; }
 </style>
