@@ -57,10 +57,14 @@
       pushToast('Max quiz attempts must be a whole number between 1 and 10', 'error');
       return;
     }
-    // Capture the values + vid at PATCH-time so a rapid v3→v4 navigation
-    // mid-await can't make us reset the tracker against the wrong version.
+    // Capture vid + values + the tracker REFERENCE at PATCH-time. A rapid
+    // v3→v4 navigation mid-await would re-run ensureLoaded and reassign the
+    // module-let `tracker` to a fresh v4 tracker; reading `tracker` post-await
+    // would then reset v4's tracker with v3's sent values. Pin the v3 tracker
+    // here so the reset always lands on the version we actually saved.
     const savedVid = vid;
-    const sentInfoMd = tracker.current.info_md;
+    const savedTracker = tracker;
+    const sentInfoMd = savedTracker.current.info_md;
     const sentAttempts = n;
     busy = true;
     try {
@@ -73,14 +77,15 @@
       const fresh = currentEditorVersion.value;
       const refetchOk = !currentEditorVersion.error && !!fresh && fresh.version.id === savedVid;
       if (refetchOk) {
-        tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+        savedTracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
         pushToast('Saved', 'success');
       } else {
         // PATCH succeeded server-side but the follow-up GET failed (or the
-        // user navigated away). Baseline against what we PATCHed so the
-        // tracker isn't stuck dirty against pre-save values.
-        tracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
-        pushToast('Saved (refresh failed — reload to see latest)', 'error');
+        // store load was invalidated by a newer navigation). Baseline against
+        // the values we PATCHed so the tracker isn't stuck dirty against
+        // pre-save values. Toast severity is 'info' — the save itself worked.
+        savedTracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
+        pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
