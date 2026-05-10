@@ -246,7 +246,27 @@
           <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
         </div>
       </section>
-    {:else if !editable}
+    {:else if editable}
+      <!-- Editable item type but text-edit perms are off (disabled / archived
+           version). Spec §11 item 7: "Disabled-state version → Preview returns
+           403 → inline error." Render a read-only preview so the user can see
+           the content and the /render 403 surfaces inline. Without this the
+           editor short-circuited to nothing on disabled versions, leaving the
+           checklist item unrealizable through the UI. -->
+      <section class="readonly">
+        {#if item.type === 'static_page'}
+          <h3>{item.title}</h3>
+          <MarkdownEditor versionId={vid} value={item.content_md ?? ''} readOnly />
+        {:else if item.type === 'video'}
+          <h3>{item.title}</h3>
+          {#if item.video_url}
+            <p><a href={item.video_url} target="_blank" rel="noopener noreferrer">{item.video_url}</a></p>
+          {:else}
+            <p><em>No video URL</em></p>
+          {/if}
+        {/if}
+      </section>
+    {:else}
       <section class="readonly">
         <p><em>Not editable in this slice.</em></p>
         {#if item.type === 'quiz'}
