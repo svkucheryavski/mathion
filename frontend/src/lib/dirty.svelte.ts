@@ -12,25 +12,30 @@ export type DirtyTracker<T extends Record<string, Allowed>> = {
 };
 
 export function makeDirtyTracker<T extends Record<string, Allowed>>(initial: T): DirtyTracker<T> {
-  // Both snapshot and current are $state proxies. Snapshot reactivity is
-  // critical for the post-save flow: reset() may be called with values that
-  // already match what the user typed (server returned exactly what was sent).
-  // In that case, current[k] = next[k] is a same-value write — Svelte 5 skips
-  // the notification — so reactive consumers (Save button disabled state,
-  // DirtyGuard) would remain stuck on the previous "dirty" reading. A reactive
-  // snapshot fixes this: writes to snapshot[k] DO notify when the value
-  // changes from old to new, forcing isDirty to re-evaluate.
-  // Note: only keys present in the snapshot count toward isDirty. The flat
-  // `Record<string, Allowed>` type allows extra runtime keys; consumers should
-  // pass a strictly-typed object literal to avoid accidental untracked fields.
+  // Contract: both `snapshot` and `current` are $state proxies — the isDirty
+  // getter reads both on every evaluation, so both must notify reactive
+  // consumers (Save button disabled state, DirtyGuard) when they change.
+  // The non-obvious case is reset() after a post-save refetch where the
+  // server returned exactly what the user typed: `current[k] = next[k]` is
+  // a same-value write Svelte 5 skips, so without a reactive snapshot the
+  // consumer would stay stuck on the old "dirty" reading. Because snapshot
+  // is $state, `snapshot[k] = next[k]` (going 'a' → 'b' for example) DOES
+  // notify, forcing isDirty to re-evaluate. See test
+  // 'reactive consumer reruns when reset() makes current a same-value write'
+  // at dirty.test.ts:79 for the discriminating regression repro.
   const snapshot = $state<T>({ ...initial });
   const current = $state<T>({ ...initial });
 
   return {
     current,
     get isDirty(): boolean {
-      for (const k of Object.keys(snapshot) as (keyof T)[]) {
-        if (current[k] !== snapshot[k]) return true;
+      // Iterate over the UNION of keys: a caller that adds a key to current
+      // not present in initial must still see isDirty flip true. The TS
+      // literal-type discipline guards most call sites at compile-time, but
+      // the runtime contract should match the type contract.
+      const keys = new Set<string>([...Object.keys(snapshot), ...Object.keys(current)]);
+      for (const k of keys) {
+        if (current[k as keyof T] !== snapshot[k as keyof T]) return true;
       }
       return false;
     },

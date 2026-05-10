@@ -97,4 +97,15 @@ describe('makeDirtyTracker', () => {
     expect(observed).toEqual([false, true, false]);
     cleanup();
   });
+
+  // C-I2: isDirty must consider the UNION of keys in snapshot and current.
+  // If a caller mutates a key not in the initial snapshot, the dirty getter
+  // must still flip true. Iterating over snapshot keys only would silently
+  // miss this case and leave Save / DirtyGuard unresponsive.
+  it('detects dirty when current has a key not present in initial snapshot', () => {
+    const t = makeDirtyTracker<Record<string, string>>({ a: '1' });
+    expect(t.isDirty).toBe(false);
+    t.current.b = 'x'; // key not in snapshot
+    expect(t.isDirty).toBe(true);
+  });
 });
