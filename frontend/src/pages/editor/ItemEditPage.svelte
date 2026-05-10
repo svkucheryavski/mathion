@@ -12,6 +12,7 @@
   import Spinner from '../../components/ui/Spinner.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { safeIframeUrl } from '../../lib/safeIframeUrl';
+  import { normalizeVideoUrl } from '../../lib/normalizeVideoUrl';
 
   let { courseSlug, versionId, blockId, sequenceId, itemId }: {
     courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
@@ -64,9 +65,11 @@
 
   // Debounced live preview for the video editor. Re-rendering the iframe on
   // every keystroke would spam network requests and visibly thrash the player;
-  // 500ms after the last edit is the sweet spot. Validation via safeIframeUrl
-  // keeps javascript:/data: out of the iframe src and silently hides the
-  // preview for partial / malformed input rather than showing a broken page.
+  // 500ms after the last edit is the sweet spot. The pipeline is
+  // normalizeVideoUrl → safeIframeUrl: normalize rewrites YouTube watch /
+  // youtu.be / Vimeo URLs to their iframe-embed form (X-Frame-Options DENY
+  // blocks the watch-form load); safeIframeUrl gates non-http(s) and
+  // partial / malformed input so the iframe never tries to load junk.
   let videoPreviewUrl = $state<string | null>(null);
   $effect(() => {
     if (item?.type !== 'video' || !tracker) {
@@ -75,15 +78,17 @@
     }
     const raw = (tracker.current as VideoForm).video_url;
     const handle = setTimeout(() => {
-      videoPreviewUrl = safeIframeUrl(raw);
+      videoPreviewUrl = safeIframeUrl(normalizeVideoUrl(raw));
     }, 500);
     return () => clearTimeout(handle);
   });
 
   // Readonly preview (disabled / archived versions): server value is fixed, so
-  // no debounce — derive directly from item.video_url.
+  // no debounce — derive directly. Server already stored the normalized form
+  // (we PATCH the normalized URL in save() below), so a re-normalize here is
+  // a no-op for new data; legacy rows go through the same pipeline.
   const readonlyVideoPreviewUrl = $derived(
-    item?.type === 'video' ? safeIframeUrl(item.video_url) : null,
+    item?.type === 'video' ? safeIframeUrl(normalizeVideoUrl(item.video_url ?? '')) : null,
   );
 
   async function ensureLoaded() {
@@ -131,7 +136,10 @@
       sentContentMd = (savedTracker.current as StaticForm).content_md;
       body.content_md = sentContentMd;
     } else if (savedItemType === 'video') {
-      sentVideoUrl = (savedTracker.current as VideoForm).video_url;
+      // Normalize at save-time so the backend stores the iframe-embed form.
+      // The student-side player iframes the value verbatim — without this,
+      // a watch URL would be saved and silently fail for every student.
+      sentVideoUrl = normalizeVideoUrl((savedTracker.current as VideoForm).video_url);
       // Defensive client-side guard: backend item invariant requires non-empty
       // video_url. The Save button is also disabled in this state, but a
       // programmatic invocation could bypass that. Toast and bail.
@@ -262,9 +270,8 @@
             <input type="url" bind:value={t.current.video_url} required placeholder="https://…" />
           </label>
           <small class="hint">
-            Use a YouTube or Vimeo <strong>embed</strong> URL (e.g.
-            <code>https://www.youtube.com/embed/VIDEO_ID</code>) — regular
-            watch URLs won't load in an iframe.
+            Paste any YouTube or Vimeo URL — we'll convert it to embed form
+            on save. For other providers, paste an iframe-embed URL.
           </small>
           {#if videoPreviewUrl}
             <VideoFrame src={videoPreviewUrl} title={t.current.title || 'Video preview'} />
@@ -352,5 +359,4 @@
   .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
   .readonly { padding: var(--space-3); background: #f7f7f7; border-radius: var(--radius); }
   .hint { display: block; margin: 0 0 var(--space-2) 0; color: var(--muted, #666); font-size: 0.85rem; }
-  .hint code { background: rgba(0, 0, 0, 0.06); padding: 0 0.25rem; border-radius: 3px; font-size: 0.85em; }
 </style>
