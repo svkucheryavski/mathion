@@ -1,17 +1,27 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
-  import type { Course, Version } from '../../lib/types';
+  import type { Version } from '../../lib/types';
+  import {
+    loadVersionsPage,
+    versionsPageState,
+    resetVersionsPageState,
+  } from '../../lib/versionsPageLoader.svelte';
 
   let { courseSlug }: { courseSlug: string } = $props();
 
-  let course = $state<Course | null>(null);
-  let versions = $state<Version[]>([]);
-  let loading = $state(true);
-  let error = $state<{ status: number; message: string } | null>(null);
+  // Reactive aliases over the module-scoped store. Routing slugs change in
+  // place (App.svelte rebinds `courseSlug` rather than remounting), so the
+  // store's stale-response guard prevents an in-flight 'a' from clobbering
+  // a freshly-loaded 'b' — see versionsPageLoader.svelte.ts header.
+  const course = $derived(versionsPageState.course);
+  const versions = $derived(versionsPageState.versions);
+  const loading = $derived(versionsPageState.loading);
+  const error = $derived(versionsPageState.error);
 
   // Single in-flight flag — disables every action button (Create / Open /
   // Disable / Enable / Delete) while a POST/DELETE is awaiting completion,
@@ -24,24 +34,7 @@
   let max_quiz_attempts = $state<number | null>(3);
 
   async function load() {
-    // Pin courseSlug at function start: a rapid prop-change (App.svelte
-    // updates `courseSlug` in place rather than remounting) mid-await would
-    // otherwise let the second GET fire against the new slug while we still
-    // wrote to `course` on success.
-    const savedSlug = courseSlug;
-    loading = true;
-    error = null;
-    try {
-      const fetched = await api.get<Course>(`/api/courses/by-slug/${encodeURIComponent(savedSlug)}`);
-      const list = await api.get<Version[]>(`/api/courses/${fetched.id}/versions`);
-      course = fetched;
-      versions = list;
-    } catch (e) {
-      if (e instanceof ApiError) error = { status: e.status, message: e.displayMessage };
-      else error = { status: 500, message: 'Could not load.' };
-    } finally {
-      loading = false;
-    }
+    await loadVersionsPage(courseSlug);
   }
 
   // Re-runs whenever `courseSlug` changes — App.svelte updates the prop in
@@ -51,6 +44,11 @@
     void courseSlug;
     void load();
   });
+
+  // Reset module state on unmount so a fresh entry doesn't briefly render the
+  // previous course's data before its own fetch resolves. Mirrors
+  // VersionEditPage's clearEditorVersion onDestroy.
+  onDestroy(() => resetVersionsPageState());
 
   async function createVersion() {
     if (!course) return;
