@@ -105,4 +105,62 @@ describe('currentEditorVersion', () => {
     expect(currentEditorVersion.error).toBe('Could not load version.');
     expect(currentEditorVersion.loading).toBe(false);
   });
+
+  // Outcome contract (D-C1): loadAdminTree returns one of 'ok' | 'error' |
+  // 'discarded' so callers can distinguish a refetch invalidated by a newer
+  // navigation (clearEditorVersion / a newer load) from a true server error.
+  // Without this, a save() followed by an unmount-driven clearEditorVersion
+  // would leave the store with value=null and the page would mistake the
+  // discarded refetch for a refetch failure and emit the misleading
+  // "refresh failed — reload to see latest" toast.
+  it('loadAdminTree returns "ok" on success', async () => {
+    vi.spyOn(apiModule.api, 'get').mockResolvedValue(tree(3));
+    const result = await loadAdminTree(3);
+    expect(result).toBe('ok');
+  });
+
+  it('loadAdminTree returns "error" on ApiError', async () => {
+    vi.spyOn(apiModule.api, 'get').mockRejectedValueOnce(new ApiError(500, 'boom'));
+    const result = await loadAdminTree(8);
+    expect(result).toBe('error');
+  });
+
+  it('loadAdminTree returns "discarded" when clearEditorVersion runs mid-flight', async () => {
+    let resolve!: (v: unknown) => void;
+    const deferred = new Promise((r) => {
+      resolve = r;
+    });
+    vi.spyOn(apiModule.api, 'get').mockImplementationOnce(() => deferred as Promise<unknown>);
+    const p = loadAdminTree(7);
+    clearEditorVersion();
+    resolve(tree(7));
+    const result = await p;
+    expect(result).toBe('discarded');
+  });
+
+  it('loadAdminTree returns "discarded" when a newer load supersedes it', async () => {
+    let resolveFirst!: (v: unknown) => void;
+    const slow = new Promise((r) => {
+      resolveFirst = r;
+    });
+    vi.spyOn(apiModule.api, 'get')
+      .mockImplementationOnce(() => slow as Promise<unknown>)
+      .mockResolvedValueOnce(tree(4));
+    const p1 = loadAdminTree(3);
+    const p2 = loadAdminTree(4);
+    const r2 = await p2;
+    resolveFirst(tree(3));
+    const r1 = await p1;
+    expect(r2).toBe('ok');
+    expect(r1).toBe('discarded');
+  });
+
+  it('dedupe path returns the in-flight result type', async () => {
+    // Concurrent same-id calls share one promise — both must report 'ok' so
+    // callers awaiting the dedupe path don't think their request was tossed.
+    vi.spyOn(apiModule.api, 'get').mockResolvedValue(tree(3));
+    const [a, b] = await Promise.all([loadAdminTree(3), loadAdminTree(3)]);
+    expect(a).toBe('ok');
+    expect(b).toBe('ok');
+  });
 });

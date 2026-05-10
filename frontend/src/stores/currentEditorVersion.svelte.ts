@@ -11,9 +11,19 @@
 // the request whose token still equals the current token writes its result.
 // This keeps a slow response for an older versionId from clobbering a newer
 // one, and lets `clearEditorVersion` invalidate any in-flight request.
+//
+// Outcome contract (D-C1): `loadAdminTree` resolves to one of three explicit
+// outcomes so callers can distinguish "discarded — your refetch was
+// invalidated by a newer navigation/clear" from "error — the GET actually
+// failed". Without this, a page that calls save() → refetch → unmount races
+// onDestroy(clearEditorVersion()) and would otherwise mistake the discarded
+// refetch for a refetch failure (value === null after clear) and toast the
+// misleading "refresh failed — reload to see latest" message.
 
 import { api, ApiError } from '../lib/api';
 import type { AdminTree } from '../lib/types';
+
+export type LoadResult = 'ok' | 'error' | 'discarded';
 
 export const currentEditorVersion = $state<{
   value: AdminTree | null;
@@ -21,13 +31,13 @@ export const currentEditorVersion = $state<{
   error: string | null;
 }>({ value: null, loading: false, error: null });
 
-let inflight: { versionId: number; token: number; promise: Promise<void> } | null = null;
+let inflight: { versionId: number; token: number; promise: Promise<LoadResult> } | null = null;
 let token = 0;
 
 export async function loadAdminTree(
   versionId: number,
   opts: { force?: boolean } = {},
-): Promise<void> {
+): Promise<LoadResult> {
   if (!opts.force && inflight && inflight.versionId === versionId) {
     return inflight.promise;
   }
@@ -35,15 +45,17 @@ export async function loadAdminTree(
   currentEditorVersion.loading = true;
   currentEditorVersion.error = null;
 
-  const promise: Promise<void> = (async () => {
+  const promise: Promise<LoadResult> = (async () => {
     try {
       const tree = await api.get<AdminTree>(`/api/versions/${versionId}/admin-tree`);
-      if (myToken !== token) return;
+      if (myToken !== token) return 'discarded';
       currentEditorVersion.value = tree;
+      return 'ok';
     } catch (e) {
-      if (myToken !== token) return;
+      if (myToken !== token) return 'discarded';
       currentEditorVersion.error =
         e instanceof ApiError ? e.displayMessage : 'Could not load version.';
+      return 'error';
     } finally {
       if (myToken === token) {
         currentEditorVersion.loading = false;
