@@ -1,6 +1,238 @@
 <script lang="ts">
-  let { courseSlug, versionId, blockId }: {
-    courseSlug: string; versionId: string; blockId: string;
-  } = $props();
+  import { onDestroy } from 'svelte';
+  import { api, ApiError } from '../../lib/api';
+  import { navigate } from '../../lib/router.svelte';
+  import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { makeDirtyTracker } from '../../lib/dirty.svelte';
+  import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import Button from '../../components/ui/Button.svelte';
+  import Spinner from '../../components/ui/Spinner.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
+
+  let { courseSlug, versionId, blockId }: { courseSlug: string; versionId: string; blockId: string } = $props();
+  const vid = $derived(Number(versionId));
+  const bid = $derived(Number(blockId));
+  const vidValid = $derived(Number.isInteger(vid) && vid > 0);
+  const bidValid = $derived(Number.isInteger(bid) && bid > 0);
+
+  const tree = $derived(currentEditorVersion.value);
+  const loadError = $derived(currentEditorVersion.error);
+  const v = $derived(tree?.version);
+  const block = $derived(tree?.blocks.find((b) => b.id === bid));
+  const valid = $derived(!!tree && tree.course.slug === courseSlug && !!block && block.version_id === vid);
+  const perms = $derived(v ? versionPermissions(v) : null);
+
+  type Form = { title: string; info: string };
+  let tracker = $state<ReturnType<typeof makeDirtyTracker<Form>> | null>(null);
+  let trackerBid = $state<number | null>(null);
+  let busy = $state(false);
+
+  let creating = $state(false);
+  let newTitle = $state('');
+  let newSlug = $state('');
+
+  async function ensureLoaded() {
+    if (!vidValid || !bidValid) return;
+    if (!tree || tree.version.id !== vid) await loadAdminTree(vid);
+    const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === bid);
+    if (fresh && trackerBid !== bid) {
+      tracker = makeDirtyTracker<Form>({ title: fresh.title, info: fresh.info });
+      trackerBid = bid;
+    }
+  }
+
+  async function save() {
+    if (!tracker) return;
+    // Pin everything at PATCH-start so v3→v4 / b12→b13 navigation mid-await
+    // can't redirect the request or corrupt the post-await reset.
+    const savedVid = vid;
+    const savedBid = bid;
+    const savedTracker = tracker;
+    const sentTitle = savedTracker.current.title;
+    const sentInfo = savedTracker.current.info;
+    busy = true;
+    try {
+      await api.patch(`/api/blocks/${savedBid}`, { title: sentTitle, info: sentInfo });
+      await loadAdminTree(savedVid, { force: true });
+      // Refetch may have failed silently — store keeps prior `value` and only
+      // sets `error`. Read error directly. On failure, baseline against the
+      // values we sent (server accepted them) so the form isn't stuck dirty.
+      const fresh = currentEditorVersion.value?.blocks.find((x) => x.id === savedBid);
+      const refetchOk = !currentEditorVersion.error && !!fresh;
+      if (refetchOk) {
+        savedTracker.reset({ title: fresh.title, info: fresh.info });
+        pushToast('Saved', 'success');
+      } else {
+        savedTracker.reset({ title: sentTitle, info: sentInfo });
+        pushToast('Saved (refresh failed — reload to see latest)', 'info');
+      }
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
+    } finally {
+      busy = false;
+    }
+  }
+  function discard() {
+    if (tracker && block) tracker.reset({ title: block.title, info: block.info });
+  }
+
+  async function createSequence() {
+    busy = true;
+    try {
+      await api.post(`/api/blocks/${bid}/sequences`, { title: newTitle, slug: newSlug });
+      newTitle = ''; newSlug = ''; creating = false;
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create sequence', 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function reorder(idx: number, dir: -1 | 1) {
+    if (!block) return;
+    const seqs = [...block.sequences];
+    const target = idx + dir;
+    if (target < 0 || target >= seqs.length) return;
+    [seqs[idx], seqs[target]] = [seqs[target], seqs[idx]];
+    const order = seqs.map((s, i) => ({ id: s.id, order: i + 1 }));
+    busy = true;
+    try {
+      await api.post(`/api/blocks/${bid}/sequences/reorder`, { order });
+      await loadAdminTree(vid, { force: true });
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      await loadAdminTree(vid, { force: true });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteBlock() {
+    if (tracker?.isDirty || !block || !perms?.canEditStructure || block.sequences.length > 0) return;
+    if (!confirm(`Delete block "${block.title}"? This cannot be undone.`)) return;
+    busy = true;
+    try {
+      await api.delete(`/api/blocks/${bid}`);
+      navigate(`/courses/${courseSlug}/edit/v/${vid}`);
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  $effect(() => { void vid; void bid; void ensureLoaded(); });
+
+  // Drop the cached AdminTree on unmount so the next editor page doesn't
+  // briefly render stale data — store docstring requires this.
+  onDestroy(() => clearEditorVersion());
 </script>
-<div class="page"><h1>BlockEditPage (stub) — {courseSlug}/v{versionId}/b{blockId}</h1></div>
+
+<div class="page">
+  {#if !vidValid || !bidValid}
+    <h1>Bad URL</h1>
+    <p>Version "{versionId}" / block "{blockId}" is not a valid id pair.</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+  {:else if loadError && (!tree || tree.version.id !== vid)}
+    <h1>Couldn't load</h1>
+    <p>{loadError}</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← v{vid}</Button>
+  {:else if !tree || tree.version.id !== vid}
+    <Spinner />
+  {:else if !valid || !block || !v}
+    <h1>Not found</h1>
+    <p>This block does not belong to this version.</p>
+    <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← Back</Button>
+  {:else if tracker && perms}
+    {#if loadError}
+      <p class="banner err">{loadError}</p>
+    {/if}
+    <header>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}`)}>← v{vid}</Button>
+      <h1>Block: {block.title}</h1>
+    </header>
+
+    {#if perms.canEditTextFields}
+      <section class="meta">
+        <label>Title <input bind:value={tracker.current.title} required /></label>
+        <label>Info (markdown) <textarea bind:value={tracker.current.info} rows="3"></textarea></label>
+        <div class="row">
+          <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
+          <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
+        </div>
+      </section>
+    {/if}
+
+    <section class="seqs">
+      <div class="head">
+        <h2>Sequences</h2>
+        {#if perms.canEditStructure}
+          <Button
+            disabled={tracker.isDirty || busy}
+            title={tracker.isDirty ? 'Save or discard changes first' : ''}
+            onclick={() => (creating = !creating)}
+          >{creating ? 'Cancel' : '+ New sequence'}</Button>
+        {/if}
+      </div>
+      {#if creating}
+        <form class="create" onsubmit={(e) => { e.preventDefault(); createSequence(); }}>
+          <input placeholder="Title" bind:value={newTitle} required />
+          <!-- Mirrors backend SequenceCreate slug regex schemas.py:
+               ^[a-z0-9]+(?:-[a-z0-9]+)*$ (HTML auto-anchors). The looser
+               [a-z0-9-]+ would let --foo / foo-- pass the browser then 422. -->
+          <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" />
+          <Button type="submit" disabled={tracker.isDirty || busy} title={tracker.isDirty ? 'Save or discard changes first' : ''}>Create</Button>
+        </form>
+      {/if}
+      {#if block.sequences.length === 0}
+        <p class="empty">No sequences yet.</p>
+      {:else}
+        <ul>
+          {#each block.sequences as s, i (s.id)}
+            <li class="row">
+              <strong>S{i + 1}. {s.title}</strong>
+              <div class="actions">
+                {#if perms.canEditStructure}
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === 0} onclick={() => reorder(i, -1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move up'}>↑</Button>
+                  <Button variant="ghost" disabled={tracker.isDirty || busy || i === block.sequences.length - 1} onclick={() => reorder(i, 1)} title={tracker.isDirty ? 'Save or discard changes first' : 'Move down'}>↓</Button>
+                {/if}
+                <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}/sequences/${s.id}`)} disabled={busy}>Open</Button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    {#if perms.canEditStructure}
+      <section class="danger">
+        <Button
+          variant="ghost"
+          disabled={tracker.isDirty || busy || block.sequences.length > 0}
+          title={tracker.isDirty ? 'Save or discard changes first' : block.sequences.length > 0 ? 'Remove sequences first' : ''}
+          onclick={deleteBlock}
+        >Delete this block</Button>
+      </section>
+    {/if}
+
+    <DirtyGuard isDirty={() => tracker!.isDirty} />
+  {/if}
+</div>
+
+<style>
+  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .banner.err { background: #fdd; border-left: 3px solid #a33; padding: var(--space-2); color: #833; }
+  .meta, .seqs, .danger { margin: var(--space-4) 0; }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta input, .meta textarea { width: 100%; }
+  .head { display: flex; justify-content: space-between; align-items: center; }
+  .create { display: flex; gap: var(--space-2); margin: var(--space-2) 0; flex-wrap: wrap; }
+  .create input { flex: 1; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .empty { color: var(--muted); }
+</style>
