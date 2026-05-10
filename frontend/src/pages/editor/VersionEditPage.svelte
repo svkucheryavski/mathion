@@ -102,11 +102,15 @@
   }
 
   async function createBlock() {
+    // Pin route IDs at POST-start. A v3→v4 navigation mid-await would let
+    // `vid` reactively rebind and the post-POST refetch land on v4 instead
+    // of the v3 we just mutated.
+    const savedVid = vid;
     busy = true;
     try {
-      await api.post(`/api/versions/${vid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
+      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
       newTitle = ''; newSlug = ''; creating = false;
-      await loadAdminTree(vid, { force: true });
+      await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create block', 'error');
     } finally {
@@ -121,13 +125,16 @@
     if (target < 0 || target >= blocks.length) return;
     [blocks[idx], blocks[target]] = [blocks[target], blocks[idx]];
     const order = blocks.map((b, i) => ({ id: b.id, order: i + 1 }));
+    // Pin vid so a navigation race mid-await doesn't reorder/refetch the
+    // wrong version.
+    const savedVid = vid;
     busy = true;
     try {
-      await api.post(`/api/versions/${vid}/blocks/reorder`, { order });
-      await loadAdminTree(vid, { force: true });
+      await api.post(`/api/versions/${savedVid}/blocks/reorder`, { order });
+      await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-      await loadAdminTree(vid, { force: true });
+      await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -143,10 +150,13 @@
       enable: `Enable version ${vid}?`,
     };
     if (!confirm(prompts[action])) return;
+    // Pin vid at POST-start so a v3→v4 navigation mid-await doesn't transition
+    // the wrong version (and refetch it).
+    const savedVid = vid;
     busy = true;
     try {
-      await api.post(`/api/versions/${vid}/${action}`);
-      await loadAdminTree(vid, { force: true });
+      await api.post(`/api/versions/${savedVid}/${action}`);
+      await loadAdminTree(savedVid, { force: true });
       // Past-tense map — the naive `${action}d` produces "publishd"/"revertd".
       const past: Record<typeof action, string> = {
         publish: 'published', archive: 'archived', revert: 'reverted',
@@ -163,10 +173,14 @@
   async function deleteVersion() {
     if (tracker?.isDirty) return;
     if (!confirm(`Delete version ${vid}? This cannot be undone.`)) return;
+    // Pin vid + slug at DELETE-start so a navigation race mid-await doesn't
+    // delete the wrong version or send the user to the wrong /edit page.
+    const savedVid = vid;
+    const savedSlug = courseSlug;
     busy = true;
     try {
-      await api.delete(`/api/versions/${vid}`);
-      navigate(`/courses/${courseSlug}/edit`);
+      await api.delete(`/api/versions/${savedVid}`);
+      navigate(`/courses/${savedSlug}/edit`);
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     } finally {

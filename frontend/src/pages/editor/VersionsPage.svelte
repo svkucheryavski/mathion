@@ -24,11 +24,18 @@
   let max_quiz_attempts = $state<number | null>(3);
 
   async function load() {
+    // Pin courseSlug at function start: a rapid prop-change (App.svelte
+    // updates `courseSlug` in place rather than remounting) mid-await would
+    // otherwise let the second GET fire against the new slug while we still
+    // wrote to `course` on success.
+    const savedSlug = courseSlug;
     loading = true;
     error = null;
     try {
-      course = await api.get<Course>(`/api/courses/by-slug/${encodeURIComponent(courseSlug)}`);
-      versions = await api.get<Version[]>(`/api/courses/${course.id}/versions`);
+      const fetched = await api.get<Course>(`/api/courses/by-slug/${encodeURIComponent(savedSlug)}`);
+      const list = await api.get<Version[]>(`/api/courses/${fetched.id}/versions`);
+      course = fetched;
+      versions = list;
     } catch (e) {
       if (e instanceof ApiError) error = { status: e.status, message: e.displayMessage };
       else error = { status: 500, message: 'Could not load.' };
@@ -56,10 +63,16 @@
       pushToast('Max quiz attempts must be a whole number between 1 and 10', 'error');
       return;
     }
+    // Pin course.id + slug at POST-start. A prop-change mid-await would
+    // otherwise let `course.id` (the route field reactively rebound) and
+    // `courseSlug` drift to the new course, sending the user to the wrong
+    // edit page after a race.
+    const savedCourseId = course.id;
+    const savedSlug = courseSlug;
     busy = true;
     try {
-      const v = await api.post<Version>(`/api/courses/${course.id}/versions`, { info_md, max_quiz_attempts: n });
-      navigate(`/courses/${courseSlug}/edit/v/${v.id}`);
+      const v = await api.post<Version>(`/api/courses/${savedCourseId}/versions`, { info_md, max_quiz_attempts: n });
+      navigate(`/courses/${savedSlug}/edit/v/${v.id}`);
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Failed to create version';
       pushToast(msg, 'error');
@@ -72,6 +85,9 @@
     // Spec §8: all state transitions follow confirm → POST → refetch / toast.
     const verb = action === 'disable' ? 'Disable' : 'Enable';
     if (!confirm(`${verb} version ${v.id}?`)) return;
+    // Pin `v.id` already (closure arg). load() pins courseSlug internally, so
+    // a prop-change mid-await re-loads the original course's list, not the
+    // newly-routed-in slug.
     busy = true;
     try {
       await api.post(`/api/versions/${v.id}/${action}`);

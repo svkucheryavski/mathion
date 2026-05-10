@@ -163,13 +163,17 @@
     if (target < 0 || target >= items.length) return;
     [items[idx], items[target]] = [items[target], items[idx]];
     const order = items.map((it, i) => ({ id: it.id, order: i + 1 }));
+    // Pin route IDs at POST-start so a navigation race mid-await doesn't
+    // reorder/refetch the wrong sequence/version.
+    const savedVid = vid;
+    const savedSid = sid;
     busy = true;
     try {
-      await api.post(`/api/sequences/${sid}/items/reorder`, { order });
-      await loadAdminTree(vid, { force: true });
+      await api.post(`/api/sequences/${savedSid}/items/reorder`, { order });
+      await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-      await loadAdminTree(vid, { force: true });
+      await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -178,10 +182,16 @@
   async function deleteSequence() {
     if (tracker?.isDirty || !seq || !perms?.canEditStructure || seq.items.length > 0) return;
     if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.`)) return;
+    // Pin route IDs + slug at DELETE-start so a navigation race mid-await
+    // doesn't delete the wrong sequence or send the user to the wrong page.
+    const savedVid = vid;
+    const savedBid = bid;
+    const savedSid = sid;
+    const savedSlug = courseSlug;
     busy = true;
     try {
-      await api.delete(`/api/sequences/${sid}`);
-      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${bid}`);
+      await api.delete(`/api/sequences/${savedSid}`);
+      navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`);
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     } finally {

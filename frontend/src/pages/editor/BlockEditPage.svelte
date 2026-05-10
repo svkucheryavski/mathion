@@ -95,11 +95,16 @@
   }
 
   async function createSequence() {
+    // Pin route IDs at POST-start. A navigation race mid-await would
+    // otherwise let `bid`/`vid` reactively rebind and the post-POST refetch
+    // land on the wrong block/version.
+    const savedVid = vid;
+    const savedBid = bid;
     busy = true;
     try {
-      await api.post(`/api/blocks/${bid}/sequences`, { title: newTitle, slug: newSlug });
+      await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle, slug: newSlug });
       newTitle = ''; newSlug = ''; creating = false;
-      await loadAdminTree(vid, { force: true });
+      await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Could not create sequence', 'error');
     } finally {
@@ -114,13 +119,17 @@
     if (target < 0 || target >= seqs.length) return;
     [seqs[idx], seqs[target]] = [seqs[target], seqs[idx]];
     const order = seqs.map((s, i) => ({ id: s.id, order: i + 1 }));
+    // Pin vid + bid at POST-start so a navigation race mid-await doesn't
+    // reorder/refetch the wrong block.
+    const savedVid = vid;
+    const savedBid = bid;
     busy = true;
     try {
-      await api.post(`/api/blocks/${bid}/sequences/reorder`, { order });
-      await loadAdminTree(vid, { force: true });
+      await api.post(`/api/blocks/${savedBid}/sequences/reorder`, { order });
+      await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-      await loadAdminTree(vid, { force: true });
+      await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -129,10 +138,15 @@
   async function deleteBlock() {
     if (tracker?.isDirty || !block || !perms?.canEditStructure || block.sequences.length > 0) return;
     if (!confirm(`Delete block "${block.title}"? This cannot be undone.`)) return;
+    // Pin route IDs + slug at DELETE-start so a navigation race mid-await
+    // doesn't delete the wrong block or send the user to the wrong /v/n page.
+    const savedVid = vid;
+    const savedBid = bid;
+    const savedSlug = courseSlug;
     busy = true;
     try {
-      await api.delete(`/api/blocks/${bid}`);
-      navigate(`/courses/${courseSlug}/edit/v/${vid}`);
+      await api.delete(`/api/blocks/${savedBid}`);
+      navigate(`/courses/${savedSlug}/edit/v/${savedVid}`);
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     } finally {
