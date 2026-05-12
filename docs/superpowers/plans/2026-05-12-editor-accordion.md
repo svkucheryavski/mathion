@@ -1002,7 +1002,7 @@ Overwrite `frontend/src/pages/editor/VersionEditPage.svelte` with:
       <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
     {/if}
 
-    <VersionMetaForm {vid} {version}={v} />
+    <VersionMetaForm {vid} version={v} />
 
     <!-- Blocks accordion list lands in Task 12. -->
 
@@ -2094,10 +2094,11 @@ sed -n '1,200p' /Users/svkucheryavski/Documents/Developing/mathion/frontend/src/
 
 Then make these edits inside `<script>`:
 
-a) Add to imports:
+a) Add imports. Merge `tick` into the existing `from 'svelte'` import so there is a single line; add the remaining imports as new lines:
 
 ```typescript
-  import { tick } from 'svelte';
+  import { setContext, onDestroy, tick } from 'svelte';  // merge tick into the existing line
+  // …other existing imports unchanged…
   import { deriveExpansion } from '../../lib/deriveExpansion';
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
@@ -2132,7 +2133,7 @@ c) After the validation `$effect`, insert the focus `$effect` (declared THIRD):
   $effect(() => {
     const bid = routeBid;
     const sid = routeSid;
-    const t = currentEditorVersion.value;
+    const t = tree;
     if (!t) return;
 
     // Resolve deepest expanded headerId from current state.
