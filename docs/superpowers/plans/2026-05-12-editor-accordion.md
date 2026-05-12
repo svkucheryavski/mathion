@@ -4,7 +4,7 @@
 
 **Goal:** Collapse the 4-page admin editor (Versions → Version → Block → Sequence → Item) into a single VersionEditPage with a 2-level accordion (blocks → sequences). Item editing stays on its own page.
 
-**Architecture:** Svelte 5 runes throughout. Three routes (`/v/:vid`, `/blocks/:bid`, `/sequences/:sid`) all render the same VersionEditPage component — accordion expansion is derived directly from URL route params (no parallel state). Per-form dirty trackers register into a page-wide `SvelteSet` registry via `setContext`/`getContext` symbol key; DirtyGuard reads `() => isAnyDirty()` so its closure re-evaluates on every navigation. Stale-id fallback toasts + history-replaces to the nearest valid parent. Focus + scroll on deep-link / Back-Forward, but click-to-expand keeps focus on the clicked toggle (discriminator: compare `document.activeElement?.id` against the deepest expanded `headerId`).
+**Architecture:** Svelte 5 runes throughout. Three routes (`/v/:vid`, `/blocks/:bid`, `/sequences/:sid`) all render the same VersionEditPage component — accordion expansion is derived directly from URL route params (no parallel state). Per-form dirty trackers register into a page-wide `SvelteSet` registry via `setContext`/`getContext` symbol key; DirtyGuard reads `() => isAnyDirty()` so its closure re-evaluates on every navigation. Stale-id fallback toasts + history-replaces to the nearest valid parent. Focus + scroll on deep-link / Back-Forward, but click-to-expand keeps focus on the clicked toggle (discriminator: compare `document.activeElement?.id` against the deepest expanded `headerId`). Reorder ownership flows down: the list-owning parent (VersionEditPage owns block reorder, BlockAccordion owns sequence reorder, SequenceAccordion owns item reorder) holds the API call; child components receive `onMoveUp` / `onMoveDown` callbacks.
 
 **Tech Stack:** Svelte 5 (runes: `$state`, `$derived`, `$props`, `$effect`, `$bindable`), TypeScript, Vite, vitest (no `@testing-library/svelte`; component-level behavior covered by manual smoke checklist). `svelte/reactivity` for `SvelteSet`. No new dependencies.
 
@@ -17,6 +17,19 @@
 - `npm run check` — run svelte-check (type check)
 - `npm run dev` — dev server for smoke checks
 
+**Slice-1 conventions to use VERBATIM (verified at plan-writing time):**
+- Toasts: `import { pushToast } from '../../stores/toasts.svelte';` called as `pushToast(msg, 'success'|'info'|'error')`. There is **no** `toasts` named export in `lib/events.ts`.
+- Permissions: `import { versionPermissions } from '../../lib/versionPermissions';` then `const perms = $derived(v ? versionPermissions(v) : null);` and read `perms.canEditTextFields`, `perms.canEditStructure`, `perms.canEditVersionMeta`, `perms.canPublish`, `perms.canArchive`, `perms.canRevert`, `perms.canDisable`, `perms.canEnable`, `perms.canDeleteVersion`. **There is no `canEditTextFields(v)` callable** — only the factory.
+- Error mapping: `import { mapCreateError, type FieldErrors } from '../../lib/formErrors';` called as `mapCreateError(e, ['title','slug'])`; returns `{ fieldErrors: FieldErrors, globalMessage: string | null }`. On global-only errors slice-1 also toasts: `if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) pushToast(mapped.globalMessage, 'error');`.
+- Save 3-way LoadResult: every PATCH save follows the slice-1 pattern — `result === 'discarded'` → `pushToast('Saved', 'success')` and skip reset; `result === 'ok'` → reset against fresh server values + `pushToast('Saved', 'success')`; `result === 'error'` → reset against the sent values + `pushToast('Saved (refresh failed — reload to see latest)', 'info')`.
+- Reorder/delete recovery: on error, `await loadAdminTree(savedVid, { force: true });` to re-derive permissions.
+- Endpoint shapes (verified): block create `POST /api/versions/${vid}/blocks { title, slug, info: '' }`; sequence create `POST /api/blocks/${bid}/sequences { title, slug }`; item create `POST /api/sequences/${sid}/items { title, slug, type, content_md? | video_url? }`; reorder POSTs use `{ order: [{id, order}, ...] }`.
+- Slug inputs: `required pattern="[a-z0-9]+(-[a-z0-9]+)*"` (matches backend regex).
+- Block has `info: string` (NOT `info_md`). See `lib/types.ts:251`.
+- `AdminTree.course` is `{ id: number; name: string; slug: string }`. See `lib/types.ts:257`.
+- `ItemTypePicker` narrows to `'static_page' | 'video'`. Per-type required fields: `content_md` (textarea, auto-seed `# {title}\n`) for static_page; `video_url` (`type="url"`) for video.
+- Page header structure: `<Button variant="ghost" onclick={...back...}>← Versions</Button>` + `<h1>{tree.course.name} · v{v.id} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>` + disabled banner.
+
 ---
 
 ## File map
@@ -28,17 +41,17 @@
 - `frontend/src/tests/deriveExpansion.test.ts`
 - `frontend/src/lib/dirtyRegistry.svelte.ts` — `createDirtyRegistry`, `DIRTY_REGISTRY_KEY`, types
 - `frontend/src/tests/dirtyRegistry.test.ts`
-- `frontend/src/lib/handleStaleIdFallback.ts` — pure side-effect (with injected toast/navigate)
+- `frontend/src/lib/handleStaleIdFallback.ts` — pure side-effect dispatch (injected `pushToast` + `navigate`)
 - `frontend/src/tests/handleStaleIdFallback.test.ts`
 - `frontend/src/components/editor/VersionMetaForm.svelte` — extracted version-meta editor
 - `frontend/src/components/editor/AccordionHeader.svelte` — pure presentational header
-- `frontend/src/components/editor/ItemRow.svelte` — one item row
-- `frontend/src/components/editor/SequenceAccordion.svelte` — one sequence
-- `frontend/src/components/editor/BlockAccordion.svelte` — one block
+- `frontend/src/components/editor/ItemRow.svelte` — one item row (callbacks only)
+- `frontend/src/components/editor/SequenceAccordion.svelte` — one sequence (owns item list)
+- `frontend/src/components/editor/BlockAccordion.svelte` — one block (owns sequence list)
 
 **Modified files:**
 - `frontend/src/components/editor/DirtyGuard.svelte` — one-line copy update
-- `frontend/src/pages/editor/VersionEditPage.svelte` — full rewrite: provider + accordion list + effects
+- `frontend/src/pages/editor/VersionEditPage.svelte` — full rewrite: provider + accordion list + effects + block-reorder + state-actions
 - `frontend/src/routes.ts` — rebind 3 routes to `'VersionEditPage'`
 - `frontend/src/App.svelte` — remove `BlockEditPage` / `SequenceEditPage` imports + componentMap entries
 
@@ -106,6 +119,10 @@ describe('labelFor', () => {
   it('item-flavored case: empty title, non-empty slug, item fallback', () => {
     expect(labelFor('  ', 'worked-example-3', 'item 5')).toBe('worked-example-3');
   });
+
+  it('whitespace-only fallback also falls through to "untitled"', () => {
+    expect(labelFor('', '', '   ')).toBe('untitled');
+  });
 });
 ```
 
@@ -116,7 +133,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm test -- labelFor
 ```
 
-Expected: All tests FAIL with "Failed to resolve import '../lib/labelFor'" (file doesn't exist).
+Expected: All tests FAIL with "Failed to resolve import '../lib/labelFor'".
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -126,15 +143,16 @@ Create `frontend/src/lib/labelFor.ts`:
 // labelFor returns a non-empty display name for an entity (block / sequence /
 // item) suitable for ARIA labels and visible-title rendering. Falls back
 // through title → slug → caller-supplied positional fallback → "untitled".
-// Whitespace-only title/slug is treated as empty. Used by AccordionHeader
-// and ItemRow to keep sighted and SR users seeing/hearing the same content.
+// Whitespace-only inputs are treated as empty at every level (including the
+// fallback), so multiple untitled rows still announce a distinguishable id
+// when the caller passes a positional string like "block 3".
 
 export function labelFor(
   title: string | null | undefined,
   slug: string | null | undefined,
   fallback?: string,
 ): string {
-  return title?.trim() || slug?.trim() || fallback || 'untitled';
+  return title?.trim() || slug?.trim() || fallback?.trim() || 'untitled';
 }
 ```
 
@@ -145,7 +163,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm test -- labelFor
 ```
 
-Expected: All 11 tests PASS.
+Expected: All 12 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -174,16 +192,7 @@ import type { AdminTree } from '../lib/types';
 
 function makeTree(): AdminTree {
   return {
-    course: {
-      id: 1,
-      slug: 'cs101',
-      title: 'CS 101',
-      info_md: '',
-      info_html: '',
-      tagline: null,
-      icon_url: null,
-      ownerships: [],
-    },
+    course: { id: 1, name: 'CS 101', slug: 'cs101' },
     version: {
       id: 10,
       course_id: 1,
@@ -192,10 +201,10 @@ function makeTree(): AdminTree {
       info_md: '',
       info_html: '',
       max_quiz_attempts: 3,
-      created_at: '',
+      created_at: '2026-05-01T00:00:00Z',
       published_at: null,
       archived_at: null,
-      content_updated_at: '',
+      content_updated_at: '2026-05-01T00:00:00Z',
     },
     blocks: [
       {
@@ -204,6 +213,8 @@ function makeTree(): AdminTree {
         title: 'B1',
         slug: 'b1',
         order: 1,
+        info: '',
+        info_html: '',
         sequences: [
           { id: 1000, block_id: 100, title: 'S1', slug: 's1', order: 1, items: [] },
           { id: 1001, block_id: 100, title: 'S2', slug: 's2', order: 2, items: [] },
@@ -215,6 +226,8 @@ function makeTree(): AdminTree {
         title: 'B2',
         slug: 'b2',
         order: 2,
+        info: '',
+        info_html: '',
         sequences: [
           { id: 1002, block_id: 101, title: 'S3', slug: 's3', order: 1, items: [] },
         ],
@@ -527,6 +540,8 @@ git commit -m "feat(frontend): add dirtyRegistry for page-wide dirty-form aggreg
 
 ## Task 4: Pure helper — `handleStaleIdFallback`
 
+**Context:** Side-effecting helper that toasts + navigates on stale-id discovery. Injects `pushToast` and `navigate` so it's vitest-testable. `pushToast` is a function (not an object with `info` / `success` / `error` methods); the helper calls it as `pushToast(msg, 'info')` to match slice-1 toast wording for benign navigations.
+
 **Files:**
 - Create: `frontend/src/lib/handleStaleIdFallback.ts`
 - Create: `frontend/src/tests/handleStaleIdFallback.test.ts`
@@ -540,54 +555,54 @@ import { describe, it, expect, vi } from 'vitest';
 import { handleStaleIdFallback } from '../lib/handleStaleIdFallback';
 
 function setup() {
-  const toast = { info: vi.fn(), success: vi.fn(), error: vi.fn() };
+  const pushToast = vi.fn();
   const navigate = vi.fn();
-  return { toast, navigate };
+  return { pushToast, navigate };
 }
 
 describe('handleStaleIdFallback', () => {
-  it('staleBid=true: toast "Block not found." + navigate to /edit/v/{vid} with replace+force', () => {
-    const { toast, navigate } = setup();
+  it('staleBid=true: toast "Block not found." (info) + navigate to /edit/v/{vid} with replace+force', () => {
+    const { pushToast, navigate } = setup();
     handleStaleIdFallback(
       { staleBid: true, staleSid: false },
       { courseSlug: 'cs101', vid: '10', bid: null },
-      { toast, navigate },
+      { pushToast, navigate },
     );
-    expect(toast.info).toHaveBeenCalledWith('Block not found.');
+    expect(pushToast).toHaveBeenCalledWith('Block not found.', 'info');
     expect(navigate).toHaveBeenCalledWith('/courses/cs101/edit/v/10', { replace: true, force: true });
   });
 
   it('staleSid=true (block intact): toast "Sequence not found." + navigate to block URL', () => {
-    const { toast, navigate } = setup();
+    const { pushToast, navigate } = setup();
     handleStaleIdFallback(
       { staleBid: false, staleSid: true },
       { courseSlug: 'cs101', vid: '10', bid: '100' },
-      { toast, navigate },
+      { pushToast, navigate },
     );
-    expect(toast.info).toHaveBeenCalledWith('Sequence not found.');
+    expect(pushToast).toHaveBeenCalledWith('Sequence not found.', 'info');
     expect(navigate).toHaveBeenCalledWith('/courses/cs101/edit/v/10/blocks/100', { replace: true, force: true });
   });
 
   it('staleBid=true AND staleSid=true: staleBid wins — toast block, navigate to version', () => {
-    const { toast, navigate } = setup();
+    const { pushToast, navigate } = setup();
     handleStaleIdFallback(
       { staleBid: true, staleSid: true },
       { courseSlug: 'cs101', vid: '10', bid: null },
-      { toast, navigate },
+      { pushToast, navigate },
     );
-    expect(toast.info).toHaveBeenCalledWith('Block not found.');
-    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(pushToast).toHaveBeenCalledWith('Block not found.', 'info');
+    expect(pushToast).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith('/courses/cs101/edit/v/10', { replace: true, force: true });
   });
 
   it('both false: no-op (no toast, no navigate)', () => {
-    const { toast, navigate } = setup();
+    const { pushToast, navigate } = setup();
     handleStaleIdFallback(
       { staleBid: false, staleSid: false },
       { courseSlug: 'cs101', vid: '10', bid: '100' },
-      { toast, navigate },
+      { pushToast, navigate },
     );
-    expect(toast.info).not.toHaveBeenCalled();
+    expect(pushToast).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
 });
@@ -608,12 +623,16 @@ Create `frontend/src/lib/handleStaleIdFallback.ts`:
 
 ```typescript
 // Resolves a stale-id condition discovered by the validation $effect:
-// toasts the user-facing message and navigates (replace + force) to the
+// toasts the user-facing message ('info' kind — this is a benign
+// redirection, not an error) and navigates (replace + force) to the
 // nearest valid parent URL. staleBid wins over staleSid because a missing
 // block makes any nested sequence URL moot (cascade-deleted or
 // unreachable). `force: true` bypasses DirtyGuard — prompting "save your
 // changes?" on a deleted entity is pointless; Cancel would re-trigger the
 // stale-id loop.
+//
+// Dependencies are injected (pushToast, navigate) so this stays pure-ish
+// and vitest-testable without DOM.
 
 export type StaleFlags = {
   staleBid: boolean;
@@ -627,7 +646,7 @@ export type StaleContext = {
 };
 
 export type StaleDeps = {
-  toast: { info(msg: string): void };
+  pushToast: (msg: string, kind: 'info' | 'success' | 'error') => void;
   navigate: (path: string, opts: { replace: boolean; force: boolean }) => void;
 };
 
@@ -637,12 +656,12 @@ export function handleStaleIdFallback(
   deps: StaleDeps,
 ): void {
   if (flags.staleBid) {
-    deps.toast.info('Block not found.');
+    deps.pushToast('Block not found.', 'info');
     deps.navigate(`/courses/${ctx.courseSlug}/edit/v/${ctx.vid}`, { replace: true, force: true });
     return;
   }
   if (flags.staleSid && ctx.bid !== null) {
-    deps.toast.info('Sequence not found.');
+    deps.pushToast('Sequence not found.', 'info');
     deps.navigate(`/courses/${ctx.courseSlug}/edit/v/${ctx.vid}/blocks/${ctx.bid}`, { replace: true, force: true });
     return;
   }
@@ -683,7 +702,7 @@ Expected: one line matching `'Discard unsaved changes?'`.
 
 - [ ] **Step 2: Update the literal**
 
-Edit `frontend/src/components/editor/DirtyGuard.svelte`: change the string `'Discard unsaved changes?'` to `'Discard unsaved changes and continue?'`. Single-character literal change.
+Edit `frontend/src/components/editor/DirtyGuard.svelte`: change the string `'Discard unsaved changes?'` to `'Discard unsaved changes and continue?'`. Single literal change.
 
 - [ ] **Step 3: Run type-check + tests to verify nothing breaks**
 
@@ -692,7 +711,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm run check && npm test
 ```
 
-Expected: No type errors. All existing tests (including any DirtyGuard-related tests) still pass.
+Expected: No type errors. All existing tests still pass.
 
 - [ ] **Step 4: Commit**
 
@@ -706,21 +725,12 @@ git commit -m "fix(frontend): clarify DirtyGuard prompt — 'and continue?' make
 
 ## Task 6: `VersionMetaForm.svelte` — extracted version meta editor
 
-**Context:** Today, the version-meta form lives inline at the top of `VersionEditPage.svelte`. We extract it into its own component so every "meta form" in slice 2 (version, block, sequence) is symmetric — its own file, owns its own tracker, registers via the page-wide dirty registry context.
+**Context:** Extract the version-meta section from slice-1 `VersionEditPage.svelte` into its own component. Owns its own `makeDirtyTracker`, registers it via `getContext(DIRTY_REGISTRY_KEY)`. The 3-way LoadResult save path and the 1–10 integer validation from slice-1 are preserved verbatim.
 
 **Files:**
 - Create: `frontend/src/components/editor/VersionMetaForm.svelte`
-- Reference (read-only): `frontend/src/pages/editor/VersionEditPage.svelte` (current slice-1 version-meta block to extract)
 
-- [ ] **Step 1: Read the slice-1 VersionEditPage version-meta section**
-
-```bash
-sed -n '1,200p' /Users/svkucheryavski/Documents/Developing/mathion/frontend/src/pages/editor/VersionEditPage.svelte
-```
-
-Capture: the `tracker = makeDirtyTracker({...})` setup, the title/info/max_quiz_attempts bindings, the Save handler with `mapCreateError`, the Discard handler, and the disabled-version permission check (`canEditTextFields`).
-
-- [ ] **Step 2: Write VersionMetaForm.svelte**
+- [ ] **Step 1: Write VersionMetaForm.svelte**
 
 Create `frontend/src/components/editor/VersionMetaForm.svelte`:
 
@@ -729,11 +739,11 @@ Create `frontend/src/components/editor/VersionMetaForm.svelte`:
   import { getContext } from 'svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
-  import { mapCreateError } from '../../lib/formErrors';
-  import { canEditTextFields } from '../../lib/versionPermissions';
-  import { api } from '../../lib/api';
-  import { toasts } from '../../lib/events';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { api, ApiError } from '../../lib/api';
+  import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import Button from '../ui/Button.svelte';
   import type { AdminTreeVersion } from '../../lib/types';
 
   type Props = {
@@ -746,19 +756,21 @@ Create `frontend/src/components/editor/VersionMetaForm.svelte`:
   const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — VersionEditPage must wrap VersionMetaForm');
 
-  const tracker = makeDirtyTracker({
-    info_md: version.info_md ?? '',
+  const perms = $derived(versionPermissions(version));
+
+  type Meta = { info_md: string; max_quiz_attempts: number };
+  const tracker = makeDirtyTracker<Meta>({
+    info_md: version.info_md,
     max_quiz_attempts: version.max_quiz_attempts,
   });
 
-  // Rebuild tracker when vid changes (defensive).
+  // Defensive rebuild on vid change. Slice-2 mount model destroys this
+  // component when VersionEditPage unmounts (different course/version), so
+  // this is belt-and-suspenders — see spec §Race safety carry-over.
   let trackerVid = $state(vid);
   $effect(() => {
     if (vid !== trackerVid) {
-      tracker.reset({
-        info_md: version.info_md ?? '',
-        max_quiz_attempts: version.max_quiz_attempts,
-      });
+      tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts });
       trackerVid = vid;
     }
   });
@@ -768,83 +780,74 @@ Create `frontend/src/components/editor/VersionMetaForm.svelte`:
     return () => dirty.unregister(tracker);
   });
 
-  const canEdit = $derived(canEditTextFields(version));
-
   let busy = $state(false);
-  let fieldErrors = $state<Record<string, string>>({});
-  let formError = $state<string | null>(null);
 
   async function save() {
-    if (!tracker.isDirty || busy) return;
-    busy = true;
-    fieldErrors = {};
-    formError = null;
+    if (!tracker.isDirty) return;
+    // Slice-1 client-side validation (Task-18 lesson preserved): bind:value
+    // on <input type=number> can yield null/NaN/decimal — all 422 server-
+    // side with an opaque message. Validate first.
+    const n = tracker.current.max_quiz_attempts as number | null;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 10) {
+      pushToast('Max quiz attempts must be a whole number between 1 and 10', 'error');
+      return;
+    }
     const savedVid = vid;
+    const sentInfoMd = tracker.current.info_md;
+    const sentAttempts = n;
+    busy = true;
     try {
-      await api.patch(`/api/versions/${savedVid}`, {
-        info_md: tracker.current.info_md,
-        max_quiz_attempts: tracker.current.max_quiz_attempts,
-      });
+      await api.patch(`/api/versions/${savedVid}`, { info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
       const result = await loadAdminTree(savedVid, { force: true });
-      if (result === 'ok' && currentEditorVersion.value) {
-        const cur = currentEditorVersion.value.version;
-        tracker.reset({
-          info_md: cur.info_md ?? '',
-          max_quiz_attempts: cur.max_quiz_attempts,
-        });
-        toasts.success('Version saved.');
-      } else if (result === 'error') {
-        toasts.error('Could not refresh after save.');
+      if (result === 'discarded') {
+        pushToast('Saved', 'success');
+      } else if (result === 'ok') {
+        const fresh = currentEditorVersion.value;
+        if (fresh && fresh.version.id === savedVid) {
+          tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+        }
+        pushToast('Saved', 'success');
+      } else {
+        tracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
+        pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }
     } catch (e) {
-      const mapped = mapCreateError(e);
-      fieldErrors = mapped.fieldErrors;
-      formError = mapped.formError;
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     } finally {
       busy = false;
     }
   }
 
   function discard() {
-    tracker.reset({
-      info_md: version.info_md ?? '',
-      max_quiz_attempts: version.max_quiz_attempts,
-    });
-    fieldErrors = {};
-    formError = null;
+    tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts });
   }
 </script>
 
-<section class="version-meta">
-  <h2>Version</h2>
-  <label>
-    Info (markdown)
-    <textarea
-      bind:value={tracker.current.info_md}
-      disabled={!canEdit || busy}
-      rows="6"
-    ></textarea>
-    {#if fieldErrors.info_md}<span class="field-err">{fieldErrors.info_md}</span>{/if}
-  </label>
-  <label>
-    Max quiz attempts
-    <input
-      type="number"
-      min="1"
-      bind:value={tracker.current.max_quiz_attempts}
-      disabled={!canEdit || busy}
-    />
-    {#if fieldErrors.max_quiz_attempts}<span class="field-err">{fieldErrors.max_quiz_attempts}</span>{/if}
-  </label>
-  {#if formError}<p class="form-err">{formError}</p>{/if}
-  <div class="actions">
-    <button onclick={save} disabled={!canEdit || !tracker.isDirty || busy}>Save</button>
-    <button onclick={discard} disabled={!tracker.isDirty || busy}>Discard</button>
-  </div>
-</section>
+{#if perms.canEditVersionMeta}
+  <section class="meta">
+    <h2>Version info</h2>
+    <label>Info (markdown)
+      <textarea bind:value={tracker.current.info_md} rows="4"></textarea>
+    </label>
+    <label>Max quiz attempts
+      <input type="number" min="1" max="10" step="1" required bind:value={tracker.current.max_quiz_attempts} />
+    </label>
+    <div class="row">
+      <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
+      <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
+    </div>
+  </section>
+{/if}
+
+<style>
+  .meta { margin: var(--space-4) 0; }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta textarea, .meta input[type=number] { width: 100%; }
+  .row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; flex-wrap: wrap; }
+</style>
 ```
 
-- [ ] **Step 3: Type-check**
+- [ ] **Step 2: Type-check**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
@@ -853,47 +856,40 @@ npm run check
 
 Expected: No type errors.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/editor/VersionMetaForm.svelte
-git commit -m "feat(frontend): extract VersionMetaForm component with context-based dirty registry"
+git commit -m "feat(frontend): extract VersionMetaForm with context-based dirty registry"
 ```
 
 ---
 
 ## Task 7: `VersionEditPage` shell + dirty-registry provider
 
-**Context:** Rewrite VersionEditPage as the new shell. This task lands the **provider before any accordion children consume context**. State-actions bar wiring stays from slice 1. No accordion children yet — those land in later tasks.
+**Context:** Rewrite VersionEditPage as the new shell. Preserves slice-1 header structure (back-link + course name + state badge + disabled banner + state-actions bar), wires `createDirtyRegistry()` and provides it via `setContext(DIRTY_REGISTRY_KEY, ...)` *before* any consumer mounts. Accordion list, create-block form, validation `$effect`, and focus `$effect` land in Task 12 — this task lands shell + state-actions + VersionMetaForm.
 
 **Files:**
 - Modify: `frontend/src/pages/editor/VersionEditPage.svelte` (full rewrite)
-- Reference: existing slice-1 version of the same file (read first)
 
-- [ ] **Step 1: Read the current VersionEditPage to capture state-actions logic**
+- [ ] **Step 1: Rewrite VersionEditPage shell**
 
-```bash
-sed -n '1,300p' /Users/svkucheryavski/Documents/Developing/mathion/frontend/src/pages/editor/VersionEditPage.svelte
-```
-
-Note: state-actions bar (publish/revert/disable/enable/delete) buttons + handlers; the `currentEditorVersion` store read pattern.
-
-- [ ] **Step 2: Rewrite VersionEditPage shell**
-
-Overwrite `frontend/src/pages/editor/VersionEditPage.svelte`:
+Overwrite `frontend/src/pages/editor/VersionEditPage.svelte` with:
 
 ```svelte
 <script lang="ts">
   import { setContext, onDestroy } from 'svelte';
-  import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
-  import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
-  import { canEditStructure } from '../../lib/versionPermissions';
+  import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
-  import { api } from '../../lib/api';
-  import { toasts } from '../../lib/events';
+  import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
+  import { versionPermissions } from '../../lib/versionPermissions';
+  import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import VersionMetaForm from '../../components/editor/VersionMetaForm.svelte';
+  import Button from '../../components/ui/Button.svelte';
+  import Spinner from '../../components/ui/Spinner.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
 
   type Props = {
     courseSlug: string;
@@ -905,156 +901,171 @@ Overwrite `frontend/src/pages/editor/VersionEditPage.svelte`:
   let { courseSlug, versionId, blockId, sequenceId }: Props = $props();
 
   const vid = $derived(Number(versionId));
+  const vidValid = $derived(Number.isInteger(vid) && vid > 0);
   const routeBid = $derived(blockId ?? null);
   const routeSid = $derived(sequenceId ?? null);
 
+  // Provide dirty registry BEFORE any consumer mounts (provider-before-
+  // consumers ordering per spec).
   const dirtyRegistry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, dirtyRegistry);
 
-  // Load $effect — keyed on vid ONLY (full hierarchical tree returned in one
-  // response; expand/collapse doesn't refetch). Declared FIRST per
-  // declaration-order discipline (see spec §"$effect declaration order").
-  $effect(() => {
-    if (!Number.isFinite(vid)) return;
-    loadAdminTree(vid);
-  });
-
-  // Validation $effect — declared SECOND, before focus, so stale-id
-  // correction lands before focus tries to find a toggle for a stale entity.
-  // (Stale-id fallback wiring lands in a later task — leave empty for now.)
-
-  // Focus $effect — declared THIRD. (Focus-and-scroll wiring lands in a
-  // later task — leave empty for now.)
-
-  onDestroy(clearEditorVersion);
-
   const tree = $derived(currentEditorVersion.value);
-  const version = $derived(tree?.version ?? null);
-  const canStructure = $derived(version ? canEditStructure(version) : false);
+  const loadError = $derived(currentEditorVersion.error);
+  const v = $derived(tree?.version);
+  const slugMatches = $derived(!!tree && tree.course.slug === courseSlug);
+  const perms = $derived(v ? versionPermissions(v) : null);
 
   let busy = $state(false);
 
-  async function publish() {
-    if (busy || !version) return;
-    busy = true;
-    try {
-      await api.post(`/api/versions/${vid}/publish`, {});
-      await loadAdminTree(vid, { force: true });
-      toasts.success('Version published.');
-    } catch {
-      toasts.error('Could not publish.');
-    } finally {
-      busy = false;
-    }
-  }
+  // Load $effect — declared FIRST (declaration-order discipline:
+  // load → validation → focus, see spec §"$effect declaration order").
+  // Validation + focus $effects land in Task 12.
+  $effect(() => {
+    if (!vidValid) return;
+    void loadAdminTree(vid);
+  });
 
-  async function revert() {
-    if (busy || !version) return;
-    busy = true;
-    try {
-      await api.post(`/api/versions/${vid}/revert`, {});
-      await loadAdminTree(vid, { force: true });
-      toasts.success('Version reverted to draft.');
-    } catch {
-      toasts.error('Could not revert.');
-    } finally {
-      busy = false;
-    }
-  }
+  onDestroy(() => clearEditorVersion());
 
-  async function disable() {
-    if (busy || !version) return;
+  async function transition(action: 'publish' | 'archive' | 'revert' | 'disable' | 'enable') {
+    if (dirtyRegistry.isAnyDirty()) return;
+    const prompts: Record<string, string> = {
+      publish: `Publish version ${vid}? Students will see it.`,
+      archive: `Archive version ${vid}?`,
+      revert: `Revert version ${vid} to created?`,
+      disable: `Disable version ${vid}?`,
+      enable: `Enable version ${vid}?`,
+    };
+    if (!confirm(prompts[action])) return;
+    const savedVid = vid;
     busy = true;
     try {
-      await api.post(`/api/versions/${vid}/disable`, {});
-      await loadAdminTree(vid, { force: true });
-      toasts.success('Version disabled.');
-    } catch {
-      toasts.error('Could not disable.');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function enable() {
-    if (busy || !version) return;
-    busy = true;
-    try {
-      await api.post(`/api/versions/${vid}/enable`, {});
-      await loadAdminTree(vid, { force: true });
-      toasts.success('Version enabled.');
-    } catch {
-      toasts.error('Could not enable.');
+      await api.post(`/api/versions/${savedVid}/${action}`);
+      await loadAdminTree(savedVid, { force: true });
+      const past: Record<typeof action, string> = {
+        publish: 'published', archive: 'archived', revert: 'reverted',
+        disable: 'disabled', enable: 'enabled',
+      };
+      pushToast(`Version ${past[action]}`, 'success');
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : `Could not ${action}`, 'error');
     } finally {
       busy = false;
     }
   }
 
   async function deleteVersion() {
-    if (busy || !version) return;
-    if (!confirm('Delete this version permanently?')) return;
+    if (dirtyRegistry.isAnyDirty()) return;
+    if (!confirm(`Delete version ${vid}? This cannot be undone.`)) return;
+    const savedVid = vid;
+    const savedSlug = courseSlug;
     busy = true;
     try {
-      await api.delete(`/api/versions/${vid}`);
-      toasts.success('Version deleted.');
-      navigate(`/courses/${courseSlug}/edit`);
-    } catch {
-      toasts.error('Could not delete.');
+      await api.delete(`/api/versions/${savedVid}`);
+      navigate(`/courses/${savedSlug}/edit`);
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+    } finally {
       busy = false;
     }
   }
 </script>
 
-<DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} />
+<div class="page">
+  {#if !vidValid}
+    <h1>Bad URL</h1>
+    <p>Version "{versionId}" is not a valid id.</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+  {:else if loadError && (!tree || tree.version.id !== vid)}
+    <h1>Couldn't load</h1>
+    <p>{loadError}</p>
+    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+  {:else if !tree || tree.version.id !== vid}
+    <Spinner />
+  {:else if !slugMatches}
+    <h1>Not found</h1>
+    <p>This version does not belong to course "{courseSlug}".</p>
+    <Button onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Back</Button>
+  {:else if !v || !perms}
+    <Spinner />
+  {:else}
+    {#if loadError}
+      <p class="banner err">{loadError}</p>
+    {/if}
+    <header>
+      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+      <h1>{tree.course.name} · v{v.id} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>
+    </header>
 
-{#if tree && version}
-  <header class="version-actions">
-    <h1>Editing version {vid}</h1>
-    {#if version.state === 'created' && !version.is_disabled}
-      <button onclick={publish} disabled={busy}>Publish</button>
+    {#if v.is_disabled}
+      <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
     {/if}
-    {#if version.state === 'published' && !version.is_disabled}
-      <button onclick={revert} disabled={busy}>Revert to draft</button>
-    {/if}
-    {#if !version.is_disabled}
-      <button onclick={disable} disabled={busy}>Disable</button>
-    {:else}
-      <button onclick={enable} disabled={busy}>Enable</button>
-    {/if}
-    {#if version.is_disabled || version.state === 'created'}
-      <button onclick={deleteVersion} disabled={busy} class="danger">Delete</button>
-    {/if}
-  </header>
 
-  <VersionMetaForm {vid} {version} />
+    <VersionMetaForm {vid} {version}={v} />
 
-  <!-- Accordion list lands in Task 12. -->
-{:else}
-  <p>Loading version…</p>
-{/if}
+    <!-- Blocks accordion list lands in Task 12. -->
+
+    <section class="state-actions">
+      {#if perms.canPublish}
+        <Button disabled={busy} onclick={() => transition('publish')}>Publish</Button>
+      {/if}
+      {#if perms.canArchive}
+        <Button disabled={busy} onclick={() => transition('archive')}>Archive</Button>
+      {/if}
+      {#if perms.canRevert}
+        <Button disabled={busy} onclick={() => transition('revert')}>Revert</Button>
+      {/if}
+      {#if perms.canDisable}
+        <Button variant="ghost" disabled={busy} onclick={() => transition('disable')}>Disable</Button>
+      {/if}
+      {#if perms.canEnable}
+        <Button variant="ghost" disabled={busy} onclick={() => transition('enable')}>Enable</Button>
+      {/if}
+      {#if perms.canDeleteVersion}
+        <Button variant="ghost" disabled={busy} onclick={deleteVersion}>Delete</Button>
+      {/if}
+    </section>
+
+    <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} />
+  {/if}
+</div>
+
+<style>
+  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .state { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; margin-left: var(--space-2); }
+  .state-created { background: #ffeac0; color: #663; }
+  .state-published { background: #ddf3dd; color: #265; }
+  .state-archived { background: #eee; color: #555; }
+  .state.disabled { background: #fdd; color: #833; }
+  .banner { background: #fff3cd; border-left: 3px solid #d99; padding: var(--space-2); }
+  .banner.err { background: #fdd; border-left-color: #a33; color: #833; }
+  .state-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+</style>
 ```
 
-- [ ] **Step 3: Type-check**
+- [ ] **Step 2: Type-check**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm run check
 ```
 
-Expected: No type errors.
+Expected: No type errors. (Existing routes still point to BlockEditPage / SequenceEditPage until Task 13; both pages still exist until Task 14.)
 
-- [ ] **Step 4: Run dev server, smoke item 2 (lands on VersionEditPage with version meta)**
+- [ ] **Step 3: Verify shell renders without console errors**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm run dev
 ```
 
-In browser: login → open an admin course → click a version → page loads with state-actions bar at top, version-meta form below. No blocks accordion yet (that's Task 12). DirtyGuard wired (typing in info textarea + clicking another link should prompt — best smoke once routing rebind also lands; for now, in-page navigation via the back arrow works as a manual check).
+In browser: login → open an admin course → click a version → page should render the header (back-link + `Course · v{vid}` + state badge), the version-meta form below, and the state-actions bar at the bottom. No blocks accordion yet (that's Task 12). No console errors. The `← Versions` link works and returns to the versions list.
 
-Stop the dev server after verification (Ctrl+C in the terminal running it).
+Stop the dev server (Ctrl+C).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
@@ -1132,13 +1143,23 @@ Create `frontend/src/components/editor/AccordionHeader.svelte`:
     aria-label={`Move ${level} up: ${ariaName}`}
     onclick={onMoveUp}
     disabled={!canReorderUp || dirty || busy}
+    title={dirty ? 'Save or discard changes first' : ''}
   >↑</button>
   <button
     aria-label={`Move ${level} down: ${ariaName}`}
     onclick={onMoveDown}
     disabled={!canReorderDown || dirty || busy}
+    title={dirty ? 'Save or discard changes first' : ''}
   >↓</button>
 </div>
+
+<style>
+  .accordion-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-bottom: 1px solid var(--border); }
+  .toggle { flex: 1; display: flex; align-items: center; gap: var(--space-2); background: transparent; border: 0; cursor: pointer; text-align: left; font-size: 1rem; padding: var(--space-1) var(--space-2); }
+  .toggle:hover { background: var(--surface-hover, #f5f5f5); }
+  .title { font-weight: 600; }
+  .slug { color: var(--muted); font-size: 0.85rem; }
+</style>
 ```
 
 - [ ] **Step 2: Type-check**
@@ -1162,6 +1183,8 @@ git commit -m "feat(frontend): add AccordionHeader pure-presentational header co
 
 ## Task 9: `ItemRow.svelte` — one item in a sequence's list
 
+**Context:** Pure presentational + callbacks. Reorder, delete, and open are emitted up to SequenceAccordion (which owns the items list and the API calls). Visible title follows the same fallback chain and slug-span suppression rule as AccordionHeader.
+
 **Files:**
 - Create: `frontend/src/components/editor/ItemRow.svelte`
 
@@ -1172,124 +1195,95 @@ Create `frontend/src/components/editor/ItemRow.svelte`:
 ```svelte
 <script lang="ts">
   import { labelFor } from '../../lib/labelFor';
-  import { navigate } from '../../lib/router.svelte';
-  import { api } from '../../lib/api';
-  import { toasts } from '../../lib/events';
-  import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import Button from '../ui/Button.svelte';
   import type { AdminTreeItem } from '../../lib/types';
 
   type Props = {
-    courseSlug: string;
-    vid: number;
-    blockId: number;
-    sequenceId: number;
     item: AdminTreeItem;
     index: number;
+    canStructure: boolean;
     canReorderUp: boolean;
     canReorderDown: boolean;
-    canStructure: boolean;
     parentDirty: boolean;
+    busy: boolean;
+    onMoveUp: () => void;
+    onMoveDown: () => void;
+    onOpen: () => void;
+    onDelete: () => void;
   };
 
   let {
-    courseSlug,
-    vid,
-    blockId,
-    sequenceId,
     item,
     index,
+    canStructure,
     canReorderUp,
     canReorderDown,
-    canStructure,
     parentDirty,
+    busy,
+    onMoveUp,
+    onMoveDown,
+    onOpen,
+    onDelete,
   }: Props = $props();
 
   const ariaName = $derived(labelFor(item.title, item.slug, `item ${index}`));
 
-  let busy = $state(false);
-
-  function openItem() {
-    navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${blockId}/sequences/${sequenceId}/items/${item.id}`);
-  }
-
-  async function moveUp() {
-    if (busy || !canReorderUp || parentDirty) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.post(`/api/items/${item.id}/move`, { direction: 'up' });
-      await loadAdminTree(savedVid, { force: true });
-    } catch {
-      toasts.error('Could not reorder.');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function moveDown() {
-    if (busy || !canReorderDown || parentDirty) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.post(`/api/items/${item.id}/move`, { direction: 'down' });
-      await loadAdminTree(savedVid, { force: true });
-    } catch {
-      toasts.error('Could not reorder.');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function deleteItem() {
-    if (busy || !canStructure) return;
-    if (!confirm(`Delete "${ariaName}"?`)) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.delete(`/api/items/${item.id}`);
-      await loadAdminTree(savedVid, { force: true });
-      toasts.success('Item deleted.');
-    } catch {
-      toasts.error('Could not delete.');
-    } finally {
-      busy = false;
-    }
-  }
+  const glyph = $derived(
+    item.type === 'static_page' ? '📄' :
+    item.type === 'video' ? '▶' :
+    item.type === 'quiz' ? '?' :
+    '⌘'
+  );
 </script>
 
 <div class="item-row">
-  <span class="type-icon" aria-hidden="true">{item.type === 'video' ? '🎬' : item.type === 'quiz' ? '❓' : item.type === 'interactive_app' ? '⚙️' : '📄'}</span>
+  <span class="glyph" aria-hidden="true">{glyph}</span>
   <span class="item-title">
     {item.title?.trim() || item.slug?.trim() || `(item ${index})`}
   </span>
   {#if item.title?.trim() && item.slug?.trim()}
     <span class="item-slug" aria-hidden="true">/{item.slug}</span>
   {/if}
-  {#if canStructure}
-    <button
-      aria-label={`Move item up: ${ariaName}`}
-      onclick={moveUp}
-      disabled={!canReorderUp || parentDirty || busy}
-    >↑</button>
-    <button
-      aria-label={`Move item down: ${ariaName}`}
-      onclick={moveDown}
-      disabled={!canReorderDown || parentDirty || busy}
-    >↓</button>
-  {/if}
-  <button
-    aria-label={`Open ${ariaName}`}
-    onclick={openItem}
-  >Open</button>
-  {#if canStructure}
-    <button
-      aria-label={`Delete ${ariaName}`}
-      onclick={deleteItem}
+  <div class="actions">
+    {#if canStructure}
+      <Button
+        variant="ghost"
+        aria-label={`Move item up: ${ariaName}`}
+        onclick={onMoveUp}
+        disabled={!canReorderUp || parentDirty || busy}
+        title={parentDirty ? 'Save or discard changes first' : 'Move up'}
+      >↑</Button>
+      <Button
+        variant="ghost"
+        aria-label={`Move item down: ${ariaName}`}
+        onclick={onMoveDown}
+        disabled={!canReorderDown || parentDirty || busy}
+        title={parentDirty ? 'Save or discard changes first' : 'Move down'}
+      >↓</Button>
+    {/if}
+    <Button
+      aria-label={`Open ${ariaName}`}
+      onclick={onOpen}
       disabled={busy}
-      class="danger"
-    >Delete</button>
-  {/if}
+    >Open</Button>
+    {#if canStructure}
+      <Button
+        variant="ghost"
+        aria-label={`Delete ${ariaName}`}
+        onclick={onDelete}
+        disabled={busy}
+      >Delete</Button>
+    {/if}
+  </div>
 </div>
+
+<style>
+  .item-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .glyph { width: 24px; text-align: center; opacity: 0.65; }
+  .item-title { font-weight: 600; flex: 1; }
+  .item-slug { color: var(--muted); font-size: 0.85rem; }
+  .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+</style>
 ```
 
 - [ ] **Step 2: Type-check**
@@ -1306,14 +1300,14 @@ Expected: No type errors.
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/editor/ItemRow.svelte
-git commit -m "feat(frontend): add ItemRow component with scoped reorder/Open/Delete a11y labels"
+git commit -m "feat(frontend): add ItemRow component with callback-based actions"
 ```
 
 ---
 
-## Task 10: `SequenceAccordion.svelte` — one sequence
+## Task 10: `SequenceAccordion.svelte` — one sequence (owns item list)
 
-**Context:** Consumes dirty-registry context, renders AccordionHeader, owns sequence-meta tracker, hosts items list + create-item form. Body unmounts via `{#if expanded}` when collapsed — tracker registered/unregistered in `$effect` symmetry.
+**Context:** Owns the sequence-meta form (registers tracker via context), the items list (renders ItemRow per item), the item-reorder + item-delete API calls, and the create-item form (with ItemTypePicker + per-type required fields). Receives `onMoveUp` / `onMoveDown` callbacks from BlockAccordion for its OWN reorder buttons (sequence-list reorder lives in BlockAccordion).
 
 **Files:**
 - Create: `frontend/src/components/editor/SequenceAccordion.svelte`
@@ -1328,14 +1322,15 @@ Create `frontend/src/components/editor/SequenceAccordion.svelte`:
   import AccordionHeader from './AccordionHeader.svelte';
   import ItemRow from './ItemRow.svelte';
   import ItemTypePicker from './ItemTypePicker.svelte';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
+  import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
-  import { mapCreateError } from '../../lib/formErrors';
-  import { canEditTextFields, canEditStructure } from '../../lib/versionPermissions';
+  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { versionPermissions } from '../../lib/versionPermissions';
   import { navigate } from '../../lib/router.svelte';
-  import { api } from '../../lib/api';
-  import { toasts } from '../../lib/events';
+  import { api, ApiError } from '../../lib/api';
+  import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import Button from '../ui/Button.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
 
   type Props = {
@@ -1347,6 +1342,8 @@ Create `frontend/src/components/editor/SequenceAccordion.svelte`:
     sequenceCount: number;
     routeBid: string | null;
     routeSid: string | null;
+    onMoveUp: () => void;
+    onMoveDown: () => void;
   };
 
   let {
@@ -1358,6 +1355,8 @@ Create `frontend/src/components/editor/SequenceAccordion.svelte`:
     sequenceCount,
     routeBid,
     routeSid,
+    onMoveUp,
+    onMoveDown,
   }: Props = $props();
 
   const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
@@ -1368,17 +1367,20 @@ Create `frontend/src/components/editor/SequenceAccordion.svelte`:
   const panelId = `seq-${String(seq.id)}-panel`;
 
   const version = $derived(currentEditorVersion.value?.version ?? null);
-  const canEdit = $derived(version ? canEditTextFields(version) : false);
-  const canStructure = $derived(version ? canEditStructure(version) : false);
+  const perms = $derived(version ? versionPermissions(version) : null);
+  const canEdit = $derived(perms?.canEditTextFields ?? false);
+  const canStructure = $derived(perms?.canEditStructure ?? false);
 
-  const tracker = makeDirtyTracker({
-    title: seq.title ?? '',
-  });
+  type Meta = { title: string };
+  const tracker = makeDirtyTracker<Meta>({ title: seq.title });
 
+  // Defensive rebuild on seq.id change (belt-and-suspenders — child body
+  // unmounts via {#if expanded} so a sid change typically remounts the
+  // whole component).
   let trackerSid = $state(seq.id);
   $effect(() => {
     if (seq.id !== trackerSid) {
-      tracker.reset({ title: seq.title ?? '' });
+      tracker.reset({ title: seq.title });
       trackerSid = seq.id;
     }
   });
@@ -1391,162 +1393,189 @@ Create `frontend/src/components/editor/SequenceAccordion.svelte`:
 
   function toggle() {
     if (expanded) {
-      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
+      void navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
     } else {
-      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}/sequences/${seq.id}`);
+      void navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}/sequences/${seq.id}`);
     }
   }
 
   let busy = $state(false);
-  let fieldErrors = $state<Record<string, string>>({});
-  let formError = $state<string | null>(null);
 
   async function save() {
-    if (!tracker.isDirty || busy) return;
-    busy = true;
-    fieldErrors = {};
-    formError = null;
+    if (!tracker.isDirty) return;
     const savedVid = vid;
     const savedSid = seq.id;
+    const savedBid = block.id;
+    const sentTitle = tracker.current.title;
+    busy = true;
     try {
-      await api.patch(`/api/sequences/${savedSid}`, { title: tracker.current.title });
+      await api.patch(`/api/sequences/${savedSid}`, { title: sentTitle });
       const result = await loadAdminTree(savedVid, { force: true });
-      if (result === 'ok' && currentEditorVersion.value) {
-        const fresh = currentEditorVersion.value.blocks
-          .find((b) => b.id === block.id)?.sequences
-          .find((s) => s.id === savedSid);
-        if (fresh) {
-          tracker.reset({ title: fresh.title ?? '' });
-          toasts.success('Sequence saved.');
-        }
+      if (result === 'discarded') {
+        pushToast('Saved', 'success');
+      } else if (result === 'ok') {
+        const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === savedBid)?.sequences.find((x) => x.id === savedSid);
+        if (fresh) tracker.reset({ title: fresh.title });
+        pushToast('Saved', 'success');
+      } else {
+        tracker.reset({ title: sentTitle });
+        pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }
     } catch (e) {
-      const mapped = mapCreateError(e);
-      fieldErrors = mapped.fieldErrors;
-      formError = mapped.formError;
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     } finally {
       busy = false;
     }
   }
 
   function discard() {
-    tracker.reset({ title: seq.title ?? '' });
-    fieldErrors = {};
-    formError = null;
-  }
-
-  async function moveUp() {
-    if (busy || tracker.isDirty || index <= 1) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.post(`/api/sequences/${seq.id}/move`, { direction: 'up' });
-      await loadAdminTree(savedVid, { force: true });
-    } catch {
-      toasts.error('Could not reorder.');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function moveDown() {
-    if (busy || tracker.isDirty || index >= sequenceCount) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.post(`/api/sequences/${seq.id}/move`, { direction: 'down' });
-      await loadAdminTree(savedVid, { force: true });
-    } catch {
-      toasts.error('Could not reorder.');
-    } finally {
-      busy = false;
-    }
+    tracker.reset({ title: seq.title });
   }
 
   async function deleteSeq() {
-    if (busy || !canStructure || tracker.isDirty) return;
-    if (seq.items.length > 0) {
-      toasts.error('Remove all items first.');
-      return;
-    }
-    if (!confirm(`Delete sequence "${seq.title || seq.slug}"?`)) return;
-    busy = true;
+    if (tracker.isDirty || !canStructure || seq.items.length > 0) return;
+    if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.`)) return;
     const savedVid = vid;
+    const savedBid = block.id;
+    const savedSid = seq.id;
+    const savedSlug = courseSlug;
+    busy = true;
     try {
-      await api.delete(`/api/sequences/${seq.id}`);
+      await api.delete(`/api/sequences/${savedSid}`);
+      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`);
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
       await loadAdminTree(savedVid, { force: true });
-      toasts.success('Sequence deleted.');
-      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
-    } catch {
-      toasts.error('Could not delete.');
     } finally {
       busy = false;
     }
   }
 
+  // Item-list reorder: this component owns seq.items and the API call.
+  async function reorderItem(idx: number, dir: -1 | 1) {
+    if (tracker.isDirty) return;
+    const items = [...seq.items];
+    const target = idx + dir;
+    if (target < 0 || target >= items.length) return;
+    [items[idx], items[target]] = [items[target], items[idx]];
+    const order = items.map((it, i) => ({ id: it.id, order: i + 1 }));
+    const savedVid = vid;
+    const savedSid = seq.id;
+    busy = true;
+    try {
+      await api.post(`/api/sequences/${savedSid}/items/reorder`, { order });
+      await loadAdminTree(savedVid, { force: true });
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      await loadAdminTree(savedVid, { force: true });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteItem(itemId: number, itemTitle: string) {
+    if (busy || !canStructure) return;
+    if (!confirm(`Delete "${itemTitle}"? This cannot be undone.`)) return;
+    const savedVid = vid;
+    busy = true;
+    try {
+      await api.delete(`/api/items/${itemId}`);
+      await loadAdminTree(savedVid, { force: true });
+      pushToast('Item deleted', 'success');
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      await loadAdminTree(savedVid, { force: true });
+    } finally {
+      busy = false;
+    }
+  }
+
+  function openItem(itemId: number) {
+    void navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}/sequences/${seq.id}/items/${itemId}`);
+  }
+
   // Inline create-item form
-  let creatingItem = $state(false);
-  let newItemTitle = $state('');
-  let newItemSlug = $state('');
-  let newItemType = $state<'static_page' | 'video' | 'quiz' | 'interactive_app' | null>(null);
-  let createFieldErrors = $state<Record<string, string>>({});
-  let createFormError = $state<string | null>(null);
+  let creating = $state(false);
+  let newType = $state<'static_page' | 'video'>('static_page');
+  let newTitle = $state('');
+  let newSlug = $state('');
+  let newContentMd = $state('');
+  let newVideoUrl = $state('');
+  let createErrors = $state<FieldErrors>({});
+  let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
-  const createTracker = makeDirtyTracker({ title: '', slug: '', type: '' });
+  let contentMdTouched = $state(false);
 
   $effect(() => {
-    if (!creatingItem) return;
+    if (creating && newType === 'static_page' && !contentMdTouched && newTitle) {
+      newContentMd = `# ${newTitle}\n`;
+    }
+  });
+
+  // Tracker shim for the create form: synthesized isDirty getter reads
+  // current state directly — NO reset()-on-keystroke (that would always
+  // make the tracker clean and break smoke 14b).
+  const createTracker: RegisteredTracker = {
+    get isDirty() {
+      return creating && (
+        newTitle.trim() !== '' ||
+        newSlug.trim() !== '' ||
+        (newType === 'static_page' && newContentMd.trim() !== '' && newContentMd !== `# ${newTitle}\n`) ||
+        (newType === 'video' && newVideoUrl.trim() !== '')
+      );
+    },
+  };
+
+  $effect(() => {
+    if (!creating) return;
     dirty.register(createTracker);
     return () => dirty.unregister(createTracker);
   });
 
-  $effect(() => {
-    if (creatingItem) {
-      createTracker.reset({
-        title: newItemTitle,
-        slug: newItemSlug,
-        type: newItemType ?? '',
-      });
-    }
-  });
-
-  function openCreateForm() {
-    newItemTitle = '';
-    newItemSlug = '';
-    newItemType = null;
-    createFieldErrors = {};
-    createFormError = null;
-    creatingItem = true;
+  function resetCreateForm() {
+    newType = 'static_page';
+    newTitle = '';
+    newSlug = '';
+    newContentMd = '';
+    newVideoUrl = '';
+    contentMdTouched = false;
+    createErrors = {};
+    createGlobalError = null;
   }
 
-  function cancelCreate() {
-    creatingItem = false;
+  function toggleCreate() {
+    if (creating) resetCreateForm();
+    creating = !creating;
   }
 
   async function submitCreate() {
-    if (createBusy || !newItemType || !newItemSlug.trim()) return;
-    createBusy = true;
-    createFieldErrors = {};
-    createFormError = null;
+    if (createBusy || !newTitle.trim() || !newSlug.trim()) return;
     const savedVid = vid;
+    const savedBid = block.id;
+    const savedSid = seq.id;
+    const savedSlug = courseSlug;
+    const body: Record<string, unknown> = { title: newTitle, slug: newSlug, type: newType };
+    if (newType === 'static_page') body.content_md = newContentMd;
+    if (newType === 'video') body.video_url = newVideoUrl;
+    createErrors = {};
+    createGlobalError = null;
+    createBusy = true;
     try {
-      const payload: Record<string, unknown> = {
-        sequence_id: seq.id,
-        title: newItemTitle.trim(),
-        slug: newItemSlug.trim(),
-        type: newItemType,
-      };
-      if (newItemType === 'static_page') {
-        payload.content_md = `# ${newItemTitle.trim() || newItemSlug.trim()}`;
-      }
-      await api.post('/api/items', payload);
+      const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
       await loadAdminTree(savedVid, { force: true });
-      creatingItem = false;
-      toasts.success('Item created.');
+      resetCreateForm();
+      creating = false;
+      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
     } catch (e) {
-      const mapped = mapCreateError(e);
-      createFieldErrors = mapped.fieldErrors;
-      createFormError = mapped.formError;
+      const known = newType === 'static_page'
+        ? ['title', 'slug', 'content_md', 'type']
+        : ['title', 'slug', 'video_url', 'type'];
+      const mapped = mapCreateError(e, known);
+      createErrors = mapped.fieldErrors;
+      createGlobalError = mapped.globalMessage;
+      if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(mapped.globalMessage, 'error');
+      }
     } finally {
       createBusy = false;
     }
@@ -1564,83 +1593,122 @@ Create `frontend/src/components/editor/SequenceAccordion.svelte`:
     {expanded}
     dirty={tracker.isDirty}
     {busy}
-    canReorderUp={canStructure && index > 1 && !tracker.isDirty}
-    canReorderDown={canStructure && index < sequenceCount && !tracker.isDirty}
+    canReorderUp={canStructure && index > 1}
+    canReorderDown={canStructure && index < sequenceCount}
     onToggle={toggle}
-    onMoveUp={moveUp}
-    onMoveDown={moveDown}
+    {onMoveUp}
+    {onMoveDown}
   />
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
-      <label>
-        Sequence title
-        <input bind:value={tracker.current.title} disabled={!canEdit || busy} />
-        {#if fieldErrors.title}<span class="field-err">{fieldErrors.title}</span>{/if}
-      </label>
-      {#if formError}<p class="form-err">{formError}</p>{/if}
-      <div class="actions">
-        <button onclick={save} disabled={!canEdit || !tracker.isDirty || busy}>Save</button>
-        <button onclick={discard} disabled={!tracker.isDirty || busy}>Discard</button>
-      </div>
-
-      <h4>Items</h4>
-      {#if seq.items.length === 0}
-        <p class="empty-state">
-          {canStructure ? 'No items yet — pick a type below to add one.' : 'No items.'}
-        </p>
-      {:else}
-        <ul class="items-list">
-          {#each seq.items as item, i (item.id)}
-            <li>
-              <ItemRow
-                {courseSlug}
-                {vid}
-                blockId={block.id}
-                sequenceId={seq.id}
-                {item}
-                index={i + 1}
-                canReorderUp={canStructure && i > 0 && !tracker.isDirty}
-                canReorderDown={canStructure && i < seq.items.length - 1 && !tracker.isDirty}
-                {canStructure}
-                parentDirty={tracker.isDirty}
-              />
-            </li>
-          {/each}
-        </ul>
-      {/if}
-
-      {#if canStructure}
-        {#if !creatingItem}
-          <button onclick={openCreateForm} disabled={tracker.isDirty}>+ New item</button>
-        {:else}
-          <div class="create-form">
-            <ItemTypePicker bind:value={newItemType} />
-            {#if newItemType}
-              <label>
-                Title
-                <input bind:value={newItemTitle} />
-                {#if createFieldErrors.title}<span class="field-err">{createFieldErrors.title}</span>{/if}
-              </label>
-              <label>
-                Slug
-                <input bind:value={newItemSlug} />
-                {#if createFieldErrors.slug}<span class="field-err">{createFieldErrors.slug}</span>{/if}
-              </label>
-              {#if createFormError}<p class="form-err">{createFormError}</p>{/if}
-              <button onclick={submitCreate} disabled={createBusy || !newItemSlug.trim()}>Create</button>
-              <button onclick={cancelCreate} disabled={createBusy}>Cancel</button>
-            {/if}
+      {#if canEdit}
+        <section class="meta">
+          <label>Sequence title <input bind:value={tracker.current.title} required /></label>
+          <div class="row">
+            <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
+            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
           </div>
-        {/if}
+        </section>
       {/if}
 
+      <section class="items">
+        <div class="head">
+          <h4>Items</h4>
+          {#if canStructure}
+            <Button
+              disabled={tracker.isDirty || busy}
+              title={tracker.isDirty ? 'Save or discard changes first' : ''}
+              onclick={toggleCreate}
+            >{creating ? 'Cancel' : '+ New item'}</Button>
+          {/if}
+        </div>
+
+        {#if creating}
+          <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
+            <ItemTypePicker bind:value={newType} />
+            <div class="field">
+              <input placeholder="Title" bind:value={newTitle} required oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+              {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+            </div>
+            <div class="field">
+              <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+              {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
+            </div>
+            {#if newType === 'static_page'}
+              <div class="field">
+                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
+                {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
+              </div>
+            {:else if newType === 'video'}
+              <div class="field">
+                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
+                {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
+              </div>
+            {/if}
+            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
+            <Button type="submit" disabled={tracker.isDirty || createBusy || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+          </form>
+        {/if}
+
+        {#if seq.items.length === 0}
+          <p class="empty">
+            {canStructure ? 'No items yet — pick a type above to add one.' : 'No items.'}
+          </p>
+        {:else}
+          <ul class="items-list">
+            {#each seq.items as item, i (item.id)}
+              <li>
+                <ItemRow
+                  {item}
+                  index={i + 1}
+                  {canStructure}
+                  canReorderUp={canStructure && i > 0}
+                  canReorderDown={canStructure && i < seq.items.length - 1}
+                  parentDirty={tracker.isDirty}
+                  {busy}
+                  onMoveUp={() => void reorderItem(i, -1)}
+                  onMoveDown={() => void reorderItem(i, 1)}
+                  onOpen={() => openItem(item.id)}
+                  onDelete={() => void deleteItem(item.id, item.title)}
+                />
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
       {#if canStructure}
-        <button onclick={deleteSeq} disabled={busy || tracker.isDirty || seq.items.length > 0} class="danger">Delete sequence</button>
+        <section class="danger">
+          <Button
+            variant="ghost"
+            disabled={tracker.isDirty || busy || seq.items.length > 0}
+            title={tracker.isDirty ? 'Save or discard changes first' : seq.items.length > 0 ? 'Remove items first' : ''}
+            onclick={deleteSeq}
+          >Delete this sequence</Button>
+        </section>
       {/if}
     </div>
   {/if}
 </div>
+
+<style>
+  .sequence { border: 1px solid var(--border); border-radius: var(--radius); margin: var(--space-2) 0; }
+  .accordion-body { padding: var(--space-3); border-top: 1px solid var(--border); }
+  .meta { margin-bottom: var(--space-3); }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta input { width: 100%; }
+  .row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .head { display: flex; justify-content: space-between; align-items: center; }
+  .create { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
+  .create input, .create textarea { width: 100%; }
+  .create .field { display: flex; flex-direction: column; }
+  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
+  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
+  .items-list { list-style: none; padding: 0; margin: 0; }
+  .empty { color: var(--muted); }
+  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); margin-top: var(--space-3); }
+</style>
 ```
 
 - [ ] **Step 2: Type-check**
@@ -1657,12 +1725,14 @@ Expected: No type errors.
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/editor/SequenceAccordion.svelte
-git commit -m "feat(frontend): add SequenceAccordion with sequence-meta + items + create form"
+git commit -m "feat(frontend): add SequenceAccordion (owns item list + create-item form)"
 ```
 
 ---
 
-## Task 11: `BlockAccordion.svelte` — one block
+## Task 11: `BlockAccordion.svelte` — one block (owns sequence list)
+
+**Context:** Owns the block-meta form, the sequence list (renders SequenceAccordion per sequence), the sequence-reorder + sequence-delete API calls (delete is delegated through SequenceAccordion's body button — only sequence-list reorder lives here), and the create-sequence form. Block uses `info` field (NOT `info_md`). Receives `onMoveUp` / `onMoveDown` callbacks from VersionEditPage for its OWN reorder buttons.
 
 **Files:**
 - Create: `frontend/src/components/editor/BlockAccordion.svelte`
@@ -1676,14 +1746,15 @@ Create `frontend/src/components/editor/BlockAccordion.svelte`:
   import { getContext } from 'svelte';
   import AccordionHeader from './AccordionHeader.svelte';
   import SequenceAccordion from './SequenceAccordion.svelte';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
+  import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
-  import { mapCreateError } from '../../lib/formErrors';
-  import { canEditTextFields, canEditStructure } from '../../lib/versionPermissions';
+  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { versionPermissions } from '../../lib/versionPermissions';
   import { navigate } from '../../lib/router.svelte';
-  import { api } from '../../lib/api';
-  import { toasts } from '../../lib/events';
+  import { api, ApiError } from '../../lib/api';
+  import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import Button from '../ui/Button.svelte';
   import type { AdminTreeBlock } from '../../lib/types';
 
   type Props = {
@@ -1694,6 +1765,8 @@ Create `frontend/src/components/editor/BlockAccordion.svelte`:
     blockCount: number;
     routeBid: string | null;
     routeSid: string | null;
+    onMoveUp: () => void;
+    onMoveDown: () => void;
   };
 
   let {
@@ -1704,6 +1777,8 @@ Create `frontend/src/components/editor/BlockAccordion.svelte`:
     blockCount,
     routeBid,
     routeSid,
+    onMoveUp,
+    onMoveDown,
   }: Props = $props();
 
   const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
@@ -1714,18 +1789,17 @@ Create `frontend/src/components/editor/BlockAccordion.svelte`:
   const panelId = `block-${String(block.id)}-panel`;
 
   const version = $derived(currentEditorVersion.value?.version ?? null);
-  const canEdit = $derived(version ? canEditTextFields(version) : false);
-  const canStructure = $derived(version ? canEditStructure(version) : false);
+  const perms = $derived(version ? versionPermissions(version) : null);
+  const canEdit = $derived(perms?.canEditTextFields ?? false);
+  const canStructure = $derived(perms?.canEditStructure ?? false);
 
-  const tracker = makeDirtyTracker({
-    title: block.title ?? '',
-    info_md: '',
-  });
+  type Meta = { title: string; info: string };
+  const tracker = makeDirtyTracker<Meta>({ title: block.title, info: block.info });
 
   let trackerBid = $state(block.id);
   $effect(() => {
     if (block.id !== trackerBid) {
-      tracker.reset({ title: block.title ?? '', info_md: '' });
+      tracker.reset({ title: block.title, info: block.info });
       trackerBid = block.id;
     }
   });
@@ -1738,149 +1812,129 @@ Create `frontend/src/components/editor/BlockAccordion.svelte`:
 
   function toggle() {
     if (expanded) {
-      navigate(`/courses/${courseSlug}/edit/v/${vid}`);
+      void navigate(`/courses/${courseSlug}/edit/v/${vid}`);
     } else {
-      navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
+      void navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
     }
   }
 
   let busy = $state(false);
-  let fieldErrors = $state<Record<string, string>>({});
-  let formError = $state<string | null>(null);
 
   async function save() {
-    if (!tracker.isDirty || busy) return;
-    busy = true;
-    fieldErrors = {};
-    formError = null;
+    if (!tracker.isDirty) return;
     const savedVid = vid;
     const savedBid = block.id;
+    const sentTitle = tracker.current.title;
+    const sentInfo = tracker.current.info;
+    busy = true;
     try {
-      await api.patch(`/api/blocks/${savedBid}`, { title: tracker.current.title });
+      await api.patch(`/api/blocks/${savedBid}`, { title: sentTitle, info: sentInfo });
       const result = await loadAdminTree(savedVid, { force: true });
-      if (result === 'ok' && currentEditorVersion.value) {
-        const fresh = currentEditorVersion.value.blocks.find((b) => b.id === savedBid);
-        if (fresh) {
-          tracker.reset({ title: fresh.title ?? '', info_md: '' });
-          toasts.success('Block saved.');
-        }
+      if (result === 'discarded') {
+        pushToast('Saved', 'success');
+      } else if (result === 'ok') {
+        const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === savedBid);
+        if (fresh) tracker.reset({ title: fresh.title, info: fresh.info });
+        pushToast('Saved', 'success');
+      } else {
+        tracker.reset({ title: sentTitle, info: sentInfo });
+        pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }
     } catch (e) {
-      const mapped = mapCreateError(e);
-      fieldErrors = mapped.fieldErrors;
-      formError = mapped.formError;
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
     } finally {
       busy = false;
     }
   }
 
   function discard() {
-    tracker.reset({ title: block.title ?? '', info_md: '' });
-    fieldErrors = {};
-    formError = null;
-  }
-
-  async function moveUp() {
-    if (busy || tracker.isDirty || index <= 1) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.post(`/api/blocks/${block.id}/move`, { direction: 'up' });
-      await loadAdminTree(savedVid, { force: true });
-    } catch {
-      toasts.error('Could not reorder.');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function moveDown() {
-    if (busy || tracker.isDirty || index >= blockCount) return;
-    busy = true;
-    const savedVid = vid;
-    try {
-      await api.post(`/api/blocks/${block.id}/move`, { direction: 'down' });
-      await loadAdminTree(savedVid, { force: true });
-    } catch {
-      toasts.error('Could not reorder.');
-    } finally {
-      busy = false;
-    }
+    tracker.reset({ title: block.title, info: block.info });
   }
 
   async function deleteBlock() {
-    if (busy || !canStructure || tracker.isDirty) return;
-    if (block.sequences.length > 0) {
-      toasts.error('Remove all sequences first.');
-      return;
-    }
-    if (!confirm(`Delete block "${block.title || block.slug}"?`)) return;
-    busy = true;
+    if (tracker.isDirty || !canStructure || block.sequences.length > 0) return;
+    if (!confirm(`Delete block "${block.title}"? This cannot be undone.`)) return;
     const savedVid = vid;
+    const savedSlug = courseSlug;
+    busy = true;
     try {
       await api.delete(`/api/blocks/${block.id}`);
+      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}`);
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
       await loadAdminTree(savedVid, { force: true });
-      toasts.success('Block deleted.');
-      navigate(`/courses/${courseSlug}/edit/v/${vid}`);
-    } catch {
-      toasts.error('Could not delete.');
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Sequence-list reorder: this component owns block.sequences and the API call.
+  async function reorderSeq(idx: number, dir: -1 | 1) {
+    if (tracker.isDirty) return;
+    const seqs = [...block.sequences];
+    const target = idx + dir;
+    if (target < 0 || target >= seqs.length) return;
+    [seqs[idx], seqs[target]] = [seqs[target], seqs[idx]];
+    const order = seqs.map((s, i) => ({ id: s.id, order: i + 1 }));
+    const savedVid = vid;
+    const savedBid = block.id;
+    busy = true;
+    try {
+      await api.post(`/api/blocks/${savedBid}/sequences/reorder`, { order });
+      await loadAdminTree(savedVid, { force: true });
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
   }
 
   // Inline create-sequence form
-  let creatingSeq = $state(false);
-  let newSeqTitle = $state('');
-  let newSeqSlug = $state('');
-  let createFieldErrors = $state<Record<string, string>>({});
-  let createFormError = $state<string | null>(null);
+  let creating = $state(false);
+  let newTitle = $state('');
+  let newSlug = $state('');
+  let createErrors = $state<FieldErrors>({});
+  let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
-  const createTracker = makeDirtyTracker({ title: '', slug: '' });
+
+  // Tracker shim with synthesized isDirty — no reset()-on-keystroke.
+  const createTracker: RegisteredTracker = {
+    get isDirty() {
+      return creating && (newTitle.trim() !== '' || newSlug.trim() !== '');
+    },
+  };
 
   $effect(() => {
-    if (!creatingSeq) return;
+    if (!creating) return;
     dirty.register(createTracker);
     return () => dirty.unregister(createTracker);
   });
 
-  $effect(() => {
-    if (creatingSeq) {
-      createTracker.reset({ title: newSeqTitle, slug: newSeqSlug });
-    }
-  });
-
-  function openCreateForm() {
-    newSeqTitle = '';
-    newSeqSlug = '';
-    createFieldErrors = {};
-    createFormError = null;
-    creatingSeq = true;
-  }
-
-  function cancelCreate() {
-    creatingSeq = false;
+  function toggleCreate() {
+    if (creating) { newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null; }
+    creating = !creating;
   }
 
   async function submitCreate() {
-    if (createBusy || !newSeqSlug.trim()) return;
-    createBusy = true;
-    createFieldErrors = {};
-    createFormError = null;
+    if (createBusy || !newTitle.trim() || !newSlug.trim()) return;
     const savedVid = vid;
+    const savedBid = block.id;
+    createErrors = {};
+    createGlobalError = null;
+    createBusy = true;
     try {
-      await api.post('/api/sequences', {
-        block_id: block.id,
-        title: newSeqTitle.trim(),
-        slug: newSeqSlug.trim(),
-      });
+      await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle, slug: newSlug });
+      newTitle = ''; newSlug = ''; creating = false;
       await loadAdminTree(savedVid, { force: true });
-      creatingSeq = false;
-      toasts.success('Sequence created.');
+      pushToast('Sequence created', 'success');
     } catch (e) {
-      const mapped = mapCreateError(e);
-      createFieldErrors = mapped.fieldErrors;
-      createFormError = mapped.formError;
+      const mapped = mapCreateError(e, ['title', 'slug']);
+      createErrors = mapped.fieldErrors;
+      createGlobalError = mapped.globalMessage;
+      if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(mapped.globalMessage, 'error');
+      }
     } finally {
       createBusy = false;
     }
@@ -1898,78 +1952,110 @@ Create `frontend/src/components/editor/BlockAccordion.svelte`:
     {expanded}
     dirty={tracker.isDirty}
     {busy}
-    canReorderUp={canStructure && index > 1 && !tracker.isDirty}
-    canReorderDown={canStructure && index < blockCount && !tracker.isDirty}
+    canReorderUp={canStructure && index > 1}
+    canReorderDown={canStructure && index < blockCount}
     onToggle={toggle}
-    onMoveUp={moveUp}
-    onMoveDown={moveDown}
+    {onMoveUp}
+    {onMoveDown}
   />
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
-      <label>
-        Block title
-        <input bind:value={tracker.current.title} disabled={!canEdit || busy} />
-        {#if fieldErrors.title}<span class="field-err">{fieldErrors.title}</span>{/if}
-      </label>
-      {#if formError}<p class="form-err">{formError}</p>{/if}
-      <div class="actions">
-        <button onclick={save} disabled={!canEdit || !tracker.isDirty || busy}>Save</button>
-        <button onclick={discard} disabled={!tracker.isDirty || busy}>Discard</button>
-      </div>
-
-      <h3>Sequences</h3>
-      {#if block.sequences.length === 0}
-        <p class="empty-state">
-          {canStructure ? 'No sequences yet.' : 'No sequences.'}
-        </p>
-      {:else}
-        <ul class="sequences-list">
-          {#each block.sequences as seq, i (seq.id)}
-            <li>
-              <SequenceAccordion
-                {courseSlug}
-                {vid}
-                {block}
-                {seq}
-                index={i + 1}
-                sequenceCount={block.sequences.length}
-                {routeBid}
-                {routeSid}
-              />
-            </li>
-          {/each}
-        </ul>
-      {/if}
-
-      {#if canStructure}
-        {#if !creatingSeq}
-          <button onclick={openCreateForm} disabled={tracker.isDirty}>+ New sequence</button>
-        {:else}
-          <div class="create-form">
-            <label>
-              Title
-              <input bind:value={newSeqTitle} />
-              {#if createFieldErrors.title}<span class="field-err">{createFieldErrors.title}</span>{/if}
-            </label>
-            <label>
-              Slug
-              <input bind:value={newSeqSlug} />
-              {#if createFieldErrors.slug}<span class="field-err">{createFieldErrors.slug}</span>{/if}
-            </label>
-            {#if createFormError}<p class="form-err">{createFormError}</p>{/if}
-            <button onclick={submitCreate} disabled={createBusy || !newSeqSlug.trim()}>Create</button>
-            <button onclick={cancelCreate} disabled={createBusy}>Cancel</button>
+      {#if canEdit}
+        <section class="meta">
+          <label>Title <input bind:value={tracker.current.title} required /></label>
+          <label>Info (markdown) <textarea bind:value={tracker.current.info} rows="3"></textarea></label>
+          <div class="row">
+            <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
+            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
           </div>
-        {/if}
+        </section>
       {/if}
 
+      <section class="seqs">
+        <div class="head">
+          <h3>Sequences</h3>
+          {#if canStructure}
+            <Button
+              disabled={tracker.isDirty || busy}
+              title={tracker.isDirty ? 'Save or discard changes first' : ''}
+              onclick={toggleCreate}
+            >{creating ? 'Cancel' : '+ New sequence'}</Button>
+          {/if}
+        </div>
+
+        {#if creating}
+          <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
+            <div class="field">
+              <input placeholder="Title" bind:value={newTitle} required oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+              {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+            </div>
+            <div class="field">
+              <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+              {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
+            </div>
+            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
+            <Button type="submit" disabled={tracker.isDirty || createBusy || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+          </form>
+        {/if}
+
+        {#if block.sequences.length === 0}
+          <p class="empty">
+            {canStructure ? 'No sequences yet.' : 'No sequences.'}
+          </p>
+        {:else}
+          <ul class="seqs-list">
+            {#each block.sequences as seq, i (seq.id)}
+              <li>
+                <SequenceAccordion
+                  {courseSlug}
+                  {vid}
+                  {block}
+                  {seq}
+                  index={i + 1}
+                  sequenceCount={block.sequences.length}
+                  {routeBid}
+                  {routeSid}
+                  onMoveUp={() => void reorderSeq(i, -1)}
+                  onMoveDown={() => void reorderSeq(i, 1)}
+                />
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
       {#if canStructure}
-        <button onclick={deleteBlock} disabled={busy || tracker.isDirty || block.sequences.length > 0} class="danger">Delete block</button>
+        <section class="danger">
+          <Button
+            variant="ghost"
+            disabled={tracker.isDirty || busy || block.sequences.length > 0}
+            title={tracker.isDirty ? 'Save or discard changes first' : block.sequences.length > 0 ? 'Remove sequences first' : ''}
+            onclick={deleteBlock}
+          >Delete this block</Button>
+        </section>
       {/if}
     </div>
   {/if}
 </div>
+
+<style>
+  .block { border: 1px solid var(--border); border-radius: var(--radius); margin: var(--space-2) 0; }
+  .accordion-body { padding: var(--space-3); border-top: 1px solid var(--border); }
+  .meta { margin-bottom: var(--space-3); }
+  .meta label { display: block; margin: var(--space-2) 0; }
+  .meta input, .meta textarea { width: 100%; }
+  .row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .head { display: flex; justify-content: space-between; align-items: center; }
+  .create { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
+  .create input { width: 100%; }
+  .create .field { display: flex; flex-direction: column; }
+  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
+  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
+  .seqs-list { list-style: none; padding: 0; margin: 0; }
+  .empty { color: var(--muted); }
+  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); margin-top: var(--space-3); }
+</style>
 ```
 
 - [ ] **Step 2: Type-check**
@@ -1986,212 +2072,255 @@ Expected: No type errors.
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/editor/BlockAccordion.svelte
-git commit -m "feat(frontend): add BlockAccordion with block-meta + nested sequences + create form"
+git commit -m "feat(frontend): add BlockAccordion (owns sequence list + reorder + create form)"
 ```
 
 ---
 
-## Task 12: VersionEditPage accordion wiring + stale-id $effect + focus $effect
+## Task 12: VersionEditPage accordion wiring + validation/focus effects + block reorder/create
 
-**Context:** The shell from Task 7 had placeholder slots for the accordion list, validation `$effect`, and focus `$effect`. This task fills them all in, respecting **declaration order: load → validation → focus** (per spec).
+**Context:** Fills in the shell from Task 7: adds the blocks accordion list (with VersionEditPage owning block-list reorder), the validation `$effect` (declared SECOND, after load), the focus `$effect` (declared THIRD), and the inline create-block form. Effect declaration order: **load → validation → focus**.
 
 **Files:**
 - Modify: `frontend/src/pages/editor/VersionEditPage.svelte`
 
-- [ ] **Step 1: Read the current shell**
+- [ ] **Step 1: Add imports + block-reorder + validation/focus effects + create-block + accordion list**
+
+Apply the changes below to `frontend/src/pages/editor/VersionEditPage.svelte`. Read the current file first to confirm the section boundaries:
 
 ```bash
 sed -n '1,200p' /Users/svkucheryavski/Documents/Developing/mathion/frontend/src/pages/editor/VersionEditPage.svelte
 ```
 
-- [ ] **Step 2: Add imports + validation/focus effects + accordion list**
+Then make these edits inside `<script>`:
 
-Apply the following changes to `frontend/src/pages/editor/VersionEditPage.svelte`:
-
-a) Add imports at the top of `<script>`:
+a) Add to imports:
 
 ```typescript
   import { tick } from 'svelte';
   import { deriveExpansion } from '../../lib/deriveExpansion';
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
-  import { mapCreateError } from '../../lib/formErrors';
+  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
+  import type { RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
 ```
 
-b) After the load `$effect`, insert the validation `$effect` (declared SECOND):
+b) After the existing load `$effect`, insert the validation `$effect` (declared SECOND, before focus):
 
 ```typescript
+  // Validation $effect — declared SECOND in declaration order so stale-id
+  // correction lands before the focus effect tries to find a toggle for a
+  // stale entity.
   $effect(() => {
-    const expansion = deriveExpansion(routeBid, routeSid, currentEditorVersion.value);
+    if (!tree) return;
+    const expansion = deriveExpansion(routeBid, routeSid, tree);
     if (expansion.staleBid || expansion.staleSid) {
       handleStaleIdFallback(
         { staleBid: expansion.staleBid, staleSid: expansion.staleSid },
         { courseSlug, vid: String(vid), bid: routeBid },
-        { toast: toasts, navigate },
+        { pushToast, navigate },
       );
     }
   });
 ```
 
-c) After the validation `$effect`, insert the focus `$effect` (declared THIRD). It depends on `(routeBid, routeSid, tree)`:
+c) After the validation `$effect`, insert the focus `$effect` (declared THIRD):
 
 ```typescript
+  // Focus $effect — declared THIRD. Tracks (routeBid, routeSid, tree) so it
+  // re-fires after the initial admin-tree load resolves on deep-link mount.
   $effect(() => {
-    // Track all three dependencies.
     const bid = routeBid;
     const sid = routeSid;
     const t = currentEditorVersion.value;
     if (!t) return;
-    // Resolve deepest expanded toggle's headerId.
+
+    // Resolve deepest expanded headerId from current state.
     let headerId: string | null = null;
     if (bid !== null) {
-      const block = t.blocks.find((b) => String(b.id) === bid);
-      if (block) {
+      const blockMatch = t.blocks.find((b) => String(b.id) === bid);
+      if (blockMatch) {
         if (sid !== null) {
-          const seq = block.sequences.find((s) => String(s.id) === sid);
-          if (seq) headerId = `seq-${String(seq.id)}-header`;
-          else headerId = `block-${String(block.id)}-header`;
+          const seqMatch = blockMatch.sequences.find((s) => String(s.id) === sid);
+          headerId = seqMatch
+            ? `seq-${String(seqMatch.id)}-header`
+            : `block-${String(blockMatch.id)}-header`;
         } else {
-          headerId = `block-${String(block.id)}-header`;
+          headerId = `block-${String(blockMatch.id)}-header`;
         }
       }
     }
     if (!headerId) return;
 
+    // Capture the target headerId before await so a later effect run can't
+    // race ahead of this one.
+    const targetHeaderId = headerId;
+    let cancelled = false;
     void (async () => {
       await tick();
-      // Read activeElement BEFORE any focus() call — otherwise the discriminator is self-referential.
+      if (cancelled) return;
+      // Read activeElement BEFORE any focus() call — once we focus we have
+      // changed activeElement ourselves and the discriminator becomes
+      // self-referential.
       const active = document.activeElement?.id ?? null;
-      if (active === headerId) return; // user-click branch — focus already correct.
-      const el = document.getElementById(headerId);
+      if (active === targetHeaderId) return; // user-click branch
+      const el = document.getElementById(targetHeaderId);
       if (!el) return;
       el.focus();
       el.scrollIntoView({ block: 'start', behavior: 'instant' });
     })();
+    return () => { cancelled = true; };
   });
 ```
 
-d) Add `import { makeDirtyTracker } from '../../lib/dirty.svelte';` to the imports block at the top of `<script>`.
-
-Then add inline create-block form state and the create-block tracker + register/unregister effects inside `<script>`, after the other state declarations:
+d) Add block-list reorder handler (VersionEditPage owns this since it iterates `tree.blocks`):
 
 ```typescript
-  let creatingBlock = $state(false);
-  let newBlockTitle = $state('');
-  let newBlockSlug = $state('');
-  let createFieldErrors = $state<Record<string, string>>({});
-  let createFormError = $state<string | null>(null);
+  async function reorderBlock(idx: number, dir: -1 | 1) {
+    if (dirtyRegistry.isAnyDirty()) return;
+    if (!tree) return;
+    const blocks = [...tree.blocks];
+    const target = idx + dir;
+    if (target < 0 || target >= blocks.length) return;
+    [blocks[idx], blocks[target]] = [blocks[target], blocks[idx]];
+    const order = blocks.map((b, i) => ({ id: b.id, order: i + 1 }));
+    const savedVid = vid;
+    busy = true;
+    try {
+      await api.post(`/api/versions/${savedVid}/blocks/reorder`, { order });
+      await loadAdminTree(savedVid, { force: true });
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      await loadAdminTree(savedVid, { force: true });
+    } finally {
+      busy = false;
+    }
+  }
+```
+
+e) Add inline create-block form state + handlers + tracker shim:
+
+```typescript
+  let creating = $state(false);
+  let newTitle = $state('');
+  let newSlug = $state('');
+  let createErrors = $state<FieldErrors>({});
+  let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
 
-  const createBlockTracker = makeDirtyTracker({ title: '', slug: '' });
-```
-
-Add the register effect and handlers:
-
-```typescript
-  $effect(() => {
-    if (!creatingBlock) return;
-    dirtyRegistry.register(createBlockTracker);
-    return () => dirtyRegistry.unregister(createBlockTracker);
-  });
+  // Tracker shim with synthesized isDirty — no reset()-on-keystroke.
+  const createTracker: RegisteredTracker = {
+    get isDirty() {
+      return creating && (newTitle.trim() !== '' || newSlug.trim() !== '');
+    },
+  };
 
   $effect(() => {
-    if (creatingBlock) {
-      createBlockTracker.reset({ title: newBlockTitle, slug: newBlockSlug });
-    }
+    if (!creating) return;
+    dirtyRegistry.register(createTracker);
+    return () => dirtyRegistry.unregister(createTracker);
   });
 
-  function openCreateBlockForm() {
-    newBlockTitle = '';
-    newBlockSlug = '';
-    createFieldErrors = {};
-    createFormError = null;
-    creatingBlock = true;
-  }
-
-  function cancelCreateBlock() {
-    creatingBlock = false;
+  function toggleCreate() {
+    if (creating) { newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null; }
+    creating = !creating;
   }
 
   async function submitCreateBlock() {
-    if (createBusy || !newBlockSlug.trim()) return;
-    createBusy = true;
-    createFieldErrors = {};
-    createFormError = null;
+    if (createBusy || !newTitle.trim() || !newSlug.trim()) return;
     const savedVid = vid;
+    createErrors = {};
+    createGlobalError = null;
+    createBusy = true;
     try {
-      await api.post('/api/blocks', {
-        version_id: savedVid,
-        title: newBlockTitle.trim(),
-        slug: newBlockSlug.trim(),
-      });
+      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
+      newTitle = ''; newSlug = ''; creating = false;
       await loadAdminTree(savedVid, { force: true });
-      creatingBlock = false;
-      toasts.success('Block created.');
+      pushToast('Block created', 'success');
     } catch (e) {
-      const mapped = mapCreateError(e);
-      createFieldErrors = mapped.fieldErrors;
-      createFormError = mapped.formError;
+      const mapped = mapCreateError(e, ['title', 'slug']);
+      createErrors = mapped.fieldErrors;
+      createGlobalError = mapped.globalMessage;
+      if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(mapped.globalMessage, 'error');
+      }
     } finally {
       createBusy = false;
     }
   }
 ```
 
-e) Replace the markup body (between `<VersionMetaForm />` and the trailing `{:else}` branch) with the blocks accordion list + create-block form:
+f) Replace the `<!-- Blocks accordion list lands in Task 12. -->` placeholder with the blocks accordion section, placed after `<VersionMetaForm {vid} {version}={v} />` and before the `<section class="state-actions">`:
 
 ```svelte
-  <VersionMetaForm {vid} {version} />
+    <section class="blocks">
+      <div class="head">
+        <h2>Blocks</h2>
+        {#if perms.canEditStructure}
+          <Button
+            disabled={dirtyRegistry.isAnyDirty() || busy}
+            title={dirtyRegistry.isAnyDirty() ? 'Save or discard changes first' : ''}
+            onclick={toggleCreate}
+          >{creating ? 'Cancel' : '+ New block'}</Button>
+        {/if}
+      </div>
 
-  <section class="blocks-section">
-    <h2>Blocks</h2>
-    {#if tree.blocks.length === 0}
-      <p class="empty-state">
-        {canStructure ? 'This version has no blocks yet.' : 'This version has no blocks.'}
-      </p>
-    {:else}
-      <ul class="blocks-list">
-        {#each tree.blocks as block, i (block.id)}
-          <li>
-            <BlockAccordion
-              {courseSlug}
-              {vid}
-              {block}
-              index={i + 1}
-              blockCount={tree.blocks.length}
-              {routeBid}
-              {routeSid}
-            />
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
-    {#if canStructure}
-      {#if !creatingBlock}
-        <button onclick={openCreateBlockForm}>+ New block</button>
-      {:else}
-        <div class="create-form">
-          <label>
-            Title
-            <input bind:value={newBlockTitle} />
-            {#if createFieldErrors.title}<span class="field-err">{createFieldErrors.title}</span>{/if}
-          </label>
-          <label>
-            Slug
-            <input bind:value={newBlockSlug} />
-            {#if createFieldErrors.slug}<span class="field-err">{createFieldErrors.slug}</span>{/if}
-          </label>
-          {#if createFormError}<p class="form-err">{createFormError}</p>{/if}
-          <button onclick={submitCreateBlock} disabled={createBusy || !newBlockSlug.trim()}>Create</button>
-          <button onclick={cancelCreateBlock} disabled={createBusy}>Cancel</button>
-        </div>
+      {#if creating}
+        <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreateBlock(); }}>
+          <div class="field">
+            <input placeholder="Title" bind:value={newTitle} required oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+            {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+          </div>
+          <div class="field">
+            <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+            {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
+          </div>
+          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
+          <Button type="submit" disabled={createBusy || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+        </form>
       {/if}
-    {/if}
-  </section>
+
+      {#if tree.blocks.length === 0}
+        <p class="empty">
+          {perms.canEditStructure ? 'This version has no blocks yet.' : 'This version has no blocks.'}
+        </p>
+      {:else}
+        <ul class="blocks-list">
+          {#each tree.blocks as block, i (block.id)}
+            <li>
+              <BlockAccordion
+                {courseSlug}
+                {vid}
+                {block}
+                index={i + 1}
+                blockCount={tree.blocks.length}
+                {routeBid}
+                {routeSid}
+                onMoveUp={() => void reorderBlock(i, -1)}
+                onMoveDown={() => void reorderBlock(i, 1)}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
 ```
 
-- [ ] **Step 3: Type-check**
+g) Add to the `<style>` block:
+
+```css
+  .blocks { margin: var(--space-4) 0; }
+  .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+  .create { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
+  .create input { width: 100%; }
+  .create .field { display: flex; flex-direction: column; }
+  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
+  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
+  .blocks-list { list-style: none; padding: 0; margin: 0; }
+  .empty { color: var(--muted); }
+```
+
+- [ ] **Step 2: Type-check**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
@@ -2200,19 +2329,19 @@ npm run check
 
 Expected: No type errors.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/pages/editor/VersionEditPage.svelte
-git commit -m "feat(frontend): wire VersionEditPage accordion + stale-id + focus effects"
+git commit -m "feat(frontend): wire VersionEditPage accordion + stale-id + focus + create-block"
 ```
 
 ---
 
 ## Task 13: Routes + componentMap rebinding
 
-**Context:** Three routes (`/v/:vid`, `/blocks/:bid`, `/sequences/:sid`) need to point to `VersionEditPage`. `App.svelte` removes references to the deleted page components.
+**Context:** Three routes (`/v/:vid`, `/blocks/:bid`, `/sequences/:sid`) all point to `VersionEditPage`. `App.svelte` removes the deleted-page imports + entries.
 
 **Files:**
 - Modify: `frontend/src/routes.ts`
@@ -2220,24 +2349,39 @@ git commit -m "feat(frontend): wire VersionEditPage accordion + stale-id + focus
 
 - [ ] **Step 1: Update `routes.ts`**
 
-Change three route entries in `frontend/src/routes.ts` so they all map to `'VersionEditPage'`:
+Edit `frontend/src/routes.ts`. Replace these three entries:
 
 ```typescript
-  { path: '/courses/:courseSlug/edit/v/:versionId', component: 'VersionEditPage', auth: true },
-  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId', component: 'VersionEditPage', auth: true },
-  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId', component: 'VersionEditPage', auth: true },
-  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId/items/:itemId', component: 'ItemEditPage', auth: true },
+  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId', component: 'BlockEditPage', auth: true },
+  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId', component: 'SequenceEditPage', auth: true },
 ```
 
-Leave the ItemEditPage entry as-is.
+with:
+
+```typescript
+  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId', component: 'VersionEditPage', auth: true },
+  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId', component: 'VersionEditPage', auth: true },
+```
+
+The `/courses/:courseSlug/edit/v/:versionId` and `.../items/:itemId` entries are unchanged.
 
 - [ ] **Step 2: Update `App.svelte`**
 
 In `frontend/src/App.svelte`:
 
-a) Remove the imports for `BlockEditPage` and `SequenceEditPage`.
+a) Remove these imports:
 
-b) Remove the `BlockEditPage` and `SequenceEditPage` entries from `componentMap`.
+```typescript
+  import BlockEditPage from './pages/editor/BlockEditPage.svelte';
+  import SequenceEditPage from './pages/editor/SequenceEditPage.svelte';
+```
+
+b) Remove these `componentMap` entries:
+
+```typescript
+    BlockEditPage: BlockEditPage as Component<Record<string, string>>,
+    SequenceEditPage: SequenceEditPage as Component<Record<string, string>>,
+```
 
 - [ ] **Step 3: Type-check**
 
@@ -2246,7 +2390,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm run check
 ```
 
-Expected: No type errors (the deleted page files don't exist yet — they'll be deleted in Task 14, but svelte-check should pass once the imports are removed).
+Expected: No type errors. (The deleted-page files still exist on disk until Task 14, but no source code references them anymore.)
 
 - [ ] **Step 4: Commit**
 
@@ -2270,7 +2414,7 @@ git commit -m "refactor(frontend): rebind /blocks/:bid and /sequences/:sid to Ve
 grep -r "BlockEditPage\|SequenceEditPage" /Users/svkucheryavski/Documents/Developing/mathion/frontend/src/ --include="*.ts" --include="*.svelte"
 ```
 
-Expected: only matches inside the page files themselves (which we're about to delete). Zero references in routes.ts, App.svelte, or anywhere else.
+Expected: only matches inside the two page files themselves. Zero references in routes.ts, App.svelte, or any component.
 
 - [ ] **Step 2: Delete the files**
 
@@ -2286,7 +2430,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm run check && npm test
 ```
 
-Expected: No type errors. All existing tests pass (plus the new ones added in Tasks 1–4).
+Expected: No type errors. All existing tests pass (plus the new ones from Tasks 1–4).
 
 - [ ] **Step 4: Commit**
 
@@ -2300,7 +2444,7 @@ git commit -m "refactor(frontend): delete BlockEditPage and SequenceEditPage —
 
 ## Task 15: Manual smoke pass
 
-**Context:** The spec defines a smoke checklist of 28+ items (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 14b, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 26b, 27, 28, 28b, 28c, 28d). This task runs through them all in the dev environment and records any defect to be fixed before merging.
+**Context:** Execute every smoke item from the spec's checklist in the dev environment.
 
 **Files:** none — verification only.
 
@@ -2329,17 +2473,16 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/backend
 
 - [ ] **Step 3: Execute each smoke item**
 
-Open the spec at `docs/superpowers/specs/2026-05-10-editor-accordion-design.md` to the "Manual smoke checklist (slice 2)" section. Execute each numbered item in a real browser (Chrome or Firefox; for items 18/24/25/28/28b/28c/28d a screen reader — VoiceOver on macOS — is needed). Mark items pass/fail; for any fail, file a separate fix task and re-run the affected item.
+Open the spec at `docs/superpowers/specs/2026-05-10-editor-accordion-design.md` to the "Manual smoke checklist (slice 2)" section. Execute each numbered item in a real browser. For items 18 / 24 / 25 / 28 / 28b / 28c / 28d use VoiceOver (macOS) or another screen reader.
 
-Items to execute, in order:
-
-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 14b, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 26b, 27, 28, 28b, 28c, 28d.
+Items: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 14b, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 26b, 27, 28, 28b, 28c, 28d.
 
 - [ ] **Step 4: Record results**
 
-If any item fails, fix the underlying defect (open the relevant source file from the file-map at the top of this plan and modify it), then commit:
+For each item that fails: open the most relevant file from the file-map at the top of this plan, write a regression test FIRST in `frontend/src/tests/` (if testable as a pure helper), make the test fail to repro, fix the defect, re-run `npm test && npm run check`, then commit:
 
 ```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion
 git add <file(s)>
 git commit -m "fix(frontend): <defect description from smoke item N>"
 ```
@@ -2348,7 +2491,7 @@ If all items pass, this task is complete — no commit needed.
 
 ---
 
-## Task 16: Final type-check + full vitest run
+## Task 16: Final svelte-check + full vitest run
 
 **Files:** none — verification only.
 
@@ -2368,7 +2511,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend
 npm test
 ```
 
-Expected: all tests pass (including the 4 new test files: labelFor, deriveExpansion, dirtyRegistry, handleStaleIdFallback). Existing tests (dirty, router, formErrors, etc.) still green.
+Expected: all tests pass (including the 4 new helper tests). Existing tests still green.
 
 - [ ] **Step 3: Verify branch is ready to merge**
 
@@ -2384,38 +2527,52 @@ Expected: clean working tree, commits visible from Task 1 through Task 15.
 
 ## Self-review
 
-Before handing off to subagent-driven-development, the planner ran a self-review against the spec:
-
 **Spec coverage:**
-- §Goal / §Architecture overview → Task 7 (shell), Task 12 (accordion wiring) ✓
-- §Components table → Tasks 6, 8, 9, 10, 11 (VersionMetaForm, AccordionHeader, ItemRow, SequenceAccordion, BlockAccordion) + Task 7 + Task 12 (VersionEditPage) ✓
+- §Goal / §Architecture overview → Tasks 7, 12 ✓
+- §Components table → Tasks 6 (VersionMetaForm), 8 (AccordionHeader), 9 (ItemRow), 10 (SequenceAccordion), 11 (BlockAccordion), 7+12 (VersionEditPage) ✓
 - §Routes table → Task 13 ✓
-- §Router contract — instance preservation → Task 13 (rebinding three routes to same component) ✓
-- §Stale-id fallback → Task 4 (helper), Task 12 (validation `$effect` wiring) ✓
-- §Expansion state derivation → Task 2 (helper), Task 11/10 (header `expanded={...}` derive) ✓
-- §Dirty state contract — registry, single-prompt-path, prompt copy, over-prompt-accepted, reorder/delete gating → Tasks 3 (registry), 5 (copy), 6/7/10/11 (consumers), 9/10/11 (reorder/delete gating) ✓
-- §Accordion a11y contract — slug-span rule, scoped reorder labels, stable IDs, `aria-hidden` slug, panel `role="region"` → Tasks 8, 9, 10, 11 ✓
-- §Focus management table → Task 12 (focus `$effect`) ✓
-- §Effect ordering + dep tuple → Task 12 explicitly orders load → validation → focus ✓
-- §Item navigation → Task 9 (ItemRow Open button → navigate) ✓
-- §Reorder → Tasks 9, 10, 11 (all three levels) ✓
-- §Create / delete → Tasks 9, 10, 11, 12 ✓
+- §Router contract — instance preservation → Task 13 ✓
+- §Stale-id fallback → Task 4 (helper), Task 12 (validation `$effect`) ✓
+- §Expansion state derivation → Task 2 (helper), Tasks 10/11 (`expanded` derive) ✓
+- §Dirty state contract → Tasks 3 (registry), 5 (copy), 6/7/10/11/12 (consumers + create-form shims), 10/11/12 (reorder/delete gating) ✓
+- §Accordion a11y contract → Tasks 8 (slug-span suppression, scoped reorder labels, stable IDs from entity.id, slug aria-hidden, panel role=region), 9 (ItemRow parallels) ✓
+- §Focus management table → Task 12 (focus `$effect` with capture-before-await + cancellation flag) ✓
+- §Effect ordering + dep tuple → Task 12 (load → validation → focus, focus tracks `(routeBid, routeSid, tree)`) ✓
+- §Item navigation → Task 9 (Open callback → SequenceAccordion → navigate) ✓
+- §Reorder → Tasks 10 (items), 11 (sequences), 12 (blocks) — list-owner pattern ✓
+- §Create / delete → Tasks 10 (items), 11 (sequences), 12 (blocks); deletes in 10/11 (sequence + item), 11 (block via SequenceAccordion's danger button — wait, block-delete lives in BlockAccordion: ✓), 12 (version) ✓
 - §Empty states → Tasks 10, 11, 12 (3 places with editable/disabled copy variants) ✓
 - §What gets deleted → Task 14 ✓
-- §What stays unchanged from slice 1 → preserved by not modifying those files; verified by Task 16 full test run ✓
-- §Race safety carry-over → Tasks 6/10/11 (savedVid/savedBid capture at await-start), 12 (LoadResult discrimination via loadAdminTree) ✓
-- §Testing approach — pure helpers + vitest → Tasks 1–4 ✓
-- §Manual smoke checklist (28+ items) → Task 15 ✓
+- §Race safety carry-over (savedVid/savedBid at await-start, LoadResult discrimination, reorder/delete recover via refetch) → Tasks 6, 10, 11, 12 ✓
+- §Testing approach → Tasks 1–4 (pure helpers + vitest) ✓
+- §Manual smoke checklist → Task 15 ✓
 - §Implementation order — provider before consumers → Task 7 provides context, Tasks 10/11/12 consume ✓
 
-**Placeholder scan:** none. Every step contains either an executable command, exact code, or an explicit pass/fail criterion.
+**Placeholder scan:** none. Every step contains executable commands or exact code.
 
 **Type consistency:**
-- `labelFor(title, slug, fallback?)` signature consistent across Tasks 1, 8, 9, 10, 11 ✓
-- `RegisteredTracker = { readonly isDirty: boolean }` matches the slice-1 tracker getter shape ✓
-- `Expansion` return shape from `deriveExpansion` matches Task 12 consumer ✓
-- `StaleFlags` / `StaleContext` / `StaleDeps` triple in Task 4 matches Task 12 caller ✓
+- `labelFor(title, slug, fallback?)` consistent across Tasks 1, 8, 9 ✓
+- `RegisteredTracker = { readonly isDirty: boolean }` matches slice-1 tracker getter shape and tracker-shim usage ✓
+- `Expansion` shape consistent between Task 2 and Task 12 ✓
+- `StaleFlags` / `StaleContext` / `StaleDeps` with `pushToast` injection consistent between Task 4 and Task 12 ✓
 - `routeBid: string | null` / `routeSid: string | null` consistent across Tasks 7, 10, 11, 12 ✓
-- `headerId = block-${block.id}-header` / `seq-${seq.id}-header` consistent between Tasks 8 (header markup), 10/11 (id construction), 12 (focus-effect lookup) ✓
+- `headerId` template literals (`block-${block.id}-header`, `seq-${seq.id}-header`) consistent between Tasks 8 (markup), 10/11 (id construction), 12 (focus-effect lookup) ✓
+- `versionPermissions(v)` factory + `.canEdit*` properties consistent across Tasks 6, 7, 10, 11 ✓
+- `mapCreateError(e, knownFields)` returning `{ fieldErrors, globalMessage }` consistent across Tasks 10, 11, 12 ✓
+- `pushToast(msg, kind)` consistent across Tasks 4, 6, 7, 10, 11, 12 ✓
 
-Plan is internally consistent and spec-complete.
+**Slice-1 contracts (verified at plan-writing time, after plan-review round 1):**
+- `toasts` named export from `lib/events.ts` does NOT exist; plan uses `pushToast` from `stores/toasts.svelte`. ✓
+- `versionPermissions` is a factory function; plan uses `versionPermissions(v).canEditX`. ✓
+- `mapCreateError(e, knownFields)` signature; plan reads `globalMessage`, not `formError`. ✓
+- Reorder endpoints: `/api/versions/:vid/blocks/reorder`, `/api/blocks/:bid/sequences/reorder`, `/api/sequences/:sid/items/reorder`. ✓
+- Create endpoints: nested `/api/versions/:vid/blocks`, `/api/blocks/:bid/sequences`, `/api/sequences/:sid/items`. ✓
+- `AdminTreeBlock.info` field (not `info_md`). ✓
+- `AdminTree.course = { id, name, slug }`. ✓
+- `ItemTypePicker` value narrowed to `'static_page' | 'video'` + per-type required field rendering. ✓
+- Slice-1 header preserved: `← Versions` button + course name + version + state badge + disabled banner. ✓
+- 3-way LoadResult save handling preserved. ✓
+- Reorder/delete error recovery refetch preserved. ✓
+- Slug `pattern="[a-z0-9]+(-[a-z0-9]+)*"` on every slug input. ✓
+- Inline create-form dirty tracking uses synthesized `RegisteredTracker` shim (no `reset()`-on-keystroke). ✓
+- Focus `$effect` reads `activeElement` BEFORE focus, captures vars before `await tick()`, returns cancellation cleanup. ✓
