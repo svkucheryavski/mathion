@@ -1,3 +1,9 @@
+// deriveExpansion takes URL-parsed block/sequence ids and the loaded
+// admin-tree and returns the matched entities plus stale-id flags. The
+// accordion uses this to rebuild its expansion state from the URL alone —
+// no parallel component state. staleBid wins over staleSid by design:
+// when the block is gone, the nested sequence URL is moot.
+
 import type { AdminTree, AdminTreeBlock, AdminTreeSequence } from './types';
 
 export type Expansion = {
