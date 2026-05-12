@@ -402,6 +402,8 @@ The recommended approach is (a). Plan-writer should confirm the backend contract
 
 Note this is the **load** `$effect`. The separate **validation** `$effect` (see Stale-id fallback) keys on `(routeBid, routeSid, tree)` and runs on every route or tree change — they are distinct and serve different purposes. Don't collapse them.
 
+**`$effect` declaration order inside `VersionEditPage`.** Declare in this order: **load `$effect` (vid) → validation `$effect` (routeBid, routeSid, tree) → focus `$effect` (routeBid, routeSid, tree)**. Svelte 5 runs `$effect`s in declaration order on every flush, so a stale-id correction queued by the validation effect mutates `routeBid`/`routeSid` before the focus effect reads them, avoiding a one-frame visual glitch where focus moves to a toggle for a stale id that's about to be navigated away. The corrected route also feeds back into the same effect set on the next tick, where validation passes (no further fallback) and focus then lands on the correct deepest toggle.
+
 ## Testing approach
 
 **Strategy: extract pure helpers; test those with existing vitest.** The repo has no `@testing-library/svelte` setup and slice 1 stayed entirely with store/lib tests via vitest. Slice 2 follows the same pattern — no new mount-test harness, no jsdom-DOM dependency added. Component-level behavior (expand/collapse, dirty-prompt, reorder/delete a11y, focus moves) is covered by the manual smoke checklist.
