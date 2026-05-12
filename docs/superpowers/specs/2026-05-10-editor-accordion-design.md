@@ -56,8 +56,8 @@ VersionEditPage (rewritten)
 | `pages/editor/VersionEditPage.svelte` | Top-level page. Holds version meta form, state actions, and the blocks accordion. Expansion is derived directly from route params (`routeBid` / `routeSid`) — **no internal expansion state**. Holds the page-wide dirty registry that every form registers into (so DirtyGuard can ask "is anything dirty?"). |
 | `components/editor/BlockAccordion.svelte` (NEW) | One block. Renders header (title, slug, reorder, expand toggle). Header `onclick` calls `navigate(...)` directly — no `requestExpand` event, no parent intercept. Body holds block meta form + sequences accordion; the block-meta form owns its own dirty tracker and registers it in the page-wide registry via context. |
 | `components/editor/SequenceAccordion.svelte` (NEW) | One sequence. Renders header (title, slug, reorder, expand toggle). Header `onclick` calls `navigate(...)` directly. Body holds sequence meta form + items list + create-item form; the sequence-meta form owns its own dirty tracker and registers it in the page-wide registry via context. |
-| `components/editor/ItemRow.svelte` (NEW) | One item in a sequence's list. Shows title + type icon + reorder ↑/↓ + delete + Open button (navigates to `ItemEditPage`). The Open button's accessible name is per-item: `aria-label={`Open ${item.title}`}`. Delete button: `aria-label={`Delete ${item.title}`}`. Reorder uses scoped labels: `"Move item up"` / `"Move item down"`. Pure presentational; emits actions up. |
-| `components/editor/AccordionHeader.svelte` (NEW) | Reusable header element used by both Block and Sequence accordions. Renders the toggle button (`<button aria-expanded>`), title, slug, and slots for extra controls. Pure presentational. |
+| `components/editor/ItemRow.svelte` (NEW) | One item in a sequence's list. Shows title + type icon + reorder ↑/↓ + delete + Open button (navigates to `ItemEditPage`). The Open button's accessible name is per-item: `aria-label={`Open ${item.title}`}`. Delete button: `aria-label={`Delete ${item.title}`}`. Reorder uses level+entity scoped labels: `aria-label={`Move item "${item.title}" up`}` / `"down"`. Pure presentational; emits actions up. |
+| `components/editor/AccordionHeader.svelte` (NEW) | Reusable header element used by both Block and Sequence accordions. Renders the toggle button (`<button aria-expanded>`), title, slug, and reorder/extra-control buttons. Pure presentational — receives all behavior via props. Props: `{ headerId, panelId, level: 'block' | 'sequence', title, slug, expanded, dirty, busy, canReorderUp, canReorderDown, onToggle, onMoveUp, onMoveDown }`. The owning component (`BlockAccordion` for level=block; `SequenceAccordion` for level=sequence) computes `dirty` from its own tracker (`tracker.isDirty`) and passes it down — `AccordionHeader` does not consult the registry directly. |
 | `pages/editor/BlockEditPage.svelte` | **DELETED.** Functionality merges into BlockAccordion body. |
 | `pages/editor/SequenceEditPage.svelte` | **DELETED.** Functionality merges into SequenceAccordion body. |
 | `pages/editor/ItemEditPage.svelte` | **UNCHANGED.** Still its own route; back-button still works. |
@@ -79,12 +79,12 @@ The `BlockEdit` and `SequenceEdit` route entries in `routes.ts` keep their patte
 If `routeBid` doesn't resolve to a block in `tree.blocks` (deleted between deep-link share and click, or concurrent admin removed it), the page:
 
 1. Shows a single info toast: "Block not found."
-2. Replaces the URL to `/edit/v/:vid` (history **replace**, not push — so Back doesn't re-trigger the toast).
+2. Replaces the URL to `/edit/v/:vid` via `navigate(url, { replace: true, force: true })` — **replace** so Back doesn't re-trigger the toast; **force** so DirtyGuard doesn't prompt on the now-deleted entity (Cancel on such a prompt would just re-trigger the stale-id loop).
 3. Renders the version page with all blocks collapsed.
 
-Same shape for stale `routeSid` against the expanded block's `sequences`: toast "Sequence not found.", replace to `/edit/v/:vid/blocks/:bid` (keep the block expanded), proceed.
+Same shape for stale `routeSid` against the expanded block's `sequences`: toast "Sequence not found.", `navigate('/edit/v/:vid/blocks/:bid', { replace: true, force: true })` (keep the block expanded), proceed.
 
-This mirrors slice-1's 404 path from `BlockEditPage.svelte:199` and `SequenceEditPage.svelte:241`, just rendered inline. Validation runs in an `$effect` keyed on `(routeBid, routeSid, tree)` so it fires on initial load, after any tree refetch, and on every route change.
+This mirrors slice-1's 404 path from `BlockEditPage.svelte:199` and `SequenceEditPage.svelte:241`, just rendered inline. Validation runs in an `$effect` keyed on `(routeBid, routeSid, tree)` so it fires on initial load, after any tree refetch, and on every route change. The `handleStaleIdFallback` helper (see Testing approach) encapsulates the toast + navigate side-effects.
 
 ## Expansion state and URL synchronization
 
@@ -101,7 +101,7 @@ const sid = $derived(routeSid);
 
 Clicking a block header to expand calls `navigate('/edit/v/${vid}/blocks/${block.id}')` — the URL becomes the source of truth, the accordion re-derives expansion. Clicking the same expanded header to collapse calls `navigate('/edit/v/${vid}')`. Same shape for sequences. Browser Back/Forward "just works" — the accordion follows the URL.
 
-**Push vs replace policy.** User-initiated expand/collapse clicks use `pushState` (so Back genuinely unwinds the user's exploration). Programmatic URL normalizations — stale-id fallback (see Routes), post-refetch repairs — use `replaceState` so Back doesn't re-trigger the broken state. The slice-1 router exposes both via `navigate(url, { replace: false })` (default push) and `navigate(url, { replace: true })`.
+**Push vs replace policy.** User-initiated expand/collapse clicks use `pushState` (so Back genuinely unwinds the user's exploration). Programmatic URL normalizations — stale-id fallback (see Routes), post-refetch repairs — use `replaceState` so Back doesn't re-trigger the broken state. The slice-1 router exposes both via `navigate(url, { replace: false })` (default push) and `navigate(url, { replace: true })`. Stale-id fallback additionally uses `{ force: true }` to bypass DirtyGuard — see Stale-id fallback subsection.
 
 **Scroll + focus on deep-link / auto-expand.** When `VersionEditPage` mounts (or `routeBid` / `routeSid` change later) with non-null ids, after the admin-tree load resolves AND `await tick()` (so the accordion body has actually rendered into the DOM):
 
@@ -155,24 +155,24 @@ export function createDirtyRegistry(): DirtyRegistry {
 }
 ```
 
-`VersionEditPage` wires it once at the top of the component:
+`VersionEditPage` (under `pages/editor/`) wires it once at the top of the component:
 
 ```typescript
 import { setContext } from 'svelte';
-import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '$lib/dirtyRegistry.svelte';
+import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
 
 const dirtyRegistry = createDirtyRegistry();
 setContext(DIRTY_REGISTRY_KEY, dirtyRegistry);
 ```
 
-Forms (version-meta, BlockAccordion, SequenceAccordion, create-forms) consume it via the same key:
+Forms (version-meta, BlockAccordion, SequenceAccordion, create-forms — under `components/editor/`) consume it via the same key. Relative-path imports match slice-1 convention (`BlockEditPage.svelte` and `ItemEditPage.svelte` both import `'../../lib/dirty.svelte'`; the project has no `$lib` alias configured in `tsconfig.json` or `vite.config.ts`):
 
 ```typescript
 import { getContext } from 'svelte';
-import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '$lib/dirtyRegistry.svelte';
+import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
 
 const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
-// Required at this site — if undefined, that's a wiring bug (assert).
+if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — VersionEditPage must wrap this component');
 
 $effect(() => {
   dirty.register(tracker);
@@ -198,7 +198,11 @@ This is the **only** prompt path; users never see the same `confirm()` twice for
 
 **Prompt copy.** When `isAnyDirty()` returns true, DirtyGuard calls `confirm("Discard unsaved changes and continue?")`. This is unambiguous about what "OK" does (discard, not save) — a slice-2 fix from the slice-1 copy. **Implementation note:** `frontend/src/components/editor/DirtyGuard.svelte` currently hardcodes `"Discard unsaved changes?"` (no "and continue"). Updating that string literal to the slice-2 copy is part of this slice's work — it is the only line-change needed inside DirtyGuard. See Implementation order step on DirtyGuard copy.
 
-**Over-prompt is accepted, by design.** The aggregate `isAnyDirty()` fires whenever *any* form on the page is dirty, including version-meta. Concretely: a user editing version-meta who clicks a block header to "just look around" will see the prompt, even though the version-meta form survives the URL change. We accept this over-prompt as the cost of a simple, safe contract — a target-URL-aware predicate (where forms whose mount lifecycle survives the target don't count) would require changing DirtyGuard's `isDirty: () => boolean` signature to `isDirty: (targetUrl) => boolean` and threading target-URL info through. Slice 2's audience is internal admin users; "asks a redundant question occasionally" is preferable to "loses unsaved work because the predicate's lifecycle-prediction was wrong." Documented in the smoke checklist so QA isn't surprised.
+**Over-prompt is accepted, by design.** The aggregate `isAnyDirty()` fires on **every navigation attempt while the page-wide registry has any dirty tracker** — not "occasionally," but every single time. Concretely: a user editing version-meta who clicks a block header to "just look around" sees the prompt; clicks Cancel; clicks a *different* block header — sees the prompt *again*; and so on, until they save or discard the version-meta edit. The prompt loop continues for every navigation attempt while any form remains dirty.
+
+We accept this as the cost of a simple, safe contract. A target-URL-aware predicate (where forms whose mount lifecycle survives the target navigation don't count toward `isAnyDirty`) would require changing DirtyGuard's `isDirty: () => boolean` signature to `isDirty: (targetUrl) => boolean` and threading target-URL info through the registry — a substantial complication for a behavior most users will resolve by saving promptly. Slice 2's audience is internal admin users; "asks a redundant question every nav while you have unsaved work" is preferable to "loses unsaved work because the predicate's lifecycle-prediction was wrong."
+
+Smoke item 27 exercises the loop (edit → click → Cancel → click again → still prompts) so QA isn't surprised by the repeat-prompt behavior.
 
 **Cancel handling.** Native `confirm()` is synchronous and pre-empts the click before any URL change. If the user cancels, no navigation happens; the accordion stays as-is; the dirty form is preserved; no visual state needs restoring.
 
@@ -208,8 +212,10 @@ This is the **only** prompt path; users never see the same `confirm()` twice for
 
 `AccordionHeader` renders the same HTML shape at every level (block and sequence). The toggle button and the action buttons (reorder, eventually delete/open) are **siblings**, never nested:
 
+`AccordionHeader` props (Svelte 5 `$props` rune): `{ headerId, panelId, level, title, slug, expanded, dirty, busy, canReorderUp, canReorderDown, onToggle, onMoveUp, onMoveDown }`. The `dirty` flag is the *enclosing form*'s `tracker.isDirty` getter value, passed in by the parent (`BlockAccordion` reads its own block-meta tracker for its header; `SequenceAccordion` reads its sequence-meta tracker for its header) — `AccordionHeader` stays pure-presentational and does not call `getContext`.
+
 ```svelte
-<!-- $level is "block" or "sequence" — used for scoped a11y labels -->
+<!-- level is "block" or "sequence" — used for scoped a11y labels -->
 <div class="accordion-row">
   <button
     id={headerId}
@@ -222,12 +228,12 @@ This is the **only** prompt path; users never see the same `confirm()` twice for
     <span class="slug" aria-hidden="true">/{slug}</span>
   </button>
   <button
-    aria-label={`Move ${level} up`}
+    aria-label={`Move ${level} "${title}" up`}
     onclick={onMoveUp}
     disabled={!canReorderUp || dirty || busy}
   >↑</button>
   <button
-    aria-label={`Move ${level} down`}
+    aria-label={`Move ${level} "${title}" down`}
     onclick={onMoveDown}
     disabled={!canReorderDown || dirty || busy}
   >↓</button>
@@ -244,7 +250,7 @@ Invariants:
 
 - `headerId` and `panelId` are stable for the row's lifetime — derived from the entity's **id, coerced to string**: ``block-${String(block.id)}-header`` / `-panel` and ``seq-${String(seq.id)}-header`` / `-panel`. Use the entity's id from `tree.blocks` / `block.sequences`, not the route param string (route params can differ by encoding round-trip).
 - Reorder buttons are **siblings** of the toggle button, not children. Nested `<button>` inside `<button>` is invalid HTML and breaks keyboard interaction.
-- Reorder `aria-label` is **scoped per level**: `"Move block up"` / `"Move block down"` / `"Move sequence up"` / `"Move sequence down"` / `"Move item up"` / `"Move item down"`. The unscoped slice-1 `"Move up"` / `"Move down"` was unambiguous on a single-page editor but becomes ambiguous on the nested-accordion page where blocks, sequences, and items all carry the same controls.
+- Reorder `aria-label` is **scoped per level AND per entity**: `"Move block "Linear Algebra" up"` / `"Move sequence "Vectors" down"` / `"Move item "Worked example 3" up"`. The level scope disambiguates block vs sequence vs item; the entity title disambiguates *which* block / sequence / item the user is acting on (without title, an SR user navigating a 20-block course hears "Move block up" 20 times identically). The unscoped slice-1 `"Move up"` / `"Move down"` was unambiguous on a single-page editor but is insufficient here.
 - Toggle's accessible name is just the title — the visible `<span class="slug">` is `aria-hidden="true"` because screen readers would otherwise read `"/intro-1"` as `"slash intro dash one"`, doubling the announcement length without adding meaning.
 - Panel `role="region"` + `aria-labelledby={headerId}` gives SR users a landmark to skim with.
 - Collapsed bodies are truly unmounted — no `display:none`.
@@ -253,10 +259,10 @@ Invariants:
 
 **Keyboard navigation pattern: standard Tab order, no APG accordion shortcuts.** We deliberately do **not** implement the WAI-ARIA APG accordion pattern (Arrow Up/Down between headers, Home/End jumps). The trade-off: simpler implementation matching slice-1's flat tab order, at the cost of more tab stops in long lists. Tab order through an expanded block row:
 
-1. Block toggle button
-2. "Move block up" (↑)
-3. "Move block down" (↓)
-4. *(if expanded — panel content follows in DOM order)* first focusable inside the body: block-meta title input → block-meta info textarea → Save → Discard → first sequence toggle → that sequence's "Move sequence up" → "Move sequence down" → …
+1. Block toggle button (SR: `"Linear Algebra, button, expanded"`)
+2. `"Move block "Linear Algebra" up"` (↑)
+3. `"Move block "Linear Algebra" down"` (↓)
+4. *(if expanded — panel content follows in DOM order)* first focusable inside the body: block-meta title input → block-meta info textarea → Save → Discard → first sequence toggle → that sequence's `"Move sequence "Vectors" up"` → `"Move sequence "Vectors" down"` → …
 
 Shift-Tab reverses this. The consequence is that Shift-Tab from inside an expanded block body lands on the block's ↓ reorder button, then ↑, then the toggle — three steps to "go back to the header." We accept this; smoke item covers the path so QA isn't surprised.
 
@@ -281,7 +287,7 @@ Clicking an item's "Open" button navigates to `/edit/v/:vid/blocks/:bid/sequence
 
 ## Reorder
 
-- Block reorder ↑/↓ lives in each `BlockAccordion` header (collapsed and expanded both). The arrow buttons use scoped `aria-label="Move block up"` / `"Move block down"` (see Accordion a11y contract — scoping is a slice-2 refinement on slice-1's bare `"Move up"` / `"Move down"`, since the nested accordion places block / sequence / item reorder buttons together on one page).
+- Block reorder ↑/↓ lives in each `BlockAccordion` header (collapsed and expanded both). The arrow buttons use level-and-entity-scoped `aria-label={`Move block "${title}" up`}` / `"down"` (see Accordion a11y contract — scoping is a slice-2 refinement on slice-1's bare `"Move up"` / `"Move down"`, since the nested accordion places block / sequence / item reorder buttons together on one page and N siblings of each level need to be disambiguated for SR users).
 - Sequence reorder ↑/↓ lives in each `SequenceAccordion` header within an expanded block — present on both collapsed and expanded sequence headers, for parity with block reorder.
 - Item reorder ↑/↓ lives in each `ItemRow` within an expanded sequence. Same a11y.
 
@@ -308,15 +314,17 @@ All inline forms reuse `mapCreateError` and the `.field-err` / `.form-err` style
 
 Three places need explicit empty-state copy so the page doesn't render as a void:
 
-| Where | Copy |
-|---|---|
-| Version with zero blocks (above the "+ New block" button) | `"This version has no blocks yet."` |
-| Expanded block with zero sequences (above the "+ New sequence" button) | `"No sequences yet."` |
-| Expanded sequence with zero items (above the create-item picker) | `"No items yet — pick a type below to add one."` |
+| Where | Copy (editable version) | Copy (disabled version) |
+|---|---|---|
+| Version with zero blocks (above the "+ New block" button) | `"This version has no blocks yet."` | `"This version has no blocks."` |
+| Expanded block with zero sequences | `"No sequences yet."` | `"No sequences."` |
+| Expanded sequence with zero items | `"No items yet — pick a type below to add one."` | `"No items."` |
 
-Render the copy in a `<p class="empty-state">` immediately preceding the create form. The create-form button remains the primary action — empty-state copy is informational only, not a CTA.
+Render the copy in a `<p class="empty-state">` immediately preceding (or replacing) the create form area. The create-form button remains the primary action on the editable branch — empty-state copy is informational only, not a CTA.
 
-The block-level delete affordance (gated by "Save or discard first" + "Remove sequences first") is naturally adjacent to the zero-sequences empty state, since deleting a block requires the empty state first.
+**Disabled-version interaction.** On a disabled version, create / delete / reorder controls are **hidden** (not greyed-disabled). The empty-state copy adjusts accordingly: the editable copy ends in "yet" and (for items) points at a picker that exists; the disabled copy drops the forward-looking phrasing because the next-step affordance is absent. This keeps the screen readable without implying actions that aren't available.
+
+The block-level delete affordance (gated by "Save or discard first" + "Remove sequences first") is naturally adjacent to the zero-sequences empty state on the editable branch.
 
 ## What gets deleted
 
@@ -359,6 +367,13 @@ Carries forward all slice-1 patterns:
 - Validate that `routeBid` / `routeSid` exist in the current tree on every change; trigger the stale-id fallback (see Routes) when not.
 - Unmount the child accordion body when the URL collapses a level — natural in Svelte 5: `{#if expanded}` flips false, the body unmounts, child trackers run their `onDestroy(unregister(tracker))` cleanup. No manual registry cleanup on URL change.
 - Treat `routeSid` going from one valid sid to another (same block) as: sequence body unmounts (old tracker unregistered), new sequence body mounts (new tracker registered). Reactive `{#if expanded}` inside `{#each block.sequences}` handles this via Svelte's keyed-block diffing — key the each block on `seq.id`.
+
+**Open decision for the plan-writer: `loadAdminTree` trigger keying.** Slice 1 paired each route with its own page component; mount-time `loadAdminTree(vid)` fired naturally. The new single-component model collapses three routes (`/v/:vid`, `/blocks/:bid`, `/sequences/:sid`) onto `VersionEditPage`, so a load `$effect` no longer reruns on routeBid/routeSid changes for free. The plan-writer should decide and document one of:
+
+- **(a) Key the load `$effect` on `vid` only** (recommended). The `/admin-tree` response already contains the full hierarchical tree — expand/collapse doesn't change what's loaded. One refetch per version change; route-param changes within the same version do not refetch. This is the simpler model and matches the data shape.
+- **(b) Key on `(vid, bid, sid)` tuple.** Defensive against partial-tree responses, but the backend always returns the full tree today, so this would cause unnecessary refetches on every accordion expand/collapse.
+
+The recommended approach is (a). Plan-writer should confirm the backend contract (no partial-tree response shape) before adopting and explicitly document the chosen `$effect` shape in the plan.
 
 ## Testing approach
 
@@ -412,7 +427,7 @@ This is a frontend-only redesign on a fresh branch. Slice 1 ships independently.
 24. Scoped reorder labels: SR announces `"Move block up"`, `"Move sequence up"`, `"Move item up"` (not bare `"Move up"`).
 25. Slug `aria-hidden`: SR does NOT read `"slash intro dash one"` when focused on a block toggle — only the title.
 26. Empty states: brand-new course version shows `"This version has no blocks yet."` Expand a block with zero sequences → shows `"No sequences yet."` Expand a sequence with zero items → shows `"No items yet — pick a type below to add one."`
-27. Over-prompt is accepted: edit version-meta title (dirty), click any block header to expand → prompt fires even though version-meta survives. Confirm discards version-meta edit; Cancel keeps it.
+27. Over-prompt loop is accepted (by design): edit version-meta title (dirty). Click block A header → prompt fires even though version-meta survives. Cancel. Click block B header → prompt fires *again*. Cancel. Click block C header → prompt fires *again*. Now click Save on version-meta → tracker cleans. Click block A header → no prompt (registry is clean). Verifies the every-nav-while-dirty contract.
 
 ## Implementation order
 
@@ -421,7 +436,7 @@ Suggested order for the writing-plans phase to follow:
 1. Branch hygiene + read-through of slice-1 patterns.
 2. **Pure helpers + tests**: `deriveExpansion.ts`, `dirtyRegistry.svelte.ts` (with `createDirtyRegistry`, `DIRTY_REGISTRY_KEY`, `RegisteredTracker`), `handleStaleIdFallback.ts`. All three with vitest coverage.
 3. **DirtyGuard string update**: edit `frontend/src/components/editor/DirtyGuard.svelte` to use `"Discard unsaved changes and continue?"`. Single-line literal change. Existing DirtyGuard tests pass.
-4. **VersionEditPage shell**: new file scaffolding that provides `setContext(DIRTY_REGISTRY_KEY, createDirtyRegistry())` and the version-meta form registering into it. DirtyGuard wired with `() => isAnyDirty()`. No accordion children yet — just version meta + state actions. This step makes the registry **provider land before consumers**.
+4. **VersionEditPage shell**: new file scaffolding that provides `setContext(DIRTY_REGISTRY_KEY, createDirtyRegistry())` and renders the version-meta form **inline** (no separate `VersionMetaForm.svelte` — slice 2 keeps it inline to minimise file count; the form has only three fields and registers its own tracker into the registry directly). DirtyGuard wired with `() => isAnyDirty()`. State actions (publish/revert/disable/enable/delete) wired. No accordion children yet. This step makes the registry **provider land before consumers** and contains both the provider call AND the first consumer call (version-meta tracker) — non-trivial scope, plan-writer should budget accordingly.
 5. New leaf components: `AccordionHeader` (full a11y contract — scoped reorder labels, slug `aria-hidden`, stable IDs from entity.id), `ItemRow` (scoped reorder labels + per-item Open / Delete `aria-label`).
 6. `SequenceAccordion` — items list + create-item + sequence meta form. Reads `getContext(DIRTY_REGISTRY_KEY)` and registers its sequence-meta tracker via `$effect`. Mount-tests via VersionEditPage shell (which now provides context).
 7. `BlockAccordion` — uses `SequenceAccordion`. Reads context, registers its block-meta tracker, hosts the inner sequences list.
