@@ -122,7 +122,7 @@
       <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
     {/if}
 
-    <VersionMetaForm {vid} version={v} />
+    <VersionMetaForm {vid} version={v} parentBusy={busy} />
 
     <!-- Blocks accordion list lands in Task 12. -->
 

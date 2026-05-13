@@ -12,9 +12,14 @@
   type Props = {
     vid: number;
     version: AdminTreeVersion;
+    // parentBusy locks inputs/buttons while the page shell is running a
+    // mutation (publish/archive/.../delete). Without it, the user could
+    // start editing after isAnyDirty() passed at action entry, leaving
+    // unreachable dirty state once perms.canEditVersionMeta flips false.
+    parentBusy?: boolean;
   };
 
-  let { vid, version }: Props = $props();
+  let { vid, version, parentBusy = false }: Props = $props();
 
   const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — VersionEditPage must wrap VersionMetaForm');
@@ -90,14 +95,14 @@
   <section class="meta">
     <h2>Version info</h2>
     <label>Info (markdown)
-      <textarea bind:value={tracker.current.info_md} rows="4" disabled={busy}></textarea>
+      <textarea bind:value={tracker.current.info_md} rows="4" disabled={busy || parentBusy}></textarea>
     </label>
     <label>Max quiz attempts
-      <input type="number" min="1" max="10" step="1" required bind:value={tracker.current.max_quiz_attempts} disabled={busy} />
+      <input type="number" min="1" max="10" step="1" required bind:value={tracker.current.max_quiz_attempts} disabled={busy || parentBusy} />
     </label>
     <div class="row">
-      <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
-      <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
+      <Button onclick={save} disabled={!tracker.isDirty || busy || parentBusy} loading={busy}>Save</Button>
+      <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || parentBusy}>Discard</Button>
     </div>
   </section>
 {/if}
