@@ -136,7 +136,11 @@
 
   // Sequence-list reorder: this component owns block.sequences and the API call.
   async function reorderSeq(idx: number, dir: -1 | 1) {
-    if (tracker.isDirty) return;
+    // Defense-in-depth: the AccordionHeader gates the up/down buttons on
+    // `busy || createBusy || parentBusy`, but a stale/programmatic click
+    // could still call this. A second reorder while one is in flight would
+    // see a pre-swap snapshot of block.sequences.
+    if (tracker.isDirty || busy || createBusy || parentBusy) return;
     const seqs = [...block.sequences];
     const target = idx + dir;
     if (target < 0 || target >= seqs.length) return;
