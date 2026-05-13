@@ -11,13 +11,21 @@
     expanded: boolean;
     dirty: boolean;
     busy: boolean;
-    // Gates whether reorder ↑/↓ render at all. When false (e.g., on a
-    // published or archived version, or a disabled one), the buttons are
+    // canStructure gates whether reorder ↑/↓ render at all. When false
+    // (published/archived version, or a disabled one), the buttons are
     // omitted from the DOM entirely — matching ItemRow's pattern and the
     // old BlockEditPage's `{#if perms.canEditStructure}` wrapper. The raw
     // native <button disabled> form has no `:disabled` CSS rule here, so
     // a greyed-out button would look indistinguishable from an active one
     // and the user can't tell why nothing happens on click.
+    //
+    // canReorderUp / canReorderDown are independent: when canStructure
+    // is true the buttons render, but the up arrow on the first row and
+    // the down arrow on the last row are still individually disabled
+    // (via `disabled={!canReorderUp || ...}`). The two gates are
+    // intentional layers — `{#if canStructure}` controls visibility (do
+    // the controls apply at all?), the disabled attribute controls
+    // boundary-state interaction (is there a row to swap with?).
     canStructure: boolean;
     canReorderUp: boolean;
     canReorderDown: boolean;
