@@ -108,5 +108,6 @@ describe('AccordionHeader', () => {
     expect(up?.disabled).toBe(true);
     expect(down?.disabled).toBe(true);
     expect(up?.title).toBe('Save or discard changes first');
+    expect(down?.title).toBe('Save or discard changes first');
   });
 });
