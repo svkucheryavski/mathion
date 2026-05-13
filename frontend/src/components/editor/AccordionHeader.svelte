@@ -35,7 +35,13 @@
     onMoveDown,
   }: Props = $props();
 
-  const ariaName = $derived(labelFor(title, slug, `${level} ${index}`));
+  // Placeholder text when both title and slug are missing. Visible form
+  // wraps it in parens to mark "this is a placeholder, not a real name";
+  // aria-label uses the plain form so screen readers don't announce stray
+  // punctuation.
+  const placeholder = $derived(`${level} ${index}`);
+  const ariaName = $derived(labelFor(title, slug, placeholder));
+  const visibleTitle = $derived(title?.trim() || slug?.trim() || `(${placeholder})`);
 </script>
 
 <div class="accordion-row">
@@ -47,7 +53,7 @@
     onclick={onToggle}
     class="toggle"
   >
-    <span class="title">{title?.trim() || slug?.trim() || `(${level} ${index})`}</span>
+    <span class="title">{visibleTitle}</span>
     {#if title?.trim() && slug?.trim()}
       <span class="slug" aria-hidden="true">/{slug}</span>
     {/if}
