@@ -44,7 +44,10 @@
   let tracker = $state<ReturnType<typeof makeDirtyTracker<StaticForm>>
                      | ReturnType<typeof makeDirtyTracker<VideoForm>> | null>(null);
   let trackerIid = $state<number | null>(null);
-  // C-I3: companion to trackerIid — see BlockEditPage for rationale.
+  // C-I3: trackerVid mirrors trackerIid — when the parent version (vid)
+  // changes underneath us, we need to discard the stale tracker so a
+  // freshly mounted page doesn't keep editing an item from a different
+  // version's tree.
   let trackerVid = $state<number | null>(null);
   let busy = $state(false);
   // Suppress the inline "couldn't load" banner after a successful save whose

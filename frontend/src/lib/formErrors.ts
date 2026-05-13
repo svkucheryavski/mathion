@@ -4,10 +4,10 @@
 //    on the slug field. 422 → inline."
 //
 // Why a helper rather than inline mapping in each create flow: the three
-// editor pages (VersionEditPage createBlock, BlockEditPage createSequence,
-// SequenceEditPage createItem) all need the same shape, and a copy-pasted
-// mapper would drift. Pure function — no runes — so it's trivially unit-
-// testable in isolation.
+// editor create flows (VersionEditPage createBlock, BlockAccordion
+// createSequence, SequenceAccordion createItem) all need the same shape,
+// and a copy-pasted mapper would drift. Pure function — no runes — so
+// it's trivially unit-testable in isolation.
 //
 // Behavior:
 //   - 422: walk `validationErrors()`, key each entry by its last `loc` segment

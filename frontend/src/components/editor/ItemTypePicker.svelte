@@ -8,7 +8,7 @@
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
   // prop type `value: ItemType` constrains it. The previous
   // `$bindable<ItemType>('static_page')` default is dead code — every call
-  // site (SequenceEditPage) binds `value`, so the default never lands.
+  // site (SequenceAccordion) binds `value`, so the default never lands.
   let { value = $bindable() }: { value: ItemType } = $props();
 </script>
 
