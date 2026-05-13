@@ -25,6 +25,11 @@
     routeSid: string | null;
     onMoveUp: () => void;
     onMoveDown: () => void;
+    // parentBusy locks inputs while a parent (BlockAccordion / VersionEditPage)
+    // mutation is in flight, so the user can't type into the title or the
+    // create form between our own dirty checks and the tracker.reset() that
+    // follows a refresh. Same convention as VersionMetaForm.
+    parentBusy?: boolean;
   };
 
   let {
@@ -38,6 +43,7 @@
     routeSid,
     onMoveUp,
     onMoveDown,
+    parentBusy = false,
   }: Props = $props();
 
   const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
@@ -253,9 +259,12 @@
         : ['title', 'slug', 'video_url', 'type'];
       const mapped = mapCreateError(e, known);
       createErrors = mapped.fieldErrors;
-      createGlobalError = mapped.globalMessage;
-      if (mapped.globalMessage && Object.keys(mapped.fieldErrors).length === 0) {
-        pushToast(mapped.globalMessage, 'error');
+      // Fall back to a generic message if mapper produced nothing — without
+      // this, a 500 with no validation body silently swallows the failure.
+      createGlobalError = mapped.globalMessage
+        ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);
+      if (createGlobalError && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(createGlobalError, 'error');
       }
     } finally {
       createBusy = false;
@@ -285,10 +294,10 @@
     <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
       {#if canEdit}
         <section class="meta">
-          <label>Sequence title <input bind:value={tracker.current.title} required /></label>
+          <label>Sequence title <input bind:value={tracker.current.title} required disabled={busy || parentBusy} /></label>
           <div class="row">
-            <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
-            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
+            <Button onclick={save} disabled={!tracker.isDirty || busy || parentBusy} loading={busy}>Save</Button>
+            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || parentBusy}>Discard</Button>
           </div>
         </section>
       {/if}
@@ -298,7 +307,7 @@
           <h4>Items</h4>
           {#if canStructure}
             <Button
-              disabled={tracker.isDirty || busy}
+              disabled={tracker.isDirty || busy || parentBusy}
               title={tracker.isDirty ? 'Save or discard changes first' : ''}
               onclick={toggleCreate}
             >{creating ? 'Cancel' : '+ New item'}</Button>
@@ -309,26 +318,26 @@
           <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
             <ItemTypePicker bind:value={newType} />
             <div class="field">
-              <input placeholder="Title" bind:value={newTitle} required oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+              <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
               {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
             </div>
             <div class="field">
-              <input placeholder="Slug" bind:value={newSlug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+              <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || parentBusy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
               {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
             </div>
             {#if newType === 'static_page'}
               <div class="field">
-                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
+                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
                 {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
               </div>
             {:else if newType === 'video'}
               <div class="field">
-                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
+                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required disabled={createBusy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
                 {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
               </div>
             {/if}
             {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+            <Button type="submit" disabled={tracker.isDirty || createBusy || parentBusy || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
           </form>
         {/if}
 
