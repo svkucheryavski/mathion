@@ -37,12 +37,13 @@
   // punctuation. Same convention as AccordionHeader.
   const placeholder = $derived(`item ${index}`);
   const ariaName = $derived(labelFor(item.title, item.slug, placeholder));
-  const visibleTitle = $derived(item.title?.trim() || item.slug?.trim() || `(${placeholder})`);
+  const visibleTitle = $derived(item.title.trim() || item.slug.trim() || `(${placeholder})`);
 
   const glyph = $derived(
     item.type === 'static_page' ? '📄' :
     item.type === 'video' ? '▶' :
     item.type === 'quiz' ? '?' :
+    item.type === 'interactive_app' ? '🧩' :
     '⌘'
   );
 </script>
@@ -50,7 +51,7 @@
 <div class="item-row">
   <span class="glyph" aria-hidden="true">{glyph}</span>
   <span class="item-title">{visibleTitle}</span>
-  {#if item.title?.trim() && item.slug?.trim()}
+  {#if item.title.trim() && item.slug.trim()}
     <span class="item-slug" aria-hidden="true">/{item.slug}</span>
   {/if}
   <div class="actions">
