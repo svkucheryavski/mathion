@@ -90,10 +90,10 @@
   <section class="meta">
     <h2>Version info</h2>
     <label>Info (markdown)
-      <textarea bind:value={tracker.current.info_md} rows="4"></textarea>
+      <textarea bind:value={tracker.current.info_md} rows="4" disabled={busy}></textarea>
     </label>
     <label>Max quiz attempts
-      <input type="number" min="1" max="10" step="1" required bind:value={tracker.current.max_quiz_attempts} />
+      <input type="number" min="1" max="10" step="1" required bind:value={tracker.current.max_quiz_attempts} disabled={busy} />
     </label>
     <div class="row">
       <Button onclick={save} disabled={!tracker.isDirty || busy} loading={busy}>Save</Button>
