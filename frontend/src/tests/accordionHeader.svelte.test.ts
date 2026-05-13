@@ -12,16 +12,14 @@ import AccordionHeader from '../components/editor/AccordionHeader.svelte';
 // identical to enabled ones (no `:disabled` CSS rule), so the user clicks
 // and nothing happens — the symptom that surfaced in smoke item 1–28d.
 //
-// Why `mount()` here vs. the `$effect.root()` pattern in the rest of the
-// test suite (see observeIsDirty.svelte.ts): we need DOM assertions
+// Why `mount()` here vs. the `$effect.root()` pattern in the rest of
+// the test suite (see observeIsDirty.svelte.ts): we need DOM assertions
 // (querySelector for buttons), so we render the component into a real
-// jsdom container. `$effect.root()` is the right tool when verifying
-// pure reactive logic; this is a presentational-output test, hence
-// mount(). Cleanup unmounts the component and clears document.body —
-// AccordionHeader has no $effect / subscription / async state, so no
-// further teardown is required; the same pattern won't survive if a
-// future change adds an internal $effect, in which case the test
-// helper should also dispose an $effect.root.
+// jsdom container. `$effect.root()` is the right tool only when the
+// test helper creates effects *outside* of any component — for a
+// presentational-output test like this one, `mount()` is correct, and
+// `unmount(cmp)` takes care of disposing any internal `$effect`s the
+// component itself sets up.
 
 let cleanup: (() => void) | null = null;
 afterEach(() => {
