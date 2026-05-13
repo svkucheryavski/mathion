@@ -12,7 +12,7 @@
   let { isDirty }: { isDirty: () => boolean } = $props();
 
   function confirmDiscard(): boolean {
-    return window.confirm('Discard unsaved changes?');
+    return window.confirm('Discard unsaved changes and continue?');
   }
 
   onMount(() => {
