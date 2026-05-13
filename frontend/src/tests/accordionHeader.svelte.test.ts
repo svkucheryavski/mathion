@@ -39,12 +39,11 @@ function mountHeader(overrides: Record<string, unknown> = {}) {
       level: 'block',
       title: 'Intro',
       slug: 'intro',
-      index: 1,
+      index: 2,           // middle row by default
       expanded: false,
       dirty: false,
       busy: false,
-      canStructure: true,
-      canReorderUp: false,
+      canReorderUp: true,
       canReorderDown: true,
       onToggle: () => {},
       onMoveUp: () => {},
@@ -58,38 +57,56 @@ function mountHeader(overrides: Record<string, unknown> = {}) {
 }
 
 describe('AccordionHeader', () => {
-  it('hides reorder buttons entirely when canStructure is false', () => {
+  it('hides both reorder buttons when canReorderUp and canReorderDown are false (e.g., on a published version)', () => {
     const target = mountHeader({
-      canStructure: false,
       canReorderUp: false,
       canReorderDown: false,
     });
     // Toggle remains so the user can still expand/read the row.
     expect(target.querySelector('#h1')).not.toBeNull();
-    // Reorder controls must not be present in the DOM at all.
     expect(target.querySelector('[aria-label^="Move block up"]')).toBeNull();
     expect(target.querySelector('[aria-label^="Move block down"]')).toBeNull();
   });
 
-  it('renders reorder buttons when canStructure is true', () => {
+  it('renders both reorder buttons on a middle row of an editable version', () => {
     const target = mountHeader({
-      canStructure: true,
-      canReorderUp: false,
+      canReorderUp: true,
       canReorderDown: true,
     });
     expect(target.querySelector('[aria-label^="Move block up"]')).not.toBeNull();
     expect(target.querySelector('[aria-label^="Move block down"]')).not.toBeNull();
   });
 
-  it('keeps boundary disabled state when canStructure is true and at first row', () => {
+  it('hides the up arrow on the first row (nothing above to swap with)', () => {
     const target = mountHeader({
-      canStructure: true,
-      canReorderUp: false,   // first row — nothing above to swap with
+      canReorderUp: false,
       canReorderDown: true,
+    });
+    expect(target.querySelector('[aria-label^="Move block up"]')).toBeNull();
+    expect(target.querySelector('[aria-label^="Move block down"]')).not.toBeNull();
+  });
+
+  it('hides the down arrow on the last row (nothing below to swap with)', () => {
+    const target = mountHeader({
+      canReorderUp: true,
+      canReorderDown: false,
+    });
+    expect(target.querySelector('[aria-label^="Move block up"]')).not.toBeNull();
+    expect(target.querySelector('[aria-label^="Move block down"]')).toBeNull();
+  });
+
+  it('renders both arrows but disables them when dirty (so the tooltip remains discoverable — smoke item 22)', () => {
+    const target = mountHeader({
+      canReorderUp: true,
+      canReorderDown: true,
+      dirty: true,
     });
     const up = target.querySelector<HTMLButtonElement>('[aria-label^="Move block up"]');
     const down = target.querySelector<HTMLButtonElement>('[aria-label^="Move block down"]');
+    expect(up).not.toBeNull();
+    expect(down).not.toBeNull();
     expect(up?.disabled).toBe(true);
-    expect(down?.disabled).toBe(false);
+    expect(down?.disabled).toBe(true);
+    expect(up?.title).toBe('Save or discard changes first');
   });
 });

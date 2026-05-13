@@ -55,19 +55,21 @@
     <span class="item-slug" aria-hidden="true">/{item.slug}</span>
   {/if}
   <div class="actions">
-    {#if canStructure}
+    {#if canReorderUp}
       <Button
         variant="ghost"
         aria-label={`Move item up: ${ariaName}`}
         onclick={onMoveUp}
-        disabled={!canReorderUp || parentDirty || busy}
+        disabled={parentDirty || busy}
         title={parentDirty ? 'Save or discard changes first' : 'Move up'}
       >↑</Button>
+    {/if}
+    {#if canReorderDown}
       <Button
         variant="ghost"
         aria-label={`Move item down: ${ariaName}`}
         onclick={onMoveDown}
-        disabled={!canReorderDown || parentDirty || busy}
+        disabled={parentDirty || busy}
         title={parentDirty ? 'Save or discard changes first' : 'Move down'}
       >↓</Button>
     {/if}

@@ -11,22 +11,17 @@
     expanded: boolean;
     dirty: boolean;
     busy: boolean;
-    // canStructure gates whether reorder ↑/↓ render at all. When false
-    // (published/archived version, or a disabled one), the buttons are
-    // omitted from the DOM entirely — matching ItemRow's pattern and the
-    // old BlockEditPage's `{#if perms.canEditStructure}` wrapper. The raw
-    // native <button disabled> form has no `:disabled` CSS rule here, so
-    // a greyed-out button would look indistinguishable from an active one
-    // and the user can't tell why nothing happens on click.
-    //
-    // canReorderUp / canReorderDown are independent: when canStructure
-    // is true the buttons render, but the up arrow on the first row and
-    // the down arrow on the last row are still individually disabled
-    // (via `disabled={!canReorderUp || ...}`). The two gates are
-    // intentional layers — `{#if canStructure}` controls visibility (do
-    // the controls apply at all?), the disabled attribute controls
-    // boundary-state interaction (is there a row to swap with?).
-    canStructure: boolean;
+    // canReorderUp / canReorderDown gate **visibility** of each arrow.
+    // The parent passes `canStructure && index > 1` and
+    // `canStructure && index < count` respectively, so each flag is
+    // false in two cases: (a) the version is not structurally editable
+    // (published/archived/disabled — both arrows disappear), and (b)
+    // the row is at the boundary in that direction (first row has no
+    // up arrow; last row has no down arrow). Either case is "no
+    // recovery action available", so the user gets the cleaner read by
+    // omitting the control entirely. Dirty/busy disable — both cases
+    // have a recovery action (save, or wait) — keep the button visible
+    // and use the disabled attribute + tooltip instead (smoke item 22).
     canReorderUp: boolean;
     canReorderDown: boolean;
     onToggle: () => void;
@@ -44,7 +39,6 @@
     expanded,
     dirty,
     busy,
-    canStructure,
     canReorderUp,
     canReorderDown,
     onToggle,
@@ -75,17 +69,19 @@
       <span class="slug" aria-hidden="true">/{slug}</span>
     {/if}
   </button>
-  {#if canStructure}
+  {#if canReorderUp}
     <button
       aria-label={`Move ${level} up: ${ariaName}`}
       onclick={onMoveUp}
-      disabled={!canReorderUp || dirty || busy}
+      disabled={dirty || busy}
       title={dirty ? 'Save or discard changes first' : ''}
     >↑</button>
+  {/if}
+  {#if canReorderDown}
     <button
       aria-label={`Move ${level} down: ${ariaName}`}
       onclick={onMoveDown}
-      disabled={!canReorderDown || dirty || busy}
+      disabled={dirty || busy}
       title={dirty ? 'Save or discard changes first' : ''}
     >↓</button>
   {/if}

@@ -303,7 +303,6 @@
     {expanded}
     dirty={tracker.isDirty}
     busy={busy || createBusy || parentBusy}
-    {canStructure}
     canReorderUp={canStructure && index > 1}
     canReorderDown={canStructure && index < sequenceCount}
     onToggle={toggle}
