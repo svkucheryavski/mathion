@@ -41,6 +41,15 @@
   const slugMatches = $derived(!!tree && tree.course.slug === courseSlug);
   const perms = $derived(v ? versionPermissions(v) : null);
 
+  // Tree that actually matches the URL we're rendering. During navigation
+  // (X → Y, instance preserved) the store still holds X's tree until the
+  // load $effect's loadAdminTree(Y) resolves. Validation and focus must
+  // operate ONLY on a matching tree, otherwise they'd judge Y's routeBid /
+  // routeSid against X's blocks and incorrectly redirect.
+  const effectiveTree = $derived(
+    tree && tree.version.id === vid && slugMatches ? tree : null,
+  );
+
   let busy = $state(false);
 
   // Load $effect — declared FIRST (declaration-order discipline:
@@ -52,10 +61,11 @@
 
   // Validation $effect — declared SECOND in declaration order so stale-id
   // correction lands before the focus effect tries to find a toggle for a
-  // stale entity.
+  // stale entity. Uses effectiveTree (not tree) so stale-id checks aren't
+  // run against the OLD version's blocks during preserved-instance nav.
   $effect(() => {
-    if (!tree) return;
-    const expansion = deriveExpansion(routeBid, routeSid, tree);
+    if (!effectiveTree) return;
+    const expansion = deriveExpansion(routeBid, routeSid, effectiveTree);
     if (expansion.staleBid || expansion.staleSid) {
       handleStaleIdFallback(
         { staleBid: expansion.staleBid, staleSid: expansion.staleSid },
@@ -65,12 +75,21 @@
     }
   });
 
-  // Focus $effect — declared THIRD. Tracks (routeBid, routeSid, tree) so it
-  // re-fires after the initial admin-tree load resolves on deep-link mount.
+  // Focus $effect — declared THIRD. Tracks (routeBid, routeSid,
+  // effectiveTree) so it re-fires after the initial admin-tree load
+  // resolves on deep-link mount. Uses effectiveTree (not tree) so we don't
+  // try to find a header in a stale-vid tree.
+  //
+  // lastFocusedTarget remembers the headerId we last auto-focused. On a
+  // plain tree refresh (e.g., save → loadAdminTree → currentEditorVersion
+  // replaced) the route ids are unchanged, so the same headerId is computed
+  // — and we skip refocus. Without this, typing in an input inside the
+  // panel would lose focus on every save.
+  let lastFocusedTarget = $state<string | null>(null);
   $effect(() => {
     const bid = routeBid;
     const sid = routeSid;
-    const t = tree;
+    const t = effectiveTree;
     if (!t) return;
 
     // Resolve deepest expanded headerId from current state.
@@ -88,7 +107,16 @@
         }
       }
     }
-    if (!headerId) return;
+    if (!headerId) {
+      // Collapsed back to version root — clear the memo so the next
+      // expansion refocuses correctly.
+      lastFocusedTarget = null;
+      return;
+    }
+
+    // Skip refocus if route hasn't changed since the last auto-focus.
+    if (headerId === lastFocusedTarget) return;
+    lastFocusedTarget = headerId;
 
     // Capture the target headerId before await so a later effect run can't
     // race ahead of this one.
