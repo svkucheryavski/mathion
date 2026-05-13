@@ -129,6 +129,10 @@
     busy = true;
     try {
       await api.delete(`/api/sequences/${savedSid}`);
+      // Refresh the store BEFORE navigating — the parent page stays mounted
+      // on the same vid, so without an explicit reload the deleted sequence
+      // would remain in currentEditorVersion until some later refetch.
+      await loadAdminTree(savedVid, { force: true });
       void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`);
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
@@ -219,6 +223,17 @@
     return () => dirty.unregister(createTracker);
   });
 
+  // Close + reset the create form if structure permission is revoked while
+  // the form is open (e.g., parent publishes the version mid-edit). Without
+  // this, the form would stay submittable even though the underlying
+  // permission has flipped.
+  $effect(() => {
+    if (!canStructure && creating) {
+      resetCreateForm();
+      creating = false;
+    }
+  });
+
   function resetCreateForm() {
     newType = 'static_page';
     newTitle = '';
@@ -236,7 +251,7 @@
   }
 
   async function submitCreate() {
-    if (createBusy || !newTitle.trim() || !newSlug.trim()) return;
+    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || !newSlug.trim()) return;
     const savedVid = vid;
     const savedBid = block.id;
     const savedSid = seq.id;
@@ -282,7 +297,7 @@
     {index}
     {expanded}
     dirty={tracker.isDirty}
-    {busy}
+    busy={busy || createBusy || parentBusy}
     canReorderUp={canStructure && index > 1}
     canReorderDown={canStructure && index < sequenceCount}
     onToggle={toggle}
@@ -294,10 +309,10 @@
     <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
       {#if canEdit}
         <section class="meta">
-          <label>Sequence title <input bind:value={tracker.current.title} required disabled={busy || parentBusy} /></label>
+          <label>Sequence title <input bind:value={tracker.current.title} required disabled={busy || createBusy || parentBusy} /></label>
           <div class="row">
-            <Button onclick={save} disabled={!tracker.isDirty || busy || parentBusy} loading={busy}>Save</Button>
-            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || parentBusy}>Discard</Button>
+            <Button onclick={save} disabled={!tracker.isDirty || busy || createBusy || parentBusy} loading={busy}>Save</Button>
+            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || createBusy || parentBusy}>Discard</Button>
           </div>
         </section>
       {/if}
@@ -318,26 +333,26 @@
           <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
             <ItemTypePicker bind:value={newType} />
             <div class="field">
-              <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+              <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
               {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
             </div>
             <div class="field">
-              <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || parentBusy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+              <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || busy || parentBusy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
               {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
             </div>
             {#if newType === 'static_page'}
               <div class="field">
-                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
+                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || busy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
                 {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
               </div>
             {:else if newType === 'video'}
               <div class="field">
-                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required disabled={createBusy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
+                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
                 {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
               </div>
             {/if}
             {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || parentBusy || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
           </form>
         {/if}
 
@@ -356,7 +371,7 @@
                   canReorderUp={canStructure && i > 0}
                   canReorderDown={canStructure && i < seq.items.length - 1}
                   parentDirty={tracker.isDirty}
-                  {busy}
+                  busy={busy || createBusy || parentBusy}
                   onMoveUp={() => void reorderItem(i, -1)}
                   onMoveDown={() => void reorderItem(i, 1)}
                   onOpen={() => openItem(item.id)}
@@ -372,7 +387,7 @@
         <section class="danger">
           <Button
             variant="ghost"
-            disabled={tracker.isDirty || busy || seq.items.length > 0}
+            disabled={tracker.isDirty || busy || createBusy || parentBusy || seq.items.length > 0}
             title={tracker.isDirty ? 'Save or discard changes first' : seq.items.length > 0 ? 'Remove items first' : ''}
             onclick={deleteSeq}
           >Delete this sequence</Button>
