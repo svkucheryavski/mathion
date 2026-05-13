@@ -1,15 +1,20 @@
 <script lang="ts">
-  import { setContext, onDestroy } from 'svelte';
+  import { setContext, onDestroy, tick } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
+  import { deriveExpansion } from '../../lib/deriveExpansion';
+  import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
+  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import VersionMetaForm from '../../components/editor/VersionMetaForm.svelte';
+  import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import type { RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
 
   type Props = {
     courseSlug: string;
@@ -22,8 +27,8 @@
 
   const vid = $derived(Number(versionId));
   const vidValid = $derived(Number.isInteger(vid) && vid > 0);
-  // routeBid / routeSid wired in Task 12 — suppress noUnusedLocals until then.
-  void blockId; void sequenceId;
+  const routeBid = $derived(blockId ?? null);
+  const routeSid = $derived(sequenceId ?? null);
 
   // Provide dirty registry BEFORE any consumer mounts (provider-before-
   // consumers ordering per spec).
@@ -40,13 +45,161 @@
 
   // Load $effect — declared FIRST (declaration-order discipline:
   // load → validation → focus, see spec §"$effect declaration order").
-  // Validation + focus $effects land in Task 12.
   $effect(() => {
     if (!vidValid) return;
     void loadAdminTree(vid);
   });
 
-  onDestroy(() => clearEditorVersion());
+  // Validation $effect — declared SECOND in declaration order so stale-id
+  // correction lands before the focus effect tries to find a toggle for a
+  // stale entity.
+  $effect(() => {
+    if (!tree) return;
+    const expansion = deriveExpansion(routeBid, routeSid, tree);
+    if (expansion.staleBid || expansion.staleSid) {
+      handleStaleIdFallback(
+        { staleBid: expansion.staleBid, staleSid: expansion.staleSid },
+        { courseSlug, vid: String(vid), bid: routeBid },
+        { pushToast, navigate },
+      );
+    }
+  });
+
+  // Focus $effect — declared THIRD. Tracks (routeBid, routeSid, tree) so it
+  // re-fires after the initial admin-tree load resolves on deep-link mount.
+  $effect(() => {
+    const bid = routeBid;
+    const sid = routeSid;
+    const t = tree;
+    if (!t) return;
+
+    // Resolve deepest expanded headerId from current state.
+    let headerId: string | null = null;
+    if (bid !== null) {
+      const blockMatch = t.blocks.find((b) => String(b.id) === bid);
+      if (blockMatch) {
+        if (sid !== null) {
+          const seqMatch = blockMatch.sequences.find((s) => String(s.id) === sid);
+          headerId = seqMatch
+            ? `seq-${String(seqMatch.id)}-header`
+            : `block-${String(blockMatch.id)}-header`;
+        } else {
+          headerId = `block-${String(blockMatch.id)}-header`;
+        }
+      }
+    }
+    if (!headerId) return;
+
+    // Capture the target headerId before await so a later effect run can't
+    // race ahead of this one.
+    const targetHeaderId = headerId;
+    let cancelled = false;
+    void (async () => {
+      await tick();
+      if (cancelled) return;
+      // Read activeElement BEFORE any focus() call — once we focus we have
+      // changed activeElement ourselves and the discriminator becomes
+      // self-referential.
+      const active = document.activeElement?.id ?? null;
+      if (active === targetHeaderId) return; // user-click branch
+      const el = document.getElementById(targetHeaderId);
+      if (!el) return;
+      el.focus();
+      el.scrollIntoView({ block: 'start', behavior: 'instant' });
+    })();
+    return () => { cancelled = true; };
+  });
+
+  let alive = true;
+  onDestroy(() => { alive = false; clearEditorVersion(); });
+
+  function stillOnVid(savedVid: number): boolean {
+    return alive && vid === savedVid;
+  }
+
+  let creating = $state(false);
+  let newTitle = $state('');
+  let newSlug = $state('');
+  let createErrors = $state<FieldErrors>({});
+  let createGlobalError = $state<string | null>(null);
+  let createBusy = $state(false);
+
+  // Tracker shim with synthesized isDirty — no reset()-on-keystroke.
+  const createTracker: RegisteredTracker = {
+    get isDirty() {
+      return creating && (newTitle.trim() !== '' || newSlug.trim() !== '');
+    },
+  };
+
+  // Register/unregister the create tracker — declared FOURTH in effect order.
+  $effect(() => {
+    if (!creating) return;
+    dirtyRegistry.register(createTracker);
+    return () => dirtyRegistry.unregister(createTracker);
+  });
+
+  // canStructure-flip $effect: reset create form when canEditStructure flips false.
+  $effect(() => {
+    if (perms && !perms.canEditStructure && creating) {
+      newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null;
+      creating = false;
+    }
+  });
+
+  function toggleCreate() {
+    if (createBusy || busy) return;
+    if (creating) { newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null; }
+    creating = !creating;
+  }
+
+  async function submitCreateBlock() {
+    if (createBusy || busy || !perms?.canEditStructure || !newTitle.trim() || !newSlug.trim()) return;
+    const savedVid = vid;
+    createErrors = {};
+    createGlobalError = null;
+    createBusy = true;
+    try {
+      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
+      newTitle = ''; newSlug = ''; creating = false;
+      if (!stillOnVid(savedVid)) return;
+      await loadAdminTree(savedVid, { force: true });
+      pushToast('Block created', 'success');
+    } catch (e) {
+      const mapped = mapCreateError(e, ['title', 'slug']);
+      createErrors = mapped.fieldErrors;
+      createGlobalError = mapped.globalMessage
+        ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);
+      if (createGlobalError && Object.keys(mapped.fieldErrors).length === 0) {
+        pushToast(createGlobalError, 'error');
+      }
+    } finally {
+      createBusy = false;
+    }
+  }
+
+  async function reorderBlock(idx: number, dir: -1 | 1) {
+    if (dirtyRegistry.isAnyDirty() || busy || createBusy) return;
+    if (!tree) return;
+    const blocks = [...tree.blocks];
+    const target = idx + dir;
+    if (target < 0 || target >= blocks.length) return;
+    [blocks[idx], blocks[target]] = [blocks[target], blocks[idx]];
+    const order = blocks.map((b, i) => ({ id: b.id, order: i + 1 }));
+    const savedVid = vid;
+    busy = true;
+    try {
+      await api.post(`/api/versions/${savedVid}/blocks/reorder`, { order });
+      if (!stillOnVid(savedVid)) return;
+      await loadAdminTree(savedVid, { force: true });
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      if (stillOnVid(savedVid)) {
+        await loadAdminTree(savedVid, { force: true });
+      }
+    } finally {
+      busy = false;
+    }
+  }
 
   async function transition(action: 'publish' | 'archive' | 'revert' | 'disable' | 'enable') {
     if (dirtyRegistry.isAnyDirty()) return;
@@ -122,9 +275,60 @@
       <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
     {/if}
 
-    <VersionMetaForm {vid} version={v} parentBusy={busy} />
+    <VersionMetaForm {vid} version={v} parentBusy={busy || createBusy} />
 
-    <!-- Blocks accordion list lands in Task 12. -->
+    <section class="blocks">
+      <div class="head">
+        <h2>Blocks</h2>
+        {#if perms.canEditStructure}
+          <Button
+            disabled={dirtyRegistry.isAnyDirty() || busy || createBusy}
+            title={dirtyRegistry.isAnyDirty() ? 'Save or discard changes first' : ''}
+            onclick={toggleCreate}
+          >{creating ? 'Cancel' : '+ New block'}</Button>
+        {/if}
+      </div>
+
+      {#if creating}
+        <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreateBlock(); }}>
+          <div class="field">
+            <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+            {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+          </div>
+          <div class="field">
+            <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || busy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
+            {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
+          </div>
+          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
+          <Button type="submit" disabled={createBusy || busy || !perms?.canEditStructure || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+        </form>
+      {/if}
+
+      {#if tree.blocks.length === 0}
+        <p class="empty">
+          {perms.canEditStructure ? 'This version has no blocks yet.' : 'This version has no blocks.'}
+        </p>
+      {:else}
+        <ul class="blocks-list">
+          {#each tree.blocks as block, i (block.id)}
+            <li>
+              <BlockAccordion
+                {courseSlug}
+                {vid}
+                {block}
+                index={i + 1}
+                blockCount={tree.blocks.length}
+                {routeBid}
+                {routeSid}
+                onMoveUp={() => void reorderBlock(i, -1)}
+                onMoveDown={() => void reorderBlock(i, 1)}
+                parentBusy={busy || createBusy}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
 
     <section class="state-actions">
       {#if perms.canPublish}
@@ -162,4 +366,13 @@
   .banner { background: #fff3cd; border-left: 3px solid #d99; padding: var(--space-2); }
   .banner.err { background: #fdd; border-left-color: #a33; color: #833; }
   .state-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+  .blocks { margin: var(--space-4) 0; }
+  .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+  .create { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
+  .create input { width: 100%; }
+  .create .field { display: flex; flex-direction: column; }
+  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
+  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
+  .blocks-list { list-style: none; padding: 0; margin: 0; }
+  .empty { color: var(--muted); }
 </style>
