@@ -82,6 +82,15 @@
 
   let busy = $state(false);
 
+  // Guard for post-await force-reloads: skip the reload if the user has
+  // already navigated to a different version. loadAdminTree's token mechanism
+  // catches out-of-order completion, but `{force: true}` increments the token
+  // and would win, overwriting the now-current version's tree with the old
+  // one. We treat that as a discarded refresh.
+  function stillOnVid(savedVid: number): boolean {
+    return currentEditorVersion.value?.version.id === savedVid;
+  }
+
   async function save() {
     if (!tracker.isDirty) return;
     const savedVid = vid;
@@ -91,7 +100,9 @@
     busy = true;
     try {
       await api.patch(`/api/blocks/${savedBid}`, { title: sentTitle, info: sentInfo });
-      const result = await loadAdminTree(savedVid, { force: true });
+      const result = stillOnVid(savedVid)
+        ? await loadAdminTree(savedVid, { force: true })
+        : 'discarded' as const;
       if (result === 'discarded') {
         pushToast('Saved', 'success');
       } else if (result === 'ok') {
@@ -114,7 +125,12 @@
   }
 
   async function deleteBlock() {
-    if (tracker.isDirty || !canStructure || block.sequences.length > 0) return;
+    // `creating` covers the create-sequence form being open with draft input —
+    // createTracker.isDirty would be registered on the page-wide dirty registry,
+    // but deleteBlock should bail BEFORE the DirtyGuard pathway anyway because
+    // deleting the block would orphan that draft without a "save your changes?"
+    // prompt.
+    if (tracker.isDirty || creating || !canStructure || busy || createBusy || parentBusy || block.sequences.length > 0) return;
     if (!confirm(`Delete block "${block.title}"? This cannot be undone.`)) return;
     const savedVid = vid;
     const savedSlug = courseSlug;
@@ -123,12 +139,17 @@
       await api.delete(`/api/blocks/${block.id}`);
       // Refresh the store BEFORE navigating — the parent page stays mounted on
       // the same vid, so without an explicit reload the deleted block would
-      // remain in currentEditorVersion until some later refetch.
-      await loadAdminTree(savedVid, { force: true });
-      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}`);
+      // remain in currentEditorVersion until some later refetch. Skip the
+      // reload if the user has already navigated to a different version.
+      if (stillOnVid(savedVid)) {
+        await loadAdminTree(savedVid, { force: true });
+        void navigate(`/courses/${savedSlug}/edit/v/${savedVid}`);
+      }
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (stillOnVid(savedVid)) {
+        await loadAdminTree(savedVid, { force: true });
+      }
     } finally {
       busy = false;
     }
@@ -151,10 +172,14 @@
     busy = true;
     try {
       await api.post(`/api/blocks/${savedBid}/sequences/reorder`, { order });
-      await loadAdminTree(savedVid, { force: true });
+      if (stillOnVid(savedVid)) {
+        await loadAdminTree(savedVid, { force: true });
+      }
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (stillOnVid(savedVid)) {
+        await loadAdminTree(savedVid, { force: true });
+      }
     } finally {
       busy = false;
     }
@@ -215,7 +240,9 @@
     try {
       await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle, slug: newSlug });
       newTitle = ''; newSlug = ''; creating = false;
-      await loadAdminTree(savedVid, { force: true });
+      if (stillOnVid(savedVid)) {
+        await loadAdminTree(savedVid, { force: true });
+      }
       pushToast('Sequence created', 'success');
     } catch (e) {
       const mapped = mapCreateError(e, ['title', 'slug']);
@@ -322,8 +349,8 @@
         <section class="danger">
           <Button
             variant="ghost"
-            disabled={tracker.isDirty || busy || createBusy || parentBusy || block.sequences.length > 0}
-            title={tracker.isDirty ? 'Save or discard changes first' : block.sequences.length > 0 ? 'Remove sequences first' : ''}
+            disabled={tracker.isDirty || creating || busy || createBusy || parentBusy || block.sequences.length > 0}
+            title={tracker.isDirty ? 'Save or discard changes first' : creating ? 'Cancel the create-sequence form first' : block.sequences.length > 0 ? 'Remove sequences first' : ''}
             onclick={deleteBlock}
           >Delete this block</Button>
         </section>
