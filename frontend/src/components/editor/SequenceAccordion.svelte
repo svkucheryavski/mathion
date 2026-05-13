@@ -246,6 +246,11 @@
   }
 
   function toggleCreate() {
+    // Defense-in-depth: refuse mid-flight toggles. The toggle button is
+    // already disabled in these states, but a stale/programmatic click
+    // would otherwise unmount the form during an in-flight POST,
+    // discarding validation errors and unregistering the create tracker.
+    if (createBusy || busy || parentBusy) return;
     if (creating) resetCreateForm();
     creating = !creating;
   }
@@ -322,7 +327,7 @@
           <h4>Items</h4>
           {#if canStructure}
             <Button
-              disabled={tracker.isDirty || busy || parentBusy}
+              disabled={tracker.isDirty || busy || createBusy || parentBusy}
               title={tracker.isDirty ? 'Save or discard changes first' : ''}
               onclick={toggleCreate}
             >{creating ? 'Cancel' : '+ New item'}</Button>
