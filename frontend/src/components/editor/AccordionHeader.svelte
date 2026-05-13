@@ -11,6 +11,14 @@
     expanded: boolean;
     dirty: boolean;
     busy: boolean;
+    // Gates whether reorder ↑/↓ render at all. When false (e.g., on a
+    // published or archived version, or a disabled one), the buttons are
+    // omitted from the DOM entirely — matching ItemRow's pattern and the
+    // old BlockEditPage's `{#if perms.canEditStructure}` wrapper. The raw
+    // native <button disabled> form has no `:disabled` CSS rule here, so
+    // a greyed-out button would look indistinguishable from an active one
+    // and the user can't tell why nothing happens on click.
+    canStructure: boolean;
     canReorderUp: boolean;
     canReorderDown: boolean;
     onToggle: () => void;
@@ -28,6 +36,7 @@
     expanded,
     dirty,
     busy,
+    canStructure,
     canReorderUp,
     canReorderDown,
     onToggle,
@@ -58,18 +67,20 @@
       <span class="slug" aria-hidden="true">/{slug}</span>
     {/if}
   </button>
-  <button
-    aria-label={`Move ${level} up: ${ariaName}`}
-    onclick={onMoveUp}
-    disabled={!canReorderUp || dirty || busy}
-    title={dirty ? 'Save or discard changes first' : ''}
-  >↑</button>
-  <button
-    aria-label={`Move ${level} down: ${ariaName}`}
-    onclick={onMoveDown}
-    disabled={!canReorderDown || dirty || busy}
-    title={dirty ? 'Save or discard changes first' : ''}
-  >↓</button>
+  {#if canStructure}
+    <button
+      aria-label={`Move ${level} up: ${ariaName}`}
+      onclick={onMoveUp}
+      disabled={!canReorderUp || dirty || busy}
+      title={dirty ? 'Save or discard changes first' : ''}
+    >↑</button>
+    <button
+      aria-label={`Move ${level} down: ${ariaName}`}
+      onclick={onMoveDown}
+      disabled={!canReorderDown || dirty || busy}
+      title={dirty ? 'Save or discard changes first' : ''}
+    >↓</button>
+  {/if}
 </div>
 
 <style>
