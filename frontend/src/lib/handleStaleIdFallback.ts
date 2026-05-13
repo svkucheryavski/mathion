@@ -36,6 +36,8 @@ export function handleStaleIdFallback(
     deps.navigate(`/courses/${ctx.courseSlug}/edit/v/${ctx.vid}`, { replace: true, force: true });
     return;
   }
+  // `bid !== null` is defense-in-depth: a stale `sid` only makes sense under a
+  // valid block, but if bid were null we'd have nowhere to navigate back to.
   if (flags.staleSid && ctx.bid !== null) {
     deps.pushToast('Sequence not found.', 'info');
     deps.navigate(`/courses/${ctx.courseSlug}/edit/v/${ctx.vid}/blocks/${ctx.bid}`, { replace: true, force: true });
