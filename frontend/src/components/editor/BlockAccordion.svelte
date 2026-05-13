@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getContext } from 'svelte';
+  import { getContext, onDestroy } from 'svelte';
   import AccordionHeader from './AccordionHeader.svelte';
   import SequenceAccordion from './SequenceAccordion.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
@@ -82,13 +82,24 @@
 
   let busy = $state(false);
 
+  // Track unmount so post-await reloads on a torn-down component (route
+  // change away from /edit/v/:vid entirely) skip cleanly.
+  let alive = true;
+  onDestroy(() => { alive = false; });
+
   // Guard for post-await force-reloads: skip the reload if the user has
   // already navigated to a different version. loadAdminTree's token mechanism
-  // catches out-of-order completion, but `{force: true}` increments the token
-  // and would win, overwriting the now-current version's tree with the old
-  // one. We treat that as a discarded refresh.
+  // catches out-of-order completion of NORMAL loads, but `{force: true}`
+  // advances the token unconditionally — an old force-reload would win and
+  // overwrite the new vid's tree.
+  //
+  // We compare against the LIVE `vid` $derived (which reflects the current
+  // `versionId` prop the router supplies — instance preservation on
+  // /edit/v/:vid navigation means the prop updates without unmounting).
+  // Checking the store value would miss the window between
+  // "navigation occurred" and "new tree finished loading".
   function stillOnVid(savedVid: number): boolean {
-    return currentEditorVersion.value?.version.id === savedVid;
+    return alive && vid === savedVid;
   }
 
   async function save() {
