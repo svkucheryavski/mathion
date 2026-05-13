@@ -2,15 +2,21 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import AccordionHeader from '../components/editor/AccordionHeader.svelte';
 
-// Mount-based regression test for the published-version smoke pass:
-// on a non-editable version (state=published/archived, where
-// canEditStructure is false), the reorder ↑/↓ buttons must not render.
-// Rationale — matches the old BlockEditPage behavior (the buttons were
-// wrapped in `{#if perms.canEditStructure}`) and the current ItemRow
-// behavior (`{#if canStructure}` wraps the up/down). Without this gate,
-// the raw native <button disabled> elements in AccordionHeader look
-// identical to enabled ones (no `:disabled` CSS rule), so the user clicks
-// and nothing happens — the symptom that surfaced in smoke item 1–28d.
+// Mount-based regression test for the per-arrow visibility rule
+// established during slice-2 smoke (commits 5bc4818 / 775f1bc, see
+// spec §"Hide vs disable for reorder ↑/↓"):
+//
+//   - canReorderUp / canReorderDown gate render: when false (the
+//     version is not structurally editable, or this row is at the
+//     boundary in that direction), the arrow is omitted from the DOM.
+//   - dirty / busy gate interaction: when those are true and the
+//     arrow is rendered, it's disabled with a "Save or discard
+//     changes first" tooltip — the user can recover, so the affordance
+//     stays visible.
+//
+// ItemRow follows the same pattern; this file covers AccordionHeader
+// directly, and the equivalent ItemRow logic is exercised
+// transitively via SequenceAccordion's smoke pass.
 //
 // Why `mount()` here vs. the `$effect.root()` pattern in the rest of
 // the test suite (see observeIsDirty.svelte.ts): we need DOM assertions

@@ -221,6 +221,13 @@ Smoke item 27 exercises the loop (edit → click → Cancel → click again → 
 
 **Reorder / delete inside a dirty body.** Reorder ↑/↓ buttons and the inline delete buttons are **disabled** while their nearest enclosing form is dirty. Tooltip: "Save or discard your changes first." This avoids races between an in-flight reorder and an unsaved edit, and removes ambiguity about whether reorder counts as "abandoning" the edit. Same rule for the block-level delete affordance inside an expanded block body.
 
+**Hide vs disable for reorder ↑/↓** (resolved during slice-2 smoke, see commits 5bc4818 / 775f1bc). Two failure modes for a reorder arrow:
+
+- *No recovery action available* — non-editable version (published/archived/disabled), or the arrow's row is at the boundary (first row's ↑, last row's ↓, nothing to swap with). The control is **hidden entirely** (`{#if canReorderUp}` / `{#if canReorderDown}` around each arrow). Raw native `<button disabled>` has no `:disabled` CSS rule in `AccordionHeader`, and `<Button disabled>` in `ItemRow` is too dim to read as "permanent" — leaving the control in the DOM in either form invites the user to click it and wonder why nothing happens.
+- *Recovery action available* — the enclosing form is dirty, or a sibling mutation is in flight (`busy`). The control stays visible and uses the `disabled` attribute + the "Save or discard changes first" tooltip so the user can see the affordance and understand the remediation.
+
+The two `canReorder{Up,Down}` props therefore encode visibility (parent passes `canStructure && index > 1`, etc.); the `dirty`/`busy` flags encode the disabled-but-visible state.
+
 ## Accordion a11y contract
 
 `AccordionHeader` renders the same HTML shape at every level (block and sequence). The toggle button and the action buttons (reorder, eventually delete/open) are **siblings**, never nested:
@@ -244,16 +251,22 @@ Smoke item 27 exercises the loop (edit → click → Cancel → click again → 
       <span class="slug" aria-hidden="true">/{slug}</span>
     {/if}
   </button>
-  <button
-    aria-label={`Move ${level} up: ${labelFor(title, slug, `${level} ${index}`)}`}
-    onclick={onMoveUp}
-    disabled={!canReorderUp || dirty || busy}
-  >↑</button>
-  <button
-    aria-label={`Move ${level} down: ${labelFor(title, slug, `${level} ${index}`)}`}
-    onclick={onMoveDown}
-    disabled={!canReorderDown || dirty || busy}
-  >↓</button>
+  {#if canReorderUp}
+    <button
+      aria-label={`Move ${level} up: ${labelFor(title, slug, `${level} ${index}`)}`}
+      onclick={onMoveUp}
+      disabled={dirty || busy}
+      title={dirty ? 'Save or discard changes first' : ''}
+    >↑</button>
+  {/if}
+  {#if canReorderDown}
+    <button
+      aria-label={`Move ${level} down: ${labelFor(title, slug, `${level} ${index}`)}`}
+      onclick={onMoveDown}
+      disabled={dirty || busy}
+      title={dirty ? 'Save or discard changes first' : ''}
+    >↓</button>
+  {/if}
 </div>
 
 {#if expanded}
