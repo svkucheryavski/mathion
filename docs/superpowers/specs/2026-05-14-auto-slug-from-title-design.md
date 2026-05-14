@@ -97,7 +97,9 @@ Slug rendering surfaces — `AccordionHeader`'s `/{slug}` and `ItemRow`'s `/{slu
   2. Else if `"title" in updates` AND `updates["title"] != row.title`: compute `new_slug = slugify(updates["title"])`; apply the same empty (422) and >80-char (422) checks as on create; assign `updates["slug"] = new_slug`.
   3. Else (title not in payload, or title unchanged): leave the slug alone.
 
-  Wrap the final `db.commit()` in `try/except IntegrityError → 409` with the same title-focused message — this wrapper is new on the update endpoints since slug-on-update used to be impossible, and it handles the concurrent-edit race (two admins simultaneously renaming siblings to titles that slugify to the same string).
+  Wrap the **entire post-mutation region** — from the point at which the slug field is assigned on the row through the final `db.commit()` — in `try/except IntegrityError → 409` with the same title-focused message. This wrapper is new on the update endpoints since slug-on-update used to be impossible, and it handles the concurrent-edit race (two admins simultaneously renaming siblings to titles that slugify to the same string).
+
+  **Autoflush caveat (matters for `update_item`).** `update_item` calls `_process_content_md` for `static_page` items, which invokes `render_with_assets` / `sync_asset_references`. Those helpers issue `db.execute(...)` queries inside the same session, and SQLAlchemy autoflushes pending mutations before each query. A slug `IntegrityError` from the `uq_*_slug` constraint therefore fires during content processing — *before* the explicit `db.commit()`. The wrapper must extend at least far enough back to cover that autoflush point. Equivalently, the endpoint may explicitly `db.flush()` immediately after assigning the new slug on the row (and before content processing) so the collision surfaces deterministically inside a smaller, slug-specific `try/except`. Either shape is acceptable; the bare "wrap only the commit" pattern from `create_*` is not, because for `update_item` the collision can escape before commit. `update_block` and `update_sequence` do not call helpers that trigger autoflush, so for them "wrap the post-mutation region" reduces in practice to "wrap the commit."
 
 Whitelists (`_BLOCK_EDITABLE_PUBLISHED = {"title", "info"}` etc.) stay as-is.
 
@@ -125,6 +127,7 @@ Whitelists (`_BLOCK_EDITABLE_PUBLISHED = {"title", "info"}` etc.) stay as-is.
   - >80-char-slug 422.
   - Collision 409 on create.
   - Collision 409 on update.
+  - **Collision 409 on `update_item` via autoflush** — PATCH on a `static_page` item that simultaneously (a) changes title to one whose slug collides with a sibling and (b) includes a `content_md` change. The slug `IntegrityError` fires during `_process_content_md`'s DB queries (autoflush), *before* the explicit commit. The wrapper still returns 409 with the title-focused message; the test fails if the endpoint surfaces a 500.
   - Title-edit-on-published also re-derives slug.
   - **Info-only PATCH** (title resent but unchanged) does NOT re-derive slug.
   - **Equivalent-after-slugify update** (e.g., title `"Foo Bar!"` → `"Foo Bar"` — both slugify to `"foo-bar"`) — diff fires, slug written, value identical to existing, no IntegrityError.
@@ -136,7 +139,7 @@ Whitelists (`_BLOCK_EDITABLE_PUBLISHED = {"title", "info"}` etc.) stay as-is.
 
 ## Migration concerns
 
-No DB migration. Existing rows keep their existing slugs. If an admin re-opens an old entity and saves without changing the title (even though the current frontend includes the title in every save body), the server's "submitted-title vs stored-title" diff check leaves the slug alone. The slug only changes when the admin actually edits the title to a new value. This is deliberate — no surprise mass-rename on the first PATCH after this feature lands.
+No DB migration. Existing rows keep their existing slugs. If an admin re-opens an old entity and saves without changing the title (even though the current frontend includes the title in every save body), the server's "submitted-title vs stored-title" diff check leaves the slug alone. The slug only changes when the *submitted* title differs from the stored title — under normal single-admin operation that means "when the admin actually edited the title." (One exception, documented in **Known limitation: stale-resend lost update** below: a stale tracker that resends the *old* title against an already-renamed row will flip both title and slug back. That's a pre-existing concurrency issue, not a migration concern.) This is deliberate — no surprise mass-rename on the first PATCH after this feature lands.
 
 **Deploy ordering matters for create flows.** Given the schema changes above:
 
