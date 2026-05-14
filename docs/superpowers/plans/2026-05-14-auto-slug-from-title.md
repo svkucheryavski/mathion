@@ -391,11 +391,17 @@ Block-create payloads exist in many test files beyond `test_blocks.py`. Sweep AL
 - `tests/test_student.py`
 - `tests/test_versions.py`
 
-Run this to locate every block-create call with `slug`:
+Block-create calls span multiple lines in most files — `admin_client.post(..., json={` on one line, then the payload on the next. A single-line grep misses those. Use:
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  grep -nE '/blocks.*"slug"|"slug".*/blocks' tests/*.py
+  for f in tests/test_admin_tree.py tests/test_assets_api.py tests/test_blocks.py \
+           tests/test_content.py tests/test_items.py tests/test_questions_api.py \
+           tests/test_quiz_api.py tests/test_reorder.py tests/test_student.py \
+           tests/test_versions.py; do
+    echo "=== $f ==="
+    grep -n -A2 '/blocks' "$f" | grep -B1 '"slug"'
+  done
 ```
 
 For each match, drop the `"slug": "..."` segment from the JSON payload, preserving the surrounding dict structure. Sequence and item slugs in these same files are handled in Tasks 3 and 4 — don't touch them now.
@@ -619,11 +625,17 @@ Same list as the block-sweep in Task 2 (most of these files build full block→s
 - `tests/test_student.py`
 - `tests/test_versions.py`
 
-Locate:
+Same multi-line caveat as Task 2: most sequence creates span multiple lines. Locate via:
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  grep -nE '/sequences.*"slug"|"slug".*/sequences' tests/*.py
+  for f in tests/test_admin_tree.py tests/test_assets_api.py tests/test_blocks.py \
+           tests/test_content.py tests/test_items.py tests/test_questions_api.py \
+           tests/test_quiz_api.py tests/test_reorder.py tests/test_student.py \
+           tests/test_versions.py; do
+    echo "=== $f ==="
+    grep -n -A2 '/sequences' "$f" | grep -B1 '"slug"'
+  done
 ```
 
 For each match, drop the `"slug": "..."` segment.
@@ -882,19 +894,37 @@ def test_api_create_item_title_too_long_for_slug(admin_client):
 Item-create payloads exist in:
 
 - `tests/test_admin_tree.py`
+- `tests/test_assets_api.py`
 - `tests/test_blocks.py` (some block tests create items down the tree)
+- `tests/test_content.py`
 - `tests/test_items.py`
+- `tests/test_questions_api.py`
+- `tests/test_quiz_api.py`
 - `tests/test_reorder.py`
+- `tests/test_student.py`
 - `tests/test_versions.py`
 
-Locate:
+Many of these calls span multiple lines — `admin_client.post(f"/api/sequences/{...}/items", json={` on one line, then `"title": "...", "slug": "...", "type": "..."` on the next. A single-line grep misses them. Use a multi-line-aware sweep:
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  grep -nE '/items.*"slug"|"slug".*/items' tests/*.py
+  grep -n -A2 '/items.*json=' tests/*.py | grep -B1 '"slug"' | head -60
 ```
 
-For each match, drop the `"slug": "..."` segment.
+Or simpler: grep each file for `/items` and visually scan the following 3-4 lines for `"slug": "..."`:
+
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
+  for f in tests/test_admin_tree.py tests/test_assets_api.py tests/test_blocks.py \
+           tests/test_content.py tests/test_items.py tests/test_questions_api.py \
+           tests/test_quiz_api.py tests/test_reorder.py tests/test_student.py \
+           tests/test_versions.py; do
+    echo "=== $f ==="
+    grep -n -A3 '/items' "$f" | grep -B1 '"slug"'
+  done
+```
+
+For each match, drop the `"slug": "..."` segment from the JSON payload. Sequence and block slugs in these same files were swept in Tasks 2 and 3 already.
 
 (`tests/test_access_control.py` does NOT POST items.)
 
@@ -1130,6 +1160,31 @@ def test_api_update_block_rejects_extra_slug_field(admin_client):
     assert ("body", "slug") in locs
 
 
+def test_api_update_block_unchanged_title_preserves_legacy_slug(admin_client, db):
+    """Spec lines 56, 142: a row with an existing non-derived slug (the
+    'legacy custom slug' case) must NOT have its slug snapped to
+    slugify(title) when an info-only PATCH resends the unchanged title.
+    A naïve 'title key present means rederive' implementation would fail
+    this — only the title-diff check should rederive."""
+    from mathion.models import Block
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block_resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "My Title"}).json()
+    # Directly mutate the row to simulate a pre-existing custom slug that
+    # doesn't match slugify(title). This is the migration scenario.
+    row = db.get(Block, block_resp["id"])
+    row.slug = "legacy-custom-slug"
+    db.commit()
+    # PATCH resending the unchanged title + an info edit (BlockAccordion's
+    # actual save shape).
+    resp = admin_client.patch(f"/api/blocks/{block_resp['id']}", json={
+        "title": "My Title",  # unchanged
+        "info": "new info",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "legacy-custom-slug"  # NOT snapped to "my-title"
+
+
 def test_api_update_block_empty_slug_after_slugify(admin_client):
     """Title edit to a Cyrillic-only string → slugify('') → 422 keyed to body.title."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
@@ -1336,6 +1391,21 @@ def test_api_update_sequence_rejects_extra_slug_field(admin_client):
     assert resp.status_code == 422
     locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
     assert ("body", "slug") in locs
+
+
+def test_api_update_sequence_unchanged_title_preserves_legacy_slug(admin_client, db):
+    """Legacy custom slug preserved on unchanged-title PATCH (spec lines 56, 142)."""
+    from mathion.models import Sequence
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq_resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "My Title"}).json()
+    row = db.get(Sequence, seq_resp["id"])
+    row.slug = "legacy-custom-slug"
+    db.commit()
+    resp = admin_client.patch(f"/api/sequences/{seq_resp['id']}", json={"title": "My Title"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "legacy-custom-slug"
 
 
 def test_api_update_sequence_empty_slug_after_slugify(admin_client):
@@ -1552,7 +1622,19 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
             )
 
     if "content_md" in updates:
-        item.content_html = _process_content_md(db, version, item.id, item.content_md)
+        # _process_content_md calls render_with_assets, which raises 422
+        # if content_md references an asset that doesn't exist in this
+        # version. After the earlier explicit db.flush() (when slug
+        # changed), pending mutations are already in the session — if
+        # render_with_assets raises here, those pending mutations would
+        # be left in the test session (production get_db() rolls back
+        # on close, but tests share the session). Rollback before
+        # re-raising so the slug/title write doesn't leak.
+        try:
+            item.content_html = _process_content_md(db, version, item.id, item.content_md)
+        except HTTPException:
+            db.rollback()
+            raise
         bump_content_updated_at(version)
 
     # Validate type invariants after applying patch.
@@ -1692,6 +1774,27 @@ def test_api_update_item_rejects_extra_slug_field(admin_client):
     assert ("body", "slug") in locs
 
 
+def test_api_update_item_unchanged_title_preserves_legacy_slug(admin_client, db):
+    """Legacy custom slug preserved on unchanged-title PATCH (spec lines 56, 142)."""
+    from mathion.models import Item
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item_resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "My Title", "type": "static_page", "content_md": "x",
+    }).json()
+    row = db.get(Item, item_resp["id"])
+    row.slug = "legacy-custom-slug"
+    db.commit()
+    resp = admin_client.patch(f"/api/items/{item_resp['id']}", json={
+        "title": "My Title",
+        "content_md": "new content",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "legacy-custom-slug"
+
+
 def test_api_update_item_empty_slug_after_slugify(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
@@ -1734,6 +1837,34 @@ def test_api_update_item_title_edit_on_published_re_derives_slug(admin_client, d
     resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Renamed On Published"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["slug"] == "renamed-on-published"
+
+
+def test_api_update_item_missing_asset_rolls_back_flushed_slug(admin_client, db):
+    """Codex R2 hazard: when slug changes (explicit db.flush() runs) AND
+    content_md references a missing asset, _process_content_md raises
+    422. The endpoint must rollback before re-raising so the flushed
+    slug/title write doesn't persist in the (test) shared session."""
+    from mathion.models import Item
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Original", "type": "static_page", "content_md": "x",
+    }).json()
+    original_slug = item["slug"]
+    original_title = item["title"]
+    # Title edit (triggers slug flush) + content_md referencing a
+    # non-existent asset → render_with_assets raises 422.
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={
+        "title": "New Name",
+        "content_md": "![missing](nonexistent-asset.png)",
+    })
+    assert resp.status_code == 422, resp.text
+    db.expire_all()
+    fresh = db.get(Item, item["id"])
+    assert fresh.slug == original_slug
+    assert fresh.title == original_title
 
 
 def test_api_update_item_invariant_422_rolls_back_flushed_slug(admin_client, db):
