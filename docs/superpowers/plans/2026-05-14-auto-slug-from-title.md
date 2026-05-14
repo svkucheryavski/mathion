@@ -377,33 +377,44 @@ def test_api_create_block_title_too_long_for_slug(admin_client):
     assert any(tuple(d["loc"]) == ("body", "title") for d in detail)
 ```
 
-- [ ] **Step 10: Sweep `tests/test_admin_tree.py` and `tests/test_access_control.py` for block-create payloads**
+- [ ] **Step 10: Sweep all test files that POST blocks with `slug`**
 
-Run:
+Block-create payloads exist in many test files beyond `test_blocks.py`. Sweep ALL of them:
 
-```bash
-grep -n '/blocks.*slug\|"slug"' /Users/svkucheryavski/Documents/Developing/mathion/backend/tests/test_admin_tree.py /Users/svkucheryavski/Documents/Developing/mathion/backend/tests/test_access_control.py
-```
+- `tests/test_admin_tree.py`
+- `tests/test_assets_api.py`
+- `tests/test_content.py`
+- `tests/test_items.py` (yes — `test_items.py` builds its block prerequisites the same way)
+- `tests/test_questions_api.py`
+- `tests/test_quiz_api.py`
+- `tests/test_reorder.py`
+- `tests/test_student.py`
+- `tests/test_versions.py`
 
-For every `admin_client.post(f"/api/versions/{...}/blocks", json={...})` or fixture-built block create payload, remove the `"slug": "..."` key.
-
-(Sequence and item slugs in these files will be handled in Tasks 3 and 4; don't touch them now.)
-
-- [ ] **Step 11: Run full backend test suite to verify all green**
+Run this to locate every block-create call with `slug`:
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  .venv/bin/pytest tests/test_blocks.py tests/test_admin_tree.py tests/test_access_control.py tests/test_slugify.py -v 2>&1 | tail -30
+  grep -nE '/blocks.*"slug"|"slug".*/blocks' tests/*.py
 ```
 
-Expected: all PASS.
+For each match, drop the `"slug": "..."` segment from the JSON payload, preserving the surrounding dict structure. Sequence and item slugs in these same files are handled in Tasks 3 and 4 — don't touch them now.
+
+(Note: `tests/test_access_control.py` does NOT POST blocks; it only creates courses. Skip it.)
+
+- [ ] **Step 11: Run the full backend test suite as the safety net**
+
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
+  .venv/bin/pytest tests/ 2>&1 | tail -40
+```
+
+Expected: all PASS. If any test still fails with 422 "Extra inputs are not permitted" for `slug`, the file slipped through the sweep — find it, drop `slug` from the offending payload, re-run pytest. Repeat until the whole suite is green before committing. This is the atomicity guarantee for Task 2.
 
 - [ ] **Step 12: Commit**
 
 ```bash
-git add backend/mathion/schemas.py backend/mathion/api/blocks.py \
-        backend/tests/test_blocks.py backend/tests/test_admin_tree.py \
-        backend/tests/test_access_control.py
+git add backend/mathion/schemas.py backend/mathion/api/blocks.py backend/tests/
 git commit -m "feat(backend): create_block auto-derives slug from title
 
 BlockCreate drops the slug field and gains extra='forbid' to reject
@@ -594,28 +605,42 @@ def test_api_create_sequence_title_too_long_for_slug(admin_client):
     assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
 ```
 
-- [ ] **Step 9: Sweep `tests/test_admin_tree.py` for sequence-create payloads**
+- [ ] **Step 9: Sweep all test files that POST sequences with `slug`**
 
-```bash
-grep -n '/sequences.*slug\|sequences.*"slug"' /Users/svkucheryavski/Documents/Developing/mathion/backend/tests/test_admin_tree.py
-```
+Same list as the block-sweep in Task 2 (most of these files build full block→sequence→item trees):
 
-For each match, drop the `"slug": "..."` segment from the JSON payload.
+- `tests/test_admin_tree.py`
+- `tests/test_assets_api.py`
+- `tests/test_blocks.py` (already swept for block-creates in Task 2; now sweep its sequence-creates)
+- `tests/test_items.py`
+- `tests/test_questions_api.py`
+- `tests/test_quiz_api.py`
+- `tests/test_reorder.py`
+- `tests/test_student.py`
+- `tests/test_versions.py`
 
-- [ ] **Step 10: Run the full affected test suite to verify all green**
+Locate:
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  .venv/bin/pytest tests/test_blocks.py tests/test_admin_tree.py tests/test_access_control.py -v 2>&1 | tail -30
+  grep -nE '/sequences.*"slug"|"slug".*/sequences' tests/*.py
 ```
 
-Expected: all PASS.
+For each match, drop the `"slug": "..."` segment.
+
+- [ ] **Step 10: Run the full backend test suite as the safety net**
+
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
+  .venv/bin/pytest tests/ 2>&1 | tail -40
+```
+
+Expected: all PASS. Any failures with 422 "Extra inputs are not permitted" for `slug` mean a sequence-create payload slipped through the sweep — fix and re-run.
 
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/mathion/schemas.py backend/mathion/api/blocks.py \
-        backend/tests/test_blocks.py backend/tests/test_admin_tree.py
+git add backend/mathion/schemas.py backend/mathion/api/blocks.py backend/tests/
 git commit -m "feat(backend): create_sequence auto-derives slug from title
 
 SequenceCreate drops slug, adds extra='forbid'. Endpoint derives slug
@@ -852,38 +877,40 @@ def test_api_create_item_title_too_long_for_slug(admin_client):
     assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
 ```
 
-- [ ] **Step 9: Sweep `test_admin_tree.py` and `test_access_control.py` for item-create payloads**
+- [ ] **Step 9: Sweep all test files that POST items with `slug`**
+
+Item-create payloads exist in:
+
+- `tests/test_admin_tree.py`
+- `tests/test_blocks.py` (some block tests create items down the tree)
+- `tests/test_items.py`
+- `tests/test_reorder.py`
+- `tests/test_versions.py`
+
+Locate:
 
 ```bash
-grep -n '/items.*slug' /Users/svkucheryavski/Documents/Developing/mathion/backend/tests/test_admin_tree.py /Users/svkucheryavski/Documents/Developing/mathion/backend/tests/test_access_control.py
+cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
+  grep -nE '/items.*"slug"|"slug".*/items' tests/*.py
 ```
 
 For each match, drop the `"slug": "..."` segment.
 
-- [ ] **Step 10: Run the full affected test suite**
+(`tests/test_access_control.py` does NOT POST items.)
+
+- [ ] **Step 10: Run the full backend test suite as the safety net**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  .venv/bin/pytest tests/test_items.py tests/test_admin_tree.py tests/test_access_control.py -v 2>&1 | tail -30
+  .venv/bin/pytest tests/ 2>&1 | tail -40
 ```
 
-Expected: all PASS.
+Expected: all PASS. Any 422 "Extra inputs are not permitted" failure for `slug` means an item-create payload slipped through — find it, drop the slug, re-run. This is the atomicity guarantee for Task 4.
 
-- [ ] **Step 11: Run the entire backend test suite to catch unanticipated callers**
-
-```bash
-cd /Users/svkucheryavski/Documents/Developing/mathion/backend && \
-  .venv/bin/pytest tests/ 2>&1 | tail -15
-```
-
-Expected: all PASS. If any test file outside the ones swept above fails because it still POSTs `slug`, hot-fix it in the same commit before continuing.
-
-- [ ] **Step 12: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add backend/mathion/schemas.py backend/mathion/api/items.py \
-        backend/tests/test_items.py backend/tests/test_admin_tree.py \
-        backend/tests/test_access_control.py
+git add backend/mathion/schemas.py backend/mathion/api/items.py backend/tests/
 git commit -m "feat(backend): create_item auto-derives slug from title
 
 ItemCreate drops slug, adds extra='forbid'. Endpoint derives slug from
@@ -1101,6 +1128,26 @@ def test_api_update_block_rejects_extra_slug_field(admin_client):
     assert resp.status_code == 422, resp.text
     locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
     assert ("body", "slug") in locs
+
+
+def test_api_update_block_empty_slug_after_slugify(admin_client):
+    """Title edit to a Cyrillic-only string → slugify('') → 422 keyed to body.title."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_block_title_too_long_for_slug(admin_client):
+    """Title edit producing >80-char slug → 422 keyed to body.title."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
 ```
 
 - [ ] **Step 7: Run the full test_blocks.py suite**
@@ -1289,6 +1336,65 @@ def test_api_update_sequence_rejects_extra_slug_field(admin_client):
     assert resp.status_code == 422
     locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
     assert ("body", "slug") in locs
+
+
+def test_api_update_sequence_empty_slug_after_slugify(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_sequence_title_too_long_for_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_sequence_title_edit_on_published_re_derives_slug(admin_client, db):
+    """title is in _SEQUENCE_EDITABLE_PUBLISHED, so published versions still re-derive."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Old"}).json()
+    v = db.get(CourseVersion, version["id"])
+    v.state = "published"
+    db.commit()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Renamed On Published"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "renamed-on-published"
+
+
+def test_api_update_sequence_unchanged_title_keeps_slug(admin_client):
+    """Title resent unchanged — slug stays."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    original_slug = seq["slug"]
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "S1"})
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == original_slug
+
+
+def test_api_update_sequence_equivalent_after_slugify(admin_client):
+    """Title 'Foo Bar' → 'Foo Bar!' both slugify to 'foo-bar'."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Foo Bar"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Foo Bar!"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Foo Bar!"
+    assert resp.json()["slug"] == "foo-bar"
 ```
 
 - [ ] **Step 7: Run the affected test files**
@@ -1449,12 +1555,24 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
         item.content_html = _process_content_md(db, version, item.id, item.content_md)
         bump_content_updated_at(version)
 
-    # Validate type invariants after applying patch
+    # Validate type invariants after applying patch.
+    #
+    # When slug changed earlier, we explicitly db.flush()ed so the
+    # IntegrityError surfaced inside our 409 wrapper. That flush also
+    # committed any other pending mutations (new title, new content_html,
+    # etc.) to the session. The production get_db() rolls back on close,
+    # but tests use a session override that does NOT rollback per-request
+    # — and even in production it is more conservative to explicitly
+    # rollback before any post-flush 422 so the partially-applied state
+    # never has a chance to be observed.
     if item.type == "static_page" and item.content_md is None:
+        db.rollback()
         raise HTTPException(status_code=422, detail="content_md cannot be null for static_page items")
     if item.type == "video" and item.video_url is None:
+        db.rollback()
         raise HTTPException(status_code=422, detail="video_url cannot be null for video items")
     if item.type == "interactive_app" and item.script_url is None:
+        db.rollback()
         raise HTTPException(status_code=422, detail="script_url cannot be null for interactive_app items")
 
     db.commit()
@@ -1572,6 +1690,80 @@ def test_api_update_item_rejects_extra_slug_field(admin_client):
     assert resp.status_code == 422
     locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
     assert ("body", "slug") in locs
+
+
+def test_api_update_item_empty_slug_after_slugify(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_item_title_too_long_for_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_item_title_edit_on_published_re_derives_slug(admin_client, db):
+    """title is in _ITEM_EDITABLE_PUBLISHED, so published versions still re-derive."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Old", "type": "static_page", "content_md": "x",
+    }).json()
+    v = db.get(CourseVersion, version["id"])
+    v.state = "published"
+    db.commit()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Renamed On Published"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "renamed-on-published"
+
+
+def test_api_update_item_invariant_422_rolls_back_flushed_slug(admin_client, db):
+    """Codex R1 hazard: when slug changes AND a subsequent type-invariant
+    422 fires (e.g., content_md set to null on a static_page), the explicit
+    db.flush() that committed the new slug to the session must be rolled
+    back so the persisted row keeps its old slug/title. The endpoint adds
+    db.rollback() before each invariant raise to enforce this."""
+    from mathion.models import Item
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Original", "type": "static_page", "content_md": "x",
+    }).json()
+    original_slug = item["slug"]
+    original_title = item["title"]
+    # Edit title (which would change slug) AND set content_md to null (which violates
+    # the static_page invariant). The 422 must fire AND the flushed slug/title must NOT persist.
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={
+        "title": "New Name",
+        "content_md": None,
+    })
+    assert resp.status_code == 422, resp.text
+    # Verify persistence: re-read via a fresh DB query.
+    db.expire_all()
+    fresh = db.get(Item, item["id"])
+    assert fresh.slug == original_slug
+    assert fresh.title == original_title
 ```
 
 - [ ] **Step 8: Run the affected test files + entire backend suite**
@@ -1766,7 +1958,7 @@ In `VersionEditPage.svelte`:
   return creating && newTitle.trim() !== '';
   ```
 - In the reset blocks (around lines 172 and 179), change `newTitle = ''; newSlug = '';` to `newTitle = '';`.
-- In the submit guard (around line 184), change `&& !newTitle.trim() && !newSlug.trim()` to drop the `newSlug` predicate:
+- In the submit guard (around line 184), drop the `!newSlug.trim()` predicate (it appears in the OR-chain inside the `return` early-exit):
   ```typescript
   if (createBusy || busy || !perms?.canEditStructure || !newTitle.trim()) return;
   ```
@@ -1921,9 +2113,10 @@ git add frontend/src/components/editor/SequenceAccordion.svelte
 git commit -m "feat(frontend): SequenceAccordion item-create — drop slug input
 
 Same shape as the previous two create-form changes. knownFields drops
-'slug' from both the static_page and video variants. Submit body for
-each type becomes { title, type, ... } (content_md, video_url, or
-script_url depending on type)."
+'slug' from both the static_page and video variants (the only two
+types the create picker currently exposes). Submit body for each type
+becomes { title, type, ... } (content_md or video_url depending on
+type)."
 ```
 
 ---
@@ -1977,7 +2170,7 @@ git -C /Users/svkucheryavski/Documents/Developing/mathion status --short && \
 git -C /Users/svkucheryavski/Documents/Developing/mathion log --oneline main..HEAD
 ```
 
-Expected: clean tree; ~12 commits from Tasks 1-11 visible on the `backend-auto-slug-from-title` branch (one per task, no fixup commits unless review found issues).
+Expected: clean tree; 11 commits from Tasks 1-11 visible on the `backend-auto-slug-from-title` branch (Task 12 is verification-only and does not produce a commit; fixup commits may appear if review found issues).
 
 ---
 
