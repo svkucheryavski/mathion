@@ -273,3 +273,125 @@ def test_disable_version_with_only_inactive_runs_ok(admin_client, db, seed_publi
     ).json()
     response = admin_client.post(f"/api/versions/{version['id']}/disable")
     assert response.status_code == 200
+
+
+def test_publish_disabled_version_returns_403(admin_client):
+    course = admin_client.post(
+        "/api/courses", json={"slug": "d", "name": "D", "description": ""}
+    ).json()
+    version = admin_client.post(
+        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+    ).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    r = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert r.status_code == 403
+    assert "disabled" in r.json()["detail"].lower()
+
+
+def test_patch_version_info_md_in_created(admin_client, db):
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "old"}).json()
+    before = db.get(CourseVersion, version["id"]).content_updated_at
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "new # heading"})
+    assert r.status_code == 200
+    assert r.json()["info_md"] == "new # heading"
+    assert "<p" in r.json()["info_html"]
+    after = db.get(CourseVersion, version["id"]).content_updated_at
+    assert after > before
+
+
+def test_patch_version_max_quiz_attempts(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"max_quiz_attempts": 5})
+    assert r.status_code == 200
+    assert r.json()["max_quiz_attempts"] == 5
+
+
+def test_patch_version_published_409(admin_client, seed_publishable_version):
+    _, version = seed_publishable_version()
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
+    assert r.status_code == 409
+
+
+def test_patch_version_archived_409(admin_client, seed_publishable_version):
+    _, version = seed_publishable_version()
+    admin_client.post(f"/api/versions/{version['id']}/archive")
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
+    assert r.status_code == 409
+
+
+def test_patch_version_disabled_403(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={"info_md": "x"})
+    assert r.status_code == 403
+
+
+def test_patch_version_empty_body_is_noop(admin_client, db):
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    before = db.get(CourseVersion, version["id"]).content_updated_at
+    r = admin_client.patch(f"/api/versions/{version['id']}", json={})
+    assert r.status_code == 200
+    after = db.get(CourseVersion, version["id"]).content_updated_at
+    assert after == before
+
+
+def test_render_endpoint_admin(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "r", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = admin_client.post(
+        f"/api/versions/{version['id']}/render", json={"content_md": "# hello"}
+    )
+    assert r.status_code == 200
+    assert "<h1>" in r.json()["html"].lower() or "<h1" in r.json()["html"]
+
+
+def test_render_endpoint_non_admin_403(auth_client, admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "r", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = auth_client.post(
+        f"/api/versions/{version['id']}/render", json={"content_md": "# x"}
+    )
+    assert r.status_code == 403
+
+
+def test_render_endpoint_disabled_403(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "r", "name": "R", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/disable")
+    r = admin_client.post(
+        f"/api/versions/{version['id']}/render", json={"content_md": "x"}
+    )
+    assert r.status_code == 403
+
+
+def test_patch_version_explicit_null_is_noop(admin_client, db):
+    """Explicit null on Optional fields must not be written through to non-null columns."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "p", "name": "P", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "seed"}).json()
+    before_md = db.get(CourseVersion, version["id"]).info_md
+    before_max = db.get(CourseVersion, version["id"]).max_quiz_attempts
+    r = admin_client.patch(
+        f"/api/versions/{version['id']}",
+        json={"info_md": None, "max_quiz_attempts": None},
+    )
+    assert r.status_code == 200
+    after = db.get(CourseVersion, version["id"])
+    assert after.info_md == before_md
+    assert after.max_quiz_attempts == before_max
+
+
+def test_list_versions_ordered_newest_first(admin_client):
+    """VersionsPage relies on a deterministic order — newest version comes first."""
+    course = admin_client.post("/api/courses", json={"slug": "ord", "name": "Ord", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v1"}).json()
+    v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"}).json()
+    v3 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v3"}).json()
+    rows = admin_client.get(f"/api/courses/{course['id']}/versions").json()
+    assert [r["id"] for r in rows] == [v3["id"], v2["id"], v1["id"]]

@@ -10,12 +10,18 @@
   import CourseView from './pages/CourseView.svelte';
   import SequencePlayer from './pages/SequencePlayer.svelte';
   import NotFound from './pages/NotFound.svelte';
+  import VersionsPage from './pages/editor/VersionsPage.svelte';
+  import VersionEditPage from './pages/editor/VersionEditPage.svelte';
+  import ItemEditPage from './pages/editor/ItemEditPage.svelte';
 
   const componentMap: Record<string, Component<Record<string, string>>> = {
     Login: Login as Component<Record<string, string>>,
     CourseList: CourseList as Component<Record<string, string>>,
     CourseView: CourseView as Component<Record<string, string>>,
     SequencePlayer: SequencePlayer as Component<Record<string, string>>,
+    VersionsPage: VersionsPage as Component<Record<string, string>>,
+    VersionEditPage: VersionEditPage as Component<Record<string, string>>,
+    ItemEditPage: ItemEditPage as Component<Record<string, string>>,
   };
 
   const matched = $derived(matchRoute(routes, currentRoute.path));
@@ -28,7 +34,7 @@
     }
     if (matched && matched.route.auth && session.user === null && !session.loading) {
       const next = encodeURIComponent(currentRoute.path + currentRoute.search + currentRoute.hash);
-      navigate(`/login?next=${next}`, { replace: true });
+      navigate(`/login?next=${next}`, { replace: true, force: true });
     }
   });
 </script>

@@ -146,3 +146,68 @@ def test_api_get_course_allowed_for_course_admin(client, db, test_user):
     response = client.get(f"/api/courses/{course.id}")
     assert response.status_code == 200
     assert response.json()["slug"] == "admincourse"
+
+
+def test_course_response_is_admin_for_superuser(admin_client):
+    course = admin_client.post(
+        "/api/courses", json={"slug": "s1", "name": "S1", "description": ""}
+    ).json()
+    # Superuser is admin on every course
+    assert course["is_admin"] is True
+
+    listed = admin_client.get("/api/courses").json()
+    assert all(c["is_admin"] is True for c in listed)
+
+
+def test_course_response_is_admin_for_course_admin(auth_client, admin_client, db, test_user):
+    """A non-superuser CourseAdmin sees is_admin=true on their course."""
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "c", "name": "C", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
+    db.commit()
+    r = auth_client.get(f"/api/courses/{course['id']}")
+    assert r.status_code == 200
+    assert r.json()["is_admin"] is True
+
+
+def test_course_response_is_admin_false_for_enrolled_student(auth_client, admin_client, db, test_user):
+    """Enrolled-but-not-admin sees is_admin=false."""
+    from mathion.models_auth import StudentEnrollment
+    course = admin_client.post(
+        "/api/courses", json={"slug": "c2", "name": "C2", "description": ""}
+    ).json()
+    version = admin_client.post(
+        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+    ).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=version["id"], is_active=True))
+    db.commit()
+    r = auth_client.get(f"/api/courses/{course['id']}")
+    assert r.status_code == 200
+    assert r.json()["is_admin"] is False
+
+
+def test_by_slug_admin(auth_client, admin_client, db, test_user):
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "calc", "name": "Calc", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
+    db.commit()
+    r = auth_client.get("/api/courses/by-slug/calc")
+    assert r.status_code == 200
+    assert r.json()["slug"] == "calc"
+    assert r.json()["is_admin"] is True
+
+
+def test_by_slug_non_admin_forbidden(auth_client, admin_client):
+    admin_client.post("/api/courses", json={"slug": "calc", "name": "Calc", "description": ""})
+    r = auth_client.get("/api/courses/by-slug/calc")
+    assert r.status_code == 403
+
+
+def test_by_slug_unknown(auth_client):
+    r = auth_client.get("/api/courses/by-slug/nope")
+    assert r.status_code == 404

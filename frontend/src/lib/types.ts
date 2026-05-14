@@ -13,12 +13,13 @@ export type User = {
 
 // ---- Course list ----
 export type CourseListItem = {
-  course: { id: number; slug: string; name: string; description: string };
-  version_id: number;
-  version_state: 'created' | 'published' | 'archived';
+  course: { id: number; slug: string; name: string; description: string; is_admin: boolean };
+  version_id: number | null;
+  version_state: 'created' | 'published' | 'archived' | null;
   covered_items: number;
   total_items: number;
   is_active: boolean;
+  is_admin: boolean;
 };
 
 // ---- Course tree (`/api/versions/:id/content`) ----
@@ -186,6 +187,76 @@ export type ValidationErrorDetail = {
   loc: (string | number)[];
   msg: string;
   type: string;
+};
+
+// ---- Admin tree (`/api/versions/:id/admin-tree`) ----
+// CourseResponse — single-course payload from /api/courses/by-slug/{slug}.
+export type Course = {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  is_admin: boolean;
+};
+
+// VersionResponse — list/detail payload from /api/courses/{cid}/versions and
+// /api/versions/{vid}. AdminTreeVersion adds `content_updated_at` for the
+// admin-tree response only; do not conflate the two.
+export type Version = {
+  id: number;
+  course_id: number;
+  state: 'created' | 'published' | 'archived';
+  is_disabled: boolean;
+  info_md: string;
+  info_html: string;
+  max_quiz_attempts: number;
+  created_at: string;
+  published_at: string | null;
+  archived_at: string | null;
+};
+
+export type AdminTreeVersion = Version & {
+  content_updated_at: string;
+};
+
+export type AdminTreeItem = {
+  id: number;
+  sequence_id: number;
+  title: string;
+  slug: string;
+  order: number;
+  type: 'static_page' | 'video' | 'quiz' | 'interactive_app';
+  content_md: string | null;
+  content_html: string | null;
+  video_url: string | null;
+  script_url: string | null;
+  questions_count: number;
+};
+
+export type AdminTreeSequence = {
+  id: number;
+  block_id: number;
+  title: string;
+  slug: string;
+  order: number;
+  items: AdminTreeItem[];
+};
+
+export type AdminTreeBlock = {
+  id: number;
+  version_id: number;
+  title: string;
+  slug: string;
+  order: number;
+  info: string;
+  info_html: string;
+  sequences: AdminTreeSequence[];
+};
+
+export type AdminTree = {
+  course: { id: number; name: string; slug: string };
+  version: AdminTreeVersion;
+  blocks: AdminTreeBlock[];
 };
 
 // ---- Exhaustiveness helper ----

@@ -21,6 +21,7 @@ class CourseResponse(BaseModel):
     slug: str
     name: str
     description: str
+    is_admin: bool = False  # populated per-request; defaults False so model_validate(course) keeps working
 
     model_config = {"from_attributes": True}
 
@@ -29,6 +30,19 @@ class VersionCreate(BaseModel):
     info_md: str = ""
     max_quiz_attempts: int = Field(default=3, ge=1, le=10)
     copy_assets_from: int | None = None
+
+
+class VersionUpdate(BaseModel):
+    info_md: str | None = None
+    max_quiz_attempts: int | None = Field(default=None, ge=1, le=10)
+
+
+class VersionRenderRequest(BaseModel):
+    content_md: str
+
+
+class VersionRenderResponse(BaseModel):
+    html: str
 
 
 class VersionResponse(BaseModel):
@@ -236,11 +250,12 @@ class MyVersionResponse(BaseModel):
 
 class MyCourseResponse(BaseModel):
     course: CourseResponse
-    version_id: int
-    version_state: str
-    total_items: int
-    covered_items: int
-    is_active: bool
+    version_id: int | None = None
+    version_state: str | None = None
+    total_items: int = 0
+    covered_items: int = 0
+    is_active: bool = False
+    is_admin: bool = False
 
 
 class QuestionCreate(BaseModel):

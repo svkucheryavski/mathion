@@ -1,3 +1,5 @@
+from sqlalchemy import select
+
 from mathion.models import Block, Course, CourseVersion, Sequence
 
 
@@ -220,3 +222,70 @@ def test_update_block_re_renders_info_html(admin_client):
     )
     assert response.status_code == 200
     assert response.json()["info_html"] == "<p>new <strong>bold</strong></p>\n"
+
+
+def test_delete_block_empty_succeeds(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(
+        f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}
+    ).json()
+    r = admin_client.delete(f"/api/blocks/{block['id']}")
+    assert r.status_code == 204
+
+
+def test_delete_block_with_sequences_blocked(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(
+        f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}
+    ).json()
+    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"})
+    r = admin_client.delete(f"/api/blocks/{block['id']}")
+    assert r.status_code == 409
+    assert "remove its sequences first" in r.json()["detail"]
+
+
+def test_delete_block_state_error_precedes_child_count(admin_client, db, seed_publishable_version):
+    """On a published version (state forbids delete), the state error wins over child-count
+    so the more actionable message surfaces."""
+    from mathion.models import Block
+    _, version = seed_publishable_version()
+    block = db.execute(select(Block).where(Block.version_id == version["id"])).scalar_one()
+    r = admin_client.delete(f"/api/blocks/{block.id}")
+    assert r.status_code == 409
+    assert "'created' state" in r.json()["detail"]
+    assert "remove its sequences" not in r.json()["detail"]
+
+
+def test_delete_sequence_empty_succeeds(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    r = admin_client.delete(f"/api/sequences/{seq['id']}")
+    assert r.status_code == 204
+
+
+def test_delete_sequence_with_items_blocked(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    admin_client.post(
+        f"/api/sequences/{seq['id']}/items",
+        json={"title": "I", "slug": "i", "type": "static_page", "content_md": "x"},
+    )
+    r = admin_client.delete(f"/api/sequences/{seq['id']}")
+    assert r.status_code == 409
+    assert "remove its items first" in r.json()["detail"]
+
+
+def test_delete_sequence_state_error_precedes_child_count(admin_client, db, seed_publishable_version):
+    from mathion.models import Sequence
+    seed_publishable_version()
+    seq = db.execute(select(Sequence)).scalar()
+    r = admin_client.delete(f"/api/sequences/{seq.id}")
+    assert r.status_code == 409
+    assert "'created' state" in r.json()["detail"]
+    assert "remove its items" not in r.json()["detail"]

@@ -145,39 +145,37 @@ def track_item(item_id: int, data: TrackItemRequest, user: User = Depends(get_cu
 
 @router.get("/api/my-courses", response_model=list[MyCourseResponse])
 def my_courses(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.is_superuser:
+        admin_course_ids: set[int] = set(db.scalars(select(Course.id)).all())
+    else:
+        admin_course_ids = set(db.scalars(
+            select(CourseAdmin.course_id).where(CourseAdmin.user_id == user.id)
+        ).all())
+
     enrollments = db.execute(
         select(StudentEnrollment)
         .where(StudentEnrollment.user_id == user.id)
-        .order_by(StudentEnrollment.created_at.desc())
+        .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc())
     ).scalars().all()
 
-    results = []
-    seen_courses = set()
+    rows_by_course: dict[int, MyCourseResponse] = {}
 
     for enrollment in enrollments:
         version = db.get(CourseVersion, enrollment.version_id)
         if not version or version.is_disabled:
             continue
-
-        # Only show the most recent enrollment per course
-        if version.course_id in seen_courses:
+        if version.course_id in rows_by_course:
             continue
-        seen_courses.add(version.course_id)
-
         course = db.get(Course, version.course_id)
         if not course:
             continue
-
-        # Count total items in this version
         total_items = db.scalar(
             select(func.count())
             .select_from(Item)
             .join(Sequence, Sequence.id == Item.sequence_id)
             .join(Block, Block.id == Sequence.block_id)
             .where(Block.version_id == version.id)
-        )
-
-        # Count covered items for this user
+        ) or 0
         covered_items = db.scalar(
             select(func.count())
             .select_from(UserItemState)
@@ -187,20 +185,32 @@ def my_courses(user: User = Depends(get_current_user), db: Session = Depends(get
             .where(
                 Block.version_id == version.id,
                 UserItemState.user_id == user.id,
-                UserItemState.is_covered == True,
+                UserItemState.is_covered == True,  # noqa: E712
             )
-        )
-
-        results.append(MyCourseResponse(
-            course=CourseResponse.model_validate(course),
+        ) or 0
+        is_admin = version.course_id in admin_course_ids
+        rows_by_course[version.course_id] = MyCourseResponse(
+            course=CourseResponse.model_validate(course).model_copy(update={"is_admin": is_admin}),
             version_id=version.id,
             version_state=version.state,
-            total_items=total_items or 0,
-            covered_items=covered_items or 0,
+            total_items=total_items,
+            covered_items=covered_items,
             is_active=enrollment.is_active,
-        ))
+            is_admin=is_admin,
+        )
 
-    return results
+    for cid in admin_course_ids:
+        if cid in rows_by_course:
+            continue
+        course = db.get(Course, cid)
+        if not course:
+            continue
+        rows_by_course[cid] = MyCourseResponse(
+            course=CourseResponse.model_validate(course).model_copy(update={"is_admin": True}),
+            is_admin=True,
+        )
+
+    return list(rows_by_course.values())
 
 
 @router.get("/api/courses/{course_slug}/my-version", response_model=MyVersionResponse)

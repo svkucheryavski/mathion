@@ -12,7 +12,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Run, Sequence
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import VersionCreate, VersionResponse
+from mathion.schemas import VersionCreate, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
 
 router = APIRouter(tags=["versions"])
 
@@ -87,12 +87,60 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
     return version
 
 
+@router.patch("/api/versions/{version_id}", response_model=VersionResponse)
+def update_version(
+    version_id: int,
+    data: VersionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    if version.state != "created":
+        raise HTTPException(status_code=409, detail="Can only edit version meta in 'created' state")
+
+    updates = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        return version
+    if "info_md" in updates:
+        version.info_md = updates["info_md"]
+        version.info_html = render_with_assets(db, version.id, updates["info_md"])
+        sync_asset_references(db, version.id, [updates["info_md"]], {"info_version_id": version.id})
+    if "max_quiz_attempts" in updates:
+        version.max_quiz_attempts = updates["max_quiz_attempts"]
+
+    bump_content_updated_at(version)
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+@router.post("/api/versions/{version_id}/render", response_model=VersionRenderResponse)
+def render_version_md(
+    version_id: int,
+    data: VersionRenderRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    version = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
+    return VersionRenderResponse(html=render_with_assets(db, version.id, data.content_md))
+
+
 @router.get("/api/courses/{course_id}/versions", response_model=list[VersionResponse])
 def list_versions(course_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     get_or_404(db, Course, course_id)
     require_course_admin(db, user, course_id)
     versions = db.execute(
-        select(CourseVersion).where(CourseVersion.course_id == course_id).offset(offset).limit(limit)
+        select(CourseVersion)
+        .where(CourseVersion.course_id == course_id)
+        .order_by(CourseVersion.created_at.desc(), CourseVersion.id.desc())
+        .offset(offset)
+        .limit(limit)
     ).scalars().all()
     return versions
 
@@ -101,6 +149,8 @@ def list_versions(course_id: int, limit: int = 100, offset: int = 0, db: Session
 def publish_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
+    if version.is_disabled:
+        raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail=f"Cannot publish version in '{version.state}' state")
 

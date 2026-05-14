@@ -533,3 +533,101 @@ def test_api_resolve_version_multiple_enrollments(admin_client, db):
         # Should not crash with MultipleResultsFound
         data = response.json()
         assert data["is_active"] is True
+
+
+def test_my_courses_admin_only_row(auth_client, admin_client, db, test_user):
+    """Admin-not-enrolled sees their course with version_id=None."""
+    from mathion.models import CourseAdmin
+    course = admin_client.post(
+        "/api/courses", json={"slug": "adm", "name": "Adm", "description": ""}
+    ).json()
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
+    db.commit()
+    rows = auth_client.get("/api/my-courses").json()
+    matches = [r for r in rows if r["course"]["slug"] == "adm"]
+    assert len(matches) == 1
+    row = matches[0]
+    assert row["is_admin"] is True
+    assert row["version_id"] is None
+    assert row["version_state"] is None
+    assert row["total_items"] == 0
+    assert row["covered_items"] == 0
+    assert row["is_active"] is False
+
+
+def test_my_courses_enrolled_only_unchanged(auth_client, admin_client, db, test_user):
+    """Enrolled-only behaviour matches pre-existing shape (with is_admin=false default)."""
+    from mathion.models_auth import StudentEnrollment
+    course = admin_client.post(
+        "/api/courses", json={"slug": "enr", "name": "Enr", "description": ""}
+    ).json()
+    version = admin_client.post(
+        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+    ).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=version["id"], is_active=True))
+    db.commit()
+    rows = auth_client.get("/api/my-courses").json()
+    row = next(r for r in rows if r["course"]["slug"] == "enr")
+    assert row["is_admin"] is False
+    assert row["version_id"] == version["id"]
+    assert row["version_state"] == "published"
+    assert row["is_active"] is True
+
+
+def test_my_courses_admin_and_enrolled_merged(auth_client, admin_client, db, test_user):
+    """User who is both admin and enrolled sees one row with both fields populated."""
+    from mathion.models import CourseAdmin
+    from mathion.models_auth import StudentEnrollment
+    course = admin_client.post(
+        "/api/courses", json={"slug": "both", "name": "Both", "description": ""}
+    ).json()
+    version = admin_client.post(
+        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+    ).json()
+    admin_client.post(f"/api/versions/{version['id']}/publish")
+    db.add(CourseAdmin(course_id=course["id"], user_id=test_user.id))
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=version["id"], is_active=True))
+    db.commit()
+    rows = auth_client.get("/api/my-courses").json()
+    matches = [r for r in rows if r["course"]["slug"] == "both"]
+    assert len(matches) == 1, "admin+enrolled must merge to a single row"
+    row = matches[0]
+    assert row["is_admin"] is True
+    assert row["version_id"] == version["id"]
+
+
+def test_my_courses_superuser_sees_all(admin_client):
+    admin_client.post("/api/courses", json={"slug": "x1", "name": "X1", "description": ""})
+    admin_client.post("/api/courses", json={"slug": "x2", "name": "X2", "description": ""})
+    rows = admin_client.get("/api/my-courses").json()
+    slugs = {r["course"]["slug"] for r in rows}
+    assert {"x1", "x2"}.issubset(slugs)
+    assert all(r["is_admin"] is True for r in rows)
+
+
+def test_my_courses_no_role_sees_empty(auth_client):
+    """Plain user with no enrollments and no admin role sees []."""
+    rows = auth_client.get("/api/my-courses").json()
+    assert rows == []
+
+
+def test_my_courses_active_enrollment_wins_over_newer_inactive(auth_client, admin_client, db, test_user):
+    """Two enrollments in same course: active one wins over a newer inactive one (matches resolve_my_version)."""
+    from mathion.models_auth import StudentEnrollment
+    course = admin_client.post(
+        "/api/courses", json={"slug": "ord", "name": "Ord", "description": ""}
+    ).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{v1['id']}/publish")
+    admin_client.post(f"/api/versions/{v2['id']}/publish")
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=v1["id"], is_active=True))
+    db.commit()
+    db.add(StudentEnrollment(user_id=test_user.id, version_id=v2["id"], is_active=False))
+    db.commit()
+    rows = auth_client.get("/api/my-courses").json()
+    matches = [r for r in rows if r["course"]["slug"] == "ord"]
+    assert len(matches) == 1
+    assert matches[0]["version_id"] == v1["id"]
+    assert matches[0]["is_active"] is True
