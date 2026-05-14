@@ -49,6 +49,10 @@ No frontend mirror. There's no live preview; the slug surfaces in the accordion 
 - If `"title"` is in the update payload AND `updates["title"] != row.title`: compute `new_slug = slugify(updates["title"])`. Enforce length ≥ 1 (else 422) and length ≤ 80 (else 422); assign `updates["slug"] = new_slug`.
 - Otherwise (no title key OR title unchanged): the server doesn't touch the slug.
 
+The comparison is **literal Python string equality** — no normalization. A title change that's whitespace-only or case-only ("Foo" → "FOO", "Foo" → "Foo ") *does* trigger the diff branch and writes a recomputed `slug`, but slugify normalizes the input so the new slug is identical to the old one. The DB write is a no-op for slug; the title field still records exactly what the admin typed. The diff rule is about avoiding *spurious* re-derivation when the title hasn't changed at all (the info-only-edit case); equivalent-after-slugify edits cost a redundant write but don't change observable state and don't trip the uniqueness constraint against the row's own existing slug.
+
+**Explicit `{ "title": null }`** in the PATCH body is a client error. The update schemas declare `title: str | None = Field(default=None, min_length=1, ...)`; the `min_length=1` only fires on string values, so Pydantic v2 *accepts* an explicit null. After `model_dump(exclude_unset=True)`, `"title"` is present with value `None` (it was explicitly set). The endpoint's diff branch must therefore guard: `if "title" in updates and updates["title"] is not None and updates["title"] != row.title`. If the title is in updates and is `None`, raise 422 keyed to `body.title` ("Title must be a non-null string") rather than calling `slugify(None)`. A nicer fix is to tighten the schema later (`Field(default=None, json_schema_extra={"nullable": False})` or a model-level validator), but that's out of scope for this spec — the endpoint guard is sufficient.
+
 This matters because the current frontend edit flows always include `title` in their PATCH body even when only `info` or `content_md` changed (see `BlockAccordion.save()` sending `{ title, info }` and `ItemEditPage.save()` building from `{ title }`). A naïve "title-in-payload → re-derive" rule would silently snap historical custom slugs on info-only edits; the diff check prevents that.
 
 The `_*_EDITABLE_PUBLISHED` whitelists themselves are unchanged — they inspect client-provided keys, never see the server-added slug.
@@ -110,7 +114,16 @@ Whitelists (`_BLOCK_EDITABLE_PUBLISHED = {"title", "info"}` etc.) stay as-is.
 
 **Backend.** Add `backend/tests/test_slugify.py` — one parametrized test covering: pure-Latin alphanumeric, mixed punctuation runs, the user's example, leading/trailing punctuation, all-uppercase, all-Cyrillic (→ `""`), empty input, single dash, whitespace-only, **punctuation-only (e.g., `"!!!"` → `""`)**, and a **>80-char-slug case** (a 200-char Latin title) to confirm slugify itself doesn't truncate (the endpoint does the rejection). Update existing endpoint tests:
 
-- `test_blocks.py` / `test_sequences.py` / `test_items.py` — create-body payloads drop `slug`; add assertions that the response's `slug` equals `slugify(title)`. New cases for: `extra="forbid"` rejection when client sends `slug` (both on create AND update), empty-title-slug 422, >80-char-slug 422, collision 409 on create, collision 409 on update, title-edit-on-published also re-derives slug, **info-only PATCH (title resent but unchanged) does NOT re-derive slug**.
+- `test_blocks.py` / `test_sequences.py` / `test_items.py` — create-body payloads drop `slug`; add assertions that the response's `slug` equals `slugify(title)`. New cases for:
+  - `extra="forbid"` rejection when client sends `slug` (both on create AND update).
+  - Empty-title-slug 422 (Cyrillic, emoji, punctuation-only).
+  - >80-char-slug 422.
+  - Collision 409 on create.
+  - Collision 409 on update.
+  - Title-edit-on-published also re-derives slug.
+  - **Info-only PATCH** (title resent but unchanged) does NOT re-derive slug.
+  - **Equivalent-after-slugify update** (e.g., title `"Foo Bar!"` → `"Foo Bar"` — both slugify to `"foo-bar"`) — diff fires, slug written, value identical to existing, no IntegrityError.
+  - **Explicit `{ "title": null }` on PATCH** → 422 keyed to `body.title` (not a 500 from `slugify(None)`).
 
 **Frontend.** Update `frontend/src/tests/formErrors.test.ts` — the collision case now asserts `fieldErrors.title` (not `.slug`); add a case for a 422 with `loc=["body","title"]`. Component-level smoke (the three create forms still submit successfully without a slug input) is covered by the manual smoke pass.
 
@@ -120,7 +133,12 @@ Whitelists (`_BLOCK_EDITABLE_PUBLISHED = {"title", "info"}` etc.) stay as-is.
 
 No DB migration. Existing rows keep their existing slugs. If an admin re-opens an old entity and saves without changing the title (even though the current frontend includes the title in every save body), the server's "submitted-title vs stored-title" diff check leaves the slug alone. The slug only changes when the admin actually edits the title to a new value. This is deliberate — no surprise mass-rename on the first PATCH after this feature lands.
 
-**Deploy ordering matters.** With `extra="forbid"` on the new create schemas, the new backend rejects the old frontend's `slug`-bearing payloads with 422; with `slug` removed from the schemas, the old backend (which still has `slug: str = Field(min_length=1, ...)`) rejects the new frontend's slug-less payloads with 422. Both single-side-deployed states break the create flow. Deploy frontend and backend together (e.g., one PR / one release) — Mathion's deploy story already does this since the two live in one repo.
+**Deploy ordering matters for create flows.** Given the schema changes above:
+
+- Backend-only deploy: new backend's `extra="forbid"` rejects the old frontend's `slug`-bearing create payloads with 422.
+- Frontend-only deploy: old backend's required `slug` field rejects the new frontend's slug-less payloads with 422.
+
+Both single-side-deployed states break create (update is unaffected — the existing frontend update bodies never sent `slug`). Deploy frontend and backend together — one PR / one release — which Mathion's monorepo deploy story already does.
 
 ---
 
