@@ -92,7 +92,12 @@ Slug rendering surfaces — `AccordionHeader`'s `/{slug}` and `ItemRow`'s `/{slu
 - `create_block` (`api/blocks.py:41`) — compute `slug = slugify(data.title)`; if `slug == ""`, raise 422 with `[{"loc":["body","title"],"msg":"Title must contain at least one Latin letter or digit","type":"value_error"}]`; if `len(slug) > 80`, raise 422 with `[{"loc":["body","title"],"msg":"Title is too long — the auto-generated slug exceeds the 80-character limit. Please shorten the title.","type":"value_error"}]`; otherwise build the row with that slug. The existing `IntegrityError → 409` wrapper around `db.commit()` is kept; the human-readable detail becomes **"A block with the same auto-generated slug already exists in this version — choose a different title."**
 - `create_sequence` (`api/blocks.py:156`) — same pattern with the empty-slug AND >80-char checks; collision message: **"A sequence with the same auto-generated slug already exists in this block — choose a different title."**
 - `create_item` (`api/items.py:39`) — same pattern; collision message: **"An item with the same auto-generated slug already exists in this sequence — choose a different title."** `ItemCreate`'s existing `@model_validator(mode="after")` that requires `content_md` for `static_page`, `video_url` for `video`, and `script_url` for `interactive_app` is **unchanged** — slug derivation runs in the endpoint *after* Pydantic validation, so type-specific requirements still gate before slug.
-- `update_block`, `update_sequence`, `update_item` — after `updates = data.model_dump(exclude_unset=True)` and after the published-state whitelist check, **read the entity's current `title` before mutating**; then if `"title" in updates` AND `updates["title"] != row.title`: compute `new_slug = slugify(updates["title"])`; apply the same empty (422) and >80-char (422) checks as on create; assign `updates["slug"] = new_slug`. If the title is unchanged (same string, or not in payload), the slug is left alone. Wrap the final `db.commit()` in `try/except IntegrityError → 409` with the same title-focused message — this wrapper is new on the update endpoints since slug-on-update used to be impossible, and it handles the concurrent-edit race (two admins simultaneously renaming siblings to titles that slugify to the same string).
+- `update_block`, `update_sequence`, `update_item` — after `updates = data.model_dump(exclude_unset=True)` and after the published-state whitelist check, **read the entity's current `title` before mutating**; then:
+  1. If `"title" in updates` AND `updates["title"] is None`: raise 422 keyed to `body.title` ("Title must be a non-null string"). Do NOT call `slugify(None)`.
+  2. Else if `"title" in updates` AND `updates["title"] != row.title`: compute `new_slug = slugify(updates["title"])`; apply the same empty (422) and >80-char (422) checks as on create; assign `updates["slug"] = new_slug`.
+  3. Else (title not in payload, or title unchanged): leave the slug alone.
+
+  Wrap the final `db.commit()` in `try/except IntegrityError → 409` with the same title-focused message — this wrapper is new on the update endpoints since slug-on-update used to be impossible, and it handles the concurrent-edit race (two admins simultaneously renaming siblings to titles that slugify to the same string).
 
 Whitelists (`_BLOCK_EDITABLE_PUBLISHED = {"title", "info"}` etc.) stay as-is.
 
@@ -139,6 +144,16 @@ No DB migration. Existing rows keep their existing slugs. If an admin re-opens a
 - Frontend-only deploy: old backend's required `slug` field rejects the new frontend's slug-less payloads with 422.
 
 Both single-side-deployed states break create (update is unaffected — the existing frontend update bodies never sent `slug`). Deploy frontend and backend together — one PR / one release — which Mathion's monorepo deploy story already does.
+
+---
+
+## Known limitation: stale-resend lost update
+
+The current frontend save bodies always include `title` (e.g., `BlockAccordion.save()` sends `{ title, info }`; `ItemEditPage.save()` builds from `{ title }`). If Admin A renames a block from "Old" → "X" and commits, and Admin B's still-stale tracker holds title="Old" and B clicks Save on an info-only edit, B's PATCH body is `{ title: "Old", info: "new info" }`. The server's title-diff rule sees `"Old" != "X"`, treats it as a real title edit, and writes `title="Old"`, `slug="old"`. A's rename is silently reverted. The DB unique constraint does not catch this — "old" is free after A took "x".
+
+**This bug is pre-existing.** Even without this spec, B's stale PATCH already reverts title today (the title write happens; the slug just didn't flip because the old code didn't touch slug on update). The title-diff rule introduced here makes the slug also flip, *slightly* worsening an existing problem.
+
+**Out of scope for this spec.** Proper fixes — frontend sends only fields whose `tracker.current` differs from `tracker.snapshot`, or backend gates updates on an `If-Match` / `updated_at` precondition — are concurrency-control work, not slug work. With one admin per course in practice today, the real-world exposure is minimal. A follow-up spec should pick one of the two fixes and apply it across all PATCH endpoints (block / sequence / item / version-meta), not just the slug-affected ones.
 
 ---
 
