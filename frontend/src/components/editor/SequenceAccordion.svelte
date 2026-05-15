@@ -189,7 +189,6 @@
   let creating = $state(false);
   let newType = $state<'static_page' | 'video'>('static_page');
   let newTitle = $state('');
-  let newSlug = $state('');
   let newContentMd = $state('');
   let newVideoUrl = $state('');
   let createErrors = $state<FieldErrors>({});
@@ -210,7 +209,6 @@
     get isDirty() {
       return creating && (
         newTitle.trim() !== '' ||
-        newSlug.trim() !== '' ||
         (newType === 'static_page' && newContentMd.trim() !== '' && newContentMd !== `# ${newTitle}\n`) ||
         (newType === 'video' && newVideoUrl.trim() !== '')
       );
@@ -237,7 +235,6 @@
   function resetCreateForm() {
     newType = 'static_page';
     newTitle = '';
-    newSlug = '';
     newContentMd = '';
     newVideoUrl = '';
     contentMdTouched = false;
@@ -256,12 +253,12 @@
   }
 
   async function submitCreate() {
-    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || !newSlug.trim()) return;
+    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim()) return;
     const savedVid = vid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
-    const body: Record<string, unknown> = { title: newTitle, slug: newSlug, type: newType };
+    const body: Record<string, unknown> = { title: newTitle, type: newType };
     if (newType === 'static_page') body.content_md = newContentMd;
     if (newType === 'video') body.video_url = newVideoUrl;
     createErrors = {};
@@ -275,8 +272,8 @@
       void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
     } catch (e) {
       const known = newType === 'static_page'
-        ? ['title', 'slug', 'content_md', 'type']
-        : ['title', 'slug', 'video_url', 'type'];
+        ? ['title', 'content_md', 'type']
+        : ['title', 'video_url', 'type'];
       const mapped = mapCreateError(e, known);
       createErrors = mapped.fieldErrors;
       // Fall back to a generic message if mapper produced nothing — without
@@ -341,10 +338,6 @@
               <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
               {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
             </div>
-            <div class="field">
-              <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || busy || parentBusy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
-              {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
-            </div>
             {#if newType === 'static_page'}
               <div class="field">
                 <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || busy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
@@ -357,7 +350,7 @@
               </div>
             {/if}
             {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
           </form>
         {/if}
 
