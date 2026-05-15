@@ -270,3 +270,227 @@ def test_api_create_item_title_too_long_for_slug(admin_client):
     })
     assert resp.status_code == 422
     assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_item_title_edit_re_derives_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Old", "type": "static_page", "content_md": "x",
+    }).json()
+    assert item["slug"] == "old"
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Renamed Item"})
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == "renamed-item"
+
+
+def test_api_update_item_collision_via_autoflush_returns_409(admin_client):
+    """update_item PATCH that (a) changes title to a colliding slug AND
+    (b) includes content_md must return 409 even though autoflush during
+    _process_content_md would otherwise fire the IntegrityError outside
+    the commit-only try/except.
+
+    The endpoint's explicit db.flush() right after slug assignment is
+    what catches this — verify by exercising the exact path."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Foo Bar", "type": "static_page", "content_md": "x",
+    })
+    other = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Other", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{other['id']}", json={
+        "title": "Foo-Bar",  # also slugifies to foo-bar
+        "content_md": "new content",  # forces _process_content_md to run
+    })
+    assert resp.status_code == 409, resp.text
+    # Crucially NOT 500 — that would mean the IntegrityError escaped.
+
+
+def test_api_update_item_info_only_does_not_re_derive_slug(admin_client):
+    """content_md-only edit with title resent unchanged keeps slug stable."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Same Title", "type": "static_page", "content_md": "x",
+    }).json()
+    original_slug = item["slug"]
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={
+        "title": "Same Title",
+        "content_md": "new content",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == original_slug
+    assert resp.json()["content_md"] == "new content"
+
+
+def test_api_update_item_equivalent_after_slugify_is_no_op_for_slug(admin_client):
+    """Title 'Foo Bar' -> 'Foo Bar!' both slugify to 'foo-bar'; slug write is identical."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Foo Bar", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Foo Bar!"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Foo Bar!"
+    assert resp.json()["slug"] == "foo-bar"
+
+
+def test_api_update_item_explicit_null_title_returns_422(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": None})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_item_rejects_extra_slug_field(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "New", "slug": "rogue"})
+    assert resp.status_code == 422
+    locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
+    assert ("body", "slug") in locs
+
+
+def test_api_update_item_unchanged_title_preserves_legacy_slug(admin_client, db):
+    """Legacy custom slug preserved on unchanged-title PATCH (spec lines 56, 142)."""
+    from mathion.models import Item
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item_resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "My Title", "type": "static_page", "content_md": "x",
+    }).json()
+    row = db.get(Item, item_resp["id"])
+    row.slug = "legacy-custom-slug"
+    db.commit()
+    resp = admin_client.patch(f"/api/items/{item_resp['id']}", json={
+        "title": "My Title",
+        "content_md": "new content",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "legacy-custom-slug"
+
+
+def test_api_update_item_empty_slug_after_slugify(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_item_title_too_long_for_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "I1", "type": "static_page", "content_md": "x",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_item_title_edit_on_published_re_derives_slug(admin_client, db):
+    """title is in _ITEM_EDITABLE_PUBLISHED, so published versions still re-derive."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Old", "type": "static_page", "content_md": "x",
+    }).json()
+    v = db.get(CourseVersion, version["id"])
+    v.state = "published"
+    db.commit()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"title": "Renamed On Published"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "renamed-on-published"
+
+
+def test_api_update_item_missing_asset_rolls_back_flushed_slug(admin_client, db):
+    """Codex R2 hazard: when slug changes (explicit db.flush() runs) AND
+    content_md references a missing asset, _process_content_md raises
+    422. The endpoint must rollback before re-raising so the flushed
+    slug/title write doesn't persist in the (test) shared session."""
+    from mathion.models import Item
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Original", "type": "static_page", "content_md": "x",
+    }).json()
+    original_slug = item["slug"]
+    original_title = item["title"]
+    # Title edit (triggers slug flush) + content_md referencing a
+    # non-existent asset -> render_with_assets raises 422.
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={
+        "title": "New Name",
+        "content_md": "![missing](nonexistent-asset.png)",
+    })
+    assert resp.status_code == 422, resp.text
+    db.expire_all()
+    fresh = db.get(Item, item["id"])
+    assert fresh.slug == original_slug
+    assert fresh.title == original_title
+
+
+def test_api_update_item_invariant_422_rolls_back_flushed_slug(admin_client, db):
+    """Codex R1 hazard: when slug changes AND a subsequent type-invariant
+    422 fires (e.g., content_md set to null on a static_page), the explicit
+    db.flush() that committed the new slug to the session must be rolled
+    back so the persisted row keeps its old slug/title. The endpoint adds
+    db.rollback() before each invariant raise to enforce this."""
+    from mathion.models import Item
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Original", "type": "static_page", "content_md": "x",
+    }).json()
+    original_slug = item["slug"]
+    original_title = item["title"]
+    # Edit title (which would change slug) AND set content_md to null (which violates
+    # the static_page invariant). The 422 must fire AND the flushed slug/title must NOT persist.
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={
+        "title": "New Name",
+        "content_md": None,
+    })
+    assert resp.status_code == 422, resp.text
+    # Verify persistence: re-read via a fresh DB query.
+    db.expire_all()
+    fresh = db.get(Item, item["id"])
+    assert fresh.slug == original_slug
+    assert fresh.title == original_title

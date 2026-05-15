@@ -129,6 +129,7 @@ class SequenceUpdate(BaseModel):
 
 
 class ItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, min_length=1, max_length=200)
     content_md: str | None = None
     video_url: str | None = None

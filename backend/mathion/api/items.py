@@ -118,19 +118,92 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
                 detail=f"Cannot edit {disallowed} in published state",
             )
 
+    stored_title = item.title
+
+    if "title" in updates:
+        if updates["title"] is None:
+            raise HTTPException(
+                status_code=422,
+                detail=[{
+                    "loc": ["body", "title"],
+                    "msg": "Title must be a non-null string",
+                    "type": "value_error",
+                }],
+            )
+        if updates["title"] != stored_title:
+            new_slug = slugify(updates["title"])
+            if not new_slug:
+                raise HTTPException(
+                    status_code=422,
+                    detail=[{
+                        "loc": ["body", "title"],
+                        "msg": "Title must contain at least one Latin letter or digit",
+                        "type": "value_error",
+                    }],
+                )
+            if len(new_slug) > 80:
+                raise HTTPException(
+                    status_code=422,
+                    detail=[{
+                        "loc": ["body", "title"],
+                        "msg": "Title is too long — the auto-generated slug exceeds the 80-character limit. Please shorten the title.",
+                        "type": "value_error",
+                    }],
+                )
+            updates["slug"] = new_slug
+
     for field, value in updates.items():
         setattr(item, field, value)
 
+    # If slug changed, flush now so the uq_item_sequence_slug constraint
+    # fires deterministically *here* — before _process_content_md runs
+    # render_with_assets / sync_asset_references, both of which issue
+    # db.execute(...) queries that would autoflush the pending slug write
+    # and surface the IntegrityError outside our try/except.
+    if "slug" in updates:
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="An item with the same auto-generated slug already exists in this sequence — choose a different title.",
+            )
+
     if "content_md" in updates:
-        item.content_html = _process_content_md(db, version, item.id, item.content_md)
+        # _process_content_md calls render_with_assets, which raises 422
+        # if content_md references an asset that doesn't exist in this
+        # version. After the earlier explicit db.flush() (when slug
+        # changed), pending mutations are already in the session — if
+        # render_with_assets raises here, those pending mutations would
+        # be left in the test session (production get_db() rolls back
+        # on close, but tests share the session). Rollback before
+        # re-raising so the slug/title write doesn't leak.
+        try:
+            item.content_html = _process_content_md(db, version, item.id, item.content_md)
+        except HTTPException:
+            db.rollback()
+            raise
         bump_content_updated_at(version)
 
-    # Validate type invariants after applying patch
+    # Validate type invariants after applying patch.
+    #
+    # When slug changed earlier, we explicitly db.flush()ed so the
+    # IntegrityError surfaced inside our 409 wrapper. That flush also
+    # committed any other pending mutations (new title, new content_html,
+    # etc.) to the session. The production get_db() rolls back on close,
+    # but tests use a session override that does NOT rollback per-request
+    # — and even in production it is more conservative to explicitly
+    # rollback before any post-flush 422 so the partially-applied state
+    # never has a chance to be observed.
     if item.type == "static_page" and item.content_md is None:
+        db.rollback()
         raise HTTPException(status_code=422, detail="content_md cannot be null for static_page items")
     if item.type == "video" and item.video_url is None:
+        db.rollback()
         raise HTTPException(status_code=422, detail="video_url cannot be null for video items")
     if item.type == "interactive_app" and item.script_url is None:
+        db.rollback()
         raise HTTPException(status_code=422, detail="script_url cannot be null for interactive_app items")
 
     db.commit()
