@@ -514,3 +514,122 @@ def test_api_update_block_title_too_long_for_slug(admin_client):
     resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "a" * 100})
     assert resp.status_code == 422
     assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+# ==================== SEQUENCE UPDATE TESTS ====================
+
+
+def test_api_update_sequence_title_edit_re_derives_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Old"}).json()
+    assert seq["slug"] == "old"
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Renamed Seq"})
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == "renamed-seq"
+
+
+def test_api_update_sequence_collision_returns_409(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Foo Bar"})
+    other = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Other"}).json()
+    resp = admin_client.patch(f"/api/sequences/{other['id']}", json={"title": "Foo-Bar"})
+    assert resp.status_code == 409
+
+
+def test_api_update_sequence_explicit_null_title_returns_422(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": None})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_sequence_rejects_extra_slug_field(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "New", "slug": "rogue"})
+    assert resp.status_code == 422
+    locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
+    assert ("body", "slug") in locs
+
+
+def test_api_update_sequence_unchanged_title_preserves_legacy_slug(admin_client, db):
+    """Legacy custom slug preserved on unchanged-title PATCH (spec lines 56, 142)."""
+    from mathion.models import Sequence
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq_resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "My Title"}).json()
+    row = db.get(Sequence, seq_resp["id"])
+    row.slug = "legacy-custom-slug"
+    db.commit()
+    resp = admin_client.patch(f"/api/sequences/{seq_resp['id']}", json={"title": "My Title"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "legacy-custom-slug"
+
+
+def test_api_update_sequence_empty_slug_after_slugify(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_sequence_title_too_long_for_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_sequence_title_edit_on_published_re_derives_slug(admin_client, db):
+    """title is in _SEQUENCE_EDITABLE_PUBLISHED, so published versions still re-derive."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Old"}).json()
+    v = db.get(CourseVersion, version["id"])
+    v.state = "published"
+    db.commit()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Renamed On Published"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "renamed-on-published"
+
+
+def test_api_update_sequence_unchanged_title_keeps_slug(admin_client):
+    """Title resent unchanged — slug stays (no rederive)."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    original_slug = seq["slug"]
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "S1"})
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == original_slug
+
+
+def test_api_update_sequence_equivalent_after_slugify(admin_client):
+    """Title 'Foo Bar' -> 'Foo Bar!' both slugify to 'foo-bar'."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Foo Bar"}).json()
+    resp = admin_client.patch(f"/api/sequences/{seq['id']}", json={"title": "Foo Bar!"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Foo Bar!"
+    assert resp.json()["slug"] == "foo-bar"

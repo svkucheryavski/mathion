@@ -302,9 +302,52 @@ def update_sequence(sequence_id: int, data: SequenceUpdate, db: Session = Depend
                 detail=f"Cannot edit {disallowed} in published state",
             )
 
+    # Snapshot stored title BEFORE mutating, so the title-diff rule has a
+    # stable reference even if loops below run in any order.
+    stored_title = seq.title
+
+    if "title" in updates:
+        if updates["title"] is None:
+            raise HTTPException(
+                status_code=422,
+                detail=[{
+                    "loc": ["body", "title"],
+                    "msg": "Title must be a non-null string",
+                    "type": "value_error",
+                }],
+            )
+        if updates["title"] != stored_title:
+            new_slug = slugify(updates["title"])
+            if not new_slug:
+                raise HTTPException(
+                    status_code=422,
+                    detail=[{
+                        "loc": ["body", "title"],
+                        "msg": "Title must contain at least one Latin letter or digit",
+                        "type": "value_error",
+                    }],
+                )
+            if len(new_slug) > 80:
+                raise HTTPException(
+                    status_code=422,
+                    detail=[{
+                        "loc": ["body", "title"],
+                        "msg": "Title is too long — the auto-generated slug exceeds the 80-character limit. Please shorten the title.",
+                        "type": "value_error",
+                    }],
+                )
+            updates["slug"] = new_slug
+
     for field, value in updates.items():
         setattr(seq, field, value)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A sequence with the same auto-generated slug already exists in this block — choose a different title.",
+        )
     db.refresh(seq)
     return seq
 
