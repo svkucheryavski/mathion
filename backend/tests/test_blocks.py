@@ -387,3 +387,130 @@ def test_api_create_sequence_title_too_long_for_slug(admin_client):
     resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "a" * 100})
     assert resp.status_code == 422
     assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_block_title_edit_re_derives_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old"}).json()
+    assert block["slug"] == "old"
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "New Name"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["title"] == "New Name"
+    assert data["slug"] == "new-name"
+
+
+def test_api_update_block_info_only_does_not_re_derive_slug(admin_client):
+    """Frontend always resends title on info-only edits — title-diff rule prevents slug churn."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Same Title"}).json()
+    original_slug = block["slug"]
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={
+        "title": "Same Title",  # resent unchanged
+        "info": "new info",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == original_slug
+    assert resp.json()["info"] == "new info"
+
+
+def test_api_update_block_title_edit_on_published_re_derives_slug(admin_client, db):
+    """title is in _BLOCK_EDITABLE_PUBLISHED, so a published version still re-derives slug on title edit."""
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version_resp = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block_resp = admin_client.post(f"/api/versions/{version_resp['id']}/blocks", json={"title": "Old"}).json()
+    v = db.get(CourseVersion, version_resp["id"])
+    v.state = "published"
+    db.commit()
+    resp = admin_client.patch(f"/api/blocks/{block_resp['id']}", json={"title": "Renamed On Published"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "renamed-on-published"
+
+
+def test_api_update_block_collision_returns_409(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Foo Bar"})  # slug=foo-bar
+    second = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Other"}).json()  # slug=other
+    resp = admin_client.patch(f"/api/blocks/{second['id']}", json={"title": "Foo-Bar"})  # also slugifies to foo-bar
+    assert resp.status_code == 409
+
+
+def test_api_update_block_equivalent_after_slugify_is_no_op_for_slug(admin_client):
+    """Title 'Foo Bar' -> 'Foo Bar!' both slugify to 'foo-bar'. Slug-write is identical; no IntegrityError on self-row."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Foo Bar"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "Foo Bar!"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Foo Bar!"
+    assert resp.json()["slug"] == "foo-bar"
+
+
+def test_api_update_block_explicit_null_title_returns_422(admin_client):
+    """{ 'title': null } in PATCH body is a client error keyed to body.title (not 500 from slugify(None))."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": None})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_block_rejects_extra_slug_field(admin_client):
+    """extra='forbid' on update schema rejects clients trying to override slug."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "New", "slug": "rogue-slug"})
+    assert resp.status_code == 422, resp.text
+    locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
+    assert ("body", "slug") in locs
+
+
+def test_api_update_block_unchanged_title_preserves_legacy_slug(admin_client, db):
+    """Spec lines 56, 142: a row with an existing non-derived slug (the
+    'legacy custom slug' case) must NOT have its slug snapped to
+    slugify(title) when an info-only PATCH resends the unchanged title.
+    A naive 'title key present means rederive' implementation would fail
+    this — only the title-diff check should rederive."""
+    from mathion.models import Block
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block_resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "My Title"}).json()
+    # Directly mutate the row to simulate a pre-existing custom slug that
+    # doesn't match slugify(title). This is the migration scenario.
+    row = db.get(Block, block_resp["id"])
+    row.slug = "legacy-custom-slug"
+    db.commit()
+    # PATCH resending the unchanged title + an info edit (BlockAccordion's
+    # actual save shape).
+    resp = admin_client.patch(f"/api/blocks/{block_resp['id']}", json={
+        "title": "My Title",  # unchanged
+        "info": "new info",
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slug"] == "legacy-custom-slug"  # NOT snapped to "my-title"
+
+
+def test_api_update_block_empty_slug_after_slugify(admin_client):
+    """Title edit to a Cyrillic-only string -> slugify('') -> 422 keyed to body.title."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_update_block_title_too_long_for_slug(admin_client):
+    """Title edit producing >80-char slug -> 422 keyed to body.title."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
