@@ -199,7 +199,6 @@
   // Inline create-sequence form
   let creating = $state(false);
   let newTitle = $state('');
-  let newSlug = $state('');
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
@@ -207,7 +206,7 @@
   // Tracker shim with synthesized isDirty — no reset()-on-keystroke.
   const createTracker: RegisteredTracker = {
     get isDirty() {
-      return creating && (newTitle.trim() !== '' || newSlug.trim() !== '');
+      return creating && newTitle.trim() !== '';
     },
   };
 
@@ -224,7 +223,6 @@
   $effect(() => {
     if (!canStructure && creating) {
       newTitle = '';
-      newSlug = '';
       createErrors = {};
       createGlobalError = null;
       creating = false;
@@ -237,26 +235,26 @@
     // would otherwise unmount the form during an in-flight POST,
     // discarding validation errors and unregistering the create tracker.
     if (createBusy || busy || parentBusy) return;
-    if (creating) { newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null; }
+    if (creating) { newTitle = ''; createErrors = {}; createGlobalError = null; }
     creating = !creating;
   }
 
   async function submitCreate() {
-    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || !newSlug.trim()) return;
+    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim()) return;
     const savedVid = vid;
     const savedBid = block.id;
     createErrors = {};
     createGlobalError = null;
     createBusy = true;
     try {
-      await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle, slug: newSlug });
-      newTitle = ''; newSlug = ''; creating = false;
+      await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle });
+      newTitle = ''; creating = false;
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }
       pushToast('Sequence created', 'success');
     } catch (e) {
-      const mapped = mapCreateError(e, ['title', 'slug']);
+      const mapped = mapCreateError(e, ['title']);
       createErrors = mapped.fieldErrors;
       // Fall back to a generic message if mapper produced nothing — without
       // this, a 500 with no validation body silently swallows the failure.
@@ -320,12 +318,8 @@
               <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
               {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
             </div>
-            <div class="field">
-              <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || busy || parentBusy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
-              {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
-            </div>
             {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
           </form>
         {/if}
 
