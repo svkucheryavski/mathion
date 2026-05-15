@@ -6,7 +6,7 @@ def _build_course_with_quiz(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Applied Statistics", "description": "Desc"}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "Welcome"}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "Descriptive Stats", "slug": "descriptive-stats", "info": "Goals",
+        "title": "Descriptive Stats", "info": "Goals",
     }).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
         "title": "Quantiles", "slug": "quantiles",

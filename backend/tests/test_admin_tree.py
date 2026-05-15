@@ -6,7 +6,7 @@ def _make_course_with_one_item(admin_client, content_md="hello"):
         f"/api/courses/{course['id']}/versions", json={"info_md": "v-info"}
     ).json()
     block = admin_client.post(
-        f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": "b-info"}
+        f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": "b-info"}
     ).json()
     seq = admin_client.post(
         f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}

@@ -134,7 +134,7 @@ def test_api_publish_version_block_with_no_sequences_fails(admin_client):
     """Publish fails with 409 when a block has no sequences."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""})
+    admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""})
     response = admin_client.post(f"/api/versions/{version['id']}/publish")
     assert response.status_code == 409
 
@@ -143,7 +143,7 @@ def test_api_publish_version_block_with_sequences_succeeds(admin_client):
     """Publish succeeds when every block has at least one sequence."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     response = admin_client.post(f"/api/versions/{version['id']}/publish")
@@ -192,7 +192,7 @@ def test_api_cannot_revert_version_with_enrolled_students(admin_client, db):
 def test_publish_quiz_without_questions_fails(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "q1", "name": "Q", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"})
     response = admin_client.post(f"/api/versions/{version['id']}/publish")
@@ -203,7 +203,7 @@ def test_publish_quiz_without_questions_fails(admin_client):
 def test_publish_choice_question_without_options_fails(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "q2", "name": "Q", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
     admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "single_choice"})
@@ -215,7 +215,7 @@ def test_publish_choice_question_without_options_fails(admin_client):
 def test_publish_numeric_question_without_answer_fails(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "q3", "name": "Q", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
     admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "numeric_answer"})
@@ -227,7 +227,7 @@ def test_publish_numeric_question_without_answer_fails(admin_client):
 def test_publish_complete_quiz_succeeds(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "q4", "name": "Q", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
     q = admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "single_choice"}).json()
@@ -240,7 +240,7 @@ def test_publish_complete_quiz_succeeds(admin_client):
 def test_publish_text_question_without_answer_fails(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "q5", "name": "Q", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
     admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "text_answer"})

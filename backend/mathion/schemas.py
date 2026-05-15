@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
 class CourseCreate(BaseModel):
@@ -61,8 +61,8 @@ class VersionResponse(BaseModel):
 
 
 class BlockCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
-    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     info: str = ""
 
 

@@ -92,7 +92,7 @@ def _setup_enrolled_student(client, db):
     course = client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
     version = client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "Welcome"}).json()
     block = client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "B1", "slug": "b1", "info": "",
+        "title": "B1", "info": "",
     }).json()
     seq = client.post(f"/api/blocks/{block['id']}/sequences", json={
         "title": "S1", "slug": "s1",
@@ -197,7 +197,7 @@ def test_api_get_state_json_unenrolled_returns_403(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "phys", "name": "Physics", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "B1", "slug": "b1", "info": "",
+        "title": "B1", "info": "",
     }).json()
     admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
         "title": "S1", "slug": "s1",
@@ -441,7 +441,7 @@ def test_api_track_item_cross_version_denied(admin_client, db):
     # Create a second course with its own item
     course2 = admin_client.post("/api/courses", json={"slug": "math", "name": "Math", "description": ""}).json()
     v2 = admin_client.post(f"/api/courses/{course2['id']}/versions", json={"info_md": ""}).json()
-    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "info": ""}).json()
     s2 = admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     i2 = admin_client.post(f"/api/sequences/{s2['id']}/items", json={
         "title": "Other", "slug": "other", "type": "static_page", "content_md": "# Other",
@@ -489,7 +489,7 @@ def test_api_my_courses_dedup_multiple_enrollments(admin_client, db):
 
     # Create second version, add structure, publish, and enroll
     v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"}).json()
-    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "info": ""}).json()
     admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S", "slug": "s"})
     admin_client.post(f"/api/versions/{v2['id']}/publish")
     enrollment2 = StudentEnrollment(user_id=student.id, version_id=v2["id"], is_active=True)
@@ -520,7 +520,7 @@ def test_api_resolve_version_multiple_enrollments(admin_client, db):
 
     # Create second version and enroll again (old enrollment stays)
     v2 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v2"}).json()
-    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "slug": "b", "info": ""}).json()
+    b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "info": ""}).json()
     admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S", "slug": "s"})
     admin_client.post(f"/api/versions/{v2['id']}/publish")
     enrollment2 = StudentEnrollment(user_id=student.id, version_id=v2["id"], is_active=True)

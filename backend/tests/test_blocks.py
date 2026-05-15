@@ -57,7 +57,7 @@ def test_api_create_block(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     response = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "Descriptive Stats", "slug": "descriptive-stats", "info": "Learning goals",
+        "title": "Descriptive Stats", "info": "Learning goals",
     })
     assert response.status_code == 201
     data = response.json()
@@ -70,11 +70,11 @@ def test_api_max_8_blocks(admin_client):
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     for i in range(8):
         resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-            "title": f"Block {i+1}", "slug": f"block-{i+1}", "info": "",
+            "title": f"Block {i+1}", "info": "",
         })
         assert resp.status_code == 201
     resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "Block 9", "slug": "block-9", "info": "",
+        "title": "Block 9", "info": "",
     })
     assert resp.status_code == 409
 
@@ -84,7 +84,7 @@ def test_api_cannot_add_block_to_published_version(admin_client):
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     response = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "New Block", "slug": "new-block", "info": "",
+        "title": "New Block", "info": "",
     })
     assert response.status_code == 409
 
@@ -93,7 +93,7 @@ def test_api_create_sequence(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "B1", "slug": "b1", "info": "",
+        "title": "B1", "info": "",
     }).json()
     response = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
         "title": "Quantiles", "slug": "quantiles",
@@ -107,7 +107,7 @@ def test_api_max_8_sequences(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
-        "title": "B1", "slug": "b1", "info": "",
+        "title": "B1", "info": "",
     }).json()
     for i in range(8):
         resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
@@ -128,7 +128,7 @@ def _setup_version(admin_client):
 
 def test_api_patch_block_title_in_created_state(admin_client):
     version = _setup_version(admin_client)
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "info": ""}).json()
     resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "New Title"})
     assert resp.status_code == 200
     assert resp.json()["title"] == "New Title"
@@ -137,7 +137,7 @@ def test_api_patch_block_title_in_created_state(admin_client):
 def test_api_patch_block_title_in_published_state(admin_client):
     """Title is in the allowed set for published state, so PATCH should succeed."""
     version = _setup_version(admin_client)
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "Updated Title"})
@@ -148,7 +148,7 @@ def test_api_patch_block_title_in_published_state(admin_client):
 def test_api_patch_block_in_archived_state(admin_client):
     """PATCH block in archived version must return 409."""
     version = _setup_version(admin_client)
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
@@ -159,7 +159,7 @@ def test_api_patch_block_in_archived_state(admin_client):
 
 def test_api_delete_block_in_created_state(admin_client):
     version = _setup_version(admin_client)
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     resp = admin_client.delete(f"/api/blocks/{block['id']}")
     assert resp.status_code == 204
 
@@ -167,7 +167,7 @@ def test_api_delete_block_in_created_state(admin_client):
 def test_api_delete_block_in_published_state(admin_client):
     """DELETE block in published version must return 409."""
     version = _setup_version(admin_client)
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
@@ -176,17 +176,20 @@ def test_api_delete_block_in_published_state(admin_client):
 
 
 def test_api_duplicate_block_slug_within_version(admin_client):
-    """Creating two blocks with the same slug in the same version must fail."""
+    """Two titles that slugify to the same string must return 409 on the second."""
     version = _setup_version(admin_client)
-    admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "dup-slug", "info": ""})
-    resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B2", "slug": "dup-slug", "info": ""})
+    # "Foo Bar" and "Foo-Bar" both slugify to "foo-bar"
+    first = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Foo Bar"})
+    assert first.status_code == 201
+    resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Foo-Bar"})
     assert resp.status_code == 409
+    assert "slug" in resp.json()["detail"].lower() or "title" in resp.json()["detail"].lower()
 
 
 def test_api_duplicate_sequence_slug_within_block(admin_client):
     """Creating two sequences with the same slug in the same block must return 409."""
     version = _setup_version(admin_client)
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "slug": "b1", "info": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "dup-slug"})
     resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S2", "slug": "dup-slug"})
     assert resp.status_code == 409
@@ -202,7 +205,7 @@ def test_create_block_renders_info_html(admin_client):
     version = _setup_version(admin_client)
     response = admin_client.post(
         f"/api/versions/{version['id']}/blocks",
-        json={"title": "B1", "slug": "b1", "info": "Goal **A**"},
+        json={"title": "B1", "info": "Goal **A**"},
     )
     assert response.status_code == 201
     body = response.json()
@@ -214,7 +217,7 @@ def test_update_block_re_renders_info_html(admin_client):
     version = _setup_version(admin_client)
     block = admin_client.post(
         f"/api/versions/{version['id']}/blocks",
-        json={"title": "B1", "slug": "b1", "info": "old"},
+        json={"title": "B1", "info": "old"},
     ).json()
     response = admin_client.patch(
         f"/api/blocks/{block['id']}",
@@ -228,7 +231,7 @@ def test_delete_block_empty_succeeds(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(
-        f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}
+        f"/api/versions/{version['id']}/blocks", json={"title": "B"}
     ).json()
     r = admin_client.delete(f"/api/blocks/{block['id']}")
     assert r.status_code == 204
@@ -238,7 +241,7 @@ def test_delete_block_with_sequences_blocked(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(
-        f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}
+        f"/api/versions/{version['id']}/blocks", json={"title": "B"}
     ).json()
     admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"})
     r = admin_client.delete(f"/api/blocks/{block['id']}")
@@ -261,7 +264,7 @@ def test_delete_block_state_error_precedes_child_count(admin_client, db, seed_pu
 def test_delete_sequence_empty_succeeds(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     r = admin_client.delete(f"/api/sequences/{seq['id']}")
     assert r.status_code == 204
@@ -270,7 +273,7 @@ def test_delete_sequence_empty_succeeds(admin_client):
 def test_delete_sequence_with_items_blocked(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "slug": "b"}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
     admin_client.post(
         f"/api/sequences/{seq['id']}/items",
@@ -289,3 +292,53 @@ def test_delete_sequence_state_error_precedes_child_count(admin_client, db, seed
     assert r.status_code == 409
     assert "'created' state" in r.json()["detail"]
     assert "remove its items" not in r.json()["detail"]
+
+
+def test_api_create_block_derives_slug_from_title(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    response = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
+        "title": "Confidence intervals (part 1)",
+    })
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["title"] == "Confidence intervals (part 1)"
+    assert data["slug"] == "confidence-intervals-part-1"
+
+
+def test_api_create_block_rejects_extra_slug_field(admin_client):
+    """extra='forbid' rejects clients still sending slug."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
+        "title": "Block A",
+        "slug": "block-a",
+    })
+    assert resp.status_code == 422, resp.text
+    # Pydantic v2 reports loc = ['body', 'slug'] for extra-forbid violations.
+    locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
+    assert ("body", "slug") in locs
+
+
+def test_api_create_block_empty_slug_after_slugify(admin_client):
+    """Cyrillic-only title -> slugify('') -> 422 keyed to body.title."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
+        "title": "Привет",
+    })
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert any(tuple(d["loc"]) == ("body", "title") for d in detail)
+
+
+def test_api_create_block_title_too_long_for_slug(admin_client):
+    """200-char Latin title -> slug >80 -> 422 keyed to body.title."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    resp = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
+        "title": "a" * 100,  # slug = "a" * 100, exceeds 80
+    })
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert any(tuple(d["loc"]) == ("body", "title") for d in detail)

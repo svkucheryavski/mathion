@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.api.helpers import get_or_404, require_course_admin, slugify
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.markdown import render_markdown
@@ -48,13 +48,34 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
     count = db.scalar(select(func.count()).where(Block.version_id == version_id))
     if count >= MAX_BLOCKS:
         raise HTTPException(status_code=409, detail=f"Maximum {MAX_BLOCKS} blocks per version")
+
+    slug = slugify(data.title)
+    if not slug:
+        raise HTTPException(
+            status_code=422,
+            detail=[{
+                "loc": ["body", "title"],
+                "msg": "Title must contain at least one Latin letter or digit",
+                "type": "value_error",
+            }],
+        )
+    if len(slug) > 80:
+        raise HTTPException(
+            status_code=422,
+            detail=[{
+                "loc": ["body", "title"],
+                "msg": "Title is too long — the auto-generated slug exceeds the 80-character limit. Please shorten the title.",
+                "type": "value_error",
+            }],
+        )
+
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
     next_order = (db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0) + 1
     block = Block(
         version_id=version_id,
         title=data.title,
-        slug=data.slug,
+        slug=slug,
         order=next_order,
         info=data.info,
         info_html=render_markdown(data.info or ""),
@@ -64,7 +85,10 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="A block with this slug already exists in this version")
+        raise HTTPException(
+            status_code=409,
+            detail="A block with the same auto-generated slug already exists in this version — choose a different title.",
+        )
     db.refresh(block)
     return block
 
