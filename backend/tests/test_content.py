@@ -14,7 +14,7 @@ def _build_course_with_quiz(admin_client, db):
 
     # Static page via API
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Introduction", "slug": "intro", "type": "static_page", "content_md": "# Intro",
+        "title": "Introduction", "type": "static_page", "content_md": "# Intro",
     })
 
     # Quiz item + questions via direct DB (question API not built yet)

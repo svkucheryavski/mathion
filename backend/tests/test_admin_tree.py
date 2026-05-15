@@ -13,7 +13,7 @@ def _make_course_with_one_item(admin_client, content_md="hello"):
     ).json()
     item = admin_client.post(
         f"/api/sequences/{seq['id']}/items",
-        json={"title": "I", "slug": "i", "type": "static_page", "content_md": content_md},
+        json={"title": "I", "type": "static_page", "content_md": content_md},
     ).json()
     return course, version, block, seq, item
 

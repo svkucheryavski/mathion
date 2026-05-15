@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, slugify, sync_asset_references
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
@@ -43,11 +43,32 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only add items to versions in 'created' state")
+
+    slug = slugify(data.title)
+    if not slug:
+        raise HTTPException(
+            status_code=422,
+            detail=[{
+                "loc": ["body", "title"],
+                "msg": "Title must contain at least one Latin letter or digit",
+                "type": "value_error",
+            }],
+        )
+    if len(slug) > 80:
+        raise HTTPException(
+            status_code=422,
+            detail=[{
+                "loc": ["body", "title"],
+                "msg": "Title is too long — the auto-generated slug exceeds the 80-character limit. Please shorten the title.",
+                "type": "value_error",
+            }],
+        )
+
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
     next_order = (db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0) + 1
     item = Item(
-        sequence_id=sequence_id, title=data.title, slug=data.slug, order=next_order,
+        sequence_id=sequence_id, title=data.title, slug=slug, order=next_order,
         type=data.type, content_md=data.content_md, content_html="",
         video_url=data.video_url, script_url=data.script_url,
     )
@@ -56,7 +77,10 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
         db.flush()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="An item with this slug already exists in this sequence")
+        raise HTTPException(
+            status_code=409,
+            detail="An item with the same auto-generated slug already exists in this sequence — choose a different title.",
+        )
     item.content_html = _process_content_md(db, version, item.id, data.content_md)
     bump_content_updated_at(version)
     db.commit()

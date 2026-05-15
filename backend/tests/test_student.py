@@ -98,10 +98,10 @@ def _setup_enrolled_student(client, db):
         "title": "S1",
     }).json()
     client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+        "title": "Intro", "type": "static_page", "content_md": "# Hello",
     })
     client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Quiz", "slug": "quiz", "type": "quiz",
+        "title": "Quiz", "type": "quiz",
     })
     client.post(f"/api/versions/{version['id']}/publish")
 
@@ -444,7 +444,7 @@ def test_api_track_item_cross_version_denied(admin_client, db):
     b2 = admin_client.post(f"/api/versions/{v2['id']}/blocks", json={"title": "B", "info": ""}).json()
     s2 = admin_client.post(f"/api/blocks/{b2['id']}/sequences", json={"title": "S"}).json()
     i2 = admin_client.post(f"/api/sequences/{s2['id']}/items", json={
-        "title": "Other", "slug": "other", "type": "static_page", "content_md": "# Other",
+        "title": "Other", "type": "static_page", "content_md": "# Other",
     }).json()
     admin_client.post(f"/api/versions/{v2['id']}/publish")
 

@@ -10,7 +10,7 @@ def _setup_quiz(admin_client, db):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Quiz", "slug": "quiz", "type": "quiz",
+        "title": "Quiz", "type": "quiz",
     }).json()
 
     # Single choice question with 2 options
@@ -58,7 +58,7 @@ def _setup_multi_choice_quiz(admin_client, db, *, slug, email):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Q", "slug": "q", "type": "quiz",
+        "title": "Q", "type": "quiz",
     }).json()
 
     q = admin_client.post(f"/api/items/{item['id']}/questions", json={
@@ -194,7 +194,7 @@ def test_submit_non_quiz_item_rejected(admin_client, db):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Page", "slug": "page", "type": "static_page", "content_md": "# Hi",
+        "title": "Page", "type": "static_page", "content_md": "# Hi",
     }).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     student = User(email="qs2@example.com", full_name="S")

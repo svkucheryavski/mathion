@@ -66,7 +66,7 @@ def _setup_sequence(admin_client):
 def test_api_create_static_page(admin_client):
     seq, version = _setup_sequence(admin_client)
     response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+        "title": "Intro", "type": "static_page", "content_md": "# Hello",
     })
     assert response.status_code == 201
     assert response.json()["type"] == "static_page"
@@ -76,7 +76,7 @@ def test_api_create_static_page(admin_client):
 def test_api_create_video(admin_client):
     seq, version = _setup_sequence(admin_client)
     response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Lecture", "slug": "lecture", "type": "video", "video_url": "https://youtube.com/watch?v=abc",
+        "title": "Lecture", "type": "video", "video_url": "https://youtube.com/watch?v=abc",
     })
     assert response.status_code == 201
     assert response.json()["type"] == "video"
@@ -84,8 +84,8 @@ def test_api_create_video(admin_client):
 
 def test_api_list_items(admin_client):
     seq, version = _setup_sequence(admin_client)
-    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I1", "slug": "i1", "type": "static_page", "content_md": "a"})
-    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I2", "slug": "i2", "type": "video", "video_url": "https://example.com"})
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I1", "type": "static_page", "content_md": "a"})
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I2", "type": "video", "video_url": "https://example.com"})
     response = admin_client.get(f"/api/sequences/{seq['id']}/items")
     assert response.status_code == 200
     assert len(response.json()) == 2
@@ -95,7 +95,7 @@ def test_api_create_video_without_video_url(admin_client):
     """Creating a video item without video_url must return 422."""
     seq, version = _setup_sequence(admin_client)
     response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Lecture", "slug": "lecture", "type": "video",
+        "title": "Lecture", "type": "video",
     })
     assert response.status_code == 422
 
@@ -104,7 +104,7 @@ def test_api_create_static_page_without_content_md(admin_client):
     """Creating a static_page item without content_md must return 422."""
     seq, version = _setup_sequence(admin_client)
     response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page",
+        "title": "Intro", "type": "static_page",
     })
     assert response.status_code == 422
 
@@ -113,7 +113,7 @@ def test_api_patch_item_content_md_in_published_state(admin_client):
     """content_md is in the published-editable set, so PATCH must succeed."""
     seq, version = _setup_sequence(admin_client)
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Old",
+        "title": "Intro", "type": "static_page", "content_md": "# Old",
     }).json()
     # Need to publish: add a sequence to its block first (block already has 1 seq from _setup_sequence)
     admin_client.post(f"/api/versions/{version['id']}/publish")
@@ -125,7 +125,7 @@ def test_api_patch_item_content_md_in_published_state(admin_client):
 def test_api_delete_item_in_created_state(admin_client):
     seq, version = _setup_sequence(admin_client)
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+        "title": "Intro", "type": "static_page", "content_md": "# Hello",
     }).json()
     resp = admin_client.delete(f"/api/items/{item['id']}")
     assert resp.status_code == 204
@@ -135,7 +135,7 @@ def test_api_delete_item_in_published_state(admin_client):
     """DELETE item in published version must return 409."""
     seq, version = _setup_sequence(admin_client)
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+        "title": "Intro", "type": "static_page", "content_md": "# Hello",
     }).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     resp = admin_client.delete(f"/api/items/{item['id']}")
@@ -149,22 +149,26 @@ def test_api_list_items_nonexistent_sequence(admin_client):
 
 
 def test_api_duplicate_item_slug_within_sequence(admin_client):
-    """Creating two items with the same slug in the same sequence must return 409."""
-    seq, version = _setup_sequence(admin_client)
+    """Creating two items whose titles produce the same slug in the same sequence must return 409."""
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "I1", "slug": "dup-slug", "type": "static_page", "content_md": "a",
+        "title": "Foo Bar", "type": "static_page", "content_md": "x",
     })
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "I2", "slug": "dup-slug", "type": "static_page", "content_md": "b",
+        "title": "Foo-Bar", "type": "static_page", "content_md": "y",
     })
     assert resp.status_code == 409
+    assert "slug" in resp.json()["detail"].lower() or "title" in resp.json()["detail"].lower()
 
 
 def test_api_patch_static_page_nullify_content_md_returns_422(admin_client):
     """Patching a static_page to set content_md=None must return 422."""
     seq, version = _setup_sequence(admin_client)
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Intro", "slug": "intro", "type": "static_page", "content_md": "# Hello",
+        "title": "Intro", "type": "static_page", "content_md": "# Hello",
     }).json()
     resp = admin_client.patch(f"/api/items/{item['id']}", json={"content_md": None})
     assert resp.status_code == 422
@@ -174,7 +178,7 @@ def test_api_patch_video_nullify_video_url_returns_422(admin_client):
     """Patching a video item to set video_url=None must return 422."""
     seq, version = _setup_sequence(admin_client)
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Lecture", "slug": "lecture", "type": "video", "video_url": "https://example.com/v",
+        "title": "Lecture", "type": "video", "video_url": "https://example.com/v",
     }).json()
     resp = admin_client.patch(f"/api/items/{item['id']}", json={"video_url": None})
     assert resp.status_code == 422
@@ -184,7 +188,7 @@ def test_api_patch_interactive_app_nullify_script_url_returns_422(admin_client):
     """Patching an interactive_app item to set script_url=None must return 422."""
     seq, version = _setup_sequence(admin_client)
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "App", "slug": "app", "type": "interactive_app", "script_url": "https://example.com/app.js",
+        "title": "App", "type": "interactive_app", "script_url": "https://example.com/app.js",
     }).json()
     resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": None})
     assert resp.status_code == 422
@@ -194,7 +198,7 @@ def test_api_create_item_invalid_video_url(admin_client):
     """Creating a video item with an invalid URL must return 422."""
     seq, version = _setup_sequence(admin_client)
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Lecture", "slug": "lecture", "type": "video", "video_url": "ftp://example.com/v",
+        "title": "Lecture", "type": "video", "video_url": "ftp://example.com/v",
     })
     assert resp.status_code == 422
 
@@ -203,6 +207,66 @@ def test_api_create_item_invalid_script_url(admin_client):
     """Creating an interactive_app item with an invalid URL must return 422."""
     seq, version = _setup_sequence(admin_client)
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "App", "slug": "app", "type": "interactive_app", "script_url": "not-a-url",
+        "title": "App", "type": "interactive_app", "script_url": "not-a-url",
     })
     assert resp.status_code == 422
+
+
+def test_api_create_item_derives_slug_from_title(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Confidence intervals (part 1)",
+        "type": "static_page",
+        "content_md": "hello",
+    })
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["title"] == "Confidence intervals (part 1)"
+    assert data["slug"] == "confidence-intervals-part-1"
+
+
+def test_api_create_item_rejects_extra_slug_field(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Item A",
+        "slug": "item-a",
+        "type": "static_page",
+        "content_md": "x",
+    })
+    assert resp.status_code == 422, resp.text
+    locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
+    assert ("body", "slug") in locs
+
+
+def test_api_create_item_empty_slug_after_slugify(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Привет",
+        "type": "static_page",
+        "content_md": "x",
+    })
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_create_item_title_too_long_for_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "a" * 100,
+        "type": "static_page",
+        "content_md": "x",
+    })
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])

@@ -92,8 +92,8 @@ class SequenceResponse(BaseModel):
 
 
 class ItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
-    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     type: Literal["static_page", "video", "quiz", "interactive_app"]
     content_md: str | None = None
     video_url: str | None = None

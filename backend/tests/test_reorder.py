@@ -21,7 +21,7 @@ def test_reorder_blocks_published_blocked(admin_client):
     course, version = _setup_course(admin_client)
     b1 = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{b1['id']}/sequences", json={"title": "S"}).json()
-    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
+    admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
     response = admin_client.post(f"/api/versions/{version['id']}/blocks/reorder", json={
         "order": [{"id": b1["id"], "order": 1}],
@@ -44,8 +44,8 @@ def test_reorder_items(admin_client):
     course, version = _setup_course(admin_client)
     b = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     s = admin_client.post(f"/api/blocks/{b['id']}/sequences", json={"title": "S"}).json()
-    i1 = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "I1", "slug": "i1", "type": "quiz"}).json()
-    i2 = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "I2", "slug": "i2", "type": "quiz"}).json()
+    i1 = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "I1", "type": "quiz"}).json()
+    i2 = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "I2", "type": "quiz"}).json()
     response = admin_client.post(f"/api/sequences/{s['id']}/items/reorder", json={
         "order": [{"id": i2["id"], "order": 1}, {"id": i1["id"], "order": 2}],
     })
@@ -56,7 +56,7 @@ def test_reorder_questions(admin_client):
     course, version = _setup_course(admin_client)
     b = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     s = admin_client.post(f"/api/blocks/{b['id']}/sequences", json={"title": "S"}).json()
-    item = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
+    item = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "Quiz", "type": "quiz"}).json()
     q1 = admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q1", "type": "single_choice"}).json()
     q2 = admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q2", "type": "single_choice"}).json()
     response = admin_client.post(f"/api/items/{item['id']}/questions/reorder", json={
@@ -69,7 +69,7 @@ def test_reorder_options(admin_client):
     course, version = _setup_course(admin_client)
     b = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     s = admin_client.post(f"/api/blocks/{b['id']}/sequences", json={"title": "S"}).json()
-    item = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "Quiz", "slug": "quiz", "type": "quiz"}).json()
+    item = admin_client.post(f"/api/sequences/{s['id']}/items", json={"title": "Quiz", "type": "quiz"}).json()
     q = admin_client.post(f"/api/items/{item['id']}/questions", json={"text_md": "Q?", "type": "single_choice"}).json()
     o1 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
     o2 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False}).json()

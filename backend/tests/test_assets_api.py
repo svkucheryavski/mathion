@@ -11,7 +11,7 @@ def _create_published_version(admin_client):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Page", "slug": "page", "type": "static_page", "content_md": "# Hi",
+        "title": "Page", "type": "static_page", "content_md": "# Hi",
     })
     admin_client.post(f"/api/versions/{version['id']}/publish")
     return course, version
@@ -336,7 +336,7 @@ def test_item_save_resolves_asset_refs(admin_client, db, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Page", "slug": "page", "type": "static_page",
+        "title": "Page", "type": "static_page",
         "content_md": "See ![chart](chart.png) for details",
     }).json()
     assert f'/assets/{version["id"]}/chart.png' in item["content_html"]
@@ -348,7 +348,7 @@ def test_item_save_rejects_missing_asset(admin_client, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Page", "slug": "page", "type": "static_page",
+        "title": "Page", "type": "static_page",
         "content_md": "See ![chart](nonexistent.png) here",
     })
     assert response.status_code == 422
@@ -369,7 +369,7 @@ def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "P", "slug": "p", "type": "static_page",
+        "title": "P", "type": "static_page",
         "content_md": "![img](a.png)",
     }).json()
 
@@ -393,7 +393,7 @@ def test_item_no_asset_refs_works(admin_client, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "P", "slug": "p", "type": "static_page",
+        "title": "P", "type": "static_page",
         "content_md": "Just text with [external](https://example.com)",
     }).json()
     assert item["content_html"]
@@ -490,7 +490,7 @@ def test_question_asset_marks_referenced(admin_client, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Q", "slug": "q", "type": "quiz", "content_md": None,
+        "title": "Q", "type": "quiz", "content_md": None,
     }).json()
     admin_client.post(f"/api/items/{item['id']}/questions", json={
         "type": "single_choice",
@@ -520,7 +520,7 @@ def test_publish_rerenders_and_fails_on_missing_asset(admin_client, asset_tmpdir
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "P", "slug": "p", "type": "static_page",
+        "title": "P", "type": "static_page",
         "content_md": "![chart](chart.png)",
     })
 
@@ -540,7 +540,7 @@ def test_publish_bumps_content_updated_at(admin_client, db, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "P", "slug": "p", "type": "static_page", "content_md": "hi",
+        "title": "P", "type": "static_page", "content_md": "hi",
     })
 
     from mathion.models import CourseVersion
@@ -563,7 +563,7 @@ def test_item_save_bumps_content_updated_at(admin_client, db, asset_tmpdir):
 
     import time; time.sleep(0.01)
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "P", "slug": "p", "type": "static_page", "content_md": "hi",
+        "title": "P", "type": "static_page", "content_md": "hi",
     })
     db.expire_all()
     after = db.get(CourseVersion, version["id"]).content_updated_at
@@ -601,7 +601,7 @@ def test_question_save_resolves_asset_refs(admin_client, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Q", "slug": "q", "type": "quiz", "content_md": None,
+        "title": "Q", "type": "quiz", "content_md": None,
     }).json()
     q = admin_client.post(f"/api/items/{item['id']}/questions", json={
         "type": "single_choice",
@@ -618,7 +618,7 @@ def test_question_save_rejects_missing_asset(admin_client, asset_tmpdir):
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "Q", "slug": "q", "type": "quiz", "content_md": None,
+        "title": "Q", "type": "quiz", "content_md": None,
     }).json()
     response = admin_client.post(f"/api/items/{item['id']}/questions", json={
         "type": "single_choice",
