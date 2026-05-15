@@ -147,7 +147,6 @@
 
   let creating = $state(false);
   let newTitle = $state('');
-  let newSlug = $state('');
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
@@ -155,7 +154,7 @@
   // Tracker shim with synthesized isDirty — no reset()-on-keystroke.
   const createTracker: RegisteredTracker = {
     get isDirty() {
-      return creating && (newTitle.trim() !== '' || newSlug.trim() !== '');
+      return creating && newTitle.trim() !== '';
     },
   };
 
@@ -169,31 +168,31 @@
   // canStructure-flip $effect: reset create form when canEditStructure flips false.
   $effect(() => {
     if (perms && !perms.canEditStructure && creating) {
-      newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null;
+      newTitle = ''; createErrors = {}; createGlobalError = null;
       creating = false;
     }
   });
 
   function toggleCreate() {
     if (createBusy || busy) return;
-    if (creating) { newTitle = ''; newSlug = ''; createErrors = {}; createGlobalError = null; }
+    if (creating) { newTitle = ''; createErrors = {}; createGlobalError = null; }
     creating = !creating;
   }
 
   async function submitCreateBlock() {
-    if (createBusy || busy || !perms?.canEditStructure || !newTitle.trim() || !newSlug.trim()) return;
+    if (createBusy || busy || !perms?.canEditStructure || !newTitle.trim()) return;
     const savedVid = vid;
     createErrors = {};
     createGlobalError = null;
     createBusy = true;
     try {
-      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, slug: newSlug, info: '' });
-      newTitle = ''; newSlug = ''; creating = false;
+      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, info: '' });
+      newTitle = ''; creating = false;
       if (!stillOnVid(savedVid)) return;
       await loadAdminTree(savedVid, { force: true });
       pushToast('Block created', 'success');
     } catch (e) {
-      const mapped = mapCreateError(e, ['title', 'slug']);
+      const mapped = mapCreateError(e, ['title']);
       createErrors = mapped.fieldErrors;
       createGlobalError = mapped.globalMessage
         ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);
@@ -323,12 +322,8 @@
             <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
             {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
           </div>
-          <div class="field">
-            <input placeholder="Slug" bind:value={newSlug} required disabled={createBusy || busy} pattern="[a-z0-9]+(-[a-z0-9]+)*" oninput={() => { if (createErrors.slug) createErrors = { ...createErrors, slug: '' }; }} />
-            {#if createErrors.slug}<small class="field-err">{createErrors.slug}</small>{/if}
-          </div>
           {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-          <Button type="submit" disabled={createBusy || busy || !perms?.canEditStructure || !newTitle.trim() || !newSlug.trim()} loading={createBusy}>Create</Button>
+          <Button type="submit" disabled={createBusy || busy || !perms?.canEditStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
         </form>
       {/if}
 
