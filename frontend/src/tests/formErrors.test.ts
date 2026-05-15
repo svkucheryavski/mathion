@@ -48,10 +48,10 @@ describe('mapCreateError', () => {
     expect(r.globalMessage).toContain('unknown bad');
   });
 
-  it('409 whose body mentions "slug" → inline slug error', () => {
-    const e = new ApiError(409, 'A sequence with slug "intro" already exists in this block');
+  it('409 whose body mentions "slug" or "title" → inline title error', () => {
+    const e = new ApiError(409, 'A sequence with the same auto-generated slug already exists in this block — choose a different title.');
     const r = mapCreateError(e, known);
-    expect(r.fieldErrors.slug).toBe('A sequence with slug "intro" already exists in this block');
+    expect(r.fieldErrors.title).toBe('A sequence with the same auto-generated slug already exists in this block — choose a different title.');
     expect(r.globalMessage).toBe(null);
   });
 
@@ -62,10 +62,19 @@ describe('mapCreateError', () => {
     expect(r.globalMessage).toBe('Conflict: parent capacity reached');
   });
 
-  it('409 with "Slug" capitalized matches case-insensitively', () => {
-    const e = new ApiError(409, 'Slug already exists');
-    const r = mapCreateError(e, known);
-    expect(r.fieldErrors.slug).toBe('Slug already exists');
+  it('409 with "Slug" or "Title" capitalized matches case-insensitively', () => {
+    const e1 = new ApiError(409, 'Slug already exists');
+    expect(mapCreateError(e1, known).fieldErrors.title).toBe('Slug already exists');
+    const e2 = new ApiError(409, 'Title already taken');
+    expect(mapCreateError(e2, known).fieldErrors.title).toBe('Title already taken');
+  });
+
+  it('422 with loc=["body","title"] maps inline on title field (knownFields=[title])', () => {
+    const e = new ApiError(422, [
+      { loc: ['body', 'title'], msg: 'Title must contain at least one Latin letter or digit', type: 'value_error' },
+    ]);
+    const r = mapCreateError(e, ['title']);
+    expect(r.fieldErrors.title).toBe('Title must contain at least one Latin letter or digit');
     expect(r.globalMessage).toBe(null);
   });
 

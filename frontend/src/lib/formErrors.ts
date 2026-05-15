@@ -1,7 +1,5 @@
 // Maps API errors raised by create-form POSTs into per-field inline errors
-// + an optional global message, matching spec §6 line 327:
-//   "Create (sub-entity). … 409 (slug collision in same parent) → inline error
-//    on the slug field. 422 → inline."
+// + an optional global message.
 //
 // Why a helper rather than inline mapping in each create flow: the three
 // editor create flows (VersionEditPage createBlock, BlockAccordion
@@ -13,8 +11,11 @@
 //   - 422: walk `validationErrors()`, key each entry by its last `loc` segment
 //     (FastAPI / Pydantic shape). Entries whose key is in `knownFields` land
 //     in `fieldErrors`; others fall into `globalMessage` joined by `; `.
-//   - 409: if the body message mentions "slug" (case-insensitive), set
-//     `fieldErrors.slug = displayMessage`; otherwise `globalMessage`.
+//   - 409: if the body message mentions "slug" or "title" (case-insensitive),
+//     set `fieldErrors.title = displayMessage`; otherwise `globalMessage`.
+//     Backend's auto-derived-slug error messages reference both "slug" and
+//     "title"; the frontend always surfaces them on the title input because
+//     that's the field the admin actually edits.
 //   - All other errors: `globalMessage = displayMessage` (or 'Save failed').
 
 import { ApiError } from './api';
@@ -47,8 +48,8 @@ export function mapCreateError(e: unknown, knownFields: readonly string[]): Crea
       const globalMessage = unmapped.length > 0 ? unmapped.join('; ') : null;
       return { fieldErrors, globalMessage };
     }
-    if (e.status === 409 && /slug/i.test(typeof e.detail === 'string' ? e.detail : '')) {
-      return { fieldErrors: { slug: e.displayMessage }, globalMessage: null };
+    if (e.status === 409 && /slug|title/i.test(typeof e.detail === 'string' ? e.detail : '')) {
+      return { fieldErrors: { title: e.displayMessage }, globalMessage: null };
     }
     return { fieldErrors: {}, globalMessage: e.displayMessage };
   }
