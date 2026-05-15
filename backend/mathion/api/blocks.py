@@ -188,16 +188,40 @@ def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(g
     count = db.scalar(select(func.count()).where(Sequence.block_id == block_id))
     if count >= MAX_SEQUENCES:
         raise HTTPException(status_code=409, detail=f"Maximum {MAX_SEQUENCES} sequences per block")
+
+    slug = slugify(data.title)
+    if not slug:
+        raise HTTPException(
+            status_code=422,
+            detail=[{
+                "loc": ["body", "title"],
+                "msg": "Title must contain at least one Latin letter or digit",
+                "type": "value_error",
+            }],
+        )
+    if len(slug) > 80:
+        raise HTTPException(
+            status_code=422,
+            detail=[{
+                "loc": ["body", "title"],
+                "msg": "Title is too long — the auto-generated slug exceeds the 80-character limit. Please shorten the title.",
+                "type": "value_error",
+            }],
+        )
+
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
     next_order = (db.scalar(select(func.max(Sequence.order)).where(Sequence.block_id == block_id)) or 0) + 1
-    seq = Sequence(block_id=block_id, title=data.title, slug=data.slug, order=next_order)
+    seq = Sequence(block_id=block_id, title=data.title, slug=slug, order=next_order)
     db.add(seq)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="A sequence with this slug already exists in this block")
+        raise HTTPException(
+            status_code=409,
+            detail="A sequence with the same auto-generated slug already exists in this block — choose a different title.",
+        )
     db.refresh(seq)
     return seq
 

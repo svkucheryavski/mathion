@@ -78,8 +78,8 @@ class BlockResponse(BaseModel):
 
 
 class SequenceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
-    slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class SequenceResponse(BaseModel):

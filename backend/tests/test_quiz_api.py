@@ -8,7 +8,7 @@ def _setup_quiz(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "quiz-course", "name": "Quiz", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
         "title": "Quiz", "slug": "quiz", "type": "quiz",
     }).json()
@@ -56,7 +56,7 @@ def _setup_multi_choice_quiz(admin_client, db, *, slug, email):
     course = admin_client.post("/api/courses", json={"slug": slug, "name": slug.upper(), "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
         "title": "Q", "slug": "q", "type": "quiz",
     }).json()
@@ -192,7 +192,7 @@ def test_submit_non_quiz_item_rejected(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "c2", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
         "title": "Page", "slug": "page", "type": "static_page", "content_md": "# Hi",
     }).json()

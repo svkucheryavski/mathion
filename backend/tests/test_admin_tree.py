@@ -9,7 +9,7 @@ def _make_course_with_one_item(admin_client, content_md="hello"):
         f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": "b-info"}
     ).json()
     seq = admin_client.post(
-        f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}
+        f"/api/blocks/{block['id']}/sequences", json={"title": "S"}
     ).json()
     item = admin_client.post(
         f"/api/sequences/{seq['id']}/items",

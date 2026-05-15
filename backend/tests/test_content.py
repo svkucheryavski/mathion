@@ -9,7 +9,7 @@ def _build_course_with_quiz(admin_client, db):
         "title": "Descriptive Stats", "info": "Goals",
     }).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
-        "title": "Quantiles", "slug": "quantiles",
+        "title": "Quantiles",
     }).json()
 
     # Static page via API

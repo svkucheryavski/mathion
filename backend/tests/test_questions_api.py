@@ -9,7 +9,7 @@ def _make_quiz_via_api(admin_client):
         "title": "B1", "info": "",
     }).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
-        "title": "S1", "slug": "s1",
+        "title": "S1",
     }).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
         "title": "Quiz", "slug": "quiz", "type": "quiz",
@@ -35,7 +35,7 @@ def test_create_question_not_quiz_item(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c1", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
         "title": "Page", "slug": "page", "type": "static_page", "content_md": "# Hi",
     }).json()

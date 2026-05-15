@@ -96,7 +96,7 @@ def test_api_create_sequence(admin_client):
         "title": "B1", "info": "",
     }).json()
     response = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
-        "title": "Quantiles", "slug": "quantiles",
+        "title": "Quantiles",
     })
     assert response.status_code == 201
     assert response.json()["title"] == "Quantiles"
@@ -111,11 +111,11 @@ def test_api_max_8_sequences(admin_client):
     }).json()
     for i in range(8):
         resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
-            "title": f"Seq {i+1}", "slug": f"seq-{i+1}",
+            "title": f"Seq {i+1}",
         })
         assert resp.status_code == 201
     resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
-        "title": "Seq 9", "slug": "seq-9",
+        "title": "Seq 9",
     })
     assert resp.status_code == 409
 
@@ -138,7 +138,7 @@ def test_api_patch_block_title_in_published_state(admin_client):
     """Title is in the allowed set for published state, so PATCH should succeed."""
     version = _setup_version(admin_client)
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "Old Title", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     resp = admin_client.patch(f"/api/blocks/{block['id']}", json={"title": "Updated Title"})
     assert resp.status_code == 200
@@ -149,7 +149,7 @@ def test_api_patch_block_in_archived_state(admin_client):
     """PATCH block in archived version must return 409."""
     version = _setup_version(admin_client)
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
     admin_client.post(f"/api/versions/{version['id']}/archive")
@@ -168,7 +168,7 @@ def test_api_delete_block_in_published_state(admin_client):
     """DELETE block in published version must return 409."""
     version = _setup_version(admin_client)
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "s1"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={"title": "I", "slug": "i", "type": "static_page", "content_md": "hello"})
     admin_client.post(f"/api/versions/{version['id']}/publish")
     resp = admin_client.delete(f"/api/blocks/{block['id']}")
@@ -187,12 +187,13 @@ def test_api_duplicate_block_slug_within_version(admin_client):
 
 
 def test_api_duplicate_sequence_slug_within_block(admin_client):
-    """Creating two sequences with the same slug in the same block must return 409."""
+    """Creating two sequences whose titles slugify identically must return 409."""
     version = _setup_version(admin_client)
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
-    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1", "slug": "dup-slug"})
-    resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S2", "slug": "dup-slug"})
+    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Foo Bar"})
+    resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Foo-Bar"})
     assert resp.status_code == 409
+    assert "slug" in resp.json()["detail"].lower() or "title" in resp.json()["detail"].lower()
 
 
 def test_api_list_blocks_nonexistent_version(admin_client):
@@ -243,7 +244,7 @@ def test_delete_block_with_sequences_blocked(admin_client):
     block = admin_client.post(
         f"/api/versions/{version['id']}/blocks", json={"title": "B"}
     ).json()
-    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"})
+    admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"})
     r = admin_client.delete(f"/api/blocks/{block['id']}")
     assert r.status_code == 409
     assert "remove its sequences first" in r.json()["detail"]
@@ -265,7 +266,7 @@ def test_delete_sequence_empty_succeeds(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B"}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     r = admin_client.delete(f"/api/sequences/{seq['id']}")
     assert r.status_code == 204
 
@@ -274,7 +275,7 @@ def test_delete_sequence_with_items_blocked(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c", "name": "C", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B"}).json()
-    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S", "slug": "s"}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     admin_client.post(
         f"/api/sequences/{seq['id']}/items",
         json={"title": "I", "slug": "i", "type": "static_page", "content_md": "x"},
@@ -342,3 +343,47 @@ def test_api_create_block_title_too_long_for_slug(admin_client):
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"]
     assert any(tuple(d["loc"]) == ("body", "title") for d in detail)
+
+
+def test_api_create_sequence_derives_slug_from_title(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
+        "title": "Confidence intervals (part 1)",
+    })
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["title"] == "Confidence intervals (part 1)"
+    assert data["slug"] == "confidence-intervals-part-1"
+
+
+def test_api_create_sequence_rejects_extra_slug_field(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={
+        "title": "Seq A",
+        "slug": "seq-a",
+    })
+    assert resp.status_code == 422, resp.text
+    locs = [tuple(d["loc"]) for d in resp.json()["detail"]]
+    assert ("body", "slug") in locs
+
+
+def test_api_create_sequence_empty_slug_after_slugify(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "Привет"})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
+
+
+def test_api_create_sequence_title_too_long_for_slug(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
+    resp = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "a" * 100})
+    assert resp.status_code == 422
+    assert any(tuple(d["loc"]) == ("body", "title") for d in resp.json()["detail"])
