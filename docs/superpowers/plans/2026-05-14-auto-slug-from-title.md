@@ -25,7 +25,7 @@
 - `backend/tests/test_blocks.py` — drop `slug` from create payloads; rewrite duplicate-slug tests to use slugify-colliding titles; add new cases (empty title via Cyrillic, >80-char title, `extra="forbid"` rejects slug, info-only PATCH does not re-derive slug, title-edit on published re-derives slug, collision on update, equivalent-after-slugify update, explicit `{ "title": null }`).
 - `backend/tests/test_items.py` — same shape for items, including the autoflush collision case.
 - `backend/tests/test_admin_tree.py` — sweep `slug` out of block / sequence / item create payloads.
-- `backend/tests/test_access_control.py` — same sweep.
+- Also sweep block/sequence/item-create payloads in `tests/test_assets_api.py`, `tests/test_content.py`, `tests/test_questions_api.py`, `tests/test_quiz_api.py`, `tests/test_reorder.py`, `tests/test_student.py`, `tests/test_versions.py` — the exhaustive per-task lists live inside Tasks 2/3/4. (`tests/test_access_control.py` only POSTs courses and is NOT affected.)
 
 **Frontend — modified:**
 - `frontend/src/lib/formErrors.ts` — relax 409 regex to `/slug|title/i`; key resulting error on `fieldErrors.title`.
@@ -169,8 +169,7 @@ title (confirming no truncation)."
 - Modify: `backend/mathion/schemas.py:1-5` (import `ConfigDict`) and `:63-67` (`BlockCreate`).
 - Modify: `backend/mathion/api/blocks.py:1-20` (import `slugify`) and `:40-69` (`create_block`).
 - Test: `backend/tests/test_blocks.py` — drop `slug` from existing block-create payloads; rewrite `test_api_duplicate_block_slug_within_version`; add new cases.
-- Test: `backend/tests/test_admin_tree.py` — sweep `slug` from block-create payloads.
-- Test: `backend/tests/test_access_control.py` — sweep `slug` from block-create payloads.
+- Test: sweep `slug` from block-create payloads in `tests/test_admin_tree.py`, `tests/test_assets_api.py`, `tests/test_content.py`, `tests/test_items.py`, `tests/test_questions_api.py`, `tests/test_quiz_api.py`, `tests/test_reorder.py`, `tests/test_student.py`, `tests/test_versions.py` (the exhaustive list — see Step 10).
 
 - [ ] **Step 1: Write a failing test asserting the new "no slug in body, slug derived from title" behavior**
 
@@ -618,6 +617,7 @@ Same list as the block-sweep in Task 2 (most of these files build full block→s
 - `tests/test_admin_tree.py`
 - `tests/test_assets_api.py`
 - `tests/test_blocks.py` (already swept for block-creates in Task 2; now sweep its sequence-creates)
+- `tests/test_content.py`
 - `tests/test_items.py`
 - `tests/test_questions_api.py`
 - `tests/test_quiz_api.py`
@@ -672,7 +672,7 @@ titles that slugify identically."
 - Modify: `backend/mathion/schemas.py` — `ItemCreate` (currently lines 94-117).
 - Modify: `backend/mathion/api/items.py:38-64` — `create_item`.
 - Test: `backend/tests/test_items.py` — sweep item-create payloads; rewrite duplicate-slug tests; add new cases.
-- Test: `backend/tests/test_admin_tree.py` and `tests/test_access_control.py` — sweep item-create payloads.
+- Test: sweep `slug` from item-create payloads in `tests/test_admin_tree.py`, `tests/test_assets_api.py`, `tests/test_blocks.py`, `tests/test_content.py`, `tests/test_questions_api.py`, `tests/test_quiz_api.py`, `tests/test_reorder.py`, `tests/test_student.py`, `tests/test_versions.py` (the exhaustive list — see Step 9).
 
 - [ ] **Step 1: Write a failing test asserting the new behavior**
 
