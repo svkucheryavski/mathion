@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -9,6 +10,17 @@ from sqlalchemy.orm import Session
 from mathion.assets import sanitize_filename
 from mathion.config import settings
 from mathion.database import Base
+
+
+_NON_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(title: str) -> str:
+    """Lowercase, collapse runs of non-[a-z0-9] into single dashes, strip
+    leading/trailing dashes. Returns '' for titles with no Latin letters or
+    digits (Cyrillic, emoji, punctuation only) — caller is responsible for
+    rejecting empty results."""
+    return _NON_SLUG.sub("-", title.lower()).strip("-")
 
 
 def bump_content_updated_at(version) -> None:
