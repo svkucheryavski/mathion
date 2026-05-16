@@ -88,7 +88,10 @@ These are deliberately deferred to keep V1 shippable:
     - `onInsert: (filename: string, mimeType: string) => void`
     - `refreshKey: number` (default 0; any change triggers re-fetch)
     - `cursorReady: boolean` (default false; controls the first-time banner
-      visibility — see `MarkdownEditor` state)
+      visibility — see `MarkdownEditor` state). **One-way: read-only from
+      the sidebar's perspective**, NOT `$bindable`. Only `MarkdownEditor`
+      writes to `cursorReady` (on first textarea `focus` AND on first
+      `onInsert` call). Sidebar reads to gate banner visibility.
     - `uploading: boolean` (default false; declared `$bindable` — see
       "Shared `uploading` state" in the Boundary section). When true:
       sidebar renders its drop-zone overlay AND its file picker is
@@ -112,11 +115,19 @@ These are deliberately deferred to keep V1 shippable:
     (`credentials: 'include'`, `X-Requested-With: mathion`). On non-2xx, it
     constructs an `ApiError` from the response body so callers get the same
     error shape as the rest of the API layer. **On 401 specifically, it
-    must replicate the `emitUnauthorized(location.pathname + location.search)`
-    call that `api.ts:request` does internally** — otherwise an expired
-    session mid-upload surfaces as a confusing inline "Not authenticated"
-    error instead of bouncing to login. Either re-export the helper from
-    `api.ts` or duplicate the one-liner.
+    must replicate the
+    `emitUnauthorized(location.pathname + location.search + location.hash)`
+    call that `api.ts:request` does internally** (matches `api.ts:41`
+    exactly — all three location parts, not just pathname + search) —
+    otherwise an expired session mid-upload surfaces as a confusing
+    inline "Not authenticated" error instead of bouncing to login. Either
+    re-export the helper from `api.ts` or duplicate the one-liner.
+  - `formatRef(filename: string, mimeType: string): string` — pure helper
+    that returns the markdown reference (`\n![{stem}]({filename})\n` for
+    image mime types, `\n[{filename}]({filename})\n` otherwise). Used by
+    `MarkdownEditor` drop handler and `AssetSidebar` click handler.
+    Lives in `lib/assets.ts` (not `lib/format.ts` — kept with the asset
+    module to avoid splitting asset concerns).
   - `listAssets(versionId): Promise<AssetResponse[]>` — uses `api.get`.
   - `deleteAsset(assetId): Promise<void>` — uses `api.delete` (which already
     handles 204 returning `Promise<void>`).
@@ -136,6 +147,13 @@ These are deliberately deferred to keep V1 shippable:
     closure — NOT exported via Svelte 5 component bindings. Tests exercise
     it indirectly via simulated event paths (drag-drop, sidebar `onInsert`
     callback), not via a test-only export.
+    **Null-textarea guard:** if the textarea ref is `null` at call time
+    (Edit→Preview switched mid-upload while a background upload was still
+    awaiting), `insertAtCursor` must early-return without throwing. The
+    in-flight upload completes silently — list still refreshes via the
+    sidebar's own upload-success path, just no markdown insert. User
+    returns to Edit and clicks the (now visible) sidebar row to insert
+    manually.
   - **Internal `$state` variables** (not props):
     - `lastOffset = $state(value.length)` — tracks the most recent textarea
       selection. Updated on textarea `blur` and `selectionchange` events.
@@ -145,6 +163,13 @@ These are deliberately deferred to keep V1 shippable:
       first `focus` event AND on the first `onInsert` call (whichever
       comes first — see Edge cases for why first-insert also clears the
       banner). Forwarded to `<AssetSidebar cursorReady={cursorReady} />`.
+      **Assignment ordering inside `onInsert`:** the handler MUST set
+      `cursorReady = true` **before** calling `insertAtCursor`. Reason:
+      Svelte 5 reactivity batches synchronously, but the banner-clear
+      visual change should be tied to the same tick as the insert so a
+      future reader can't reason about a one-frame interleaving. (Both
+      orders work in practice — pin the order for clarity, not
+      correctness.)
     - `uploading = $state(false)` — true while ANY upload batch is in
       flight (textarea drop, outer-container drop, sidebar drop-zone,
       OR sidebar file picker). Forwarded bidirectionally to AssetSidebar
@@ -152,6 +177,16 @@ These are deliberately deferred to keep V1 shippable:
       the sidebar can flip it when its own upload paths start/finish.
       Used by both components for the "Drop arriving WHILE uploading"
       overlay state and re-entrancy guards on all drop handlers.
+      **TOCTOU avoidance — set `uploading = true` SYNCHRONOUSLY** at the
+      top of every upload entry point (textarea drop handler, wrapper
+      drop handler, sidebar drop handler, sidebar file-picker change
+      handler), **before the first `await`**. The guard check
+      (`if (uploading) { … return; }`) and the synchronous write must
+      both occur in the same microtask tick. Without this discipline,
+      two near-simultaneous drops can each pass the guard check before
+      either writes the flag, producing concurrent upload loops and a
+      double overlay flash. The flag must also be reset in a
+      `try/finally` so a thrown error always returns it to `false`.
   - `dragover` and `drop` listeners on **two surfaces**: the textarea AND an
     **inner edit-content wrapper `<div>` that sits inside the `{#if mode ===
     'edit' && !readOnly}` block**. The wrapper, NOT the always-rendered
@@ -177,6 +212,13 @@ These are deliberately deferred to keep V1 shippable:
       {/if}
     </div>
     ```
+    **`.edit-content` styling** (required, not optional): `display: flex;
+    flex-direction: row; gap: <existing editor spacing>;` — the wrapper
+    becomes the flex container that previously was the outer `.editor`.
+    Move any flex/gap styling that was on `.editor` (for the textarea +
+    Edit/Preview content row) down to `.edit-content`. Outer `.editor`
+    keeps `display: flex; flex-direction: column;` so the tab strip
+    stacks above the edit-content row.
   - **Event propagation:** the textarea's `drop` handler MUST call
     `event.stopPropagation()` after handling, OR the `.edit-content` handler
     must check `event.target !== textareaRef` and bail early. Pick one in
@@ -215,7 +257,7 @@ otherwise be ignored.
 |---|---|
 | `uploadAsset` / `listAssets` / `deleteAsset` API calls + multipart + error mapping + 401 → emitUnauthorized + `AssetResponse` type | `lib/assets.ts` |
 | List rendering, thumbnails, sidebar drop zone, file picker, click-to-insert callback, delete UI, first-time banner copy | `AssetSidebar.svelte` |
-| `lastOffset`, `cursorReady`, **shared `uploading`** ($bindable), textarea drag-drop, edit-content-wrapper drop guard, `insertAtCursor`, conditional sidebar mount, `refreshKey` pass-through | `MarkdownEditor.svelte` |
+| `lastOffset`, `cursorReady` (one-way), **shared `uploading`** ($bindable, synchronous-write), textarea drag-drop, edit-content-wrapper drop guard, `insertAtCursor` (with null-textarea guard), conditional sidebar mount, `refreshKey` pass-through, `formatRef` import from `lib/assets.ts` | `MarkdownEditor.svelte` |
 | Save lifecycle (own existing flow), `refreshKey` declaration + bump on success | `ItemEditPage.svelte` (and any future host of `MarkdownEditor`) |
 | Asset reference sync (`AssetReference` rows for item/question/info contexts) | Backend (`render_with_assets`) — unchanged |
 
@@ -229,6 +271,32 @@ AssetSidebar-path upload starts, the sidebar sets `uploading = true`; when
 done, `false`. MarkdownEditor's textarea/wrapper drop handlers do the same.
 Both components check `uploading` before starting a new batch and refuse to
 re-enter. Both render the overlay while `uploading === true`.
+
+**Synchronous write requirement (TOCTOU fix):** every upload entry point —
+in BOTH components — must set `uploading = true` SYNCHRONOUSLY in the
+same microtask as the guard check, before issuing any `await`. The handler
+shape is:
+
+```ts
+function handleDrop(e) {
+  if (uploading) { /* show flash, return */ return; }
+  uploading = true;                  // synchronous, same tick as the guard
+  try {
+    for (const file of files) {
+      await uploadAsset(...);         // first await — only AFTER the write
+      // ...
+    }
+  } finally {
+    uploading = false;
+  }
+}
+```
+
+Without this, two near-simultaneous drops (e.g., user double-drops a file
+in <16ms) both pass the guard before either writes the flag, producing
+concurrent upload loops. Re-entrancy guards in `AssetSidebar`'s
+file-picker change handler and sidebar drop handler follow the same
+shape.
 
 **Why upload logic doesn't live in `AssetSidebar`:** the data flow has two
 upload paths — sidebar drop-zone/file-picker AND textarea drag-drop. Both
@@ -337,6 +405,12 @@ Two drop targets need handlers, for different reasons:
    `file://` and discard all unsaved edits). The wrapper handler treats
    the file as a sidebar-style upload: upload only, no auto-insert. User
    can then click the resulting sidebar row to insert if they meant to.
+   **`refreshKey` behavior:** the wrapper handler does NOT bump
+   `refreshKey`. The sidebar's own `listAssets()` re-fetch on
+   upload-success (the same code path used by the sidebar drop zone and
+   file picker) makes the new row appear. `refreshKey` is exclusively
+   the post-save signal owned by `ItemEditPage`; mixing it into the
+   upload flow would re-fetch twice per upload.
    In Preview mode the wrapper isn't rendered (the conditional), so no
    listeners are active — preview drops fall to the browser default
    (navigation), acceptable in V1 since admins in Preview aren't editing.
@@ -351,8 +425,10 @@ Two drop targets need handlers, for different reasons:
   (sequentially, not concurrently):
   1. `uploadAsset(versionId, file)` — `await`.
   2. On success: `insertAtCursor(formatRef(filename, mimeType), atOffset=offset)`.
-     Subsequent files in the same drop advance `offset` by the length of the
-     just-inserted text. Use the server's `mime_type` from the response.
+     Subsequent files in the same drop advance `offset` by
+     `formattedRef.length` (the length of the markdown string returned
+     by `formatRef`, including the leading and trailing `\n`). Use the
+     server's `mime_type` from the response.
   3. On error: stop the loop. Subsequent files in the batch are NOT
      uploaded. The inline error region surfaces the failure with explicit
      "Upload stopped at file N of M" wording when M > 1, so the user knows
@@ -520,8 +596,10 @@ filenames, which is enough to act on. No spec change to the save flow.
   class (400 ext, 400 size, 400 total-size, 400 no-filename, 403 disabled,
   409 already-exists, 500 disk-write, network failure).
 - `uploadAsset` on 401: calls `emitUnauthorized(location.pathname +
-  location.search)` (mirrors `api.ts:request`) BEFORE throwing. Test
-  stubs the events module and asserts the call.
+  location.search + location.hash)` (mirrors `api.ts:request` exactly —
+  all three location parts, not just pathname + search) BEFORE throwing.
+  Test stubs the events module and asserts the call with all three
+  parts concatenated.
 - `listAssets`: returns array; uses backend's alphabetical sort (we don't
   re-sort).
 - `deleteAsset`: succeeds on 204. Note: the backend's 409 "is_referenced"
@@ -544,11 +622,16 @@ filenames, which is enough to act on. No spec change to the save flow.
   with "Upload stopped at file N of M" when applicable.
 - `refreshKey` prop change (any change, not just increment) triggers a
   re-fetch.
-- "Click in the editor to choose where assets will be inserted" banner
-  is visible when the sidebar's `cursorReady` prop is `false` and hidden
+- Banner copy "Click in the editor to position the cursor, or new assets
+  will be appended to the end." (canonical literal — see state table
+  row "First-time sidebar click before textarea ever focused") is
+  visible when the sidebar's `cursorReady` prop is `false` and hidden
   when `true`. `cursorReady` is owned by `MarkdownEditor` (it knows when
-  the textarea is first focused). Default `false`; flips to `true` on
-  textarea's first `focus` event and stays true for the session.
+  the textarea is first focused or first onInsert fires). Read-only from
+  the sidebar — sidebar does NOT write to `cursorReady`. Default
+  `false`; flips to `true` on textarea's first `focus` event OR on
+  `MarkdownEditor`'s first `onInsert` handling, and stays true for the
+  session.
 
 ### `MarkdownEditor.svelte` extended tests (vitest + jsdom)
 
@@ -557,9 +640,18 @@ exist yet); this task creates it from scratch.
 
 - Existing render/mode behavior covered (Edit/Preview tab toggling,
   `loadPreview` lifecycle, `readOnly` mode).
-- `insertAtCursor`: programmatic invocation (via a small test-only export
-  or simulated event path) splices at the selection and restores cursor
-  position just after the inserted text.
+- `insertAtCursor`: programmatic invocation via a simulated event path
+  (drag-drop event with `dataTransfer.files`, or a programmatic
+  `onInsert` invocation from the mounted sidebar) splices at the
+  selection and restores cursor position just after the inserted text.
+  NO test-only export — the helper is a local closure inside
+  `MarkdownEditor`; tests reach it only through public surfaces (drop
+  events on the textarea, sidebar click → `onInsert` callback).
+- `insertAtCursor` null-textarea guard: simulate Edit→Preview toggle
+  while an upload promise is still pending (textarea ref becomes null),
+  then resolve the upload. Verify `insertAtCursor` returns silently
+  without throwing and the list still refreshes via the sidebar's own
+  upload-success refresh path.
 - `lastOffset` tracks textarea `blur` and `selectionchange`. Initial value
   is `value.length`. After programmatic textarea cursor moves, `lastOffset`
   reflects the latest selection.
@@ -571,6 +663,14 @@ exist yet); this task creates it from scratch.
 - `uploading` is `false` on mount. While a textarea-drop batch is in
   flight, `uploading === true` and a second drop on the textarea is
   refused (re-entrancy guard) and shows the 1.5s overlay flash.
+- **TOCTOU on `uploading`:** fire TWO `drop` events on the textarea
+  back-to-back **within the same microtask** (no awaited yields in
+  between — use a synchronous test scheduler or
+  `Promise.all([fire1, fire2])` with the drop handlers stubbed to
+  delay). Verify `uploadAsset` is called exactly ONCE — the second
+  drop's synchronous guard check sees `uploading === true` (set
+  synchronously by the first drop before its first `await`) and
+  rejects. Without the synchronous-set discipline this test fails.
 - `bind:uploading` two-way: simulate sidebar setting `uploading = true`
   (e.g., starting a file-picker upload); textarea-drop in the same moment
   is rejected.
@@ -620,10 +720,11 @@ exist yet); this task creates it from scratch.
    Verify the browser does NOT navigate away (no `file://` redirect,
    unsaved edits intact) and the file appears in the sidebar (upload only,
    no insert).
-7. **No double-fire on textarea drop**: drop a single file precisely on
-   the textarea. Verify the asset list grows by exactly ONE row (not two),
-   confirming the textarea handler's `stopPropagation` prevents the
-   wrapper handler from firing for the same event.
+7. **No double-fire on textarea drop**: note the asset count before
+   dropping. Drop a single file precisely on the textarea. Verify the
+   asset list grows by exactly ONE row (count after − count before = 1,
+   NOT 2), confirming the textarea handler's `stopPropagation` prevents
+   the wrapper handler from firing for the same event.
 8. **Same-filename re-upload**: drop the SAME filename twice → second
    drop triggers a 409 inline error. Verify the error message uses the
    **sanitized** filename and includes the hint "Rename the file on disk
@@ -642,15 +743,19 @@ exist yet); this task creates it from scratch.
     is oversize. Verify files before the error are uploaded and inserted;
     files after the error are NOT. Error message includes "Upload stopped
     at file N of 5".
-14. **Multi-file drop with mid-batch network failure**: drop 3 files;
-    DevTools → Network → Offline mid-batch. Verify the message begins
-    "Could not reach server" with the "Upload stopped at file N of 3"
-    context.
+14. **Multi-file drop with mid-batch network failure**: open DevTools →
+    Network and set throttling to Slow 3G FIRST (so the upload is slow
+    enough to switch to Offline mid-batch). Drop 3 files; while file 1
+    or 2 is uploading, flip Network to Offline. Verify the message
+    begins "Could not reach server" with the "Upload stopped at file N
+    of 3" context.
 15. **Drop-while-uploading**: open DevTools → Network → Slow 3G (or
     equivalent throttling, since a local upload completes too fast
     otherwise). Drop a file, then drop a second file mid-upload. Verify
-    the second drop is discarded with the 1.5s overlay flash, while the
-    "Uploading…" transient row remains visible the entire time.
+    the second drop is discarded with the 1.5s overlay flash (overlay
+    fade timer is anchored at the moment of the discarded drop, not at
+    upload start), while the "Uploading…" transient row remains visible
+    the entire time.
 16. **Edit → Preview → Edit round-trip**: upload a file in Edit mode,
     switch to Preview, switch back. Verify (a) the new file is still in
     the sidebar (list re-fetches on remount), (b) no stale state like an
