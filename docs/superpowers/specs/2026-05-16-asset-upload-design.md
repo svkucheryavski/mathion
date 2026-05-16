@@ -905,7 +905,7 @@ Likely 6-7 tasks in the plan:
    + re-entrancy guard + multi-file sequential loop + tests.
 6. `ItemEditPage.svelte` `refreshKey` declaration + bump on save success.
 7. Final verification: pytest unchanged, svelte-check, vitest, manual
-   smoke (16 steps above).
+   smoke (18 steps above).
 
 Still smaller than auto-slug-from-title (which was 12 tasks across backend
 + frontend), but the original 5-6 estimate undercounted the work in
