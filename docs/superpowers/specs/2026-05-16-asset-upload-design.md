@@ -35,8 +35,12 @@ against `backend/mathion/api/assets.py`, `backend/mathion/markdown.py`, and
   save-error path, NOT through the asset sidebar. See Error handling §
   "Cross-channel: save 422 from unknown asset filenames" below.
 - Asset filenames are server-side **sanitized** at upload (`sanitize_filename`):
-  lowercased, non-alphanumeric collapsed to hyphens. The 409 error message
-  echoes the **sanitized** filename, not the client-side name the user picked.
+  lowercased base, then **spaces and underscores → hyphens**, then **all
+  other non-`[a-z0-9-]` characters are removed** (NOT replaced with hyphens).
+  Example: `My Image (final).PNG` → `my-image-final.png`,
+  `my.report.v2.pdf` → `myreportv2.pdf` (dots in the base are stripped, NOT
+  preserved). The 409 error message echoes the **sanitized** filename, not
+  the client-side name the user picked.
 - `is_referenced` on `AssetResponse` counts ALL `AssetReference` rows for the
   asset — set by item `content_md`, question `text_md` and `explanation_md`,
   AND version `info_md`. The "save then delete" workflow only resolves
@@ -83,23 +87,36 @@ These are deliberately deferred to keep V1 shippable:
     - `versionId: number`
     - `onInsert: (filename: string, mimeType: string) => void`
     - `refreshKey: number` (default 0; any change triggers re-fetch)
-    - `cursorReady: boolean` (default false; controls the "click in the
-      editor to choose where assets will be inserted" first-time banner)
+    - `cursorReady: boolean` (default false; controls the first-time banner
+      visibility — see `MarkdownEditor` state)
+    - `uploading: boolean` (default false; declared `$bindable` — see
+      "Shared `uploading` state" in the Boundary section). When true:
+      sidebar renders its drop-zone overlay AND its file picker is
+      disabled. When sidebar starts/finishes a file-picker or sidebar-drop
+      upload, it sets `uploading` accordingly.
   - Renders the right-rail in Edit mode.
   - Owns: GET listing, file-picker upload, sidebar drop-zone upload, per-row
     click-to-insert, per-row delete (only when `!is_referenced`), inline
-    error region, "Uploading…" transient row, first-time banner.
+    error region (its own — does NOT emit errors upward; errors are
+    contained at the sidebar level and dismissed locally), "Uploading…"
+    transient row, first-time banner, 404-on-delete handling (rare race).
 - **NEW** `frontend/src/lib/assets.ts` — pure helper module for the three
   asset endpoints.
   - `uploadAsset(versionId, file): Promise<AssetResponse>` — **uses raw
     `fetch`**, NOT `api.post`. The existing `api.post` in `lib/api.ts`
     hardcodes `Content-Type: application/json` and `JSON.stringify(body)`,
     which would silently corrupt multipart uploads. `uploadAsset` builds a
-    `FormData` with the file, omits any `Content-Type` header (browser sets
-    the multipart boundary), and includes the same auth-relevant headers
-    `api.ts` uses (`credentials: 'include'`, `X-Requested-With: mathion`).
-    On non-2xx, it constructs an `ApiError` from the response body so callers
-    get the same error shape as the rest of the API layer.
+    `FormData` with the file (field name `file`, matching the FastAPI
+    parameter), omits any `Content-Type` header (browser sets the multipart
+    boundary), and includes the same auth-relevant headers `api.ts` uses
+    (`credentials: 'include'`, `X-Requested-With: mathion`). On non-2xx, it
+    constructs an `ApiError` from the response body so callers get the same
+    error shape as the rest of the API layer. **On 401 specifically, it
+    must replicate the `emitUnauthorized(location.pathname + location.search)`
+    call that `api.ts:request` does internally** — otherwise an expired
+    session mid-upload surfaces as a confusing inline "Not authenticated"
+    error instead of bouncing to login. Either re-export the helper from
+    `api.ts` or duplicate the one-liner.
   - `listAssets(versionId): Promise<AssetResponse[]>` — uses `api.get`.
   - `deleteAsset(assetId): Promise<void>` — uses `api.delete` (which already
     handles 204 returning `Promise<void>`).
@@ -116,21 +133,56 @@ These are deliberately deferred to keep V1 shippable:
     delete-confirm) carrying across Edit↔Preview toggles.
   - `insertAtCursor(text, atOffset?)` helper that reads/writes
     `selectionStart`/`selectionEnd` on the textarea ref. Defined as a local
-    closure — NOT exported via Svelte 5 component bindings (no caller outside
-    the component needs it in V1).
-  - `lastOffset` ($state, initialized to `value.length`): tracks the most
-    recent textarea selection. Updated on textarea `blur` and `selectionchange`
-    events. Used as the fallback insert position when the sidebar fires
-    `onInsert` and the textarea isn't currently focused. Initial value of
-    `value.length` means the first sidebar click before any focus inserts at
-    the end of existing content (predictable rather than position-zero).
-  - `dragover` and `drop` listeners on **both** the textarea AND the outer
-    editor container `<div>`. The outer container is the critical addition:
-    without it, a drop on the editor's gap/border/label area falls through
-    to the browser default and navigates to `file://`, discarding all unsaved
-    edits. The outer-container handlers `preventDefault` and route the file
-    to the sidebar's upload helper (upload-only, no auto-insert) so a slightly
-    miss-aimed drop never destroys work.
+    closure — NOT exported via Svelte 5 component bindings. Tests exercise
+    it indirectly via simulated event paths (drag-drop, sidebar `onInsert`
+    callback), not via a test-only export.
+  - **Internal `$state` variables** (not props):
+    - `lastOffset = $state(value.length)` — tracks the most recent textarea
+      selection. Updated on textarea `blur` and `selectionchange` events.
+      Used as the fallback insert position when the sidebar fires
+      `onInsert` and the textarea isn't currently focused.
+    - `cursorReady = $state(false)` — flips to `true` on the textarea's
+      first `focus` event AND on the first `onInsert` call (whichever
+      comes first — see Edge cases for why first-insert also clears the
+      banner). Forwarded to `<AssetSidebar cursorReady={cursorReady} />`.
+    - `uploading = $state(false)` — true while ANY upload batch is in
+      flight (textarea drop, outer-container drop, sidebar drop-zone,
+      OR sidebar file picker). Forwarded bidirectionally to AssetSidebar
+      via `bind:uploading` (Svelte 5 `$bindable` on the sidebar side) so
+      the sidebar can flip it when its own upload paths start/finish.
+      Used by both components for the "Drop arriving WHILE uploading"
+      overlay state and re-entrancy guards on all drop handlers.
+  - `dragover` and `drop` listeners on **two surfaces**: the textarea AND an
+    **inner edit-content wrapper `<div>` that sits inside the `{#if mode ===
+    'edit' && !readOnly}` block**. The wrapper, NOT the always-rendered
+    outer `.editor` container, hosts the data-loss guard. Why this matters:
+    the existing outer `.editor` wraps the tab strip too — putting listeners
+    on it would catch drops on the Edit/Preview tabs (harmless but ugly in
+    Preview, where the user is reading not editing). Putting them on an
+    inner wrapper inside the Edit-mode conditional ensures the guard is
+    Edit-only by construction.
+  - The DOM structure becomes:
+    ```
+    <div class="editor">                         ← outer (existing)
+      <div class="tabs">...</div>                ← Edit/Preview tabs
+      {#if mode === 'edit' && !readOnly}
+        <div class="edit-content"                ← NEW guard wrapper
+             ondragover={...} ondrop={...}>
+          <textarea ondragover={...}             ← productive path
+                    ondrop={...}>...</textarea>
+          <AssetSidebar ... />
+        </div>
+      {:else if mode === 'preview'}
+        <div class="preview">...</div>
+      {/if}
+    </div>
+    ```
+  - **Event propagation:** the textarea's `drop` handler MUST call
+    `event.stopPropagation()` after handling, OR the `.edit-content` handler
+    must check `event.target !== textareaRef` and bail early. Pick one in
+    implementation; without it, a textarea-on-target drop fires the textarea
+    handler (insert) AND bubbles to the wrapper handler (upload-only) →
+    double upload. Spec recommends `stopPropagation()` for clarity.
   - Textarea drop computes the drop offset via
     `document.caretPositionFromPoint` (Firefox-spec name) with a fallback to
     `document.caretRangeFromPoint` (Chrome/WebKit legacy alias); both
@@ -161,11 +213,22 @@ otherwise be ignored.
 
 | Concern | Owner |
 |---|---|
-| `uploadAsset` / `listAssets` / `deleteAsset` API calls + multipart + error mapping + `AssetResponse` type | `lib/assets.ts` |
-| List rendering, thumbnails, sidebar drop zone, file picker, click-to-insert callback, delete UI | `AssetSidebar.svelte` |
-| Textarea selection (`lastOffset`), cursor, **textarea drag-drop**, **outer-container drag-drop guard**, insertion at offset, conditional sidebar mount, `refreshKey` pass-through | `MarkdownEditor.svelte` |
+| `uploadAsset` / `listAssets` / `deleteAsset` API calls + multipart + error mapping + 401 → emitUnauthorized + `AssetResponse` type | `lib/assets.ts` |
+| List rendering, thumbnails, sidebar drop zone, file picker, click-to-insert callback, delete UI, first-time banner copy | `AssetSidebar.svelte` |
+| `lastOffset`, `cursorReady`, **shared `uploading`** ($bindable), textarea drag-drop, edit-content-wrapper drop guard, `insertAtCursor`, conditional sidebar mount, `refreshKey` pass-through | `MarkdownEditor.svelte` |
 | Save lifecycle (own existing flow), `refreshKey` declaration + bump on success | `ItemEditPage.svelte` (and any future host of `MarkdownEditor`) |
 | Asset reference sync (`AssetReference` rows for item/question/info contexts) | Backend (`render_with_assets`) — unchanged |
+
+**Shared `uploading` state via `$bindable`:** the re-entrancy guard and the
+"Upload in progress" overlay need to coordinate across all four upload entry
+points (textarea drop, edit-content-wrapper drop, sidebar drop zone, sidebar
+file picker). The single source of truth is `MarkdownEditor`'s
+`uploading = $state(false)`, exposed to `AssetSidebar` via
+`bind:uploading` (declared `$bindable` on the sidebar side). When an
+AssetSidebar-path upload starts, the sidebar sets `uploading = true`; when
+done, `false`. MarkdownEditor's textarea/wrapper drop handlers do the same.
+Both components check `uploading` before starting a new batch and refuse to
+re-enter. Both render the overlay while `uploading === true`.
 
 **Why upload logic doesn't live in `AssetSidebar`:** the data flow has two
 upload paths — sidebar drop-zone/file-picker AND textarea drag-drop. Both
@@ -225,10 +288,16 @@ without crossing the component boundary in either direction.
   successfully-uploaded assets and the image-syntax check only needs to
   recognize these three.
   - Format: `\n![{stem}]({filename})\n`.
-  - `{stem}` is the filename with the **last** extension stripped (one dot
-    from the right). Example: `histogram.png` → `histogram`,
-    `my.report.v2.pdf` → `my.report.v2`.
-  - Example: `histogram.png` → `\n![histogram](histogram.png)\n`.
+  - `{filename}` is the **server-returned** value from
+    `AssetResponse.filename` (i.e., the sanitized form). `{stem}` is that
+    sanitized filename with the **last** extension stripped (one dot from
+    the right). Examples (post-sanitization values):
+    - `histogram.png` → stem `histogram` → `\n![histogram](histogram.png)\n`
+    - `my-report-v2.pdf` (client `My Report v2.pdf`) → stem `my-report-v2`
+    - `myreportv2.pdf` (client `my.report.v2.pdf`) → stem `myreportv2`
+  - Because sanitization runs server-side at upload, the frontend never
+    invents the stem from the original client filename — always from
+    `AssetResponse.filename`.
 - **Non-image mime types** → `\n[{filename}]({filename})\n`.
   - Example: `worksheet.pdf` → `\n[worksheet.pdf](worksheet.pdf)\n`.
 - The mime type used for the image-vs-link check comes from the **server's
@@ -249,7 +318,7 @@ without crossing the component boundary in either direction.
   enhancement could prompt for alt text on insert; V1 keeps the path
   click-fast.
 
-### Drop on textarea and outer container
+### Drop on textarea and edit-content wrapper
 
 Two drop targets need handlers, for different reasons:
 
@@ -257,14 +326,20 @@ Two drop targets need handlers, for different reasons:
    the textarea element itself; drop computes a precise offset from
    `caretPositionFromPoint`/`caretRangeFromPoint` (with `lastOffset`
    fallback), uploads, and inserts the markdown reference at that offset.
-2. **Outer container drop** — the **data-loss guard**. `dragover` + `drop`
-   listeners on the outer `.editor` `<div>` so a drop that lands in the
-   editor's border/gap/label area (not on the textarea precisely) does NOT
-   fall through to the browser's default file-handler (which would navigate
-   to `file://` and discard all unsaved edits). The outer-container drop
-   handler treats the file as a sidebar-style upload: upload only, no
-   auto-insert. User can then click the resulting sidebar row to insert if
-   they meant to.
+   The textarea handler calls `event.stopPropagation()` to prevent the
+   wrapper handler below from also firing (would otherwise double-upload).
+2. **Edit-content wrapper drop** — the **data-loss guard**. `dragover` +
+   `drop` listeners on an inner `<div class="edit-content">` wrapper that
+   sits inside `{#if mode === 'edit' && !readOnly}` (NOT on the
+   always-rendered outer `.editor`). A drop that lands on the wrapper's
+   padding / inside the wrapper but not on the textarea does NOT fall
+   through to the browser's default file-handler (which would navigate to
+   `file://` and discard all unsaved edits). The wrapper handler treats
+   the file as a sidebar-style upload: upload only, no auto-insert. User
+   can then click the resulting sidebar row to insert if they meant to.
+   In Preview mode the wrapper isn't rendered (the conditional), so no
+   listeners are active — preview drops fall to the browser default
+   (navigation), acceptable in V1 since admins in Preview aren't editing.
 
 **Textarea drop algorithm:**
 
@@ -311,12 +386,12 @@ progress / error states" below.
 | Empty list (loaded, zero assets) | "No assets yet. Drop a file in the zone below or click it to pick." |
 | Upload in flight (single file) | Transient row at top of list: "Uploading {filename}…" with indeterminate spinner |
 | Upload in flight (multi-file batch from one drop) | Transient row: "Uploading file {N} of {M}…" |
-| Drop arriving WHILE uploading | Sidebar drop zone + textarea both display a momentary `Upload in progress — please wait` overlay state (red border / muted background, 1.5s). New drop is silently discarded — but the user sees they were discarded. |
+| Drop arriving WHILE uploading | Sidebar drop zone + textarea both display a `Upload in progress — please wait` overlay state (red border / muted background) for 1.5s; the dropped file is silently discarded. After the 1.5s the overlay fades, BUT `uploading === true` is still in effect — the sidebar's "Uploading file {N} of {M}…" transient row remains visible as the persistent busy signal. A second drop arriving after the overlay fade but before upload completion is still discarded, and re-shows the 1.5s overlay. The flash overlay signals the rejected drop; the transient row signals "still busy". |
 | Upload error (any) | Inline error region at top of sidebar with server's `detail` text, dismissable via `×`. Multi-file: "Upload stopped at file {N} of {M}" prefix. |
 | Delete error | Same channel as upload error |
 | Disabled-version upload/delete error | Inline error "Version is disabled" + disable drop zone + hide trash icons. Sidebar list itself stays populated since LIST doesn't 403 on disabled. |
 | `used` badge hover | Tooltip: "Remove this reference from content and save to enable delete." Makes the absent trash icon discoverable. |
-| First-time sidebar click before textarea ever focused | Insert proceeds at `lastOffset` (= `value.length`, i.e., end of content). Could be surprising; mitigation: a one-time muted banner at the top of the sidebar — "Click in the editor to choose where assets will be inserted." — visible until the textarea is focused for the first time, then permanently hidden. |
+| First-time sidebar click before textarea ever focused | Insert proceeds at `lastOffset` (= `value.length`, i.e., end of content). A one-time muted banner at the top of the sidebar — "Click in the editor to position the cursor, or new assets will be appended to the end." — is visible until `cursorReady === true` (set on first textarea `focus` OR first `onInsert` call). |
 
 ## Error handling
 
@@ -330,7 +405,7 @@ progress / error states" below.
 | 400 "Total version asset size would exceed limit ({M} bytes)" | Inline error verbatim |
 | 400 "No filename provided" | Inline error verbatim (practically unreachable from the DOM file picker / DataTransfer path) |
 | 403 "Version is disabled" | Inline error + disable upload UI |
-| 409 "Asset '{X}' already exists in this version" | Inline error suggesting "rename and retry". **`{X}` is the SANITIZED filename** (lowercased, non-alphanumeric collapsed to hyphens — e.g., uploading `My Image.PNG` gives an error saying `Asset 'my-image.png' already exists`). No client-side rename in V1. |
+| 409 "Asset '{X}' already exists in this version" | Inline error verbatim PLUS UI hint: "Rename the file on disk and re-upload." (V1 has no in-browser rename.) **`{X}` is the SANITIZED filename**: see the "sanitize_filename" assumption — spaces/underscores become hyphens, other non-`[a-z0-9-]` chars are stripped. E.g., `My Image.PNG` → error references `my-image.png`; `histogram.png` (already sanitized form) → error references `histogram.png` unchanged. |
 | 500 "Failed to write asset to disk" | Inline error + re-fetch list (backend already rolled back the registry row) |
 | Network failure | Inline error "Could not reach server. Check your connection." |
 
@@ -343,8 +418,8 @@ one from the non-2xx response body (since `uploadAsset` uses raw `fetch`, not
 
 `render_with_assets` raises **422 "Referenced assets not found in version:
 …"** when `content_md` references a bare filename with no matching `Asset`
-row. This is a content-save error (from `POST /api/items/{id}` save), NOT an
-asset-upload error. It can occur if:
+row. This is a content-save error (from `PATCH /api/items/{id}` save —
+the existing item-edit endpoint), NOT an asset-upload error. It can occur if:
 
 - The user hand-types `![foo](nonexistent.png)` in the textarea.
 - The user has a typo in a filename (`histogran.png` instead of
@@ -367,16 +442,17 @@ filenames, which is enough to act on. No spec change to the save flow.
   flag (in `MarkdownEditor`) blocks new drops from starting a second loop.
   Discarded drops trigger a 1.5s visual signal (see "Drop arriving WHILE
   uploading" row in the state table).
-- **Drop on outer container vs textarea vs preview:**
+- **Drop on edit-content wrapper vs textarea vs preview:**
   - Textarea drop → uploads + inserts at drop offset (the productive path).
-  - Outer `.editor` container drop → uploads only (data-loss guard); user
-    clicks the resulting sidebar row to insert.
-  - Drop on the rendered preview area (in Preview mode, when the textarea
-    isn't mounted) — no listeners. Browser default behavior (navigates to
-    `file://`). Mitigation: the outer `.editor` container's drop guard fires
-    in Edit mode only; in Preview mode the preview content doesn't have
-    listeners. We accept this for V1 — admins in Preview mode aren't actively
-    editing and the navigation is recoverable.
+    Textarea handler calls `stopPropagation` so the wrapper handler does
+    NOT also fire (no double-upload).
+  - `.edit-content` wrapper drop (anywhere inside the wrapper but not on
+    the textarea precisely) → uploads only (data-loss guard); user clicks
+    the resulting sidebar row to insert.
+  - Drop on the rendered preview area (in Preview mode) — no listeners
+    (the wrapper isn't rendered in Preview, the textarea isn't either).
+    Browser default behavior (navigates to `file://`). Accepted V1
+    tradeoff: admins in Preview mode aren't actively editing.
 - **`onInsert` called while textarea has no focus:** insert at `lastOffset`
   (`$state`), which `MarkdownEditor` maintains via textarea `blur` and
   `selectionchange` handlers. Initial value: `value.length` (end of
@@ -387,10 +463,18 @@ filenames, which is enough to act on. No spec change to the save flow.
   to insert" the natural workflow.
 - **First-time sidebar click before any textarea focus:** insert lands at
   the end of existing content (`lastOffset === value.length`). A one-time
-  muted banner at the top of the sidebar — "Click in the editor to choose
-  where assets will be inserted." — is visible until the textarea is
-  focused for the first time, then permanently hidden for the session.
-  Makes the rule discoverable without forcing a modal.
+  muted banner at the top of the sidebar — "Click in the editor to position
+  the cursor, or new assets will be appended to the end." — is visible
+  until `cursorReady === true`. The banner clears when **either**:
+  (a) the textarea receives its first `focus` event, OR
+  (b) `onInsert` is called for the first time (the user just learned by
+      doing). Both paths set `cursorReady = true`. After clearing, the
+  banner stays hidden for the mount lifetime.
+- **Banner across Edit↔Preview round-trips:** the sidebar is unmounted on
+  Preview-mode toggle and remounted on return. `cursorReady` lives in
+  `MarkdownEditor` (not unmounted by the tab toggle), so it survives the
+  round-trip. The banner stays hidden after first focus, even after
+  switching to Preview and back.
 - **Referenced asset becomes unreferenced after content edit:** the
   `is_referenced` flag reflects `AssetReference` rows server-side. The trash
   icon won't appear until the user saves content_md (or the relevant
@@ -435,6 +519,9 @@ filenames, which is enough to act on. No spec change to the save flow.
 - `uploadAsset` propagates `ApiError` with status + detail for each error
   class (400 ext, 400 size, 400 total-size, 400 no-filename, 403 disabled,
   409 already-exists, 500 disk-write, network failure).
+- `uploadAsset` on 401: calls `emitUnauthorized(location.pathname +
+  location.search)` (mirrors `api.ts:request`) BEFORE throwing. Test
+  stubs the events module and asserts the call.
 - `listAssets`: returns array; uses backend's alphabetical sort (we don't
   re-sort).
 - `deleteAsset`: succeeds on 204. Note: the backend's 409 "is_referenced"
@@ -476,23 +563,37 @@ exist yet); this task creates it from scratch.
 - `lastOffset` tracks textarea `blur` and `selectionchange`. Initial value
   is `value.length`. After programmatic textarea cursor moves, `lastOffset`
   reflects the latest selection.
-- `cursorReady` is `false` on mount and flips to `true` on the textarea's
-  first `focus` event.
+- `cursorReady` is `false` on mount and flips to `true` on EITHER the
+  textarea's first `focus` event OR the first `onInsert` call from the
+  sidebar — verified separately. Once true, stays true for the mount
+  lifetime (survives Edit↔Preview round-trips because `MarkdownEditor`
+  doesn't unmount on tab toggle).
+- `uploading` is `false` on mount. While a textarea-drop batch is in
+  flight, `uploading === true` and a second drop on the textarea is
+  refused (re-entrancy guard) and shows the 1.5s overlay flash.
+- `bind:uploading` two-way: simulate sidebar setting `uploading = true`
+  (e.g., starting a file-picker upload); textarea-drop in the same moment
+  is rejected.
 - Drag-drop on textarea: stub `dataTransfer.files` + `clientX`/`clientY`,
   fire `drop`, assert `uploadAsset` called and text inserted at the
   drop-offset. `document.caretPositionFromPoint` and `caretRangeFromPoint`
   are both stubbed to return a known offset; if both return null, the test
   verifies fallback to `lastOffset`.
-- Drag-drop on outer container (the data-loss guard): fire `dragover` and
-  `drop` on the outer `.editor` `<div>`, assert `preventDefault` is called
-  and `uploadAsset` is called with upload-only behavior (no insertion).
+- Drag-drop on the `.edit-content` wrapper (the data-loss guard): fire
+  `dragover` and `drop` on the wrapper `<div>` (target is the wrapper, not
+  the textarea), assert `preventDefault` is called and `uploadAsset` is
+  called with upload-only behavior (no insertion).
+- **No double-fire on textarea drop:** fire `drop` on the textarea with a
+  realistic event, assert `uploadAsset` is called exactly ONCE (the
+  textarea handler), NOT also by the wrapper handler. Verifies
+  `stopPropagation()` (or equivalent guard) is wired.
 - Re-entrancy guard: while `uploading === true`, a second `drop` does not
   start a second loop; visual signal state is set briefly.
 - Multi-file drop: sequential upload-then-insert; on mid-batch error, the
   loop aborts and the error includes "Upload stopped at file N of M".
 - In `readOnly` mode, no sidebar element is rendered (queried by selector).
 - Sidebar receives forwarded props (`refreshKey`, `versionId`,
-  `cursorReady`, `onInsert`).
+  `cursorReady`, `onInsert`, `bind:uploading`).
 
 ### Manual smoke (in the eventual plan's final task)
 
@@ -500,53 +601,70 @@ exist yet); this task creates it from scratch.
    thumbnail.
 2. Click the image row → markdown reference appears in textarea at the
    current cursor. Switch to Preview → image renders.
-3. **First-time banner**: open a fresh item where you haven't clicked the
-   textarea yet. Confirm the "Click in the editor to choose where assets
-   will be inserted" banner is visible. Click in the textarea — banner
-   disappears. Don't refocus the textarea between tests in this scenario.
-4. **Click-with-no-focus fallback**: as a continuation, open another fresh
-   item and immediately (without clicking the textarea) click a sidebar
-   row. Verify the markdown reference is inserted at the end of existing
-   content (`lastOffset === value.length`).
+3. **First-time banner — focus path**: hard-reload the page on an item
+   where you haven't clicked the textarea. Confirm the banner is visible:
+   "Click in the editor to position the cursor, or new assets will be
+   appended to the end." Click in the textarea — banner disappears.
+4. **First-time banner — insert path**: hard-reload (full page reload, NOT
+   same-tab navigation) and immediately click a sidebar row WITHOUT
+   clicking the textarea. Verify the reference is inserted at the END of
+   existing content. Verify the banner ALSO clears after this first
+   insert (the second clear-path).
 5. **Textarea drop**: drag an image into a specific position inside the
-   textarea (e.g., mid-paragraph). Verify the inserted markdown appears on
-   the line corresponding to the drop point, NOT at the end.
-6. **Outer-container drop guard**: drag a file and drop it 10px ABOVE the
-   textarea (on the editor's border/padding area). Verify the browser does
-   NOT navigate away (no `file://` redirect, unsaved edits intact) and the
-   file appears in the sidebar (upload only, no insert).
-7. **Same-filename re-upload**: drop the SAME filename twice → second drop
-   triggers a 409 inline error in sidebar. Note: the error message uses
-   the **sanitized** filename (e.g., `my-image.png`).
-8. **Disallowed extension**: drop a `.exe` (or any extension not in the
-   backend's `ALLOWED_EXTENSIONS`) → 400 inline error.
-9. **Oversize file**: drop a file larger than `max_file_size` → 400 inline
-   error with byte numbers (raw integers, no KB/MB units in V1).
-10. **Reference + save + sidebar refresh**: reference an asset in
+   textarea (e.g., mid-paragraph). Verify (a) the inserted markdown
+   appears on the line corresponding to the drop point, NOT at the end,
+   and (b) the inserted text is preceded and followed by blank lines (the
+   `\n…\n` wrap), with the text before and after the drop point intact.
+6. **Edit-content-wrapper drop guard**: drag a file and drop it 10px ABOVE
+   the textarea (on the wrapper's padding area, NOT on the textarea).
+   Verify the browser does NOT navigate away (no `file://` redirect,
+   unsaved edits intact) and the file appears in the sidebar (upload only,
+   no insert).
+7. **No double-fire on textarea drop**: drop a single file precisely on
+   the textarea. Verify the asset list grows by exactly ONE row (not two),
+   confirming the textarea handler's `stopPropagation` prevents the
+   wrapper handler from firing for the same event.
+8. **Same-filename re-upload**: drop the SAME filename twice → second
+   drop triggers a 409 inline error. Verify the error message uses the
+   **sanitized** filename and includes the hint "Rename the file on disk
+   and re-upload."
+9. **Disallowed extension**: drop a `.exe` → 400 inline error.
+10. **Oversize file**: drop a file larger than `max_file_size` → 400 inline
+    error with byte numbers (raw integers, no KB/MB units in V1).
+11. **Reference + save + sidebar refresh**: reference an asset in
     content_md, save. Verify the sidebar refreshes via `refreshKey`, the
     `used` badge appears, and the trash icon disappears. Hover the badge →
     tooltip explains the workflow.
-11. **Unreference + save**: remove the reference from content_md, save.
+12. **Unreference + save**: remove the reference from content_md, save.
     Verify the `used` badge disappears and the trash icon (on hover) is
     back. Click trash → inline confirm → delete → row disappears.
-12. **Multi-file drop with mid-batch error**: drop 5 files at once where
-    one is oversize. Verify files before the error are uploaded and
-    inserted; files after the error are NOT. Error message says "Upload
-    stopped at file N of 5".
-13. **Drop-while-uploading**: drop a big file (slow upload), then drop a
-    second file mid-upload. Verify the second drop is discarded with a
-    visual signal (1.5s overlay) — NOT silently lost.
-14. **Edit → Preview → Edit round-trip**: upload a file in Edit mode,
-    switch to Preview, switch back. Verify the new file is still in the
-    sidebar (list re-fetches on remount; no stale state like an open
-    delete-confirm carries over).
-15. **Save 422 (cross-channel)**: type `![ghost](does-not-exist.png)` in
-    the textarea and save. Verify the 422 surfaces via the existing item
-    save-error path (not in the sidebar). Sidebar's existing list is
-    unchanged.
-16. **Disabled version**: disable the version via the version-meta panel,
-    then return to an item edit. Verify the sidebar is not rendered
-    (readOnly mode). Re-enable, return: sidebar comes back.
+13. **Multi-file drop with mid-batch 400**: drop 5 files at once where one
+    is oversize. Verify files before the error are uploaded and inserted;
+    files after the error are NOT. Error message includes "Upload stopped
+    at file N of 5".
+14. **Multi-file drop with mid-batch network failure**: drop 3 files;
+    DevTools → Network → Offline mid-batch. Verify the message begins
+    "Could not reach server" with the "Upload stopped at file N of 3"
+    context.
+15. **Drop-while-uploading**: open DevTools → Network → Slow 3G (or
+    equivalent throttling, since a local upload completes too fast
+    otherwise). Drop a file, then drop a second file mid-upload. Verify
+    the second drop is discarded with the 1.5s overlay flash, while the
+    "Uploading…" transient row remains visible the entire time.
+16. **Edit → Preview → Edit round-trip**: upload a file in Edit mode,
+    switch to Preview, switch back. Verify (a) the new file is still in
+    the sidebar (list re-fetches on remount), (b) no stale state like an
+    open delete-confirm carries over, (c) the first-time banner stays
+    hidden if it was previously cleared (`cursorReady` survives the
+    round-trip because it lives in `MarkdownEditor`, not the sidebar).
+17. **Save 422 (cross-channel)**: type `![ghost](does-not-exist.png)` in
+    the textarea and save (PATCH). Verify the 422 surfaces via the
+    existing item save-error path (not in the sidebar). Sidebar's
+    existing list is unchanged.
+18. **Disabled version**: disable the version via the version-meta panel,
+    then navigate away from the item and return (or full page reload).
+    Verify the sidebar is not rendered (readOnly mode). Re-enable, return:
+    sidebar comes back.
 
 ## Data flow summary
 
@@ -573,12 +691,14 @@ ItemEditPage → refreshKey++  (after the eventual content save)
 AssetSidebar (via prop change) → listAssets() → re-render with new is_referenced
 ```
 
-### Drop on outer container (data-loss guard)
+### Drop on .edit-content wrapper (data-loss guard)
 
 ```
-User drops file.png slightly off the textarea (border, gap, label area)
+User drops file.png slightly off the textarea (inside the Edit-mode wrapper
+but not on the textarea itself — e.g., padding, gap between textarea and
+sidebar, sidebar's empty area outside the drop zone)
   ↓
-.editor outer div: dragover preventDefault, drop preventDefault
+.edit-content div: dragover preventDefault, drop preventDefault
   ↓ (prevents browser navigation to file://)
 lib/assets.ts → uploadAsset(versionId, file)
   ↓
@@ -588,6 +708,9 @@ Backend: returns AssetResponse
   ↓
 AssetSidebar → listAssets() → re-render with new row
   (no auto-insert — user clicks to insert if intended)
+
+Note: textarea's own drop handler calls stopPropagation, so a precise drop
+on the textarea does NOT also fire this wrapper handler.
 ```
 
 ### Sidebar click → insert
@@ -640,7 +763,7 @@ AssetSidebar → listAssets() → re-render without the deleted row
 | `frontend/src/tests/assets.test.ts` | NEW | ~150 |
 | `frontend/src/components/editor/AssetSidebar.svelte` | NEW | ~220 (template + script + style; first-time banner adds ~15 LoC over the prior estimate) |
 | `frontend/src/tests/AssetSidebar.test.ts` | NEW | ~220 |
-| `frontend/src/components/editor/MarkdownEditor.svelte` | MODIFIED | +80 / -10 (layout shift + drag-drop on both surfaces + lastOffset / cursorReady state + sidebar mount) |
+| `frontend/src/components/editor/MarkdownEditor.svelte` | MODIFIED | +100 / -10 (DOM restructure with edit-content wrapper, two drag-drop surfaces with stopPropagation, lastOffset / cursorReady / uploading state, sidebar mount + bind:uploading) |
 | `frontend/src/tests/MarkdownEditor.test.ts` | NEW | ~120 |
 | `frontend/src/pages/editor/ItemEditPage.svelte` | MODIFIED | +4 / -0 (state declaration + prop forward + bump in save success branch) |
 
