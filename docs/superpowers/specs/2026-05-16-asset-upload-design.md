@@ -97,12 +97,35 @@ These are deliberately deferred to keep V1 shippable:
       sidebar renders its drop-zone overlay AND its file picker is
       disabled. When sidebar starts/finishes a file-picker or sidebar-drop
       upload, it sets `uploading` accordingly.
+    - `uploadProgress: { current: number; total: number; filename: string } | null`
+      (default null; declared `$bindable`). Drives the "Uploading file
+      {N} of {M}…" / "Uploading {filename}…" transient row at the top
+      of the list. Written by EVERY upload entry point (textarea drop,
+      wrapper drop in `MarkdownEditor`; sidebar drop zone, sidebar
+      file picker in `AssetSidebar`) — both components write through
+      this shared state so the sidebar renders one canonical progress
+      row regardless of which entry point started the upload. Reset to
+      `null` in the upload loop's `try/finally`.
+    - `uploadError: { detail: string; stoppedAt?: { n: number; m: number } } | null`
+      (default null; declared `$bindable`). Drives the inline error
+      region. `detail` is the verbatim server `detail` string (or the
+      network-failure copy). `stoppedAt` is set ONLY for multi-file
+      batches where the batch was halted mid-loop — sidebar renders
+      "Upload stopped at file {n} of {m}" as a prefix on the error
+      detail. Written by every upload entry point; dismissed by the
+      user via the `×` button (which the sidebar owns) → sets
+      `uploadError = null`.
   - Renders the right-rail in Edit mode.
   - Owns: GET listing, file-picker upload, sidebar drop-zone upload, per-row
-    click-to-insert, per-row delete (only when `!is_referenced`), inline
-    error region (its own — does NOT emit errors upward; errors are
-    contained at the sidebar level and dismissed locally), "Uploading…"
-    transient row, first-time banner, 404-on-delete handling (rare race).
+    click-to-insert, per-row delete (only when `!is_referenced`),
+    **rendering** of the inline error region and the "Uploading…"
+    transient row (the underlying state is shared via `$bindable
+    uploadProgress` and `$bindable uploadError`), first-time banner,
+    404-on-delete handling (rare race). The sidebar is the **sole
+    render site** for upload progress and upload errors — even when
+    the upload originated in `MarkdownEditor`'s textarea/wrapper drop
+    handlers. This keeps one canonical UI location for upload status,
+    regardless of entry point.
 - **NEW** `frontend/src/lib/assets.ts` — pure helper module for the three
   asset endpoints.
   - `uploadAsset(versionId, file): Promise<AssetResponse>` — **uses raw
@@ -179,6 +202,24 @@ These are deliberately deferred to keep V1 shippable:
       the sidebar can flip it when its own upload paths start/finish.
       Used by both components for the "Drop arriving WHILE uploading"
       overlay state and re-entrancy guards on all drop handlers.
+    - `uploadProgress = $state<UploadProgress | null>(null)` —
+      `{ current, total, filename }` while a batch is in flight;
+      `null` otherwise. Forwarded to AssetSidebar via
+      `bind:uploadProgress` ($bindable two-way). Written by
+      MarkdownEditor's textarea-drop and wrapper-drop handlers as
+      they advance through the sequential loop; written by AssetSidebar's
+      file-picker and sidebar-drop handlers similarly. Reset to `null`
+      in the upload loop's `try/finally` block. The sidebar is the
+      sole render site (transient row at top of list).
+    - `uploadError = $state<UploadError | null>(null)` —
+      `{ detail, stoppedAt? }` after a failed upload; `null` otherwise.
+      Forwarded to AssetSidebar via `bind:uploadError` ($bindable
+      two-way). Written by MarkdownEditor on its own upload paths
+      (with `stoppedAt: { n, m }` set when a multi-file batch halted
+      mid-loop); written by AssetSidebar on its own paths similarly.
+      Cleared on user dismiss (the sidebar owns the `×` button which
+      sets `uploadError = null`) or on the next successful upload's
+      `try/finally` reset.
       **TOCTOU avoidance — set `uploading = true` SYNCHRONOUSLY** at the
       top of every upload entry point (textarea drop handler, wrapper
       drop handler, sidebar drop handler, sidebar file-picker change
@@ -227,18 +268,49 @@ These are deliberately deferred to keep V1 shippable:
     single drop on either inner element fires its own handler AND the
     wrapper handler → double upload + double `refreshKey++`. Required
     discipline:
-    1. **Textarea `drop` handler** MUST call `event.stopPropagation()`
-       after handling its drop (productive path: insert + upload +
-       refreshKey++).
-    2. **AssetSidebar's sidebar-drop-zone `drop` handler** MUST also
-       call `event.stopPropagation()` after handling its drop (sidebar
-       upload-success closure refreshes the list internally — bubbling
-       to the wrapper would cause a redundant `refreshKey++` and a
-       second upload of the same file).
+    1. **Textarea `drop` handler** MUST call
+       `event.preventDefault(); event.stopPropagation();` as its
+       **first synchronous work**, BEFORE the `if (uploading) … return`
+       re-entrancy guard, BEFORE setting `uploading = true`, and
+       BEFORE the first `await`. DOM propagation is synchronous —
+       calling `stopPropagation()` after `await uploadAsset(...)` is too
+       late; by then the wrapper handler has already fired.
+    2. **AssetSidebar's sidebar-drop-zone `drop` handler** MUST do the
+       same: `event.preventDefault(); event.stopPropagation();` as the
+       first synchronous statements, before guards or awaits. Without
+       this, a sidebar drop bubbles to the wrapper and triggers a
+       redundant upload + `refreshKey++`.
     3. **`.edit-content` wrapper `drop` handler** runs only for drops
-       that landed neither on the textarea nor in the sidebar drop
-       zone (i.e., the data-loss guard catches drops on padding /
-       gaps). It uploads + bumps `refreshKey++`.
+       that landed neither on the textarea nor in the sidebar (i.e.,
+       the data-loss guard catches drops on padding / gaps). It also
+       starts with `event.preventDefault();` (no stopPropagation needed
+       since it's the outermost guarded element).
+
+    The canonical drop-handler shape:
+
+    ```ts
+    function handleDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();          // ← synchronous, first
+      if (uploading) {
+        // show 1.5s flash, return
+        return;
+      }
+      uploading = true;             // ← synchronous, before any await
+      try {
+        for (const file of files) {
+          uploadProgress = { current: i+1, total, filename: file.name };
+          await uploadAsset(...);    // ← first await goes here
+          // ...
+        }
+      } catch (err) {
+        uploadError = { detail: err.detail, stoppedAt: { n, m } };
+      } finally {
+        uploading = false;
+        uploadProgress = null;
+      }
+    }
+    ```
 
     Spec recommends `stopPropagation()` on the two inner handlers (the
     pattern is symmetric and self-documenting) rather than the
@@ -293,8 +365,8 @@ otherwise be ignored.
 | Concern | Owner |
 |---|---|
 | `uploadAsset` / `listAssets` / `deleteAsset` API calls + multipart + error mapping + 401 → emitUnauthorized + `AssetResponse` type | `lib/assets.ts` |
-| List rendering, thumbnails, sidebar drop zone, file picker, click-to-insert callback, delete UI, first-time banner copy | `AssetSidebar.svelte` |
-| `lastOffset`, `cursorReady` (one-way), **shared `uploading`** ($bindable, synchronous-write), textarea drag-drop, edit-content-wrapper drop guard, `insertAtCursor` (with null-textarea guard), conditional sidebar mount, **`refreshKey` bump on textarea/wrapper drop upload success** ($bindable two-way with `ItemEditPage`), `formatRef` import from `lib/assets.ts` | `MarkdownEditor.svelte` |
+| List rendering, thumbnails, sidebar root-level + drop-zone drop handling (synchronous stopPropagation), file picker, click-to-insert callback, delete UI, first-time banner copy, **rendering** of "Uploading…" transient row and inline error region (state shared via $bindable) | `AssetSidebar.svelte` |
+| `lastOffset`, `cursorReady` (one-way), **shared `uploading`** ($bindable, synchronous-write), **shared `uploadProgress`** ($bindable), **shared `uploadError`** ($bindable), textarea drag-drop (synchronous stopPropagation), edit-content-wrapper drop guard, `insertAtCursor` (with null-textarea guard), conditional sidebar mount, **`refreshKey` bump on textarea/wrapper drop upload success** ($bindable two-way with `ItemEditPage`), `formatRef` import from `lib/assets.ts` | `MarkdownEditor.svelte` |
 | Save lifecycle (own existing flow), `refreshKey` declaration + `bind:refreshKey` forward + bump on save success | `ItemEditPage.svelte` (and any future host of `MarkdownEditor`) |
 | Asset reference sync (`AssetReference` rows for item/question/info contexts) | Backend (`render_with_assets`) — unchanged |
 
@@ -316,24 +388,38 @@ shape is:
 
 ```ts
 function handleDrop(e) {
-  if (uploading) { /* show flash, return */ return; }
+  e.preventDefault();
+  e.stopPropagation();               // synchronous, FIRST — before guards
+  if (uploading) { /* show 1.5s flash, return */ return; }
   uploading = true;                  // synchronous, same tick as the guard
   try {
-    for (const file of files) {
-      await uploadAsset(...);         // first await — only AFTER the write
-      // ...
+    const files = Array.from(e.dataTransfer.files);
+    for (let i = 0; i < files.length; i++) {
+      uploadProgress = { current: i + 1, total: files.length, filename: files[i].name };
+      const asset = await uploadAsset(...);   // first await
+      // entry-point-specific work: insertAtCursor + refreshKey++ for
+      // textarea drop; refreshKey++ only for wrapper drop; listAssets()
+      // for sidebar paths.
     }
+  } catch (err) {
+    uploadError = {
+      detail: err.detail ?? 'Could not reach server. Check your connection.',
+      stoppedAt: files.length > 1 ? { n: i + 1, m: files.length } : undefined,
+    };
   } finally {
     uploading = false;
+    uploadProgress = null;
   }
 }
 ```
 
-Without this, two near-simultaneous drops (e.g., user double-drops a file
-in <16ms) both pass the guard before either writes the flag, producing
-concurrent upload loops. Re-entrancy guards in `AssetSidebar`'s
-file-picker change handler and sidebar drop handler follow the same
-shape.
+Without the synchronous flag write, two near-simultaneous drops (e.g.,
+user double-drops a file in <16ms) both pass the guard before either
+writes the flag, producing concurrent upload loops. Without synchronous
+`stopPropagation()`, a single inner-element drop bubbles to the wrapper
+handler before any `await` returns, causing double upload. Re-entrancy
+guards in `AssetSidebar`'s file-picker change handler and sidebar drop
+handler follow the same shape.
 
 **Why upload logic doesn't live in `AssetSidebar`:** the data flow has two
 upload paths — sidebar drop-zone/file-picker AND textarea drag-drop. Both
@@ -488,15 +574,30 @@ progress / error states" below.
   helper. No insertion — the file just appears in the list after upload
   (sidebar's own `listAssets()` re-fetch on upload-success). User clicks
   to insert later.
-- **The `drop` handler MUST call `event.stopPropagation()` after
-  handling.** AssetSidebar is rendered inside the `.edit-content` wrapper
-  (which has its own data-loss-guard drop handler), so without
-  stopPropagation a sidebar-drop bubbles to the wrapper and triggers a
-  redundant upload + `refreshKey++`. The sidebar already refreshes its
-  list internally via its upload-success closure; the wrapper bump would
-  be a second re-fetch of the same data plus a second upload of the same
-  file. The textarea drop handler enforces the same discipline (see
-  MarkdownEditor's "Event propagation" note).
+- **The `drop` handler MUST call `event.stopPropagation()` synchronously
+  as its first work**, before the re-entrancy guard, the
+  `uploading = true` write, or any `await`. DOM propagation is
+  synchronous — stopping it after an awaited upload is too late, by
+  which point the wrapper handler has already fired. AssetSidebar is
+  rendered inside the `.edit-content` wrapper (which has its own
+  data-loss-guard drop handler), so without synchronous stopPropagation
+  a sidebar-drop bubbles to the wrapper and triggers a redundant
+  upload + `refreshKey++`. The textarea drop handler enforces the same
+  discipline — see the canonical drop-handler shape in MarkdownEditor's
+  "Event propagation" note.
+- **Drops on AssetSidebar descendants outside the drop zone** — asset
+  rows, the list-empty area, the first-time banner, the error region:
+  these all bubble through the sidebar's root `<aside>` (or equivalent
+  root element). Spec choice: install a root-level `dragover` +
+  `drop` handler on AssetSidebar's root element with the same
+  synchronous `stopPropagation()` discipline. The root handler is
+  upload-only (no insert) and routes through the same upload helper
+  as the drop zone. The drop zone is still rendered as the discoverable
+  affordance, but drops anywhere inside the sidebar boundary behave
+  consistently (upload, appear in list). This is simpler than trying
+  to discriminate "drop zone vs everywhere else" and matches user
+  intuition: a drop inside the visible sidebar boundary is meant for
+  the sidebar.
 
 ### Sort & filter
 
@@ -671,13 +772,25 @@ filenames, which is enough to act on. No spec change to the save flow.
 - Renders the list returned by `listAssets` on mount.
 - Click on a row calls `onInsert(filename, mimeType)` where `mimeType` is
   the server's value from the asset row (not the client `File.type`).
-- File picker → calls `uploadAsset` → refreshes list.
-- Drop on sidebar drop zone → same upload path.
+- File picker → calls `uploadAsset` → writes `uploadProgress` /
+  `uploadError` through $bindable → refreshes list via own closure.
+- Drop on sidebar drop zone → same upload path. Verify the handler
+  calls `stopPropagation` synchronously (assert via spy that
+  `stopPropagation` was called BEFORE `uploadAsset` started awaiting).
+- Drop on sidebar root (anywhere inside the sidebar `<aside>` but not
+  on the drop zone, e.g., on a list row's empty area) → same upload
+  path, no insertion.
 - Trash icon hidden when `is_referenced === true`; the `used` badge is
   visible with the tooltip text. Trash visible (on hover) when
   `is_referenced === false`. Click → inline confirm → `deleteAsset` → refresh.
-- Each error state renders the server's `detail` text verbatim, prefixed
-  with "Upload stopped at file N of M" when applicable.
+- **Transient row from shared `uploadProgress`:** mount sidebar with
+  `uploadProgress = { current: 2, total: 5, filename: 'foo.png' }` →
+  asserts "Uploading file 2 of 5…" row renders.
+- **Inline error region from shared `uploadError`:** mount with
+  `uploadError = { detail: 'File size … exceeds max …', stoppedAt: { n: 3, m: 5 } }`
+  → asserts "Upload stopped at file 3 of 5: File size … exceeds max …"
+  renders. Click `×` button → assert `uploadError` is written to `null`
+  through the $bindable.
 - `refreshKey` prop change (any change, not just increment) triggers a
   re-fetch.
 - Banner copy "Click in the editor to position the cursor, or new assets
@@ -765,11 +878,39 @@ exist yet); this task creates it from scratch.
 - Multi-file drop: sequential upload-then-insert; on mid-batch error, the
   loop aborts and the error includes "Upload stopped at file N of M".
 - In `readOnly` mode, no sidebar element is rendered (queried by selector).
-- Sidebar receives forwarded props (`refreshKey`, `versionId`,
-  `cursorReady`, `onInsert`, `bind:uploading`). Note: `refreshKey` is
-  forwarded as a regular prop to `AssetSidebar` (one-way down — the
-  sidebar reads but does not write); the `$bindable` two-way is between
-  `MarkdownEditor` and `ItemEditPage` (its parent host).
+- Sidebar receives forwarded props: `refreshKey` (as regular one-way
+  prop to the sidebar; the `$bindable` two-way is between
+  `MarkdownEditor` and `ItemEditPage`), `versionId`, `cursorReady`,
+  `onInsert`, `bind:uploading`, `bind:uploadProgress`,
+  `bind:uploadError`.
+- **Shared `uploadProgress` write from MarkdownEditor:** simulate a
+  textarea-drop batch in flight; assert that as the loop advances,
+  `uploadProgress` is written with `{ current, total, filename }` and
+  that the sidebar's transient row reflects the latest values. After
+  the batch (success or error) `uploadProgress === null`.
+- **Shared `uploadError` write from MarkdownEditor:** simulate a
+  multi-file textarea-drop where the 3rd of 5 files errors; assert
+  `uploadError === { detail: '<server detail>', stoppedAt: { n: 3, m: 5 } }`
+  and the sidebar's error region renders "Upload stopped at file 3 of
+  5: <detail>". Simulate the user clicking the sidebar `×` dismiss
+  button and assert `uploadError === null` (the sidebar writes through
+  the $bindable).
+
+### `ItemEditPage.svelte` tests (vitest + jsdom)
+
+The existing ItemEditPage test file covers save flow. This task adds:
+
+- `refreshKey` declared as `$state(0)` and forwarded via
+  `bind:refreshKey` to `MarkdownEditor`.
+- After a successful save (`result === 'ok'` branch), `refreshKey` is
+  bumped exactly once.
+- After a failed save (non-ok result), `refreshKey` is NOT bumped.
+- On the user discarding edits (or any other non-save exit), `refreshKey`
+  is NOT bumped.
+- `bind:refreshKey` round-trip: simulate `MarkdownEditor` writing
+  `refreshKey++` (as it does on textarea/wrapper drop upload success);
+  assert the parent `ItemEditPage`'s state is updated (no separate
+  re-render path needed — Svelte 5 reactivity handles it).
 
 ### Manual smoke (in the eventual plan's final task)
 
@@ -961,9 +1102,10 @@ AssetSidebar → listAssets() → re-render without the deleted row
 | `frontend/src/tests/assets.test.ts` | NEW | ~150 |
 | `frontend/src/components/editor/AssetSidebar.svelte` | NEW | ~220 (template + script + style; first-time banner adds ~15 LoC over the prior estimate) |
 | `frontend/src/tests/AssetSidebar.test.ts` | NEW | ~220 |
-| `frontend/src/components/editor/MarkdownEditor.svelte` | MODIFIED | +100 / -10 (DOM restructure with edit-content wrapper, two drag-drop surfaces with stopPropagation, lastOffset / cursorReady / uploading state, sidebar mount + bind:uploading) |
-| `frontend/src/tests/MarkdownEditor.test.ts` | NEW | ~120 |
-| `frontend/src/pages/editor/ItemEditPage.svelte` | MODIFIED | +4 / -0 (state declaration + prop forward + bump in save success branch) |
+| `frontend/src/components/editor/MarkdownEditor.svelte` | MODIFIED | +110 / -10 (DOM restructure with edit-content wrapper, three drag-drop surfaces with synchronous stopPropagation, lastOffset / cursorReady / uploading / uploadProgress / uploadError state, sidebar mount + bind:uploading + bind:uploadProgress + bind:uploadError + bind:refreshKey) |
+| `frontend/src/tests/MarkdownEditor.test.ts` | NEW | ~150 (added: shared progress/error write tests, sidebar drop bubble test) |
+| `frontend/src/pages/editor/ItemEditPage.svelte` | MODIFIED | +4 / -0 (state declaration + `bind:refreshKey` forward + bump in save success branch) |
+| `frontend/src/tests/ItemEditPage.test.ts` | MODIFIED | +30 (new focused tests for `refreshKey` save-success bump and `bind:refreshKey` round-trip — only if the existing test file is structured to accommodate; otherwise NEW `ItemEditPage.refreshKey.test.ts` ~40 LoC) |
 
 Test files all live in `frontend/src/tests/` (matching the existing
 convention — `accordionHeader.svelte.test.ts`, `api.test.ts`,
@@ -997,7 +1139,8 @@ Likely 6-7 tasks in the plan:
 5. `MarkdownEditor.svelte` textarea drag-drop + outer-container drop guard
    + re-entrancy guard + multi-file sequential loop + tests.
 6. `ItemEditPage.svelte` `refreshKey` declaration + `bind:refreshKey`
-   forward + bump on save success.
+   forward + bump on save success + focused tests (save-success bumps,
+   non-save paths don't, $bindable round-trip).
 7. Final verification: pytest unchanged, svelte-check, vitest, manual
    smoke (18 steps above).
 
