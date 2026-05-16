@@ -150,9 +150,11 @@ These are deliberately deferred to keep V1 shippable:
     **Null-textarea guard:** if the textarea ref is `null` at call time
     (Edit→Preview switched mid-upload while a background upload was still
     awaiting), `insertAtCursor` must early-return without throwing. The
-    in-flight upload completes silently — list still refreshes via the
-    sidebar's own upload-success path, just no markdown insert. User
-    returns to Edit and clicks the (now visible) sidebar row to insert
+    in-flight upload completes silently — the `refreshKey++` bump
+    (which runs in the textarea-drop handler **after** `uploadAsset`
+    resolves, regardless of whether `insertAtCursor` no-ops) still
+    happens, so when the user returns to Edit the sidebar shows the
+    new asset row. User then clicks the (now visible) row to insert
     manually.
   - **Internal `$state` variables** (not props):
     - `lastOffset = $state(value.length)` — tracks the most recent textarea
@@ -219,12 +221,30 @@ These are deliberately deferred to keep V1 shippable:
     Edit/Preview content row) down to `.edit-content`. Outer `.editor`
     keeps `display: flex; flex-direction: column;` so the tab strip
     stacks above the edit-content row.
-  - **Event propagation:** the textarea's `drop` handler MUST call
-    `event.stopPropagation()` after handling, OR the `.edit-content` handler
-    must check `event.target !== textareaRef` and bail early. Pick one in
-    implementation; without it, a textarea-on-target drop fires the textarea
-    handler (insert) AND bubbles to the wrapper handler (upload-only) →
-    double upload. Spec recommends `stopPropagation()` for clarity.
+  - **Event propagation:** `<AssetSidebar />` is nested inside the
+    `.edit-content` wrapper, so DOM drop events on the sidebar AND on the
+    textarea both bubble up to the wrapper handler. Without guards, a
+    single drop on either inner element fires its own handler AND the
+    wrapper handler → double upload + double `refreshKey++`. Required
+    discipline:
+    1. **Textarea `drop` handler** MUST call `event.stopPropagation()`
+       after handling its drop (productive path: insert + upload +
+       refreshKey++).
+    2. **AssetSidebar's sidebar-drop-zone `drop` handler** MUST also
+       call `event.stopPropagation()` after handling its drop (sidebar
+       upload-success closure refreshes the list internally — bubbling
+       to the wrapper would cause a redundant `refreshKey++` and a
+       second upload of the same file).
+    3. **`.edit-content` wrapper `drop` handler** runs only for drops
+       that landed neither on the textarea nor in the sidebar drop
+       zone (i.e., the data-loss guard catches drops on padding /
+       gaps). It uploads + bumps `refreshKey++`.
+
+    Spec recommends `stopPropagation()` on the two inner handlers (the
+    pattern is symmetric and self-documenting) rather than the
+    alternative `event.target !== ...` filter approach in the wrapper
+    handler. Either approach must be wired or a single drop will fire
+    two upload paths.
   - Textarea drop computes the drop offset via
     `document.caretPositionFromPoint` (Firefox-spec name) with a fallback to
     `document.caretRangeFromPoint` (Chrome/WebKit legacy alias); both
@@ -236,16 +256,19 @@ These are deliberately deferred to keep V1 shippable:
   - `refreshKey: number` is a **`$bindable` prop** (Svelte 5 two-way),
     forwarded to `AssetSidebar` and to `ItemEditPage` (via
     `bind:refreshKey`). Default `0`; sidebar re-fetches on **any change**
-    to the prop (so `++` is the natural mutation pattern). Two writers:
+    to the prop (so `++` is the natural mutation pattern). **Three write
+    sites:**
     (a) `ItemEditPage` bumps after a successful content save (drives
-    `is_referenced` re-evaluation), AND (b) `MarkdownEditor`'s textarea
-    and wrapper drop handlers bump after each successful upload (drives
-    the new asset to appear in the sidebar list for upload paths that
-    don't run inside `AssetSidebar`). Sidebar-initiated uploads (file
-    picker, sidebar drop zone) refresh via the sidebar's own
-    upload-success closure and do NOT bump `refreshKey` (would double-
-    fetch). This is the single signal that ties all upload paths to a
-    list refresh.
+    `is_referenced` re-evaluation),
+    (b) `MarkdownEditor`'s textarea drop handler bumps after each
+    successful upload, and
+    (c) `MarkdownEditor`'s `.edit-content` wrapper drop handler bumps
+    after each successful upload (both (b) and (c) drive the new asset
+    to appear in the sidebar list for upload paths that don't run
+    inside `AssetSidebar`). Sidebar-initiated uploads (file picker,
+    sidebar drop zone) refresh via the sidebar's own upload-success
+    closure and do NOT bump `refreshKey` (would double-fetch). This is
+    the single signal that ties all upload paths to a list refresh.
 - **MODIFIED** `frontend/src/pages/editor/ItemEditPage.svelte` — adds a
   `let refreshKey = $state(0)` declaration, forwards it via
   `<MarkdownEditor bind:refreshKey={refreshKey} />` ($bindable two-way),
@@ -462,8 +485,18 @@ progress / error states" below.
 ### Drop on sidebar
 
 - Same `dragover`/`drop` handlers on the sidebar's drop zone. Same upload
-  helper. No insertion — the file just appears in the list after upload. User
-  clicks to insert later.
+  helper. No insertion — the file just appears in the list after upload
+  (sidebar's own `listAssets()` re-fetch on upload-success). User clicks
+  to insert later.
+- **The `drop` handler MUST call `event.stopPropagation()` after
+  handling.** AssetSidebar is rendered inside the `.edit-content` wrapper
+  (which has its own data-loss-guard drop handler), so without
+  stopPropagation a sidebar-drop bubbles to the wrapper and triggers a
+  redundant upload + `refreshKey++`. The sidebar already refreshes its
+  list internally via its upload-success closure; the wrapper bump would
+  be a second re-fetch of the same data plus a second upload of the same
+  file. The textarea drop handler enforces the same discipline (see
+  MarkdownEditor's "Event propagation" note).
 
 ### Sort & filter
 
@@ -675,8 +708,10 @@ exist yet); this task creates it from scratch.
 - `insertAtCursor` null-textarea guard: simulate Edit→Preview toggle
   while an upload promise is still pending (textarea ref becomes null),
   then resolve the upload. Verify `insertAtCursor` returns silently
-  without throwing and the list still refreshes via the sidebar's own
-  upload-success refresh path.
+  without throwing AND `refreshKey++` still fires (so the sidebar sees
+  the new asset when the user returns to Edit). The
+  refreshKey bump happens in the drop handler after `uploadAsset`
+  resolves, separately from the `insertAtCursor` call.
 - `lastOffset` tracks textarea `blur` and `selectionchange`. Initial value
   is `value.length`. After programmatic textarea cursor moves, `lastOffset`
   reflects the latest selection.
@@ -714,6 +749,17 @@ exist yet); this task creates it from scratch.
   realistic event, assert `uploadAsset` is called exactly ONCE (the
   textarea handler), NOT also by the wrapper handler. Verifies
   `stopPropagation()` (or equivalent guard) is wired.
+- **No double-fire on sidebar drop:** mount `MarkdownEditor` with the
+  sidebar nested as in production. Fire `drop` on the sidebar's drop
+  zone with a realistic event. Assert:
+  (a) `uploadAsset` is called exactly ONCE (the sidebar handler), NOT
+      also by the wrapper handler.
+  (b) `refreshKey` is NOT bumped by `MarkdownEditor`'s wrapper handler
+      (the sidebar refreshes its list via its own upload-success closure;
+      a wrapper bump would mean stopPropagation failed and the wrapper
+      handler also fired).
+  Verifies the sidebar drop handler's `stopPropagation()` prevents the
+  wrapper handler from also firing for the same event.
 - Re-entrancy guard: while `uploading === true`, a second `drop` does not
   start a second loop; visual signal state is set briefly.
 - Multi-file drop: sequential upload-then-insert; on mid-batch error, the
