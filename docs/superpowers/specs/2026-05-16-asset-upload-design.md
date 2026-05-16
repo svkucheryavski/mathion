@@ -218,8 +218,10 @@ These are deliberately deferred to keep V1 shippable:
       (with `stoppedAt: { n, m }` set when a multi-file batch halted
       mid-loop); written by AssetSidebar on its own paths similarly.
       Cleared on user dismiss (the sidebar owns the `×` button which
-      sets `uploadError = null`) or on the next successful upload's
-      `try/finally` reset.
+      sets `uploadError = null`) OR at the top of the next batch's
+      `try` block (right after `uploading = true`). Crucially, NOT
+      cleared in `finally` — that would erase the error the catch
+      block just wrote, since `finally` runs on the error path too.
       **TOCTOU avoidance — set `uploading = true` SYNCHRONOUSLY** at the
       top of every upload entry point (textarea drop handler, wrapper
       drop handler, sidebar drop handler, sidebar file-picker change
@@ -392,9 +394,11 @@ function handleDrop(e) {
   e.stopPropagation();               // synchronous, FIRST — before guards
   if (uploading) { /* show 1.5s flash, return */ return; }
   uploading = true;                  // synchronous, same tick as the guard
+  uploadError = null;                // clear stale error from a prior batch
+  const files = Array.from(e.dataTransfer.files);  // hoisted for catch block
+  let i = 0;
   try {
-    const files = Array.from(e.dataTransfer.files);
-    for (let i = 0; i < files.length; i++) {
+    for (; i < files.length; i++) {
       uploadProgress = { current: i + 1, total: files.length, filename: files[i].name };
       const asset = await uploadAsset(...);   // first await
       // entry-point-specific work: insertAtCursor + refreshKey++ for
@@ -409,6 +413,9 @@ function handleDrop(e) {
   } finally {
     uploading = false;
     uploadProgress = null;
+    // uploadError is NOT reset here — error must persist until the user
+    // dismisses (× button) or the next successful batch clears it at
+    // the top of its try block.
   }
 }
 ```
@@ -574,8 +581,9 @@ progress / error states" below.
   helper. No insertion — the file just appears in the list after upload
   (sidebar's own `listAssets()` re-fetch on upload-success). User clicks
   to insert later.
-- **The `drop` handler MUST call `event.stopPropagation()` synchronously
-  as its first work**, before the re-entrancy guard, the
+- **The `drop` handler MUST call
+  `event.preventDefault(); event.stopPropagation();` as its first
+  synchronous statements**, before the re-entrancy guard, the
   `uploading = true` write, or any `await`. DOM propagation is
   synchronous — stopping it after an awaited upload is too late, by
   which point the wrapper handler has already fired. AssetSidebar is
@@ -589,15 +597,16 @@ progress / error states" below.
   rows, the list-empty area, the first-time banner, the error region:
   these all bubble through the sidebar's root `<aside>` (or equivalent
   root element). Spec choice: install a root-level `dragover` +
-  `drop` handler on AssetSidebar's root element with the same
-  synchronous `stopPropagation()` discipline. The root handler is
-  upload-only (no insert) and routes through the same upload helper
-  as the drop zone. The drop zone is still rendered as the discoverable
-  affordance, but drops anywhere inside the sidebar boundary behave
-  consistently (upload, appear in list). This is simpler than trying
-  to discriminate "drop zone vs everywhere else" and matches user
-  intuition: a drop inside the visible sidebar boundary is meant for
-  the sidebar.
+  `drop` handler on AssetSidebar's root element. The root handler
+  starts with `event.preventDefault(); event.stopPropagation();` as
+  its first synchronous statements (same discipline as the drop-zone
+  handler). It is upload-only (no insert) and routes through the
+  same upload helper as the drop zone. The drop zone is still rendered
+  as the discoverable affordance, but drops anywhere inside the
+  sidebar boundary behave consistently (upload, appear in list). This
+  is simpler than trying to discriminate "drop zone vs everywhere
+  else" and matches user intuition: a drop inside the visible sidebar
+  boundary is meant for the sidebar.
 
 ### Sort & filter
 
@@ -1022,11 +1031,11 @@ AssetSidebar → listAssets() → re-render with is_referenced=true
 ### Drop on .edit-content wrapper (data-loss guard)
 
 ```
-User drops file.png slightly off the textarea (inside the Edit-mode wrapper
-but not on the textarea itself — e.g., padding, gap between textarea and
-sidebar, sidebar's empty area outside the drop zone)
+User drops file.png on the wrapper's padding / the gap between textarea
+and sidebar — NOT on the textarea, NOT inside the sidebar boundary
   ↓
-.edit-content div: dragover preventDefault, drop preventDefault
+.edit-content div: synchronous preventDefault + (no stopPropagation
+  needed — this is the outermost guarded element)
   ↓ (prevents browser navigation to file://)
 lib/assets.ts → uploadAsset(versionId, file)
   ↓
@@ -1039,8 +1048,37 @@ MarkdownEditor → refreshKey++ ($bindable write)
 AssetSidebar (via prop change) → listAssets() → re-render with new row
   (no auto-insert — user clicks to insert if intended)
 
-Note: textarea's own drop handler calls stopPropagation, so a precise drop
-on the textarea does NOT also fire this wrapper handler.
+Notes on event propagation (both inner handlers stop propagation
+synchronously, so the wrapper handler runs ONLY for "true outside" drops):
+- A precise drop on the textarea fires the textarea handler only — its
+  synchronous stopPropagation prevents the wrapper handler from also
+  firing.
+- A drop anywhere inside the sidebar boundary (drop zone, asset row,
+  empty list area, banner) fires the sidebar handler (drop-zone OR
+  root-level <aside> handler) only — both call synchronous
+  stopPropagation, so the wrapper handler does not fire and refreshKey
+  is NOT bumped by MarkdownEditor for sidebar-interior drops (the
+  sidebar refreshes via its own upload-success closure).
+```
+
+### Drop on sidebar interior (drop zone OR rows OR list area OR banner)
+
+```
+User drops file.png anywhere inside the sidebar's <aside> boundary
+  ↓
+AssetSidebar drop handler (drop zone if precise, root-level <aside>
+  handler otherwise): synchronous preventDefault + stopPropagation
+  ↓ (wrapper handler does NOT fire — synchronous stopPropagation)
+lib/assets.ts → uploadAsset(versionId, file)
+  ↓
+POST /api/versions/{vid}/assets
+  ↓
+Backend: returns AssetResponse
+  ↓
+AssetSidebar internal closure → listAssets() → re-render with new row
+  (no auto-insert — user clicks to insert if intended)
+  (no refreshKey bump — sidebar paths refresh via own closure to avoid
+   double-fetch)
 ```
 
 ### Sidebar click → insert
