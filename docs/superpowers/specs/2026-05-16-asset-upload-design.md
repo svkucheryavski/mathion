@@ -233,15 +233,29 @@ These are deliberately deferred to keep V1 shippable:
   - Drop handler calls `uploadAsset` then `insertAtCursor` for each file. See
     UI / Interaction § "Drop on textarea" for sequential-vs-parallel and
     the in-flight-drop UI state.
-  - `refreshKey: number` prop forwarded to `AssetSidebar` so the parent can
-    trigger a list re-fetch after save. Default `0`; sidebar re-fetches on
-    **any change** to the prop (so `++` is the natural mutation pattern).
+  - `refreshKey: number` is a **`$bindable` prop** (Svelte 5 two-way),
+    forwarded to `AssetSidebar` and to `ItemEditPage` (via
+    `bind:refreshKey`). Default `0`; sidebar re-fetches on **any change**
+    to the prop (so `++` is the natural mutation pattern). Two writers:
+    (a) `ItemEditPage` bumps after a successful content save (drives
+    `is_referenced` re-evaluation), AND (b) `MarkdownEditor`'s textarea
+    and wrapper drop handlers bump after each successful upload (drives
+    the new asset to appear in the sidebar list for upload paths that
+    don't run inside `AssetSidebar`). Sidebar-initiated uploads (file
+    picker, sidebar drop zone) refresh via the sidebar's own
+    upload-success closure and do NOT bump `refreshKey` (would double-
+    fetch). This is the single signal that ties all upload paths to a
+    list refresh.
 - **MODIFIED** `frontend/src/pages/editor/ItemEditPage.svelte` — adds a
-  `let refreshKey = $state(0)` declaration, forwards it to `<MarkdownEditor
-  refreshKey={refreshKey} />`, and bumps `refreshKey++` after a **successful**
-  content save (the `result === 'ok'` branch of the existing save flow —
-  NOT on error). Sidebar then re-fetches and `is_referenced` flags reflect
-  the latest `AssetReference` rows.
+  `let refreshKey = $state(0)` declaration, forwards it via
+  `<MarkdownEditor bind:refreshKey={refreshKey} />` ($bindable two-way),
+  and bumps `refreshKey++` after a **successful** content save (the
+  `result === 'ok'` branch of the existing save flow — NOT on error).
+  Sidebar then re-fetches and `is_referenced` flags reflect the latest
+  `AssetReference` rows. The same `refreshKey` is also bumped from
+  inside `MarkdownEditor` on textarea/wrapper drop upload success
+  (see above); `ItemEditPage` doesn't see or care about that — it's
+  just a shared counter.
 
 ### ReadOnly mode
 
@@ -257,8 +271,8 @@ otherwise be ignored.
 |---|---|
 | `uploadAsset` / `listAssets` / `deleteAsset` API calls + multipart + error mapping + 401 → emitUnauthorized + `AssetResponse` type | `lib/assets.ts` |
 | List rendering, thumbnails, sidebar drop zone, file picker, click-to-insert callback, delete UI, first-time banner copy | `AssetSidebar.svelte` |
-| `lastOffset`, `cursorReady` (one-way), **shared `uploading`** ($bindable, synchronous-write), textarea drag-drop, edit-content-wrapper drop guard, `insertAtCursor` (with null-textarea guard), conditional sidebar mount, `refreshKey` pass-through, `formatRef` import from `lib/assets.ts` | `MarkdownEditor.svelte` |
-| Save lifecycle (own existing flow), `refreshKey` declaration + bump on success | `ItemEditPage.svelte` (and any future host of `MarkdownEditor`) |
+| `lastOffset`, `cursorReady` (one-way), **shared `uploading`** ($bindable, synchronous-write), textarea drag-drop, edit-content-wrapper drop guard, `insertAtCursor` (with null-textarea guard), conditional sidebar mount, **`refreshKey` bump on textarea/wrapper drop upload success** ($bindable two-way with `ItemEditPage`), `formatRef` import from `lib/assets.ts` | `MarkdownEditor.svelte` |
+| Save lifecycle (own existing flow), `refreshKey` declaration + `bind:refreshKey` forward + bump on save success | `ItemEditPage.svelte` (and any future host of `MarkdownEditor`) |
 | Asset reference sync (`AssetReference` rows for item/question/info contexts) | Backend (`render_with_assets`) — unchanged |
 
 **Shared `uploading` state via `$bindable`:** the re-entrancy guard and the
@@ -338,7 +352,7 @@ without crossing the component boundary in either direction.
 - The outer `.editor` container's existing border now wraps the flex row
   (textarea + sidebar). The flex row becomes the new direct child of
   `.editor`.
-- Asset row: thumbnail box (image `<img loading="lazy" src="/assets/{vid}/{filename}">` for image mime types; extension chip e.g. `PDF` / `MD` / `TXT` for others) + filename + file size in muted subtitle + a small `used` badge when `is_referenced === true` (no badge otherwise — less visual noise).
+- Asset row: thumbnail box (image `<img loading="lazy" src="/assets/{vid}/{filename}">` for image mime types; extension chip e.g. `PDF` / `CSV` / `XLSX` / `PY` / `JS` — drawn from the actual ALLOWED_EXTENSIONS list — for others) + filename + file size in muted subtitle + a small `used` badge when `is_referenced === true` (no badge otherwise — less visual noise).
 - Single click anywhere on the row → insert at the textarea's current cursor.
 - Hover reveals a small trash icon on `!is_referenced` rows only. Click →
   confirm via a tiny inline two-state ("Delete?" / "Confirm" buttons) rather
@@ -405,12 +419,13 @@ Two drop targets need handlers, for different reasons:
    `file://` and discard all unsaved edits). The wrapper handler treats
    the file as a sidebar-style upload: upload only, no auto-insert. User
    can then click the resulting sidebar row to insert if they meant to.
-   **`refreshKey` behavior:** the wrapper handler does NOT bump
-   `refreshKey`. The sidebar's own `listAssets()` re-fetch on
-   upload-success (the same code path used by the sidebar drop zone and
-   file picker) makes the new row appear. `refreshKey` is exclusively
-   the post-save signal owned by `ItemEditPage`; mixing it into the
-   upload flow would re-fetch twice per upload.
+   **`refreshKey` behavior:** the wrapper handler **bumps `refreshKey++`**
+   after each successful upload (writing to the `$bindable` prop shared
+   with `ItemEditPage`). This is the single signal that drives
+   `AssetSidebar` to re-fetch and surface the new row — same mechanism
+   `ItemEditPage` uses post-save. Sidebar-initiated uploads (file picker,
+   sidebar drop zone) do NOT bump `refreshKey`; the sidebar refreshes
+   via its own upload-success closure instead (to avoid a double-fetch).
    In Preview mode the wrapper isn't rendered (the conditional), so no
    listeners are active — preview drops fall to the browser default
    (navigation), acceptable in V1 since admins in Preview aren't editing.
@@ -424,7 +439,9 @@ Two drop targets need handlers, for different reasons:
   `lastOffset`). Extract `e.dataTransfer.files`. For each file
   (sequentially, not concurrently):
   1. `uploadAsset(versionId, file)` — `await`.
-  2. On success: `insertAtCursor(formatRef(filename, mimeType), atOffset=offset)`.
+  2. On success: `insertAtCursor(formatRef(filename, mimeType), atOffset=offset)`,
+     then `refreshKey++` to signal `AssetSidebar` to re-fetch (so the new
+     row appears with the correct `is_referenced` once the user saves).
      Subsequent files in the same drop advance `offset` by
      `formattedRef.length` (the length of the markdown string returned
      by `formatRef`, including the leading and trailing `\n`). Use the
@@ -590,11 +607,19 @@ filenames, which is enough to act on. No spec change to the save flow.
   JSON; assert the returned object matches.
 - `uploadAsset` request shape: assert `fetch` is called with `method: 'POST'`,
   body is a `FormData` containing the file under field name `file`,
-  `credentials: 'include'`, and **no `Content-Type` header** (browser sets
-  the multipart boundary).
+  `credentials: 'include'`, **`X-Requested-With: mathion` header set**
+  (matches `api.ts:request` — backend mutating endpoints check this
+  header in `backend/mathion/dependencies.py:14`), and **no `Content-Type`
+  header** (browser sets the multipart boundary).
 - `uploadAsset` propagates `ApiError` with status + detail for each error
   class (400 ext, 400 size, 400 total-size, 400 no-filename, 403 disabled,
-  409 already-exists, 500 disk-write, network failure).
+  409 already-exists, 500 disk-write, network failure). The cross-channel
+  422 "Referenced assets not found in version: …" is **NOT** an upload
+  error — it surfaces through `PATCH /api/items/{id}` (the save flow) via
+  `ItemEditPage`'s existing save-error path (`mapCreateError` /
+  `createGlobalError`). No automated test in `uploadAsset` covers it;
+  the existing item-edit save-error tests cover the surfacing channel,
+  and smoke step 17 exercises it end-to-end.
 - `uploadAsset` on 401: calls `emitUnauthorized(location.pathname +
   location.search + location.hash)` (mirrors `api.ts:request` exactly —
   all three location parts, not just pathname + search) BEFORE throwing.
@@ -676,13 +701,15 @@ exist yet); this task creates it from scratch.
   is rejected.
 - Drag-drop on textarea: stub `dataTransfer.files` + `clientX`/`clientY`,
   fire `drop`, assert `uploadAsset` called and text inserted at the
-  drop-offset. `document.caretPositionFromPoint` and `caretRangeFromPoint`
+  drop-offset, AND assert `refreshKey` was incremented (the $bindable
+  write). `document.caretPositionFromPoint` and `caretRangeFromPoint`
   are both stubbed to return a known offset; if both return null, the test
   verifies fallback to `lastOffset`.
 - Drag-drop on the `.edit-content` wrapper (the data-loss guard): fire
   `dragover` and `drop` on the wrapper `<div>` (target is the wrapper, not
   the textarea), assert `preventDefault` is called and `uploadAsset` is
-  called with upload-only behavior (no insertion).
+  called with upload-only behavior (no insertion), AND assert `refreshKey`
+  was incremented (so the sidebar will re-fetch and show the new row).
 - **No double-fire on textarea drop:** fire `drop` on the textarea with a
   realistic event, assert `uploadAsset` is called exactly ONCE (the
   textarea handler), NOT also by the wrapper handler. Verifies
@@ -693,7 +720,10 @@ exist yet); this task creates it from scratch.
   loop aborts and the error includes "Upload stopped at file N of M".
 - In `readOnly` mode, no sidebar element is rendered (queried by selector).
 - Sidebar receives forwarded props (`refreshKey`, `versionId`,
-  `cursorReady`, `onInsert`, `bind:uploading`).
+  `cursorReady`, `onInsert`, `bind:uploading`). Note: `refreshKey` is
+  forwarded as a regular prop to `AssetSidebar` (one-way down — the
+  sidebar reads but does not write); the `$bindable` two-way is between
+  `MarkdownEditor` and `ItemEditPage` (its parent host).
 
 ### Manual smoke (in the eventual plan's final task)
 
@@ -791,9 +821,15 @@ Backend: validate → write atomic → return AssetResponse
   ↓ mime_type comes from server response (not File.type)
 MarkdownEditor → insertAtCursor(formatRef(name, mime), atOffset=dropOffset)
   ↓
-ItemEditPage → refreshKey++  (after the eventual content save)
+MarkdownEditor → refreshKey++ ($bindable write)
   ↓
-AssetSidebar (via prop change) → listAssets() → re-render with new is_referenced
+AssetSidebar (via prop change) → listAssets() → row appears
+  (is_referenced still false here — the textarea now has the reference
+   but content_md hasn't been saved yet)
+  ↓
+[Later] ItemEditPage → refreshKey++  (after the eventual content save)
+  ↓
+AssetSidebar → listAssets() → re-render with is_referenced=true
 ```
 
 ### Drop on .edit-content wrapper (data-loss guard)
@@ -811,7 +847,9 @@ POST /api/versions/{vid}/assets
   ↓
 Backend: returns AssetResponse
   ↓
-AssetSidebar → listAssets() → re-render with new row
+MarkdownEditor → refreshKey++ ($bindable write)
+  ↓
+AssetSidebar (via prop change) → listAssets() → re-render with new row
   (no auto-insert — user clicks to insert if intended)
 
 Note: textarea's own drop handler calls stopPropagation, so a precise drop
@@ -853,12 +891,21 @@ AssetSidebar → listAssets() → re-render without the deleted row
 ### Refresh triggers (sidebar listAssets re-fetch)
 
 - On AssetSidebar mount.
-- After each successful upload (each file in a multi-file drop) — runs
-  inside the sequential loop so each new asset becomes visible without
-  waiting for the batch to finish.
+- After each **sidebar-initiated** successful upload (file picker, sidebar
+  drop zone — each file in a multi-file batch) — runs inside the
+  sequential loop so each new asset becomes visible without waiting for
+  the batch to finish. This is the sidebar's internal upload-success
+  closure; does NOT route through `refreshKey`.
 - After successful delete.
-- When `refreshKey` prop changes (parent bumps after successful save of
-  content_md, or after any future markdown-field save in the same version).
+- When `refreshKey` prop changes. Three writers bump it:
+  1. `ItemEditPage` after a successful content_md save (drives
+     `is_referenced` re-evaluation).
+  2. `MarkdownEditor`'s textarea drop handler after each successful
+     upload in the loop.
+  3. `MarkdownEditor`'s `.edit-content` wrapper drop handler after each
+     successful upload in the loop.
+  (`MarkdownEditor` writes via the `$bindable` declaration; the parent
+  sees the changes too.)
 
 ## File structure
 
@@ -903,7 +950,8 @@ Likely 6-7 tasks in the plan:
    wiring (no drag-drop yet) + tests.
 5. `MarkdownEditor.svelte` textarea drag-drop + outer-container drop guard
    + re-entrancy guard + multi-file sequential loop + tests.
-6. `ItemEditPage.svelte` `refreshKey` declaration + bump on save success.
+6. `ItemEditPage.svelte` `refreshKey` declaration + `bind:refreshKey`
+   forward + bump on save success.
 7. Final verification: pytest unchanged, svelte-check, vitest, manual
    smoke (18 steps above).
 
