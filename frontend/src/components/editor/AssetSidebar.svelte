@@ -196,8 +196,10 @@
   {:else}
     <ul class="list">
       {#each assets as a (a.id)}
-        <li class="row" data-testid={`asset-row-${a.id}`}>
-          <button type="button" class="row-click" onclick={() => onInsert(a.filename, a.mime_type)}>
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <li class="row" data-testid={`asset-row-${a.id}`} onclick={() => onInsert(a.filename, a.mime_type)}>
+          <button type="button" class="row-click">
             <span class="thumb">
               {#if isImage(a.mime_type)}
                 <img loading="lazy" src={imgSrc(a)} alt="" />

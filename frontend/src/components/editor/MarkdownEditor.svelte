@@ -1,36 +1,67 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { api, ApiError } from '../../lib/api';
+  import { formatRef } from '../../lib/assets';
+  import AssetSidebar from './AssetSidebar.svelte';
 
-  // Default value to '' so a parent that forgets to bind doesn't send
-  // content_md=undefined (which JSON.stringify drops, producing a 422 from
-  // the backend's required str field) and the typing isn't a runtime lie.
-  // `readOnly` flips the editor into preview-only mode for disabled versions:
-  // spec §11 item 7 requires the user to see the rendered HTML (or the 403
-  // inline error) without an Edit tab — backend /render still 403s on a
-  // disabled version, and the existing error path surfaces that inline.
+  type UploadProgress = { current: number; total: number; filename: string } | null;
+  type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
+
   let {
     versionId,
     value = $bindable<string>(''),
     readOnly = false,
-  }: { versionId: number; value?: string; readOnly?: boolean } = $props();
-  // `mode` is local UI state. In readOnly mode the Edit tab is hidden so the
-  // user can never flip mode back to 'edit'; we still keep it as $state so
-  // editable-mode tab toggling works. Effective mode is derived to honor
-  // readOnly even if a future caller flips the prop at runtime.
+    refreshKey = $bindable<number>(0),
+  }: {
+    versionId: number;
+    value?: string;
+    readOnly?: boolean;
+    refreshKey?: number;
+  } = $props();
+
   let _mode = $state<'edit' | 'preview'>('edit');
   const mode = $derived<'edit' | 'preview'>(readOnly ? 'preview' : _mode);
   let html = $state<string | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
 
-  // Monotonic request id. Rapid Edit→Preview toggles or a slow render
-  // followed by a fast retry can land response N before response N-1 and
-  // overwrite the newer html with stale content. Each loadPreview captures
-  // a fresh reqId; only the most recent reqId is allowed to write state.
-  // onDestroy bumps latestReq so any in-flight response after unmount
-  // becomes stale and discards its writes (no leak into a dead component).
   let latestReq = 0;
+
+  let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  let lastOffset = $state(0);
+  let cursorReady = $state(false);
+  let uploading = $state(false);
+  let uploadProgress = $state<UploadProgress>(null);
+  let uploadError = $state<UploadError>(null);
+
+  $effect(() => { if (!cursorReady) lastOffset = value.length; });
+
+  function onTextareaFocus() { cursorReady = true; updateLastOffset(); }
+  function onTextareaBlur() { updateLastOffset(); }
+  function onTextareaSelectionChange() { updateLastOffset(); }
+  function updateLastOffset() {
+    if (textareaEl) lastOffset = textareaEl.selectionStart ?? lastOffset;
+  }
+
+  function insertAtCursor(text: string, atOffset?: number) {
+    if (!textareaEl) return;
+    const offset = atOffset ?? lastOffset;
+    const before = value.slice(0, offset);
+    const after = value.slice(offset);
+    value = before + text + after;
+    const newPos = offset + text.length;
+    queueMicrotask(() => {
+      if (!textareaEl) return;
+      textareaEl.focus();
+      textareaEl.setSelectionRange(newPos, newPos);
+      lastOffset = newPos;
+    });
+  }
+
+  function handleSidebarInsert(filename: string, mimeType: string) {
+    cursorReady = true;
+    insertAtCursor(formatRef(filename, mimeType));
+  }
 
   async function loadPreview() {
     const reqId = ++latestReq;
@@ -53,20 +84,11 @@
     if (m === 'preview') loadPreview();
   }
 
-  // In readOnly mode there's no Edit tab to click — auto-load the preview
-  // on mount so the user sees rendered HTML (or the 403 inline error) right
-  // away. Skipped in editable mode: preview is opt-in there.
   onMount(() => { if (readOnly) void loadPreview(); });
-
   onDestroy(() => { latestReq++; });
 </script>
 
 <div class="editor">
-  <!-- Plain toggle buttons rather than role="tablist". The full WAI-ARIA
-       tablist contract (arrow-key navigation, aria-controls, tabindex
-       cycling) is overkill for a two-state Edit/Preview switch. aria-pressed
-       communicates the active state to screen readers. In readOnly mode the
-       Edit tab is hidden — there's nothing to switch to. -->
   {#if !readOnly}
     <div class="tabs">
       <button type="button" aria-pressed={mode === 'edit'} onclick={() => setMode('edit')}>Edit</button>
@@ -74,25 +96,42 @@
     </div>
   {/if}
   {#if mode === 'edit' && !readOnly}
-    <textarea bind:value rows="14" spellcheck="false"></textarea>
+    <div class="edit-content">
+      <textarea
+        bind:this={textareaEl}
+        bind:value
+        rows="14"
+        spellcheck="false"
+        onfocus={onTextareaFocus}
+        onblur={onTextareaBlur}
+        onselectionchange={onTextareaSelectionChange}
+      ></textarea>
+      <AssetSidebar
+        {versionId}
+        onInsert={handleSidebarInsert}
+        {refreshKey}
+        {cursorReady}
+        bind:uploading
+        bind:uploadProgress
+        bind:uploadError
+      />
+    </div>
   {:else if loading}
     <div class="preview"><em>Rendering…</em></div>
   {:else if error}
     <div class="preview err">{error}</div>
   {:else}
-    <!-- {@html} is safe here only because the backend's /render endpoint
-         (Task 8) sanitizes the output server-side. The frontend MUST NOT
-         render markdown locally without that round-trip. -->
     <div class="preview">{@html html ?? ''}</div>
   {/if}
 </div>
 
 <style>
-  .editor { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .editor { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
   .tabs { display: flex; border-bottom: 1px solid var(--border); }
   .tabs button { background: none; border: 0; padding: var(--space-2) var(--space-3); cursor: pointer; }
   .tabs button[aria-pressed="true"] { background: var(--surface, #f7f7f7); font-weight: 600; }
-  textarea { width: 100%; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
+  .edit-content { display: flex; flex-direction: row; min-height: 0; }
+  textarea { flex: 1 1 0; min-width: 0; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
   .preview { padding: var(--space-3); min-height: 200px; }
   .preview.err { color: #a33; }
 </style>
