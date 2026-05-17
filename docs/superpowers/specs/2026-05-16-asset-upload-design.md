@@ -226,9 +226,10 @@ These are deliberately deferred to keep V1 shippable:
       cleared in `finally` — that would erase the error the catch
       block just wrote, since `finally` runs on the error path too.
       **TOCTOU avoidance — set `uploading = true` SYNCHRONOUSLY** at the
-      top of every upload entry point (textarea drop handler, wrapper
-      drop handler, sidebar drop handler, sidebar file-picker change
-      handler), **before the first `await`**. The guard check
+      top of every upload entry point — all five: textarea drop
+      handler, `.edit-content` wrapper drop handler, sidebar drop-zone
+      handler, sidebar root `<aside>` drop handler, sidebar file-picker
+      change handler — **before the first `await`**. The guard check
       (`if (uploading) { … return; }`) and the synchronous write must
       both occur in the same microtask tick. Without this discipline,
       two near-simultaneous drops can each pass the guard check before
@@ -302,11 +303,12 @@ These are deliberately deferred to keep V1 shippable:
     `event.stopPropagation()` since it is the outermost guarded
     element.
 
-    Spec recommends `stopPropagation()` on the two inner handlers (the
+    Spec recommends `stopPropagation()` on the inner handlers (the
     pattern is symmetric and self-documenting) rather than the
     alternative `event.target !== ...` filter approach in the wrapper
-    handler. Either approach must be wired or a single drop will fire
-    two upload paths.
+    handler. Either approach must be wired, or a single inner-element
+    drop will fire two handlers (the inner handler AND the bubbled
+    wrapper handler) → double upload of the same file.
   - Textarea drop computes the drop offset via
     `document.caretPositionFromPoint` (Firefox-spec name) with a fallback to
     `document.caretRangeFromPoint` (Chrome/WebKit legacy alias); both
@@ -1110,11 +1112,12 @@ AssetSidebar → listAssets() → re-render without the deleted row
 ### Refresh triggers (sidebar listAssets re-fetch)
 
 - On AssetSidebar mount.
-- After each **sidebar-initiated** successful upload (file picker, sidebar
-  drop zone — each file in a multi-file batch) — runs inside the
-  sequential loop so each new asset becomes visible without waiting for
-  the batch to finish. This is the sidebar's internal upload-success
-  closure; does NOT route through `refreshKey`.
+- After each **sidebar-initiated** successful upload (file picker,
+  sidebar drop zone, sidebar root `<aside>` handler — each file in a
+  multi-file batch) — runs inside the sequential loop so each new
+  asset becomes visible without waiting for the batch to finish. This
+  is the sidebar's internal upload-success closure; does NOT route
+  through `refreshKey`.
 - After successful delete.
 - When `refreshKey` prop changes. Three writers bump it:
   1. `ItemEditPage` after a successful content_md save (drives
@@ -1134,7 +1137,7 @@ AssetSidebar → listAssets() → re-render without the deleted row
 | `frontend/src/tests/assets.test.ts` | NEW | ~150 |
 | `frontend/src/components/editor/AssetSidebar.svelte` | NEW | ~220 (template + script + style; first-time banner adds ~15 LoC over the prior estimate) |
 | `frontend/src/tests/AssetSidebar.test.ts` | NEW | ~220 |
-| `frontend/src/components/editor/MarkdownEditor.svelte` | MODIFIED | +110 / -10 (DOM restructure with edit-content wrapper, three drag-drop surfaces with synchronous stopPropagation, lastOffset / cursorReady / uploading / uploadProgress / uploadError state, sidebar mount + bind:uploading + bind:uploadProgress + bind:uploadError + bind:refreshKey) |
+| `frontend/src/components/editor/MarkdownEditor.svelte` | MODIFIED | +110 / -10 (DOM restructure with edit-content wrapper, two MarkdownEditor-owned drag-drop surfaces — textarea and `.edit-content` wrapper — with synchronous preventDefault + stopPropagation, lastOffset / cursorReady / uploading / uploadProgress / uploadError state, sidebar mount + bind:uploading + bind:uploadProgress + bind:uploadError + bind:refreshKey) |
 | `frontend/src/tests/MarkdownEditor.test.ts` | NEW | ~150 (added: shared progress/error write tests, sidebar drop bubble test) |
 | `frontend/src/pages/editor/ItemEditPage.svelte` | MODIFIED | +4 / -0 (state declaration + `bind:refreshKey` forward + bump in save success branch) |
 | `frontend/src/tests/ItemEditPage.test.ts` | MODIFIED | +30 (new focused tests for `refreshKey` save-success bump and `bind:refreshKey` round-trip — only if the existing test file is structured to accommodate; otherwise NEW `ItemEditPage.refreshKey.test.ts` ~40 LoC) |
