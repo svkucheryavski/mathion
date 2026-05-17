@@ -114,6 +114,7 @@ describe('AssetSidebar — empty list', () => {
     vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync();
+    await Promise.resolve(); flushSync();
     expect(target.textContent).toContain('No assets yet');
   });
 });

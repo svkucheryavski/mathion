@@ -31,15 +31,19 @@
 
   let assets = $state<AssetResponse[]>([]);
   let listError = $state<string | null>(null);
+  let loading = $state(true);
   let fileInputEl = $state<HTMLInputElement | null>(null);
   let mountDone = false;
 
   async function fetchAssets() {
+    loading = true;
     listError = null;
     try {
       assets = await listAssets(versionId);
     } catch (e) {
       listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
+    } finally {
+      loading = false;
     }
   }
 
@@ -151,7 +155,9 @@
     </div>
   {/if}
 
-  {#if listError}
+  {#if loading}
+    <p class="muted" data-testid="loading-indicator">Loading…</p>
+  {:else if listError}
     <p class="error-inline">{listError}</p>
   {:else if assets.length === 0}
     <p class="muted">No assets yet. Drop a file in the zone below or click it to pick.</p>
