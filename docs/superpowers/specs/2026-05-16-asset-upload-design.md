@@ -101,10 +101,11 @@ These are deliberately deferred to keep V1 shippable:
       (default null; declared `$bindable`). Drives the "Uploading file
       {N} of {M}…" / "Uploading {filename}…" transient row at the top
       of the list. Written by EVERY upload entry point (textarea drop,
-      wrapper drop in `MarkdownEditor`; sidebar drop zone, sidebar
-      file picker in `AssetSidebar`) — both components write through
-      this shared state so the sidebar renders one canonical progress
-      row regardless of which entry point started the upload. Reset to
+      `.edit-content` wrapper drop in `MarkdownEditor`; sidebar drop
+      zone, sidebar root `<aside>` handler, sidebar file picker in
+      `AssetSidebar`) — both components write through this shared
+      state so the sidebar renders one canonical progress row
+      regardless of which entry point started the upload. Reset to
       `null` in the upload loop's `try/finally`.
     - `uploadError: { detail: string; stoppedAt?: { n: number; m: number } } | null`
       (default null; declared `$bindable`). Drives the inline error
@@ -196,12 +197,14 @@ These are deliberately deferred to keep V1 shippable:
       orders work in practice — pin the order for clarity, not
       correctness.)
     - `uploading = $state(false)` — true while ANY upload batch is in
-      flight (textarea drop, outer-container drop, sidebar drop-zone,
-      OR sidebar file picker). Forwarded bidirectionally to AssetSidebar
-      via `bind:uploading` (Svelte 5 `$bindable` on the sidebar side) so
-      the sidebar can flip it when its own upload paths start/finish.
-      Used by both components for the "Drop arriving WHILE uploading"
-      overlay state and re-entrancy guards on all drop handlers.
+      flight (textarea drop, `.edit-content` wrapper drop, sidebar drop
+      zone, sidebar root `<aside>` handler, OR sidebar file picker —
+      five entry points total). Forwarded bidirectionally to
+      AssetSidebar via `bind:uploading` (Svelte 5 `$bindable` on the
+      sidebar side) so the sidebar can flip it when its own upload
+      paths start/finish. Used by both components for the "Drop
+      arriving WHILE uploading" overlay state and re-entrancy guards
+      on all drop handlers.
     - `uploadProgress = $state<UploadProgress | null>(null)` —
       `{ current, total, filename }` while a batch is in flight;
       `null` otherwise. Forwarded to AssetSidebar via
@@ -290,9 +293,10 @@ These are deliberately deferred to keep V1 shippable:
 
     The canonical drop-handler shape lives in the Boundary summary's
     "Synchronous write requirement" subsection below — see the code
-    block there (single source of truth). All three drop handlers
-    (textarea, sidebar drop zone, sidebar root, wrapper) follow that
-    shape, with entry-point-specific work inside the loop body
+    block there (single source of truth). All four drop handlers
+    (textarea, sidebar drop zone, sidebar root `<aside>`, `.edit-content`
+    wrapper) follow that shape, with entry-point-specific work inside
+    the loop body
     (insertAtCursor + refreshKey++ for textarea; refreshKey++ only for
     wrapper; listAssets for sidebar paths). The wrapper handler omits
     `event.stopPropagation()` since it is the outermost guarded
@@ -358,9 +362,10 @@ otherwise be ignored.
 | Asset reference sync (`AssetReference` rows for item/question/info contexts) | Backend (`render_with_assets`) — unchanged |
 
 **Shared `uploading` state via `$bindable`:** the re-entrancy guard and the
-"Upload in progress" overlay need to coordinate across all four upload entry
-points (textarea drop, edit-content-wrapper drop, sidebar drop zone, sidebar
-file picker). The single source of truth is `MarkdownEditor`'s
+"Upload in progress" overlay need to coordinate across all five upload entry
+points (textarea drop, `.edit-content` wrapper drop, sidebar drop zone,
+sidebar root `<aside>` handler, sidebar file picker). The single source of
+truth is `MarkdownEditor`'s
 `uploading = $state(false)`, exposed to `AssetSidebar` via
 `bind:uploading` (declared `$bindable` on the sidebar side). When an
 AssetSidebar-path upload starts, the sidebar sets `uploading = true`; when
@@ -413,11 +418,13 @@ handler before any `await` returns, causing double upload. Re-entrancy
 guards in `AssetSidebar`'s file-picker change handler and sidebar drop
 handler follow the same shape.
 
-**Why upload logic doesn't live in `AssetSidebar`:** the data flow has two
-upload paths — sidebar drop-zone/file-picker AND textarea drag-drop. Both
-must call the same upload helper to share error semantics, sequential
-queueing, and progress UI. Putting the helper in `lib/assets.ts` (a pure
-module) lets both `AssetSidebar` and `MarkdownEditor` call it directly,
+**Why upload logic doesn't live in `AssetSidebar`:** two components own
+upload entry points — `MarkdownEditor` (textarea drop, `.edit-content`
+wrapper drop) and `AssetSidebar` (file picker, drop zone, root `<aside>`
+handler). Both must call the same upload helper to share error
+semantics, sequential queueing, and progress UI. Putting the helper in
+`lib/assets.ts` (a pure module) lets both `AssetSidebar` and
+`MarkdownEditor` call it directly,
 without crossing the component boundary in either direction.
 
 ## UI / Interaction
