@@ -288,31 +288,15 @@ These are deliberately deferred to keep V1 shippable:
        starts with `event.preventDefault();` (no stopPropagation needed
        since it's the outermost guarded element).
 
-    The canonical drop-handler shape:
-
-    ```ts
-    function handleDrop(e) {
-      e.preventDefault();
-      e.stopPropagation();          // ← synchronous, first
-      if (uploading) {
-        // show 1.5s flash, return
-        return;
-      }
-      uploading = true;             // ← synchronous, before any await
-      try {
-        for (const file of files) {
-          uploadProgress = { current: i+1, total, filename: file.name };
-          await uploadAsset(...);    // ← first await goes here
-          // ...
-        }
-      } catch (err) {
-        uploadError = { detail: err.detail, stoppedAt: { n, m } };
-      } finally {
-        uploading = false;
-        uploadProgress = null;
-      }
-    }
-    ```
+    The canonical drop-handler shape lives in the Boundary summary's
+    "Synchronous write requirement" subsection below — see the code
+    block there (single source of truth). All three drop handlers
+    (textarea, sidebar drop zone, sidebar root, wrapper) follow that
+    shape, with entry-point-specific work inside the loop body
+    (insertAtCursor + refreshKey++ for textarea; refreshKey++ only for
+    wrapper; listAssets for sidebar paths). The wrapper handler omits
+    `event.stopPropagation()` since it is the outermost guarded
+    element.
 
     Spec recommends `stopPropagation()` on the two inner handlers (the
     pattern is symmetric and self-documenting) rather than the
@@ -340,9 +324,10 @@ These are deliberately deferred to keep V1 shippable:
     after each successful upload (both (b) and (c) drive the new asset
     to appear in the sidebar list for upload paths that don't run
     inside `AssetSidebar`). Sidebar-initiated uploads (file picker,
-    sidebar drop zone) refresh via the sidebar's own upload-success
-    closure and do NOT bump `refreshKey` (would double-fetch). This is
-    the single signal that ties all upload paths to a list refresh.
+    sidebar drop zone, sidebar root `<aside>` handler) refresh via the
+    sidebar's own upload-success closure and do NOT bump `refreshKey`
+    (would double-fetch). This is the single signal that ties all
+    upload paths to a list refresh.
 - **MODIFIED** `frontend/src/pages/editor/ItemEditPage.svelte` — adds a
   `let refreshKey = $state(0)` declaration, forwards it via
   `<MarkdownEditor bind:refreshKey={refreshKey} />` ($bindable two-way),
@@ -540,8 +525,9 @@ Two drop targets need handlers, for different reasons:
    with `ItemEditPage`). This is the single signal that drives
    `AssetSidebar` to re-fetch and surface the new row — same mechanism
    `ItemEditPage` uses post-save. Sidebar-initiated uploads (file picker,
-   sidebar drop zone) do NOT bump `refreshKey`; the sidebar refreshes
-   via its own upload-success closure instead (to avoid a double-fetch).
+   sidebar drop zone, sidebar root `<aside>` handler) do NOT bump
+   `refreshKey`; the sidebar refreshes via its own upload-success
+   closure instead (to avoid a double-fetch).
    In Preview mode the wrapper isn't rendered (the conditional), so no
    listeners are active — preview drops fall to the browser default
    (navigation), acceptable in V1 since admins in Preview aren't editing.
@@ -591,8 +577,9 @@ progress / error states" below.
   data-loss-guard drop handler), so without synchronous stopPropagation
   a sidebar-drop bubbles to the wrapper and triggers a redundant
   upload + `refreshKey++`. The textarea drop handler enforces the same
-  discipline — see the canonical drop-handler shape in MarkdownEditor's
-  "Event propagation" note.
+  discipline — see the canonical drop-handler shape in the Boundary
+  summary's "Synchronous write requirement" subsection (single source
+  of truth).
 - **Drops on AssetSidebar descendants outside the drop zone** — asset
   rows, the list-empty area, the first-time banner, the error region:
   these all bubble through the sidebar's root `<aside>` (or equivalent
@@ -1174,7 +1161,7 @@ Likely 6-7 tasks in the plan:
 4. `MarkdownEditor.svelte` layout shift, `lastOffset` / `cursorReady`
    state, conditional sidebar mount, `insertAtCursor` + sidebar click
    wiring (no drag-drop yet) + tests.
-5. `MarkdownEditor.svelte` textarea drag-drop + outer-container drop guard
+5. `MarkdownEditor.svelte` textarea drag-drop + `.edit-content` wrapper drop guard
    + re-entrancy guard + multi-file sequential loop + tests.
 6. `ItemEditPage.svelte` `refreshKey` declaration + `bind:refreshKey`
    forward + bump on save success + focused tests (save-success bumps,
