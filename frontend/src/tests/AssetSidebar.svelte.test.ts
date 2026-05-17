@@ -120,7 +120,8 @@ describe('AssetSidebar — click to insert', () => {
     const { target } = mountSidebar({ onInsert });
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
-    row.click();
+    const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
+    clickBtn.click();
     expect(onInsert).toHaveBeenCalledWith('a.png', 'image/png');
   });
 });
@@ -339,5 +340,28 @@ describe('AssetSidebar — delete UI', () => {
     const err = target.querySelector('[data-testid="delete-error"]');
     expect(err?.textContent).toContain('Asset not found');
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+  });
+
+  it('confirm button is disabled while delete is in flight (re-entrancy guard)', async () => {
+    let resolveDelete!: () => void;
+    vi.spyOn(assetsModule, 'deleteAsset').mockReturnValue(
+      new Promise<void>((resolve) => { resolveDelete = () => resolve(); })
+    );
+    vi.mocked(assetsModule.listAssets)
+      .mockResolvedValueOnce([
+        mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
+      ])
+      .mockResolvedValueOnce([]);
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"]')!;
+    trash.click();
+    flushSync();
+    const confirm = target.querySelector<HTMLButtonElement>('[data-testid="delete-confirm"]')!;
+    confirm.click();
+    flushSync();
+    expect(confirm.disabled).toBe(true);
+    resolveDelete();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
   });
 });

@@ -36,6 +36,7 @@
   let mountDone = false;
   let confirmId = $state<number | null>(null);
   let deleteErrorMsg = $state<string | null>(null);
+  let deletingId = $state<number | null>(null);
 
   async function fetchAssets() {
     loading = true;
@@ -55,6 +56,8 @@
   function askDelete(id: number) { confirmId = id; }
   function cancelDelete() { confirmId = null; }
   async function confirmDelete(id: number) {
+    if (deletingId === id) return;
+    deletingId = id;
     deleteErrorMsg = null;
     try {
       await deleteAsset(id);
@@ -62,6 +65,7 @@
       deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
     } finally {
       confirmId = null;
+      deletingId = null;
       await fetchAssets();
     }
   }
@@ -191,14 +195,8 @@
   {:else}
     <ul class="list">
       {#each assets as a (a.id)}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <li
-          class="row"
-          data-testid={`asset-row-${a.id}`}
-          onclick={() => onInsert(a.filename, a.mime_type)}
-        >
-          <span class="row-click">
+        <li class="row" data-testid={`asset-row-${a.id}`}>
+          <button type="button" class="row-click" onclick={() => onInsert(a.filename, a.mime_type)}>
             <span class="thumb">
               {#if isImage(a.mime_type)}
                 <img loading="lazy" src={imgSrc(a)} alt="" />
@@ -210,7 +208,7 @@
               <span class="name">{a.filename}</span>
               <span class="size">{a.file_size} B</span>
             </span>
-          </span>
+          </button>
           {#if a.is_referenced}
             <span
               class="used"
@@ -222,6 +220,7 @@
               <button
                 type="button"
                 data-testid="delete-confirm"
+                disabled={deletingId === a.id}
                 onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
               >Confirm</button>
               <button
@@ -279,7 +278,7 @@
   .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
   .row { display: flex; align-items: center; cursor: pointer; border: 1px solid transparent; border-radius: var(--radius); }
   .row:hover { background: #f5f5f5; }
-  .row-click { flex: 1; display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2); }
+  .row-click { flex: 1; display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2); background: none; border: 0; cursor: pointer; text-align: left; }
   .thumb { width: 32px; height: 32px; flex: 0 0 32px; display: flex; align-items: center; justify-content: center; background: #eee; border-radius: 4px; overflow: hidden; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
   .chip { font-size: 0.65rem; font-weight: 600; color: #555; }
