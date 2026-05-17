@@ -280,3 +280,64 @@ describe('AssetSidebar — file picker', () => {
     expect(uploadSpy).toHaveBeenCalledWith(42, file);
   });
 });
+
+describe('AssetSidebar — delete UI', () => {
+  beforeEach(() => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+      mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
+      mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true }),
+    ]);
+  });
+
+  it('trash icon is rendered for unreferenced rows and absent for referenced rows', async () => {
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const row1 = target.querySelector('[data-testid="asset-row-1"]')!;
+    const row2 = target.querySelector('[data-testid="asset-row-2"]')!;
+    expect(row1.querySelector('[data-testid="delete-trash"]')).toBeTruthy();
+    expect(row2.querySelector('[data-testid="delete-trash"]')).toBeNull();
+  });
+
+  it('trash → confirm → deleteAsset called and list refreshes', async () => {
+    const deleteSpy = vi.spyOn(assetsModule, 'deleteAsset').mockResolvedValue(undefined);
+    vi.mocked(assetsModule.listAssets)
+      .mockResolvedValueOnce([
+        mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
+        mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true }),
+      ])
+      .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"]')!;
+    trash.click();
+    flushSync();
+    const confirm = target.querySelector<HTMLElement>('[data-testid="delete-confirm"]')!;
+    confirm.click();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(deleteSpy).toHaveBeenCalledWith(1);
+    expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+    expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
+  });
+
+  it('404 on delete (race) surfaces inline error + refreshes the list', async () => {
+    const { ApiError } = await import('../lib/api');
+    vi.spyOn(assetsModule, 'deleteAsset').mockRejectedValue(new ApiError(404, 'Asset not found'));
+    vi.mocked(assetsModule.listAssets)
+      .mockResolvedValueOnce([
+        mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
+        mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true }),
+      ])
+      .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"]')!;
+    trash.click();
+    flushSync();
+    const confirm = target.querySelector<HTMLElement>('[data-testid="delete-confirm"]')!;
+    confirm.click();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="delete-error"]');
+    expect(err?.textContent).toContain('Asset not found');
+    expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+  });
+});

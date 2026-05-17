@@ -4,6 +4,7 @@
   import {
     listAssets,
     uploadAsset,
+    deleteAsset,
     type AssetResponse,
   } from '../../lib/assets';
 
@@ -33,6 +34,8 @@
   let loading = $state(true);
   let fileInputEl = $state<HTMLInputElement | null>(null);
   let mountDone = false;
+  let confirmId = $state<number | null>(null);
+  let deleteErrorMsg = $state<string | null>(null);
 
   async function fetchAssets() {
     loading = true;
@@ -48,6 +51,20 @@
 
   $effect(() => { void refreshKey; if (mountDone) void fetchAssets(); });
   onMount(() => { mountDone = true; void fetchAssets(); });
+
+  function askDelete(id: number) { confirmId = id; }
+  function cancelDelete() { confirmId = null; }
+  async function confirmDelete(id: number) {
+    deleteErrorMsg = null;
+    try {
+      await deleteAsset(id);
+    } catch (e) {
+      deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
+    } finally {
+      confirmId = null;
+      await fetchAssets();
+    }
+  }
 
   function pickFile() { fileInputEl?.click(); }
 
@@ -154,6 +171,17 @@
     </div>
   {/if}
 
+  {#if deleteErrorMsg}
+    <div class="error" data-testid="delete-error">
+      <span>{deleteErrorMsg}</span>
+      <button
+        type="button"
+        aria-label="Dismiss error"
+        onclick={() => (deleteErrorMsg = null)}
+      >×</button>
+    </div>
+  {/if}
+
   {#if loading}
     <p class="muted" data-testid="loading-indicator">Loading…</p>
   {:else if listError}
@@ -163,13 +191,14 @@
   {:else}
     <ul class="list">
       {#each assets as a (a.id)}
-        <li class="row">
-          <button
-            type="button"
-            class="row-click"
-            data-testid={`asset-row-${a.id}`}
-            onclick={() => onInsert(a.filename, a.mime_type)}
-          >
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <li
+          class="row"
+          data-testid={`asset-row-${a.id}`}
+          onclick={() => onInsert(a.filename, a.mime_type)}
+        >
+          <span class="row-click">
             <span class="thumb">
               {#if isImage(a.mime_type)}
                 <img loading="lazy" src={imgSrc(a)} alt="" />
@@ -181,14 +210,35 @@
               <span class="name">{a.filename}</span>
               <span class="size">{a.file_size} B</span>
             </span>
-            {#if a.is_referenced}
-              <span
-                class="used"
-                data-testid="used-badge"
-                title="Remove this reference from content and save to enable delete."
-              >used</span>
-            {/if}
-          </button>
+          </span>
+          {#if a.is_referenced}
+            <span
+              class="used"
+              data-testid="used-badge"
+              title="Remove this reference from content and save to enable delete."
+            >used</span>
+          {:else if confirmId === a.id}
+            <span class="confirm-pair">
+              <button
+                type="button"
+                data-testid="delete-confirm"
+                onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
+              >Confirm</button>
+              <button
+                type="button"
+                data-testid="delete-cancel"
+                onclick={(e) => { e.stopPropagation(); cancelDelete(); }}
+              >Cancel</button>
+            </span>
+          {:else}
+            <button
+              type="button"
+              class="trash"
+              data-testid="delete-trash"
+              aria-label={`Delete ${a.filename}`}
+              onclick={(e) => { e.stopPropagation(); askDelete(a.id); }}
+            >🗑</button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -227,8 +277,9 @@
   .muted { color: var(--muted, #666); font-size: 0.85rem; }
   .error-inline { color: #a33; font-size: 0.85rem; }
   .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-  .row-click { width: 100%; display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2); background: none; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; text-align: left; }
-  .row-click:hover { background: #f5f5f5; }
+  .row { display: flex; align-items: center; cursor: pointer; border: 1px solid transparent; border-radius: var(--radius); }
+  .row:hover { background: #f5f5f5; }
+  .row-click { flex: 1; display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2); }
   .thumb { width: 32px; height: 32px; flex: 0 0 32px; display: flex; align-items: center; justify-content: center; background: #eee; border-radius: 4px; overflow: hidden; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
   .chip { font-size: 0.65rem; font-weight: 600; color: #555; }
@@ -239,4 +290,9 @@
   .drop-zone { margin-top: var(--space-2); padding: var(--space-3); border: 2px dashed var(--border); border-radius: var(--radius); text-align: center; color: var(--muted, #666); cursor: pointer; font-size: 0.85rem; }
   .drop-zone:hover { background: #fafafa; }
   .drop-zone.disabled { opacity: 0.5; cursor: not-allowed; }
+  .confirm-pair { display: flex; gap: var(--space-1); }
+  .confirm-pair button { font-size: 0.7rem; padding: 2px 6px; cursor: pointer; }
+  .trash { background: none; border: 0; cursor: pointer; opacity: 0; transition: opacity 80ms; font-size: 0.9rem; }
+  .row:hover .trash { opacity: 0.7; }
+  .trash:hover { opacity: 1; }
 </style>
