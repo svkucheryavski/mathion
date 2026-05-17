@@ -21,7 +21,7 @@ describe('lib/assets', () => {
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, 'fetch');
     Object.defineProperty(window, 'location', {
-      value: new URL('http://localhost/courses/foo/edit#item=87'),
+      value: new URL('http://localhost/courses/foo/edit?tab=meta#item=87'),
       writable: true,
     });
   });
@@ -75,10 +75,9 @@ describe('lib/assets', () => {
         }),
       );
       const file = new File(['x'], 'foo.exe', { type: 'application/x-msdownload' });
-      await expect(uploadAsset(42, file)).rejects.toMatchObject({
-        status: 400,
-        detail: 'File extension not allowed: foo.exe',
-      });
+      const err = await uploadAsset(42, file).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 400, detail: 'File extension not allowed: foo.exe' });
     });
 
     it('propagates ApiError on 409 (already exists)', async () => {
@@ -89,10 +88,9 @@ describe('lib/assets', () => {
         }),
       );
       const file = new File(['x'], 'foo.png', { type: 'image/png' });
-      await expect(uploadAsset(42, file)).rejects.toMatchObject({
-        status: 409,
-        detail: "Asset 'foo.png' already exists in this version",
-      });
+      const err = await uploadAsset(42, file).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 409, detail: "Asset 'foo.png' already exists in this version" });
     });
 
     it('propagates ApiError on 403 disabled, 500 disk-write, 400 size, 400 total, 400 no-filename', async () => {
@@ -111,10 +109,9 @@ describe('lib/assets', () => {
           }),
         );
         const file = new File(['x'], 'foo.png', { type: 'image/png' });
-        await expect(uploadAsset(42, file)).rejects.toMatchObject({
-          status: c.status,
-          detail: c.detail,
-        });
+        const err = await uploadAsset(42, file).catch((e) => e);
+        expect(err).toBeInstanceOf(ApiError);
+        expect(err).toMatchObject({ status: c.status, detail: c.detail });
       }
     });
 
@@ -137,7 +134,7 @@ describe('lib/assets', () => {
       const file = new File(['x'], 'foo.png', { type: 'image/png' });
       await expect(uploadAsset(42, file)).rejects.toBeInstanceOf(ApiError);
       expect(emitSpy).toHaveBeenCalledTimes(1);
-      expect(emitSpy).toHaveBeenCalledWith('/courses/foo/edit#item=87');
+      expect(emitSpy).toHaveBeenCalledWith('/courses/foo/edit?tab=meta#item=87');
     });
   });
 
@@ -172,7 +169,9 @@ describe('lib/assets', () => {
           headers: { 'content-type': 'application/json' },
         }),
       );
-      await expect(deleteAsset(7)).rejects.toMatchObject({ status: 404, detail: 'Asset not found' });
+      const err = await deleteAsset(7).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 404, detail: 'Asset not found' });
     });
   });
 
