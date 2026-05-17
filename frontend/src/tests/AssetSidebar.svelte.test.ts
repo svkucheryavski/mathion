@@ -364,4 +364,66 @@ describe('AssetSidebar — delete UI', () => {
     resolveDelete();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
   });
+
+  it('cross-row delete race: row1 completion does not clear row2 confirm pair', async () => {
+    // Two deferred delete promises so we control ordering precisely.
+    let resolveDelete1!: () => void;
+    let resolveDelete2!: () => void;
+    const deleteMock = vi.spyOn(assetsModule, 'deleteAsset')
+      .mockImplementationOnce(() => new Promise<void>((r) => { resolveDelete1 = () => r(); }))
+      .mockImplementationOnce(() => new Promise<void>((r) => { resolveDelete2 = () => r(); }));
+
+    vi.mocked(assetsModule.listAssets)
+      .mockResolvedValueOnce([
+        mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
+        mkAsset({ id: 2, filename: 'b.png', is_referenced: false }),
+      ])
+      // After row1 delete resolves, list still has row2.
+      .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.png', is_referenced: false })])
+      // After row2 delete resolves, list is empty.
+      .mockResolvedValueOnce([]);
+
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+
+    // Start delete on row 1.
+    const trash1 = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"]')!;
+    trash1.click();
+    flushSync();
+    const confirm1 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-confirm"]')!;
+    confirm1.click();
+    flushSync();
+
+    // While row 1 is in flight, move focus to row 2: click its trash.
+    const trash2 = target.querySelector<HTMLElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"]')!;
+    trash2.click();
+    flushSync();
+
+    // Row 2's confirm pair should now be visible.
+    const confirm2 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-confirm"]')!;
+    expect(confirm2).toBeTruthy();
+    expect(confirm2.disabled).toBe(false);
+
+    // Confirm row 2 (now both deletes are in flight).
+    confirm2.click();
+    flushSync();
+    expect(confirm2.disabled).toBe(true);
+
+    // Row 1 resolves first. Its finally must NOT clear row 2's UI.
+    resolveDelete1();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+
+    // Row 2's confirm pair must still be present and STILL DISABLED (row 2 delete still in flight).
+    const confirm2After = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-confirm"]')!;
+    expect(confirm2After).toBeTruthy();
+    expect(confirm2After.disabled).toBe(true);
+
+    // Now resolve row 2 to clean up.
+    resolveDelete2();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+
+    expect(deleteMock).toHaveBeenCalledTimes(2);
+    expect(deleteMock).toHaveBeenNthCalledWith(1, 1);
+    expect(deleteMock).toHaveBeenNthCalledWith(2, 2);
+  });
 });

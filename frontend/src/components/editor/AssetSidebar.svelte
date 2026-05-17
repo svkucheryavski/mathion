@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import {
     listAssets,
@@ -36,7 +37,7 @@
   let mountDone = false;
   let confirmId = $state<number | null>(null);
   let deleteErrorMsg = $state<string | null>(null);
-  let deletingId = $state<number | null>(null);
+  const deletingIds = new SvelteSet<number>();
 
   async function fetchAssets() {
     loading = true;
@@ -56,16 +57,16 @@
   function askDelete(id: number) { confirmId = id; }
   function cancelDelete() { confirmId = null; }
   async function confirmDelete(id: number) {
-    if (deletingId === id) return;
-    deletingId = id;
+    if (deletingIds.has(id)) return;
+    deletingIds.add(id);
     deleteErrorMsg = null;
     try {
       await deleteAsset(id);
     } catch (e) {
       deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
     } finally {
-      confirmId = null;
-      deletingId = null;
+      if (confirmId === id) confirmId = null;
+      deletingIds.delete(id);
       await fetchAssets();
     }
   }
@@ -220,7 +221,7 @@
               <button
                 type="button"
                 data-testid="delete-confirm"
-                disabled={deletingId === a.id}
+                disabled={deletingIds.has(a.id)}
                 onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
               >Confirm</button>
               <button
