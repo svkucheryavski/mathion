@@ -60,6 +60,22 @@ describe('AssetSidebar — list render', () => {
     expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
   });
 
+  it('renders [data-testid="loading-indicator"] before listAssets resolves', async () => {
+    // Use a deferred promise to keep listAssets pending. The component's
+    // onMount fires listAssets; the loading state is true until the promise
+    // resolves.
+    let resolveList: (assets: AssetResponse[]) => void = () => {};
+    const pending = new Promise<AssetResponse[]>((r) => { resolveList = r; });
+    vi.spyOn(assetsModule, 'listAssets').mockReturnValueOnce(pending);
+    const { target } = mountSidebar();
+    flushSync();
+    expect(target.querySelector('[data-testid="loading-indicator"]')).toBeTruthy();
+    // Resolve the mock so afterEach cleanup doesn't hang on an unresolved fetch
+    resolveList([]);
+    await Promise.resolve(); flushSync();
+    await Promise.resolve(); flushSync();
+  });
+
   it('shows the "used" badge when is_referenced is true and hides it otherwise', async () => {
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
@@ -231,13 +247,15 @@ describe('AssetSidebar — drop on sidebar', () => {
     await Promise.resolve(); flushSync();
     const aside = target.querySelector<HTMLElement>('aside[data-testid="asset-sidebar"]')!;
     const stopSpy = vi.fn();
+    const preventSpy = vi.fn();
     const dropEvent = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(dropEvent, 'dataTransfer', {
       value: { files: [new File(['x'], 'rooted.png', { type: 'image/png' })] },
     });
     dropEvent.stopPropagation = stopSpy;
-    dropEvent.preventDefault = vi.fn();
+    dropEvent.preventDefault = preventSpy;
     aside.dispatchEvent(dropEvent);
+    expect(preventSpy).toHaveBeenCalled();
     expect(stopSpy).toHaveBeenCalled();
     await Promise.resolve(); flushSync();
     await Promise.resolve(); flushSync();

@@ -4,7 +4,6 @@
   import {
     listAssets,
     uploadAsset,
-    deleteAsset as _deleteAsset,
     type AssetResponse,
   } from '../../lib/assets';
 
