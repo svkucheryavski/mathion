@@ -74,7 +74,8 @@ describe('MarkdownEditor — click insert at cursor', () => {
     const { target, propsRef } = mountEditor({ value: 'hello' });
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
-    row.click();
+    const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
+    clickBtn.click();
     flushSync();
     expect(propsRef.value).toBe('hello\n![a](a.png)\n');
   });
@@ -89,7 +90,8 @@ describe('MarkdownEditor — click insert at cursor', () => {
     ta.dispatchEvent(new Event('blur', { bubbles: true }));
     flushSync();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
-    row.click();
+    const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
+    clickBtn.click();
     flushSync();
     expect(propsRef.value).toBe('hello\n![a](a.png)\n world');
   });
@@ -118,7 +120,8 @@ describe('MarkdownEditor — cursorReady', () => {
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     expect(target.querySelector('[data-testid="cursor-banner"]')).toBeTruthy();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
-    row.click();
+    const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
+    clickBtn.click();
     flushSync();
     expect(target.querySelector('[data-testid="cursor-banner"]')).toBeNull();
   });
