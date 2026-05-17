@@ -118,14 +118,12 @@ describe('lib/assets', () => {
       }
     });
 
-    it('wraps network failure in ApiError', async () => {
+    it('wraps network failure in ApiError with status 0', async () => {
       fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
       const file = new File(['x'], 'foo.png', { type: 'image/png' });
-      await expect(uploadAsset(42, file)).rejects.toBeInstanceOf(ApiError);
-      await expect(uploadAsset(42, file).catch((e) => e)).resolves.toMatchObject({
-        status: 0,
-      });
-      // second call exhausted the mock; restore a fresh one for the rejection branch above.
+      const err = await uploadAsset(42, file).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 0 });
     });
 
     it('on 401 calls emitUnauthorized(pathname + search + hash) before throwing', async () => {
@@ -186,9 +184,12 @@ describe('lib/assets', () => {
     });
 
     it('image stem strips ONLY the last extension', () => {
-      expect(formatRef('my-report-v2.pdf', 'application/pdf')).toBe('\n[my-report-v2.pdf](my-report-v2.pdf)\n');
-      // non-image: stem stripping does not apply
-      expect(formatRef('myreportv2.pdf', 'application/pdf')).toBe('\n[myreportv2.pdf](myreportv2.pdf)\n');
+      // single dot
+      expect(formatRef('histogram.png', 'image/png')).toBe('\n![histogram](histogram.png)\n');
+      // multi-dot: strip ONLY the last dot-segment
+      expect(formatRef('my.photo.png', 'image/png')).toBe('\n![my.photo](my.photo.png)\n');
+      // no dot at all: stem equals full filename
+      expect(formatRef('nodot', 'image/png')).toBe('\n![nodot](nodot)\n');
     });
 
     it('non-image mime types return [filename](filename) with surrounding newlines', () => {
