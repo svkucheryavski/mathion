@@ -353,22 +353,45 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
 });
 
 describe('MarkdownEditor — sidebar drop suppression', () => {
-  it('drop on sidebar drop-zone does NOT bubble to .edit-content wrapper handler', async () => {
+  it('drop on sidebar drop-zone does NOT bubble to <aside> (drop-zone stopPropagation works)', async () => {
     vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
     vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
-      mkAsset({ filename: 'side.png', mime_type: 'image/png' }),
+      mkAsset({ filename: 'dz.png', mime_type: 'image/png' }),
+    );
+    const { target } = mountEditor({ value: 'x' });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const aside = target.querySelector<HTMLElement>('[data-testid="asset-sidebar"]')!;
+    const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
+    // Listener on the aside — between drop-zone and wrapper. Only fires if
+    // the drop-zone's stopPropagation is missing. (The aside's own
+    // stopPropagation would catch the event before .edit-content, so a
+    // wrapper-level listener can't distinguish drop-zone vs aside stops.)
+    const asideDropListener = vi.fn();
+    aside.addEventListener('drop', asideDropListener);
+    const file = new File(['x'], 'dz.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    dropZone.dispatchEvent(ev);
+    expect(asideDropListener).not.toHaveBeenCalled();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    aside.removeEventListener('drop', asideDropListener);
+  });
+
+  it('drop directly on <aside> (catch-all path) does NOT bubble to .edit-content wrapper (aside stopPropagation works)', async () => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+      mkAsset({ filename: 'as.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     const wrapper = target.querySelector<HTMLElement>('.edit-content')!;
-    const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
+    const aside = target.querySelector<HTMLElement>('[data-testid="asset-sidebar"]')!;
     const wrapperDropListener = vi.fn();
     wrapper.addEventListener('drop', wrapperDropListener);
-    const file = new File(['x'], 'side.png', { type: 'image/png' });
-    // Real Event with native stopPropagation (no override).
+    const file = new File(['x'], 'as.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
-    dropZone.dispatchEvent(ev);
+    aside.dispatchEvent(ev);
     expect(wrapperDropListener).not.toHaveBeenCalled();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     wrapper.removeEventListener('drop', wrapperDropListener);
