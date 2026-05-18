@@ -427,3 +427,46 @@ describe('AssetSidebar — delete UI', () => {
     expect(deleteMock).toHaveBeenNthCalledWith(2, 2);
   });
 });
+
+describe('AssetSidebar — long filename truncation', () => {
+  it('does not truncate filenames at or below the cap', async () => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+      mkAsset({ id: 1, filename: 'short.pdf' }),
+    ]);
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const name = target.querySelector('[data-testid="asset-row-1"] .name')!;
+    expect(name.textContent).toBe('short.pdf');
+    expect(name.getAttribute('title')).toBe('short.pdf');
+  });
+
+  it('truncates long filenames with middle ellipsis and preserves the extension', async () => {
+    const full = 'Presentation 2 (corrected version of the lecture slides).pdf';
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+      mkAsset({ id: 1, filename: full }),
+    ]);
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const name = target.querySelector('[data-testid="asset-row-1"] .name')!;
+    // MAX=24, stem='Presentation 2 (corrected version of the lecture slides)',
+    // ext='.pdf' (4). reserve=8. prefixLen=16.
+    // result = stem.slice(0,16) + '...' + stem.slice(-1) + '.pdf'
+    //        = 'Presentation 2 (' + '...' + ')' + '.pdf'
+    //        = 'Presentation 2 (...).pdf'  (24 chars)
+    expect(name.textContent).toBe('Presentation 2 (...).pdf');
+    expect(name.getAttribute('title')).toBe(full);
+  });
+
+  it('falls back to end truncation for filenames without an extension', async () => {
+    const full = 'this-is-a-name-without-any-extension';  // 36 chars, no dot
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+      mkAsset({ id: 1, filename: full }),
+    ]);
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const name = target.querySelector('[data-testid="asset-row-1"] .name')!;
+    // MAX=24, no dot → filename.slice(0, 21) + '...'.
+    expect(name.textContent).toBe('this-is-a-name-withou...');
+    expect(name.getAttribute('title')).toBe(full);
+  });
+});

@@ -132,6 +132,21 @@
   function isImage(mime: string) {
     return mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif';
   }
+  function displayName(filename: string): string {
+    const MAX = 24;
+    if (filename.length <= MAX) return filename;
+    const dot = filename.lastIndexOf('.');
+    // No extension (or dotfile like .gitignore): plain end truncation.
+    if (dot <= 0) return filename.slice(0, MAX - 3) + '...';
+    const ext = filename.slice(dot);
+    const stem = filename.slice(0, dot);
+    // Reserve room for: '...' (3) + 1 stem-tail char + ext.length.
+    const reserve = 3 + 1 + ext.length;
+    // If extension is so long it leaves no room for prefix+tail, fall back.
+    if (reserve >= MAX) return filename.slice(0, MAX - 3) + '...';
+    const prefixLen = MAX - reserve;
+    return stem.slice(0, prefixLen) + '...' + stem.slice(-1) + ext;
+  }
 </script>
 
 <aside
@@ -206,7 +221,7 @@
               {/if}
             </span>
             <span class="meta">
-              <span class="name">{a.filename}</span>
+              <span class="name" title={a.filename}>{displayName(a.filename)}</span>
               <span class="size">{a.file_size} B</span>
             </span>
           </button>
