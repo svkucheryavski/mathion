@@ -428,6 +428,44 @@ describe('AssetSidebar — delete UI', () => {
   });
 });
 
+describe('AssetSidebar — 409 duplicate upload rename hint', () => {
+  it('409 from uploadAsset surfaces the rename hint appended to the server detail', async () => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    const { ApiError } = await import('../lib/api');
+    vi.spyOn(assetsModule, 'uploadAsset').mockRejectedValueOnce(
+      new ApiError(409, "Asset 'foo.png' already exists in this version"),
+    );
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const picker = target.querySelector<HTMLInputElement>('[data-testid="file-picker"]')!;
+    const file = new File(['x'], 'foo.png', { type: 'image/png' });
+    Object.defineProperty(picker, 'files', { value: [file], configurable: true });
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="upload-error"]');
+    expect(err?.textContent).toContain("Asset 'foo.png' already exists in this version");
+    expect(err?.textContent).toContain('Rename the file on disk and re-upload.');
+  });
+
+  it('non-409 errors do NOT append the rename hint', async () => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    const { ApiError } = await import('../lib/api');
+    vi.spyOn(assetsModule, 'uploadAsset').mockRejectedValueOnce(
+      new ApiError(400, 'Extension not allowed'),
+    );
+    const { target } = mountSidebar();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const picker = target.querySelector<HTMLInputElement>('[data-testid="file-picker"]')!;
+    const file = new File(['x'], 'bad.exe', { type: 'application/octet-stream' });
+    Object.defineProperty(picker, 'files', { value: [file], configurable: true });
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="upload-error"]');
+    expect(err?.textContent).toContain('Extension not allowed');
+    expect(err?.textContent).not.toContain('Rename the file on disk and re-upload.');
+  });
+});
+
 describe('AssetSidebar — long filename truncation', () => {
   it('does not truncate filenames at or below the cap', async () => {
     vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([

@@ -85,9 +85,12 @@
         await fetchAssets();
       }
     } catch (e) {
-      const detail = e instanceof ApiError ? e.displayMessage : 'Upload failed';
+      const baseDetail = e instanceof ApiError ? e.displayMessage : 'Upload failed';
+      const renameHint = e instanceof ApiError && e.status === 409
+        ? ' Rename the file on disk and re-upload.'
+        : '';
       uploadError = {
-        detail,
+        detail: baseDetail + renameHint,
         stoppedAt: files.length > 1 ? { n: i + 1, m: files.length } : undefined,
       };
     } finally {
