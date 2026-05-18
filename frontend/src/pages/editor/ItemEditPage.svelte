@@ -302,7 +302,7 @@
       <section class="readonly">
         {#if item.type === 'static_page'}
           <h3>{item.title}</h3>
-          <MarkdownEditor versionId={vid} value={item.content_md ?? ''} readOnly />
+          <MarkdownEditor versionId={vid} value={item?.content_md ?? ''} readOnly />
         {:else if item.type === 'video'}
           <h3>{item.title}</h3>
           {#if readonlyVideoPreviewUrl}
