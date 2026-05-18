@@ -1,10 +1,9 @@
 <script lang="ts">
-  let { initial, simulateSaveResult }: {
-    initial: number;
+  let { simulateSaveResult }: {
     simulateSaveResult: 'ok' | 'error';
   } = $props();
 
-  let refreshKey = $state(initial);
+  let refreshKey = $state(0);
 
   function simulateSave() {
     if (simulateSaveResult === 'ok') refreshKey++;

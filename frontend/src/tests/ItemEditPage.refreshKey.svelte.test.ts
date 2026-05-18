@@ -20,7 +20,7 @@ describe('ItemEditPage refreshKey wiring', () => {
     const target = document.createElement('div');
     document.body.appendChild(target);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const props: any = $state({ initial: 0, simulateSaveResult: 'ok' as 'ok' | 'error' });
+    const props: any = $state({ simulateSaveResult: 'ok' as 'ok' | 'error' });
     const cmp = mount(RefreshKeyHarness, { target, props });
     cleanup = () => unmount(cmp);
     await Promise.resolve(); flushSync();
@@ -35,7 +35,7 @@ describe('ItemEditPage refreshKey wiring', () => {
     const target = document.createElement('div');
     document.body.appendChild(target);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const props: any = $state({ initial: 0, simulateSaveResult: 'error' as 'ok' | 'error' });
+    const props: any = $state({ simulateSaveResult: 'error' as 'ok' | 'error' });
     const cmp = mount(RefreshKeyHarness, { target, props });
     cleanup = () => unmount(cmp);
     await Promise.resolve(); flushSync();
@@ -50,7 +50,7 @@ describe('ItemEditPage refreshKey wiring', () => {
     const target = document.createElement('div');
     document.body.appendChild(target);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const props: any = $state({ initial: 0, simulateSaveResult: 'ok' as 'ok' | 'error' });
+    const props: any = $state({ simulateSaveResult: 'ok' as 'ok' | 'error' });
     const cmp = mount(RefreshKeyHarness, { target, props });
     cleanup = () => unmount(cmp);
     await Promise.resolve(); flushSync();
