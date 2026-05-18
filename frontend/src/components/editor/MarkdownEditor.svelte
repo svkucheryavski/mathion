@@ -59,9 +59,11 @@
   }
 
   let flashUntil = $state(0);
+  let flashTimer: ReturnType<typeof setTimeout> | null = null;
   function flashOverlay() {
     flashUntil = Date.now() + 1500;
-    setTimeout(() => { flashUntil = 0; }, 1500);
+    if (flashTimer !== null) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { flashUntil = 0; flashTimer = null; }, 1500);
   }
 
   async function runMarkdownEditorUpload(
@@ -160,7 +162,10 @@
   }
 
   onMount(() => { if (readOnly) void loadPreview(); });
-  onDestroy(() => { latestReq++; });
+  onDestroy(() => {
+    latestReq++;
+    if (flashTimer !== null) clearTimeout(flashTimer);
+  });
 </script>
 
 <div class="editor">

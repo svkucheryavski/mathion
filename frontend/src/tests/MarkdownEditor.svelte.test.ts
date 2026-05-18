@@ -196,6 +196,26 @@ describe('MarkdownEditor — textarea drop', () => {
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     expect(propsRef.value).toBe('abc\n![fb](fb.png)\n');
   });
+
+  it('textarea drop does not bubble to .edit-content (stopPropagation is effective)', async () => {
+    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+      mkAsset({ filename: 'bubble.png', mime_type: 'image/png' }),
+    );
+    const { target } = mountEditor({ value: 'x' });
+    await Promise.resolve(); flushSync();
+    const wrapper = target.querySelector<HTMLElement>('.edit-content')!;
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const wrapperDropListener = vi.fn();
+    wrapper.addEventListener('drop', wrapperDropListener);
+    const file = new File(['x'], 'bubble.png', { type: 'image/png' });
+    // Real Event with native stopPropagation (not a spy).
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    ta.dispatchEvent(ev);
+    expect(wrapperDropListener).not.toHaveBeenCalled();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    wrapper.removeEventListener('drop', wrapperDropListener);
+  });
 });
 
 describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
@@ -249,9 +269,14 @@ describe('MarkdownEditor — re-entrancy guard', () => {
     flushSync();
     const ev2 = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev2, 'dataTransfer', { value: { files: [f2] } });
-    ev2.preventDefault = vi.fn(); ev2.stopPropagation = vi.fn();
+    const ev2Prevent = vi.fn();
+    const ev2Stop = vi.fn();
+    ev2.preventDefault = ev2Prevent;
+    ev2.stopPropagation = ev2Stop;
     ta.dispatchEvent(ev2);
     flushSync();
+    expect(ev2Prevent).toHaveBeenCalled();
+    expect(ev2Stop).toHaveBeenCalled();
     expect(uploadSpy).toHaveBeenCalledTimes(1);
     resolveFirst(mkAsset({ filename: 'first.png' }));
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
