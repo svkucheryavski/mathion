@@ -311,3 +311,55 @@ describe('MarkdownEditor — multi-file batch with mid-error', () => {
     expect(err?.textContent).toContain('File size 999 exceeds max 100');
   });
 });
+
+describe('MarkdownEditor — window-level file-drop navigation guard', () => {
+  beforeEach(() => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+  });
+
+  it('window-level file drop has preventDefault called while editor is mounted', async () => {
+    mountEditor();
+    await Promise.resolve(); flushSync();
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: [] } });
+    const preventSpy = vi.fn();
+    ev.preventDefault = preventSpy;
+    window.dispatchEvent(ev);
+    expect(preventSpy).toHaveBeenCalled();
+  });
+
+  it('window-level dragover with files has preventDefault called while editor is mounted', async () => {
+    mountEditor();
+    await Promise.resolve(); flushSync();
+    const ev = new Event('dragover', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: [] } });
+    const preventSpy = vi.fn();
+    ev.preventDefault = preventSpy;
+    window.dispatchEvent(ev);
+    expect(preventSpy).toHaveBeenCalled();
+  });
+
+  it('non-file drags pass through (no preventDefault) — guard does not block URL or text drags', async () => {
+    mountEditor();
+    await Promise.resolve(); flushSync();
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['text/uri-list'], files: [] } });
+    const preventSpy = vi.fn();
+    ev.preventDefault = preventSpy;
+    window.dispatchEvent(ev);
+    expect(preventSpy).not.toHaveBeenCalled();
+  });
+
+  it('guard is removed when editor unmounts (no leak across pages)', async () => {
+    const { cmp } = mountEditor();
+    await Promise.resolve(); flushSync();
+    unmount(cmp);
+    cleanup = null; // prevent afterEach from unmounting again
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: [] } });
+    const preventSpy = vi.fn();
+    ev.preventDefault = preventSpy;
+    window.dispatchEvent(ev);
+    expect(preventSpy).not.toHaveBeenCalled();
+  });
+});

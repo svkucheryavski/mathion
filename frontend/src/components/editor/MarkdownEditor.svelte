@@ -60,6 +60,19 @@
 
   let flashUntil = $state(0);
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Page-level drop navigation guard. While the editor is mounted, any file
+  // drop that ISN'T caught by our dedicated handlers (textarea, wrapper,
+  // sidebar) would otherwise navigate the browser away to display the file,
+  // destroying any unsaved textarea content. Suppress that by calling
+  // preventDefault on window-level dragover and drop, but ONLY for file
+  // drags. Non-file drags (URL drags, internal text drags) pass through.
+  function guardFileDropNavigation(e: DragEvent) {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+    }
+  }
+
   function flashOverlay() {
     flashUntil = Date.now() + 1500;
     if (flashTimer !== null) clearTimeout(flashTimer);
@@ -161,10 +174,16 @@
     if (m === 'preview') loadPreview();
   }
 
-  onMount(() => { if (readOnly) void loadPreview(); });
+  onMount(() => {
+    if (readOnly) void loadPreview();
+    window.addEventListener('dragover', guardFileDropNavigation);
+    window.addEventListener('drop', guardFileDropNavigation);
+  });
   onDestroy(() => {
     latestReq++;
     if (flashTimer !== null) clearTimeout(flashTimer);
+    window.removeEventListener('dragover', guardFileDropNavigation);
+    window.removeEventListener('drop', guardFileDropNavigation);
   });
 </script>
 
