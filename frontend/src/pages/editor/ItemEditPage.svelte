@@ -55,6 +55,7 @@
   // showing the values we PATCHed (server accepted), so the banner reads as
   // a contradiction. Cleared on the next ensureLoaded that succeeds.
   let postSaveRefetchFailed = $state(false);
+  let refreshKey = $state(0);
 
   // Block save when a video item has empty video_url. Server requires a non-empty
   // value (item invariant), so without this gate a programmatic clear (or the
@@ -175,6 +176,7 @@
           }
         }
         postSaveRefetchFailed = false;
+        refreshKey++;
         pushToast('Saved', 'success');
       } else {
         // result === 'error': refetch GET failed. Baseline against sent
@@ -265,7 +267,7 @@
         {#if item.type === 'static_page'}
           {@const t = tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>}
           <label>Content (markdown)
-            <MarkdownEditor versionId={vid} bind:value={t.current.content_md} />
+            <MarkdownEditor versionId={vid} bind:value={t.current.content_md} bind:refreshKey />
           </label>
         {:else if item.type === 'video'}
           {@const t = tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>}
