@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { api, ApiError } from '../../lib/api';
-  import { formatRef } from '../../lib/assets';
+  import { formatRef, uploadAsset, type AssetResponse } from '../../lib/assets';
   import AssetSidebar from './AssetSidebar.svelte';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
@@ -58,6 +58,81 @@
     });
   }
 
+  let flashUntil = $state(0);
+  function flashOverlay() {
+    flashUntil = Date.now() + 1500;
+    setTimeout(() => { flashUntil = 0; }, 1500);
+  }
+
+  async function runMarkdownEditorUpload(
+    files: File[],
+    onEachSuccess: (asset: AssetResponse, index: number) => void,
+  ): Promise<void> {
+    if (uploading) { flashOverlay(); return; }
+    uploading = true;
+    uploadError = null;
+    let i = 0;
+    try {
+      for (; i < files.length; i++) {
+        uploadProgress = { current: i + 1, total: files.length, filename: files[i].name };
+        const asset = await uploadAsset(versionId, files[i]);
+        onEachSuccess(asset, i);
+        refreshKey++;
+      }
+    } catch (e) {
+      const detail = e instanceof ApiError ? e.displayMessage : 'Upload failed';
+      uploadError = {
+        detail,
+        stoppedAt: files.length > 1 ? { n: i + 1, m: files.length } : undefined,
+      };
+    } finally {
+      uploading = false;
+      uploadProgress = null;
+    }
+  }
+
+  function dropOffsetFromPoint(e: DragEvent): number {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const doc = document as any;
+    if (typeof doc.caretPositionFromPoint === 'function') {
+      const pos = doc.caretPositionFromPoint(e.clientX, e.clientY);
+      if (pos && typeof pos.offset === 'number') return pos.offset;
+    }
+    if (typeof doc.caretRangeFromPoint === 'function') {
+      const r = doc.caretRangeFromPoint(e.clientX, e.clientY);
+      if (r && typeof r.startOffset === 'number') return r.startOffset;
+    }
+    return lastOffset;
+  }
+
+  function handleTextareaDragOver(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  function handleTextareaDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    let offset = dropOffsetFromPoint(e);
+    void runMarkdownEditorUpload(files, (asset) => {
+      const ref = formatRef(asset.filename, asset.mime_type);
+      insertAtCursor(ref, offset);
+      offset += ref.length;
+      cursorReady = true;
+    });
+  }
+
+  function handleWrapperDragOver(e: DragEvent) {
+    e.preventDefault();
+  }
+  function handleWrapperDrop(e: DragEvent) {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    void runMarkdownEditorUpload(files, () => { /* no insert */ });
+  }
+
   function handleSidebarInsert(filename: string, mimeType: string) {
     cursorReady = true;
     insertAtCursor(formatRef(filename, mimeType));
@@ -96,12 +171,21 @@
     </div>
   {/if}
   {#if mode === 'edit' && !readOnly}
-    <div class="edit-content">
+    <div
+      class="edit-content"
+      role="region"
+      aria-label="Markdown editor"
+      ondragover={handleWrapperDragOver}
+      ondrop={handleWrapperDrop}
+      class:flash={flashUntil > 0}
+    >
       <textarea
         bind:this={textareaEl}
         bind:value
         rows="14"
         spellcheck="false"
+        ondragover={handleTextareaDragOver}
+        ondrop={handleTextareaDrop}
         onfocus={onTextareaFocus}
         onblur={onTextareaBlur}
         onselectionchange={onTextareaSelectionChange}
@@ -134,4 +218,5 @@
   textarea { flex: 1 1 0; min-width: 0; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
   .preview { padding: var(--space-3); min-height: 200px; }
   .preview.err { color: #a33; }
+  .edit-content.flash { box-shadow: inset 0 0 0 2px #c62828; }
 </style>

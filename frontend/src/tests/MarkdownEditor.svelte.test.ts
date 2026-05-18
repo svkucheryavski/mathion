@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import MarkdownEditor from '../components/editor/MarkdownEditor.svelte';
 import * as assetsModule from '../lib/assets';
 import type { AssetResponse } from '../lib/assets';
+import { ApiError } from '../lib/api';
 
 const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   id: 1,
@@ -140,5 +141,148 @@ describe('MarkdownEditor — value prop bind:value', () => {
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
     expect(propsRef.value).toBe('changed');
+  });
+});
+
+describe('MarkdownEditor — textarea drop', () => {
+  beforeEach(() => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+  });
+
+  function makeDropEvent(files: File[], target: EventTarget, opts: { stopSpy?: () => void; preventSpy?: () => void } = {}) {
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files } });
+    Object.defineProperty(ev, 'target', { value: target });
+    if (opts.stopSpy) ev.stopPropagation = opts.stopSpy;
+    if (opts.preventSpy) ev.preventDefault = opts.preventSpy;
+    return ev;
+  }
+
+  it('drop on textarea uploads + inserts + bumps refreshKey', async () => {
+    const uploadSpy = vi
+      .spyOn(assetsModule, 'uploadAsset')
+      .mockResolvedValue(mkAsset({ filename: 'dropped.png', mime_type: 'image/png' }));
+    const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
+    await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    ta.focus();
+    ta.setSelectionRange(1, 1);
+    ta.dispatchEvent(new Event('selectionchange', { bubbles: true }));
+    flushSync();
+    const stopSpy = vi.fn();
+    const preventSpy = vi.fn();
+    const file = new File(['x'], 'dropped.png', { type: 'image/png' });
+    const ev = makeDropEvent([file], ta, { stopSpy, preventSpy });
+    ta.dispatchEvent(ev);
+    expect(preventSpy).toHaveBeenCalled();
+    expect(stopSpy).toHaveBeenCalled();
+    await Promise.resolve(); flushSync();
+    await Promise.resolve(); flushSync();
+    expect(uploadSpy).toHaveBeenCalledWith(42, file);
+    expect(propsRef.value).toBe('a\n![dropped](dropped.png)\nbc');
+    expect(propsRef.refreshKey).toBe(1);
+  });
+
+  it('drop on textarea with no precise offset falls back to lastOffset (= end if never focused)', async () => {
+    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+      mkAsset({ filename: 'fb.png', mime_type: 'image/png' }),
+    );
+    const { target, propsRef } = mountEditor({ value: 'abc' });
+    await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const file = new File(['x'], 'fb.png', { type: 'image/png' });
+    const ev = makeDropEvent([file], ta);
+    ta.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(propsRef.value).toBe('abc\n![fb](fb.png)\n');
+  });
+});
+
+describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
+  beforeEach(() => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+  });
+
+  it('drop on wrapper uploads (no insert) and bumps refreshKey', async () => {
+    const uploadSpy = vi
+      .spyOn(assetsModule, 'uploadAsset')
+      .mockResolvedValue(mkAsset({ filename: 'wd.png', mime_type: 'image/png' }));
+    const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
+    await Promise.resolve(); flushSync();
+    const wrapper = target.querySelector<HTMLElement>('.edit-content')!;
+    const file = new File(['x'], 'wd.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    Object.defineProperty(ev, 'target', { value: wrapper });
+    const preventSpy = vi.fn();
+    ev.preventDefault = preventSpy;
+    wrapper.dispatchEvent(ev);
+    expect(preventSpy).toHaveBeenCalled();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(uploadSpy).toHaveBeenCalledWith(42, file);
+    expect(propsRef.value).toBe('abc');
+    expect(propsRef.refreshKey).toBe(1);
+  });
+});
+
+describe('MarkdownEditor — re-entrancy guard', () => {
+  beforeEach(() => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+  });
+
+  it('a second textarea drop while uploading is rejected (uploadAsset called once)', async () => {
+    let resolveFirst: (a: AssetResponse) => void = () => {};
+    const firstPromise = new Promise<AssetResponse>((r) => { resolveFirst = r; });
+    const uploadSpy = vi
+      .spyOn(assetsModule, 'uploadAsset')
+      .mockReturnValueOnce(firstPromise)
+      .mockResolvedValueOnce(mkAsset({ filename: 'second.png' }));
+    const { target } = mountEditor({ value: '' });
+    await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const f1 = new File(['x'], 'first.png', { type: 'image/png' });
+    const f2 = new File(['y'], 'second.png', { type: 'image/png' });
+    const ev1 = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev1, 'dataTransfer', { value: { files: [f1] } });
+    ev1.preventDefault = vi.fn(); ev1.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev1);
+    flushSync();
+    const ev2 = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev2, 'dataTransfer', { value: { files: [f2] } });
+    ev2.preventDefault = vi.fn(); ev2.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev2);
+    flushSync();
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    resolveFirst(mkAsset({ filename: 'first.png' }));
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+  });
+});
+
+describe('MarkdownEditor — multi-file batch with mid-error', () => {
+  beforeEach(() => {
+    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+  });
+
+  it('batch halts on mid-loop error and writes uploadError with stoppedAt', async () => {
+    vi.spyOn(assetsModule, 'uploadAsset')
+      .mockResolvedValueOnce(mkAsset({ filename: '1.png' }))
+      .mockResolvedValueOnce(mkAsset({ filename: '2.png' }))
+      .mockRejectedValueOnce(new ApiError(400, 'File size 999 exceeds max 100'))
+      .mockResolvedValueOnce(mkAsset({ filename: '4.png' }));
+    const { target } = mountEditor({ value: '' });
+    await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const files = [1, 2, 3, 4].map(
+      (n) => new File(['x'], `${n}.png`, { type: 'image/png' }),
+    );
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files } });
+    ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="upload-error"]');
+    expect(err?.textContent).toContain('Upload stopped at file 3 of 4');
+    expect(err?.textContent).toContain('File size 999 exceeds max 100');
   });
 });
