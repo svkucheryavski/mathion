@@ -1,7 +1,7 @@
 # Run Management (Admin Surface) — Design
 
 **Date:** 2026-05-19
-**Status:** Brainstorm-validated and reviewer-corrected (five rounds); ready for implementation plan.
+**Status:** Brainstorm-validated and reviewer-corrected (six rounds); ready for implementation plan.
 **Scope:** Mathion frontend — admin-only run management for a single course.
 
 > **Revision notes**
@@ -15,6 +15,8 @@
 > **R4 (post-round-4):** Three parallel reviewers verified all R3 fixes hold against actual source. **Task rebalance (G1=A): 12 → 18 tasks** to keep each task subagent-cycle-sized — splits: T4→T5+T6 (NewRunModal isolated); T5a→T7+T8 (Publish bar separate); T5b→T9+T10 (`makeDirtyTracker` vs checklist+settings+danger); T8a→T14+T15 (chunked dispatcher vs banner+retry); T8b→T16+T17 (modal scaffold vs F1=A `buildBatchRow`). **Shared UI helpers (G2=A):** new Task 3 extracts three primitives — `InlineConfirm` (5 sites), `LoadingPlaceholder` (7 sites), `FocusTrap` (2 sites) — consumed by all subsequent tasks to prevent divergent implementations. Mechanical fixes: §3.2 stale-guard catch filters `e.status !== 401` (avoids briefly rendering `loadError` before the global redirect); named the Overview→parent navigation callback prop `onNavigateTab` (parallel to existing `onPrefilterClear`); §5.1 notes that `VersionResponse`/`CourseResponse` are pre-existing types in `lib/types.ts`; §7 DST helper documents an explicit-offset Date fallback if `process.env.TZ` doesn't take effect in jsdom worker; §7 `RosterImportModal` test clarifies that the `prunePendingGroups` assertion runs on the parent (`RunRosterTab`) after the modal-triggered refetch; three "group full" toast surfaces normalized to `"Target group is full (10 students)."`.
 >
 > **R5 (post-round-5):** Three parallel reviewers confirmed all R4 mechanical fixes hold cleanly; minor task-ownership gaps and one shared-primitive API gap remained. **`InlineConfirm` API expanded:** added `warning?: string` prop (renders muted small text above the `[Confirm] [Cancel]` row); §3.5 Unpublish now wires `warning="Students will lose access immediately. Their progress data is preserved."` via the primitive (was previously an ad-hoc inline pair). **Bulk-delete added to consumer list (5 → 6 sites)**; selection-strip "Delete selected" uses `InlineConfirm` with dynamic `confirmLabel`. **`FocusTrap` test scoping documented** in §3.1 — jsdom-bounded assertions (previousFocus capture, listener attach/detach, isConnected branch, selector resolution); true focus traversal deferred to manual smoke. **Task 8/Task 10 readiness-derivation boundary clarified** — single `$derived` lives on `RunDetailPage`, returns `{ checks, firstViolation }`, consumed by both the publish-button tooltip (T8) and the Overview tab's checklist render (T10). **Task 14/Task 15 state contract named** — T14 exposes a `bulkOpResult` `$state` and a `dispatchBulkOp` function reference; T15 consumes both to render banner shapes and re-enter dispatcher on Retry. **§10 task descriptions tightened**: T5 now names the "No runs yet" CTA, `LoadingPlaceholder` consumption, and the no-frontend-resort assertion; T11 makes the `(invited)`-persists-across-adds invariant explicit; T12 specifies lowercased duplicate compare + `'__unassigned'` sentinel + "add-student row persists across filter changes" + "indeterminate is derived-only"; T17 documents `RunStudentBatchResultRow.detail` rendered verbatim as both visible text and `title` tooltip; T10/T11/T12 cite `InlineConfirm` "from T3" parallel to existing `FocusTrap` citations on T6/T16.
+>
+> **R6 (post-round-6):** Two narrowly-scoped reviewers confirmed all R5 fixes are correctly applied. Two small body-consistency gaps from R5 closed: §10 T3 description was still saying "5 sites" (now lists all 6 including Roster bulk-delete with dynamic `confirmLabel`); §4.4 "Delete selected" wording now cites `InlineConfirm` from §3.1 (parallel to the other 5 consumer sites). Three pre-plan-writing micro-tightenings applied: `InlineConfirm` pins the morph mechanic (plain `{#if confirmOpen}` swap, no Svelte transitions, internal `$state` toggle); `LoadingPlaceholder` pins styling (`<div class="loading-placeholder">`, `color: var(--text-muted)`, no animated glyph — the trailing `…` IS the indicator); §5.1 adds the `ChecklistRow` type definition consumed by T8's shared `$derived` (was referenced in T8/T10 but undefined). No design decisions taken in R6 — purely mechanical.
 
 ---
 
@@ -141,8 +143,8 @@ frontend/src/tests/
 
 **Shared UI primitives.** Three components in `components/ui/` factored out because they're used by ≥2 sites with subtle correctness requirements that should not diverge between consumers:
 
-- **`InlineConfirm.svelte`** — single-button-that-morphs-to-pair pattern. Props: `label: string` (idle button text, e.g., "Delete"), `confirmLabel?: string` (default "Confirm"), `warning?: string` (rendered as muted small text directly above the `[Confirm] [Cancel]` row when in confirm state — used by the Unpublish site for "Students will lose access immediately. Their progress data is preserved."), `disabled?: boolean`, `tooltip?: string`, `onConfirm: () => void`. Used at: Run delete (Overview danger zone), Teacher remove, Group delete, Roster single-student delete, Roster bulk-delete (selection action strip; uses dynamic `confirmLabel`), Unpublish — **6 sites**.
-- **`LoadingPlaceholder.svelte`** — muted "Loading…" text with optional spinner glyph. Props: `label?: string` (default "Loading…"). Used wherever a `$state<T[] | null>` is `null` — 7+ list sites.
+- **`InlineConfirm.svelte`** — single-button-that-morphs-to-pair pattern. Props: `label: string` (idle button text, e.g., "Delete"), `confirmLabel?: string` (default "Confirm"), `warning?: string` (rendered as muted small text directly above the `[Confirm] [Cancel]` row when in confirm state — used by the Unpublish site for "Students will lose access immediately. Their progress data is preserved."), `disabled?: boolean`, `tooltip?: string`, `onConfirm: () => void`. Used at: Run delete (Overview danger zone), Teacher remove, Group delete, Roster single-student delete, Roster bulk-delete (selection action strip; uses dynamic `confirmLabel`), Unpublish — **6 sites**. **Implementation:** internal `let confirmOpen = $state(false)` toggled on idle-button click → renders `[Confirm] [Cancel]` (and `warning` if provided) via plain `{#if confirmOpen}` swap (no Svelte transition directives — instant). Cancel resets `confirmOpen = false`. Confirm calls `onConfirm()` then resets `confirmOpen = false` (caller is responsible for hiding the component or refreshing state).
+- **`LoadingPlaceholder.svelte`** — muted text indicator. Renders a single `<div class="loading-placeholder">{label}</div>`. Props: `label?: string` (default `"Loading…"`). The trailing `…` in the default label is the only "spinner" — no animated glyph (the existing app does not use animated spinners). Styling: `.loading-placeholder` class adds `color: var(--text-muted)` and small padding; defined in the component's `<style>` block. Used wherever a `$state<T[] | null>` is `null` — 7+ list sites.
 - **`FocusTrap.svelte`** — modal-scope Tab-trap. Captures previously-focused element on mount, autofocuses the first interactive element, traps Tab/Shift-Tab inside the modal, and on destroy restores focus to the stored element **only if `isConnected`** (no-op when the trigger has unmounted). Props: `autofocusSelector?: string` (default `'input, select, textarea, button'` — first match). Used by `NewRunModal` and `RosterImportModal`. **Test scoping:** jsdom focus is partially broken, so `FocusTrap.svelte.test.ts` asserts only what jsdom supports: (i) `previousFocus` captured via `document.activeElement` at mount; (ii) Tab key event listeners attached on mount and removed on destroy; (iii) the `isConnected === false` restore branch is a no-op (mock the previous element with `isConnected=false`, assert no throw and no `.focus()` call); (iv) `autofocusSelector` resolves to the right element (DOM query assertion, not actual focus state). True keyboard-driven focus traversal is deferred to manual smoke (§7).
 
 **Routes** live under `pages/runs/` (sibling to `pages/editor/`), not under a new `pages/admin/` subtree, to match the established convention.
@@ -479,7 +481,7 @@ The heaviest UI. Manages individual + bulk student operations.
   - `N` = `selected.size` (all selected, including those hidden by current filter).
   - `(M visible)` appears as a tooltip/hint when M < N due to filter.
 - `Move to group` dropdown lists `Unassign` + each non-disabled group with `(n/10)` capacity. Selecting an option triggers `POST /api/runs/{runId}/students/bulk-move` with `{user_ids: Array.from(selected), group_id: null | id}`.
-- `Delete selected`: morphs to inline confirm ("Confirm Delete — {N} students will be removed.") Confirm → `POST /api/runs/{runId}/students/bulk-delete`.
+- `Delete selected`: renders `InlineConfirm` from §3.1 with `label="Delete selected"` and dynamic `confirmLabel={"Confirm Delete — " + selected.size + " students will be removed."}`. Confirm → `POST /api/runs/{runId}/students/bulk-delete`.
 
 **Header checkbox tri-state.** Three render states based on the filtered-visible row set (size = M):
 - **Unchecked**: zero of the filtered-visible rows are in `selected`.
@@ -744,6 +746,15 @@ export type BulkRosterErrorCode =
   | 'internal_error';
 
 export type BulkOpSummary = { total: number; ok: number; error: number };
+
+// Used by the shared publish-readiness $derived on RunDetailPage (consumed by
+// both the Publish-button tooltip in T8 and the Overview checklist in T10).
+export type ChecklistRow = {
+  id: 'has_teacher' | 'all_assigned' | 'group_sizes';
+  status: 'ok' | 'fail' | 'na';   // ok → ✓ ; fail → ✗ ; na → — (only when !groups_enabled)
+  label: string;                  // e.g., "All students assigned to a group"
+  hint?: string;                  // shown on fail (e.g., "3 students unassigned" or per-group breakdown)
+};
 
 export type BulkMoveResultRow = {
   user_id: number;
@@ -1069,7 +1080,7 @@ The implementation plan (written next via `superpowers:writing-plans`) will use 
 2. **`lib/runTeachers.ts` + `lib/runGroups.ts` (incl. `getCapacityClass`) + `lib/runRoster.ts`** — three resource modules + their tests. Establishes the bulk-op client-side validation pattern (`>= 1`, `<= 200`, unique values).
 
 3. **Shared UI helpers (`components/ui/`)** — three primitives consumed by ≥2 later tasks each (see §3.1 "Shared UI primitives"):
-   - `InlineConfirm.svelte` (5 sites: Run delete, Teacher remove, Group delete, Roster single-delete, Unpublish).
+   - `InlineConfirm.svelte` (**6 sites**: Run delete, Teacher remove, Group delete, Roster single-delete, Roster bulk-delete with dynamic `confirmLabel`, Unpublish with `warning` prop).
    - `LoadingPlaceholder.svelte` (7+ sites: every list).
    - `FocusTrap.svelte` (2 sites: `NewRunModal`, `RosterImportModal`).
    Tests for each. Establishes the verbatim patterns later tasks must consume — no per-site reimplementation.
