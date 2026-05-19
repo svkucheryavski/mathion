@@ -1,7 +1,7 @@
 # Run Management (Admin Surface) — Design
 
 **Date:** 2026-05-19
-**Status:** Brainstorm-validated and reviewer-corrected (six rounds in-house + 1 independent codex pass); ready for implementation plan.
+**Status:** Brainstorm-validated and reviewer-corrected (six rounds in-house + 2 independent codex passes); ready for implementation plan.
 **Scope:** Mathion frontend — admin-only run management for a single course.
 
 > **Revision notes**
@@ -19,6 +19,8 @@
 > **R6 (post-round-6):** Two narrowly-scoped reviewers confirmed all R5 fixes are correctly applied. Two small body-consistency gaps from R5 closed: §10 T3 description was still saying "5 sites" (now lists all 6 including Roster bulk-delete with dynamic `confirmLabel`); §4.4 "Delete selected" wording now cites `InlineConfirm` from §3.1 (parallel to the other 5 consumer sites). Three pre-plan-writing micro-tightenings applied: `InlineConfirm` pins the morph mechanic (plain `{#if confirmOpen}` swap, no Svelte transitions, internal `$state` toggle); `LoadingPlaceholder` pins styling (`<div class="loading-placeholder">`, `color: var(--text-muted)`, no animated glyph — the trailing `…` IS the indicator); §5.1 adds the `ChecklistRow` type definition consumed by T8's shared `$derived` (was referenced in T8/T10 but undefined). No design decisions taken in R6 — purely mechanical.
 >
 > **R7 (post-independent-codex-review):** Independent codex review caught 2 Critical, 3 Important, 2 Minor findings that all six in-house rounds missed. **Critical fixes:** (1) Frontend type names corrected — the actual exports in `lib/types.ts:194,205` are `Course` and `Version`, NOT `CourseResponse`/`VersionResponse`; the `Response` names appear only in header comments describing the backend endpoints. R4-A had misread those comments as type definitions and propagated the error. All references in §2, §3.2, §3.3, §5.1, §7 corrected; §5.1 now explicitly documents the comment/export distinction. (2) `pendingGroupId` render formula corrected — was `pendingGroupId.get(U) ?? student.group_id ?? '__unassigned'`; the `??` falls through `null`, so optimistic-unassign (overlay value `null`) silently displayed the pristine `student.group_id`. New formula uses `pendingGroupId.has(U) ? pendingGroupId.get(U)! : student.group_id` with a separate `null → '__unassigned'` mapping in `selectValueFor(U)`. **Important fixes:** (1) `loadAll` now resets all six slices to `null` at load start (was leaving stale data between same-instance navigations like `/runs/1 → /runs/2`, defeating the disabled-banner fallback and showing wrong tab data briefly). (2) §4.1 pseudo-code import paths corrected — `RunOverviewTab.svelte` is two levels deep under `components/runs/`, so imports must use `../../lib/...` (not `../lib/...`) and omit the `.ts` extension. (3) Three missing error matrix rows added in §6: `createRun` 409 (no published version / disabled newest), `unpublishRun` 409 ("Run is not published"), `updateGroup` 409 (rename name conflict). **Minor fixes:** (1) §5.7 CSV "No email column" condition clarified — fires only when header detection succeeds AND all data rows have blank email cells (positional fallback uses per-row validation instead). (2) §4.4 `prunePendingGroups` lifecycle clarified — runs on students refetch only, not on inline group change success (which only refetches groups).
+>
+> **R8 (post-second-codex-review):** Second codex pass confirmed all R7 fixes correctly close their findings; two partial-citation gaps remained. **Fixes:** (1) §6 `createRun` 409 row backend citation corrected — the two error sources are at distinct lines: "No published version" raised in `helpers.py:77` (called from `runs.py:42`); "Newest version is disabled" raised in `runs.py:43-44`. Row now cites both correctly and notes the race-only nature of this 409 path (normal flow is pre-empted by §3.4's disabled New-run button). (2) §4.4 `prunePendingGroups` refetch-paths enumeration expanded to include the §4.3 group-delete 409 "Group has students" race (which refetches both `groups` AND `students`, line ~482) — was missing from the original 3-path list. All R7 sweep/anti-regression checks passed clean; no new regressions introduced by R7's edits.
 
 ---
 
@@ -547,7 +549,14 @@ Uses `SvelteMap<number, number | null>` overlay (NOT `Record<…>` — `SvelteMa
 const pendingGroupId = new SvelteMap<number, number | null>();
 ```
 
-**`pendingGroupId` prune rule.** Whenever `students` is refetched (the four refetch paths: single-row delete, bulk-op completion, RosterImportModal Done, and any path that resets `students`), call `prunePendingGroups()` immediately after the new `students` array is assigned. Note the inline group change success branch does NOT refetch `students` (it only refetches `groups` for capacity badges) and does NOT need to call `prunePendingGroups()` — it removes its own entry via `pendingGroupId.delete(U)` directly. If `pendingGroupId.delete` is later called on a U that was already pruned, `SvelteMap.delete` is idempotent. Function:
+**`pendingGroupId` prune rule.** Whenever `students` is refetched, call `prunePendingGroups()` immediately after the new `students` array is assigned. Exhaustive list of refetch paths in this spec:
+
+1. Single-row roster delete (§4.4 row Actions, refetches `students` AND `groups`).
+2. Bulk-move / bulk-delete completion (§4.4 step 4, refetches `students` AND `groups`).
+3. `RosterImportModal` Done (§4.5, parent refetches `students` AND `groups`).
+4. **`RunGroupsTab` group-delete 409 "Group has students; reassign or remove first" race** (§4.3, refetches `groups` AND `students` — line ~482) — also covered by this rule.
+
+Note the inline group change success branch does NOT refetch `students` (only `groups` for capacity badges) and does NOT need to call `prunePendingGroups()` — it removes its own entry via `pendingGroupId.delete(U)` directly. If `pendingGroupId.delete` is later called on a U that was already pruned, `SvelteMap.delete` is idempotent. Function:
 
 ```ts
 function prunePendingGroups(): void {
@@ -965,7 +974,7 @@ All HTTP errors propagate as `ApiError`. Component handling:
 | 404 (on `getRun`) | Render inline "Run not found" placeholder. |
 | 404 (on roster `DELETE`) | Treat as success; refetch the affected list. |
 | 404 (other) | Toast with `e.displayMessage`. |
-| **409 on `createRun`** | **Toast with `e.displayMessage` (covers "No published version" / "Newest version is disabled" — both from `runs.py:43` calling `get_newest_published_version`, `helpers.py:77`). Keep modal open; admin can dismiss and visit Course Editor.** |
+| **409 on `createRun`** | **Toast with `e.displayMessage`. Covers two backend cases: "No published version" (raised in `helpers.py:77` from `get_newest_published_version`, called by `runs.py:42`), and "Newest version is disabled" (raised in `runs.py:43-44` immediately after the helper returns). Keep modal open; admin can dismiss and visit Course Editor. Normal flow is pre-empted by §3.4's disabled New-run button when no published version exists; this 409 path catches the race where the version became disabled between page load and modal submit.** |
 | 409 on `publishRun` | Parse `e.displayMessage`, render banner under Publish button. Covers all backend 409s on publish (readiness violations, disabled version, already-published race). |
 | **409 on `unpublishRun` ("Run is not published")** | **Race: another tab unpublished first. Toast with `e.displayMessage` + refetch `run` (the refetched `is_published === false` flips the button back to "Publish").** |
 | 409 on `deleteRun` | Toast with `e.displayMessage` (covers "Run has students", "Run has submissions", "Unpublish run before deleting"). |
