@@ -1,7 +1,7 @@
 # Run Management (Admin Surface) — Design
 
 **Date:** 2026-05-19
-**Status:** Brainstorm-validated and reviewer-corrected (three rounds); ready for implementation plan.
+**Status:** Brainstorm-validated and reviewer-corrected (four rounds); ready for implementation plan.
 **Scope:** Mathion frontend — admin-only run management for a single course.
 
 > **Revision notes**
@@ -11,6 +11,8 @@
 > **R2 (post-round-2):** Expanded the backend error matrix (group-delete "has submissions", run-PATCH 409s including mini-projects/submissions/disabled-version, bulk-move whole-call 400/409, publish on disabled version); pinned the stale-guard shape (single commit gate over `Promise.all`); added explicit `App.svelte` componentMap registration step; added `runId` string→int coercion with validity guard mirroring `ItemEditPage`; adopted `makeDirtyTracker` from `lib/dirty.svelte.ts` for inline edits (replaces the imperative pristine-capture pattern); switched `pendingGroupId` to `SvelteMap<number, number | null>` for reliable reactivity; pinned `(invited)` badge to a session-scoped `Set<userId>` (replaces wall-clock check); added concrete UX for the bulk-op retry dropdown, red-border lifecycle, chunk failure set composition, header checkbox tri-state, and roster prefilter pill; CourseCard restructure: mirror the mixed-admin pattern (card-as-div, title-as-`<a>`, action buttons in a row); task count split 9 → 12 (T5/T7/T8 each into a+b); enumerated ~10 specific previously-coarse test bullets. Fixed the `VersionResponse.published_at` rationale (it does exist; we deliberately use `created_at` because not all pinned versions are published).
 >
 > **R3 (post-round-3):** **F1=A — already-enrolled with empty `group` cell preserves the student's current group** via a client-side lookup (`existingRoster.find(...).group_id → groups.find(...).name`) and sends that name in the batch row; backend `enroll_user_in_run` unconditionally overwrites `group_id`, so omitting the field would silently unassign the student. Corrected `makeDirtyTracker` API usage to match the actual `lib/dirty.svelte.ts` shape: init with an object literal (NOT a getter), bind to `tracker.current.<field>` (NOT `tracker.current`), `reset(next)` requires a snapshot argument. Corrected toast-module references throughout: actual module is `stores/toasts.svelte.ts` with `pushToast(message: string, kind?: 'info' | 'error' | 'success')`; `lib/toasts.ts` does not exist. Added a `pendingGroupId` prune-on-students-refetch rule (drop entries whose key is no longer in `students[*].user_id` after any refetch). Clarified that the bulk-op Retry button re-enters the same chunked dispatcher (so retry of >200 cancelled rows re-chunks correctly); the wrapper's per-call `<=200` cap is preserved. Added try/catch + `loadError` placeholder to the stale-guard pseudo-code. Replaced the `pendingTab` `$effect`-write idiom with a direct `gotoTab(tab, prefilter?)` function (removes the `pendingTab` state entirely). Added disabled-version banner derivation (`versions.find(...)`) with mid-load and miss fallbacks. Tolerant focus-restore in `NewRunModal` when the trigger unmounts post-navigate. Pinned TZ to `America/New_York` for the DST roster-status test (matches the `2026-03-08` spring-forward date). Documented the conditional-spread JSON idiom for the optional `group` field in batch rows.
+>
+> **R4 (post-round-4):** Three parallel reviewers verified all R3 fixes hold against actual source. **Task rebalance (G1=A): 12 → 18 tasks** to keep each task subagent-cycle-sized — splits: T4→T5+T6 (NewRunModal isolated); T5a→T7+T8 (Publish bar separate); T5b→T9+T10 (`makeDirtyTracker` vs checklist+settings+danger); T8a→T14+T15 (chunked dispatcher vs banner+retry); T8b→T16+T17 (modal scaffold vs F1=A `buildBatchRow`). **Shared UI helpers (G2=A):** new Task 3 extracts three primitives — `InlineConfirm` (5 sites), `LoadingPlaceholder` (7 sites), `FocusTrap` (2 sites) — consumed by all subsequent tasks to prevent divergent implementations. Mechanical fixes: §3.2 stale-guard catch filters `e.status !== 401` (avoids briefly rendering `loadError` before the global redirect); named the Overview→parent navigation callback prop `onNavigateTab` (parallel to existing `onPrefilterClear`); §5.1 notes that `VersionResponse`/`CourseResponse` are pre-existing types in `lib/types.ts`; §7 DST helper documents an explicit-offset Date fallback if `process.env.TZ` doesn't take effect in jsdom worker; §7 `RosterImportModal` test clarifies that the `prunePendingGroups` assertion runs on the parent (`RunRosterTab`) after the modal-triggered refetch; three "group full" toast surfaces normalized to `"Target group is full (10 students)."`.
 
 ---
 
@@ -102,6 +104,11 @@ frontend/src/components/runs/
   RunRosterTab.svelte
   RosterImportModal.svelte
 
+frontend/src/components/ui/                    # shared primitives, used 2+ sites
+  InlineConfirm.svelte        # morph: button → [Confirm] [Cancel] pair
+  LoadingPlaceholder.svelte   # muted "Loading…" + optional spinner glyph
+  FocusTrap.svelte            # modal Tab-trap + previous-focus capture + tolerant restore
+
 frontend/src/lib/
   runs.ts          # run CRUD + publish/unpublish
   runTeachers.ts   # run-teachers CRUD
@@ -117,6 +124,9 @@ frontend/src/tests/
   runRoster.test.ts
   runStatus.test.ts
   csv.test.ts
+  InlineConfirm.svelte.test.ts
+  LoadingPlaceholder.svelte.test.ts
+  FocusTrap.svelte.test.ts
   RunListPage.svelte.test.ts
   NewRunModal.svelte.test.ts
   RunDetailPage.svelte.test.ts
@@ -126,6 +136,12 @@ frontend/src/tests/
   RunRosterTab.svelte.test.ts
   RosterImportModal.svelte.test.ts
 ```
+
+**Shared UI primitives.** Three components in `components/ui/` factored out because they're used by ≥2 sites with subtle correctness requirements that should not diverge between consumers:
+
+- **`InlineConfirm.svelte`** — single-button-that-morphs-to-pair pattern. Props: `label: string` (idle button text, e.g., "Delete"), `confirmLabel?: string` (default "Confirm"), `disabled?: boolean`, `tooltip?: string`, `onConfirm: () => void`. Used at: Run delete (Overview danger zone), Teacher remove, Group delete, Roster single-student delete, Unpublish — 5 sites.
+- **`LoadingPlaceholder.svelte`** — muted "Loading…" text with optional spinner glyph. Props: `label?: string` (default "Loading…"). Used wherever a `$state<T[] | null>` is `null` — 7+ list sites.
+- **`FocusTrap.svelte`** — modal-scope Tab-trap. Captures previously-focused element on mount, autofocuses the first interactive element, traps Tab/Shift-Tab inside the modal, and on destroy restores focus to the stored element **only if `isConnected`** (no-op when the trigger has unmounted). Props: `autofocusSelector?: string` (default `'input, select, textarea, button'` — first match). Used by `NewRunModal` and `RosterImportModal`.
 
 **Routes** live under `pages/runs/` (sibling to `pages/editor/`), not under a new `pages/admin/` subtree, to match the established convention.
 
@@ -173,8 +189,13 @@ async function loadAll(slug: string, rid: number) {
     // Single commit step — all six slices assigned together.
     course = c; run = r; versions = vs; teachers = ts; groups = gs; students = ss;
     loadError = null;
-  } catch (e) {
+  } catch (e: any) {
     if (myToken !== loadToken) return;  // stale failure; ignore.
+    // 401 is handled globally by lib/api.ts:39-41 (emitUnauthorized + login
+    // redirect). We do NOT surface a loadError placeholder in that case —
+    // doing so would briefly render an error screen before the redirect
+    // takes the user away. Filter explicitly.
+    if (e?.status === 401) return;
     // Surface a single error placeholder for the whole page. Specific status
     // handling (403 redirect on by-slug, 404 → "Run not found") is applied
     // before assigning loadError — see access-check rules in §3.3/§3.5.
@@ -289,8 +310,8 @@ function gotoTab(tab: ActiveTab, prefilter?: 'unassigned' | null): void {
 }
 ```
 
-- The Overview-tab "N unassigned" hint button calls `gotoTab('roster', 'unassigned')` directly. The single-tick atomicity is structural (one synchronous function call sets both); no separate `pendingTab` state required.
-- `rosterPrefilter` is cleared by `RunRosterTab` itself when the user types in the search box or clicks the prefilter pill's `×` (see §4.4) — assigning back to the parent's `$state` via a callback prop `onPrefilterClear={() => rosterPrefilter = null}`.
+- `RunDetailPage` passes `gotoTab` to `RunOverviewTab` via a callback prop named `onNavigateTab` (parallel to `onPrefilterClear` below). `RunOverviewTab` props declare: `onNavigateTab: (tab: ActiveTab, prefilter?: 'unassigned' | null) => void`. The "N unassigned" hint button calls `onNavigateTab('roster', 'unassigned')`. The single-tick atomicity is structural (one synchronous function call sets both); no separate `pendingTab` state required.
+- `rosterPrefilter` is cleared by `RunRosterTab` itself when the user types in the search box or clicks the prefilter pill's `×` (see §4.4) — assigning back to the parent's `$state` via a callback prop `onPrefilterClear={() => rosterPrefilter = null}`. `RunRosterTab` props declare: `onPrefilterClear: () => void`.
 
 ---
 
@@ -385,7 +406,7 @@ Three rows, each rendering `✓` (green), `✗` (red), or `—` (gray). Computed
 | Check | Rule |
 |---|---|
 | At least one teacher | `✓` if `teachers.length >= 1`, else `✗`. |
-| All students assigned to a group | If `!run.groups_enabled`, render `—`. Otherwise `✓` if every `student.group_id !== null`, else `✗` with hint button "N students unassigned" — clicking invokes `gotoTab('roster', 'unassigned')` on the parent. |
+| All students assigned to a group | If `!run.groups_enabled`, render `—`. Otherwise `✓` if every `student.group_id !== null`, else `✗` with hint button "N students unassigned" — clicking invokes the `onNavigateTab('roster', 'unassigned')` callback prop on the parent (`RunDetailPage`). |
 | All groups have 1–10 students | If `!run.groups_enabled`, render `—`. **If `groups.length === 0` AND `groups_enabled`, render `✗` with hint "No groups defined".** Otherwise `✓` if every `group.student_count >= 1 && <= 10`, else `✗` with a per-group breakdown. |
 
 **Third-row advisory note.** Backend's publish endpoint enforces only `>10`, not `<1` (see `runs.py:201-209`). Frontend surfaces `<1` as advisory because empty groups indicate incomplete setup. If backend disagrees, the 409 handler (§6) takes over.
@@ -525,7 +546,7 @@ Why: without pruning, entries for rows that vanished from the roster (deleted by
   - `pendingGroupId.set(U, G)`.
   - Fire `PATCH /api/runs/{rid}/students/{U}` with `{group_id: G}`.
   - On success: `pendingGroupId.delete(U)`; update `student.group_id = G` from the response; refetch `groups` (so capacity badges update).
-  - On 409 `capacity_reached`: `pendingGroupId.delete(U)`; toast "Group full — try another."
+  - On 409 `capacity_reached`: `pendingGroupId.delete(U)`; toast `"Target group is full (10 students)."` (matches the message used by inline-add and bulk-op tooltip — single canonical phrasing).
   - On 409 disabled group: `pendingGroupId.delete(U)`; toast.
   - On 400 / 5xx / other: `pendingGroupId.delete(U)`; toast with `e.displayMessage`.
   - On 401: handled globally by `emitUnauthorized`.
@@ -643,6 +664,8 @@ All HTTP helpers use `lib/api.ts`: `api.get`, `api.post`, `api.patch`, `api.dele
 **Toasts.** All toast call sites import `pushToast` from `stores/toasts.svelte.ts` (the actual toast module — `lib/toasts.ts` does not exist). Signature: `pushToast(message: string, kind?: 'info' | 'error' | 'success')`. Default kind is `'info'`. Toasts auto-dismiss after 5 seconds (handled inside the store). Component code uses `pushToast(...)` directly; no wrapper module.
 
 ### 5.1 Backend-mirror types (added to `lib/types.ts`)
+
+(`VersionResponse` and `CourseResponse` already live in `lib/types.ts` from earlier phases; the spec references them but does NOT redefine them. The types below are the new additions for run management.)
 
 ```ts
 export type RunResponse = {
@@ -924,10 +947,10 @@ All HTTP errors propagate as `ApiError`. Component handling:
 
 Vitest + jsdom. Components with runes use `.svelte.test.ts`. Tests use `mount` / `unmount` / `flushSync` patterns from the existing precedent (see `tests/AssetSidebar.svelte.test.ts`).
 
-**Helper patterns established for this feature** (set up in T1/T3 and reused):
+**Helper patterns established for this feature** (set up in T1–T4 — `lib/runs.ts` helpers, shared UI primitives, pure-function modules — and reused by later tasks):
 
 - **Toast assertions.** Components call `pushToast(message, kind?)` from `stores/toasts.svelte.ts`. Tests use `vi.spyOn(toastsModule, 'pushToast')` (importing the module and spying on the named export) to assert call args. Reset the spy between tests; avoid leaking auto-dismiss timers across tests by using `vi.useFakeTimers()` where banner timing is asserted.
-- **DST test timezone pin.** `tests/runStatus.test.ts` pins `process.env.TZ = 'America/New_York'` in a `beforeAll`/`afterAll` (capture original, restore) so the spring-forward DST boundary check around `2026-03-08` is deterministic regardless of CI runner timezone. (The runStatus helper uses local-time semantics by design; pinning TZ is the only way to make the DST test reproducible.)
+- **DST test timezone pin.** `tests/runStatus.test.ts` pins `process.env.TZ = 'America/New_York'` in a `beforeAll`/`afterAll` (capture original, restore) so the spring-forward DST boundary check around `2026-03-08` is deterministic regardless of CI runner timezone. (The runStatus helper uses local-time semantics by design; pinning TZ is the only way to make the DST test reproducible.) **Fallback if `process.env.TZ` does not take effect** (some jsdom worker setups cache locale data before the test bootstrap mutates `process.env`): construct the `now` Date with an explicit offset string, e.g., `new Date('2026-03-08T02:30:00-05:00')` (EST) and `new Date('2026-03-08T03:30:00-04:00')` (EDT), and assert behavior across both. Either approach satisfies the regression intent; tests should not silently degrade if the env-pin no-ops.
 - **Router navigation stub.** For tests asserting redirects (admin gate, 403 by-slug), `vi.spyOn(router, 'navigate')` from `lib/router.svelte.ts`. The existing `tests/assets.test.ts` `Object.defineProperty(window, 'location', …)` pattern is for *reading* the current URL (emitUnauthorized payload), NOT for spying on navigation — use the router spy instead.
 - **`vi.useFakeTimers()`** — debounced CSV live-parse (200ms), banner auto-dismiss (5s), session-scoped `(invited)` badge timing if relevant.
 - **Clipboard stub:**
@@ -960,7 +983,7 @@ Vitest + jsdom. Components with runes use `.svelte.test.ts`. Tests use `mount` /
 | `tests/RunTeachersTab.svelte.test.ts` | Add flow (POST → prepend). Auto-created teacher with `user_full_name=null` shows `(invited)` badge; **`(invited)` persists across reactive updates** (e.g., another teacher added later — the original's badge stays). Remove flow with inline confirm. 409 on add → inline error. Empty state. |
 | `tests/RunGroupsTab.svelte.test.ts` | `groups_enabled=false` → placeholder. Add → POST → prepend. Inline-rename with `makeDirtyTracker`: blur commits, Enter commits, Escape reverts. Capacity classes render correctly via `getCapacityClass` (assert DOM class names on the badge). Delete-empty → DELETE. Trash disabled when `student_count > 0`. 409 "Group has students" → toast + refetch (both refetched). 409 "Group has submissions" → toast + refetch groups. |
 | `tests/RunRosterTab.svelte.test.ts` | Add inline (with `group_id: null`). Client-side duplicate check blocks POST and shows inline error. **Add-student row: email input cleared after success** (assert `inputEl.value === ''`). Search: email substring (case-insensitive); name substring (case-insensitive); empty search shows all rows. **Header checkbox tri-state:** 0 visible selected → unchecked; 1 of 3 selected → indeterminate (DOM attribute); 3 of 3 selected → checked; click on indeterminate → all visible selected (checked). **Header checkbox toggles only filtered rows** (rows outside the filter unaffected). Selection state survives search-filter changes. **Roster prefilter pill renders** when `rosterPrefilter !== null`; clicking `×` clears the prefilter; typing in search clears the prefilter. **Inline group change optimistic update:** select disabled during in-flight; success updates `student.group_id` + refetches `groups`; 409 capacity_reached deletes from `pendingGroupId` + toasts; 5xx deletes from `pendingGroupId` + toasts. **Inline group change uses `SvelteMap` (not Record)** — verify reactivity on `pendingGroupId.set` AND `pendingGroupId.delete` triggers `<select>` re-render. **`prunePendingGroups()` runs after every `students` refetch** — set `pendingGroupId.set(U, G)` for a userId U whose row is then removed (via bulk-delete that succeeds for U), refetch `students`, assert `pendingGroupId.has(U) === false`. Inverse: set for a userId still in the refetched roster → entry preserved. **Bulk-move chunking boundaries:** 200 → 1 request; 201 → 2 requests of sizes [200, 1]; 450 → 3 requests of sizes [200, 200, 50]; **sequential firing** (request #2's body not constructed until #1 resolves — use deferred promise + spy call-order). **207 aggregation across chunks:** results from chunks 1 and 2 combined into a single summary banner. **207 per-row mapping (one test each):** `not_in_run` → "Student is no longer enrolled in this run."; `capacity_reached` → "Target group is full (10 students)."; `internal_error` → "Server error — please retry."; null+detail-present → `detail` verbatim; **null+detail-missing → "Unknown error"**. **Red-border lifecycle:** errors painted only on rows from THIS bulk op; previous-op red borders cleared at start of next bulk op. **Selection auto-pruned after partial failure** (succeeded rows leave `selected`; cancelled and errored rows stay). **Banner Retry button:** clicking `Retry → group [▼]` and picking a target fires a new bulkMove on still-selected user_ids. **Chunk-level network failure:** chunk 1 ok, chunk 2 throws → abort chunk 3; banner shows `cancelled` count; `Retry cancelled` re-fires for `cancelledIds ∪ chunkErrorRowIds`. **Bulk-move whole-call 400/409:** behaves like chunk-level failure; banner renders `e.displayMessage`. **Banner auto-dismiss** after 5s on full success (fake timers). **Banner does NOT auto-dismiss** on partial failure (advance 10s, banner still in DOM). Bulk-delete: same shape (without group dropdown). Refetch `students` AND `groups` after every bulk op (use `expectBothRefetched`). |
-| `tests/RosterImportModal.svelte.test.ts` | Paste → preview happy path with debounced live-parse (fake timers, advance 200ms). **Debounce cancellation:** rapid keystrokes within 200ms cancel prior parse — only the final parse fires (assert single parse call after the rapid sequence). Invalid rows flagged with reason. In-paste duplicates flagged. Already-enrolled emails listed in counts footer (with `, +N more` truncation when > 5). willCreateGroups displayed. **F1=A wire shape — already-enrolled, empty group cell, existing `group_id` resolves to "Group A"** → assert the submitted batch row has `group: "Group A"`. **F1=A wire shape — already-enrolled, empty cell, existing `group_id === null`** → assert the submitted batch row has no `group` key (use `Object.prototype.hasOwnProperty` assertion, not just `=== undefined`). **Brand-new email, empty group cell** → batch row has no `group` key. **Non-empty group cell on already-enrolled** is sent as-is (re-bucket). Submit calls batch endpoint with valid rows only. Stage 2 result rendering with mixed success/error. **Copy-failed-rows clipboard success** (clipboard mock asserted). **Copy-failed-rows fallback** (clipboard rejects with DOMException → textarea revealed). Escape in stage 1 closes (no refetch). Escape in stage 2 closes + parent refetch (both `listRunStudents` AND `listGroups` called); after the refetch, `prunePendingGroups()` runs (assert via spy on `pendingGroupId.delete`). Focus restoration on close (modal trigger is the `Import roster` button which remains mounted; restore is straightforward). |
+| `tests/RosterImportModal.svelte.test.ts` | Paste → preview happy path with debounced live-parse (fake timers, advance 200ms). **Debounce cancellation:** rapid keystrokes within 200ms cancel prior parse — only the final parse fires (assert single parse call after the rapid sequence). Invalid rows flagged with reason. In-paste duplicates flagged. Already-enrolled emails listed in counts footer (with `, +N more` truncation when > 5). willCreateGroups displayed. **F1=A wire shape — already-enrolled, empty group cell, existing `group_id` resolves to "Group A"** → assert the submitted batch row has `group: "Group A"`. **F1=A wire shape — already-enrolled, empty cell, existing `group_id === null`** → assert the submitted batch row has no `group` key (use `Object.prototype.hasOwnProperty` assertion, not just `=== undefined`). **Brand-new email, empty group cell** → batch row has no `group` key. **Non-empty group cell on already-enrolled** is sent as-is (re-bucket). Submit calls batch endpoint with valid rows only. Stage 2 result rendering with mixed success/error. **Copy-failed-rows clipboard success** (clipboard mock asserted). **Copy-failed-rows fallback** (clipboard rejects with DOMException → textarea revealed). Escape in stage 1 closes (no refetch). Escape in stage 2 closes + parent refetch (both `listRunStudents` AND `listGroups` called). **Note:** `pendingGroupId` and `prunePendingGroups()` live on `RunRosterTab`, NOT on the modal — the modal test asserts only that the modal triggers the parent's refetch callback; the prune-after-refetch invariant is tested in `tests/RunRosterTab.svelte.test.ts` and assumed to be held by the parent's `students` setter. Focus restoration on close (modal trigger is the `Import roster` button which remains mounted; restore is straightforward via `FocusTrap`'s previous-focus capture). |
 
 ### Manual smoke plan
 
@@ -1025,29 +1048,56 @@ The implementation is complete when:
 
 1. Both routes added to `src/routes.ts` with `:courseSlug`/`:runId` param names; **`App.svelte` componentMap registers both new pages**.
 2. `CourseCard` admin-only branch mirrors the mixed-admin pattern (card-as-div, title-as-`<a>`, sibling action buttons); "Runs" button gated on `course.is_admin`.
-3. All eight new Svelte components compile, render, and pass vitest tests.
+3. All eight new run-management Svelte components plus three shared UI primitives (`InlineConfirm`, `LoadingPlaceholder`, `FocusTrap`) compile, render, and pass vitest tests.
 4. All four new lib modules (`runs.ts`, `runTeachers.ts`, `runGroups.ts`, `runRoster.ts`) plus `runStatus.ts` and `csv.ts` exist with documented signatures and pass unit tests.
 5. Backend-mirror types added to `lib/types.ts`.
 6. svelte-check baseline preserved (0 errors; existing warning count unchanged — verified at execution time, not assumed).
 7. The 24-step manual smoke plan passes end-to-end on a local backend running via `run-debug.sh`.
 8. Backend unchanged: no migrations, no schema edits, no endpoint changes.
-9. The **12-task** implementation plan completes with each task individually verified and reviewer-approved.
+9. The **18-task** implementation plan completes with each task individually verified and reviewer-approved.
 
 ---
 
 ## 10. Task decomposition preview
 
-The implementation plan (written next via `superpowers:writing-plans`) will use 12 tasks:
+The implementation plan (written next via `superpowers:writing-plans`) will use **18 tasks** following the R4 rebalance (each right-sized for a single subagent work cycle):
 
-1. **`lib/runs.ts` + types in `lib/types.ts`** — backend-mirror type block; 7 run-CRUD helpers; tests. Verify backend response shapes match.
-2. **`lib/runTeachers.ts`, `lib/runGroups.ts` (incl. `getCapacityClass`), `lib/runRoster.ts`** — three resource modules + their tests. Establishes the bulk-op client-side validation pattern.
-3. **`lib/runStatus.ts` + `lib/csv.ts` + tests** — pure functions. Establishes fake-timer + clipboard-mock patterns reusable by later tasks.
-4. **`RunListPage` + `NewRunModal` + `routes.ts` + `App.svelte` componentMap + `CourseCard` "Runs" button** — page-level routing, admin gate (with 403 redirect), list table, modal, navigation entry point. Tests include version-empty disabled state and by-slug 403 redirect.
-5a. **`RunDetailPage` shell** — stale-guard with single commit gate + `loadError` placeholder, `runId` coercion, parallel fetch, tabs scaffold, sticky publish bar with disabled-version banner derivation, cross-tab handoff via `gotoTab(tab, prefilter?)` (no `$effect`-write idiom), `rosterPrefilter` state with `onPrefilterClear` callback prop, tab-state reset on `runId` change.
-5b. **`RunOverviewTab`** — `makeDirtyTracker`-based inline edits for title + dates; settings panel; tri-state readiness checklist with all permutations; danger zone with delete + 409 toasts.
-6. **`RunTeachersTab` + `RunGroupsTab`** — both small CRUD tabs. Establishes the inline-rename and inline-confirm patterns. Includes `getCapacityClass` rendering and the 409 "Group has submissions" handler.
-7a. **`RunRosterTab` core** — table layout, search filter, header tri-state checkbox with filter scoping, prefilter pill, persistent add-student row with duplicate pre-check + post-success input clear, single-row delete, empty / filtered-empty states.
-7b. **`RunRosterTab` optimistic inline group edit** — `SvelteMap`-based `pendingGroupId` overlay, `prunePendingGroups()` helper called after every `students` refetch, per-row select disabled during in-flight, success / 409 / 5xx branches, refetch on success.
-8a. **`RunRosterTab` bulk ops** — selection action strip, bulk-move + bulk-delete chunking with sequential firing, 207 per-row mapping (all 5 cases incl. null+detail-missing), red-border lifecycle (clear-at-start-paint-on-this-op), selection auto-prune, summary banner with retry control, chunk-level failure handling, bulk-move whole-call 400/409 as chunk-level failure.
-8b. **`RosterImportModal`** — two-stage modal, debounced live-parse with cancellation, preview table with in-paste duplicate + already-enrolled detection, batch submit using `buildBatchRow` (F1=A: already-enrolled with empty group cell preserves current group via `existingRoster + groups` lookup; brand-new empty cell omits `group` via conditional spread), stage 2 results, clipboard copy with fallback.
-9. **Final integration** — manual 24-step smoke walk-through, full vitest (verify count delta), svelte-check baseline check (compare warnings), branch cleanup, merge prep.
+1. **`lib/runs.ts` + types in `lib/types.ts`** — backend-mirror type block (`RunResponse`, `GroupResponse`, etc., per §5.1); 7 run-CRUD helpers; tests. Verify backend response shapes match.
+
+2. **`lib/runTeachers.ts` + `lib/runGroups.ts` (incl. `getCapacityClass`) + `lib/runRoster.ts`** — three resource modules + their tests. Establishes the bulk-op client-side validation pattern (`>= 1`, `<= 200`, unique values).
+
+3. **Shared UI helpers (`components/ui/`)** — three primitives consumed by ≥2 later tasks each (see §3.1 "Shared UI primitives"):
+   - `InlineConfirm.svelte` (5 sites: Run delete, Teacher remove, Group delete, Roster single-delete, Unpublish).
+   - `LoadingPlaceholder.svelte` (7+ sites: every list).
+   - `FocusTrap.svelte` (2 sites: `NewRunModal`, `RosterImportModal`).
+   Tests for each. Establishes the verbatim patterns later tasks must consume — no per-site reimplementation.
+
+4. **`lib/runStatus.ts` + `lib/csv.ts` + tests** — pure functions. DST test pins TZ to `America/New_York` with explicit-offset Date fallback (§7). Establishes fake-timer + clipboard-mock patterns reusable by later tasks.
+
+5. **`RunListPage` + routes + `App.svelte` componentMap + `CourseCard` "Runs" button** — `routes.ts` adds two rows; `App.svelte:14-25` componentMap registers both new pages; list table with backend-ordered rows + status badge + version label resolution + delete-only-when-draft; admin-gate 403 → redirect via `router.navigate`; 404 → inline "Course not found"; version-empty disabled state on New-run button; `CourseCard` admin-only branch restructured to mirror mixed-admin pattern (card-as-div, title-as-`<a>`, sibling `Edit` and `Runs` buttons gated on `course.is_admin`).
+
+6. **`NewRunModal`** — modal scaffold consuming `FocusTrap` from T3; 4 validation tests (title empty, start empty, end empty, end < start); submit payload omits `version_id`; success → close + navigate (tolerant focus restore via `FocusTrap`'s `isConnected` guard); API error → banner with `e.displayMessage`. Establishes the modal pattern reusable by T16.
+
+7. **`RunDetailPage` shell** — stale-guard with single commit gate + `loadError` placeholder + 401 filter (§3.2); `runId` string→int coercion with `Number.isInteger && > 0` validity guard; parallel fetch of 5 nested resources; tabs scaffold; **disabled-version banner derivation** (`$derived(versions?.find(v => v.id === run?.version_id))` with mid-load and miss fallbacks); `gotoTab(tab, prefilter?)` function + `onNavigateTab` callback prop passed to `RunOverviewTab`; `rosterPrefilter` state + `onPrefilterClear` callback prop passed to `RunRosterTab`; tab-state reset effect on `runId` change. Loading-state rendering uses `LoadingPlaceholder` from T3.
+
+8. **Sticky publish bar** (lives at the top of `RunDetailPage`) — Publish/Unpublish buttons; readiness-violation tooltip derivation (first violation only — uses `teachers`, `groups`, `students`, `run` from parent); Publish 409 banner under the button; Unpublish via `InlineConfirm` from T3; post-success run refetch.
+
+9. **`RunOverviewTab` inline edits with `makeDirtyTracker`** — one bundled tracker for `{ title, start_date, end_date }` initialized via `$effect` when `run` first becomes non-null (§4.1); per-field commit on blur with cross-field revert rule (compare `tracker.current[field]` with captured `inFlightValue`); Enter/Escape/blur semantics including "blur after Enter does not double-PATCH"; jsdom date-input `.value` string helper. Calls `pushToast` from `stores/toasts.svelte.ts` on error.
+
+10. **`RunOverviewTab` checklist + settings + danger zone** — tri-state readiness checklist with 7 permutations (§4.1 (c)); settings panel with groups_enabled toggle (publish-lock tooltip + mini-projects-409 fallback); danger zone with `InlineConfirm` for Delete + 204 → navigate back + 2× 409 toasts (`"Clear roster before deleting."` / backend verbatim for "submissions"). The "N unassigned" hint button invokes `onNavigateTab('roster', 'unassigned')`.
+
+11. **`RunTeachersTab` + `RunGroupsTab`** — Teachers: add (auto-create user) + `(invited)` badge with session-scoped `SvelteSet<userId>` + remove via `InlineConfirm`. Groups: `groups_enabled=false` placeholder; add (409 name conflict → inline error); list ordered by `name ASC`; inline-rename via `makeDirtyTracker` (pattern from T9); capacity badges via `getCapacityClass`; delete via `InlineConfirm` (disabled when non-empty) with two 409 branches (`"has students"` → toast + refetch students+groups; `"has submissions"` → toast + refetch groups).
+
+12. **`RunRosterTab` core** — table layout (sticky header); client-side search filter (`$derived`); header tri-state checkbox with filter scoping (unchecked / indeterminate / checked); prefilter pill rendering + clearing (typing in search OR clicking `×` invokes `onPrefilterClear`); persistent add-student row with client-side duplicate pre-check + post-success input clear + `group_id: null` for Unassigned; single-row delete via `InlineConfirm`; empty + filtered-empty states.
+
+13. **`RunRosterTab` optimistic inline group edit + `prunePendingGroups`** — `pendingGroupId = new SvelteMap<number, number | null>()` overlay; per-row select disabled during in-flight; success / 409 capacity_reached / 409 disabled-group / 400 / 5xx branches; rendered `<select>` value = `pendingGroupId.get(U) ?? student.group_id ?? '__unassigned'`; `prunePendingGroups()` helper invoked after every `students` refetch (the parent's `students` setter wraps the call; T14 also invokes it post-refetch).
+
+14. **`RunRosterTab` bulk ops core (chunked dispatcher)** — selection action strip with `[N selected (M visible)? Move to group [▼] Delete selected [× clear]`; chunked dispatcher (≤ 200 per chunk, sequential firing — chunk[i+1] starts only after chunk[i] resolves); 207 per-row mapping (5 cases including `null+detail-missing → "Unknown error"`); red-border lifecycle (paint on THIS op only, clear at start of next); selection auto-prune (succeeded leave, errors+cancelled stay); refetch `students` AND `groups` + `prunePendingGroups()` after each op.
+
+15. **`RunRosterTab` bulk ops banner + retry** — three banner shapes (full success / per-row partial / chunk-level cancellation); auto-dismiss 5s only on full success; retry control re-enters the same chunked dispatcher (so retry of >200 rows re-chunks correctly); bulk-move whole-call 400/409 treated as chunk-level failure with `Retry cancelled → group [▼]` (different group, since the original target was bad); banner non-dismissible during in-flight retry.
+
+16. **`RosterImportModal` scaffold** — two-stage modal (paste & preview, then result); `FocusTrap` from T3; debounced live-parse (200ms with cancellation on rapid keystrokes); preview table (max ~10 rows visible, scrollable) with `#`/`Name`/`Email`/`Group`/`Status` columns; counts footer with `, +N more` truncation on already-enrolled list; `Cancel` / `Import N valid rows` buttons (disabled when 0 valid). No submit logic yet.
+
+17. **`RosterImportModal` `buildBatchRow` (F1=A) + submit + result** — `buildBatchRow(parsedRow, existingRoster, groups)` with the 4-case logic (F1=A: already-enrolled + empty cell + has group → resolve current group name; already-enrolled + empty cell + null group → omit `group`; brand-new + empty cell → omit `group`; non-empty cell sent as-is); `POST /api/runs/{runId}/students/batch`; stage-2 result table with mixed success/error; `Copy failed rows` with `navigator.clipboard.writeText` + textarea fallback on `DOMException`; `Done` → parent refetches `students` AND `groups`. Tests assert all 4 wire-shape cases including `Object.prototype.hasOwnProperty('group')` absence assertion (not just `=== undefined`).
+
+18. **Final integration** — 24-step manual smoke walk-through with explicit pass criterion (all 24 steps green; backend-side issues filed as follow-ups rather than blocking merge); full vitest run with **count delta** vs main; `svelte-check` baseline comparison (warnings unchanged); branch cleanup; merge prep.
