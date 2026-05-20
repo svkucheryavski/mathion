@@ -90,14 +90,22 @@ describe('getRun / updateRun / deleteRun', () => {
 
 describe('publishRun / unpublishRun', () => {
   it('publishRun POSTs /api/runs/{id}/publish', async () => {
-    vi.stubGlobal('fetch', mockFetch(200, { ...sample, is_published: true }));
+    const f = mockFetch(200, { ...sample, is_published: true });
+    vi.stubGlobal('fetch', f);
     const r = await publishRun(1);
     expect(r.is_published).toBe(true);
+    const call = (f.mock.calls as unknown[][])[0];
+    expect(call[0]).toBe('/api/runs/1/publish');
+    expect(call[1]).toMatchObject({ method: 'POST' });
   });
   it('unpublishRun POSTs /api/runs/{id}/unpublish', async () => {
-    vi.stubGlobal('fetch', mockFetch(200, sample));
+    const f = mockFetch(200, sample);
+    vi.stubGlobal('fetch', f);
     const r = await unpublishRun(1);
     expect(r.is_published).toBe(false);
+    const call = (f.mock.calls as unknown[][])[0];
+    expect(call[0]).toBe('/api/runs/1/unpublish');
+    expect(call[1]).toMatchObject({ method: 'POST' });
   });
 });
 

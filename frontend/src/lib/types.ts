@@ -316,16 +316,16 @@ export type RunStudentResponse = {
 };
 
 export type RunStudentBatchRow = {
-  name?: string;
+  name?: string | null;
   email: string;
-  group?: string;
+  group?: string | null;
 };
 
 export type RunStudentBatchResultRow = {
   email: string;
   status: 'added' | 'error';
-  group_id?: number;
-  detail?: string;
+  group_id?: number | null;
+  detail?: string | null;
 };
 
 export type BulkRosterErrorCode =
@@ -339,14 +339,14 @@ export type BulkMoveResultRow = {
   user_id: number;
   status: 'ok' | 'error';
   group_id?: number | null;
-  detail?: string;
+  detail?: string | null;
   error_code?: BulkRosterErrorCode | null;
 };
 
 export type BulkDeleteResultRow = {
   user_id: number;
   status: 'ok' | 'error';
-  detail?: string;
+  detail?: string | null;
   error_code?: BulkRosterErrorCode | null;
 };
 
