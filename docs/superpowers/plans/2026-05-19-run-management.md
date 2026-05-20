@@ -24,7 +24,7 @@
 | 4 | `lib/runStatus.ts` + tests, `lib/csv.ts` + tests | — |
 | 5 | `pages/runs/RunListPage.svelte` + tests | `routes.ts`, `App.svelte`, `components/course/CourseCard.svelte` |
 | 6 | `components/runs/NewRunModal.svelte` + tests | — |
-| 7 | `pages/runs/RunDetailPage.svelte` + tests | — |
+| 7 | `pages/runs/RunDetailPage.svelte` + tests | `routes.ts`, `App.svelte`, `components/runs/NewRunModal.svelte` + its test (Step 5 retrofit: nav target → detail page) |
 | 8 | (added to `pages/runs/RunDetailPage.svelte` from T7) sticky publish bar logic + tests | (extends T7 tests) |
 | 9 | `components/runs/RunOverviewTab.svelte` + tests (inline edits) | — |
 | 10 | (extends `RunOverviewTab.svelte`) checklist + settings + danger zone | — |
@@ -2027,7 +2027,7 @@ describe('NewRunModal', () => {
     await settle();
     expect(onClose).toHaveBeenCalled();
     // T6 navigates to the list page; T7 retrofits this to the detail page.
-    // See the Step 7 retrofit in T7 — that step also updates this assertion to
+    // See T7 Step 5 (retrofit) — that step also updates this assertion to
     // `#/courses/algebra/runs/42`.
     expect(location.hash).toBe('#/courses/algebra/runs');
     unmount(cmp);
@@ -2600,7 +2600,7 @@ expect(location.hash).toBe('#/courses/algebra/runs');
 expect(location.hash).toBe('#/courses/algebra/runs/42');
 ```
 
-Also drop the two-line comment block above the `navigate(...)` call (no longer applicable).
+Also drop the 5-line comment block above the `navigate(...)` call (the "Navigate to the list page; T7 retrofits this..." paragraph — no longer applicable).
 
 - [ ] **Step 6: Verify shell tests + retrofit test pass**
 
