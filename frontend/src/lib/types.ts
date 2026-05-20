@@ -278,14 +278,14 @@ export type RunCreateRequest = {
   title: string;
   start_date: string;
   end_date: string;
-  groups_enabled: boolean;
+  groups_enabled?: boolean;
 };
 
 export type RunUpdateRequest = {
-  title?: string;
-  start_date?: string;
-  end_date?: string;
-  groups_enabled?: boolean;
+  title?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  groups_enabled?: boolean | null;
 };
 
 export type RunTeacherResponse = {
