@@ -3637,13 +3637,7 @@ cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts 2>&1 | tai
 
 Expected: FAIL with `Cannot find module '../components/runs/RunTeachersTab.svelte'`.
 
-- [ ] **Step 3: Implement `components/runs/RunTeachersTab.svelte`** (see implementation in Step 4 of this task below)
-
-(Implementation block is inlined as Step 4 below to keep the test→implement→wire→verify cycle linear.)
-
-- [ ] **Step 4: Implementation source**
-
-(The full Svelte component source for `RunTeachersTab.svelte` is provided below the Groups task split — see "Step 4 implementation" block in the original combined task, now relocated under T11a Step 4.)
+- [ ] **Step 3: Implement `components/runs/RunTeachersTab.svelte`**
 
 ```svelte
 <script lang="ts">
@@ -3727,7 +3721,7 @@ Expected: FAIL with `Cannot find module '../components/runs/RunTeachersTab.svelt
 </section>
 ```
 
-- [ ] **Step 5: Wire `RunTeachersTab` into `RunDetailPage.svelte`**
+- [ ] **Step 4: Wire `RunTeachersTab` into `RunDetailPage.svelte`**
 
 Add imports:
 
@@ -3752,7 +3746,7 @@ Replace the Teachers placeholder block in the template:
   <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} />
 ```
 
-- [ ] **Step 6: Verify Teachers tab tests pass**
+- [ ] **Step 5: Verify Teachers tab tests pass**
 
 ```bash
 cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts 2>&1 | tail -10
@@ -3760,7 +3754,7 @@ cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts 2>&1 | tai
 
 Expected: 4/4 PASS.
 
-- [ ] **Step 7: Run full suite + svelte-check**
+- [ ] **Step 6: Run full suite + svelte-check**
 
 ```bash
 cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
@@ -3768,7 +3762,7 @@ cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
 
 Expected: full suite passes; baseline unchanged.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
@@ -4752,23 +4746,12 @@ async function onGroupChange(s: RunStudentResponse, raw: string) {
 }
 ```
 
-Update the props block at the top of `RunRosterTab.svelte` (T12) to declare the new prop — find the existing `onRefetchRosterData` declaration and add `onRefetchGroupsOnly` alongside it:
+**Verify the props wiring already done in T12 is intact** (no new edits to the prop declaration block or to the parent mount site should be needed in T13):
 
-```ts
-let {
-  // ...existing props...
-  onRefetchRosterData,
-  onRefetchGroupsOnly,
-  onOpenImport,
-}: {
-  // ...existing types...
-  onRefetchRosterData: () => Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }>;
-  onRefetchGroupsOnly: () => Promise<void>;
-  onOpenImport: () => void;
-} = $props();
-```
+- T12 Step 3 already declares `onRefetchGroupsOnly: () => Promise<void>` in `RunRosterTab.svelte`'s props block (alongside `onRefetchRosterData`).
+- T12 Step 4 already passes `onRefetchGroupsOnly={refetchGroups}` from `RunDetailPage.svelte`'s `<RunRosterTab .../>` mount site (the `refetchGroups` helper itself was introduced in T11b).
 
-Update the parent mount site in `RunDetailPage.svelte` to pass the new prop. Find the `<RunRosterTab ... />` block from T12 Step 4 and add `onRefetchGroupsOnly={refetchGroups}` (the helper was introduced in T11b).
+T13 only adds the *consumer* code — the `await onRefetchGroupsOnly()` line inside the `onGroupChange` success branch (shown above). If the implementing agent finds either the prop declaration or the parent mount site missing, T12 was incomplete and should be patched first.
 
 - [ ] **Step 4: Wrap `students` setter with `prunePendingGroups()` in `RunDetailPage.svelte`**
 
@@ -5039,6 +5022,10 @@ type BulkOpResult = {
   chunkErrorRowIds: number[];
   cancelledIds: number[];
   lastOp: BulkOpKind;
+  // Records the move target for the last op. Reserved by the spec's §10 T14
+  // contract for future "Repeat move" / "Retry to same group" UX; not consumed
+  // by T15's current banner code (T15 retries on a different group, since the
+  // chunk-level cancellation usually implies the original target was bad).
   lastTargetGroupId?: number | null;
   error?: ApiError;
 };
@@ -5255,6 +5242,7 @@ function mountTab(extra: Record<string, unknown> = {}) {
     rosterPrefilter: null,
     onPrefilterClear: vi.fn(),
     onRefetchRosterData: vi.fn().mockResolvedValue({ students: studentN(3), groups: [{ id: 99, run_id: 10, name: 'Alpha', student_count: 0, is_disabled: false }] }),
+    onRefetchGroupsOnly: vi.fn().mockResolvedValue(undefined),
     onOpenImport: vi.fn(),
     ...extra,
   } });
