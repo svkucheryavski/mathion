@@ -259,6 +259,112 @@ export type AdminTree = {
   blocks: AdminTreeBlock[];
 };
 
+// ---- Run management (Phase 8 frontend) ----
+// Backend mirrors from backend/mathion/schemas.py. Course and Version are
+// already defined above; do not redefine.
+
+export type RunResponse = {
+  id: number;
+  version_id: number;
+  title: string;
+  start_date: string;     // YYYY-MM-DD
+  end_date: string;       // YYYY-MM-DD
+  groups_enabled: boolean;
+  is_published: boolean;
+  created_at: string;     // ISO timestamp
+};
+
+export type RunCreateRequest = {
+  title: string;
+  start_date: string;
+  end_date: string;
+  groups_enabled: boolean;
+};
+
+export type RunUpdateRequest = {
+  title?: string;
+  start_date?: string;
+  end_date?: string;
+  groups_enabled?: boolean;
+};
+
+export type RunTeacherResponse = {
+  id: number;
+  run_id: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string | null;
+  created_at: string;
+};
+
+export type GroupResponse = {
+  id: number;
+  run_id: number;
+  name: string;
+  is_disabled: boolean;
+  student_count: number;
+};
+
+export type RunStudentResponse = {
+  id: number;
+  run_id: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string | null;
+  group_id: number | null;
+  created_at: string;
+};
+
+export type RunStudentBatchRow = {
+  name?: string;
+  email: string;
+  group?: string;
+};
+
+export type RunStudentBatchResultRow = {
+  email: string;
+  status: 'added' | 'error';
+  group_id?: number;
+  detail?: string;
+};
+
+export type BulkRosterErrorCode =
+  | 'not_in_run'
+  | 'capacity_reached'
+  | 'internal_error';
+
+export type BulkOpSummary = { total: number; ok: number; error: number };
+
+export type BulkMoveResultRow = {
+  user_id: number;
+  status: 'ok' | 'error';
+  group_id?: number | null;
+  detail?: string;
+  error_code?: BulkRosterErrorCode | null;
+};
+
+export type BulkDeleteResultRow = {
+  user_id: number;
+  status: 'ok' | 'error';
+  detail?: string;
+  error_code?: BulkRosterErrorCode | null;
+};
+
+export type BulkMoveResponse = {
+  results: BulkMoveResultRow[];
+  summary: BulkOpSummary;
+};
+
+export type BulkDeleteResponse = {
+  results: BulkDeleteResultRow[];
+  summary: BulkOpSummary;
+};
+
+// (No shared ChecklistRow type added in T1 — the readiness checklist row shape
+// lives locally in T8's RunDetailPage.svelte, where the $derived computes it
+// from teachers/groups/students/run. T10 consumes the same prop. Centralizing
+// the type here would create drift if either side adds a field.)
+
 // ---- Exhaustiveness helper ----
 export function assertNever(x: never): never {
   throw new Error(`Unhandled discriminant: ${JSON.stringify(x)}`);
