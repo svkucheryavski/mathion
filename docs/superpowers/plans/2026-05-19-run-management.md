@@ -172,12 +172,10 @@ export type BulkDeleteResponse = {
   summary: BulkOpSummary;
 };
 
-export type ChecklistRow = {
-  id: 'has_teacher' | 'all_assigned' | 'group_sizes';
-  status: 'ok' | 'fail' | 'na';
-  label: string;
-  hint?: string;
-};
+// (No shared ChecklistRow type added in T1 — the readiness checklist row shape
+// lives locally in T8's RunDetailPage.svelte, where the $derived computes it
+// from teachers/groups/students/run. T10 consumes the same prop. Centralizing
+// the type here would create drift if either side adds a field.)
 ```
 
 - [ ] **Step 2: Write the failing tests for `lib/runs.ts`**
@@ -781,18 +779,8 @@ beforeEach(() => { target = document.createElement('div'); document.body.appendC
 afterEach(() => { if (component) unmount(component); document.body.removeChild(target); vi.restoreAllMocks(); });
 
 describe('InlineConfirm', () => {
-  it('renders idle label as a single button', () => {
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', onConfirm: () => {} } });
-    flushSync();
-    const buttons = target.querySelectorAll('button');
-    expect(buttons.length).toBe(1);
-    expect(buttons[0]!.textContent?.trim()).toBe('Delete');
-  });
-
-  it('clicking idle button morphs to [Confirm] [Cancel] pair', () => {
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', onConfirm: () => {} } });
-    flushSync();
-    target.querySelector('button')!.click();
+  it('renders [Confirm] [Cancel] pair when mounted', () => {
+    component = mount(InlineConfirm, { target, props: { onConfirm: () => {} } });
     flushSync();
     const buttons = Array.from(target.querySelectorAll('button'));
     expect(buttons.length).toBe(2);
@@ -801,65 +789,53 @@ describe('InlineConfirm', () => {
   });
 
   it('uses confirmLabel when provided', () => {
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', confirmLabel: 'Confirm Delete — 3 students', onConfirm: () => {} } });
-    flushSync();
-    target.querySelector('button')!.click();
+    component = mount(InlineConfirm, { target, props: { confirmLabel: 'Confirm Delete — 3 students', onConfirm: () => {} } });
     flushSync();
     expect(target.querySelectorAll('button')[0]!.textContent?.trim()).toBe('Confirm Delete — 3 students');
   });
 
   it('renders warning above the pair when provided', () => {
-    component = mount(InlineConfirm, { target, props: { label: 'Unpublish', warning: 'Students lose access.', onConfirm: () => {} } });
-    flushSync();
-    target.querySelector('button')!.click();
+    component = mount(InlineConfirm, { target, props: { warning: 'Students lose access.', onConfirm: () => {} } });
     flushSync();
     expect(target.textContent).toContain('Students lose access.');
   });
 
-  it('Confirm click invokes onConfirm and resets', () => {
+  it('Confirm click invokes onConfirm', () => {
     const onConfirm = vi.fn();
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', onConfirm } });
+    component = mount(InlineConfirm, { target, props: { onConfirm } });
     flushSync();
-    target.querySelector('button')!.click();
-    flushSync();
-    const confirmBtn = target.querySelectorAll('button')[0]!;
-    confirmBtn.click();
+    (target.querySelectorAll('button')[0] as HTMLButtonElement).click();
     flushSync();
     expect(onConfirm).toHaveBeenCalledTimes(1);
-    // After reset, back to idle single button.
-    expect(target.querySelectorAll('button').length).toBe(1);
   });
 
-  it('Cancel click resets without invoking onConfirm, and fires onCancel if provided', () => {
+  it('Cancel click invokes onCancel (when provided) and does NOT invoke onConfirm', () => {
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', onConfirm, onCancel } });
+    component = mount(InlineConfirm, { target, props: { onConfirm, onCancel } });
     flushSync();
-    target.querySelector('button')!.click(); flushSync();
-    const cancelBtn = target.querySelectorAll('button')[1]!;
-    cancelBtn.click(); flushSync();
+    (target.querySelectorAll('button')[1] as HTMLButtonElement).click();
+    flushSync();
     expect(onConfirm).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledTimes(1);
-    expect(target.querySelectorAll('button').length).toBe(1);
+  });
+
+  it('Cancel click without onCancel prop is a no-op (no throw)', () => {
+    component = mount(InlineConfirm, { target, props: { onConfirm: () => {} } });
+    flushSync();
+    expect(() => (target.querySelectorAll('button')[1] as HTMLButtonElement).click()).not.toThrow();
   });
 
   it('confirmDataAction is reflected on the confirm button when provided', () => {
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', confirmDataAction: 'confirm-delete-item', onConfirm: () => {} } });
+    component = mount(InlineConfirm, { target, props: { confirmDataAction: 'confirm-delete-item', onConfirm: () => {} } });
     flushSync();
-    target.querySelector('button')!.click(); flushSync();
     const confirmBtn = target.querySelectorAll('button')[0]!;
     expect(confirmBtn.getAttribute('data-action')).toBe('confirm-delete-item');
   });
-
-  it('disabled prop disables the idle button and adds tooltip', () => {
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', disabled: true, tooltip: 'Cannot delete', onConfirm: () => {} } });
-    flushSync();
-    const btn = target.querySelector('button')!;
-    expect(btn.disabled).toBe(true);
-    expect(btn.title).toBe('Cannot delete');
-  });
 });
 ```
+
+> **Design note.** `InlineConfirm` is a *confirm panel* only — it always renders the `[Confirm] [Cancel]` pair when mounted. The parent decides when to mount it (via `{#if pendingX}<InlineConfirm .../>{:else}<button .../>{/if}`) and handles the outer "Delete"/"Remove"/etc. idle button itself. This is intentional: the primitive does not duplicate the parent's state, and `onCancel` simply tells the parent to flip its pending flag back. The earlier two-stage design (idle button + open state) would have required *two* clicks to reach the confirm, since the parent is already gating mount.
 
 - [ ] **Step 2: Verify InlineConfirm test fails**
 
@@ -876,51 +852,27 @@ Create `frontend/src/components/ui/InlineConfirm.svelte`:
 ```svelte
 <script lang="ts">
   let {
-    label,
     confirmLabel = 'Confirm',
     confirmDataAction,
     warning,
-    disabled = false,
-    tooltip,
     onConfirm,
     onCancel,
   }: {
-    label: string;
     confirmLabel?: string;
     confirmDataAction?: string;
     warning?: string;
-    disabled?: boolean;
-    tooltip?: string;
     onConfirm: () => void;
     onCancel?: () => void;
   } = $props();
-
-  let confirmOpen = $state(false);
-
-  function openConfirm() {
-    confirmOpen = true;
-  }
-  function cancel() {
-    confirmOpen = false;
-    onCancel?.();
-  }
-  function confirm() {
-    onConfirm();
-    confirmOpen = false;
-  }
 </script>
 
-{#if confirmOpen}
-  <div class="inline-confirm">
-    {#if warning}<div class="warning">{warning}</div>{/if}
-    <div class="actions">
-      <button type="button" class="confirm" data-action={confirmDataAction} onclick={confirm}>{confirmLabel}</button>
-      <button type="button" class="cancel" onclick={cancel}>Cancel</button>
-    </div>
+<div class="inline-confirm">
+  {#if warning}<div class="warning">{warning}</div>{/if}
+  <div class="actions">
+    <button type="button" class="confirm" data-action={confirmDataAction} onclick={onConfirm}>{confirmLabel}</button>
+    <button type="button" class="cancel" onclick={() => onCancel?.()}>Cancel</button>
   </div>
-{:else}
-  <button type="button" {disabled} title={tooltip ?? ''} onclick={openConfirm}>{label}</button>
-{/if}
+</div>
 
 <style>
   .inline-confirm { display: inline-flex; flex-direction: column; gap: 4px; }
@@ -1614,7 +1566,7 @@ git commit -m "feat(frontend): add runStatus + csv parsers (lib/runStatus.ts, li
 - Create: `frontend/src/pages/runs/RunListPage.svelte`
 - Modify: `frontend/src/routes.ts`
 - Modify: `frontend/src/App.svelte` (componentMap lines 14-25)
-- Modify: `frontend/src/components/items/CourseCard.svelte`
+- Modify: `frontend/src/components/course/CourseCard.svelte`
 - Test: `frontend/src/tests/RunListPage.svelte.test.ts`
 
 **Context:** First admin-facing page in this feature. Renders the per-course runs table in backend order (no frontend re-sort), with status badge from `runStatus`, version label resolution (`v{idx+1} ({created_at YYYY-MM-DD})` where `idx` is the index in versions sorted by `created_at`), and `Delete` action only when `!is_published`. Empty state has a `Create the first run` CTA. The `New run` button is disabled (with tooltip) when no published version exists. `CourseCard` admin-only branch is restructured to mirror the mixed-admin pattern: card-as-`<div>`, title-as-`<a href="/courses/:slug">`, sibling `Edit` + `Runs` buttons gated on `course.is_admin`.
@@ -1657,7 +1609,7 @@ async function settle() {
 describe('RunListPage', () => {
   it('renders empty state with Create-the-first-run CTA when no runs', async () => {
     fetchSpy.mockImplementation((url: string) => {
-      if (url.includes('/courses/by-slug/')) return ok({ id: 1, slug: 'algebra', title: 'Algebra', is_admin: true });
+      if (url.includes('/courses/by-slug/')) return ok({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
       if (url.includes('/runs')) return ok([]);
       if (url.includes('/versions')) return ok([]);
       return Promise.reject(new Error('unexpected ' + url));
@@ -1675,7 +1627,7 @@ describe('RunListPage', () => {
 
   it('renders rows in backend order with status badge and version label', async () => {
     fetchSpy.mockImplementation((url: string) => {
-      if (url.includes('/courses/by-slug/')) return ok({ id: 1, slug: 'algebra', title: 'Algebra', is_admin: true });
+      if (url.includes('/courses/by-slug/')) return ok({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
       if (url.endsWith('/runs')) return ok([
         { id: 10, course_id: 1, version_id: 99, title: 'Spring 2026', start_date: '2026-06-01', end_date: '2026-06-30', is_published: false, groups_enabled: false },
         { id: 11, course_id: 1, version_id: 99, title: 'Fall 2026', start_date: '2026-09-01', end_date: '2026-12-15', is_published: true, groups_enabled: true },
@@ -1707,7 +1659,7 @@ describe('RunListPage', () => {
 
   it('disables New-run button with tooltip when no published version exists', async () => {
     fetchSpy.mockImplementation((url: string) => {
-      if (url.includes('/courses/by-slug/')) return ok({ id: 1, slug: 'algebra', title: 'Algebra', is_admin: true });
+      if (url.includes('/courses/by-slug/')) return ok({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
       if (url.endsWith('/runs')) return ok([]);
       if (url.includes('/versions')) return ok([
         { id: 99, course_id: 1, created_at: '2026-01-01', published_at: null, is_disabled: false },
@@ -1821,7 +1773,7 @@ Expected: FAIL with `Cannot find module '../pages/runs/RunListPage.svelte'`.
 {:else}
   <header>
     <nav class="breadcrumb">
-      <a href="#/courses">Courses</a> › <a href="#/courses/{course.slug}">{course.title}</a> › Runs
+      <a href="#/courses">Courses</a> › <a href="#/courses/{course.slug}">{course.name}</a> › Runs
     </nav>
     <button
       data-action="new-run"
@@ -1864,7 +1816,6 @@ Expected: FAIL with `Cannot find module '../pages/runs/RunListPage.svelte'`.
               {#if !run.is_published}
                 {#if pendingDelete === run.id}
                   <InlineConfirm
-                    label="Delete"
                     confirmLabel="Confirm Delete"
                     onConfirm={() => confirmDelete(run.id)}
                     onCancel={() => (pendingDelete = null)}
@@ -1892,25 +1843,22 @@ Expected: FAIL with `Cannot find module '../pages/runs/RunListPage.svelte'`.
 
 > Note: The dynamic import of `NewRunModal.svelte` lets this task land before T6 implements that component — the modal is only loaded when `showNewRun` becomes true, so tests in this task that do not click `New run` still pass. T6 adds the actual modal **and converts this dynamic import into a static import** (move `import NewRunModal from '../../components/runs/NewRunModal.svelte';` to the top of the `<script>` block, drop the `{#await}` wrapper, and render `<NewRunModal ... />` directly when `showNewRun`). Same pattern is used in T7 / T12 for `RosterImportModal.svelte` and is converted to static in T16.
 
-- [ ] **Step 4: Add routes**
+- [ ] **Step 4: Add the RunListPage route**
 
-Modify `frontend/src/routes.ts` — append two entries to the `routes` array (location depends on existing layout; place near other course-nested routes):
+Modify `frontend/src/routes.ts` — append one entry to the `routes` array (location depends on existing layout; place near other course-nested routes):
 
 ```ts
 { path: '/courses/:courseSlug/runs', component: 'RunListPage' },
-{ path: '/courses/:courseSlug/runs/:runId', component: 'RunDetailPage' },
 ```
 
-(The `RunDetailPage` route registration is added now even though that component lands in T7 — registering it early keeps the routes file in one commit. T7 implements the component; until then, navigating to the detail URL would fail to resolve in `componentMap`, but no app code links there yet.)
+> The `RunDetailPage` route is **deliberately not registered here** — T5's `RunListPage` already renders links to detail URLs (`<a href="#/courses/{slug}/runs/{id}">`). If the route + componentMap entry existed before T7 implements the page, the router would try to resolve a component that doesn't exist yet. T7 Step 4 below adds both the route entry and the componentMap entry atomically.
 
-- [ ] **Step 5: Register components in `App.svelte` componentMap**
+- [ ] **Step 5: Register `RunListPage` in `App.svelte` componentMap**
 
-Modify `frontend/src/App.svelte` lines 14-25 — add to the `componentMap`:
+Modify `frontend/src/App.svelte` lines 14-25 — add the import and the map entry:
 
 ```ts
 import RunListPage from './pages/runs/RunListPage.svelte';
-// (RunDetailPage import comes in T7; for now stub a placeholder OR leave the route to fail-gracefully)
-// Pragmatic choice: import a tiny placeholder component now and overwrite in T7.
 ```
 
 Update the componentMap object literal:
@@ -1922,16 +1870,16 @@ const componentMap: Record<string, ComponentType> = {
 };
 ```
 
-(T7 will add `RunDetailPage` to both the import block and the map. Until then, the detail route is unreachable from any UI in this task.)
+(Detail links rendered by `RunListPage` will produce a no-op navigation if clicked before T7 lands, since the route isn't registered. That's acceptable in mid-feature commits — fail-safe by design.)
 
 - [ ] **Step 6: Restructure `CourseCard.svelte` admin-only branch**
 
-Read the current file structure first. Then modify `frontend/src/components/items/CourseCard.svelte` so the admin branch mirrors the mixed-admin pattern: the card is a `<div>` (not an `<a>`), the title is an `<a href="#/courses/{slug}">`, and `Edit` / `Runs` are sibling buttons rendered only when `course.is_admin === true`.
+Read the current file structure first. Then modify `frontend/src/components/course/CourseCard.svelte` so the admin branch mirrors the mixed-admin pattern: the card is a `<div>` (not an `<a>`), the title is an `<a href="#/courses/{slug}">`, and `Edit` / `Runs` are sibling buttons rendered only when `course.is_admin === true`.
 
 ```svelte
 <!-- Replacement template for the admin-only / is_admin branch -->
 <div class="course-card">
-  <a class="course-title" href="#/courses/{course.slug}">{course.title}</a>
+  <a class="course-title" href="#/courses/{course.slug}">{course.name}</a>
   <p class="course-summary">{course.summary}</p>
   {#if course.is_admin}
     <div class="card-actions">
@@ -1968,7 +1916,7 @@ git add frontend/src/pages/runs/RunListPage.svelte \
         frontend/src/tests/RunListPage.svelte.test.ts \
         frontend/src/routes.ts \
         frontend/src/App.svelte \
-        frontend/src/components/items/CourseCard.svelte
+        frontend/src/components/course/CourseCard.svelte
 git commit -m "feat(frontend): RunListPage + routes + CourseCard Runs button"
 ```
 
@@ -2002,7 +1950,7 @@ beforeEach(() => {
   location.hash = '#/courses/algebra/runs';
 });
 
-const course: Course = { id: 1, slug: 'algebra', title: 'Algebra', is_admin: true } as Course;
+const course: Course = { id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true } as Course;
 const versions: Version[] = [
   { id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false } as Version,
 ];
@@ -2327,7 +2275,7 @@ function jres(body: unknown, status = 200) {
   } as unknown as Response);
 }
 
-const courseFixture = { id: 1, slug: 'algebra', title: 'Algebra', is_admin: true };
+const courseFixture = { id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true };
 const runFixture = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30',
   is_published: false, groups_enabled: false, ...overrides,
@@ -2339,7 +2287,10 @@ const versionFixture = (overrides: Partial<Record<string, unknown>> = {}) => ({
 function mockHappyPath() {
   fetchSpy.mockImplementation((url: string) => {
     if (url.includes('/courses/by-slug/')) return jres(courseFixture);
-    if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+    // Match any positive integer runId so reset-on-runId-change tests work
+    // when they remount with a different runId (e.g., 11) without rewiring fetch.
+    const m = url.match(/\/api\/runs\/(\d+)$/);
+    if (m) return jres(runFixture({ id: Number(m[1]) }));
     if (url.includes('/versions')) return jres([versionFixture()]);
     if (url.includes('/teachers')) return jres([]);
     if (url.includes('/groups')) return jres([]);
@@ -2428,42 +2379,10 @@ describe('RunDetailPage shell', () => {
     unmount(cmp2);
   });
 
-  it('refetchRosterData() runs in-band — refetches students+groups WITHOUT bumping loadToken', async () => {
-    // The in-band contract per spec §3.2: refetchRosterData reassigns the two slices
-    // directly without invalidating an in-flight loadAll. We verify that a sequence of
-    // [initial loadAll] → [refetchRosterData] → [loadAll for new runId] does not drop
-    // the refetched data (i.e., the refetch is not stomped by a stale loadToken check).
-    let resolveSecond: ((r: Response) => void) | null = null;
-    let listStudentsCallCount = 0;
-    fetchSpy.mockImplementation((url: string) => {
-      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
-      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
-      if (url.includes('/versions')) return jres([versionFixture()]);
-      if (url.includes('/teachers')) return jres([]);
-      if (url.includes('/groups')) return jres([]);
-      if (url.includes('/students')) {
-        listStudentsCallCount += 1;
-        if (listStudentsCallCount === 1) return jres([]);
-        // Second call — used by refetchRosterData.
-        return jres([{ user_id: 99, user_email: 'new@x.com', user_full_name: null, group_id: null }]);
-      }
-      return Promise.reject(new Error('unexpected ' + url));
-    });
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunDetailPage, { target, props: { params: { courseSlug: 'algebra', runId: '10' } } });
-    await settle();
-    // refetchRosterData is exposed through the RunRosterTab callback prop. We exercise it
-    // by switching to the roster tab and triggering a single-row delete OR a manual call
-    // through a test hook. Since the shell does not yet mount the roster tab in T7's
-    // isolation, the assertion here is restricted to the function existing and the
-    // students-fetch count incrementing when it would be called.
-    expect(listStudentsCallCount).toBe(1);
-    // (Full in-band-contract test re-asserted in T12+ where RunRosterTab is mounted.)
-    unmount(cmp);
-  });
 });
 ```
+
+> **Note on the in-band `refetchRosterData()` contract** (spec §3.2). T7 cannot exercise this directly without mounting `RunRosterTab` (which lands in T12). The contract — refetch writes `students` AND `groups` slices directly without bumping `loadToken`, so a concurrent navigation doesn't drop the refetched data — is verified later in T12's "single-row delete via InlineConfirm calls refetch" test and T17's "Done button refetch" test. Both flow through the `onRefetchRosterData` callback prop, which the parent wires to `RunDetailPage.refetchRosterData`. If you want a direct unit test on `refetchRosterData` here, add an `onMount` test hook that exposes it on `globalThis`; we deliberately skip that to avoid leaking implementation details.
 
 - [ ] **Step 2: Run shell test, verify it fails**
 
@@ -2574,7 +2493,7 @@ Expected: FAIL with `Cannot find module '../pages/runs/RunDetailPage.svelte'`.
   <header class="run-header">
     <nav class="breadcrumb">
       <a href="#/courses">Courses</a> ›
-      <a href="#/courses/{course.slug}">{course.title}</a> ›
+      <a href="#/courses/{course.slug}">{course.name}</a> ›
       <a href="#/courses/{course.slug}/runs">Runs</a> ›
       {run.title}
     </nav>
@@ -2614,7 +2533,13 @@ Expected: FAIL with `Cannot find module '../pages/runs/RunDetailPage.svelte'`.
 
 > The placeholder `<p>` tags are removed when each downstream task lands; this lets the shell pass tests in isolation without depending on T9–T17.
 
-- [ ] **Step 4: Register `RunDetailPage` in `App.svelte` componentMap**
+- [ ] **Step 4: Register `RunDetailPage` route + componentMap entry**
+
+Modify `frontend/src/routes.ts` — append one entry (T5 deferred this on purpose, see T5 Step 4):
+
+```ts
+{ path: '/courses/:courseSlug/runs/:runId', component: 'RunDetailPage' },
+```
 
 Modify `frontend/src/App.svelte` — add import and componentMap entry:
 
@@ -2634,7 +2559,7 @@ const componentMap: Record<string, ComponentType> = {
 cd frontend && npx vitest run src/tests/RunDetailPage.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: 4/4 PASS.
+Expected: 5/5 PASS.
 
 - [ ] **Step 6: Run full suite + svelte-check**
 
@@ -2650,7 +2575,8 @@ Expected: full suite passes; baseline unchanged.
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/pages/runs/RunDetailPage.svelte \
         frontend/src/tests/RunDetailPage.svelte.test.ts \
-        frontend/src/App.svelte
+        frontend/src/App.svelte \
+        frontend/src/routes.ts
 git commit -m "feat(frontend): RunDetailPage shell with stale-guard + tabs scaffold"
 ```
 
@@ -2699,7 +2625,7 @@ async function settle() {
 
 function setup(opts: { teachers?: unknown[]; groups?: unknown[]; students?: unknown[]; run?: Record<string, unknown> } = {}) {
   fetchSpy.mockImplementation((url: string) => {
-    if (url.includes('/courses/by-slug/')) return jres({ id: 1, slug: 'algebra', title: 'Algebra', is_admin: true });
+    if (url.includes('/courses/by-slug/')) return jres({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
     if (url.match(/\/api\/runs\/10$/)) return jres({
       id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30',
       is_published: false, groups_enabled: false, ...(opts.run ?? {}),
@@ -2748,7 +2674,7 @@ describe('Publish bar', () => {
 
   it('disables Publish when version is disabled', async () => {
     fetchSpy.mockImplementation((url: string) => {
-      if (url.includes('/courses/by-slug/')) return jres({ id: 1, slug: 'algebra', title: 'Algebra', is_admin: true });
+      if (url.includes('/courses/by-slug/')) return jres({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
       if (url.match(/\/api\/runs\/10$/)) return jres({ id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30', is_published: false, groups_enabled: false });
       if (url.includes('/versions')) return jres([{ id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: true }]);
       if (url.includes('/teachers')) return jres([{ user_id: 1, user_email: 't@x.com' }]);
@@ -2867,7 +2793,7 @@ Replace the existing `<header class="run-header">` block in the template with:
 <header class="run-header">
   <nav class="breadcrumb">
     <a href="#/courses">Courses</a> ›
-    <a href="#/courses/{course.slug}">{course.title}</a> ›
+    <a href="#/courses/{course.slug}">{course.name}</a> ›
     <a href="#/courses/{course.slug}/runs">Runs</a> ›
     {run.title}
   </nav>
@@ -2883,7 +2809,6 @@ Replace the existing `<header class="run-header">` block in the template with:
       </button>
     {:else if unpublishConfirmOpen}
       <InlineConfirm
-        label="Unpublish"
         confirmLabel="Confirm Unpublish"
         warning="Students will lose access immediately. Their progress data is preserved."
         onConfirm={doUnpublish}
@@ -3468,8 +3393,8 @@ Replace the `<!-- T10 appends: ... -->` comment with these three sections:
       <h3>Danger zone</h3>
       {#if confirmDeleteOpen}
         <InlineConfirm
-          label="Delete run"
           confirmLabel="Confirm Delete"
+          confirmDataAction="confirm-delete"
           onConfirm={onDeleteRun}
           onCancel={() => (confirmDeleteOpen = false)}
         />
@@ -3705,7 +3630,6 @@ Expected: FAIL with `Cannot find module '../components/runs/RunTeachersTab.svelt
           {#if justInvited.has(t.user_id)}<span class="badge">(invited)</span>{/if}
           {#if pendingRemove === t.user_id}
             <InlineConfirm
-              label="Remove"
               confirmLabel="Confirm Remove"
               confirmDataAction="confirm-remove"
               onConfirm={() => confirmRemove(t.user_id)}
@@ -4004,7 +3928,6 @@ Expected: FAIL with `Cannot find module '../components/runs/RunGroupsTab.svelte'
             </span>
             {#if pendingDelete === g.id}
               <InlineConfirm
-                label="Delete"
                 confirmLabel="Confirm Delete"
                 confirmDataAction="confirm-delete-group"
                 onConfirm={() => confirmDelete(g.id)}
@@ -4454,7 +4377,6 @@ Expected: FAIL with `Cannot find module '../components/runs/RunRosterTab.svelte'
           <td>
             {#if pendingDelete === s.user_id}
               <InlineConfirm
-                label="Delete"
                 confirmLabel="Confirm Delete"
                 confirmDataAction="confirm-delete-student"
                 onConfirm={() => confirmDelete(s.user_id)}
@@ -4549,7 +4471,7 @@ Replace the roster placeholder block:
 cd frontend && npx vitest run src/tests/RunRosterTab.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: 6/6 PASS.
+Expected: 7/7 PASS.
 
 - [ ] **Step 6: Run full suite + svelte-check**
 
@@ -4575,10 +4497,11 @@ git commit -m "feat(frontend): RunRosterTab core (search, prefilter, tri-state, 
 
 **Files:**
 - Modify: `frontend/src/components/runs/RunRosterTab.svelte`
-- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` (wrap `students` setter with `prunePendingGroups`)
 - Test: `frontend/src/tests/RunRosterTab.optimistic.svelte.test.ts`
 
-**Context:** Wires up the optimistic inline group change. On select change for `user_id=U` → `pendingGroupId.set(U, G)` immediately, disable the row's select, PATCH `/api/runs/{rid}/students/{U}` with `{group_id: G}`. On success: `pendingGroupId.delete(U)`, update `student.group_id` from response, refetch `groups` only (no `prunePendingGroups()` needed — own entry already removed). On failure: revert (`pendingGroupId.delete(U)`), toast. `prunePendingGroups()` runs every time `students` is refetched (the parent's setter wraps the call).
+**Context:** Wires up the optimistic inline group change. On select change for `user_id=U` → `pendingGroupId.set(U, G)` immediately, disable the row's select, PATCH `/api/runs/{rid}/students/{U}` with `{group_id: G}`. On success: `pendingGroupId.delete(U)`, update `student.group_id` from response, refetch `groups` only (no `prunePendingGroups()` needed — own entry already removed). On failure: revert (`pendingGroupId.delete(U)`), toast.
+
+`prunePendingGroups` is implemented as a `$effect` inside `RunRosterTab` that fires whenever the parent's `students` prop changes. This automatically covers all 5 refetch paths from spec §4.4 without requiring the parent to wrap its `students` setter. (Earlier drafts of this task proposed wrapping the parent setter; the `$effect` approach is simpler and keeps the prune logic co-located with the overlay it cleans.)
 
 - [ ] **Step 1: Write optimistic-edit tests**
 
@@ -4793,8 +4716,7 @@ Expected: full suite passes; baseline unchanged.
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/runs/RunRosterTab.svelte \
-        frontend/src/tests/RunRosterTab.optimistic.svelte.test.ts \
-        frontend/src/pages/runs/RunDetailPage.svelte
+        frontend/src/tests/RunRosterTab.optimistic.svelte.test.ts
 git commit -m "feat(frontend): optimistic inline group edit + pendingGroupId prune"
 ```
 
@@ -5140,7 +5062,6 @@ Add the action strip above the `<table>` block:
     {/if}
     {#if bulkDeleteConfirm}
       <InlineConfirm
-        label="Delete selected"
         confirmLabel={`Confirm Delete — ${selected.size} students will be removed.`}
         confirmDataAction="confirm-bulk-delete"
         onConfirm={bulkDeleteSelected}
@@ -5171,7 +5092,7 @@ On each `<tr data-row="student">`, add the row-error class, `data-user-id`, and 
 cd frontend && npx vitest run src/tests/RunRosterTab.bulk-core.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: 3/3 PASS.
+Expected: 4/4 PASS.
 
 - [ ] **Step 5: Run full suite + svelte-check**
 
@@ -6178,16 +6099,20 @@ For each step, note pass/fail with a brief observation. Steps cover: course → 
 
 Record results in a temporary scratch buffer in this terminal (do NOT add a doc to the repo — these are verification notes, not artifacts).
 
-- [ ] **Step 3: Vitest count delta vs main**
+- [ ] **Step 3: Vitest count delta vs main (use a temporary worktree — do NOT touch the current working tree)**
 
 ```bash
-cd frontend && git stash 2>/dev/null
-git checkout main -- src/tests 2>/dev/null
-npm test -- --run 2>&1 | tail -5  # baseline
-git checkout - -- src/tests
-git stash pop 2>/dev/null
-npm test -- --run 2>&1 | tail -5  # feature branch
+cd /Users/svkucheryavski/Documents/Developing/mathion
+# Create a throwaway worktree at main so the current branch stays untouched.
+git worktree add /tmp/mathion-main-baseline main
+cd /tmp/mathion-main-baseline/frontend && npm install --silent && npm test -- --run 2>&1 | tail -5
+# Then back to feature branch for the comparison.
+cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm test -- --run 2>&1 | tail -5
+# Cleanup once you've noted the counts.
+git worktree remove /tmp/mathion-main-baseline
 ```
+
+Alternative (if you noted the baseline count BEFORE starting T1, per the "Pre-task: dev environment sanity" step at the top of this plan): just rerun `npm test -- --run` on the feature branch and compare against the noted baseline. No worktree needed.
 
 The feature-branch run must have STRICTLY MORE passing tests than baseline, and zero failures.
 
