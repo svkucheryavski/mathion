@@ -1928,7 +1928,9 @@ git commit -m "feat(frontend): RunListPage + routes + CourseCard Runs button"
 - Create: `frontend/src/components/runs/NewRunModal.svelte`
 - Test: `frontend/src/tests/NewRunModal.svelte.test.ts`
 
-**Context:** Modal opened from `RunListPage`. Wraps a `FocusTrap` from T3. Four validation rules (title empty after trim, start empty, end empty, end < start). Read-only Version row displays the label derived from the most recent published, non-disabled version. Submit payload omits `version_id` (backend auto-pins). On success → `onClose()` + `navigate(/courses/:slug/runs/:id)`. On API error → top-of-body banner using `e.displayMessage`.
+**Context:** Modal opened from `RunListPage`. Wraps a `FocusTrap` from T3. Four validation rules (title empty after trim, start empty, end empty, end < start). Read-only Version row displays the label derived from the most recent published, non-disabled version. Submit payload omits `version_id` (backend auto-pins). On success → `onClose()` + `navigate(/courses/:slug/runs)` (the list page). On API error → top-of-body banner using `e.displayMessage`.
+
+> **Note on success navigation.** The spec's create-flow lands on the run **detail** page, but the detail route + componentMap entry are not registered until T7 (this avoids reachable-but-broken routes in the T5→T7 gap, per the R3 codex pass). T6 therefore navigates to the list page initially, and T7 includes a one-line **retrofit step** that updates this `navigate(...)` call to `/courses/:slug/runs/:id` AND updates the corresponding test assertion. Same pattern as T5's dynamic→static `NewRunModal` import retrofit done here.
 
 - [ ] **Step 1: Write modal tests (validation + submit shape + success navigation)**
 
@@ -2024,7 +2026,10 @@ describe('NewRunModal', () => {
     (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
     expect(onClose).toHaveBeenCalled();
-    expect(location.hash).toBe('#/courses/algebra/runs/42');
+    // T6 navigates to the list page; T7 retrofits this to the detail page.
+    // See the Step 7 retrofit in T7 — that step also updates this assertion to
+    // `#/courses/algebra/runs/42`.
+    expect(location.hash).toBe('#/courses/algebra/runs');
     unmount(cmp);
   });
 
@@ -2112,14 +2117,19 @@ Expected: FAIL with `Cannot find module '../components/runs/NewRunModal.svelte'`
     submitting = true;
     submitError = null;
     try {
-      const run = await createRun(course.id, {
+      await createRun(course.id, {
         title: title.trim(),
         start_date,
         end_date,
         groups_enabled,
       });
       onClose();
-      navigate(`/courses/${course.slug}/runs/${run.id}`);
+      // Navigate to the list page; T7 retrofits this to the detail page once
+      // the `/courses/:courseSlug/runs/:runId` route + componentMap entry exist.
+      // Until T7 ships, navigating to the detail URL would hit an unregistered
+      // route and render nothing. Going to the list keeps the create-flow
+      // observable (the new run appears at the top of the table).
+      navigate(`/courses/${course.slug}/runs`);
     } catch (e) {
       if (e instanceof ApiError) submitError = e.displayMessage;
       else submitError = 'Unable to create run.';
@@ -2243,6 +2253,9 @@ git commit -m "feat(frontend): NewRunModal with FocusTrap + validation + submit"
 **Files:**
 - Create: `frontend/src/pages/runs/RunDetailPage.svelte`
 - Modify: `frontend/src/App.svelte` (componentMap)
+- Modify: `frontend/src/routes.ts`
+- Modify: `frontend/src/components/runs/NewRunModal.svelte` (Step 5 retrofit — nav target → detail page)
+- Modify: `frontend/src/tests/NewRunModal.svelte.test.ts` (Step 5 retrofit — assertion update)
 - Test: `frontend/src/tests/RunDetailPage.svelte.test.ts`
 
 **Context:** The shell that hosts the four tab components implemented in T9–T17. Owns all six data slices (course, run, versions, teachers, groups, students) with the stale-guard pattern from spec §3.2 (single-commit gate; reset all slices to `null` at load start). Coerces `runId` from string with `Number.isInteger && > 0` guard. Computes `pinned` and `showDisabledBanner` via `$derived`. Implements `gotoTab(tab, prefilter?)`, `rosterPrefilter`, `onPrefilterClear`, and `refetchRosterData()` — the in-band refetch that re-reads `students` AND `groups` without bumping `loadToken`. Resets `activeTab` to `'overview'` and `rosterPrefilter` to `null` on `runId` change. Renders only the tab nav + an empty tab body in this task — actual tab components are placeholder stubs replaced in T9–T17.
@@ -2553,15 +2566,51 @@ const componentMap: Record<string, ComponentType> = {
 };
 ```
 
-- [ ] **Step 5: Verify shell tests pass**
+- [ ] **Step 5: Retrofit T6's success navigation to the detail page**
 
-```bash
-cd frontend && npx vitest run src/tests/RunDetailPage.svelte.test.ts 2>&1 | tail -10
+Now that `/courses/:courseSlug/runs/:runId` is a registered route, update `NewRunModal` to navigate to the detail page on success (matches the spec's intended create-flow landing).
+
+In `frontend/src/components/runs/NewRunModal.svelte`, locate the `submit()` function and replace its success branch:
+
+```ts
+// BEFORE (T6):
+await createRun(course.id, { title: title.trim(), start_date, end_date, groups_enabled });
+onClose();
+// Navigate to the list page; T7 retrofits this to the detail page once
+// the `/courses/:courseSlug/runs/:runId` route + componentMap entry exist.
+// Until T7 ships, navigating to the detail URL would hit an unregistered
+// route and render nothing. Going to the list keeps the create-flow
+// observable (the new run appears at the top of the table).
+navigate(`/courses/${course.slug}/runs`);
 ```
 
-Expected: 5/5 PASS.
+```ts
+// AFTER (T7 retrofit):
+const run = await createRun(course.id, { title: title.trim(), start_date, end_date, groups_enabled });
+onClose();
+navigate(`/courses/${course.slug}/runs/${run.id}`);
+```
 
-- [ ] **Step 6: Run full suite + svelte-check**
+Update the corresponding test assertion in `frontend/src/tests/NewRunModal.svelte.test.ts`:
+
+```ts
+// BEFORE:
+expect(location.hash).toBe('#/courses/algebra/runs');
+// AFTER:
+expect(location.hash).toBe('#/courses/algebra/runs/42');
+```
+
+Also drop the two-line comment block above the `navigate(...)` call (no longer applicable).
+
+- [ ] **Step 6: Verify shell tests + retrofit test pass**
+
+```bash
+cd frontend && npx vitest run src/tests/RunDetailPage.svelte.test.ts src/tests/NewRunModal.svelte.test.ts 2>&1 | tail -15
+```
+
+Expected: 5/5 (RunDetailPage) + 4/4 (NewRunModal) PASS.
+
+- [ ] **Step 7: Run full suite + svelte-check**
 
 ```bash
 cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
@@ -2569,15 +2618,17 @@ cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
 
 Expected: full suite passes; baseline unchanged.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/pages/runs/RunDetailPage.svelte \
         frontend/src/tests/RunDetailPage.svelte.test.ts \
+        frontend/src/components/runs/NewRunModal.svelte \
+        frontend/src/tests/NewRunModal.svelte.test.ts \
         frontend/src/App.svelte \
         frontend/src/routes.ts
-git commit -m "feat(frontend): RunDetailPage shell with stale-guard + tabs scaffold"
+git commit -m "feat(frontend): RunDetailPage shell + retrofit T6 nav to detail page"
 ```
 
 ---
@@ -5826,6 +5877,10 @@ async function settle() { await Promise.resolve(); await Promise.resolve(); flus
 function mountModal(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.appendChild(target);
+  // Stale props show the OLD group name; the refetch returns the FRESH name.
+  // The submit-time refetch contract requires `buildBatchRow` to run against
+  // the callback's data, NOT the props. Asserting `group: 'Alpha'` on the POST
+  // body therefore proves the fresh data path was taken.
   const refetch = vi.fn().mockResolvedValue({
     students: [{ user_id: 1, user_email: 'a@x.com', user_full_name: null, group_id: 99 }],
     groups: [{ id: 99, run_id: 10, name: 'Alpha', student_count: 1, is_disabled: false }],
@@ -5834,7 +5889,7 @@ function mountModal(extra: Record<string, unknown> = {}) {
   const cmp = mount(RosterImportModal, { target, props: {
     runId: 10,
     existingRoster: [{ user_id: 1, user_email: 'a@x.com', user_full_name: null, group_id: 99 }],
-    existingGroups: [{ id: 99, run_id: 10, name: 'Alpha', student_count: 1, is_disabled: false }],
+    existingGroups: [{ id: 99, run_id: 10, name: 'OldName', student_count: 1, is_disabled: false }],
     onRefetchBeforeSubmit: refetch,
     onClose,
     ...extra,
