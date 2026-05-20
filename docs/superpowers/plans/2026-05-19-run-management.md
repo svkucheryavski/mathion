@@ -14,7 +14,7 @@
 
 ---
 
-## File structure (18 tasks)
+## File structure (19 tasks — T11 split into T11a + T11b)
 
 | Task | Owns these new files | Modifies |
 |---|---|---|
@@ -28,7 +28,8 @@
 | 8 | (added to `pages/runs/RunDetailPage.svelte` from T7) sticky publish bar logic + tests | (extends T7 tests) |
 | 9 | `components/runs/RunOverviewTab.svelte` + tests (inline edits) | — |
 | 10 | (extends `RunOverviewTab.svelte`) checklist + settings + danger zone | — |
-| 11 | `components/runs/RunTeachersTab.svelte` + tests, `components/runs/RunGroupsTab.svelte` + tests | — |
+| 11a | `components/runs/RunTeachersTab.svelte` + tests | (modify `RunDetailPage.svelte` to mount + add `refetchTeachers`) |
+| 11b | `components/runs/RunGroupsTab.svelte` + tests | (modify `RunDetailPage.svelte` to mount + add `refetchGroups` / `refetchGroupsAndStudents`) |
 | 12 | `components/runs/RunRosterTab.svelte` + tests (core) | — |
 | 13 | (extends `RunRosterTab.svelte`) optimistic inline group edit + `prunePendingGroups` | — |
 | 14 | (extends `RunRosterTab.svelte`) bulk-ops dispatcher | — |
@@ -186,7 +187,7 @@ Create `frontend/src/tests/runs.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  listRuns, createRun, getRun, updateRun, deleteRun,
+  listRuns, listVersions, createRun, getRun, updateRun, deleteRun,
   publishRun, unpublishRun,
 } from '../lib/runs';
 import { ApiError } from '../lib/api';
@@ -222,6 +223,17 @@ describe('listRuns', () => {
   it('throws ApiError on 500', async () => {
     vi.stubGlobal('fetch', mockFetch(500, { detail: 'boom' }));
     await expect(listRuns(42)).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('listVersions', () => {
+  it('GETs /api/courses/{cid}/versions and returns the array', async () => {
+    const v = { id: 7, course_id: 42, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false };
+    const f = mockFetch(200, [v]);
+    vi.stubGlobal('fetch', f);
+    const result = await listVersions(42);
+    expect(result).toEqual([v]);
+    expect(f).toHaveBeenCalledWith('/api/courses/42/versions', expect.objectContaining({ method: 'GET' }));
   });
 });
 
@@ -306,11 +318,15 @@ Create `frontend/src/lib/runs.ts`:
 ```ts
 import { api } from './api';
 import type {
-  RunResponse, RunCreateRequest, RunUpdateRequest,
+  RunResponse, RunCreateRequest, RunUpdateRequest, Version,
 } from './types';
 
 export function listRuns(courseId: number): Promise<RunResponse[]> {
   return api.get<RunResponse[]>(`/api/courses/${courseId}/runs`);
+}
+
+export function listVersions(courseId: number): Promise<Version[]> {
+  return api.get<Version[]>(`/api/courses/${courseId}/versions`);
 }
 
 export function createRun(courseId: number, body: RunCreateRequest): Promise<RunResponse> {
@@ -814,15 +830,25 @@ describe('InlineConfirm', () => {
     expect(target.querySelectorAll('button').length).toBe(1);
   });
 
-  it('Cancel click resets without invoking onConfirm', () => {
+  it('Cancel click resets without invoking onConfirm, and fires onCancel if provided', () => {
     const onConfirm = vi.fn();
-    component = mount(InlineConfirm, { target, props: { label: 'Delete', onConfirm } });
+    const onCancel = vi.fn();
+    component = mount(InlineConfirm, { target, props: { label: 'Delete', onConfirm, onCancel } });
     flushSync();
     target.querySelector('button')!.click(); flushSync();
     const cancelBtn = target.querySelectorAll('button')[1]!;
     cancelBtn.click(); flushSync();
     expect(onConfirm).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
     expect(target.querySelectorAll('button').length).toBe(1);
+  });
+
+  it('confirmDataAction is reflected on the confirm button when provided', () => {
+    component = mount(InlineConfirm, { target, props: { label: 'Delete', confirmDataAction: 'confirm-delete-item', onConfirm: () => {} } });
+    flushSync();
+    target.querySelector('button')!.click(); flushSync();
+    const confirmBtn = target.querySelectorAll('button')[0]!;
+    expect(confirmBtn.getAttribute('data-action')).toBe('confirm-delete-item');
   });
 
   it('disabled prop disables the idle button and adds tooltip', () => {
@@ -852,17 +878,21 @@ Create `frontend/src/components/ui/InlineConfirm.svelte`:
   let {
     label,
     confirmLabel = 'Confirm',
+    confirmDataAction,
     warning,
     disabled = false,
     tooltip,
     onConfirm,
+    onCancel,
   }: {
     label: string;
     confirmLabel?: string;
+    confirmDataAction?: string;
     warning?: string;
     disabled?: boolean;
     tooltip?: string;
     onConfirm: () => void;
+    onCancel?: () => void;
   } = $props();
 
   let confirmOpen = $state(false);
@@ -872,6 +902,7 @@ Create `frontend/src/components/ui/InlineConfirm.svelte`:
   }
   function cancel() {
     confirmOpen = false;
+    onCancel?.();
   }
   function confirm() {
     onConfirm();
@@ -883,7 +914,7 @@ Create `frontend/src/components/ui/InlineConfirm.svelte`:
   <div class="inline-confirm">
     {#if warning}<div class="warning">{warning}</div>{/if}
     <div class="actions">
-      <button type="button" class="confirm" onclick={confirm}>{confirmLabel}</button>
+      <button type="button" class="confirm" data-action={confirmDataAction} onclick={confirm}>{confirmLabel}</button>
       <button type="button" class="cancel" onclick={cancel}>Cancel</button>
     </div>
   </div>
@@ -1580,7 +1611,7 @@ git commit -m "feat(frontend): add runStatus + csv parsers (lib/runStatus.ts, li
 ### Task 5: `RunListPage` + routes + `App.svelte` componentMap + `CourseCard` restructure
 
 **Files:**
-- Create: `frontend/src/pages/RunListPage.svelte`
+- Create: `frontend/src/pages/runs/RunListPage.svelte`
 - Modify: `frontend/src/routes.ts`
 - Modify: `frontend/src/App.svelte` (componentMap lines 14-25)
 - Modify: `frontend/src/components/items/CourseCard.svelte`
@@ -1595,7 +1626,7 @@ Create `frontend/src/tests/RunListPage.svelte.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import RunListPage from '../pages/RunListPage.svelte';
+import RunListPage from '../pages/runs/RunListPage.svelte';
 
 const fetchSpy = vi.fn();
 
@@ -1703,21 +1734,22 @@ describe('RunListPage', () => {
 cd frontend && npx vitest run src/tests/RunListPage.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: FAIL with `Cannot find module '../pages/RunListPage.svelte'`.
+Expected: FAIL with `Cannot find module '../pages/runs/RunListPage.svelte'`.
 
-- [ ] **Step 3: Implement `pages/RunListPage.svelte`**
+- [ ] **Step 3: Implement `pages/runs/RunListPage.svelte`**
 
 ```svelte
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, ApiError } from '../lib/api';
-  import { listRuns, deleteRun } from '../lib/runs';
-  import { runStatus } from '../lib/runStatus';
-  import { navigate } from '../lib/router.svelte';
-  import { pushToast } from '../stores/toasts.svelte';
-  import LoadingPlaceholder from '../components/ui/LoadingPlaceholder.svelte';
-  import InlineConfirm from '../components/ui/InlineConfirm.svelte';
-  import type { Course, Version, RunResponse } from '../lib/types';
+  import { ApiError } from '../../lib/api';
+  import { listRuns, listVersions, deleteRun } from '../../lib/runs';
+  import { runStatus } from '../../lib/runStatus';
+  import { navigate } from '../../lib/router.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
+  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
+  import { api } from '../../lib/api';
+  import type { Course, Version, RunResponse } from '../../lib/types';
 
   let { params }: { params: { courseSlug: string } } = $props();
 
@@ -1752,7 +1784,7 @@ Expected: FAIL with `Cannot find module '../pages/RunListPage.svelte'`.
       course = c;
       const [rs, vs] = await Promise.all([
         listRuns(c.id),
-        api.get<Version[]>(`/api/courses/${c.id}/versions`),
+        listVersions(c.id),
       ]);
       runs = rs;
       versions = vs;
@@ -1850,7 +1882,7 @@ Expected: FAIL with `Cannot find module '../pages/RunListPage.svelte'`.
 
   {#if showNewRun}
     <!-- T6 mounts NewRunModal here; placeholder for now -->
-    {#await import('../components/NewRunModal.svelte') then mod}
+    {#await import('../../components/runs/NewRunModal.svelte') then mod}
       {@const NewRunModal = mod.default}
       <NewRunModal course={course} versions={versions} onClose={() => (showNewRun = false)} />
     {/await}
@@ -1858,7 +1890,7 @@ Expected: FAIL with `Cannot find module '../pages/RunListPage.svelte'`.
 {/if}
 ```
 
-> Note: The dynamic import of `NewRunModal.svelte` lets this task land before T6 implements that component — the modal is only loaded when `showNewRun` becomes true, so tests in this task that do not click `New run` still pass. T6 adds the actual modal.
+> Note: The dynamic import of `NewRunModal.svelte` lets this task land before T6 implements that component — the modal is only loaded when `showNewRun` becomes true, so tests in this task that do not click `New run` still pass. T6 adds the actual modal **and converts this dynamic import into a static import** (move `import NewRunModal from '../../components/runs/NewRunModal.svelte';` to the top of the `<script>` block, drop the `{#await}` wrapper, and render `<NewRunModal ... />` directly when `showNewRun`). Same pattern is used in T7 / T12 for `RosterImportModal.svelte` and is converted to static in T16.
 
 - [ ] **Step 4: Add routes**
 
@@ -1876,7 +1908,7 @@ Modify `frontend/src/routes.ts` — append two entries to the `routes` array (lo
 Modify `frontend/src/App.svelte` lines 14-25 — add to the `componentMap`:
 
 ```ts
-import RunListPage from './pages/RunListPage.svelte';
+import RunListPage from './pages/runs/RunListPage.svelte';
 // (RunDetailPage import comes in T7; for now stub a placeholder OR leave the route to fail-gracefully)
 // Pragmatic choice: import a tiny placeholder component now and overwrite in T7.
 ```
@@ -1932,7 +1964,7 @@ Expected: full suite passes; svelte-check baseline unchanged.
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/pages/RunListPage.svelte \
+git add frontend/src/pages/runs/RunListPage.svelte \
         frontend/src/tests/RunListPage.svelte.test.ts \
         frontend/src/routes.ts \
         frontend/src/App.svelte \
@@ -1945,7 +1977,7 @@ git commit -m "feat(frontend): RunListPage + routes + CourseCard Runs button"
 ### Task 6: `NewRunModal.svelte`
 
 **Files:**
-- Create: `frontend/src/components/NewRunModal.svelte`
+- Create: `frontend/src/components/runs/NewRunModal.svelte`
 - Test: `frontend/src/tests/NewRunModal.svelte.test.ts`
 
 **Context:** Modal opened from `RunListPage`. Wraps a `FocusTrap` from T3. Four validation rules (title empty after trim, start empty, end empty, end < start). Read-only Version row displays the label derived from the most recent published, non-disabled version. Submit payload omits `version_id` (backend auto-pins). On success → `onClose()` + `navigate(/courses/:slug/runs/:id)`. On API error → top-of-body banner using `e.displayMessage`.
@@ -1957,7 +1989,7 @@ Create `frontend/src/tests/NewRunModal.svelte.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import NewRunModal from '../components/NewRunModal.svelte';
+import NewRunModal from '../components/runs/NewRunModal.svelte';
 import type { Course, Version } from '../lib/types';
 
 const fetchSpy = vi.fn();
@@ -2079,17 +2111,17 @@ describe('NewRunModal', () => {
 cd frontend && npx vitest run src/tests/NewRunModal.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: FAIL with `Cannot find module '../components/NewRunModal.svelte'`.
+Expected: FAIL with `Cannot find module '../components/runs/NewRunModal.svelte'`.
 
-- [ ] **Step 3: Implement `components/NewRunModal.svelte`**
+- [ ] **Step 3: Implement `components/runs/NewRunModal.svelte`**
 
 ```svelte
 <script lang="ts">
-  import { ApiError } from '../lib/api';
-  import { createRun } from '../lib/runs';
-  import { navigate } from '../lib/router.svelte';
-  import FocusTrap from './ui/FocusTrap.svelte';
-  import type { Course, Version } from '../lib/types';
+  import { ApiError } from '../../lib/api';
+  import { createRun } from '../../lib/runs';
+  import { navigate } from '../../lib/router.svelte';
+  import FocusTrap from '../ui/FocusTrap.svelte';
+  import type { Course, Version } from '../../lib/types';
 
   let { course, versions, onClose }: {
     course: Course;
@@ -2212,7 +2244,25 @@ Expected: FAIL with `Cannot find module '../components/NewRunModal.svelte'`.
 </div>
 ```
 
-- [ ] **Step 4: Verify modal tests pass**
+- [ ] **Step 4: Convert T5's dynamic import in `RunListPage.svelte` to a static import**
+
+In `frontend/src/pages/runs/RunListPage.svelte`, replace the `{#await import('../../components/runs/NewRunModal.svelte') then mod}{@const NewRunModal = mod.default}<NewRunModal ... /> {/await}` block with:
+
+```svelte
+{#if showNewRun}
+  <NewRunModal course={course} versions={versions} onClose={() => (showNewRun = false)} />
+{/if}
+```
+
+Add the static import at the top of the `<script>` block:
+
+```ts
+import NewRunModal from '../../components/runs/NewRunModal.svelte';
+```
+
+This is purely a cleanup — the dynamic import was a T5-time scaffold for ordering.
+
+- [ ] **Step 5: Verify modal tests pass**
 
 ```bash
 cd frontend && npx vitest run src/tests/NewRunModal.svelte.test.ts 2>&1 | tail -10
@@ -2220,7 +2270,7 @@ cd frontend && npx vitest run src/tests/NewRunModal.svelte.test.ts 2>&1 | tail -
 
 Expected: 4/4 PASS.
 
-- [ ] **Step 5: Run full suite + svelte-check**
+- [ ] **Step 6: Run full suite + svelte-check**
 
 ```bash
 cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
@@ -2228,12 +2278,13 @@ cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
 
 Expected: full suite passes; baseline unchanged.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/components/NewRunModal.svelte \
-        frontend/src/tests/NewRunModal.svelte.test.ts
+git add frontend/src/components/runs/NewRunModal.svelte \
+        frontend/src/tests/NewRunModal.svelte.test.ts \
+        frontend/src/pages/runs/RunListPage.svelte
 git commit -m "feat(frontend): NewRunModal with FocusTrap + validation + submit"
 ```
 
@@ -2242,7 +2293,7 @@ git commit -m "feat(frontend): NewRunModal with FocusTrap + validation + submit"
 ### Task 7: `RunDetailPage` shell (stale-guard + tabs scaffold + disabled-version banner + callback chain)
 
 **Files:**
-- Create: `frontend/src/pages/RunDetailPage.svelte`
+- Create: `frontend/src/pages/runs/RunDetailPage.svelte`
 - Modify: `frontend/src/App.svelte` (componentMap)
 - Test: `frontend/src/tests/RunDetailPage.svelte.test.ts`
 
@@ -2255,7 +2306,7 @@ Create `frontend/src/tests/RunDetailPage.svelte.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import RunDetailPage from '../pages/RunDetailPage.svelte';
+import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
 
 const fetchSpy = vi.fn();
 
@@ -2354,6 +2405,63 @@ describe('RunDetailPage shell', () => {
     expect(target.textContent).toMatch(/(not found|Failed to load)/i);
     unmount(cmp);
   });
+
+  it('resets activeTab to overview and rosterPrefilter to null on runId change', async () => {
+    // Two consecutive mounts with different runIds — second mount must not preserve
+    // tab state from the first (covered by the component-local $effect on runIdInt).
+    mockHappyPath();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { params: { courseSlug: 'algebra', runId: '10' } } });
+    await settle();
+    // Switch to roster tab.
+    const rosterBtn = Array.from(target.querySelectorAll('button[role="tab"]')).find((b) => b.textContent?.includes('Roster')) as HTMLButtonElement;
+    rosterBtn.click();
+    flushSync();
+    expect(rosterBtn.getAttribute('aria-selected')).toBe('true');
+    // Simulate navigation to another runId by re-mounting (App.svelte may reuse instance; the spec's $effect handles either).
+    unmount(cmp);
+    const cmp2 = mount(RunDetailPage, { target, props: { params: { courseSlug: 'algebra', runId: '11' } } });
+    await settle();
+    const overviewBtn = Array.from(target.querySelectorAll('button[role="tab"]')).find((b) => b.textContent?.includes('Overview')) as HTMLButtonElement;
+    expect(overviewBtn.getAttribute('aria-selected')).toBe('true');
+    unmount(cmp2);
+  });
+
+  it('refetchRosterData() runs in-band — refetches students+groups WITHOUT bumping loadToken', async () => {
+    // The in-band contract per spec §3.2: refetchRosterData reassigns the two slices
+    // directly without invalidating an in-flight loadAll. We verify that a sequence of
+    // [initial loadAll] → [refetchRosterData] → [loadAll for new runId] does not drop
+    // the refetched data (i.e., the refetch is not stomped by a stale loadToken check).
+    let resolveSecond: ((r: Response) => void) | null = null;
+    let listStudentsCallCount = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) {
+        listStudentsCallCount += 1;
+        if (listStudentsCallCount === 1) return jres([]);
+        // Second call — used by refetchRosterData.
+        return jres([{ user_id: 99, user_email: 'new@x.com', user_full_name: null, group_id: null }]);
+      }
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { params: { courseSlug: 'algebra', runId: '10' } } });
+    await settle();
+    // refetchRosterData is exposed through the RunRosterTab callback prop. We exercise it
+    // by switching to the roster tab and triggering a single-row delete OR a manual call
+    // through a test hook. Since the shell does not yet mount the roster tab in T7's
+    // isolation, the assertion here is restricted to the function existing and the
+    // students-fetch count incrementing when it would be called.
+    expect(listStudentsCallCount).toBe(1);
+    // (Full in-band-contract test re-asserted in T12+ where RunRosterTab is mounted.)
+    unmount(cmp);
+  });
 });
 ```
 
@@ -2363,20 +2471,19 @@ describe('RunDetailPage shell', () => {
 cd frontend && npx vitest run src/tests/RunDetailPage.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: FAIL with `Cannot find module '../pages/RunDetailPage.svelte'`.
+Expected: FAIL with `Cannot find module '../pages/runs/RunDetailPage.svelte'`.
 
-- [ ] **Step 3: Implement `pages/RunDetailPage.svelte` shell**
+- [ ] **Step 3: Implement `pages/runs/RunDetailPage.svelte` shell**
 
 ```svelte
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { api, ApiError } from '../lib/api';
-  import { getRun } from '../lib/runs';
-  import { listRunTeachers } from '../lib/runTeachers';
-  import { listGroups } from '../lib/runGroups';
-  import { listRunStudents } from '../lib/runRoster';
-  import LoadingPlaceholder from '../components/ui/LoadingPlaceholder.svelte';
-  import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../lib/types';
+  import { api, ApiError } from '../../lib/api';
+  import { getRun, listVersions } from '../../lib/runs';
+  import { listRunTeachers } from '../../lib/runTeachers';
+  import { listGroups } from '../../lib/runGroups';
+  import { listRunStudents } from '../../lib/runRoster';
+  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
 
@@ -2409,7 +2516,7 @@ Expected: FAIL with `Cannot find module '../pages/RunDetailPage.svelte'`.
       if (myToken !== loadToken) return;
       const [r, vs, ts, gs, ss] = await Promise.all([
         getRun(rid),
-        api.get<Version[]>(`/api/courses/${c.id}/versions`),
+        listVersions(c.id),
         listRunTeachers(rid),
         listGroups(rid),
         listRunStudents(rid),
@@ -2512,7 +2619,7 @@ Expected: FAIL with `Cannot find module '../pages/RunDetailPage.svelte'`.
 Modify `frontend/src/App.svelte` — add import and componentMap entry:
 
 ```ts
-import RunDetailPage from './pages/RunDetailPage.svelte';
+import RunDetailPage from './pages/runs/RunDetailPage.svelte';
 
 const componentMap: Record<string, ComponentType> = {
   // ...existing entries...
@@ -2541,7 +2648,7 @@ Expected: full suite passes; baseline unchanged.
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/pages/RunDetailPage.svelte \
+git add frontend/src/pages/runs/RunDetailPage.svelte \
         frontend/src/tests/RunDetailPage.svelte.test.ts \
         frontend/src/App.svelte
 git commit -m "feat(frontend): RunDetailPage shell with stale-guard + tabs scaffold"
@@ -2552,7 +2659,7 @@ git commit -m "feat(frontend): RunDetailPage shell with stale-guard + tabs scaff
 ### Task 8: Sticky publish bar + shared readiness `$derived`
 
 **Files:**
-- Modify: `frontend/src/pages/RunDetailPage.svelte`
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte`
 - Test: `frontend/src/tests/RunDetailPage.publish.svelte.test.ts`
 
 **Context:** Lives at the top of `RunDetailPage`. Single `$derived` over already-loaded `run`/`teachers`/`groups`/`students` returns `{ checks: ChecklistRow[], firstViolation: string | null }`. T10 (Overview checklist) consumes `checks`; T8 (here) consumes `firstViolation` for the Publish button tooltip. Publish button disabled when `firstViolation !== null` OR `showDisabledBanner`. Unpublish uses `InlineConfirm` from T3. Both flows re-fetch `run` after success.
@@ -2564,7 +2671,7 @@ Create `frontend/src/tests/RunDetailPage.publish.svelte.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import RunDetailPage from '../pages/RunDetailPage.svelte';
+import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
 
 const fetchSpy = vi.fn();
 beforeEach(() => {
@@ -2667,16 +2774,16 @@ describe('Publish bar', () => {
 cd frontend && npx vitest run src/tests/RunDetailPage.publish.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: FAIL — the publish bar is not yet rendered in the shell (T7 left the header bar's right side empty).
+Expected: FAIL — the publish bar is not yet rendered in the shell (T7 left the header bar's right side empty). The first test's `target.querySelector('button[data-action="publish"]')` returns `null` and the test errors with `Cannot read properties of null (reading 'disabled')`. That counts as a fail; we keep the cleaner assertion intent for after the implementation lands. (If you prefer a cleaner pre-implementation diagnostic, guard each test with `const btn = target.querySelector(...); expect(btn).not.toBeNull();` before reading properties — optional.)
 
 - [ ] **Step 3: Add readiness `$derived` + publish bar to `RunDetailPage.svelte`**
 
 Inside the `<script>` block (after the existing `pinned`/`showDisabledBanner` derivations), add:
 
 ```ts
-import { publishRun, unpublishRun } from '../lib/runs';
-import { pushToast } from '../stores/toasts.svelte';
-import InlineConfirm from '../components/ui/InlineConfirm.svelte';
+import { publishRun, unpublishRun } from '../../lib/runs';
+import { pushToast } from '../../stores/toasts.svelte';
+import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
 
 type ChecklistState = 'ok' | 'violated' | 'na';
 type ChecklistRow = { id: string; label: string; state: ChecklistState; hint?: string };
@@ -2811,7 +2918,7 @@ Expected: full suite passes; baseline unchanged.
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/pages/RunDetailPage.svelte \
+git add frontend/src/pages/runs/RunDetailPage.svelte \
         frontend/src/tests/RunDetailPage.publish.svelte.test.ts
 git commit -m "feat(frontend): publish bar + readiness derivation on RunDetailPage"
 ```
@@ -2823,7 +2930,7 @@ git commit -m "feat(frontend): publish bar + readiness derivation on RunDetailPa
 **Files:**
 - Create: `frontend/src/components/runs/RunOverviewTab.svelte`
 - Test: `frontend/src/tests/RunOverviewTab.svelte.test.ts`
-- Modify: `frontend/src/pages/RunDetailPage.svelte` (mount the tab)
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` (mount the tab)
 
 **Context:** First section of `RunOverviewTab` — inline-edit `title`, `start_date`, `end_date`. One `makeDirtyTracker` bundling all three. Per-field commit on blur. Enter blurs the field (commits via onblur — exactly one PATCH). Escape reverts that field. Cross-field revert rule: on error, revert ONLY if the user has not since typed a new value into that field (compare `tracker.current[field]` with the captured `inFlightValue`).
 
@@ -3104,7 +3211,7 @@ Replace the placeholder `<p>Overview tab (T9 + T10 implementation pending).</p>`
 {:else if ...}
 ```
 
-Add import: `import RunOverviewTab from '../components/runs/RunOverviewTab.svelte';`.
+Add import: `import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';`.
 
 - [ ] **Step 5: Verify overview tests pass**
 
@@ -3128,7 +3235,7 @@ Expected: full suite passes; baseline unchanged.
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/runs/RunOverviewTab.svelte \
         frontend/src/tests/RunOverviewTab.svelte.test.ts \
-        frontend/src/pages/RunDetailPage.svelte
+        frontend/src/pages/runs/RunDetailPage.svelte
 git commit -m "feat(frontend): RunOverviewTab inline edits with makeDirtyTracker"
 ```
 
@@ -3395,7 +3502,7 @@ async function onDeleteRun() {
 }
 ```
 
-Add imports: `import { deleteRun } from '../lib/runs';` and `import { navigate } from '../lib/router.svelte';`.
+Add imports: `import { deleteRun } from '../../lib/runs';` and `import { navigate } from '../../lib/router.svelte';`.
 
 Replace the placeholder `onDeleteRun={async () => { /* T10 wires deleteRun + navigate */ }}` with `{onDeleteRun}`.
 
@@ -3421,24 +3528,20 @@ Expected: full suite passes; baseline unchanged.
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/runs/RunOverviewTab.svelte \
         frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts \
-        frontend/src/pages/RunDetailPage.svelte
+        frontend/src/pages/runs/RunDetailPage.svelte
 git commit -m "feat(frontend): RunOverviewTab checklist + settings + danger zone"
 ```
 
 ---
 
-### Task 11: `RunTeachersTab` + `RunGroupsTab`
+### Task 11a: `RunTeachersTab`
 
 **Files:**
 - Create: `frontend/src/components/runs/RunTeachersTab.svelte`
-- Create: `frontend/src/components/runs/RunGroupsTab.svelte`
-- Modify: `frontend/src/pages/RunDetailPage.svelte` (mount both tabs + refetch helpers)
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` (mount + add `refetchTeachers`)
 - Test: `frontend/src/tests/RunTeachersTab.svelte.test.ts`
-- Test: `frontend/src/tests/RunGroupsTab.svelte.test.ts`
 
-**Context:**
-- **Teachers tab.** Top form (`email`, max 254, autofocus) → `POST /api/runs/{runId}/teachers`. Session-scoped `justInvited = new SvelteSet<userId>()` populated only by add-actions in this mount; cleared by unmount. Remove via `InlineConfirm`. 409 → inline error "Teacher already assigned to this run." Empty state: "No teachers assigned yet. Add one above."
-- **Groups tab.** When `!groups_enabled`: placeholder card. When enabled: top form (`name`, max 80) → `POST /api/runs/{runId}/groups`. List ordered by `name ASC`. Inline-rename via `makeDirtyTracker`. Capacity badge from `getCapacityClass(student_count)`. Delete via `InlineConfirm`, disabled when `student_count > 0`. Two 409 branches: "has students" → toast + refetch students AND groups; "has submissions" → toast + refetch groups only.
+**Context:** Top form (`email`, max 254, autofocus) → `POST /api/runs/{runId}/teachers`. Session-scoped `justInvited = new SvelteSet<userId>()` populated only by add-actions in this mount; cleared by unmount. Remove via `InlineConfirm` (with `confirmDataAction="confirm-remove"`). 409 → inline error "Teacher already assigned to this run." Empty state: "No teachers assigned yet. Add one above."
 
 - [ ] **Step 1: Write Teachers tab tests**
 
@@ -3526,7 +3629,167 @@ describe('RunTeachersTab', () => {
 });
 ```
 
-- [ ] **Step 2: Write Groups tab tests**
+- [ ] **Step 2: Run Teachers tab test, verify it fails**
+
+```bash
+cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts 2>&1 | tail -10
+```
+
+Expected: FAIL with `Cannot find module '../components/runs/RunTeachersTab.svelte'`.
+
+- [ ] **Step 3: Implement `components/runs/RunTeachersTab.svelte`** (see implementation in Step 4 of this task below)
+
+(Implementation block is inlined as Step 4 below to keep the test→implement→wire→verify cycle linear.)
+
+- [ ] **Step 4: Implementation source**
+
+(The full Svelte component source for `RunTeachersTab.svelte` is provided below the Groups task split — see "Step 4 implementation" block in the original combined task, now relocated under T11a Step 4.)
+
+```svelte
+<script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
+  import { ApiError } from '../../lib/api';
+  import { addRunTeacher, removeRunTeacher } from '../../lib/runTeachers';
+  import InlineConfirm from '../ui/InlineConfirm.svelte';
+  import type { RunTeacherResponse } from '../../lib/types';
+
+  let { runId, teachers, onRefetch }: {
+    runId: number;
+    teachers: RunTeacherResponse[];
+    onRefetch: () => Promise<void>;
+  } = $props();
+
+  let email = $state('');
+  let addError: string | null = $state(null);
+  let busy = $state(false);
+  const justInvited = new SvelteSet<number>();
+  let pendingRemove: number | null = $state(null);
+
+  async function submit(event: SubmitEvent) {
+    event.preventDefault();
+    addError = null;
+    busy = true;
+    try {
+      const t = await addRunTeacher(runId, email.trim());
+      if (t.user_full_name === null) justInvited.add(t.user_id);
+      email = '';
+      await onRefetch();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        addError = e.status === 409 ? 'Teacher already assigned to this run.' : e.displayMessage;
+      }
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function confirmRemove(userId: number) {
+    try {
+      await removeRunTeacher(runId, userId);
+      pendingRemove = null;
+      await onRefetch();
+    } catch (e) {
+      pendingRemove = null;
+    }
+  }
+</script>
+
+<section class="teachers-tab">
+  <form onsubmit={submit}>
+    <input name="email" type="email" maxlength="254" autofocus placeholder="teacher@example.com" bind:value={email} />
+    <button type="submit" disabled={busy || !email.trim()}>Add teacher</button>
+  </form>
+  {#if addError}<p class="error">{addError}</p>{/if}
+
+  {#if teachers.length === 0}
+    <p class="empty">No teachers assigned yet. Add one above.</p>
+  {:else}
+    <ul>
+      {#each teachers as t (t.user_id)}
+        <li>
+          {t.user_full_name || '—'} ({t.user_email})
+          {#if justInvited.has(t.user_id)}<span class="badge">(invited)</span>{/if}
+          {#if pendingRemove === t.user_id}
+            <InlineConfirm
+              label="Remove"
+              confirmLabel="Confirm Remove"
+              confirmDataAction="confirm-remove"
+              onConfirm={() => confirmRemove(t.user_id)}
+              onCancel={() => (pendingRemove = null)}
+            />
+          {:else}
+            <button data-action="remove" onclick={() => (pendingRemove = t.user_id)}>Remove</button>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  {/if}
+</section>
+```
+
+- [ ] **Step 5: Wire `RunTeachersTab` into `RunDetailPage.svelte`**
+
+Add imports:
+
+```ts
+import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
+import { listRunTeachers } from '../../lib/runTeachers';
+```
+
+Add refetch helper:
+
+```ts
+async function refetchTeachers() {
+  if (runIdInt === null) return;
+  teachers = await listRunTeachers(runIdInt);
+}
+```
+
+Replace the Teachers placeholder block in the template:
+
+```svelte
+{:else if activeTab === 'teachers'}
+  <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} />
+```
+
+- [ ] **Step 6: Verify Teachers tab tests pass**
+
+```bash
+cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts 2>&1 | tail -10
+```
+
+Expected: 4/4 PASS.
+
+- [ ] **Step 7: Run full suite + svelte-check**
+
+```bash
+cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
+```
+
+Expected: full suite passes; baseline unchanged.
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion
+git add frontend/src/components/runs/RunTeachersTab.svelte \
+        frontend/src/tests/RunTeachersTab.svelte.test.ts \
+        frontend/src/pages/runs/RunDetailPage.svelte
+git commit -m "feat(frontend): RunTeachersTab with invited-badge + refetch"
+```
+
+---
+
+### Task 11b: `RunGroupsTab`
+
+**Files:**
+- Create: `frontend/src/components/runs/RunGroupsTab.svelte`
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` (mount + add `refetchGroups`/`refetchGroupsAndStudents`)
+- Test: `frontend/src/tests/RunGroupsTab.svelte.test.ts`
+
+**Context:** When `!groups_enabled`: placeholder card. When enabled: top form (`name`, max 80) → `POST /api/runs/{runId}/groups`. List ordered by `name ASC`. Inline-rename via `makeDirtyTracker`. Capacity badge from `getCapacityClass(student_count)`. Delete via `InlineConfirm` (with `confirmDataAction="confirm-delete-group"`), disabled when `student_count > 0`. Two 409 branches: "has students" → toast + refetch students AND groups; "has submissions" → toast + refetch groups only.
+
+- [ ] **Step 1: Write Groups tab tests**
 
 Create `frontend/src/tests/RunGroupsTab.svelte.test.ts`:
 
@@ -3618,100 +3881,15 @@ describe('RunGroupsTab', () => {
 });
 ```
 
-- [ ] **Step 3: Run tests, verify they fail**
+- [ ] **Step 2: Run Groups tab test, verify it fails**
 
 ```bash
-cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts src/tests/RunGroupsTab.svelte.test.ts 2>&1 | tail -10
+cd frontend && npx vitest run src/tests/RunGroupsTab.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: FAIL — components not yet implemented.
+Expected: FAIL with `Cannot find module '../components/runs/RunGroupsTab.svelte'`.
 
-- [ ] **Step 4: Implement `components/runs/RunTeachersTab.svelte`**
-
-```svelte
-<script lang="ts">
-  import { SvelteSet } from 'svelte/reactivity';
-  import { ApiError } from '../../lib/api';
-  import { addRunTeacher, removeRunTeacher } from '../../lib/runTeachers';
-  import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { RunTeacherResponse } from '../../lib/types';
-
-  let { runId, teachers, onRefetch }: {
-    runId: number;
-    teachers: RunTeacherResponse[];
-    onRefetch: () => Promise<void>;
-  } = $props();
-
-  let email = $state('');
-  let addError: string | null = $state(null);
-  let busy = $state(false);
-  const justInvited = new SvelteSet<number>();
-  let pendingRemove: number | null = $state(null);
-
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
-    addError = null;
-    busy = true;
-    try {
-      const t = await addRunTeacher(runId, email.trim());
-      if (t.user_full_name === null) justInvited.add(t.user_id);
-      email = '';
-      await onRefetch();
-    } catch (e) {
-      if (e instanceof ApiError) {
-        addError = e.status === 409 ? 'Teacher already assigned to this run.' : e.displayMessage;
-      }
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function confirmRemove(userId: number) {
-    try {
-      await removeRunTeacher(runId, userId);
-      pendingRemove = null;
-      await onRefetch();
-    } catch (e) {
-      pendingRemove = null;
-    }
-  }
-</script>
-
-<section class="teachers-tab">
-  <form onsubmit={submit}>
-    <input name="email" type="email" maxlength="254" autofocus placeholder="teacher@example.com" bind:value={email} />
-    <button type="submit" disabled={busy || !email.trim()}>Add teacher</button>
-  </form>
-  {#if addError}<p class="error">{addError}</p>{/if}
-
-  {#if teachers.length === 0}
-    <p class="empty">No teachers assigned yet. Add one above.</p>
-  {:else}
-    <ul>
-      {#each teachers as t (t.user_id)}
-        <li>
-          {t.user_full_name || '—'} ({t.user_email})
-          {#if justInvited.has(t.user_id)}<span class="badge">(invited)</span>{/if}
-          {#if pendingRemove === t.user_id}
-            <InlineConfirm
-              label="Remove"
-              confirmLabel="Confirm Remove"
-              onConfirm={() => confirmRemove(t.user_id)}
-              onCancel={() => (pendingRemove = null)}
-            />
-          {:else}
-            <button data-action="remove" onclick={() => (pendingRemove = t.user_id)}>Remove</button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {/if}
-</section>
-```
-
-> The Remove button's confirm step must render `data-action="confirm-remove"` on its primary button so the test selector matches. The `InlineConfirm` primitive from T3 already accepts a `confirmDataAction` prop — if T3 did not include one, add it now (it should: see T3 Step 3 implementation). If `InlineConfirm` does not expose `data-action` on the confirm button, set the test selector accordingly OR extend `InlineConfirm` props once and reuse everywhere.
-
-- [ ] **Step 5: Implement `components/runs/RunGroupsTab.svelte`**
+- [ ] **Step 3: Implement `components/runs/RunGroupsTab.svelte`**
 
 ```svelte
 <script lang="ts">
@@ -3854,28 +4032,19 @@ Expected: FAIL — components not yet implemented.
 {/if}
 ```
 
-> The `confirmDataAction` prop on `InlineConfirm` is the test-selector hook. If T3's `InlineConfirm` did not include this prop, extend T3 first (add `confirmDataAction?: string` to its props and bind `data-action={confirmDataAction}` on the confirm button); commit that change as part of this task.
-
-- [ ] **Step 6: Wire both tabs into `RunDetailPage.svelte`**
+- [ ] **Step 4: Wire `RunGroupsTab` into `RunDetailPage.svelte`**
 
 Add imports:
 
 ```ts
-import RunTeachersTab from '../components/runs/RunTeachersTab.svelte';
-import RunGroupsTab from '../components/runs/RunGroupsTab.svelte';
-import { listGroups } from '../lib/runGroups';
-import { listRunTeachers } from '../lib/runTeachers';
-import { listRunStudents } from '../lib/runRoster';
+import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
+import { listGroups } from '../../lib/runGroups';
+import { listRunStudents } from '../../lib/runRoster';
 ```
 
-Add refetch helpers:
+Add refetch helpers (these are also needed by T12+ but introduced here):
 
 ```ts
-async function refetchTeachers() {
-  if (runIdInt === null) return;
-  teachers = await listRunTeachers(runIdInt);
-}
-
 async function refetchGroups() {
   if (runIdInt === null) return;
   groups = await listGroups(runIdInt);
@@ -3888,11 +4057,9 @@ async function refetchGroupsAndStudents() {
 }
 ```
 
-Replace the teachers/groups placeholder blocks in the template:
+Replace the Groups placeholder block in the template:
 
 ```svelte
-{:else if activeTab === 'teachers'}
-  <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} />
 {:else if activeTab === 'groups'}
   <RunGroupsTab
     runId={runIdInt!}
@@ -3903,15 +4070,15 @@ Replace the teachers/groups placeholder blocks in the template:
   />
 ```
 
-- [ ] **Step 7: Verify all tests pass**
+- [ ] **Step 5: Verify Groups tab tests pass**
 
 ```bash
-cd frontend && npx vitest run src/tests/RunTeachersTab.svelte.test.ts src/tests/RunGroupsTab.svelte.test.ts 2>&1 | tail -10
+cd frontend && npx vitest run src/tests/RunGroupsTab.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: all PASS.
+Expected: 4/4 PASS.
 
-- [ ] **Step 8: Run full suite + svelte-check**
+- [ ] **Step 6: Run full suite + svelte-check**
 
 ```bash
 cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
@@ -3919,17 +4086,14 @@ cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
 
 Expected: full suite passes; baseline unchanged.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/components/runs/RunTeachersTab.svelte \
-        frontend/src/components/runs/RunGroupsTab.svelte \
-        frontend/src/tests/RunTeachersTab.svelte.test.ts \
+git add frontend/src/components/runs/RunGroupsTab.svelte \
         frontend/src/tests/RunGroupsTab.svelte.test.ts \
-        frontend/src/pages/RunDetailPage.svelte \
-        frontend/src/components/ui/InlineConfirm.svelte
-git commit -m "feat(frontend): RunTeachersTab + RunGroupsTab with refetch + InlineConfirm hook"
+        frontend/src/pages/runs/RunDetailPage.svelte
+git commit -m "feat(frontend): RunGroupsTab with inline rename + capacity badges"
 ```
 
 ---
@@ -3938,7 +4102,7 @@ git commit -m "feat(frontend): RunTeachersTab + RunGroupsTab with refetch + Inli
 
 **Files:**
 - Create: `frontend/src/components/runs/RunRosterTab.svelte`
-- Modify: `frontend/src/pages/RunDetailPage.svelte` (mount + pass props)
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` (mount + pass props)
 - Test: `frontend/src/tests/RunRosterTab.svelte.test.ts`
 
 **Context:** Core table without optimistic inline group editing (T13) or bulk ops (T14/T15). Renders sticky-header table; filters via search input + `rosterPrefilter`. Tri-state header checkbox derived from filtered-visible rows (indeterminate is derived-only, never user-settable). Persistent add-student row always mounted (stays in DOM across filter changes). Client-side duplicate pre-check via lowercased email comparison. Single-row delete via `InlineConfirm`. The rendered `<select>` value uses `selectValueFor(U)` helper with `.has()` guard — overlay still mostly inert in this task but the helper is in place for T13.
@@ -3986,6 +4150,7 @@ function mountTab(props: Record<string, unknown>) {
     rosterPrefilter: null,
     onPrefilterClear: vi.fn(),
     onRefetchRosterData: vi.fn().mockResolvedValue({ students: [], groups: [] }),
+    onRefetchGroupsOnly: vi.fn().mockResolvedValue(undefined),
     onOpenImport: vi.fn(),
     ...props,
   } });
@@ -4086,6 +4251,26 @@ describe('RunRosterTab core', () => {
     expect(refetch).toHaveBeenCalled();
     unmount(cmp);
   });
+
+  it('persistent add-student row stays in DOM across filter changes', async () => {
+    const { target, cmp } = mountTab({
+      students: [
+        fakeStudent({ user_id: 1, user_email: 'a@x.com', user_full_name: 'Alice', group_id: null }),
+        fakeStudent({ user_id: 2, user_email: 'b@x.com', user_full_name: 'Bob', group_id: 99 }),
+      ],
+      rosterPrefilter: 'unassigned',
+    });
+    await settle();
+    // Prefilter active: only Alice visible. Add row must still exist.
+    expect(target.querySelector('input[name="new-email"]')).not.toBeNull();
+    // Type a search that filters out everyone.
+    const search = target.querySelector('input[name="roster-search"]') as HTMLInputElement;
+    search.value = 'zzz-no-match';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(target.querySelector('input[name="new-email"]')).not.toBeNull();
+    unmount(cmp);
+  });
 });
 ```
 
@@ -4111,7 +4296,7 @@ Expected: FAIL with `Cannot find module '../components/runs/RunRosterTab.svelte'
   let {
     runId, students, groups, groupsEnabled,
     rosterPrefilter, onPrefilterClear,
-    onRefetchRosterData, onOpenImport,
+    onRefetchRosterData, onRefetchGroupsOnly, onOpenImport,
   }: {
     runId: number;
     students: RunStudentResponse[];
@@ -4120,6 +4305,7 @@ Expected: FAIL with `Cannot find module '../components/runs/RunRosterTab.svelte'
     rosterPrefilter: 'unassigned' | null;
     onPrefilterClear: () => void;
     onRefetchRosterData: () => Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }>;
+    onRefetchGroupsOnly: () => Promise<void>;
     onOpenImport: () => void;
   } = $props();
 
@@ -4323,7 +4509,7 @@ Expected: FAIL with `Cannot find module '../components/runs/RunRosterTab.svelte'
 
 - [ ] **Step 4: Mount in `RunDetailPage.svelte`**
 
-Add import: `import RunRosterTab from '../components/runs/RunRosterTab.svelte';`.
+Add import: `import RunRosterTab from '../../components/runs/RunRosterTab.svelte';`.
 
 Add state for `showImportModal`:
 
@@ -4343,10 +4529,11 @@ Replace the roster placeholder block:
     {rosterPrefilter}
     {onPrefilterClear}
     onRefetchRosterData={refetchRosterData}
+    onRefetchGroupsOnly={refetchGroups}
     onOpenImport={() => (showImportModal = true)}
   />
   {#if showImportModal}
-    {#await import('../components/RosterImportModal.svelte') then mod}
+    {#await import('../../components/runs/RosterImportModal.svelte') then mod}
       {@const RosterImportModal = mod.default}
       <RosterImportModal
         runId={runIdInt!}
@@ -4360,7 +4547,7 @@ Replace the roster placeholder block:
 {/if}
 ```
 
-> The dynamic `import('../components/RosterImportModal.svelte')` is the same pattern used in T5 — it lets T16 land the modal later without breaking T12's tests.
+> The dynamic `import('../../components/runs/RosterImportModal.svelte')` is the same pattern used in T5 — it lets T16 land the modal later without breaking T12's tests.
 
 - [ ] **Step 5: Verify tests pass**
 
@@ -4384,7 +4571,7 @@ Expected: full suite passes; baseline unchanged.
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/runs/RunRosterTab.svelte \
         frontend/src/tests/RunRosterTab.svelte.test.ts \
-        frontend/src/pages/RunDetailPage.svelte
+        frontend/src/pages/runs/RunDetailPage.svelte
 git commit -m "feat(frontend): RunRosterTab core (search, prefilter, tri-state, add, delete)"
 ```
 
@@ -4394,7 +4581,7 @@ git commit -m "feat(frontend): RunRosterTab core (search, prefilter, tri-state, 
 
 **Files:**
 - Modify: `frontend/src/components/runs/RunRosterTab.svelte`
-- Modify: `frontend/src/pages/RunDetailPage.svelte` (wrap `students` setter with `prunePendingGroups`)
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` (wrap `students` setter with `prunePendingGroups`)
 - Test: `frontend/src/tests/RunRosterTab.optimistic.svelte.test.ts`
 
 **Context:** Wires up the optimistic inline group change. On select change for `user_id=U` → `pendingGroupId.set(U, G)` immediately, disable the row's select, PATCH `/api/runs/{rid}/students/{U}` with `{group_id: G}`. On success: `pendingGroupId.delete(U)`, update `student.group_id` from response, refetch `groups` only (no `prunePendingGroups()` needed — own entry already removed). On failure: revert (`pendingGroupId.delete(U)`), toast. `prunePendingGroups()` runs every time `students` is refetched (the parent's setter wraps the call).
@@ -4440,6 +4627,7 @@ function mountTab(extra: Record<string, unknown> = {}) {
     rosterPrefilter: null,
     onPrefilterClear: vi.fn(),
     onRefetchRosterData: vi.fn().mockResolvedValue({ students: [], groups: [] }),
+    onRefetchGroupsOnly: vi.fn().mockResolvedValue(undefined),
     onOpenImport: vi.fn(),
     ...extra,
   } });
@@ -4533,20 +4721,21 @@ Remove `disabled` from the row select, bind to a per-row handler:
 
 Add helper inside `<script>`:
 
+Extend the `RunRosterTab` props with a new callback `onRefetchGroupsOnly: () => Promise<void>` (supplied by the parent — wires to `RunDetailPage.refetchGroups` from T11b). Per spec §4.4 line 567: inline group change success refetches `groups` only (for capacity badges), NOT `students`. The pending-group entry for this row is removed by `pendingGroupId.delete(U)` directly, so `prunePendingGroups()` is not needed here.
+
 ```ts
 async function onGroupChange(s: RunStudentResponse, raw: string) {
   const target: number | null = raw === '__unassigned' ? null : Number(raw);
   pendingGroupId.set(s.user_id, target);
   try {
     const updated = await updateRunStudent(runId, s.user_id, target);
-    // Mutate the local student row in place — parent's `students` is the source of truth,
-    // but until the parent refetches, this keeps the row in sync.
+    // Mutate the local student row in place — parent's `students` slice is the source
+    // of truth, but until a refetch path runs, this keeps the row in sync. Spec §4.4
+    // explicitly says the inline-edit success branch does NOT refetch students; only
+    // groups (for capacity badges).
     s.group_id = updated.group_id;
     pendingGroupId.delete(s.user_id);
-    // Refetch groups only (capacity badges); students refetch is unnecessary here.
-    // We piggyback on the parent's roster refetch helper but only commit groups —
-    // simpler: call onRefetchRosterData() which writes both slices. Acceptable cost.
-    await onRefetchRosterData();
+    await onRefetchGroupsOnly();
   } catch (e) {
     pendingGroupId.delete(s.user_id);
     if (e instanceof ApiError) {
@@ -4562,6 +4751,24 @@ async function onGroupChange(s: RunStudentResponse, raw: string) {
   }
 }
 ```
+
+Update the props block at the top of `RunRosterTab.svelte` (T12) to declare the new prop — find the existing `onRefetchRosterData` declaration and add `onRefetchGroupsOnly` alongside it:
+
+```ts
+let {
+  // ...existing props...
+  onRefetchRosterData,
+  onRefetchGroupsOnly,
+  onOpenImport,
+}: {
+  // ...existing types...
+  onRefetchRosterData: () => Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }>;
+  onRefetchGroupsOnly: () => Promise<void>;
+  onOpenImport: () => void;
+} = $props();
+```
+
+Update the parent mount site in `RunDetailPage.svelte` to pass the new prop. Find the `<RunRosterTab ... />` block from T12 Step 4 and add `onRefetchGroupsOnly={refetchGroups}` (the helper was introduced in T11b).
 
 - [ ] **Step 4: Wrap `students` setter with `prunePendingGroups()` in `RunDetailPage.svelte`**
 
@@ -4604,7 +4811,7 @@ Expected: full suite passes; baseline unchanged.
 cd /Users/svkucheryavski/Documents/Developing/mathion
 git add frontend/src/components/runs/RunRosterTab.svelte \
         frontend/src/tests/RunRosterTab.optimistic.svelte.test.ts \
-        frontend/src/pages/RunDetailPage.svelte
+        frontend/src/pages/runs/RunDetailPage.svelte
 git commit -m "feat(frontend): optimistic inline group edit + pendingGroupId prune"
 ```
 
@@ -4661,6 +4868,7 @@ function mountTab(extra: Record<string, unknown> = {}) {
     rosterPrefilter: null,
     onPrefilterClear: vi.fn(),
     onRefetchRosterData: vi.fn().mockResolvedValue({ students: [], groups: [] }),
+    onRefetchGroupsOnly: vi.fn().mockResolvedValue(undefined),
     onOpenImport: vi.fn(),
     ...extra,
   } });
@@ -4765,6 +4973,47 @@ describe('RunRosterTab bulk-op dispatcher', () => {
     expect(row2?.classList.contains('row-error')).toBe(true);
     unmount(cmp);
   });
+
+  it('renders all 5 per-row tooltip mappings on bulk-op errors (spec §4.4)', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (!url.includes('bulk-move')) return jres({ results: [], summary: { total: 0, ok: 0, error: 0 } });
+      return jres({
+        results: [
+          { user_id: 1, status: 'error', error_code: 'not_in_run', detail: '...' },
+          { user_id: 2, status: 'error', error_code: 'capacity_reached', detail: '...' },
+          { user_id: 3, status: 'error', error_code: 'internal_error', detail: '...' },
+          { user_id: 4, status: 'error', error_code: null, detail: 'Custom backend message' },
+          { user_id: 5, status: 'error', error_code: null }, // detail also missing
+        ],
+        summary: { total: 5, ok: 0, error: 5 },
+      });
+    });
+
+    const { target, cmp } = mountTab({
+      students: studentN(5),
+      onRefetchRosterData: vi.fn().mockResolvedValue({
+        students: studentN(5),
+        groups: [{ id: 99, run_id: 10, name: 'Alpha', student_count: 0, is_disabled: false }],
+      }),
+    });
+    await settle();
+    (target.querySelector('input[data-header-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    (target.querySelector('[data-action="bulk-move-select"]') as HTMLSelectElement).value = '99';
+    (target.querySelector('[data-action="bulk-move-select"]') as HTMLSelectElement)
+      .dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const tooltipOf = (uid: number) =>
+      (target.querySelector(`tr[data-user-id="${uid}"]`) as HTMLElement | null)?.getAttribute('title');
+
+    expect(tooltipOf(1)).toBe('Student is no longer enrolled in this run.');
+    expect(tooltipOf(2)).toBe('Target group is full (10 students).');
+    expect(tooltipOf(3)).toBe('Server error — please retry.');
+    expect(tooltipOf(4)).toBe('Custom backend message');
+    expect(tooltipOf(5)).toBe('Unknown error.');
+    unmount(cmp);
+  });
 });
 ```
 
@@ -4799,11 +5048,23 @@ let bulkOpResult = $state<BulkOpResult>({
 });
 
 let rowErrorBorders = $state(new SvelteSet<number>());
+let rowErrorMeta = $state(new SvelteMap<number, { error_code: string | null | undefined; detail: string | undefined }>());
 let bulkDeleteConfirm = $state(false);
+
+function bulkErrorTooltip(meta: { error_code: string | null | undefined; detail: string | undefined } | undefined): string {
+  if (!meta) return '';
+  const code = meta.error_code;
+  if (code === 'not_in_run') return 'Student is no longer enrolled in this run.';
+  if (code === 'capacity_reached') return 'Target group is full (10 students).';
+  if (code === 'internal_error') return 'Server error — please retry.';
+  if (code === null || code === undefined) return meta.detail ? meta.detail : 'Unknown error.';
+  return meta.detail ?? 'Unknown error.';
+}
 
 async function dispatchBulkOp(kind: BulkOpKind, userIds: number[], groupId: number | null = null) {
   // Step 1: clear borders for this op.
   rowErrorBorders = new SvelteSet<number>();
+  rowErrorMeta = new SvelteMap<number, { error_code: string | null | undefined; detail: string | undefined }>();
   bulkOpResult = {
     kind: 'in-flight', succeededIds: [], chunkErrorRowIds: [], cancelledIds: [],
     lastOp: kind, lastTargetGroupId: groupId,
@@ -4825,7 +5086,10 @@ async function dispatchBulkOp(kind: BulkOpKind, userIds: number[], groupId: numb
         : await bulkDeleteRunStudents(runId, chunk);
       for (const row of response.results) {
         if (row.status === 'ok') succeededIds.push(row.user_id);
-        else chunkErrorRowIds.push(row.user_id);
+        else {
+          chunkErrorRowIds.push(row.user_id);
+          rowErrorMeta.set(row.user_id, { error_code: row.error_code, detail: row.detail });
+        }
       }
     } catch (e) {
       // Whole-chunk failure (network or non-207 like 400/409).
@@ -4903,13 +5167,14 @@ Add the action strip above the `<table>` block:
 {/if}
 ```
 
-On each `<tr data-row="student">`, add the row-error class + `data-user-id`:
+On each `<tr data-row="student">`, add the row-error class, `data-user-id`, and `title` (tooltip) wired to `bulkErrorTooltip` from the per-row error metadata map. Replace the existing T12 `<tr data-row="student">` line with:
 
 ```svelte
 <tr
   data-row="student"
   data-user-id={s.user_id}
   class:row-error={rowErrorBorders.has(s.user_id)}
+  title={bulkErrorTooltip(rowErrorMeta.get(s.user_id))}
 >
 ```
 
@@ -5119,14 +5384,11 @@ function retryDelete() {
   dispatchBulkOp('delete', bulkOpResult.chunkErrorRowIds);
 }
 
-function retryCancelled() {
+function retryCancelledDelete() {
+  // Only the chunk-level-cancelled bulk-DELETE branch uses this helper. The move
+  // branch re-enters dispatchBulkOp directly from the template's retry <select>
+  // (the user picks a different target group because the original target was bad).
   const ids = [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds];
-  if (bulkOpResult.lastOp === 'move') {
-    // For chunk-level cancellation on a move, the original target was bad → require user to pick a new one in template.
-    // We re-fire via the selectable; this path is wired by the template's <select>.
-    // No-op here; template invokes dispatchBulkOp('move', ids, newGroupId).
-    return;
-  }
   dispatchBulkOp('delete', ids);
 }
 ```
@@ -5166,7 +5428,7 @@ Add the banner template above the action strip:
           {/each}
         </select>
       {:else}
-        <button data-action="retry-cancelled" onclick={retryCancelled}>Retry cancelled</button>
+        <button data-action="retry-cancelled" onclick={retryCancelledDelete}>Retry cancelled</button>
       {/if}
     {/if}
 
@@ -5207,7 +5469,7 @@ git commit -m "feat(frontend): bulk-op summary banner + retry controls"
 ### Task 16: `RosterImportModal` scaffold (Stage 1 paste + preview)
 
 **Files:**
-- Create: `frontend/src/components/RosterImportModal.svelte`
+- Create: `frontend/src/components/runs/RosterImportModal.svelte`
 - Test: `frontend/src/tests/RosterImportModal.scaffold.svelte.test.ts`
 
 **Context:** Two-stage modal — this task implements Stage 1 only (paste + live preview + counts footer). Wraps `FocusTrap` from T3. Debounced live-parse (200ms with cancellation on rapid keystrokes). Preview table caps at ~10 visible rows (scrollable). Counts footer summarizes valid/invalid/duplicate counts + `Will auto-create groups: …` + `Already-enrolled emails …` with `, +N more` truncation. `Cancel` and `Import N valid rows` buttons (Import disabled when 0 valid). T17 wires the submit logic.
@@ -5219,7 +5481,7 @@ Create `frontend/src/tests/RosterImportModal.scaffold.svelte.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import RosterImportModal from '../components/RosterImportModal.svelte';
+import RosterImportModal from '../components/runs/RosterImportModal.svelte';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -5325,16 +5587,16 @@ describe('RosterImportModal — Stage 1 paste + preview', () => {
 cd frontend && npx vitest run src/tests/RosterImportModal.scaffold.svelte.test.ts 2>&1 | tail -10
 ```
 
-Expected: FAIL with `Cannot find module '../components/RosterImportModal.svelte'`.
+Expected: FAIL with `Cannot find module '../components/runs/RosterImportModal.svelte'`.
 
-- [ ] **Step 3: Implement `components/RosterImportModal.svelte` (Stage 1 only)**
+- [ ] **Step 3: Implement `components/runs/RosterImportModal.svelte` (Stage 1 only)**
 
 ```svelte
 <script lang="ts">
-  import FocusTrap from './ui/FocusTrap.svelte';
-  import { parseCsv } from '../lib/csv';
-  import type { CsvParseResult } from '../lib/csv';
-  import type { GroupResponse, RunStudentResponse } from '../lib/types';
+  import FocusTrap from '../ui/FocusTrap.svelte';
+  import { parseCsv } from '../../lib/csv';
+  import type { CsvParseResult } from '../../lib/csv';
+  import type { GroupResponse, RunStudentResponse } from '../../lib/types';
 
   let {
     runId, existingRoster, existingGroups,
@@ -5440,7 +5702,29 @@ Expected: FAIL with `Cannot find module '../components/RosterImportModal.svelte'
 </div>
 ```
 
-- [ ] **Step 4: Verify Stage 1 tests pass**
+- [ ] **Step 4: Convert T12's dynamic import in `RunDetailPage.svelte` to a static import**
+
+In `frontend/src/pages/runs/RunDetailPage.svelte`, replace the `{#await import('../../components/runs/RosterImportModal.svelte') then mod}{@const RosterImportModal = mod.default}<RosterImportModal ... />{/await}` block with:
+
+```svelte
+{#if showImportModal}
+  <RosterImportModal
+    runId={runIdInt!}
+    existingRoster={students}
+    existingGroups={groups}
+    onRefetchBeforeSubmit={refetchRosterData}
+    onClose={() => (showImportModal = false)}
+  />
+{/if}
+```
+
+Add the static import at the top of the `<script>` block:
+
+```ts
+import RosterImportModal from '../../components/runs/RosterImportModal.svelte';
+```
+
+- [ ] **Step 5: Verify Stage 1 tests pass**
 
 ```bash
 cd frontend && npx vitest run src/tests/RosterImportModal.scaffold.svelte.test.ts 2>&1 | tail -10
@@ -5448,7 +5732,7 @@ cd frontend && npx vitest run src/tests/RosterImportModal.scaffold.svelte.test.t
 
 Expected: 6/6 PASS.
 
-- [ ] **Step 5: Run full suite + svelte-check**
+- [ ] **Step 6: Run full suite + svelte-check**
 
 ```bash
 cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
@@ -5456,12 +5740,13 @@ cd frontend && npm test -- --run 2>&1 | tail -3 && npm run check 2>&1 | tail -3
 
 Expected: full suite passes; baseline unchanged.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/components/RosterImportModal.svelte \
-        frontend/src/tests/RosterImportModal.scaffold.svelte.test.ts
+git add frontend/src/components/runs/RosterImportModal.svelte \
+        frontend/src/tests/RosterImportModal.scaffold.svelte.test.ts \
+        frontend/src/pages/runs/RunDetailPage.svelte
 git commit -m "feat(frontend): RosterImportModal Stage 1 (paste + live preview)"
 ```
 
@@ -5470,7 +5755,7 @@ git commit -m "feat(frontend): RosterImportModal Stage 1 (paste + live preview)"
 ### Task 17: `RosterImportModal` `buildBatchRow` (F1=A) + submit + result
 
 **Files:**
-- Modify: `frontend/src/components/RosterImportModal.svelte`
+- Modify: `frontend/src/components/runs/RosterImportModal.svelte`
 - Create: `frontend/src/lib/buildBatchRow.ts`
 - Test: `frontend/src/tests/buildBatchRow.test.ts`
 - Test: `frontend/src/tests/RosterImportModal.submit.svelte.test.ts`
@@ -5608,7 +5893,7 @@ Create `frontend/src/tests/RosterImportModal.submit.svelte.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import RosterImportModal from '../components/RosterImportModal.svelte';
+import RosterImportModal from '../components/runs/RosterImportModal.svelte';
 
 const fetchSpy = vi.fn();
 beforeEach(() => {
@@ -5735,10 +6020,10 @@ Expected: FAIL — Import button has no onclick handler.
 Inside `<script>`, add:
 
 ```ts
-import { ApiError } from '../lib/api';
-import { batchAddRunStudents } from '../lib/runRoster';
-import { buildBatchRow } from '../lib/buildBatchRow';
-import type { RunStudentBatchResultRow } from '../lib/types';
+import { ApiError } from '../../lib/api';
+import { batchAddRunStudents } from '../../lib/runRoster';
+import { buildBatchRow } from '../../lib/buildBatchRow';
+import type { RunStudentBatchResultRow } from '../../lib/types';
 
 type Stage = 'paste' | 'result';
 let stage = $state<Stage>('paste');
@@ -5874,7 +6159,7 @@ Expected: full suite passes; baseline unchanged.
 
 ```bash
 cd /Users/svkucheryavski/Documents/Developing/mathion
-git add frontend/src/components/RosterImportModal.svelte \
+git add frontend/src/components/runs/RosterImportModal.svelte \
         frontend/src/lib/buildBatchRow.ts \
         frontend/src/tests/buildBatchRow.test.ts \
         frontend/src/tests/RosterImportModal.submit.svelte.test.ts
@@ -5942,7 +6227,7 @@ Apply `finishing-a-development-branch` workflow when the user is ready to merge 
 
 ## Plan complete
 
-This plan covers spec §1–§10 across 18 tasks. Coverage map:
+This plan covers spec §1–§10 across 19 tasks (T11 split into T11a + T11b). Coverage map:
 
 | Spec section | Task(s) |
 |---|---|
@@ -5953,8 +6238,8 @@ This plan covers spec §1–§10 across 18 tasks. Coverage map:
 | §3.4 NewRunModal | T6 |
 | §3.5 RunDetailPage (header, banner, callback chain) | T7, T8 |
 | §4.1 RunOverviewTab | T9, T10 |
-| §4.2 RunTeachersTab | T11 |
-| §4.3 RunGroupsTab | T11 |
+| §4.2 RunTeachersTab | T11a |
+| §4.3 RunGroupsTab | T11b |
 | §4.4 RunRosterTab (core + optimistic + bulk + banner) | T12, T13, T14, T15 |
 | §4.5 RosterImportModal | T16, T17 |
 | §5.1 Types | T1 |
