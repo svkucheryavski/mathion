@@ -93,6 +93,7 @@
       <form onsubmit={submit}>
         <label>
           Title
+          <!-- svelte-ignore a11y_autofocus — modals open via user action; autofocus on the first field is the expected keyboard UX. -->
           <input name="title" maxlength="200" autofocus bind:value={title} />
           {#if errors.title}<span class="field-error">{errors.title}</span>{/if}
         </label>
