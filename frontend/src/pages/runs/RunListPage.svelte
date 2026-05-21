@@ -6,6 +6,7 @@
   import { navigate } from '../../lib/router.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import NewRunModal from '../../components/runs/NewRunModal.svelte';
   import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
   import type { Course, Version, RunResponse } from '../../lib/types';
 
@@ -138,9 +139,6 @@
   {/if}
 
   {#if showNewRun}
-    {#await import('../../components/runs/NewRunModal.svelte') then mod}
-      {@const NewRunModal = mod.default}
-      <NewRunModal course={course} versions={versions} onClose={() => (showNewRun = false)} />
-    {/await}
+    <NewRunModal course={course} versions={versions} onClose={() => (showNewRun = false)} />
   {/if}
 {/if}
