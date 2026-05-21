@@ -73,13 +73,13 @@
 </script>
 
 {#if loadError}
-  <div class="error">{loadError} <a href="#/courses">Back to courses</a></div>
+  <div class="error">{loadError} <a href="/courses" onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Back to courses</a></div>
 {:else if course === null || runs === null || versions === null}
   <LoadingPlaceholder label="Loading runs…" />
 {:else}
   <header>
     <nav class="breadcrumb">
-      <a href="#/courses">Courses</a> › <a href="#/courses/{course.slug}">{course.name}</a> › Runs
+      <a href="/courses" onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Courses</a> › <a href={`/courses/${course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}`); }}>{course.name}</a> › Runs
     </nav>
     <button
       data-action="new-run"
@@ -112,13 +112,13 @@
         {#each runs as run (run.id)}
           {@const status = runStatus(run)}
           <tr>
-            <td><a href="#/courses/{course.slug}/runs/{run.id}">{run.title}</a></td>
+            <td><a href={`/courses/${course.slug}/runs/${run.id}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs/${run.id}`); }}>{run.title}</a></td>
             <td><span class="badge badge-{status}">{status[0].toUpperCase() + status.slice(1)}</span></td>
             <td>{versionLabelById.get(run.version_id) ?? '—'}</td>
             <td>{run.start_date}</td>
             <td>{run.end_date}</td>
             <td>
-              <a href="#/courses/{course.slug}/runs/{run.id}">Open</a>
+              <a href={`/courses/${course.slug}/runs/${run.id}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs/${run.id}`); }}>Open</a>
               {#if !run.is_published}
                 {#if pendingDelete === run.id}
                   <InlineConfirm
