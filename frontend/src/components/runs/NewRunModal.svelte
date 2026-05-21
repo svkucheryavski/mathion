@@ -21,10 +21,11 @@
   let submitting = $state(false);
 
   const versionLabel = $derived.by(() => {
-    const eligible = versions.filter((v) => v.published_at !== null && !v.is_disabled);
-    if (eligible.length === 0) return null;
     const sorted = [...versions].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    const idx = sorted.findIndex((v) => v.id === eligible[eligible.length - 1].id);
+    const eligibleSorted = sorted.filter((v) => v.published_at !== null && !v.is_disabled);
+    if (eligibleSorted.length === 0) return null;
+    const latest = eligibleSorted[eligibleSorted.length - 1];
+    const idx = sorted.findIndex((v) => v.id === latest.id);
     return `v${idx + 1} (${sorted[idx].created_at.slice(0, 10)})`;
   });
 
@@ -93,8 +94,7 @@
       <form onsubmit={submit}>
         <label>
           Title
-          <!-- svelte-ignore a11y_autofocus — modals open via user action; autofocus on the first field is the expected keyboard UX. -->
-          <input name="title" maxlength="200" autofocus bind:value={title} />
+          <input name="title" maxlength="200" bind:value={title} />
           {#if errors.title}<span class="field-error">{errors.title}</span>{/if}
         </label>
 
