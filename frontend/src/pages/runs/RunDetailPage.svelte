@@ -1,11 +1,13 @@
 <script lang="ts">
   import { api, ApiError } from '../../lib/api';
-  import { getRun, listVersions } from '../../lib/runs';
+  import { getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
   import { listRunStudents } from '../../lib/runRoster';
   import { navigate } from '../../lib/router.svelte';
+  import { pushToast } from '../../stores/toasts.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
   import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
@@ -79,6 +81,81 @@
 
   const pinned = $derived(versions?.find((v) => v.id === run?.version_id));
   const showDisabledBanner = $derived(pinned?.is_disabled === true);
+
+  type ChecklistState = 'ok' | 'violated' | 'na';
+  type ChecklistRow = { id: string; label: string; state: ChecklistState; hint?: string };
+
+  const readiness = $derived.by((): { checks: ChecklistRow[]; firstViolation: string | null } => {
+    const checks: ChecklistRow[] = [];
+    if (!run || teachers === null || groups === null || students === null) {
+      return { checks: [], firstViolation: null };
+    }
+    // Teacher
+    const teacherOk = teachers.length >= 1;
+    checks.push({
+      id: 'teacher',
+      label: 'At least one teacher',
+      state: teacherOk ? 'ok' : 'violated',
+      hint: teacherOk ? undefined : 'Add at least one teacher.',
+    });
+    // Students assigned
+    if (!run.groups_enabled) {
+      checks.push({ id: 'assigned', label: 'All students assigned to a group', state: 'na' });
+    } else {
+      const unassigned = students.filter((s: RunStudentResponse) => s.group_id === null).length;
+      checks.push({
+        id: 'assigned',
+        label: 'All students assigned to a group',
+        state: unassigned === 0 ? 'ok' : 'violated',
+        hint: unassigned === 0 ? undefined : `${unassigned} students unassigned.`,
+      });
+    }
+    // Group sizes
+    if (!run.groups_enabled) {
+      checks.push({ id: 'sizes', label: 'All groups have 1–10 students', state: 'na' });
+    } else if (groups.length === 0) {
+      checks.push({ id: 'sizes', label: 'All groups have 1–10 students', state: 'violated', hint: 'No groups defined.' });
+    } else {
+      const bad = groups.filter((g: GroupResponse) => g.student_count < 1 || g.student_count > 10);
+      checks.push({
+        id: 'sizes',
+        label: 'All groups have 1–10 students',
+        state: bad.length === 0 ? 'ok' : 'violated',
+        hint: bad.length === 0 ? undefined : bad.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', '),
+      });
+    }
+    const violated = checks.find((c) => c.state === 'violated');
+    return { checks, firstViolation: violated?.hint ?? null };
+  });
+
+  const publishBlocked = $derived(readiness.firstViolation !== null || showDisabledBanner);
+  const publishTooltip = $derived(showDisabledBanner
+    ? "This run's course version is disabled. Re-enable it under Course Editor before publishing."
+    : (readiness.firstViolation ?? ''));
+
+  let unpublishConfirmOpen = $state(false);
+
+  async function doPublish() {
+    if (runIdInt === null) return;
+    try {
+      const r = await publishRun(runIdInt);
+      run = r;
+    } catch (e) {
+      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+    }
+  }
+
+  async function doUnpublish() {
+    if (runIdInt === null) return;
+    try {
+      const r = await unpublishRun(runIdInt);
+      run = r;
+      unpublishConfirmOpen = false;
+    } catch (e) {
+      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      unpublishConfirmOpen = false;
+    }
+  }
 </script>
 
 {#if runIdInt === null}
@@ -95,6 +172,27 @@
       <a href={`/courses/${course.slug}/runs`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs`); }}>Runs</a> ›
       {run.title}
     </nav>
+    <div class="publish-bar">
+      {#if !run.is_published}
+        <button
+          data-action="publish"
+          disabled={publishBlocked}
+          title={publishTooltip}
+          onclick={doPublish}
+        >
+          Publish
+        </button>
+      {:else if unpublishConfirmOpen}
+        <InlineConfirm
+          confirmLabel="Confirm Unpublish"
+          warning="Students will lose access immediately. Their progress data is preserved."
+          onConfirm={doUnpublish}
+          onCancel={() => (unpublishConfirmOpen = false)}
+        />
+      {:else}
+        <button data-action="unpublish" onclick={() => (unpublishConfirmOpen = true)}>Unpublish</button>
+      {/if}
+    </div>
   </header>
 
   {#if showDisabledBanner}
@@ -124,7 +222,8 @@
 {/if}
 
 <style>
-  .run-header { padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
+  .run-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 16px); padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
+  .publish-bar { display: flex; align-items: center; gap: 8px; }
   .breadcrumb { color: var(--muted, #666); font-size: 0.9em; }
   .breadcrumb a { color: var(--link, #335); text-decoration: none; }
   .breadcrumb a:hover { text-decoration: underline; }
