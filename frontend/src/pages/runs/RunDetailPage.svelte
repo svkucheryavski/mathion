@@ -10,6 +10,7 @@
   import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
   import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
   import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
+  import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
   import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
@@ -68,6 +69,18 @@
   async function refetchTeachers(): Promise<void> {
     if (runIdInt === null) return;
     teachers = await listRunTeachers(runIdInt);
+  }
+
+  async function refetchGroups(): Promise<void> {
+    if (runIdInt === null) return;
+    groups = await listGroups(runIdInt);
+  }
+
+  async function refetchGroupsAndStudents(): Promise<void> {
+    if (runIdInt === null) return;
+    const [gs, ss] = await Promise.all([listGroups(runIdInt), listRunStudents(runIdInt)]);
+    groups = gs;
+    students = ss;
   }
 
   // Reference refetchRosterData to satisfy the unused-variable check; it's
@@ -271,7 +284,13 @@
     {:else if activeTab === 'teachers'}
       <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} />
     {:else if activeTab === 'groups'}
-      <p>Groups tab (T11 pending).</p>
+      <RunGroupsTab
+        runId={runIdInt!}
+        {groups}
+        groupsEnabled={run.groups_enabled}
+        onRefetchGroups={refetchGroups}
+        onRefetchGroupsAndStudents={refetchGroupsAndStudents}
+      />
     {:else if activeTab === 'roster'}
       <p>Roster tab (T12+ pending).{rosterPrefilter ? '' : ''}</p>
     {/if}
