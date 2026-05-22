@@ -11,6 +11,7 @@
   import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
   import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
   import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
+  import RunRosterTab from '../../components/runs/RunRosterTab.svelte';
   import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
@@ -32,6 +33,11 @@
 
   let activeTab = $state<ActiveTab>('overview');
   let rosterPrefilter = $state<'unassigned' | null>(null);
+  let showImportModal = $state(false);
+
+  function onPrefilterClear() {
+    rosterPrefilter = null;
+  }
 
   let loadToken = 0;
 
@@ -82,10 +88,6 @@
     groups = gs;
     students = ss;
   }
-
-  // Reference refetchRosterData to satisfy the unused-variable check; it's
-  // exported via callback prop wiring in downstream tasks (T12, T17).
-  void refetchRosterData;
 
   $effect(() => {
     void courseSlug;
@@ -292,7 +294,29 @@
         onRefetchGroupsAndStudents={refetchGroupsAndStudents}
       />
     {:else if activeTab === 'roster'}
-      <p>Roster tab (T12+ pending).{rosterPrefilter ? '' : ''}</p>
+      <RunRosterTab
+        runId={runIdInt!}
+        {students}
+        {groups}
+        groupsEnabled={run.groups_enabled}
+        {rosterPrefilter}
+        {onPrefilterClear}
+        onRefetchRosterData={refetchRosterData}
+        onRefetchGroupsOnly={refetchGroups}
+        onOpenImport={() => (showImportModal = true)}
+      />
+      {#if showImportModal}
+        {#await import('../../components/runs/RosterImportModal.svelte') then mod}
+          {@const RosterImportModal = mod.default}
+          <RosterImportModal
+            runId={runIdInt!}
+            existingRoster={students}
+            existingGroups={groups}
+            onRefetchBeforeSubmit={refetchRosterData}
+            onClose={() => (showImportModal = false)}
+          />
+        {/await}
+      {/if}
     {/if}
   </section>
 {/if}
