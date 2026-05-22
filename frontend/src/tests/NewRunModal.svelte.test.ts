@@ -19,8 +19,7 @@ const versions: Version[] = [
 ];
 
 async function settle() {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
   flushSync();
 }
 
@@ -87,10 +86,7 @@ describe('NewRunModal', () => {
     (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
     expect(onClose).toHaveBeenCalled();
-    // T6 navigates to the list page; T7 retrofits this to the detail page.
-    // See T7 Step 5 (retrofit) — that step also updates this assertion to
-    // `#/courses/algebra/runs/42`.
-    expect(location.hash).toBe('#/courses/algebra/runs');
+    expect(location.pathname).toBe('/courses/algebra/runs/42');
     unmount(cmp);
   });
 

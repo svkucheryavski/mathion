@@ -47,19 +47,14 @@
     submitting = true;
     submitError = null;
     try {
-      await createRun(course.id, {
+      const run = await createRun(course.id, {
         title: title.trim(),
         start_date,
         end_date,
         groups_enabled,
       });
       onClose();
-      // Navigate to the list page; T7 retrofits this to the detail page once
-      // the `/courses/:courseSlug/runs/:runId` route + componentMap entry exist.
-      // Until T7 ships, navigating to the detail URL would hit an unregistered
-      // route and render nothing. Going to the list keeps the create-flow
-      // observable (the new run appears at the top of the table).
-      navigate(`/courses/${course.slug}/runs`);
+      navigate(`/courses/${course.slug}/runs/${run.id}`);
     } catch (e) {
       if (e instanceof ApiError) submitError = e.displayMessage;
       else submitError = 'Unable to create run.';
