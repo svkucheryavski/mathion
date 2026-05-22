@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, ApiError } from '../../lib/api';
-  import { getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
+  import { deleteRun, getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
   import { listRunStudents } from '../../lib/runRoster';
@@ -154,6 +154,23 @@
     }
   }
 
+  async function onDeleteRun() {
+    if (runIdInt === null || !run) return;
+    try {
+      await deleteRun(runIdInt);
+      navigate(`/courses/${courseSlug}/runs`);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        const msg = typeof e.detail === 'string' ? e.detail : '';
+        if (e.status === 409 && /students/i.test(msg)) {
+          pushToast('Clear roster before deleting.', 'error');
+        } else {
+          pushToast(e.displayMessage, 'error');
+        }
+      }
+    }
+  }
+
   async function doUnpublish() {
     if (runIdInt === null) return;
     const myToken = loadToken;
@@ -243,7 +260,7 @@
         {students}
         {readiness}
         onNavigateTab={gotoTab}
-        onDeleteRun={async () => { /* T10 wires deleteRun + navigate */ }}
+        {onDeleteRun}
       />
     {:else if activeTab === 'teachers'}
       <p>Teachers tab (T11 pending).</p>

@@ -4,6 +4,7 @@
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import type { DirtyTracker } from '../../lib/dirty.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse, RunUpdateRequest } from '../../lib/types';
 
   type RunForm = { title: string; start_date: string; end_date: string };
@@ -30,16 +31,15 @@
     onDeleteRun: () => void;
   } = $props();
 
-  // Reference unused props (T10 will use them) to keep svelte-check clean.
-  // Done inside $effect so the reads happen in a reactive context — using
-  // `void prop` at top level triggers `state_referenced_locally` because the
-  // destructured prop values are state proxies.
+  // T10: reference still-unused props (teachers, groups, students) inside an
+  // $effect so svelte-check stays clean. T11/T12 will surface them.
   $effect(() => {
-    void teachers; void groups; void students; void readiness;
-    void onNavigateTab; void onDeleteRun;
+    void teachers; void groups; void students;
   });
 
   let tracker = $state<DirtyTracker<RunForm> | null>(null);
+  let groupsEnabledBusy = $state(false);
+  let confirmDeleteOpen = $state(false);
 
   $effect(() => {
     if (run && tracker === null) {
@@ -105,6 +105,21 @@
       el.blur();
     }
   }
+
+  async function toggleGroupsEnabled(event: Event) {
+    const el = event.currentTarget as HTMLInputElement;
+    const next = el.checked;
+    groupsEnabledBusy = true;
+    try {
+      const updated = await updateRun(run.id, { groups_enabled: next });
+      setRun(updated);
+    } catch (e) {
+      el.checked = run.groups_enabled;
+      if (e instanceof ApiError) pushToast(`Could not update setting: ${e.displayMessage}`, 'error');
+    } finally {
+      groupsEnabledBusy = false;
+    }
+  }
 </script>
 
 {#if tracker}
@@ -141,7 +156,58 @@
     </label>
   </section>
 
-  <!-- T10 appends: settings panel, readiness checklist, danger zone -->
+  <section class="run-settings">
+    <h3>Settings</h3>
+    <label title={run.is_published ? 'Locked once the run is published. Unpublish to change.' : ''}>
+      <input
+        type="checkbox"
+        name="groups_enabled"
+        checked={run.groups_enabled}
+        disabled={run.is_published || groupsEnabledBusy}
+        onchange={toggleGroupsEnabled}
+      />
+      Groups enabled
+      <small>Disabling groups hides group assignments but does not delete them.</small>
+    </label>
+  </section>
+
+  <section class="readiness">
+    <h3>Publish readiness</h3>
+    <ul>
+      {#each readiness.checks as row (row.id)}
+        <li class="state-{row.state}">
+          {#if row.state === 'ok'}✓{:else if row.state === 'violated'}✗{:else}—{/if}
+          {row.label}
+          {#if row.state === 'violated' && row.id === 'assigned' && row.hint}
+            <button
+              type="button"
+              class="hint-button"
+              data-action="goto-unassigned"
+              onclick={() => onNavigateTab('roster', 'unassigned')}
+            >{row.hint}</button>
+          {:else if row.hint}
+            <span class="hint">{row.hint}</span>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  </section>
+
+  {#if !run.is_published}
+    <section class="danger-zone">
+      <h3>Danger zone</h3>
+      {#if confirmDeleteOpen}
+        <InlineConfirm
+          confirmLabel="Confirm Delete"
+          confirmDataAction="confirm-delete"
+          onConfirm={onDeleteRun}
+          onCancel={() => (confirmDeleteOpen = false)}
+        />
+      {:else}
+        <button type="button" data-action="delete-run" onclick={() => (confirmDeleteOpen = true)}>Delete run</button>
+      {/if}
+    </section>
+  {/if}
 {/if}
 
 <style>
@@ -166,5 +232,58 @@
     font-size: 1em;
     color: var(--text, #222);
     background: var(--input-bg, #fff);
+  }
+  .run-settings,
+  .readiness,
+  .danger-zone {
+    padding: var(--space-3, 16px) 0;
+    border-top: 1px solid var(--border, #eee);
+  }
+  .run-settings h3,
+  .readiness h3,
+  .danger-zone h3 {
+    margin: 0 0 var(--space-2, 8px);
+    font-size: 1em;
+    color: var(--text, #222);
+  }
+  .run-settings label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text, #222);
+  }
+  .run-settings small {
+    color: var(--muted, #666);
+    font-size: 0.85em;
+    margin-left: 6px;
+  }
+  .readiness ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .readiness li.state-ok { color: var(--text, #222); }
+  .readiness li.state-violated { color: var(--danger, #c00); }
+  .readiness li.state-na { color: var(--muted, #666); }
+  .readiness .hint { color: var(--muted, #666); margin-left: 4px; }
+  .readiness .hint-button {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--link, #335);
+    cursor: pointer;
+    text-decoration: underline;
+    font: inherit;
+    margin-left: 4px;
+  }
+  .danger-zone button[data-action="delete-run"] {
+    background: var(--danger, #c00);
+    color: #fff;
+    border: 0;
+    padding: 8px 14px;
+    border-radius: 4px;
+    cursor: pointer;
   }
 </style>
