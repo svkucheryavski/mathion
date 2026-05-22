@@ -76,8 +76,14 @@
       };
       tracker.reset(serverSnapshot);
       for (const k of Object.keys(serverSnapshot) as (keyof RunForm)[]) {
-        if (k === field) continue;
-        if (beforeReset[k] !== serverSnapshot[k]) {
+        if (k === field) {
+          // Committed field: server value sticks ONLY if the user has not
+          // since typed (current still equals what we sent). Symmetric with
+          // the error-path revert rule below.
+          if (beforeReset[k] !== inFlightValue) {
+            tracker.current[k] = beforeReset[k];
+          }
+        } else if (beforeReset[k] !== serverSnapshot[k]) {
           tracker.current[k] = beforeReset[k];
         }
       }

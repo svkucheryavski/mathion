@@ -136,6 +136,34 @@ describe('RunOverviewTab inline edits', () => {
     unmount(cmp);
   });
 
+  it('successful PATCH does not clobber a newer edit to the COMMITTED field', async () => {
+    // Race: user blurs title with 'Summer', then re-types 'Autumn' BEFORE the
+    // Summer PATCH resolves. Server returns Summer (unaware of Autumn). The
+    // restore loop must detect that the user has typed since (beforeReset.title
+    // !== inFlightValue) and preserve their newer draft, not clobber with
+    // serverSnapshot.title.
+    let resolveTitle!: (r: Response) => void;
+    fetchSpy.mockImplementationOnce(() => new Promise<Response>((r) => { resolveTitle = r; }));
+    const { target, cmp } = mountOverview();
+    await settle();
+    const titleInput = target.querySelector('input[name="title"]') as HTMLInputElement;
+    titleInput.focus();
+    titleInput.value = 'Summer';
+    titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    titleInput.dispatchEvent(new Event('blur', { bubbles: true }));
+    await Promise.resolve();
+    titleInput.value = 'Autumn';
+    titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    resolveTitle({
+      ok: true, status: 200,
+      json: () => Promise.resolve(makeRun({ title: 'Summer' })),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    } as unknown as Response);
+    await settle();
+    expect(titleInput.value).toBe('Autumn');
+    unmount(cmp);
+  });
+
   it('on PATCH error: reverts only if user has not since typed a new value', async () => {
     fetchSpy.mockImplementation(() => jres({ detail: 'fail' }, 500));
     const { target, cmp } = mountOverview();
