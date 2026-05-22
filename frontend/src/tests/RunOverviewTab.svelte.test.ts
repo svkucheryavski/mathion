@@ -108,6 +108,34 @@ describe('RunOverviewTab inline edits', () => {
     unmount(cmp);
   });
 
+  it('successful PATCH preserves user edits to OTHER fields during the in-flight window', async () => {
+    // Race: user blurs title (starts PATCH), then types in start_date BEFORE
+    // the title PATCH resolves. The server response only knows the OLD
+    // start_date; reset() would clobber the user's newer draft without
+    // cross-field protection.
+    let resolveTitle!: (r: Response) => void;
+    fetchSpy.mockImplementationOnce(() => new Promise<Response>((r) => { resolveTitle = r; }));
+    const { target, cmp } = mountOverview();
+    await settle();
+    const titleInput = target.querySelector('input[name="title"]') as HTMLInputElement;
+    titleInput.focus();
+    titleInput.value = 'Summer';
+    titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    titleInput.dispatchEvent(new Event('blur', { bubbles: true }));
+    await Promise.resolve();
+    const startInput = target.querySelector('input[name="start_date"]') as HTMLInputElement;
+    startInput.value = '2026-07-15';
+    startInput.dispatchEvent(new Event('input', { bubbles: true }));
+    resolveTitle({
+      ok: true, status: 200,
+      json: () => Promise.resolve(makeRun({ title: 'Summer' })),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    } as unknown as Response);
+    await settle();
+    expect(startInput.value).toBe('2026-07-15');
+    unmount(cmp);
+  });
+
   it('on PATCH error: reverts only if user has not since typed a new value', async () => {
     fetchSpy.mockImplementation(() => jres({ detail: 'fail' }, 500));
     const { target, cmp } = mountOverview();

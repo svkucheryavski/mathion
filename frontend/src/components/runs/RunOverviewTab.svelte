@@ -61,11 +61,26 @@
       (body as Record<string, string>)[field] = inFlightValue;
       const updated = await updateRun(run.id, body);
       setRun(updated);
-      tracker.reset({
+      // Capture in-flight current BEFORE reset so we can preserve user edits to
+      // OTHER fields that landed during this PATCH (spec §4.1 cross-field rule
+      // applies to success path too — reset() rewrites every key in `current`).
+      const beforeReset: RunForm = {
+        title: tracker.current.title,
+        start_date: tracker.current.start_date,
+        end_date: tracker.current.end_date,
+      };
+      const serverSnapshot: RunForm = {
         title: updated.title,
         start_date: updated.start_date,
         end_date: updated.end_date,
-      });
+      };
+      tracker.reset(serverSnapshot);
+      for (const k of Object.keys(serverSnapshot) as (keyof RunForm)[]) {
+        if (k === field) continue;
+        if (beforeReset[k] !== serverSnapshot[k]) {
+          tracker.current[k] = beforeReset[k];
+        }
+      }
     } catch (e) {
       if (tracker.current[field] === inFlightValue) {
         tracker.current[field] = pristineValue;
