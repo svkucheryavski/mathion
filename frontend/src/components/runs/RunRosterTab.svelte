@@ -82,6 +82,70 @@
   // lets the user pick the same group twice in a row (sticky-select UX defect
   // avoidance — see deviation #7 in the T14 brief).
   let bulkMoveSelectValue = $state('');
+  // Same sticky-select defect avoidance for the T15 retry <select>s. Plan uses
+  // a literal `value=""` attribute on the retry-move and retry-cancelled selects;
+  // jsdom's `<select>` does not reset to "" after onchange just because the
+  // attribute says so, so we bind to a state variable and reset to '' inside
+  // the change handler — identical pattern to `bulkMoveSelectValue`.
+  let retryMoveSelectValue = $state('');
+  let retryCancelledSelectValue = $state('');
+
+  // Banner auto-dismiss state. Re-set to false at the start of each new
+  // success run (so a previously-dismissed banner reappears for a fresh op);
+  // flipped to true 5s after `bulkOpResult.kind` lands on 'success'. The
+  // $effect's cleanup clears the timer when kind transitions away from
+  // 'success' before the 5s elapses, preventing a stale dismiss.
+  let bannerDismissed = $state(false);
+
+  $effect(() => {
+    if (bulkOpResult.kind === 'success') {
+      bannerDismissed = false;
+      const t = setTimeout(() => (bannerDismissed = true), 5000);
+      return () => clearTimeout(t);
+    }
+  });
+
+  function summaryText(): string {
+    const r = bulkOpResult;
+    const total = r.succeededIds.length + r.chunkErrorRowIds.length + r.cancelledIds.length;
+    const verb = r.lastOp === 'move' ? 'Moved' : 'Deleted';
+    if (r.kind === 'success') return `${verb} ${r.succeededIds.length} of ${total} — 0 failed.`;
+    if (r.kind === 'partial') return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed.`;
+    if (r.kind === 'cancelled') {
+      return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed, ${r.cancelledIds.length} cancelled (connection issue).`;
+    }
+    return '';
+  }
+
+  function retryMove(event: Event) {
+    const raw = (event.currentTarget as HTMLSelectElement).value;
+    if (raw === '') return;
+    const target: number | null = raw === '__unassigned' ? null : Number(raw);
+    const ids = bulkOpResult.chunkErrorRowIds;
+    retryMoveSelectValue = '';
+    dispatchBulkOp('move', ids, target);
+  }
+
+  function retryDelete() {
+    dispatchBulkOp('delete', bulkOpResult.chunkErrorRowIds);
+  }
+
+  function retryCancelledMove(event: Event) {
+    const raw = (event.currentTarget as HTMLSelectElement).value;
+    if (raw === '') return;
+    const target: number | null = raw === '__unassigned' ? null : Number(raw);
+    const ids = [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds];
+    retryCancelledSelectValue = '';
+    dispatchBulkOp('move', ids, target);
+  }
+
+  function retryCancelledDelete() {
+    // Only the chunk-level-cancelled bulk-DELETE branch uses this helper. The
+    // move branch re-enters dispatchBulkOp via `retryCancelledMove` (a separate
+    // helper so the select can reset its bind-value before dispatching).
+    const ids = [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds];
+    dispatchBulkOp('delete', ids);
+  }
 
   function bulkErrorTooltip(meta: BulkRowErrorMeta | undefined): string {
     if (!meta) return '';
@@ -319,6 +383,59 @@
     </p>
   {/if}
 
+  {#if bulkOpResult.kind !== 'idle' && !(bulkOpResult.kind === 'success' && bannerDismissed)}
+    <div class="bulk-banner bulk-banner-{bulkOpResult.kind}">
+      <span>{summaryText()}</span>
+
+      {#if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'move'}
+        <select
+          data-action="retry-move-select"
+          bind:value={retryMoveSelectValue}
+          onchange={retryMove}
+          disabled={bulkInFlight}
+        >
+          <option value="" disabled>Retry {bulkOpResult.chunkErrorRowIds.length} → group…</option>
+          <option value="__unassigned">Unassign</option>
+          {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
+            <option value={g.id}>{g.name} ({g.student_count}/10)</option>
+          {/each}
+        </select>
+      {:else if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'delete'}
+        <button data-action="retry-delete" onclick={retryDelete} disabled={bulkInFlight}>
+          Retry {bulkOpResult.chunkErrorRowIds.length} delete
+        </button>
+      {:else if bulkOpResult.kind === 'cancelled'}
+        {#if bulkOpResult.lastOp === 'move'}
+          <select
+            data-action="retry-cancelled"
+            bind:value={retryCancelledSelectValue}
+            onchange={retryCancelledMove}
+            disabled={bulkInFlight}
+          >
+            <option value="" disabled>Retry cancelled → group…</option>
+            <option value="__unassigned">Unassign</option>
+            {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
+              <option value={g.id}>{g.name} ({g.student_count}/10)</option>
+            {/each}
+          </select>
+        {:else}
+          <button data-action="retry-cancelled" onclick={retryCancelledDelete} disabled={bulkInFlight}>
+            Retry cancelled
+          </button>
+        {/if}
+      {/if}
+
+      {#if bulkOpResult.kind !== 'in-flight'}
+        <button
+          data-action="dismiss-banner"
+          onclick={() => (bulkOpResult = { ...bulkOpResult, kind: 'idle' })}
+        >
+          Dismiss
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   {#if selected.size > 0}
     <div data-strip="bulk" class="bulk-strip">
       <span>
@@ -488,6 +605,17 @@
     background: var(--surface-muted, #f5f5f5);
     border-radius: 4px;
   }
+  .bulk-banner {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: var(--surface-muted, #f5f5f5);
+  }
+  .bulk-banner-success { background: var(--success-soft, #e6f6ea); }
+  .bulk-banner-partial { background: var(--warn-soft, #fff4e0); }
+  .bulk-banner-cancelled { background: var(--danger-soft, #fdecea); }
   .row-error {
     box-shadow: inset 4px 0 0 0 var(--danger, #c00);
   }
