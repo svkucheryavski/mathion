@@ -137,22 +137,40 @@
 
   async function doPublish() {
     if (runIdInt === null) return;
+    const myToken = loadToken;
     try {
       const r = await publishRun(runIdInt);
+      if (myToken !== loadToken) return;
       run = r;
     } catch (e) {
+      if (myToken !== loadToken) return;
       if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
     }
   }
 
   async function doUnpublish() {
     if (runIdInt === null) return;
+    const myToken = loadToken;
+    const rid = runIdInt;
     try {
-      const r = await unpublishRun(runIdInt);
+      const r = await unpublishRun(rid);
+      if (myToken !== loadToken) return;
       run = r;
       unpublishConfirmOpen = false;
     } catch (e) {
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      if (myToken !== loadToken) return;
+      if (e instanceof ApiError) {
+        pushToast(e.displayMessage, 'error');
+        // Spec §6: 409 "Run is not published" — another tab unpublished first.
+        // Refetch run so the UI flips back to Publish.
+        if (e.status === 409) {
+          try {
+            const r = await getRun(rid);
+            if (myToken !== loadToken) return;
+            run = r;
+          } catch { /* refetch failed; toast already shown */ }
+        }
+      }
       unpublishConfirmOpen = false;
     }
   }

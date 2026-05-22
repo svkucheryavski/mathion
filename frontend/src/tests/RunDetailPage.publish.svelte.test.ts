@@ -75,6 +75,42 @@ describe('Publish bar', () => {
     unmount(cmp);
   });
 
+  it('refetches run on 409 unpublish race so the UI flips back to Publish', async () => {
+    let runGetCount = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
+      if (url.match(/\/api\/runs\/10$/)) {
+        runGetCount++;
+        return jres({
+          id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30',
+          is_published: runGetCount === 1, groups_enabled: false,
+        });
+      }
+      if (url.includes('/unpublish')) return jres({ detail: 'Run is not published' }, 409);
+      if (url.includes('/versions')) return jres([{ id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false }]);
+      if (url.includes('/teachers')) return jres([{ user_id: 1, user_email: 't@x.com' }]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const unpubBtn = target.querySelector('button[data-action="unpublish"]') as HTMLButtonElement;
+    expect(unpubBtn).not.toBeNull();
+    unpubBtn.click();
+    flushSync();
+    const confirmBtn = target.querySelector('button.confirm') as HTMLButtonElement;
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn.click();
+    await settle();
+    const pubBtn = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(pubBtn).not.toBeNull();
+    expect(runGetCount).toBe(2);
+    unmount(cmp);
+  });
+
   it('disables Publish when version is disabled', async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes('/courses/by-slug/')) return jres({ id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true });
