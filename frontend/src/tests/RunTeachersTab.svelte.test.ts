@@ -82,6 +82,47 @@ describe('RunTeachersTab', () => {
     unmount(cmp);
   });
 
+  it('prepends new teacher to existing list (sorts DESC by created_at)', async () => {
+    // Backend lists teachers ASC by created_at, so a newly-added teacher comes
+    // back LAST. Spec §4.2:455 says "prepend the new row" — component sorts DESC.
+    const newTeacher: RunTeacherResponse = {
+      id: 50, run_id: 10, user_id: 7,
+      user_email: 'new@x.com', user_full_name: 'New Teach',
+      created_at: '2026-05-22T00:00:00Z',
+    };
+    const oldTeacher: RunTeacherResponse = {
+      id: 1, run_id: 10, user_id: 1,
+      user_email: 'old@x.com', user_full_name: 'Old',
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation(() => jres(newTeacher));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10,
+      teachers: [oldTeacher],
+      onRefetch: vi.fn().mockImplementation(async () => {
+        // Backend returns ASC: oldest first, newest last.
+        propsRef.teachers = [oldTeacher, newTeacher];
+      }),
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, { target, props: propsRef });
+    await settle();
+    const emailInput = target.querySelector('input[name="email"]') as HTMLInputElement;
+    emailInput.value = 'new@x.com';
+    emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    );
+    await settle();
+    const rows = target.querySelectorAll('li');
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toContain('new@x.com');
+    expect(rows[1].textContent).toContain('old@x.com');
+    unmount(cmp);
+  });
+
   it('renders inline error on 409', async () => {
     fetchSpy.mockImplementation(() => jres({ detail: 'Already there' }, 409));
     const target = document.createElement('div');

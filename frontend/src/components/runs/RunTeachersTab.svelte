@@ -23,6 +23,14 @@
     emailInput?.focus();
   });
 
+  // Spec §4.2:455 — "prepend the new row" after success. Backend lists ASC by
+  // created_at (run_teachers.py:62), so a refetched newly-added teacher comes
+  // back LAST. Sort DESC here so newest is always on top, which makes "prepend"
+  // the natural visual outcome.
+  const sortedTeachers = $derived(
+    [...teachers].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+  );
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     addError = null;
@@ -71,7 +79,7 @@
     <p class="empty">No teachers assigned yet. Add one above.</p>
   {:else}
     <ul>
-      {#each teachers as t (t.user_id)}
+      {#each sortedTeachers as t (t.user_id)}
         <li>
           {t.user_full_name || '—'} ({t.user_email})
           {#if justInvited.has(t.user_id)}<span class="badge">(invited)</span>{/if}
