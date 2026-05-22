@@ -8,6 +8,7 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
   import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
+  import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
   import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
@@ -78,6 +79,11 @@
     activeTab = 'overview';
     rosterPrefilter = null;
   });
+
+  function gotoTab(tab: ActiveTab, prefilter?: 'unassigned' | null) {
+    activeTab = tab;
+    rosterPrefilter = prefilter ?? null;
+  }
 
   const pinned = $derived(versions?.find((v) => v.id === run?.version_id));
   const showDisabledBanner = $derived(pinned?.is_disabled === true);
@@ -229,7 +235,16 @@
 
   <section class="tab-body">
     {#if activeTab === 'overview'}
-      <p>Overview tab (T9 + T10 implementation pending).</p>
+      <RunOverviewTab
+        {run}
+        setRun={(r) => (run = r)}
+        {teachers}
+        {groups}
+        {students}
+        {readiness}
+        onNavigateTab={gotoTab}
+        onDeleteRun={async () => { /* T10 wires deleteRun + navigate */ }}
+      />
     {:else if activeTab === 'teachers'}
       <p>Teachers tab (T11 pending).</p>
     {:else if activeTab === 'groups'}
