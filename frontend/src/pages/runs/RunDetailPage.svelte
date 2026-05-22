@@ -9,6 +9,7 @@
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
   import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
   import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
+  import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
   import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
@@ -62,6 +63,11 @@
     students = ss;
     groups = gs;
     return { students: ss, groups: gs };
+  }
+
+  async function refetchTeachers(): Promise<void> {
+    if (runIdInt === null) return;
+    teachers = await listRunTeachers(runIdInt);
   }
 
   // Reference refetchRosterData to satisfy the unused-variable check; it's
@@ -263,7 +269,7 @@
         {onDeleteRun}
       />
     {:else if activeTab === 'teachers'}
-      <p>Teachers tab (T11 pending).</p>
+      <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} />
     {:else if activeTab === 'groups'}
       <p>Groups tab (T11 pending).</p>
     {:else if activeTab === 'roster'}
