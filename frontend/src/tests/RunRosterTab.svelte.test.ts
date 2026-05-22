@@ -110,9 +110,14 @@ describe('RunRosterTab core', () => {
     });
     await settle();
     expect(target.querySelectorAll('tbody tr[data-row="student"]').length).toBe(1);
+    const search = target.querySelector('input[name="roster-search"]') as HTMLInputElement;
+    search.value = 'ali';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(onPrefilterClear).toHaveBeenCalledTimes(1);
     (target.querySelector('button[data-action="clear-prefilter"]') as HTMLButtonElement).click();
     flushSync();
-    expect(onPrefilterClear).toHaveBeenCalled();
+    expect(onPrefilterClear).toHaveBeenCalledTimes(2);
     unmount(cmp);
   });
 

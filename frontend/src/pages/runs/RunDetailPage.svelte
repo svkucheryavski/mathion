@@ -99,6 +99,7 @@
     void runIdInt;
     activeTab = 'overview';
     rosterPrefilter = null;
+    showImportModal = false;
   });
 
   function gotoTab(tab: ActiveTab, prefilter?: 'unassigned' | null) {
