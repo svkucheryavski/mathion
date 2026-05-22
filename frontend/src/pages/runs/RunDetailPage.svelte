@@ -171,6 +171,7 @@
           } catch { /* refetch failed; toast already shown */ }
         }
       }
+      if (myToken !== loadToken) return;
       unpublishConfirmOpen = false;
     }
   }
