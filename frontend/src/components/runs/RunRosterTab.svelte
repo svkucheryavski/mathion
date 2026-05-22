@@ -1,7 +1,7 @@
 <script lang="ts">
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
-  import { addRunStudent, removeRunStudent } from '../../lib/runRoster';
+  import { addRunStudent, removeRunStudent, updateRunStudent } from '../../lib/runRoster';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { GroupResponse, RunStudentResponse } from '../../lib/types';
@@ -27,10 +27,6 @@
     onRefetchGroupsOnly: () => Promise<void>;
     onOpenImport: () => void;
   } = $props();
-
-  // Reference onRefetchGroupsOnly so TS does not flag the unused prop; this
-  // prop is consumed by T13 (optimistic inline group edit refetch path).
-  $effect(() => { void onRefetchGroupsOnly; });
 
   let search = $state('');
   let newEmail = $state('');
@@ -106,6 +102,49 @@
       if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
     }
   }
+
+  async function onGroupChange(s: RunStudentResponse, raw: string) {
+    const targetGroupId: number | null = raw === '__unassigned' ? null : Number(raw);
+    pendingGroupId.set(s.user_id, targetGroupId);
+    try {
+      const updated = await updateRunStudent(runId, s.user_id, targetGroupId);
+      // Mutate the local student row in place. Spec §4.4: inline-edit success
+      // branch refetches groups only (for capacity badges), NOT students; this
+      // keeps the row's group_id in sync until the next full roster refetch.
+      s.group_id = updated.group_id;
+      pendingGroupId.delete(s.user_id);
+      await onRefetchGroupsOnly();
+    } catch (e) {
+      // Delete from pendingGroupId on EVERY error path (incl. network failures),
+      // otherwise a TypeError thrown by fetch would leave the row permanently disabled.
+      pendingGroupId.delete(s.user_id);
+      if (e instanceof ApiError) {
+        // Per-errorCode branches kept for future divergence (e.g. distinct toast
+        // kinds or copy). For now all 409 paths display the backend-supplied
+        // detail string via ApiError.displayMessage.
+        if (e.status === 409 && e.errorCode === 'capacity_reached') {
+          pushToast(e.displayMessage, 'error');
+        } else if (e.status === 409 && e.errorCode === 'group_disabled') {
+          pushToast(e.displayMessage, 'error');
+        } else {
+          pushToast(e.displayMessage, 'error');
+        }
+      }
+    }
+  }
+
+  // prunePendingGroups: fires on every reassignment of the parent's `students`
+  // prop. Removes pending-overlay entries for user_ids no longer in the roster.
+  // Covers all 5 refetch paths from spec §4.4 without parent-side setter wrapping.
+  $effect(() => {
+    // Dependency declaration trick: reading `students` here registers the
+    // effect's dependency on the array reference for fine-grained reactivity.
+    void students;
+    const liveIds = new Set(students.map((s) => s.user_id));
+    for (const uid of Array.from(pendingGroupId.keys())) {
+      if (!liveIds.has(uid)) pendingGroupId.delete(uid);
+    }
+  });
 </script>
 
 <section class="roster-tab">
@@ -169,7 +208,11 @@
           <td>{s.user_full_name || '—'}</td>
           <td>
             {#if groupsEnabled}
-              <select value={selectValueFor(s)} disabled>
+              <select
+                value={selectValueFor(s)}
+                disabled={pendingGroupId.has(s.user_id)}
+                onchange={(e) => onGroupChange(s, (e.currentTarget as HTMLSelectElement).value)}
+              >
                 <option value="__unassigned">Unassigned</option>
                 {#each groups as g (g.id)}
                   <option value={g.id}>{g.name} ({g.student_count}/10){g.is_disabled ? ' (disabled)' : ''}</option>
