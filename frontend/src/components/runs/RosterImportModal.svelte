@@ -54,7 +54,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="modal-backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-  <FocusTrap>
+  <FocusTrap autofocusSelector="textarea">
     <div class="modal modal-roster-import" role="dialog" aria-modal="true" aria-label="Import roster">
       <header>
         <h2>Import roster from CSV</h2>

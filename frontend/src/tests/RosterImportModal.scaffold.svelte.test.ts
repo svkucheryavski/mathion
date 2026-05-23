@@ -124,4 +124,12 @@ describe('RosterImportModal — Stage 1 paste + preview', () => {
     expect(target.textContent).toContain('second@x.com');
     unmount(cmp);
   });
+
+  it('autofocuses the textarea, not the × close button', async () => {
+    const { target, cmp } = mountModal();
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(ta);
+    unmount(cmp);
+  });
 });
