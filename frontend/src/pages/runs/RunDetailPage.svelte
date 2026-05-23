@@ -12,6 +12,7 @@
   import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
   import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
   import RunRosterTab from '../../components/runs/RunRosterTab.svelte';
+  import RosterImportModal from '../../components/runs/RosterImportModal.svelte';
   import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
 
   type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
@@ -307,16 +308,13 @@
         onOpenImport={() => (showImportModal = true)}
       />
       {#if showImportModal}
-        {#await import('../../components/runs/RosterImportModal.svelte') then mod}
-          {@const RosterImportModal = mod.default}
-          <RosterImportModal
-            runId={runIdInt!}
-            existingRoster={students}
-            existingGroups={groups}
-            onRefetchBeforeSubmit={refetchRosterData}
-            onClose={() => (showImportModal = false)}
-          />
-        {/await}
+        <RosterImportModal
+          runId={runIdInt!}
+          existingRoster={students}
+          existingGroups={groups}
+          onRefetchBeforeSubmit={refetchRosterData}
+          onClose={() => (showImportModal = false)}
+        />
       {/if}
     {/if}
   </section>
