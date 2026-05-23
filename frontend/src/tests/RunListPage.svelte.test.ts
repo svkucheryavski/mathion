@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunListPage from '../pages/runs/RunListPage.svelte';
+import * as routerModule from '../lib/router.svelte';
 
 const fetchSpy = vi.fn();
 
@@ -99,6 +100,27 @@ describe('RunListPage', () => {
     const btn = target.querySelector('button[data-action="new-run"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.title).toContain('Publish a course version');
+    unmount(cmp);
+  });
+
+  it('403 from by-slug redirects to /courses/:courseSlug (per spec §7 step 1 + §B row 1055)', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) {
+        return Promise.resolve({
+          ok: false, status: 403,
+          json: () => Promise.resolve({ detail: 'Access denied' }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        } as unknown as Response);
+      }
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const navigateSpy = vi.spyOn(routerModule, 'navigate').mockResolvedValue(undefined);
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunListPage, { target, props: { courseSlug: 'algebra' } });
+    await settle();
+    expect(navigateSpy).toHaveBeenCalledWith('/courses/algebra');
+    navigateSpy.mockRestore();
     unmount(cmp);
   });
 });

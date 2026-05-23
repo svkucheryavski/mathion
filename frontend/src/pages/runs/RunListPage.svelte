@@ -51,7 +51,7 @@
       if (e instanceof ApiError && e.status === 404) {
         loadError = 'Course not found.';
       } else if (e instanceof ApiError && e.status === 403) {
-        navigate('/courses');
+        navigate(`/courses/${courseSlug}`);
       } else {
         loadError = e instanceof ApiError ? e.displayMessage : 'Failed to load runs.';
       }
