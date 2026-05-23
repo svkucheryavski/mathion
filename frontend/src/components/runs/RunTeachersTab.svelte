@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { SvelteSet } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import { addRunTeacher, removeRunTeacher } from '../../lib/runTeachers';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -15,7 +14,6 @@
   let email = $state('');
   let addError: string | null = $state(null);
   let busy = $state(false);
-  const justInvited = new SvelteSet<number>();
   let pendingRemove: number | null = $state(null);
 
   let emailInput: HTMLInputElement | undefined = $state();
@@ -36,8 +34,7 @@
     addError = null;
     busy = true;
     try {
-      const t = await addRunTeacher(runId, email.trim());
-      if (t.user_full_name === null) justInvited.add(t.user_id);
+      await addRunTeacher(runId, email.trim());
       email = '';
       await onRefetch();
     } catch (e) {
@@ -82,7 +79,7 @@
       {#each sortedTeachers as t (t.user_id)}
         <li>
           {t.user_full_name || '—'} ({t.user_email})
-          {#if justInvited.has(t.user_id)}<span class="badge">(invited)</span>{/if}
+          {#if t.user_full_name === null}<span class="badge">(invited)</span>{/if}
           {#if pendingRemove === t.user_id}
             <InlineConfirm
               confirmLabel="Confirm Remove"

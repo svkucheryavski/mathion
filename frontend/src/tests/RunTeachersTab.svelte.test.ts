@@ -38,6 +38,27 @@ describe('RunTeachersTab', () => {
     unmount(cmp);
   });
 
+  it('(invited) badge persists across page refresh — derived from user_full_name=null in props (spec §7 step 7)', async () => {
+    // Refresh scenario: parent already supplies a teacher with user_full_name=null;
+    // no submit happens. The badge must render purely from prop state.
+    const invitedTeacher: RunTeacherResponse = {
+      id: 50, run_id: 10, user_id: 7,
+      user_email: 'newteacher@nowhere.test', user_full_name: null,
+      created_at: '2026-05-22T00:00:00Z',
+    };
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, { target, props: {
+      runId: 10,
+      teachers: [invitedTeacher],
+      onRefetch: vi.fn(),
+    } });
+    await settle();
+    expect(target.textContent).toContain('(invited)');
+    expect(target.textContent).toContain('newteacher@nowhere.test');
+    unmount(cmp);
+  });
+
   it('adds teacher, prepends row, shows (invited) when user_full_name === null', async () => {
     fetchSpy.mockImplementation(() =>
       jres({
