@@ -1071,7 +1071,7 @@ Run via `run-debug.sh`. Pre-condition: course `calc-101` exists with at least on
 4. Create a run via `NewRunModal`: title, start, end (end >= start enforced), groups_enabled=on → navigates to detail page; verify version label.
 5. On detail page, edit title inline: type, blur → persists on refresh. Type again, Escape → reverts. Press Enter on changed title → exactly one PATCH (no double-fire on blur after Enter).
 6. Toggle `groups_enabled` off then on → Groups tab placeholder appears/disappears.
-7. Add a teacher by email of a non-existing user → row shows `(invited)` badge; refresh page → badge still gone (session-scoped).
+7. Add a teacher by email of a non-existing user → row shows `(invited)` badge; refresh page → badge still shown (persistent: derived from `user_full_name=null` per §B row 1059).
 8. Add three groups → capacity badges all show "empty" italic gray.
 9. Use `RosterImportModal`: paste 6 rows including:
    - 1 row with malformed email,
