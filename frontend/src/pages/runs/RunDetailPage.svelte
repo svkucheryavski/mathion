@@ -4,6 +4,7 @@
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
   import { listRunStudents } from '../../lib/runRoster';
+  import { runStatus } from '../../lib/runStatus';
   import { navigate } from '../../lib/router.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
@@ -110,6 +111,8 @@
 
   const pinned = $derived(versions?.find((v) => v.id === run?.version_id));
   const showDisabledBanner = $derived(pinned?.is_disabled === true);
+
+  const runStatusBadge = $derived(run ? runStatus(run) : null);
 
   // Rank-by-created_at to match RunListPage's `v{N} ({date})` format.
   const versionLabel = $derived.by(() => {
@@ -247,6 +250,9 @@
       {run.title}
     </nav>
     <div class="publish-bar">
+      {#if runStatusBadge}
+        <span class="badge badge-{runStatusBadge}" data-testid="status-badge">{runStatusBadge[0].toUpperCase() + runStatusBadge.slice(1)}</span>
+      {/if}
       {#if versionLabel}
         <span class="version-label" data-testid="version-label">{versionLabel}</span>
       {/if}
@@ -336,6 +342,11 @@
   .run-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 16px); padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
   .publish-bar { display: flex; align-items: center; gap: 8px; }
   .version-label { font-size: 0.875rem; color: var(--text-muted, #666); font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 500; line-height: 1.4; }
+  .badge-draft { background: #e5e7eb; color: #374151; }
+  .badge-upcoming { background: #dbeafe; color: #1e40af; }
+  .badge-active { background: #d1fae5; color: #065f46; }
+  .badge-ended { background: #f3f4f6; color: #6b7280; }
   .breadcrumb { color: var(--muted, #666); font-size: 0.9em; }
   .breadcrumb a { color: var(--link, #335); text-decoration: none; }
   .breadcrumb a:hover { text-decoration: underline; }

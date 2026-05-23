@@ -141,4 +141,24 @@ describe('RunDetailPage shell', () => {
     expect(label?.textContent).toBe('v3 (2026-03-15)');
     unmount(cmp);
   });
+
+  it('renders status badge in the header (spec §3.5 + §7 step 20)', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ is_published: false }));
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const badge = target.querySelector('[data-testid="status-badge"]');
+    expect(badge?.textContent).toBe('Draft');
+    expect(badge?.classList.contains('badge-draft')).toBe(true);
+    unmount(cmp);
+  });
 });
