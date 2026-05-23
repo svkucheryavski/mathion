@@ -10,19 +10,33 @@
 </script>
 
 {#if adminOnly}
-  <!-- Admin-only: single destination → entire card is a link.
-       Restores whole-card click target and gives the h3 link semantics. -->
-  <a
-    class="card card-link"
-    href={editHref}
-    onclick={(e) => { e.preventDefault(); navigate(editHref); }}
-    aria-label={`Edit ${course.course.name}`}
-  >
+  <!-- Admin-only (no published version): mirror the mixed-admin <div> pattern
+       so we can render sibling action buttons (Edit + Runs). -->
+  <div class="card">
     <div class="title-row">
-      <h3>{course.course.name}</h3>
+      <h3>
+        <a
+          class="title-link"
+          href={editHref}
+          onclick={(e) => { e.preventDefault(); navigate(editHref); }}
+        >{course.course.name}</a>
+      </h3>
       <span class="badge">Admin</span>
     </div>
-  </a>
+    <div class="actions">
+      <a
+        class="edit"
+        href={editHref}
+        onclick={(e) => { e.preventDefault(); navigate(editHref); }}
+        aria-label={`Edit ${course.course.name}`}
+      >Edit</a>
+      <a
+        href={`/courses/${course.course.slug}/runs`}
+        onclick={(e) => { e.preventDefault(); navigate(`/courses/${course.course.slug}/runs`); }}
+        aria-label={`Runs for ${course.course.name}`}
+      >Runs</a>
+    </div>
+  </div>
 {:else if course.is_admin}
   <!-- Mixed (admin + enrolled): two destinations (Continue + Edit) — can't
        nest anchors, so the card stays a <div>. The h3 content is wrapped in
@@ -52,6 +66,11 @@
         onclick={(e) => { e.preventDefault(); navigate(editHref); }}
         aria-label={`Edit ${course.course.name}`}
       >Edit</a>
+      <a
+        href={`/courses/${course.course.slug}/runs`}
+        onclick={(e) => { e.preventDefault(); navigate(`/courses/${course.course.slug}/runs`); }}
+        aria-label={`Runs for ${course.course.name}`}
+      >Runs</a>
     </div>
   </div>
 {:else}
