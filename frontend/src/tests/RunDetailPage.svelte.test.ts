@@ -118,4 +118,27 @@ describe('RunDetailPage shell', () => {
     expect(overviewBtn.getAttribute('aria-selected')).toBe('true');
     unmount(cmp2);
   });
+
+  it('renders version label "vN (YYYY-MM-DD)" in the header (spec §7 step 4)', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ version_id: 102 }));
+      if (url.includes('/versions')) return jres([
+        versionFixture({ id: 100, created_at: '2026-01-01' }),
+        versionFixture({ id: 101, created_at: '2026-02-01' }),
+        versionFixture({ id: 102, created_at: '2026-03-15' }),
+      ]);
+      if (url.includes('/teachers')) return jres([]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const label = target.querySelector('[data-testid="version-label"]');
+    expect(label?.textContent).toBe('v3 (2026-03-15)');
+    unmount(cmp);
+  });
 });

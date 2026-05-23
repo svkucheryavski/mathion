@@ -111,6 +111,15 @@
   const pinned = $derived(versions?.find((v) => v.id === run?.version_id));
   const showDisabledBanner = $derived(pinned?.is_disabled === true);
 
+  // Rank-by-created_at to match RunListPage's `v{N} ({date})` format.
+  const versionLabel = $derived.by(() => {
+    if (!versions || !pinned) return null;
+    const sorted = [...versions].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const idx = sorted.findIndex((v) => v.id === pinned.id);
+    if (idx < 0) return null;
+    return `v${idx + 1} (${pinned.created_at.slice(0, 10)})`;
+  });
+
   type ChecklistState = 'ok' | 'violated' | 'na';
   type ChecklistRow = { id: string; label: string; state: ChecklistState; hint?: string };
 
@@ -238,6 +247,9 @@
       {run.title}
     </nav>
     <div class="publish-bar">
+      {#if versionLabel}
+        <span class="version-label" data-testid="version-label">{versionLabel}</span>
+      {/if}
       {#if !run.is_published}
         <button
           data-action="publish"
@@ -323,6 +335,7 @@
 <style>
   .run-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 16px); padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
   .publish-bar { display: flex; align-items: center; gap: 8px; }
+  .version-label { font-size: 0.875rem; color: var(--text-muted, #666); font-variant-numeric: tabular-nums; }
   .breadcrumb { color: var(--muted, #666); font-size: 0.9em; }
   .breadcrumb a { color: var(--link, #335); text-decoration: none; }
   .breadcrumb a:hover { text-decoration: underline; }
