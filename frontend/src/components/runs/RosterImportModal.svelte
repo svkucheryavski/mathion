@@ -52,10 +52,15 @@
 
   async function onImport() {
     if (!parsed || !parsed.ok || parsed.validCount === 0 || submitting) return;
+    // Snapshot parsed BEFORE the first await so a concurrent textarea edit
+    // during in-flight submit can't mutate which rows we submit.
+    const snapshot = parsed;
+    // Cancel any pending debounce so it can't overwrite `parsed` mid-submit.
+    if (parseTimer) { clearTimeout(parseTimer); parseTimer = null; }
     submitting = true;
     try {
       const fresh = await onRefetchBeforeSubmit();
-      const rows = parsed.rows
+      const rows = snapshot.rows
         .filter((r) => r.valid)
         .map((r) => buildBatchRow(r, fresh.students, fresh.groups));
       const response = await batchAddRunStudents(runId, rows);
@@ -65,6 +70,8 @@
       // Top-of-modal banner via local state.
       if (e instanceof ApiError) {
         parsed = { ok: false, error: e.displayMessage };
+      } else {
+        parsed = { ok: false, error: 'Import failed — please retry.' };
       }
     } finally {
       submitting = false;
@@ -94,22 +101,26 @@
     onClose();
   }
 
-  function onKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return;
+  function closeForCurrentStage() {
     if (submitting) return;
     if (stage === 'paste') onClose();
     else onDone();
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    closeForCurrentStage();
   }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="modal-backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+<div class="modal-backdrop" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) closeForCurrentStage(); }}>
   <FocusTrap autofocusSelector="textarea">
     <div class="modal modal-roster-import" role="dialog" aria-modal="true" aria-label="Import roster">
       <header>
         <h2>Import roster from CSV</h2>
-        <button type="button" aria-label="Close" onclick={onClose}>×</button>
+        <button type="button" aria-label="Close" onclick={closeForCurrentStage}>×</button>
       </header>
 
       {#if stage === 'paste'}

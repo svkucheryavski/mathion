@@ -252,4 +252,135 @@ describe('RosterImportModal submit', () => {
     expect(capturedBody!.rows[0]).toMatchObject({ email: 'a@x.com' });
     unmount(cmp);
   });
+
+  it('Stage 2 X button triggers Done flow (refetch + onClose)', async () => {
+    fetchSpy.mockImplementation(() => jres({ results: [
+      { email: 'a@x.com', status: 'added' },
+    ] }));
+    const refetch = vi.fn().mockResolvedValue({
+      students: [student({ group_id: 99 })],
+      groups: [group({ name: 'Alpha' })],
+    });
+    const onClose = vi.fn();
+    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch, onClose });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'a@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
+    vi.useRealTimers();
+    await settle();
+    expect(target.querySelector('table.result')).toBeTruthy();
+    (target.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click();
+    await settle();
+    expect(refetch).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalled();
+    unmount(cmp);
+  });
+
+  it('Stage 2 backdrop click triggers Done flow (refetch + onClose)', async () => {
+    fetchSpy.mockImplementation(() => jres({ results: [
+      { email: 'a@x.com', status: 'added' },
+    ] }));
+    const refetch = vi.fn().mockResolvedValue({
+      students: [student({ group_id: 99 })],
+      groups: [group({ name: 'Alpha' })],
+    });
+    const onClose = vi.fn();
+    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch, onClose });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'a@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
+    vi.useRealTimers();
+    await settle();
+    expect(target.querySelector('table.result')).toBeTruthy();
+    const backdrop = target.querySelector('.modal-backdrop') as HTMLElement;
+    // Simulate a click that targets the backdrop itself (not a descendant).
+    backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(refetch).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalled();
+    unmount(cmp);
+  });
+
+  it('Close paths are inert while submitting (no onClose, no extra refetch)', async () => {
+    let resolveRefetch: ((v: unknown) => void) | null = null;
+    const refetch = vi.fn(() => new Promise((res) => { resolveRefetch = res; }));
+    const onClose = vi.fn();
+    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch, onClose });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'a@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
+    flushSync();
+    // In-flight: backdrop, X, and Escape are all no-ops.
+    (target.querySelector('.modal-backdrop') as HTMLElement)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    (target.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(refetch).toHaveBeenCalledTimes(1); // only the submit's call, no Done-flow extra
+    resolveRefetch!({ students: [], groups: [] });
+    unmount(cmp);
+  });
+
+  it('Non-ApiError rejection surfaces a generic banner (no silent swallow)', async () => {
+    const refetch = vi.fn().mockRejectedValue(new TypeError('network down'));
+    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'a@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
+    vi.useRealTimers();
+    await settle();
+    expect(target.querySelector('p.error')?.textContent).toMatch(/Import failed/);
+    unmount(cmp);
+  });
+
+  it('Concurrent textarea edit during in-flight submit does not mutate rows (snapshot guard)', async () => {
+    let capturedBody: { rows: { email: string }[] } | null = null;
+    let resolveRefetch: ((v: unknown) => void) | null = null;
+    const refetch = vi.fn(() => new Promise((res) => { resolveRefetch = res; }));
+    fetchSpy.mockImplementation((_url: string, init: RequestInit) => {
+      capturedBody = JSON.parse(init.body as string);
+      return jres({ results: [{ email: 'first@x.com', status: 'added' }] });
+    });
+    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'first@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    // Click Import — refetch is in-flight (resolveRefetch not called yet).
+    (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
+    flushSync();
+    // User keeps typing while refetch is pending. Input handler schedules a new
+    // debounce that WILL fire (onImport's clearTimeout already ran before).
+    ta.value = 'second@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    // Now `parsed` reactive state has been mutated to "second@x.com". Without the
+    // snapshot, onImport would build rows from the mutated state.
+    resolveRefetch!({ students: [], groups: [] });
+    vi.useRealTimers();
+    await settle();
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.rows).toEqual([{ email: 'first@x.com' }]);
+    unmount(cmp);
+  });
 });
