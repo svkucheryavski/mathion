@@ -34,12 +34,22 @@ describe('runAssets wrappers', () => {
     );
   });
 
-  it('uploadRunAsset POSTs FormData with field "file" and threads AbortSignal', async () => {
+  it('uploadRunAsset POSTs FormData with field "file" and full wire-pattern parity to uploadAsset', async () => {
+    // Locks the "mirrors lib/assets.ts:uploadAsset" contract by asserting the
+    // parity-critical wire bits: multipart body, threaded signal,
+    // credentials: 'include' (cross-port dev cookie), X-Requested-With CSRF
+    // header, and no manual Content-Type (the browser must set the multipart
+    // boundary). A regression that drops any of these slips past URL+method
+    // checks otherwise.
     fetchSpy.mockImplementation((_url, init) => {
       expect(init.method).toBe('POST');
       expect(init.body).toBeInstanceOf(FormData);
       expect((init.body as FormData).get('file')).toBeInstanceOf(File);
       expect(init.signal).toBeDefined();
+      expect(init.credentials).toBe('include');
+      const headers = new Headers(init.headers as HeadersInit | undefined);
+      expect(headers.get('X-Requested-With')).toBe('mathion');
+      expect(headers.has('Content-Type')).toBe(false);
       return jres({
         id: 1,
         filename: 'x.png',
