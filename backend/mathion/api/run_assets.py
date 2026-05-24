@@ -7,8 +7,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel
+
 from mathion.api.helpers import (
     get_or_404,
+    render_with_run_assets,
     require_course_admin_for_run,
     require_run_admin_or_teacher,
     run_asset_storage_dir,
@@ -208,3 +211,38 @@ def delete_run_asset(
             os.remove(filepath)
         except OSError:
             pass
+
+
+class RunRenderRequest(BaseModel):
+    content_md: str
+
+
+class RunRenderResponse(BaseModel):
+    html: str
+
+
+@router.post("/api/runs/{run_id}/render", response_model=RunRenderResponse)
+def render_run_markdown(
+    run_id: int,
+    body: RunRenderRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Render markdown with bare-filename asset refs resolved against this run's asset pool.
+
+    Convention is `![alt](filename.png)` (markdown.py:52-68 extracts non-URL refs);
+    `render_with_run_assets` validates each against the run's RunAsset pool and rewrites
+    `src="{filename}"` / `href="{filename}"` to `/api/runs/{run_id}/assets/{filename}`.
+    Side-effect-free: SELECTs only; no RunAssetReference rows are written here
+    (sync_run_asset_references runs only on PATCH/POST of mini-projects).
+    422 raised internally by render_with_run_assets when any referenced asset
+    is not in the run pool (helpers.py:448-450).
+
+    Gating: matches the rest of this router — `require_run_admin_or_teacher` is
+    a plain helper function (helpers.py:105), NOT a FastAPI dependency; called
+    imperatively after loading the run.
+    """
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
+    html = render_with_run_assets(db, run_id, body.content_md)
+    return RunRenderResponse(html=html)
