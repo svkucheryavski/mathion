@@ -256,7 +256,12 @@ Internal changes:
     } catch (e: any) {
       if (!editorMounted) return null;
       if (e?.name === 'AbortError') return null;       // silent on abort
-      uploadError = { detail: String(e?.detail ?? e?.message ?? e) };
+      uploadError = {
+        detail: String(e?.detail ?? e?.message ?? e),
+        // preserve existing "Upload stopped at file N of M" UX from AssetSidebar.svelte:88-94 —
+        // only set stoppedAt when batch.total > 1, so single-file callers don't get spurious "1 of 1".
+        stoppedAt: batch && batch.total > 1 ? { n: batch.current, m: batch.total } : undefined,
+      };
       return null;
     } finally {
       // compare-before-clear + editorMounted guard: only clear if (a) this invocation
@@ -277,6 +282,22 @@ Internal changes:
   `uploadOne` is the ONLY upload path. Textarea drop, wrapper drop, and the sidebar's drop/file-picker all invoke it. The controller is exposed via `$bindable<AbortController | null>` so a consumer modal can read+abort it through `bind:uploadAbortController`. AssetSidebar does NOT own its own controller — it gets `uploadOne` injected as `onUploadFile`. `editorMounted` is flipped `true` in MarkdownEditor's `onMount` and back to `false` in `onDestroy`, which fires during MarkdownEditor unmount when its parent (MiniProjectModal) unmounts.
 
   **Single-flight UX:** the existing `uploading` overlay (rendered by both MarkdownEditor and AssetSidebar while `uploading === true`) is the only feedback for a single-flight skip. No "Already uploading" inline message needed — the overlay already communicates "an upload is in progress" and a second drop while it's visible silently no-ops. Documented here so reviewers don't ask for a toast.
+- **Textarea/wrapper multi-file drop contract** (codex round-7 catch — existing MarkdownEditor supports multi-file batches with `stoppedAt`; the refactor must preserve this for non-sidebar entry points too). Both textarea drop and wrapper drop call the same internal loop, mirroring the sidebar's:
+  ```ts
+  // textarea drop OR wrapper drop handler
+  async function handleEditorDrop(files: File[]) {
+    for (let i = 0; i < files.length; i++) {
+      const result = await uploadOne(files[i], { current: i + 1, total: files.length });
+      if (result === null) break;
+      // insertion-at-cursor (existing behavior, textarea drop only): format ref + splice at cursor offset
+      if (entryPoint === 'textarea') insertRefAtCursor(formatRef(result));
+      refreshKey += 1;  // bump so sidebar's $effect re-runs fetchAssets to reflect the new asset
+    }
+  }
+  ```
+  - Single-file textarea drop (the common case) still works — loop runs once, `batch={current:1,total:1}` means `uploadOne` writes no `stoppedAt`, refresh happens once.
+  - Insertion-at-cursor stays scoped to textarea drop (preserves existing UX); wrapper drop has no cursor semantics and just uploads.
+  - `refreshKey += 1` per successful file (cheap — `refreshKey` is a number, sidebar's `$effect` is debounced by the async fetchAssets). With the new `loadToken` ratchet on `fetchAssets`, multiple bumps in quick succession are race-safe.
 - **`disabled` prop** (codex-review Critical): when truthy, ALL interactive handlers no-op — textarea drag-drop, wrapper drag-drop, preview button, mode toggle. Textarea itself gets `disabled={disabled}`. Sidebar is passed `disabled` through.
 
 ### `components/editor/AssetSidebar.svelte`
@@ -296,15 +317,16 @@ Prop signature change:
 ```
 
 Internally:
-- `fetchAssets` calls `assetContext.list()`.
+- `fetchAssets` calls `assetContext.list()`, **with a `loadToken` ratchet** (codex round-7 catch — same pattern used in `RunDetailPage` for run lookups): before the await, bump `let loadToken = 0` and capture the current value; after the await, drop the response if the captured token no longer matches the latest `loadToken`. This prevents an older overlapping `fetchAssets` response from clobbering a newer one — relevant when sidebar's own post-upload refetch races with a `refreshKey`-triggered refetch from a sibling MarkdownEditor upload. Cost: 3 lines. Without the ratchet, a stale response landing last could leave the sidebar showing N items instead of N+1 until the user next interacts.
 - **Sidebar does NOT own the upload controller and does NOT mutate `uploading` or `uploadProgress` directly.** It MAY write to `uploadError` for client-side pre-validation failures (oversize / wrong-extension) — see the pre-validation section below — since those branches never reach `uploadOne` and need a visible error. During an actual in-flight upload, only `uploadOne` writes upload-state. When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads.
   - **On success (non-null `AssetItem` returned):** sidebar calls its own `await fetchAssets()` (refetch/replace, mirroring the existing pattern at `AssetSidebar.svelte:85`) and continues to the next file in the batch. No append-then-bump — that would duplicate work, since `refreshKey`-change ALREADY triggers `fetchAssets` via the existing `$effect` at `AssetSidebar.svelte:54`. Sidebar does NOT bump `refreshKey` after its own uploads (would just re-fetch what it already re-fetched). No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
   - **On `null` returned:** no refetch, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
-  - **Multi-file OS drop:** sidebar awaits each `onUploadFile` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. The loop is explicit and threads the batch counters:
+  - **Multi-file OS drop:** sidebar awaits each `onUploadFile` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. The loop is explicit and threads the batch counters, and refetches after each success:
     ```ts
     for (let i = 0; i < files.length; i++) {
       const result = await onUploadFile(files[i], { current: i + 1, total: files.length });
       if (result === null) break;   // batch stops on null (skip / abort / error)
+      await fetchAssets();          // refetch/replace after each successful file
     }
     ```
     Test recipe: drop 3 valid files. After resetting the `fetchAssets` spy that counted the initial-mount fetch, assert it's called 3 more times (one per successful upload). Assert all 3 filenames are present in the rendered list (backend sorts by filename, so don't assert tail position — assert set-membership).
@@ -317,7 +339,11 @@ Internally:
 
 ### Client-side file pre-validation (in AssetSidebar before calling `onUploadFile`)
 
-Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. **Stop-on-any-invalid pre-pass:** sidebar validates ALL dropped files first (one pre-pass) BEFORE entering the upload loop. If any file fails validation, sidebar writes a combined message into `uploadError` (e.g., `"Cannot upload — invalid file(s): foo.exe (extension not allowed), big.zip (>20MB)"`) and does NOT call `onUploadFile` for ANY file. The user retries with a valid subset.
+Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. **Stop-on-any-invalid pre-pass:** sidebar validates ALL dropped files first (one pre-pass) BEFORE entering the upload loop. If any file fails validation, sidebar writes a message into `uploadError` and does NOT call `onUploadFile` for ANY file. The user retries with a valid subset. Message format matches existing UX conventions (no `file(s)` constructions):
+- 1 invalid file: `Cannot upload: foo.exe (extension not allowed)` or `Cannot upload: big.zip (file exceeds 20MB)`
+- N invalid files (N > 1): `Cannot upload 3 files: foo.exe (extension not allowed), big.zip (file exceeds 20MB), other.exe (extension not allowed)`
+
+A subsequent valid retry clears the prior validation error: pre-pass passes → `uploadOne` runs → `uploadOne` sets `uploadError = null` at its start. (Until that retry, the validation error stays visible — that's the intended UX.)
 
 Rationale (codex round-6 catch): per-file validation inside the upload loop hides validation errors — `uploadOne` clears `uploadError = null` at the start of each call, so a validation message set for file N gets wiped when file N+1 starts. Pre-pass + stop-on-any-invalid is simpler than per-file accumulation and gives the user a single clear message.
 
@@ -530,7 +556,7 @@ Established patterns plus what was kept after the second-pass review:
 - **`is_referenced` is stale during in-modal edit.** Server-side flag updates only on PATCH/POST commit; in-modal references to a not-yet-saved asset don't bump the flag. Trash button can mislead. Spec accepts: matches existing course-asset behavior.
 - **Cross-TZ deadline values shift.** `isoToLocalInput` reflects current browser TZ; a traveling teacher sees displayed times move. Phase 9: per-run pinned TZ.
 - **Sidebar batch interruptible by sibling textarea/wrapper drop** (codex round-6 catch). After each successful file in a sidebar batch, `uploadOne` releases the single-flight lock briefly before the sidebar's next iteration acquires it. A textarea-drop in that window can take the slot; the sidebar's next iteration single-flight-rejects and returns `null`, stopping the batch at the current position. UX consequence: user sees the textarea-drop's file landed, sidebar list updates, but remaining sidebar-batch files were not uploaded. User can re-drop them. Documented rather than fixed (the alternative — restructuring to `uploadMany(files)` that holds the lock across the whole batch — doubles the API surface and adds a new contract for a rare edge case). Phase 9: batch-level lock if real users hit this.
-- **Concurrent `fetchAssets` responses can clobber.** The sidebar's `fetchAssets` has no request-token ratchet, so two overlapping calls (e.g., sidebar's own post-upload refetch + a refreshKey-triggered refetch from a sibling MarkdownEditor upload) could land in arbitrary order; the older response wins if it lands later. With backend sorting deterministic by filename, worst-case is a brief "N items instead of N+1" flash that the next fetch corrects. Phase 9: `loadToken` ratchet (same pattern used in RunDetailPage).
+<!-- (Removed: prior "concurrent fetchAssets can clobber" accepted gap. Codex round-7 catch: stale responses can land last and persist until a NEXT user action — not "next fetch corrects" as previously claimed. Fixed in T5a — see lib/sidebar refactor below.) -->
 
 ## Testing
 
@@ -615,7 +641,7 @@ Established patterns plus what was kept after the second-pass review:
 - T2: `lib/types.ts` additions (incl. new `BlockResponse` type, currently absent in the frontend) + `lib/blocks.ts` with `listBlocks(versionId): Promise<BlockResponse[]>` (currently absent) + `lib/datetime.ts` + `lib/assetContext.ts` (both factories) + tests (incl. TZ-pinned setup file)
 - T3: `lib/miniProjects.ts` + tests
 - T4: `lib/runAssets.ts` (incl. AbortSignal, pre-validation constants) + tests
-- T5a: MarkdownEditor + AssetSidebar refactor to `assetContext` prop; `bind:uploading/uploadProgress/uploadError` preserved; `ItemEditPage` call-site migration; existing-behavior regression tests pass
+- T5a: MarkdownEditor + AssetSidebar refactor to `assetContext` prop; `bind:uploading/uploadProgress/uploadError` preserved; shared `uploadOne(file, batch?)` helper introduced inside MarkdownEditor; AssetSidebar `fetchAssets` gets `loadToken` ratchet; `ItemEditPage` call-site migration; existing-behavior regression tests pass
 - T5b: new run-mode tests for MarkdownEditor + AssetSidebar (preview URL, list URL, imgSrc URL, drag-drop, abort, pre-validation, cursor insert)
 - T6a: `MiniProjectModal.svelte` create + edit + `closeForCurrentStage` (InlineConfirm footer dirty-confirm, abort-in-flight-upload-on-close, mounted-flag rule, inputs-disabled-while-submitting); tests
 - T6b: `MiniProjectModal.svelte` publish flow + precondition bullets + 409 PATCH banner + 404 Save banner (with Ctrl/Cmd+A/+C copy instructions); tests
