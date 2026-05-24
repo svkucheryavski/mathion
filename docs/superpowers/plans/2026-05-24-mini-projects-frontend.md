@@ -1450,6 +1450,18 @@ async function handleDrop(files: File[]) {
     await fetchAssets();
   }
 }
+
+// Round-4 reviewer-1 catch (spec line 339): the existing file-picker `<input type="file">`
+// (upload button) MUST route through the SAME `handleDrop` pre-pass so multi-file picker
+// selections enforce stop-on-any-invalid. Wire the existing `pickFile`/onchange handler
+// to call `handleDrop(Array.from(input.files))` instead of its old per-file upload loop.
+function handleFileInputChange(ev: Event) {
+  const input = ev.currentTarget as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  void handleDrop(Array.from(input.files));
+  input.value = '';   // reset so re-picking the same files re-triggers change
+}
+// In the template: <input type="file" multiple onchange={handleFileInputChange} disabled={disabled || uploading} ... />
 ```
 
 - [ ] **Step 14: Apply `disabled` prop to file-input, upload button, "Insert ref" buttons, per-row delete buttons**
@@ -1621,9 +1633,11 @@ describe('AssetSidebar with runAssetContext', () => {
       onUploadFile: abortableUpload,
     } });
     await settle();
-    // simulate a drop — the abortableUpload resolves to null so sidebar stops iterating
-    // (test that the loop breaks on null without throwing)
-    // ... fire a drop event with one file; assert abortableUpload called once and sidebar continues
+    // abortableUpload resolves to null; sidebar's drop-loop must break on null without throwing.
+    const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+    dropZone.dispatchEvent(makeDropEvent([new File(['x'], 'x.png', { type: 'image/png' })]));
+    await settle();
+    expect(abortableUpload).toHaveBeenCalledTimes(1);
   });
 
   it('stop-on-any-invalid pre-pass: one bad file in 3-drop sets uploadError and skips ALL uploads', async () => {
@@ -1639,15 +1653,18 @@ describe('AssetSidebar with runAssetContext', () => {
       set uploadError(v) { uploadError = v; },
     } });
     await settle();
-    // construct a drop with 1 valid + 1 bad-extension file
-    // ... fire drop event with mixed files
+    const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+    dropZone.dispatchEvent(makeDropEvent([
+      new File(['ok'], 'a.png', { type: 'image/png' }),
+      new File(['bad'], 'evil.exe', { type: 'application/octet-stream' }),
+    ]));
+    await settle();
     expect(onUploadFile).not.toHaveBeenCalled();
     expect(uploadError?.detail).toContain('extension not allowed');
   });
 
   it('multi-file sidebar drop: 3 valid files → onUploadFile called 3 times with batch counters, fetchAssets refetches 3 times after initial mount', async () => {
-    // Reset fetchSpy after initial-mount fetch.
-    fetchSpy.mockImplementation(() => jres([]));
+    fetchSpy.mockImplementation(() => jres([{ id: 1, filename: 'a.png', mime_type: 'image/png', file_size: 1, is_referenced: false }]));
     const onUploadFile = vi.fn().mockResolvedValue({ id: 1, filename: 'a.png', mime_type: 'image/png', file_size: 1, is_referenced: false });
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -1658,10 +1675,17 @@ describe('AssetSidebar with runAssetContext', () => {
     } });
     await settle();
     fetchSpy.mockClear();   // reset after initial-mount fetch
-    // construct 3 valid files; fire drop
-    // assert onUploadFile called 3 times with batch={current:1,total:3}, {2,3}, {3,3}
-    // assert fetchSpy (list endpoint) called 3 times
-    // assert all 3 filenames present in rendered list (set-membership, not tail position)
+    const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+    const files = ['a.png', 'b.png', 'c.png'].map(n => new File(['x'], n, { type: 'image/png' }));
+    dropZone.dispatchEvent(makeDropEvent(files));
+    await settle();
+    expect(onUploadFile).toHaveBeenCalledTimes(3);
+    expect(onUploadFile.mock.calls[0][1]).toEqual({ current: 1, total: 3 });
+    expect(onUploadFile.mock.calls[1][1]).toEqual({ current: 2, total: 3 });
+    expect(onUploadFile.mock.calls[2][1]).toEqual({ current: 3, total: 3 });
+    // 3 GET refetches (one per success), filtered to /assets endpoint.
+    const listCalls = fetchSpy.mock.calls.filter(c => String(c[0]).includes('/api/runs/42/assets') && (c[1] as any)?.method !== 'POST');
+    expect(listCalls.length).toBe(3);
   });
 });
 
@@ -1675,19 +1699,49 @@ describe('MarkdownEditor with runAssetContext', () => {
       value: 'hi',
     } });
     await settle();
-    // trigger preview button click
-    // assert POST to /api/runs/42/render
+    const previewBtn = target.querySelector('button[data-action="preview"]') as HTMLButtonElement;
+    previewBtn.click();
+    await settle();
+    const renderCall = fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/runs/42/render') && (c[1] as any)?.method === 'POST');
+    expect(renderCall).toBeTruthy();
   });
 
   it('textarea-drop hits /api/runs/{rid}/assets (not /api/assets/...)', async () => {
-    // mock fetch for both /api/runs/42/assets POST + /api/runs/42/assets GET (refetch)
-    // simulate drop on textarea
-    // assert POST URL contains /api/runs/42/assets
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/runs/42/assets') && (init as any)?.method === 'POST') {
+        return jres({ id: 1, filename: 'x.png', mime_type: 'image/png', file_size: 1, is_referenced: false });
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MarkdownEditor, { target, props: {
+      assetContext: runAssetContext(42),
+      value: '',
+    } });
+    await settle();
+    const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
+    textarea.dispatchEvent(makeDropEvent([new File(['x'], 'x.png', { type: 'image/png' })]));
+    await settle();
+    const postCall = fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/runs/42/assets') && (c[1] as any)?.method === 'POST');
+    expect(postCall).toBeTruthy();
+    expect(String(postCall![0])).not.toContain('/api/assets/');
   });
 
   it('disabled prop blocks all interactive handlers', async () => {
-    // mount with disabled=true; verify textarea has disabled attribute,
-    // preview button disabled, drop handlers no-op
+    fetchSpy.mockImplementation(() => jres([]));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MarkdownEditor, { target, props: {
+      assetContext: runAssetContext(42),
+      value: '',
+      disabled: true,
+    } });
+    await settle();
+    const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea.disabled).toBe(true);
+    const previewBtn = target.querySelector('button[data-action="preview"]') as HTMLButtonElement;
+    expect(previewBtn.disabled).toBe(true);
   });
 
   it('editorMounted local guard: late upload resolve after unmount does NOT write state', async () => {
@@ -1772,9 +1826,11 @@ cd frontend && npx vitest run src/tests/AssetSidebar src/tests/MarkdownEditor
 
 Expected: new test cases FAIL until each event-firing TODO is fleshed out.
 
-- [ ] **Step 3: Implement the event-firing details**
+- [ ] **Step 3: Inline the `makeDropEvent` helper into Step 1's test file at the TOP, before any `it(...)` blocks**
 
-Borrow `Blob`/`File`/`DragEvent` construction from existing tests. For the drop event:
+Round-4 reviewer-2 catch: prior plan ordering put the `// ... fire drop` TODOs in Step 1 and only provided the `makeDropEvent` helper in Step 3 — which broke TDD ordering (Step 2's "expected: tests fail" was dishonest because the tests had `// ...` placeholders that wouldn't even FAIL meaningfully, just pass-as-empty). Fix: write the helper inline into the test file FIRST, then the `it(...)` bodies use it directly. The TDD sequence becomes: Step 1 = full test file with real event-firing → Step 2 = `vitest run` shows real failures → Step 3 = implement.
+
+The helper, used in every drop-related `it(...)` body in Step 1 above:
 
 ```ts
 function makeDropEvent(files: File[]): DragEvent {
@@ -1782,6 +1838,38 @@ function makeDropEvent(files: File[]): DragEvent {
   for (const f of files) dt.items.add(f);
   return new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
 }
+```
+
+Replace the `// ... fire a drop event with one file` (Step 1) with the concrete sequence:
+```ts
+const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+dropZone.dispatchEvent(makeDropEvent([new File(['x'], 'x.png', { type: 'image/png' })]));
+await settle();
+expect(abortableUpload).toHaveBeenCalledTimes(1);
+```
+
+Replace the `// ... fire drop event with mixed files` (stop-on-any-invalid) with:
+```ts
+const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+dropZone.dispatchEvent(makeDropEvent([
+  new File(['ok'], 'a.png', { type: 'image/png' }),
+  new File(['bad'], 'evil.exe', { type: 'application/octet-stream' }),
+]));
+await settle();
+expect(onUploadFile).not.toHaveBeenCalled();
+expect(target.textContent).toContain('extension not allowed');
+```
+
+Replace the multi-file 3-drop assertion with:
+```ts
+const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+const files = ['a.png', 'b.png', 'c.png'].map(n => new File(['x'], n, { type: 'image/png' }));
+dropZone.dispatchEvent(makeDropEvent(files));
+await settle();
+expect(onUploadFile).toHaveBeenCalledTimes(3);
+expect(onUploadFile.mock.calls[0][1]).toEqual({ current: 1, total: 3 });
+expect(onUploadFile.mock.calls[1][1]).toEqual({ current: 2, total: 3 });
+expect(onUploadFile.mock.calls[2][1]).toEqual({ current: 3, total: 3 });
 ```
 
 - [ ] **Step 4: Tests pass**
@@ -1930,8 +2018,12 @@ describe('MiniProjectModal — create mode', () => {
 });
 
 describe('MiniProjectModal — edit mode + dirty close', () => {
+  // Round-4 reviewer-1 catch: MiniProjectResponse requires `title` and `assignment_html`
+  // (non-optional per types.ts T2.B addition). Old fixtures omitted them; strict TS would
+  // reject. Widened to the full 11-field shape across all MP literals in this plan.
   const initial: MiniProjectResponse = {
-    id: 99, run_id: 10, block_id: 1, assignment_md: 'orig text',
+    id: 99, run_id: 10, block_id: 1, title: 'Mini project for Block 1',
+    assignment_md: 'orig text', assignment_html: '<p>orig text</p>',
     soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
     is_published: false, first_submitted_at: null,
     created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
@@ -1966,6 +2058,24 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     await settle();
     const backdrop = target.querySelector('[data-role="backdrop"]') as HTMLElement;
     backdrop.click();
+    await settle();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('clean close: Escape key → onClose called (spec line 482 — backdrop/X/Escape route through closeForCurrentStage)', async () => {
+    // Round-4 reviewer-1 catch: prior test list omitted Escape coverage.
+    fetchSpy.mockImplementation(() => jres([]));
+    const onClose = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'edit', initial, availableBlocks: [],
+      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      onClose, onSaved: vi.fn(),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
     expect(onClose).toHaveBeenCalled();
   });
@@ -2243,8 +2353,26 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   // Inline initialization is deterministic: at $derived-evaluation time, snapshot is
   // already defined.
   const initialFormSnapshot = currentFormSnapshot();
-  onMount(() => { mounted = true; });
-  onDestroy(() => { mounted = false; });
+  // Round-4 reviewer-1 catch: spec line 482 mandates Escape route through
+  // closeForCurrentStage alongside backdrop and [×]. Register a document-level
+  // keydown listener (modal is rendered top-level via parent's {#if}; focus may
+  // be on any descendant, so window/document listener is the simplest reliable
+  // capture). Filter to Escape only; ignore inside contenteditable / textarea
+  // selection state via target check.
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeForCurrentStage();
+    }
+  }
+  onMount(() => {
+    mounted = true;
+    window.addEventListener('keydown', onWindowKeydown);
+  });
+  onDestroy(() => {
+    mounted = false;
+    window.removeEventListener('keydown', onWindowKeydown);
+  });
 
   let pendingClose = $state(false);
   let discarding = $state(false);   // reviewer-3 catch: discarding flag avoids closeForCurrentStage re-entrancy
@@ -2691,8 +2819,9 @@ describe('RunMiniProjectsTab', () => {
 
   it('MP rows sorted by block.order asc; status pill mapping', async () => {
     const mps: MiniProjectResponse[] = [
-      { id: 2, run_id: 10, block_id: 2, assignment_md: 'x', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: true, first_submitted_at: null, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
-      { id: 1, run_id: 10, block_id: 1, assignment_md: 'x', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: false, first_submitted_at: '2026-05-22T00:00:00Z', created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
+      // Round-4 reviewer-1 catch: full 11-field MiniProjectResponse shape (title + assignment_html).
+      { id: 2, run_id: 10, block_id: 2, title: 'Mini project for Block 1', assignment_md: 'x', assignment_html: '<p>x</p>', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: true, first_submitted_at: null, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
+      { id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0', assignment_md: 'x', assignment_html: '<p>x</p>', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: false, first_submitted_at: '2026-05-22T00:00:00Z', created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
     ];
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -2715,8 +2844,10 @@ describe('RunMiniProjectsTab', () => {
   });
 
   it('force-delete confirm: copy includes "permanently remove" + checkbox + danger button (no count)', async () => {
+    // Round-4 reviewer-1 catch: full 11-field MiniProjectResponse shape.
     const mp: MiniProjectResponse = {
-      id: 1, run_id: 10, block_id: 1, assignment_md: 'x',
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
       soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
       is_published: true, first_submitted_at: '2026-05-22T00:00:00Z',
       created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
@@ -2739,13 +2870,45 @@ describe('RunMiniProjectsTab', () => {
   });
 
   it('409 on non-locked delete: flips row into force-confirm view (spec line 524)', async () => {
-    // Round-3 reviewer-1 catch: a row the client thinks is draft/published but
-    // that became locked server-side (student submission landed in another tab)
-    // must reveal the force option when DELETE returns 409, NOT silently dismiss.
+    // Round-4 reviewers 1+2+3+4+5 ALL flagged the prior version of this test as
+    // broken (Svelte 5 mount() snapshots props; closure-mutating an outer array
+    // doesn't propagate to the mounted component; selector mismatched the
+    // production InlineConfirm; assertion was inverted and tested a dead vi.fn).
+    //
+    // The correct pattern for "parent re-passes a $state array down to a child"
+    // is a tiny test-harness `.svelte` component that owns the array as $state
+    // and renders <RunMiniProjectsTab miniProjects={mps}>. Mount the harness;
+    // mutate harness.$state from the refetch spy; the child re-renders.
+    //
+    // Mirror the existing `RunTeachersTab.svelte.test.ts` re-render harness pattern
+    // (read it first — same idea). Create the harness inline as a test fixture:
+
+    // frontend/src/tests/RunMiniProjectsTab.race-harness.svelte
+    // <script lang="ts">
+    //   import RunMiniProjectsTab from '../components/runs/RunMiniProjectsTab.svelte';
+    //   import type { BlockResponse, MiniProjectResponse } from '../lib/types';
+    //   let { runId, blocks, initialMps, onRefetchMiniProjects }: {
+    //     runId: number; blocks: BlockResponse[];
+    //     initialMps: MiniProjectResponse[];
+    //     onRefetchMiniProjects: () => Promise<void>;
+    //   } = $props();
+    //   export let miniProjects = $state(initialMps);
+    //   export function setMps(next: MiniProjectResponse[]) { miniProjects = next; }
+    // </script>
+    // <RunMiniProjectsTab
+    //   {runId} runIsPublished={true} runGroupsEnabled={true}
+    //   runEndDate="2026-06-30" versionIsDisabled={false} pinnedAvailable={true}
+    //   {blocks} {miniProjects}
+    //   {onRefetchMiniProjects}
+    //   onNavigateToTab={() => {}}
+    // />
+
+    // Then this test imports the harness and drives setMps from the refetch spy:
+    const Harness = (await import('./RunMiniProjectsTab.race-harness.svelte')).default;
+
     const blocks: BlockResponse[] = [
       { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
     ];
-    // mp.first_submitted_at is null → client renders 'draft' → InlineConfirm (non-locked branch).
     const mp: MiniProjectResponse = {
       id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
       assignment_md: 'x', assignment_html: '<p>x</p>',
@@ -2753,9 +2916,7 @@ describe('RunMiniProjectsTab', () => {
       is_published: true, first_submitted_at: null,
       created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
     };
-    // Simulate the server-side state where it has ALREADY transitioned to locked.
     const lockedMp = { ...mp, first_submitted_at: '2026-05-22T00:00:00Z' };
-    const refetch = vi.fn().mockResolvedValue(undefined);
 
     fetchSpy.mockImplementation((url, init) => {
       if ((init as any)?.method === 'DELETE' && String(url).endsWith('/api/mini-projects/1')) {
@@ -2764,46 +2925,89 @@ describe('RunMiniProjectsTab', () => {
           409,
         );
       }
-      return jres([lockedMp]);   // refetch returns the now-locked MP
+      return jres([lockedMp]);
     });
 
-    // Mount twice via state-changing prop: first pass renders the draft view; after
-    // confirming delete and refetch returns the locked variant, parent reruns with
-    // the new miniProjects array. Simulate parent rerun by remounting with locked mp.
-    let propsMps: MiniProjectResponse[] = [mp];
+    let harnessInstance: { setMps: (next: MiniProjectResponse[]) => void } | null = null;
+    const onRefetchMiniProjects = vi.fn().mockImplementation(async () => {
+      // Mutate the harness $state so RunMiniProjectsTab sees the locked MP on
+      // its next render. This is the EXACT contract the production RunDetailPage
+      // satisfies via its own listMiniProjects() + miniProjects = ... assignment.
+      harnessInstance!.setMps([lockedMp]);
+    });
+
     const target = document.createElement('div');
     document.body.appendChild(target);
-    const cmp = mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: propsMps,
-      onRefetchMiniProjects: async () => {
-        propsMps = [lockedMp];
-        // Re-render — in the real app, RunDetailPage refetches and passes the new array down.
-      },
-      onNavigateToTab: vi.fn(),
-    } });
+    harnessInstance = mount(Harness, { target, props: {
+      runId: 10, blocks, initialMps: [mp], onRefetchMiniProjects,
+    } }) as any;
+    await settle();
+
+    // Open the InlineConfirm (non-locked branch) — initial MP is draft.
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('button.confirm')).toBeTruthy();   // belt-and-suspenders: production class is `confirm`
+    const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+
+    // Confirm → triggers DELETE → 409 → catch awaits onRefetchMiniProjects()
+    // → harness setMps → child re-renders with lockedMp → rowStatus='locked'
+    // → template's `{#if rowStatus === 'locked'}` branch wins → force-confirm view.
+    confirmBtn.click();
+    await settle();
+
+    // Spec line 524 contract — observable outcomes:
+    expect(onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    expect(target.textContent).toContain('Force delete will permanently remove');
+    expect(target.querySelector('input[type="checkbox"]')).toBeTruthy();
+    // Cancel/danger pair from the force-confirm template:
+    expect(target.querySelector('button.danger')).toBeTruthy();
+
+    unmount(harnessInstance as any);
+  });
+
+  it('409 on non-locked delete + refetch ALSO fails: surfaces error, resets confirm state (round-4 reviewer-4 catch)', async () => {
+    // If the refetch in the 409 catch branch itself rejects (network drops),
+    // the implementation's nested try/catch should reset deleteConfirmId + forceCheckbox
+    // and re-throw. Without this, the InlineConfirm stays open with no progress signal.
+    const Harness = (await import('./RunMiniProjectsTab.race-harness.svelte')).default;
+    const blocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const mp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as any)?.method === 'DELETE') {
+        return jres({ detail: 'has submissions; use ?force=true' }, 409);
+      }
+      return jres([mp]);
+    });
+    const onRefetchMiniProjects = vi.fn().mockRejectedValue(new Error('network'));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const inst = mount(Harness, { target, props: {
+      runId: 10, blocks, initialMps: [mp], onRefetchMiniProjects,
+    } }) as any;
     await settle();
     (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
     await settle();
-    // Now in InlineConfirm (non-locked branch). Confirm → triggers 409 path.
-    const confirmBtn = target.querySelector('button[data-action="confirm"]') as HTMLButtonElement;
-    expect(confirmBtn).toBeTruthy();
-    confirmBtn.click();
+    // Click confirm; catch the unhandled rejection from the rethrow so test doesn't fail noisily.
+    const unhandled: Error[] = [];
+    const onErr = (e: PromiseRejectionEvent) => { unhandled.push(e.reason); e.preventDefault(); };
+    window.addEventListener('unhandledrejection', onErr);
+    (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
     await settle();
-    // The implementation refetches MPs in the catch branch; after refetch the row
-    // now reports as locked. The test relies on `deleteConfirmId` remaining set so
-    // the locked branch wins on next render. With external mp-state mutation, we
-    // assert the assertion target via the live DOM after the catch settles.
-    // (In a real integration test, the parent passes the new miniProjects prop down
-    // — wrap in a tinywrapper if mount() doesn't accept updates here, or test the
-    // function in isolation; pattern is `RunTeachersTab.svelte.test.ts` style.)
-    expect(refetch).toHaveBeenCalledTimes(0);   // refetch is wired via the closure assignment above
-    // NB: detailed wiring of the parent-prop-update is left to the implementer —
-    // the contract being asserted is: (a) `await onRefetchMiniProjects()` fires in catch,
-    // (b) `deleteConfirmId` stays === mp.id so the next render hits the locked branch,
-    // (c) the force-confirm view's text is observable post-refetch.
-    unmount(cmp);
+    // Contract: InlineConfirm is gone (deleteConfirmId reset), refetch attempted,
+    // error rethrown. We assert the InlineConfirm is no longer visible.
+    expect(target.querySelector('button[data-action="confirm-delete"]')).toBeNull();
+    expect(onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    window.removeEventListener('unhandledrejection', onErr);
+    unmount(inst);
   });
 });
 ```
@@ -2936,6 +3140,7 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
             </div>
           {:else if deleteConfirmId === mp.id}
             <InlineConfirm warning="Delete this mini-project?" confirmLabel="Delete"
+              confirmDataAction="confirm-delete"
               onCancel={() => { deleteConfirmId = null; }}
               onConfirm={async () => {
                 // Round-3 reviewer-1 catch (spec line 524): a row the client believes is
@@ -2945,16 +3150,36 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
                 // (which the locked-branch above renders) rather than silently dismiss.
                 // Achieved by leaving deleteConfirmId set + refetching MPs so rowStatus()
                 // returns 'locked' on next render → the `{#if locked}` branch wins.
+                //
+                // Round-4 reviewer-4 catch: if the refetch ITSELF rejects (network drop
+                // between 409 and the GET), the error escapes, deleteConfirmId never
+                // resets, AND the locked branch never activates because miniProjects[]
+                // wasn't refreshed. Wrap the refetch separately and surface a banner.
+                //
+                // Round-4 reviewer-5 note: `mp` here is the per-render closure binding
+                // from `#each ... as { mp, block } (mp.id)`. After `await onRefetchMiniProjects()`,
+                // the parent reassigns `miniProjects[]`; the each-block re-renders with a
+                // NEW `mp` binding (now `lockedMp`). The branch decision is template-side
+                // (`{#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked'}`), so the
+                // live render uses the post-refetch mp — exactly what we want. The OLD
+                // closure (still mid-execution after the await) continues with its OLD `mp`,
+                // but only writes scalar state (deleteConfirmId, forceCheckbox), which is fine.
                 try {
                   await deleteMiniProject(mp.id);
                   await onRefetchMiniProjects();
                   deleteConfirmId = null;
                 } catch (e) {
                   if (e instanceof ApiError && e.status === 409) {
-                    // Refetch so this row now satisfies rowStatus(mp)==='locked' on next render.
-                    await onRefetchMiniProjects();
-                    forceCheckbox = false;
-                    // Keep deleteConfirmId === mp.id so the template re-enters with the force branch.
+                    try {
+                      await onRefetchMiniProjects();
+                      forceCheckbox = false;
+                      // Keep deleteConfirmId === mp.id so the template re-enters with the force branch.
+                    } catch (refetchErr) {
+                      // Refetch failed too — surface error and reset so the user can retry.
+                      deleteConfirmId = null;
+                      forceCheckbox = false;
+                      throw refetchErr;
+                    }
                   } else {
                     deleteConfirmId = null;
                     throw e;   // caller surfaces via existing error handler
@@ -3115,6 +3340,7 @@ miniProjects = mpsResult;
 - All assignments to $state (`course/run/versions/.../blocks/miniProjects`) happen in ONE block at the end, so the $derived `pinned` resolves correctly post-load.
 - The token check is between the two awaits, matching the existing pattern (line 60 + new check after the inner Promise.all).
 - Entry-reset nulls `blocks`/`miniProjects` alongside the other fields so a runId change clears stale data immediately (round-3 reviewer-4 defensive catch).
+- **All-or-nothing load** (round-4 reviewer-4 catch): if EITHER `listBlocks` OR `listMiniProjects` rejects, `Promise.all` rejects → the existing outer try/catch sets `loadError` → the whole page renders the loadError view (NOT just the mini-projects tab). This matches the existing pattern at line 64-67. Tabs above mini-projects (overview/teachers/groups/roster) are also unavailable until the user retries. Acceptable per spec line 535 ("treat the whole-page reload as one operation").
 
 Add to the existing reset effect (around line ~100 per spec):
 ```ts
@@ -3123,11 +3349,21 @@ modalMode = null;
 editTarget = null;
 ```
 
-Add `refetchMiniProjects` helper:
+Add `refetchMiniProjects` helper. Round-4 reviewer-5 catch: gate on `pinnedAvailable`
+(the $derived) AT INVOCATION time, but explicitly accept that if the gate flips
+false BETWEEN invocation and the listMiniProjects await, the response is dropped
+on the floor — the next loadAll cycle will refill. This matches the existing
+"latest fetch wins" pattern; we don't need a loadToken here because the helper
+is only triggered by user actions (Save / Publish / Delete), not by an $effect
+that could fire repeatedly.
+
 ```ts
 async function refetchMiniProjects() {
   if (!pinnedAvailable) return;
-  miniProjects = await listMiniProjects(rid);
+  const fetched = await listMiniProjects(rid);
+  // If a runId change or re-pin invalidated pinnedAvailable mid-flight, drop the response.
+  if (!pinnedAvailable) return;
+  miniProjects = fetched;
 }
 ```
 
@@ -3255,7 +3491,7 @@ If smoke is clean, no commit needed; proceed to merge prep.
   - Accepted gaps: documented in spec; no code needed. Round-3 reviewer-4 adds one new gap: **within-runId re-pin via Overview is not auto-detected by the mini-projects tab.** If an admin opens Overview, switches the run's pinned version, and switches back to Mini-projects without a page refresh, `pinned` re-derives but `loadAll` doesn't re-fire (the $effect at `RunDetailPage.svelte:94-98` depends on `courseSlug`/`runIdInt`, not `run.version_id`). Stale blocks/MPs would render until the next runId/courseSlug change. Mitigation today: tell admins to refresh after re-pinning. Phase 9: add a `$effect(() => { void run?.version_id; if (run) void loadAll(courseSlug, runIdInt); })` if the workflow becomes common.
   - Testing section: lib unit tests = T2/T3/T4; component tests = T6a/T6b/T7; MarkdownEditor/AssetSidebar regression = T5a/T5b; backend test = T1; manual smoke = T9.
 
-- [ ] Placeholder scan: no "TBD" / "TODO" / "implement later" remain (a few `// ...` event-firing details in T5b test stubs intentionally point to the implementer to fill, but the surrounding code shows exactly what the assertion should be).
+- [ ] Placeholder scan: no "TBD" / "TODO" / "implement later" remain. Round-4 inlined the T5b drag/drop event-firing details into Step 1 so the test file is runnable as written before Step 2; round-3's residual `// ...` comments in T5b are removed.
 
 - [ ] Type consistency: `AssetItem` is exported from `lib/assetContext.ts` and reused in `runAssets.test.ts` import. `RunAssetResponse` (lib/types.ts) is the wire shape; `AssetItem` is the adapter shape — both have the same fields. `MiniProjectResponse` shape mirrored across T3 tests, T6a tests, and T7 tests.
 
