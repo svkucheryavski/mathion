@@ -49,19 +49,35 @@ describe('isoToLocalInput', () => {
 });
 
 describe('formatLocalWithTz', () => {
-  it('formats UTC ISO with browser-local label', () => {
+  it('formats UTC ISO with browser-local label (summer / CEST = GMT+2)', () => {
     const out = formatLocalWithTz('2026-06-07T21:59:00Z');
     expect(out).toMatch(/2026-06-07/);
     expect(out).toMatch(/23:59/);
     expect(out).toMatch(/GMT\+2/);
   });
+
+  it('formats winter UTC ISO with GMT+1 label regardless of current season', () => {
+    // Regression: formatLocalWithTz must use the TARGET date's offset, not the
+    // current Date's offset. A winter deadline shown in summer must still
+    // render as GMT+1 (CET) — otherwise the displayed wall-clock time would
+    // mismatch the labelled offset.
+    const out = formatLocalWithTz('2026-01-15T11:00:00Z');
+    expect(out).toMatch(/2026-01-15/);
+    expect(out).toMatch(/12:00/);
+    expect(out).toMatch(/GMT\+1/);
+  });
 });
 
 describe('localTzLabel', () => {
-  it('returns a short-offset label string', () => {
+  it('returns a short-offset label string for the current moment', () => {
     // shape "(GMT+2)" or "(UTC)" depending on TZ; pinned to Copenhagen so
     // GMT+1 (winter) or GMT+2 (summer).
     const label = localTzLabel();
     expect(label).toMatch(/^\(GMT[+-]?\d?\)$|^\(UTC\)$/);
+  });
+
+  it('accepts a Date arg and uses ITS offset (so winter dates label as GMT+1)', () => {
+    expect(localTzLabel(new Date('2026-01-15T11:00:00Z'))).toMatch(/\(GMT\+1\)/);
+    expect(localTzLabel(new Date('2026-06-07T21:59:00Z'))).toMatch(/\(GMT\+2\)/);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { courseAssetContext, runAssetContext } from '../lib/assetContext';
 import type { AssetItem } from '../lib/assetContext';
+import * as events from '../lib/events';
 
 const fetchSpy = vi.fn();
 
@@ -124,5 +125,44 @@ describe('runAssetContext', () => {
       expect((e as InstanceType<typeof ApiError>).status).toBe(409);
       expect((e as InstanceType<typeof ApiError>).errorCode).toBe('asset_exists');
     }
+  });
+
+  it('upload wraps network failure in ApiError(0, ...) mirroring assets.ts:46', async () => {
+    // Mirrors uploadAsset network-failure handling at lib/assets.ts:41-53 so
+    // downstream `instanceof ApiError` consumers (AssetSidebar, MarkdownEditor)
+    // get a uniform error type for both the course and run upload paths.
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    const { ApiError } = await import('../lib/api');
+    const err = await ctx.upload(file).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 0 });
+  });
+
+  it('upload preserves AbortError (does NOT wrap user-cancelled fetch as ApiError(0))', async () => {
+    // Codex round-1 nit: when adding a network-failure catch, user-initiated
+    // cancellation must not be reclassified as a server-unreachable error.
+    fetchSpy.mockImplementation(() =>
+      Promise.reject(new DOMException('Aborted', 'AbortError')),
+    );
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    const { ApiError } = await import('../lib/api');
+    const err = await ctx.upload(file).catch((e) => e);
+    expect(err).not.toBeInstanceOf(ApiError);
+    expect((err as Error).name).toBe('AbortError');
+  });
+
+  it('upload on 401 calls emitUnauthorized(pathname+search+hash) before throwing', async () => {
+    // Mirrors uploadAsset 401 handling at lib/assets.ts:50-53 so expired
+    // sessions mid-upload bounce to login on the run path too.
+    const emitSpy = vi.spyOn(events, 'emitUnauthorized').mockImplementation(() => {});
+    fetchSpy.mockImplementation(() => jres({ detail: 'Not authenticated' }, 401));
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    const { ApiError } = await import('../lib/api');
+    await expect(ctx.upload(file)).rejects.toBeInstanceOf(ApiError);
+    expect(emitSpy).toHaveBeenCalledTimes(1);
+    const arg = emitSpy.mock.calls[0][0] as string;
+    expect(arg).toBe(location.pathname + location.search + location.hash);
+    emitSpy.mockRestore();
   });
 });
