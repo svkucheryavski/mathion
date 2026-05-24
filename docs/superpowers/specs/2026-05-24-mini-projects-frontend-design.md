@@ -26,6 +26,8 @@ Give course-admins a UI to create, edit, publish, and delete mini-projects on a 
 
 ## Decisions Already Fixed by Parent Specs
 
+*Backend `*.py:line` citations throughout this spec are relative to `backend/mathion/api/` unless otherwise prefixed (e.g. `backend/mathion/assets.py`, `backend/mathion/config.py`, `backend/mathion/schemas.py`, `backend/mathion/api/helpers.py`).*
+
 | Decision | Source |
 |---|---|
 | One mini-project per `(run, block)` | Phase 7b §"Decisions Already Fixed by Master Spec" |
@@ -40,6 +42,8 @@ Give course-admins a UI to create, edit, publish, and delete mini-projects on a 
 | **`GET /api/courses/by-slug/{slug}` and `GET /api/versions/{vid}/blocks` are course-admin-gated.** | `courses.py:77-80`, `blocks.py:99` |
 
 **Consequence of the last row:** RunDetailPage is currently unreachable to run-teachers who aren't course admins. This slice accepts that: every action on the tab is course-admin-implicitly. The earlier draft included `isCourseAdmin` row-action gating; that ladder is removed since `course.is_admin` is always `true` for anyone who can load the page. Relaxing by-slug to admit run-teachers is a separate slice.
+
+**Backend gating note:** the MP and run-asset mutation endpoints themselves use `require_run_admin_or_teacher` (not `require_course_admin`) per `backend/mathion/api/mini_projects.py` and `run_assets.py`. Force-delete on MP and run-asset is the only exception — both narrowed to `require_course_admin` per `mini_projects.py:206-209` and `run_assets.py:188`. The page-reachability gate via by-slug is what currently constrains this slice to course-admins; if/when by-slug is relaxed in a future slice, the existing backend gating accepts run-teachers correctly without further frontend changes.
 
 ## Scope Slice (Author only)
 
@@ -171,8 +175,9 @@ This is why there's no separate `lib/runRender.ts` — the run-render call lives
 ### `lib/datetime.ts` (small new helper)
 
 ```ts
-// Browser-local naive string "2026-06-07T23:59" → ISO with offset.
-// Implementation: new Date(naive).toISOString() — naive parsed as local per ECMA-262.
+// Browser-local naive string "2026-06-07T23:59" → ISO 8601 UTC string ending in "Z".
+// Implementation: new Date(naive).toISOString() — naive parsed as local per ECMA-262,
+// then serialized as UTC. Backend accepts ISO with "Z" suffix (UTC-aware datetime).
 // DST spring-forward: non-existent local times (e.g. "2026-03-29T02:30" in CET)
 // normalize forward by +1h per ECMA-262 §21.4.3.2; tests assert this.
 export function localInputToISO(value: string): string;
@@ -193,13 +198,21 @@ export function formatLocalWithTz(iso: string): string;
 export function localTzLabel(): string;
 ```
 
-All four are pure; tested in isolation with `TZ=Europe/Copenhagen` pinned via vitest setup file so DST + offset tests are deterministic.
+All four are pure; tested in isolation with `TZ=Europe/Copenhagen` pinned via the existing `vitest.setup.ts` (extend it; do NOT create a fresh global setup that could silently change other tests' local-date behavior).
 
 **Deadline values reflect the *current* browser TZ in the modal — `isoToLocalInput` converts stored UTC to whatever local the teacher is in now. A teacher traveling across TZs and reopening the modal will see deadline times shift accordingly. Accepted for this slice; explicit run-pinned TZ is future work.**
 
 ### Type additions in `lib/types.ts`
 
-Mirror Pydantic schemas: `MiniProjectCreate`, `MiniProjectUpdate`, `MiniProjectResponse`, `RunAssetResponse`. Export `type MiniProjectRowStatus = 'draft' | 'published' | 'locked'`.
+Mirror Pydantic schemas: `MiniProjectCreate`, `MiniProjectUpdate`, `MiniProjectResponse`, `RunAssetResponse`, and **`BlockResponse`** (currently absent from `lib/types.ts` — verified). Export `type MiniProjectRowStatus = 'draft' | 'published' | 'locked'`.
+
+### `lib/blocks.ts` (new — currently absent from the frontend)
+
+```ts
+listBlocks(versionId: number): Promise<BlockResponse[]>
+```
+
+Single thin wrapper around `GET /api/versions/{vid}/blocks`. Consumed by `RunDetailPage.loadAll` to populate the block picker.
 
 ## Extended Existing Components
 
@@ -208,25 +221,28 @@ Mirror Pydantic schemas: `MiniProjectCreate`, `MiniProjectUpdate`, `MiniProjectR
 **Prop signature change** (single existing call site — ItemEditPage):
 
 Before: `{ versionId: number; value: string; readOnly?: boolean; refreshKey?: number }`
-After: `{ assetContext: AssetContext; value: string; readOnly?: boolean; refreshKey?: number }`
+After: `{ assetContext: AssetContext; value: string; readOnly?: boolean; disabled?: boolean; refreshKey?: number; uploadAbortController?: AbortController | null }`
 
 Internal changes:
 - `loadPreview` calls `assetContext.renderPreview(value)`.
-- Textarea drag-drop handler (today calls `uploadAsset(versionId, file)` at `:93`) becomes `assetContext.upload(file)`.
+- Textarea drag-drop handler (today calls `uploadAsset(versionId, file)` at `:93`) becomes `assetContext.upload(file, controller.signal)`.
 - `formatRef` (filename+mime → markdown snippet, `lib/assets.ts:69`) is shape-agnostic; reused unchanged.
-- `AssetSidebar` instance receives the same `assetContext` (passed through).
-- **Upload-state ownership preserved** (feasibility-reviewer Critical): the existing `uploading` / `uploadProgress` / `uploadError` $state lives in MarkdownEditor and is `$bindable` into AssetSidebar so that all three upload entry points (textarea drop, wrapper drop, sidebar drop) share a single overlay + error display. The adapter swap MUST preserve this contract. AssetSidebar still receives `bind:uploading`, `bind:uploadProgress`, `bind:uploadError`.
+- `AssetSidebar` instance receives the same `assetContext` (passed through), plus a `disabled` prop.
+- **Upload-state ownership preserved**: the existing `uploading` / `uploadProgress` / `uploadError` $state lives in MarkdownEditor and is `$bindable` into AssetSidebar so that all three upload entry points (textarea drop, wrapper drop, sidebar drop) share a single overlay + error display. AssetSidebar still receives `bind:uploading`, `bind:uploadProgress`, `bind:uploadError`.
+- **`uploadAbortController` is parent-owned in MarkdownEditor** (codex-review Critical): the controller is created here when ANY upload starts (textarea-drop, wrapper-drop, OR sidebar-drop — covers all three entry points) and cleared on resolve/reject. Exposed via `$bindable<AbortController | null>` so a consumer modal can read+abort it through `bind:uploadAbortController`. AssetSidebar does NOT own its own controller; it receives controller-creation as a callback or shares parent's state. The non-abort upload `.catch` branches set `uploadError`; the `e.name === 'AbortError'` branch is silent.
+- **`disabled` prop** (codex-review Critical): when truthy, ALL interactive handlers no-op — textarea drag-drop, wrapper drag-drop, preview button, mode toggle. Textarea itself gets `disabled={disabled}`. Sidebar is passed `disabled` through.
 
 ### `components/editor/AssetSidebar.svelte`
 
-Same prop change: `{ assetContext: AssetContext; refreshKey?: number; onInsert: (snippet: string) => void; ... }`. Internally:
+Same prop change: `{ assetContext: AssetContext; disabled?: boolean; refreshKey?: number; onInsert: (snippet: string) => void; ... }`. Internally:
 - `fetchAssets` calls `assetContext.list()`.
-- Upload calls `assetContext.upload(file, signal)`.
+- Upload calls `assetContext.upload(file, signal)` where `signal` comes from the controller created in MarkdownEditor (passed via callback or shared state).
 - Delete calls `assetContext.remove(assetId)`.
 - `imgSrc(asset)` calls `assetContext.imgSrc(item)`.
 - Section label switches on `assetContext.kind`: "Course assets" vs "Run assets — shared across all MPs in this run".
 - Cursor-aware "Insert ref" (`cursorReady` + `onInsert(snippet)`) preserved unchanged; covered by an explicit test that mounts AssetSidebar with `runAssetContext` and verifies the insert callback receives the right snippet at the right cursor offset.
-- Upload-state bindings (`uploading`, `uploadProgress`, `uploadError`) remain `$bindable` and parent-owned.
+- Upload-state bindings (`uploading`, `uploadProgress`, `uploadError`) remain `$bindable` and parent-owned in MarkdownEditor.
+- **`disabled` prop**: when truthy, the file-input drop zone, upload button, "Insert ref" buttons, and per-row delete buttons all no-op (and visually use `disabled` styling). The list itself still renders.
 
 ### Client-side file pre-validation (in AssetSidebar before calling `assetContext.upload`)
 
@@ -234,7 +250,7 @@ Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. Ove
 
 ### AbortController plumbing
 
-AssetSidebar tracks an in-flight upload's `AbortController`. Modal Cancel during upload calls `controller.abort()`. **Server-side: the upload is atomic (DB row + filesystem write commit together at `run_assets.py:60-96`) and is NOT abort-aware** — the server may have committed by the time the client's signal fires, leaving an orphan asset row in the run pool that is visible (and trash-able) on next sidebar refetch. Spec accepts this; documented in "Race / Staleness Handling". Test recipe in jsdom: mock `fetch` rejects with `new DOMException('Aborted', 'AbortError')` when `signal` fires.
+MarkdownEditor owns the upload's `AbortController` (covering ALL THREE upload entry points: textarea drop, wrapper drop, sidebar drop). The modal reads it via `bind:uploadAbortController={...}` on MarkdownEditor. Modal Cancel during upload calls `controller.abort()`. **Server-side: the upload is atomic (DB row + filesystem write commit together at `backend/mathion/api/run_assets.py:60-96`) and is NOT abort-aware** — the server may have committed by the time the client's signal fires, leaving an orphan asset row in the run pool that is visible (and trash-able) on next sidebar refetch. Spec accepts this; documented in "Race / Staleness Handling". Test recipe in jsdom: mock `fetch` rejects with `new DOMException('Aborted', 'AbortError')` when `signal` fires.
 
 ## New Components
 
@@ -299,12 +315,34 @@ Props:
 **Internal architecture:**
 - `assetContext = $derived(runAssetContext(runId))` (memoized; not constructed per render).
 - `formData` $state: `{ block_id, soft_local, hard_local, resub_local, assignment_md }` — datetime fields hold naive local strings throughout the modal; converted via `localInputToISO` only at POST/PATCH time.
-- `submitting` $state. **Inputs disabled while submitting:** `assignment_md` textarea, all three datetime inputs, the block picker, and the AssetSidebar (upload + insert-ref buttons) all set `disabled={submitting}`. This prevents the in-flight-edit data-loss case where a user keeps typing after Save → PATCH carries the pre-click snapshot → post-click edits are silently lost on the success refetch.
+- `submitting` $state. **Inputs disabled while submitting:** all three datetime inputs and the block picker set `disabled={submitting}` directly; the MarkdownEditor and AssetSidebar both receive `disabled={submitting}` via the new `disabled` prop documented in their contracts above (textarea + drag-drop handlers + sidebar upload/insert/delete all no-op). This prevents the in-flight-edit data-loss case where a user keeps typing after Save → PATCH carries the pre-click snapshot → post-click edits are silently lost on the success refetch.
 - `mounted` $state: set `true` in `onMount`, `false` in `onDestroy`. Every post-await state write inside the modal (Save success, upload `.catch` for non-abort errors, etc.) checks `if (!mounted) return;` first. This covers the unmounted-state-write race surfaced by the edge-case reviewer (covers close-during-upload, close-during-Save, close-during-publish all as one rule).
-- **Dirty-confirm via `InlineConfirm` footer-row.** Single guarded close path:
+- **Dirty-confirm via `InlineConfirm` footer-row.** Tracks the full form snapshot (block_id, three deadlines, markdown) so accidental loss of deadline edits also triggers the confirm:
   ```ts
+  // Plain object snapshot of the 5 form fields taken once on mount (NOT a $state proxy).
+  const initialFormSnapshot = {
+    block_id: initial?.block_id ?? null,
+    soft_local: initial ? isoToLocalInput(initial.soft_deadline) : '',
+    hard_local: initial ? isoToLocalInput(initial.hard_deadline) : '',
+    resub_local: initial ? isoToLocalInput(initial.resubmission_deadline) : '',
+    assignment_md: initial?.assignment_md ?? '',
+  };
+
+  // currentFormSnapshot is a plain-object projection of formData re-built on every read.
+  function currentFormSnapshot() {
+    return {
+      block_id: formData.block_id ?? null,
+      soft_local: formData.soft_local,
+      hard_local: formData.hard_local,
+      resub_local: formData.resub_local,
+      assignment_md: formData.assignment_md,
+    };
+  }
+
   let pendingClose = $state(false);
-  const dirty = $derived(formData.assignment_md !== (initial?.assignment_md ?? ''));
+  const dirty = $derived(
+    JSON.stringify(currentFormSnapshot()) !== JSON.stringify(initialFormSnapshot)
+  );
 
   function closeForCurrentStage() {
     if (submitting) return;
@@ -316,8 +354,8 @@ Props:
     onClose();
   }
   ```
-  When `pendingClose` is true, the footer renders an `InlineConfirm` row: *"Discard unsaved changes? [Keep editing] [Discard]"*. **Keep editing** sets `pendingClose=false` (returns to normal footer). **Discard** calls `closeForCurrentStage` again (now passes through to `onClose`). Backdrop / `[×]` / Escape all route through `closeForCurrentStage`. Dirty heuristic is a plain string compare on `assignment_md` only — deadlines and block_id changes are smaller/cheaper to re-enter and not worth the snapshot-deep-compare footgun the reviewers warned about. Matches the publish-confirm pattern already in the modal.
-- `uploadAbortController` $state: the latest in-flight `AbortController` from `assetContext.upload`. **Created inside `AssetSidebar`** (where the upload call lives) and exposed to the modal via `$bindable` (matching the existing `bind:uploading/uploadProgress/uploadError` plumbing). The modal reads it through `bind:uploadAbortController={...}` so `closeForCurrentStage` can call `.abort()` before `onClose()`. The sidebar's upload `.catch` branches on `e.name === 'AbortError'` and skips setting `uploadError` for user-initiated aborts.
+  When `pendingClose` is true, the footer renders an `InlineConfirm` row with `warning="Discard unsaved changes?"` and `confirmLabel="Discard"`. The existing component's cancel button reads "Cancel" — equivalent to "Keep editing" in this context; no component-API extension needed. **Cancel** sets `pendingClose=false` (returns to normal footer). **Discard** calls `closeForCurrentStage` again (now passes through to `onClose`). Backdrop / `[×]` / Escape all route through `closeForCurrentStage`. Comparing plain-object snapshots (not $state proxies) avoids the proxy-key-order footgun the third reviewer flagged.
+- `uploadAbortController` $state: the latest in-flight `AbortController` for the active upload. **Created inside MarkdownEditor** (which owns ALL THREE upload entry points: textarea drop, wrapper drop, sidebar drop — see the MarkdownEditor section above) and exposed via `$bindable`. The modal reads it through `bind:uploadAbortController={...}` on MarkdownEditor so `closeForCurrentStage` can call `.abort()` before `onClose()`. MarkdownEditor's non-abort upload `.catch` branch sets `uploadError`; the `e.name === 'AbortError'` branch is silent.
 - `[Publish…]` rendered only when `mode === 'edit'` and `!initial.is_published`. Click flips footer into an `InlineConfirm` with copy: *"Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."*
 - **Modal close on runId change** is wired into RunDetailPage's existing reset-effect (the one at line ~100 that already resets `activeTab`, `rosterPrefilter`, `showImportModal`). Just add `showMiniProjectModal = false`. No new effect. (Single-tick window: the modal sees the new runId in $derived re-eval before the reset-effect fires; `submitting` guard + immediate close on next microtask keeps no operations from dispatching in the interim.)
 
@@ -333,7 +371,7 @@ Props:
   - `hard_local` set
   - `resub_local` set
   - `new Date(hard_iso) > new Date()` (client-side proactive warning — backend re-checks)
-  - `hard_iso <= runEndDate + 'T23:59:59Z'` (UTC boundary; teachers in deep west TZs may see this be confusing because their local June 30 23:30 is July 1 UTC; documented as accepted behavior — the alternative — local-offset boundary — drifts as the teacher moves)
+  - `hard_iso <= runEndDate + 'T23:59:59Z'` (matches backend publish check at `backend/mathion/api/mini_projects.py:258-281` which does `hard_aware.date() > run.end_date` in UTC). **Note: this is a product-visible discrepancy with the existing run-status logic at `frontend/src/lib/runStatus.ts`, which treats `run.end_date` as a browser-local end-of-day boundary.** A teacher in HST setting hard_deadline to June 30 23:30 local (= July 1 09:30 UTC) sees publish fail even though their local clock says it's still June 30. Spec accepts this as inherited backend behavior; the cleanest fix is for backend publish to switch to `hard_aware.date() > run.end_date` in the run's local TZ once per-run TZ pinning lands in Phase 9.
   - `runIsPublished === true`
 
 **Publish-precondition presentation:** Inline banner inside the modal body (NOT floating sticky — so unbounded length doesn't push the footer off-screen). Each unmet precondition is a bullet with substituted value:
@@ -489,7 +527,7 @@ Established patterns plus what was kept after the second-pass review:
 **~11 tasks**, per-task review loop (reviewer + codex parallel):
 
 - T1: backend `POST /api/runs/{rid}/render` endpoint + test
-- T2: `lib/types.ts` additions + `lib/datetime.ts` + `lib/assetContext.ts` (both factories) + tests (incl. TZ-pinned setup file)
+- T2: `lib/types.ts` additions (incl. new `BlockResponse` type, currently absent in the frontend) + `lib/blocks.ts` with `listBlocks(versionId): Promise<BlockResponse[]>` (currently absent) + `lib/datetime.ts` + `lib/assetContext.ts` (both factories) + tests (incl. TZ-pinned setup file)
 - T3: `lib/miniProjects.ts` + tests
 - T4: `lib/runAssets.ts` (incl. AbortSignal, pre-validation constants) + tests
 - T5a: MarkdownEditor + AssetSidebar refactor to `assetContext` prop; `bind:uploading/uploadProgress/uploadError` preserved; `ItemEditPage` call-site migration; existing-behavior regression tests pass
