@@ -250,8 +250,8 @@
 <div class="editor">
   {#if !readOnly}
     <div class="tabs">
-      <button type="button" aria-pressed={mode === 'edit'} disabled={disabled} onclick={() => setMode('edit')}>Edit</button>
-      <button type="button" aria-pressed={mode === 'preview'} disabled={disabled} onclick={() => setMode('preview')}>Preview</button>
+      <button type="button" data-action="edit" aria-pressed={mode === 'edit'} disabled={disabled} onclick={() => setMode('edit')}>Edit</button>
+      <button type="button" data-action="preview" aria-pressed={mode === 'preview'} disabled={disabled} onclick={() => setMode('preview')}>Preview</button>
     </div>
   {/if}
   {#if mode === 'edit' && !readOnly}
