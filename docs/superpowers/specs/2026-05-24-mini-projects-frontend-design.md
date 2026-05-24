@@ -19,7 +19,7 @@ Give course-admins a UI to create, edit, publish, and delete mini-projects on a 
 - **Read-only MPs × groups dashboard matrix** — deferred to slice B (where matrix cells become clickable into the submission/evaluation surface, giving the matrix real value beyond duplicating the per-row pills already in this slice's list).
 - Editing locked mini-projects (those with submissions). `[Edit]` is hidden on locked rows in this slice; locked-MP deadline-extend lands in slice B.
 - **Optimistic-concurrency / concurrent-edit detection.** Phase 9 has proper `If-Match` slated. On a low-frequency authoring surface, an `updated_at` refetch-and-compare adds complexity (extra round-trip, never-converging Reload/Continue UX, toast component that doesn't support buttons today) without solving the underlying race. This slice accepts silent overwrite. The only mitigation: if the server returns a 409 the modal already surfaces it as an inline banner with the server message; the user can refresh manually.
-- **Dirty-confirm on modal close.** Peer modals (RunGroupsTab, RosterImportModal, NewRunModal) have none; the third reviewer pass flagged a JSON.stringify-on-$state-proxy footgun, a `window.confirm` UX clash, and a 404-banner-vs-confirm interaction. This slice matches peer-modal precedent: misclicked close loses unsaved markdown silently. Accepted. Route-level DirtyGuard wiring can wrap longer-lived edit views in slice B.
+- **Route-level DirtyGuard wiring.** `DirtyGuard` is route-level (`registerNavigationGuard` + `beforeunload`) and doesn't catch modal-internal close. Modal-internal dirty-confirm lives in `closeForCurrentStage` via an inline footer-row pattern (see modal section). Route-level guard wiring lands in slice B alongside longer-lived edit views.
 - Optimistic UI updates. MP authoring is low-frequency; refetch round-trips are fine.
 - Scheduled deadline notifications, email delivery (Phase 9).
 - Full Phase 7c teacher progress dashboard (sequences × students coverage).
@@ -248,8 +248,9 @@ Props:
   runGroupsEnabled: boolean;
   runEndDate: string | null;             // ISO date; used in publish-precondition copy
   versionIsDisabled: boolean;
-  blocks: BlockResponse[];                // pinned version's blocks (from RunDetailPage)
-  miniProjects: MiniProjectResponse[];
+  pinnedAvailable: boolean;               // false → render "Cannot load — pinned version not found" instead of normal body
+  blocks: BlockResponse[];                // pinned version's blocks (from RunDetailPage); empty array when !pinnedAvailable
+  miniProjects: MiniProjectResponse[];     // empty array when !pinnedAvailable
   onRefetchMiniProjects: () => Promise<void>;
   onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
 }
@@ -298,16 +299,25 @@ Props:
 **Internal architecture:**
 - `assetContext = $derived(runAssetContext(runId))` (memoized; not constructed per render).
 - `formData` $state: `{ block_id, soft_local, hard_local, resub_local, assignment_md }` — datetime fields hold naive local strings throughout the modal; converted via `localInputToISO` only at POST/PATCH time.
-- `submitting` $state. The single guarded close path:
+- `submitting` $state. **Inputs disabled while submitting:** `assignment_md` textarea, all three datetime inputs, the block picker, and the AssetSidebar (upload + insert-ref buttons) all set `disabled={submitting}`. This prevents the in-flight-edit data-loss case where a user keeps typing after Save → PATCH carries the pre-click snapshot → post-click edits are silently lost on the success refetch.
+- `mounted` $state: set `true` in `onMount`, false in `$effect.root` cleanup (or via Svelte 5's component teardown). Every post-await state write inside the modal (clipboard `.then`, Save success, upload `.catch` for non-abort errors, etc.) checks `if (!mounted) return;` first. This covers the unmounted-state-write race surfaced by the edge-case reviewer (covers close-during-upload, close-during-Save, close-during-publish all as one rule).
+- **Dirty-confirm via `InlineConfirm` footer-row.** Single guarded close path:
   ```ts
+  let pendingClose = $state(false);
+  const dirty = $derived(formData.assignment_md !== (initial?.assignment_md ?? ''));
+
   function closeForCurrentStage() {
     if (submitting) return;
-    uploadAbortController?.abort();  // cancel any in-flight asset upload
+    if (dirty && !pendingClose) {
+      pendingClose = true;  // flip footer to InlineConfirm
+      return;
+    }
+    uploadAbortController?.abort();
     onClose();
   }
   ```
-  Backdrop / `[×]` / Escape all route through this. **No dirty-confirm.** Peer modals (RunGroupsTab inline edit, RosterImportModal, NewRunModal) have no dirty-confirm; matching precedent eliminates the JSON.stringify/proxy comparison footgun, the `window.confirm` UX clash, the post-save re-snapshot machinery, and the 404-banner interaction problem. The cost: a misclicked close loses unsaved markdown silently. Accepted for this slice; route-level DirtyGuard can wrap longer-lived edit views in slice B.
-- `uploadAbortController` $state: the latest in-flight `AbortController` from `assetContext.upload`. Set when upload starts, cleared on resolve/reject. `closeForCurrentStage` aborts it before `onClose()` so an upload-in-flight during close doesn't strand a server-committed orphan **and** doesn't try to update unmounted-modal state on resolve.
+  When `pendingClose` is true, the footer renders an `InlineConfirm` row: *"Discard unsaved changes? [Keep editing] [Discard]"*. **Keep editing** sets `pendingClose=false` (returns to normal footer). **Discard** calls `closeForCurrentStage` again (now passes through to `onClose`). Backdrop / `[×]` / Escape all route through `closeForCurrentStage`. Dirty heuristic is a plain string compare on `assignment_md` only — deadlines and block_id changes are smaller/cheaper to re-enter and not worth the snapshot-deep-compare footgun the reviewers warned about. Matches the publish-confirm pattern already in the modal.
+- `uploadAbortController` $state: the latest in-flight `AbortController` from `assetContext.upload`. **Created inside `AssetSidebar`** (where the upload call lives) and exposed to the modal via `$bindable` (matching the existing `bind:uploading/uploadProgress/uploadError` plumbing). The modal reads it through `bind:uploadAbortController={...}` so `closeForCurrentStage` can call `.abort()` before `onClose()`. The sidebar's upload `.catch` branches on `e.name === 'AbortError'` and skips setting `uploadError` for user-initiated aborts.
 - `[Publish…]` rendered only when `mode === 'edit'` and `!initial.is_published`. Click flips footer into an `InlineConfirm` with copy: *"Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."*
 - **Modal close on runId change** is wired into RunDetailPage's existing reset-effect (the one at line ~100 that already resets `activeTab`, `rosterPrefilter`, `showImportModal`). Just add `showMiniProjectModal = false`. No new effect. (Single-tick window: the modal sees the new runId in $derived re-eval before the reset-effect fires; `submitting` guard + immediate close on next microtask keeps no operations from dispatching in the interim.)
 
@@ -350,7 +360,7 @@ Each bullet uses `aria-describedby` on the offending field. The "Open Overview" 
 | 409 on asset delete | ref count > 0 | inline sidebar error with backend message (`"Asset 'X' is referenced by N mini-project(s). Use ?force=true to delete."`) |
 | 422 on create/patch | bad payload | field-level error |
 | 422 on render preview | bad markdown ref | inline preview-pane error showing the missing filenames |
-| 404 on Save | MP deleted between open and Save | inline banner: "This mini-project has been deleted." with an explicit `[Copy markdown to clipboard]` button next to the banner that runs `navigator.clipboard.writeText(formData.assignment_md)` and shows "Copied ✓" inline on success or "Copy failed — select the textarea text manually" on `clipboard.writeText` rejection (covers non-secure contexts / permission denied). Modal stays open until user closes (no dirty-confirm to interfere now). |
+| 404 on Save | MP deleted between open and Save | inline banner: "This mini-project has been deleted. Select-all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C) from the assignment textarea if you want to preserve your work before closing." Modal stays open; textarea is no longer `disabled` once submitting resolves so the user can copy. The dirty-confirm footer-row WILL fire on close in this state — accepted, because the user has just been instructed to copy and clicking Discard is a deliberate confirmation. |
 | 5xx / network | unexpected | red banner in modal; modal stays open |
 | 401 | session expired | existing global handler (silent return; auth redirects) |
 
@@ -358,7 +368,7 @@ Each bullet uses `aria-describedby` on the offending field. The "Open Overview" 
 
 - `ActiveTab` type: add `'mini-projects'`.
 - 5th tab button "Mini-projects".
-- `loadAll`: existing fan-out resolves `versions` in the inner Promise.all. **Add a sequenced step after `versions`:** find `pinned = versions.find(v => v.id === run.version_id)`. If `pinned == null` (defensive — version row hard-deleted while run kept its FK), render an inline "Cannot load — pinned version not found" error in the Mini-projects tab and skip the blocks/MP fetches. Otherwise, `Promise.all([listBlocks(pinned.id), listMiniProjects(rid)])` in parallel.
+- `loadAll`: existing fan-out resolves `versions` in the inner Promise.all. **Add a sequenced step after `versions`:** find `pinned = versions.find(v => v.id === run.version_id)`. When `pinned == null` (defensive — version row hard-deleted while run kept its FK, or versions list is empty), set `blocks = []`, `miniProjects = []`, and pass `pinnedAvailable={false}` to the tab so it renders "Cannot load — pinned version not found." Otherwise, `Promise.all([listBlocks(pinned.id), listMiniProjects(rid)])` in parallel; pass `pinnedAvailable={true}`.
 - New state: `blocks: BlockResponse[] | null`, `miniProjects: MiniProjectResponse[] | null`, `showMiniProjectModal: boolean`, plus modal-mode state.
 - `refetchMiniProjects()` helper passed to the tab.
 - **Modal close on runId change folds into the existing reset effect** — add `showMiniProjectModal = false` (and clear modal-related state) alongside the existing `activeTab='overview'` / `rosterPrefilter=null` / `showImportModal=false` resets.
@@ -425,10 +435,14 @@ Established patterns plus what was kept after the second-pass review:
   - Create flow: block picker filtered, POST body shape (`localInputToISO` conversion verified), success refetches and closes
   - Edit flow: prefill, read-only block label, modal closes on success
   - Validation: deadline order; empty assignment blocks Save
+  - Inputs disabled while submitting: textarea, datetime fields, block picker, sidebar upload all set `disabled={submitting}`; user keystrokes during in-flight save are no-ops
   - Publish flow: precondition bullets render with substituted runEndDate; field-level `aria-describedby`; inline confirm; 409 surfaces as inline banner
   - 409-PATCH: shows "Refresh to see latest"; modal stays open
-  - 404 on Save: inline banner renders with `[Copy markdown to clipboard]` button; clicking it calls `navigator.clipboard.writeText` with current `assignment_md` and shows "Copied ✓"; on `writeText` rejection (mocked), shows "Copy failed" fallback message
-  - Close handler: backdrop/X/Escape → `closeForCurrentStage` → aborts any in-flight upload + calls `onClose` (mock `AbortController.abort` is called when upload-in-flight); no dirty-confirm prompt fires
+  - 404 on Save: inline banner renders with Ctrl/Cmd+A/+C instructions
+  - Close handler — clean form: backdrop/X/Escape → `closeForCurrentStage` → calls `onClose` immediately
+  - Close handler — dirty form: footer flips to InlineConfirm; "Keep editing" returns to normal footer; "Discard" calls `onClose`
+  - Close handler aborts in-flight upload: `bind:uploadAbortController` is read by the modal; `closeForCurrentStage` calls `.abort()` before `onClose()`; sidebar's upload `.catch` ignores `AbortError`
+  - `mounted` flag: simulate close-during-clipboard-await OR close-during-Save-resolve; assert no post-await state write fires (`expect(setState).not.toHaveBeenCalled()` after unmount)
   - Save-then-Publish: Publish disabled while saving; button text changes to "Saving…"
   - X during submitting: ignored (early-return); subsequent click after submit resolves closes normally
   - Modal `max-width: 1100px; max-height: 90vh; overflow: auto`; sticky header + footer remain visible after long content
@@ -466,8 +480,9 @@ Established patterns plus what was kept after the second-pass review:
 8. Set deadlines + run.is_published=true; Publish → confirm → Published.
 9. Force-delete a locked MP (after seeding a submission via DB) — checkbox + force confirms; deletes.
 10. Disable groups on Overview — banner appears on Mini-projects tab; click link → switches to Overview.
-11. Edit modal, type some markdown, click X — modal closes silently (no dirty-confirm; matches peer-modal precedent). Reopen, verify markdown was discarded.
-12. 404 path (delete the MP via DB while modal is open, click Save) — banner shows `[Copy markdown to clipboard]` button; click → "Copied ✓"; markdown is in clipboard.
+11. Edit modal, type some markdown, click X — footer flips to InlineConfirm "Discard unsaved changes?"; click Keep editing → footer reverts, modal stays; click X again → confirm reappears; click Discard → modal closes; reopen and verify the new text is gone.
+12. While Save is in flight, try to type into the textarea / upload an asset — inputs are disabled, nothing happens.
+13. 404 path (delete the MP via DB while modal is open, click Save) — banner shows Ctrl/Cmd+A/+C instructions; user selects text manually, copies, then closes (dirty-confirm fires; Discard).
 
 ## Estimated Plan Size
 
@@ -479,11 +494,11 @@ Established patterns plus what was kept after the second-pass review:
 - T4: `lib/runAssets.ts` (incl. AbortSignal, pre-validation constants) + tests
 - T5a: MarkdownEditor + AssetSidebar refactor to `assetContext` prop; `bind:uploading/uploadProgress/uploadError` preserved; `ItemEditPage` call-site migration; existing-behavior regression tests pass
 - T5b: new run-mode tests for MarkdownEditor + AssetSidebar (preview URL, list URL, imgSrc URL, drag-drop, abort, pre-validation, cursor insert)
-- T6a: `MiniProjectModal.svelte` create + edit + `closeForCurrentStage` (abort-in-flight-upload-on-close, no dirty-confirm); tests
-- T6b: `MiniProjectModal.svelte` publish flow + precondition bullets + 409 PATCH banner + 404 Save banner with `[Copy markdown]` button; tests
+- T6a: `MiniProjectModal.svelte` create + edit + `closeForCurrentStage` (InlineConfirm footer dirty-confirm, abort-in-flight-upload-on-close, mounted-flag rule, inputs-disabled-while-submitting); tests
+- T6b: `MiniProjectModal.svelte` publish flow + precondition bullets + 409 PATCH banner + 404 Save banner (with Ctrl/Cmd+A/+C copy instructions); tests
 - T7: `RunMiniProjectsTab.svelte` shell + gating + actionable banners + list rendering + force-delete confirm; tests
-- T8: `RunDetailPage` integration (5th tab, loadAll sequencing for blocks-after-versions + pinned-null defensive, reset-effect modal-close fold-in, `onNavigateToTab` wiring); tests
-- T9: 12-step manual smoke
+- T8: `RunDetailPage` integration (5th tab, loadAll sequencing for blocks-after-versions + `pinnedAvailable` prop, reset-effect modal-close fold-in, `onNavigateToTab` wiring); tests
+- T9: 13-step manual smoke
 
 writing-plans refines exact dependencies and TDD shape per task.
 
