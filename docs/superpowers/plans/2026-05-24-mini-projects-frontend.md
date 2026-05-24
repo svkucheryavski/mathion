@@ -1817,7 +1817,7 @@ describe('MarkdownEditor with runAssetContext', () => {
   });
 });
 
-describe('AssetSidebar error surfaces (reviewer-1 catch — spec lines 525, 527)', () => {
+describe('AssetSidebar error surfaces (reviewer-1 catch — spec line 527 asset-delete 409)', () => {
   it('asset delete 409: surfaces backend message in sidebar error slot', async () => {
     // Mount sidebar with one asset; click delete; mock DELETE to return 409 with
     // {detail: "Asset 'X' is referenced by N mini-project(s). Use ?force=true to delete."}.
@@ -2031,7 +2031,7 @@ describe('MiniProjectModal — create mode', () => {
     expect(saveBtn.disabled).toBe(true);
   });
 
-  it('422 on POST: renders field-level error spans + aria-describedby wiring (spec line 526)', async () => {
+  it('422 on POST: renders field-level error spans + aria-describedby wiring (spec line 527)', async () => {
     // Codex catch: spec 526 mandates field-level UX for 422. Backend returns
     // ValidationErrorDetail[] like `[{ loc: ['body', 'assignment_md'], msg: 'must be non-empty', type: 'value_error' }]`.
     // ApiError.validationErrors() returns the array; handleSave maps last-loc-segment → msg.
@@ -2221,7 +2221,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
   });
 
   it('inputs disabled while submitting: textarea, datetime fields, block picker, MarkdownEditor all set disabled', async () => {
-    // Spec line 606: verify all interactive inputs disable simultaneously when submitting.
+    // Spec line 607: verify all interactive inputs disable simultaneously when submitting.
     let resolvePost!: (v: unknown) => void;
     fetchSpy.mockImplementation((url, init) => {
       if (String(url).includes('/api/mini-projects') && (init as any)?.method === 'PATCH') {
@@ -2251,7 +2251,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
   });
 
   it('X during submitting is ignored; subsequent click after submit resolves closes normally', async () => {
-    // Spec line 615.
+    // Spec line 617.
     let resolvePost!: (v: unknown) => void;
     fetchSpy.mockImplementation((url, init) => {
       if (String(url).includes('/api/mini-projects') && (init as any)?.method === 'PATCH') {
@@ -2288,7 +2288,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
   });
 
   it('close-during-upload aborts the in-flight upload via bind:uploadAbortController', async () => {
-    // Spec line 612. Mount with a stub MarkdownEditor that exposes a controller via
+    // Spec line 614. Mount with a stub MarkdownEditor that exposes a controller via
     // its bind:uploadAbortController prop; trigger an upload that hangs; click X;
     // assert the controller's .abort() was called.
     // Implementation hint: this test can't easily use the real MarkdownEditor
@@ -2343,7 +2343,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     // even with correct CSS. Layout/visual regressions belong in Playwright/Cypress;
     // here we only assert structural presence (the elements exist with the expected
     // selectors so styling has somewhere to attach).
-    // Spec line 488 + line 616.
+    // Spec line 489 + line 618.
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -2525,7 +2525,7 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   });
 
   let serverError = $state<string | null>(null);  // for 409/PATCH banner, 404, 5xx
-  // Codex catch: spec line 526 mandates field-level UX for 422
+  // Codex catch: spec line 527 mandates field-level UX for 422
   // ValidationErrorDetail[] payloads — not just a single banner. Map
   // ApiError.validationErrors() → `{ [fieldName]: msg }` so the template can
   // render per-field error spans with stable IDs that match each input's
@@ -2581,7 +2581,7 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
       //
       // Codex catch: for 422 also populate `fieldErrors` from
       // `e.validationErrors()` so the template renders per-field spans
-      // (spec line 526). The banner stays as a summary; field spans
+      // (spec line 527). The banner stays as a summary; field spans
       // are the actionable affordance.
       if (e instanceof ApiError && e.status === 404) {
         serverError = 'This mini-project has been deleted. Select-all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C) from the assignment textarea if you want to preserve your work before closing.';
@@ -2611,7 +2611,7 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   </header>
   <div class="body">
     <!--
-      Codex catch: spec line 526 mandates field-level UX for 422 errors.
+      Codex catch: spec line 527 mandates field-level UX for 422 errors.
       Each input below renders an `aria-describedby` pointing at a stable
       ID; if `fieldErrors[name]` is set, render a `<span id="err-{name}">`
       after the input. Screen readers announce the error when focus lands.
@@ -2694,11 +2694,11 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
 </div>
 
 <style>
-  /* Round-7 reviewer-1 catch: spec line 488 mandates sticky header + footer.
+  /* Round-7 reviewer-1 catch: spec line 489 mandates sticky header + footer.
      `.modal` is `overflow: auto`, so the sticky elements stick to its
      scrolling viewport (top: 0 for header, bottom: 0 for footer). Without
      these, long body content scrolls header/footer out of view — failing
-     spec line 488 + the related smoke step at spec 641-653. The T6a
+     spec line 489 + the related smoke step at spec 641-653. The T6a
      "modal layout" test only asserts structural presence (jsdom can't
      reliably check computed styles for scoped CSS), so this rule would
      silently regress if dropped. */
@@ -2782,8 +2782,8 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
   /publish is NOT called. Locks the contract that the full Save validation is
   re-checked at publish-preflight time, not just the publish-specific gates.
 - 409 on publish: inline banner with `e.displayMessage`
-- **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{ detail: [{ loc: ['body', 'block_id'], msg: 'must be set', type: 'value_error' }] }` (codex re-review catch: ApiError.validationErrors() returns null for a string detail per api.ts:21-24, so the field-level branch never executes — must be `ValidationErrorDetail[]`); assert `#err-block_id` span renders with msg AND that `<select>` carries `aria-describedby="err-block_id"`. (Same `ValidationErrorDetail[]` shape as the corresponding T6a test above.)
-- **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert `#err-assignment_md` span renders AND the inner `<textarea>` carries `aria-describedby="err-assignment_md"` (codex round-3 nit — lock the MarkdownEditor forwarding in this test too, not just T6a's 422-on-create) AND the summary banner shows `"Please correct the highlighted fields."`.
+- **422 on create (spec line 527)**: mount in create mode; POST returns 422 with `{ detail: [{ loc: ['body', 'block_id'], msg: 'must be set', type: 'value_error' }] }` (codex re-review catch: ApiError.validationErrors() returns null for a string detail per api.ts:21-24, so the field-level branch never executes — must be `ValidationErrorDetail[]`); assert `#err-block_id` span renders with msg AND that `<select>` carries `aria-describedby="err-block_id"`. (Same `ValidationErrorDetail[]` shape as the corresponding T6a test above.)
+- **422 on PATCH (spec line 527)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert `#err-assignment_md` span renders AND the inner `<textarea>` carries `aria-describedby="err-assignment_md"` (codex round-3 nit — lock the MarkdownEditor forwarding in this test too, not just T6a's 422-on-create) AND the summary banner shows `"Please correct the highlighted fields."`.
 - **versionIsDisabled while modal open (spec line 548 — modal-only publish; codex r3-5 history)**:
   mount in edit mode with `versionIsDisabled: false` and valid publish
   preconditions via the same propsRef pattern used in T7 force-reveal
@@ -2797,7 +2797,7 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
   AND the precondition banner now shows "This run's course version is
   disabled — Open Overview to re-enable it." Locks the
   already-open-modal gate so a flip-from-parent can't bypass spec 547.
-- **422 on render preview (spec lines 513, 527)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
+- **422 on render preview (spec lines 514, 528)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
 - **5xx on publish (spec line 530)**: mount with valid preconditions; POST /publish returns 503; assert red banner stays; modal does NOT close.
 - Save and Publish share `submitting`: clicking Publish disables Save and vice versa; button text changes to "Publishing…"
 - **Mounted-flag rule for Publish (reviewer-2 catch)**: same shape as the T6a close-during-Save test — close mid-Publish, assert no post-await write fires and the late resolve doesn't throw.
@@ -2998,7 +2998,7 @@ describe('RunMiniProjectsTab', () => {
     expect(onNav).toHaveBeenCalledWith('overview');
   });
 
-  it('actionable banner when versionIsDisabled; [+ New] disabled with tooltip (spec lines 546-548, 594)', async () => {
+  it('actionable banner when versionIsDisabled; [+ New] disabled with tooltip (spec lines 548, 595)', async () => {
     // Codex catch: spec testing 594 + states table 546-548 require explicit
     // coverage that the versionIsDisabled banner renders AND that [+ New] is
     // disabled with the "version disabled" tooltip when versionIsDisabled=true.
@@ -3026,13 +3026,13 @@ describe('RunMiniProjectsTab', () => {
     expect(target.querySelector('button[data-action="publish"]')).toBeNull();
   });
 
-  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled; NO row-level Publish button (spec lines 548-549, 553, 595-596)', async () => {
+  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled; NO row-level Publish button (spec lines 549, 553, 596)', async () => {
     // Spec (codex round-5 cleanup): !runIsPublished surfaces a banner
     // BUT does NOT disable authoring (unlike versionIsDisabled or
     // !runGroupsEnabled). User can still draft mini-projects while the
     // run itself is unpublished.
     //
-    // Publishing path: spec lines 548-549 + 553 + 595 + plan T7 all
+    // Publishing path: spec lines 549 + 553 + 596 + plan T7 all
     // agree on modal-only publish. No row-level [Publish] button
     // exists in any MP state. publishCheckResult inside the modal
     // gates Publish when runIsPublished is false (precondition:
@@ -3167,7 +3167,7 @@ describe('RunMiniProjectsTab', () => {
     expect(target.textContent).not.toMatch(/\d+ submission/);
   });
 
-  it('409 on non-locked delete: flips row into force-confirm view (spec line 524)', async () => {
+  it('409 on non-locked delete: flips row into force-confirm view (spec line 525)', async () => {
     // Round-5 reviewers 1+2+3+5 ALL flagged round-4's TestHarness approach as broken
     // (`export let miniProjects = $state(...)` is invalid Svelte 5 runes syntax; the
     // "mirrors RunTeachersTab.svelte.test.ts" reference was fictional — that test
@@ -3464,7 +3464,7 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
   }
 
   // Round-5 reviewer-5 catch: extracted from inline InlineConfirm onConfirm closure
-  // for testability + readability. Handles the 409→force-reveal race per spec line 524.
+  // for testability + readability. Handles the 409→force-reveal race per spec line 525.
   //
   // Round-6 reviewer-4/5 catch: clear deleteError at entry so prior banner doesn't
   // bleed; do NOT rely on a $effect tied to deleteConfirmId (see banner declaration above).
@@ -3806,7 +3806,7 @@ miniProjects = mpsResult;
 - All assignments to $state (`course/run/versions/.../blocks/miniProjects`) happen in ONE block at the end, so the $derived `pinned` resolves correctly post-load.
 - The token check is between the two awaits, matching the existing pattern (line 60 + new check after the inner Promise.all).
 - Entry-reset nulls `blocks`/`miniProjects` alongside the other fields so a runId change clears stale data immediately (round-3 reviewer-4 defensive catch).
-- **All-or-nothing load** (round-4 reviewer-4 catch): if EITHER `listBlocks` OR `listMiniProjects` rejects, `Promise.all` rejects → the existing outer try/catch sets `loadError` → the whole page renders the loadError view (NOT just the mini-projects tab). This matches the existing pattern at line 64-67. Tabs above mini-projects (overview/teachers/groups/roster) are also unavailable until the user retries. Acceptable per spec line 535 ("treat the whole-page reload as one operation").
+- **All-or-nothing load** (round-4 reviewer-4 catch): if EITHER `listBlocks` OR `listMiniProjects` rejects, `Promise.all` rejects → the existing outer try/catch sets `loadError` → the whole page renders the loadError view (NOT just the mini-projects tab). This matches the existing pattern at line 64-67. Tabs above mini-projects (overview/teachers/groups/roster) are also unavailable until the user retries. Codex round-8 catch: prior wording quoted a "treat the whole-page reload as one operation" line at spec 535 that doesn't actually exist — spec 535 is just the `ActiveTab` bullet. The all-or-nothing behavior is the plan's interpretation of spec section 537 ("Add a sequenced step after versions") + the existing RunDetailPage try/catch pattern, not a verbatim spec quote.
 
 **Reset-effect entries dropped in round 5** (reviewer-2 catch): the prior plan added `showMiniProjectModal = false; modalMode = null; editTarget = null;` to the RunDetailPage reset effect. But those names refer to state that lives **inside** `RunMiniProjectsTab`, not on RunDetailPage — they were dead writes to declared-but-unused parent state. The actual modal-close path on runId change is: existing reset writes `activeTab = 'overview'` (already present in the reset effect) → `{:else if activeTab === 'mini-projects'}` flips false → `RunMiniProjectsTab` unmounts → its $state (`modalMode`, `editTarget`) is destroyed by component lifecycle. No new reset-effect entries needed.
 
