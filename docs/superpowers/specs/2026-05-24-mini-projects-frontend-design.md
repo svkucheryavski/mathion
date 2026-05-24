@@ -319,10 +319,11 @@ Prop signature change:
 Internally:
 - `fetchAssets` calls `assetContext.list()`, **with a `loadToken` ratchet** (codex round-7 catch — same pattern used in `RunDetailPage` for run lookups and `MarkdownEditor.loadPreview`). **Full contract** (codex round-8 catch — token-ownership must extend to `loading` and `listError`, not just to `assets`, or an unguarded `finally` can hide the spinner while a newer request is still pending):
   ```ts
-  let loadToken = $state(0);
+  let loadToken = 0;  // plain `let`, NOT $state — fetchAssets is called from a $effect, so a reactive token would re-trigger the effect on every increment and create a refetch loop (codex round-9 catch).
   async function fetchAssets() {
-    const myToken = ++loadToken;
-    loading = true;
+    loadToken += 1;
+    const myToken = loadToken;
+    loading = true;       // request-start writes are NOT token-gated (they happen before any await; no race possible).
     listError = null;
     try {
       const list = await assetContext.list();
@@ -334,7 +335,7 @@ Internally:
     }
   }
   ```
-  Three writes (`assets`, `listError`, `loading=false`) are ALL token-gated; otherwise older responses could clobber state for the in-flight newer request. This matters when sidebar's own post-upload refetch races with a `refreshKey`-triggered refetch from a sibling MarkdownEditor upload — without the ratchet, a stale response landing last could leave the sidebar showing N items instead of N+1 (or stuck-loading) until the user next interacts.
+  Three post-await writes (`assets`, `listError`, `loading=false`) are ALL token-gated; otherwise older responses could clobber state for the in-flight newer request. Request-start writes (`loading = true`, `listError = null`) are NOT gated because they happen before the await — there's no race window. This matters when sidebar's own post-upload refetch races with a `refreshKey`-triggered refetch from a sibling MarkdownEditor upload — without the ratchet, a stale response landing last could leave the sidebar showing N items instead of N+1 (or stuck-loading) until the user next interacts.
 - **Sidebar does NOT own the upload controller and does NOT mutate `uploading` or `uploadProgress` directly.** It MAY write to `uploadError` for client-side pre-validation failures (oversize / wrong-extension) — see the pre-validation section below — since those branches never reach `uploadOne` and need a visible error. During an actual in-flight upload, only `uploadOne` writes upload-state. When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads.
   - **On success (non-null `AssetItem` returned):** sidebar calls its own `await fetchAssets()` (refetch/replace, mirroring the existing pattern at `AssetSidebar.svelte:85`) and continues to the next file in the batch. No append-then-bump — that would duplicate work, since `refreshKey`-change ALREADY triggers `fetchAssets` via the existing `$effect` at `AssetSidebar.svelte:54`. Sidebar does NOT bump `refreshKey` after its own uploads (would just re-fetch what it already re-fetched). No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
   - **On `null` returned:** no refetch, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
@@ -572,6 +573,7 @@ Established patterns plus what was kept after the second-pass review:
 - **AbortController abort leaves orphan asset row.** Server-side commit is atomic and not abort-aware (`run_assets.py:60-96`); aborted-mid-write uploads still land in the DB whether the user cancelled explicitly or simply closed the modal during upload. Sidebar refetch on next open shows them; the user manually trashes them. Phase 9: abort-aware upload.
 - **`is_referenced` is stale during in-modal edit.** Server-side flag updates only on PATCH/POST commit; in-modal references to a not-yet-saved asset don't bump the flag. Trash button can mislead. Spec accepts: matches existing course-asset behavior.
 - **Cross-TZ deadline values shift.** `isoToLocalInput` reflects current browser TZ; a traveling teacher sees displayed times move. Phase 9: per-run pinned TZ.
+- **Sidebar spinner can stall indefinitely on hung latest request** (codex round-9 catch). With the `loadToken` ratchet, only the LATEST `fetchAssets` request can clear `loading = false`. If that latest request hangs (network stall, server doesn't respond), the spinner stays up; the user can't tell whether to wait or retry. The existing `api.get` wrapper has no timeout, so this is the global behavior, not new. Phase 9: global fetch-timeout policy (e.g., 30s timeout → surface as retryable error).
 - **Sidebar batch interruptible by sibling textarea/wrapper drop** (codex round-6 catch). After each successful file in a sidebar batch, `uploadOne` releases the single-flight lock briefly before the sidebar's next iteration acquires it. A textarea-drop in that window can take the slot; the sidebar's next iteration single-flight-rejects and returns `null`, stopping the batch at the current position. UX consequence: user sees the textarea-drop's file landed, sidebar list updates, but remaining sidebar-batch files were not uploaded. User can re-drop them. Documented rather than fixed (the alternative — restructuring to `uploadMany(files)` that holds the lock across the whole batch — doubles the API surface and adds a new contract for a rare edge case). Phase 9: batch-level lock if real users hit this.
 <!-- (Removed: prior "concurrent fetchAssets can clobber" accepted gap. Codex round-7 catch: stale responses can land last and persist until a NEXT user action — not "next fetch corrects" as previously claimed. Fixed in T5a — see lib/sidebar refactor below.) -->
 
