@@ -2017,7 +2017,7 @@ describe('MiniProjectModal — create mode', () => {
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'create', initial: null,
       availableBlocks: [],  // empty
-      currentBlock: null, runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: null, runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2051,7 +2051,7 @@ describe('MiniProjectModal — create mode', () => {
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'create', initial: null,
       availableBlocks: blocks, currentBlock: null,
-      runIsPublished: true, runEndDate: '2026-06-30',
+      runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2104,7 +2104,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2120,7 +2120,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2141,7 +2141,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     const cmp = mount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2159,7 +2159,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2202,7 +2202,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     const cmp = mount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved,
       onNavigateToTab: vi.fn(),
     } });
@@ -2232,7 +2232,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn().mockResolvedValue(undefined),
       onNavigateToTab: vi.fn(),
     } });
@@ -2263,7 +2263,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn().mockResolvedValue(undefined),
       onNavigateToTab: vi.fn(),
     } });
@@ -2307,7 +2307,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2348,7 +2348,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
-      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      currentBlock: blocks[0], runIsPublished: true, versionIsDisabled: false, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
       onNavigateToTab: vi.fn(),
     } });
@@ -2386,13 +2386,19 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { MiniProjectResponse, BlockResponse } from '../../lib/types';
 
-  let { runId, mode, initial, availableBlocks, currentBlock, runIsPublished, runEndDate, onClose, onSaved, onNavigateToTab }: {
+  // Codex round-3 catch: `versionIsDisabled` was previously NOT a modal prop.
+  // The publishCheckResult gate (added below) needs it so that an already-open
+  // modal can't bypass spec line 547 (`[Publish]` disabled when version
+  // disabled). Parent passes it through alongside runIsPublished — the same
+  // way RunMiniProjectsTab already does for its row-level gating.
+  let { runId, mode, initial, availableBlocks, currentBlock, runIsPublished, versionIsDisabled, runEndDate, onClose, onSaved, onNavigateToTab }: {
     runId: number;
     mode: 'create' | 'edit';
     initial: MiniProjectResponse | null;
     availableBlocks: BlockResponse[];
     currentBlock: BlockResponse | null;
     runIsPublished: boolean;
+    versionIsDisabled: boolean;
     runEndDate: string | null;
     onClose: () => void;
     onSaved: () => Promise<void>;
@@ -2775,7 +2781,16 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
   re-checked at publish-preflight time, not just the publish-specific gates.
 - 409 on publish: inline banner with `e.displayMessage`
 - **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{ detail: [{ loc: ['body', 'block_id'], msg: 'must be set', type: 'value_error' }] }` (codex re-review catch: ApiError.validationErrors() returns null for a string detail per api.ts:21-24, so the field-level branch never executes — must be `ValidationErrorDetail[]`); assert `#err-block_id` span renders with msg AND that `<select>` carries `aria-describedby="err-block_id"`. (Same `ValidationErrorDetail[]` shape as the corresponding T6a test above.)
-- **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert the field-level span renders AND the summary banner shows `"Please correct the highlighted fields."`.
+- **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert `#err-assignment_md` span renders AND the inner `<textarea>` carries `aria-describedby="err-assignment_md"` (codex round-3 nit — lock the MarkdownEditor forwarding in this test too, not just T6a's 422-on-create) AND the summary banner shows `"Please correct the highlighted fields."`.
+- **Codex round-3 catch — versionIsDisabled while modal open (spec line 547)**:
+  mount in edit mode with `versionIsDisabled: false` and valid publish
+  preconditions; click `[Publish…]`; assert InlineConfirm appears. Then
+  re-render with `versionIsDisabled: true` via the same propsRef pattern
+  used in T7 force-reveal (`propsRef = $state({...}); propsRef.versionIsDisabled = true;`
+  inside a re-render trigger). Click `confirmPublish`; assert POST /publish
+  is NOT called AND the precondition banner now shows "This run's course
+  version is disabled — Open Overview to re-enable it." Locks the
+  already-open-modal gate so a flip-from-parent can't bypass spec 547.
 - **422 on render preview (spec lines 513, 527)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
 - **5xx on publish (spec line 530)**: mount with valid preconditions; POST /publish returns 503; assert red banner stays; modal does NOT close.
 - Save and Publish share `submitting`: clicking Publish disables Save and vice versa; button text changes to "Publishing…"
@@ -2832,6 +2847,13 @@ const publishCheckResult = $derived.by(() => {
     }
   }
   if (!runIsPublished) unmet.push('Run must be published — Open Overview to publish.');
+  // Codex round-3 catch: spec line 547 requires `[Publish]` disabled when
+  // versionIsDisabled. Without this check, an already-open modal whose
+  // parent flips `versionIsDisabled` to true would still allow Publish.
+  // The T7 row-level [Edit] is disabled in this state, but that only
+  // prevents the OPEN-FROM-ROW path; it doesn't help a modal that was
+  // already open when the version got disabled.
+  if (versionIsDisabled) unmet.push("This run's course version is disabled — Open Overview to re-enable it.");
   return unmet;
 });
 
@@ -3558,7 +3580,7 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
       initial={editTarget}
       availableBlocks={modalMode === 'create' ? availableBlocks : []}
       currentBlock={editTarget ? blocks.find(b => b.id === editTarget.block_id) ?? null : null}
-      {runIsPublished} {runEndDate}
+      {runIsPublished} {versionIsDisabled} {runEndDate}
       onClose={() => { modalMode = null; editTarget = null; }}
       onSaved={onRefetchMiniProjects}
       {onNavigateToTab}
