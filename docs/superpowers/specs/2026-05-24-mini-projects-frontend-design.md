@@ -422,7 +422,7 @@ Props:
   availableBlocks: BlockResponse[];        // unused blocks (for create); empty for edit
   currentBlock: BlockResponse | null;      // for edit-mode label rendering
   runIsPublished: boolean;
-  versionIsDisabled: boolean;               // codex round-3/4: needed by publishCheckResult so an already-open modal can't bypass spec line 547 if the parent flips this to true mid-edit
+  versionIsDisabled: boolean;               // needed by publishCheckResult so an already-open modal can't bypass spec line 548 if the parent flips this to true mid-edit (modal-only publish — codex r3-5 history)
   runEndDate: string | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
