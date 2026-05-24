@@ -56,6 +56,19 @@ def test_run_render_outsider_403(client, seed_run_with_groups):
     assert r.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
 
+def test_run_render_authenticated_non_member_403(auth_client, seed_run_with_groups):
+    """Authenticated user who is NEITHER course admin NOR run teacher: 403.
+
+    Locks the authorization boundary distinct from the 401 path: a regression
+    that allowed any authenticated user to render would slip past the
+    unauthenticated test but fail here. `auth_client` is `test_user`
+    (conftest.py:102) — plain user, no admin/teacher/student attachment.
+    """
+    run, _, _ = seed_run_with_groups()
+    r = auth_client.post(f"/api/runs/{run['id']}/render", json={"content_md": "hi"})
+    assert r.status_code == status.HTTP_403_FORBIDDEN, r.text
+
+
 def test_run_render_422_on_missing_asset(admin_client, seed_run_with_groups):
     """422 lists the missing filenames in the detail message."""
     run, _, _ = seed_run_with_groups()
