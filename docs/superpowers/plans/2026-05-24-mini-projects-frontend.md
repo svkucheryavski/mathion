@@ -2387,11 +2387,12 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { MiniProjectResponse, BlockResponse } from '../../lib/types';
 
-  // Codex round-3 catch: `versionIsDisabled` was previously NOT a modal prop.
-  // The publishCheckResult gate (added below) needs it so that an already-open
-  // modal can't bypass spec line 547 (`[Publish]` disabled when version
-  // disabled). Parent passes it through alongside runIsPublished — the same
-  // way RunMiniProjectsTab already does for its row-level gating.
+  // `versionIsDisabled` is a modal prop so publishCheckResult can block
+  // Publish if the parent flips this to true while the modal is already
+  // open (spec lines 414/548 — modal-only publish; codex r3-5 history).
+  // RunMiniProjectsTab passes it through alongside runIsPublished — no
+  // row-level gating relies on it for Publish (Publish is modal-only),
+  // but [+ New] and [Edit] use the same flag at the row level.
   let { runId, mode, initial, availableBlocks, currentBlock, runIsPublished, versionIsDisabled, runEndDate, onClose, onSaved, onNavigateToTab }: {
     runId: number;
     mode: 'create' | 'edit';
@@ -2783,7 +2784,7 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
 - 409 on publish: inline banner with `e.displayMessage`
 - **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{ detail: [{ loc: ['body', 'block_id'], msg: 'must be set', type: 'value_error' }] }` (codex re-review catch: ApiError.validationErrors() returns null for a string detail per api.ts:21-24, so the field-level branch never executes — must be `ValidationErrorDetail[]`); assert `#err-block_id` span renders with msg AND that `<select>` carries `aria-describedby="err-block_id"`. (Same `ValidationErrorDetail[]` shape as the corresponding T6a test above.)
 - **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert `#err-assignment_md` span renders AND the inner `<textarea>` carries `aria-describedby="err-assignment_md"` (codex round-3 nit — lock the MarkdownEditor forwarding in this test too, not just T6a's 422-on-create) AND the summary banner shows `"Please correct the highlighted fields."`.
-- **Codex round-3 catch — versionIsDisabled while modal open (spec line 547)**:
+- **versionIsDisabled while modal open (spec line 548 — modal-only publish; codex r3-5 history)**:
   mount in edit mode with `versionIsDisabled: false` and valid publish
   preconditions via the same propsRef pattern used in T7 force-reveal
   (`const propsRef: any = $state({ ..., versionIsDisabled: false });
@@ -2852,12 +2853,12 @@ const publishCheckResult = $derived.by(() => {
     }
   }
   if (!runIsPublished) unmet.push('Run must be published — Open Overview to publish.');
-  // Codex round-3 catch: spec line 547 requires `[Publish]` disabled when
-  // versionIsDisabled. Without this check, an already-open modal whose
-  // parent flips `versionIsDisabled` to true would still allow Publish.
-  // The T7 row-level [Edit] is disabled in this state, but that only
-  // prevents the OPEN-FROM-ROW path; it doesn't help a modal that was
-  // already open when the version got disabled.
+  // versionIsDisabled blocks Publish too (spec lines 548 — modal-only
+  // publish blocked by publishCheckResult). T7 disables row [Edit] in
+  // this state, but that only prevents the OPEN-FROM-ROW path; without
+  // this check, a modal already open when versionIsDisabled flips to
+  // true could still publish. Locked by the T6b "versionIsDisabled
+  // while modal open" test.
   if (versionIsDisabled) unmet.push("This run's course version is disabled — Open Overview to re-enable it.");
   return unmet;
 });
@@ -3025,26 +3026,22 @@ describe('RunMiniProjectsTab', () => {
     expect(target.querySelector('button[data-action="publish"]')).toBeNull();
   });
 
-  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled; NO row-level Publish button (spec lines 546-548, 595 — intentional divergence)', async () => {
-    // Codex catch: spec line 595 — !runIsPublished surfaces a banner BUT
-    // does NOT disable authoring (unlike versionIsDisabled or
+  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled; NO row-level Publish button (spec lines 548-549, 553, 595-596)', async () => {
+    // Spec (codex round-5 cleanup): !runIsPublished surfaces a banner
+    // BUT does NOT disable authoring (unlike versionIsDisabled or
     // !runGroupsEnabled). User can still draft mini-projects while the
     // run itself is unpublished.
     //
-    // Codex re-review catch (spec lines 548/552/595): spec describes a
-    // row-level `[Publish]` action that should be DISABLED when
-    // !runIsPublished. Plan intentionally diverges: publishing happens
-    // ONLY through the modal (T6b's `[Publish…]` button), not via a
-    // row-level button. The publishCheckResult inside the modal already
-    // gates on `runIsPublished` (pushes "Run must be published — Open
-    // Overview to publish" when false), so the user experience is:
+    // Publishing path: spec lines 548-549 + 553 + 595 + plan T7 all
+    // agree on modal-only publish. No row-level [Publish] button
+    // exists in any MP state. publishCheckResult inside the modal
+    // gates Publish when runIsPublished is false (precondition:
+    // "Run must be published — Open Overview to publish."). User flow:
     //   1. Click Edit on a draft row → modal opens
-    //   2. Click [Publish…] → precondition banner shows "Run must be
-    //      published — Open Overview to publish"
+    //   2. Click [Publish…] → precondition banner shows the blocker
     //   3. Confirm-publish is blocked; user navigates to Overview.
-    // This single-publish-path keeps the row UI simple. The assertion
-    // below LOCKS THIS DIVERGENCE by verifying there is no row-level
-    // `data-action="publish"` button on the draft row.
+    // The assertion below LOCKS THIS CONTRACT by verifying there is
+    // no row-level `data-action="publish"` button on the draft row.
     const onNav = vi.fn();
     // One draft MP so Edit button renders alongside [+ New].
     const draftMp: MiniProjectResponse = {
@@ -3390,16 +3387,14 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
     if (mp.is_published) return 'published';
     return 'draft';
   }
-  // Codex re-review catch — INTENTIONAL spec divergence (spec lines
-  // 547-548, 552, 595): the spec table references a row-level [Publish]
-  // action that should be disabled under versionIsDisabled / !runIsPublished
-  // and hidden when is_published=true. The plan implements publishing as
-  // MODAL-ONLY: the only Publish entry point is T6b's `[Publish…]` button
-  // inside MiniProjectModal, which already gates on runIsPublished /
-  // versionIsDisabled via publishCheckResult. Single-publish-path
-  // keeps row UI to just [Edit] / [×] and avoids two separate gating
-  // surfaces. T7 tests lock this contract by asserting `data-action="publish"`
-  // is absent from the row DOM in the relevant state-coverage tests.
+  // Publish is modal-only (spec lines 60, 548-549, 553, 595-596). The only
+  // Publish entry point is T6b's `[Publish…]` button inside MiniProjectModal,
+  // which gates on runIsPublished AND versionIsDisabled via publishCheckResult.
+  // Row UI is `[Edit]` / `[×]` only. T7 tests assert
+  // `data-action="publish"` is absent from row DOM in the relevant
+  // state-coverage tests, locking the contract. (Earlier plan drafts
+  // described this as an "intentional spec divergence"; the spec was
+  // updated in codex round-5 to match — no longer a divergence.)
 
   let modalMode = $state<'create' | 'edit' | null>(null);
   let editTarget = $state<MiniProjectResponse | null>(null);
