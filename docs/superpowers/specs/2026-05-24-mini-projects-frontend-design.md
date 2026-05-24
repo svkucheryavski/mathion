@@ -297,7 +297,7 @@ Internal changes:
   ```
   - Single-file textarea drop (the common case) still works — loop runs once, `batch={current:1,total:1}` means `uploadOne` writes no `stoppedAt`, refresh happens once.
   - Insertion-at-cursor stays scoped to textarea drop (preserves existing UX); wrapper drop has no cursor semantics and just uploads.
-  - `refreshKey += 1` per successful file (cheap — `refreshKey` is a number, sidebar's `$effect` is debounced by the async fetchAssets). With the new `loadToken` ratchet on `fetchAssets`, multiple bumps in quick succession are race-safe.
+  - `refreshKey += 1` per successful file. Note: the sidebar's `$effect` re-runs on each bump, but how many of the resulting `fetchAssets` calls actually arrive at the await depends on Svelte's micro-task scheduler — the `$effect` is NOT debounced; it can fire multiple times in quick succession, producing overlapping `fetchAssets` calls whose responses race. The `loadToken` ratchet on `fetchAssets` makes those races safe (stale responses are dropped). **Test recipe for the textarea/wrapper path:** assert final rendered list membership (the 3 uploaded filenames all present), NOT call count. Exact `fetchAssets` call count under effect-driven refetch is scheduler-dependent and brittle. The sidebar-path test recipe (which awaits `fetchAssets` directly per success) does assert call count, but that's because the sidebar path bypasses `$effect`.
 - **`disabled` prop** (codex-review Critical): when truthy, ALL interactive handlers no-op — textarea drag-drop, wrapper drag-drop, preview button, mode toggle. Textarea itself gets `disabled={disabled}`. Sidebar is passed `disabled` through.
 
 ### `components/editor/AssetSidebar.svelte`
@@ -317,7 +317,24 @@ Prop signature change:
 ```
 
 Internally:
-- `fetchAssets` calls `assetContext.list()`, **with a `loadToken` ratchet** (codex round-7 catch — same pattern used in `RunDetailPage` for run lookups): before the await, bump `let loadToken = 0` and capture the current value; after the await, drop the response if the captured token no longer matches the latest `loadToken`. This prevents an older overlapping `fetchAssets` response from clobbering a newer one — relevant when sidebar's own post-upload refetch races with a `refreshKey`-triggered refetch from a sibling MarkdownEditor upload. Cost: 3 lines. Without the ratchet, a stale response landing last could leave the sidebar showing N items instead of N+1 until the user next interacts.
+- `fetchAssets` calls `assetContext.list()`, **with a `loadToken` ratchet** (codex round-7 catch — same pattern used in `RunDetailPage` for run lookups and `MarkdownEditor.loadPreview`). **Full contract** (codex round-8 catch — token-ownership must extend to `loading` and `listError`, not just to `assets`, or an unguarded `finally` can hide the spinner while a newer request is still pending):
+  ```ts
+  let loadToken = $state(0);
+  async function fetchAssets() {
+    const myToken = ++loadToken;
+    loading = true;
+    listError = null;
+    try {
+      const list = await assetContext.list();
+      if (myToken === loadToken) assets = list;   // stale responses dropped
+    } catch (e) {
+      if (myToken === loadToken) listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
+    } finally {
+      if (myToken === loadToken) loading = false;  // spinner only cleared by the latest request
+    }
+  }
+  ```
+  Three writes (`assets`, `listError`, `loading=false`) are ALL token-gated; otherwise older responses could clobber state for the in-flight newer request. This matters when sidebar's own post-upload refetch races with a `refreshKey`-triggered refetch from a sibling MarkdownEditor upload — without the ratchet, a stale response landing last could leave the sidebar showing N items instead of N+1 (or stuck-loading) until the user next interacts.
 - **Sidebar does NOT own the upload controller and does NOT mutate `uploading` or `uploadProgress` directly.** It MAY write to `uploadError` for client-side pre-validation failures (oversize / wrong-extension) — see the pre-validation section below — since those branches never reach `uploadOne` and need a visible error. During an actual in-flight upload, only `uploadOne` writes upload-state. When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads.
   - **On success (non-null `AssetItem` returned):** sidebar calls its own `await fetchAssets()` (refetch/replace, mirroring the existing pattern at `AssetSidebar.svelte:85`) and continues to the next file in the batch. No append-then-bump — that would duplicate work, since `refreshKey`-change ALREADY triggers `fetchAssets` via the existing `$effect` at `AssetSidebar.svelte:54`. Sidebar does NOT bump `refreshKey` after its own uploads (would just re-fetch what it already re-fetched). No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
   - **On `null` returned:** no refetch, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
