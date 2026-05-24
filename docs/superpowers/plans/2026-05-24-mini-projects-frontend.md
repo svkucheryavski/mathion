@@ -1817,7 +1817,7 @@ describe('MarkdownEditor with runAssetContext', () => {
   });
 });
 
-describe('AssetSidebar error surfaces (reviewer-1 catch — spec line 527 asset-delete 409)', () => {
+describe('AssetSidebar error surfaces (reviewer-1 catch — spec line 526 asset-delete 409)', () => {
   it('asset delete 409: surfaces backend message in sidebar error slot', async () => {
     // Mount sidebar with one asset; click delete; mock DELETE to return 409 with
     // {detail: "Asset 'X' is referenced by N mini-project(s). Use ?force=true to delete."}.
@@ -2032,7 +2032,7 @@ describe('MiniProjectModal — create mode', () => {
   });
 
   it('422 on POST: renders field-level error spans + aria-describedby wiring (spec line 527)', async () => {
-    // Codex catch: spec 526 mandates field-level UX for 422. Backend returns
+    // Codex catch: spec 527 mandates field-level UX for 422. Backend returns
     // ValidationErrorDetail[] like `[{ loc: ['body', 'assignment_md'], msg: 'must be non-empty', type: 'value_error' }]`.
     // ApiError.validationErrors() returns the array; handleSave maps last-loc-segment → msg.
     // Template renders <span id="err-assignment_md"> + the input/editor gets aria-describedby.
@@ -2132,7 +2132,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('clean close: Escape key → onClose called (spec line 482 — backdrop/X/Escape route through closeForCurrentStage)', async () => {
+  it('clean close: Escape key → onClose called (spec line 483 — backdrop/X/Escape route through closeForCurrentStage)', async () => {
     // Round-4 reviewer-1 catch: prior test list omitted Escape coverage.
     // Round-5 reviewer-2 catch: capture cmp + unmount so the window listener is
     // removed before subsequent tests fire dispatchEvent.
@@ -2796,7 +2796,7 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
   ambiguous). Click `confirmPublish`; assert POST /publish is NOT called
   AND the precondition banner now shows "This run's course version is
   disabled — Open Overview to re-enable it." Locks the
-  already-open-modal gate so a flip-from-parent can't bypass spec 547.
+  already-open-modal gate so a flip-from-parent can't bypass spec 548.
 - **422 on render preview (spec lines 514, 528)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
 - **5xx on publish (spec line 530)**: mount with valid preconditions; POST /publish returns 503; assert red banner stays; modal does NOT close.
 - Save and Publish share `submitting`: clicking Publish disables Save and vice versa; button text changes to "Publishing…"
@@ -2806,7 +2806,7 @@ Use the same test scaffold from T6a (mount, settle, fetch spy).
 
 - [ ] **Step 2: Implement the publish flow**
 
-Read spec lines 484, 491-510, 519-531 verbatim. **Note on `runEndDate` type** (reviewer-5 catch): `frontend/src/lib/types.ts:271` currently types `Run.end_date` as non-null `string`. Spec line 499 says "Run table currently allows nullable end_date in some legacy rows, so the prop type stays `string | null`". Resolution for the plan: accept `runEndDate: string | null` on the MiniProjectModal prop, AND treat the null path as defensive (most runs in practice have an end_date). If a future spec hardens the backend to non-null, drop the null bullet then. Don't change `lib/types.ts:271` in this task — that's a wider type-tightening initiative.
+Read spec lines 484, 491-510, 519-531 verbatim. **Note on `runEndDate` type** (reviewer-5 catch): `frontend/src/lib/types.ts:271` currently types `Run.end_date` as non-null `string`. Spec line 500 says "Run table currently allows nullable end_date in some legacy rows, so the prop type stays `string | null`". Resolution for the plan: accept `runEndDate: string | null` on the MiniProjectModal prop, AND treat the null path as defensive (most runs in practice have an end_date). If a future spec hardens the backend to non-null, drop the null bullet then. Don't change `lib/types.ts:271` in this task — that's a wider type-tightening initiative.
 
 Add:
 
@@ -3229,7 +3229,7 @@ describe('RunMiniProjectsTab', () => {
     confirmBtn.click();
     await settle();
 
-    // Spec line 524 contract — observable outcomes:
+    // Spec line 525 contract — observable outcomes:
     expect(propsRef.onRefetchMiniProjects).toHaveBeenCalledTimes(1);
     expect(target.textContent).toContain('Force delete will permanently remove');
     expect(target.querySelector('input[type="checkbox"]')).toBeTruthy();
@@ -3906,9 +3906,9 @@ This is the final task before merging. No code changes; just the 13-step manual 
 - Frontend dev server: `cd frontend && npm run dev`
 - Test DB seeded with at least one course, one published run, one teacher account that's also a course-admin.
 
-- [ ] **Step 1: Run all 13 smoke steps from spec lines 641-653 in order**
+- [ ] **Step 1: Run all 13 smoke steps from spec lines 641-655 in order**
 
-Spec §"Manual smoke" lines 641-653. Step-by-step (do them in your local browser):
+Spec §"Manual smoke" lines 641-655. Step-by-step (do them in your local browser):
 
 1. Open Mini-projects tab on a run with groups enabled — empty-state CTA + explainer.
 2. Click `[+ New]` — modal opens; block picker shows unused blocks; TZ label shows e.g. "(GMT+2)".
