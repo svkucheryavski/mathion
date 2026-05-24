@@ -245,8 +245,10 @@ Internal changes:
     uploadAbortController = controller;
     uploading = true;
     uploadError = null;
+    uploadProgress = { current: 1, total: 1, filename: file.name };  // single-file granularity; no progress events available from fetch upload
     try {
       const item = await assetContext.upload(file, controller.signal);
+      if (!editorMounted) return null;    // codex round-4: abort()-then-resolve race — fetch may fulfill just before/despite abort; do not propagate post-destroy
       return item;
     } catch (e: any) {
       if (!editorMounted) return null;
@@ -254,17 +256,24 @@ Internal changes:
       uploadError = { detail: String(e?.detail ?? e?.message ?? e) };
       return null;
     } finally {
-      // compare-before-clear: only clear if this invocation still owns the controller
-      // (defensive — the single-flight guard above already prevents overwrite, but
-      // this keeps the invariant local and obvious).
-      if (uploadAbortController === controller) {
+      // compare-before-clear + editorMounted guard: only clear if (a) this invocation
+      // still owns the controller AND (b) the component is still mounted. The
+      // single-flight guard above already prevents controller-overwrite during the
+      // component's lifetime, but mounted-guard is needed to prevent post-destroy
+      // $state writes.
+      if (editorMounted && uploadAbortController === controller) {
         uploadAbortController = null;
       }
-      if (editorMounted) uploading = false;
+      if (editorMounted) {
+        uploading = false;
+        uploadProgress = null;
+      }
     }
   }
   ```
-  `uploadOne` is the ONLY upload path. Textarea drop, wrapper drop, and the sidebar's drop/file-picker all invoke it. The controller is exposed via `$bindable<AbortController | null>` so a consumer modal can read+abort it through `bind:uploadAbortController`. AssetSidebar does NOT own its own controller — it gets `uploadOne` injected as `onUploadFile`.
+  `uploadOne` is the ONLY upload path. Textarea drop, wrapper drop, and the sidebar's drop/file-picker all invoke it. The controller is exposed via `$bindable<AbortController | null>` so a consumer modal can read+abort it through `bind:uploadAbortController`. AssetSidebar does NOT own its own controller — it gets `uploadOne` injected as `onUploadFile`. `editorMounted` is flipped `true` in MarkdownEditor's `onMount` and back to `false` in `onDestroy`, which fires during MarkdownEditor unmount when its parent (MiniProjectModal) unmounts.
+
+  **Single-flight UX:** the existing `uploading` overlay (rendered by both MarkdownEditor and AssetSidebar while `uploading === true`) is the only feedback for a single-flight skip. No "Already uploading" inline message needed — the overlay already communicates "an upload is in progress" and a second drop while it's visible silently no-ops. Documented here so reviewers don't ask for a toast.
 - **`disabled` prop** (codex-review Critical): when truthy, ALL interactive handlers no-op — textarea drag-drop, wrapper drag-drop, preview button, mode toggle. Textarea itself gets `disabled={disabled}`. Sidebar is passed `disabled` through.
 
 ### `components/editor/AssetSidebar.svelte`
@@ -285,7 +294,10 @@ Prop signature change:
 
 Internally:
 - `fetchAssets` calls `assetContext.list()`.
-- **Sidebar does NOT own the upload controller and does NOT mutate `uploading`/`uploadProgress`/`uploadError` directly.** When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads. A return value of `null` from `onUploadFile` signals "skipped (single-flight) / aborted / errored" and the sidebar simply stops iterating.
+- **Sidebar does NOT own the upload controller and does NOT mutate `uploading` or `uploadProgress` directly.** It MAY write to `uploadError` for client-side pre-validation failures (oversize / wrong-extension) — see the pre-validation section below — since those branches never reach `uploadOne` and need a visible error. During an actual in-flight upload, only `uploadOne` writes upload-state. When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads.
+  - **On success (non-null `AssetItem` returned):** sidebar appends the item to its local asset list, bumps `refreshKey` (so any embedded MarkdownEditor preview re-renders), and continues to the next file in the batch. No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
+  - **On `null` returned:** no list append, no `refreshKey` bump, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
+  - **Multi-file OS drop:** sidebar awaits each `onUploadFile(file)` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. Test recipe: drop 3 valid files; assert all 3 land server-side in order, the asset list grows by 3, and `refreshKey` bumps 3 times.
 - Delete calls `assetContext.remove(assetId)`.
 - `imgSrc(asset)` calls `assetContext.imgSrc(item)`.
 - Section label switches on `assetContext.kind`: "Course assets" vs "Run assets — shared across all MPs in this run".
@@ -293,9 +305,9 @@ Internally:
 - Upload-state bindings (`uploading`, `uploadProgress`, `uploadError`) remain `$bindable` and parent-owned in MarkdownEditor.
 - **`disabled` prop**: when truthy, the file-input drop zone, upload button, "Insert ref" buttons, and per-row delete buttons all no-op (and visually use `disabled` styling). The list itself still renders.
 
-### Client-side file pre-validation (in AssetSidebar before calling `assetContext.upload`)
+### Client-side file pre-validation (in AssetSidebar before calling `onUploadFile`)
 
-Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. Oversize or wrong-extension files show inline sidebar error (in the existing `uploadError` slot) without hitting the network.
+Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. Oversize or wrong-extension files: sidebar writes the message into `uploadError` directly and skips that file (does NOT call `onUploadFile` for it, so the single upload path is preserved). Validation runs per file inside the multi-file `for` loop, so one bad file in a 3-file drop fails only that file and lets the others proceed (sidebar simply does not call `onUploadFile` for the invalid one and continues to the next).
 
 ### AbortController plumbing
 
