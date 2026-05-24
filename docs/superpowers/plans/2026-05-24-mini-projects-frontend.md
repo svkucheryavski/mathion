@@ -58,74 +58,103 @@ git checkout -b frontend-mini-projects
 
 **Files:**
 - Reference: `backend/mathion/api/versions.py:120` (mirror this endpoint's shape)
-- Reference: `backend/mathion/api/helpers.py:421` (call `render_with_run_assets`)
-- Reference: `backend/mathion/api/run_assets.py` (gating pattern `require_run_admin_or_teacher`)
-- Modify or create: `backend/mathion/api/run_assets.py` (recommended — endpoint cohabits with the run-asset surface)
+- Reference: `backend/mathion/api/helpers.py:421` (call `render_with_run_assets`; **note** this helper already raises `HTTPException(422, ...)` internally at `helpers.py:448-450` with the missing-filenames message — so the endpoint body is a one-liner, no try/except needed)
+- Reference: `backend/mathion/api/run_assets.py` (gating pattern `require_run_admin_or_teacher`, existing routes at `run_assets.py:27`/`:99`/`:122`/`:177` — all use FULL paths like `/api/runs/{run_id}/assets`; the router is declared `APIRouter(tags=["run-assets"])` with NO prefix)
+- Reference: `backend/tests/test_run_assets.py` (canonical test pattern: uses `admin_client` fixture + `seed_run_with_groups()` — cookie auth via CSRFTestClient, NOT bearer tokens)
+- Modify: `backend/mathion/api/run_assets.py` (endpoint cohabits with the run-asset surface)
 - Create: `backend/tests/test_run_render.py`
 
-**Sub-step before coding:** Read `versions.py:120` end-to-end to understand the existing render endpoint's request body shape (`RenderRequest` Pydantic model), response shape (`{ html: str }`), 422-on-unknown-asset behavior. Mirror exactly; only the helper-function call changes.
+**Sub-step before coding:** Read `backend/tests/test_run_assets.py:22-80` to lift the exact test pattern (`admin_client.post(...)`, `seed_run_with_groups()` returns `(run, _, _)` tuple, no token strings needed). Then read `versions.py:120` for response shape (`{html: str}`).
 
 - [ ] **Step 1: Write the failing backend test**
 
 Create `backend/tests/test_run_render.py`:
 
 ```python
-import pytest
+"""Tests for POST /api/runs/{run_id}/render — slice-A T1."""
+import io
 from fastapi import status
 
 
-def test_run_render_rewrites_asset_refs(client, course_admin_token, run, run_asset_factory):
-    """POST /api/runs/{rid}/render returns HTML with mathion:asset://X rewritten to /api/runs/{rid}/assets/X."""
-    asset = run_asset_factory(run_id=run.id, filename="diagram.png", mime_type="image/png")
-    body = {"content_md": f"![diagram](mathion:asset://{asset.filename})"}
-    r = client.post(
-        f"/api/runs/{run.id}/render",
-        json=body,
-        headers={"Authorization": f"Bearer {course_admin_token}"},
+def _upload_asset(admin_client, run_id: int, filename: str, content: bytes = b"x") -> dict:
+    r = admin_client.post(
+        f"/api/runs/{run_id}/assets",
+        files={"file": (filename, io.BytesIO(content), "image/png")},
     )
-    assert r.status_code == status.HTTP_200_OK
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_run_render_rewrites_asset_refs(admin_client, seed_run_with_groups):
+    """POST /api/runs/{rid}/render returns HTML with mathion:asset://X rewritten to /api/runs/{rid}/assets/X."""
+    run, _, _ = seed_run_with_groups()
+    asset = _upload_asset(admin_client, run["id"], "diagram.png")
+    r = admin_client.post(
+        f"/api/runs/{run['id']}/render",
+        json={"content_md": f"![diagram](mathion:asset://{asset['filename']})"},
+    )
+    assert r.status_code == status.HTTP_200_OK, r.text
     html = r.json()["html"]
-    assert f"/api/runs/{run.id}/assets/{asset.filename}" in html
+    assert f"/api/runs/{run['id']}/assets/{asset['filename']}" in html
     assert "mathion:asset://" not in html
 
 
-def test_run_render_gated_by_run_admin_or_teacher(client, run, outsider_token):
-    """Gating: outsider → 403; course-admin OK; run-teacher OK (covered by happy path)."""
-    r = client.post(
-        f"/api/runs/{run.id}/render",
-        json={"content_md": "hi"},
-        headers={"Authorization": f"Bearer {outsider_token}"},
-    )
-    assert r.status_code == status.HTTP_403_FORBIDDEN
+def test_run_render_admin_ok(admin_client, seed_run_with_groups):
+    """Course-admin authenticated session: 200."""
+    run, _, _ = seed_run_with_groups()
+    r = admin_client.post(f"/api/runs/{run['id']}/render", json={"content_md": "hi"})
+    assert r.status_code == status.HTTP_200_OK
 
 
-def test_run_render_422_on_missing_asset(client, course_admin_token, run):
+def test_run_render_run_teacher_ok(teacher_client, seed_run_with_groups):
+    """Run-teacher authenticated session: 200 (require_run_admin_or_teacher dep)."""
+    # If teacher_client fixture differs in this codebase, mirror the auth setup that
+    # backend/tests/test_run_assets.py uses for non-admin users — pattern is to attach
+    # a teacher via seed_run_with_groups then call as that user. Inspect conftest.py
+    # for the actual fixture name; if there's no teacher_client, this test can be
+    # skipped + documented (run_admin_or_teacher gating is also exercised in
+    # test_run_assets.py).
+    run, _, _ = seed_run_with_groups()
+    r = teacher_client.post(f"/api/runs/{run['id']}/render", json={"content_md": "hi"})
+    assert r.status_code == status.HTTP_200_OK
+
+
+def test_run_render_outsider_403(client, seed_run_with_groups):
+    """Unauthenticated / non-member: 403 (or 401 if no session at all)."""
+    run, _, _ = seed_run_with_groups()
+    r = client.post(f"/api/runs/{run['id']}/render", json={"content_md": "hi"})
+    assert r.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+def test_run_render_422_on_missing_asset(admin_client, seed_run_with_groups):
     """422 lists the missing filenames in the detail message."""
-    body = {"content_md": "![x](mathion:asset://missing.png)"}
-    r = client.post(
-        f"/api/runs/{run.id}/render",
-        json=body,
-        headers={"Authorization": f"Bearer {course_admin_token}"},
+    run, _, _ = seed_run_with_groups()
+    r = admin_client.post(
+        f"/api/runs/{run['id']}/render",
+        json={"content_md": "![x](mathion:asset://missing.png)"},
     )
     assert r.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     assert "missing.png" in r.json()["detail"]
 
 
-def test_run_render_no_reference_rows_created(client, course_admin_token, run, run_asset_factory, db_session):
+def test_run_render_no_reference_rows_created(admin_client, seed_run_with_groups):
     """Side-effect-free: rendering does NOT create RunAssetReference rows."""
     from mathion.models import RunAssetReference
-    asset = run_asset_factory(run_id=run.id, filename="d.png", mime_type="image/png")
-    before = db_session.query(RunAssetReference).filter_by(run_asset_id=asset.id).count()
-    client.post(
-        f"/api/runs/{run.id}/render",
-        json={"content_md": f"![](mathion:asset://{asset.filename})"},
-        headers={"Authorization": f"Bearer {course_admin_token}"},
+    from mathion.database import SessionLocal
+    run, _, _ = seed_run_with_groups()
+    asset = _upload_asset(admin_client, run["id"], "d.png")
+    with SessionLocal() as s:
+        before = s.query(RunAssetReference).filter_by(run_asset_id=asset["id"]).count()
+    admin_client.post(
+        f"/api/runs/{run['id']}/render",
+        json={"content_md": f"![](mathion:asset://{asset['filename']})"},
     )
-    after = db_session.query(RunAssetReference).filter_by(run_asset_id=asset.id).count()
+    with SessionLocal() as s:
+        after = s.query(RunAssetReference).filter_by(run_asset_id=asset["id"]).count()
     assert before == after
 ```
 
-(Adjust fixture names — `course_admin_token`, `outsider_token`, `run_asset_factory` — to match existing `backend/tests/conftest.py`. Read conftest first; if fixture names differ, use the existing ones.)
+**Before writing the run-teacher test**, grep `backend/tests/conftest.py` for the actual non-admin fixture name. If the codebase has no separate `teacher_client`, attach a teacher in test setup via the existing pattern (look at how other tests verify run-teacher gating) — DON'T invent `course_admin_token`/`outsider_token`-style bearer fixtures; they don't exist.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -137,34 +166,44 @@ Expected: 4 failures (endpoint doesn't exist yet → 404 on all calls).
 
 - [ ] **Step 3: Implement the endpoint**
 
-Open `backend/mathion/api/run_assets.py`. Locate the existing endpoint definitions and the `require_run_admin_or_teacher` import. After the last existing endpoint, add:
+Open `backend/mathion/api/run_assets.py`. Verify the imports at the top — `BaseModel` from pydantic must be present; if not, add it. Also verify `render_with_run_assets` is imported from `.helpers`; if not, add it. Then **at the end of the file** (after the existing routes at `:27`/`:99`/`:122`/`:177`) add:
 
 ```python
-from .helpers import render_with_run_assets  # add to existing import block at top if not present
+# Add to imports at top of file if not already present:
+from pydantic import BaseModel
+from .helpers import render_with_run_assets
 
-class RenderRequest(BaseModel):
+
+class RunRenderRequest(BaseModel):
     content_md: str
 
-class RenderResponse(BaseModel):
+
+class RunRenderResponse(BaseModel):
     html: str
 
-@router.post("/{rid}/render", response_model=RenderResponse)
+
+@router.post("/api/runs/{run_id}/render", response_model=RunRenderResponse)
 def render_run_markdown(
-    rid: int,
-    body: RenderRequest,
+    run_id: int,
+    body: RunRenderRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(require_run_admin_or_teacher),
-) -> RenderResponse:
+    _user: User = Depends(require_run_admin_or_teacher),
+) -> RunRenderResponse:
     """Render markdown with mathion:asset:// refs resolved against this run's asset pool.
 
-    Side-effect-free: SELECTs only; no RunAssetReference rows are written here.
-    422 if any referenced asset is not found in the run pool.
+    Side-effect-free: SELECTs only; no RunAssetReference rows are written here
+    (sync_run_asset_references runs only on PATCH/POST of mini-projects).
+    422 raised internally by render_with_run_assets when any referenced asset
+    is not in the run pool (see helpers.py:448-450).
     """
-    html = render_with_run_assets(db, rid, body.content_md)
-    return RenderResponse(html=html)
+    html = render_with_run_assets(db, run_id, body.content_md)
+    return RunRenderResponse(html=html)
 ```
 
-Mirror `versions.py:120` for `RenderRequest`/`RenderResponse` shapes. If `render_with_run_assets` raises a domain error for missing assets, ensure the handler converts to `HTTPException(422, detail="Referenced run-assets not found: ...")` — check helper signature first; if it returns a tuple `(html, missing: list[str])`, raise the 422 explicitly here.
+**Three corrections vs the previous draft (from reviewer-4 catch):**
+1. **Full path** `/api/runs/{run_id}/render` — the router has NO prefix (`APIRouter(tags=["run-assets"])` at `:24`), so existing routes use full literal paths. Using `/{rid}/render` would resolve to `/render` (broken).
+2. **Param name `run_id`** to match the rest of the file (`:27`/`:99` etc. all use `run_id`).
+3. **No try/except for 422** — `render_with_run_assets` already raises `HTTPException(422, detail="Referenced run-assets not found: foo.csv, bar.png")` internally at `helpers.py:448-450`. The endpoint is a one-liner pass-through.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -214,23 +253,50 @@ This task lands four small lib modules + a vitest setup pin. It's bundled becaus
 - Create: `frontend/src/tests/datetime.test.ts`
 - Create: `frontend/src/tests/assetContext.test.ts`
 
-### T2.A — TZ pin in vitest.setup.ts
+### T2.A — TZ pin via npm test script (NOT via setup.ts)
 
-- [ ] **Step 1: Check whether `frontend/vitest.setup.ts` exists**
+**Reviewer-2 catch:** Node caches the host TZ at process startup; setting `process.env.TZ` from a vitest `setupFiles` script runs AFTER worker boot and has no effect on `Date` formatting. The correct mechanism is to set `TZ` in the process environment BEFORE Node launches — via the npm script that runs vitest.
 
-```bash
-cat frontend/vitest.setup.ts 2>/dev/null || echo "MISSING"
+- [ ] **Step 1: Update the `test` script in `frontend/package.json`**
+
+Read `frontend/package.json`. The existing `"test"` script likely runs `vitest` or `vitest run`. Change it to prepend `TZ=Europe/Copenhagen`:
+
+```json
+{
+  "scripts": {
+    "test": "TZ=Europe/Copenhagen vitest run",
+    "test:watch": "TZ=Europe/Copenhagen vitest",
+    ...
+  }
+}
 ```
 
-If it exists, extend it. If `MISSING`, create it. Either way, ensure this block runs ONCE at setup:
+This makes `TZ` part of the process environment before Node sees its first `new Date()`. Verify by adding a sanity check in `tests/datetime.test.ts` (it's already there — the CEST/CET assertions only pass with TZ pinned).
+
+- [ ] **Step 2: Document the requirement in README or top of vitest.config.ts**
+
+Add a comment in `frontend/vitest.config.ts` (read it first to find the right spot):
 
 ```ts
-// Pin TZ for deterministic datetime tests (see lib/datetime.ts).
-// Must be set BEFORE any Date is constructed by other test setup.
-process.env.TZ = 'Europe/Copenhagen';
+// IMPORTANT: tests in lib/datetime.ts depend on TZ=Europe/Copenhagen being set
+// BEFORE vitest launches. The `npm test` script prepends it. Running vitest
+// directly (e.g., `npx vitest run`) without TZ in the env will produce
+// host-TZ-dependent failures on datetime tests.
 ```
 
-If `frontend/vitest.config.ts` doesn't already reference the setup file via `test.setupFiles`, add it. Read the config first to determine.
+- [ ] **Step 3 (optional defensive belt-and-suspenders)**: in `frontend/src/tests/datetime.test.ts`, add an `expect.fail` guard if the pin didn't take:
+
+```ts
+import { describe, it, expect, beforeAll } from 'vitest';
+
+beforeAll(() => {
+  if (process.env.TZ !== 'Europe/Copenhagen') {
+    throw new Error(`TZ pin required: expected Europe/Copenhagen, got ${process.env.TZ ?? 'unset'}. Run via npm test (which prepends TZ=...) not bare npx vitest.`);
+  }
+});
+```
+
+This converts a silent flaky-on-CI failure into a loud config error.
 
 ### T2.B — `lib/types.ts` additions
 
@@ -238,21 +304,27 @@ If `frontend/vitest.config.ts` doesn't already reference the setup file via `tes
 
 Read `frontend/src/lib/types.ts` to confirm the existing pattern (Pydantic-mirror style). Then add:
 
+**Types verified against `backend/mathion/schemas.py:69` (BlockResponse), `:588` (MiniProjectResponse), `:651` (RunAssetResponse) — copy verbatim:**
+
 ```ts
 export type BlockResponse = {
   id: number;
   version_id: number;
-  order: number;
   title: string;
-  // (mirror remaining BlockResponse fields from backend/mathion/schemas.py — verify against schemas.py before finalizing)
+  slug: string;
+  order: number;
+  info: string;
+  info_html: string;
 };
 
 export type MiniProjectResponse = {
   id: number;
   run_id: number;
   block_id: number;
+  title: string;                       // service-populated "Mini project for Block {block.order}"
   assignment_md: string;
-  soft_deadline: string | null;       // ISO 8601 UTC ending in "Z"
+  assignment_html: string;             // server-rendered preview HTML
+  soft_deadline: string | null;        // ISO 8601 UTC ending in "Z"
   hard_deadline: string | null;
   resubmission_deadline: string | null;
   is_published: boolean;
@@ -275,16 +347,17 @@ export type RunAssetResponse = {
   id: number;
   run_id: number;
   filename: string;
-  mime_type: string;
   file_size: number;
+  mime_type: string;
+  uploaded_at: string;                 // ISO datetime (NOT created_at — verified schemas.py:657)
+  uploaded_by: number | null;
   is_referenced: boolean;
-  created_at: string;
 };
 
 export type MiniProjectRowStatus = 'draft' | 'published' | 'locked';
 ```
 
-**Before adding:** open `backend/mathion/schemas.py` and pattern-match the exact field names + nullability. Copy verbatim. Don't invent fields.
+(Reviewer-2 catch: prior draft had `RunAssetResponse.created_at` — wrong; backend uses `uploaded_at/uploaded_by`. `MiniProjectResponse` was missing `title`+`assignment_html`. `BlockResponse` was missing `slug`+`info`+`info_html`. All fixed.)
 
 ### T2.C — `lib/blocks.ts`
 
@@ -507,10 +580,10 @@ describe('courseAssetContext', () => {
 
   it('kind is "course"', () => expect(ctx.kind).toBe('course'));
 
-  it('list() GETs /api/assets/{vid}', async () => {
+  it('list() GETs /api/versions/{vid}/assets (verified frontend/src/lib/assets.ts:62)', async () => {
     fetchSpy.mockImplementation(() => jres([]));
     await ctx.list();
-    expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/assets/7'), expect.any(Object));
+    expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/versions/7/assets'), expect.any(Object));
   });
 
   it('renderPreview POSTs /api/versions/{vid}/render', async () => {
@@ -553,15 +626,43 @@ describe('runAssetContext', () => {
     expect(ctx.imgSrc(item)).toBe('/api/runs/42/assets/d.png');
   });
 
-  it('upload threads AbortSignal to fetch', async () => {
+  it('upload threads AbortSignal AND propagates abort as AbortError rejection', async () => {
+    // Verify the signal is threaded into fetch:
+    let capturedSignal: AbortSignal | undefined;
     fetchSpy.mockImplementation((_url, init) => {
-      expect(init?.signal).toBeDefined();
-      return jres({ id: 1, filename: 'x.png', mime_type: 'image/png', file_size: 1, is_referenced: false });
+      capturedSignal = init?.signal;
+      // Simulate a fetch that respects abort
+      return new Promise((resolve, reject) => {
+        if (capturedSignal?.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        capturedSignal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+        // Don't resolve unless aborted in this test — we're testing abort path.
+      });
     });
     const file = new File(['x'], 'x.png', { type: 'image/png' });
     const controller = new AbortController();
-    await ctx.upload(file, controller.signal);
-    expect(fetchSpy).toHaveBeenCalled();
+    const uploadPromise = ctx.upload(file, controller.signal);
+    expect(capturedSignal).toBe(controller.signal);
+    controller.abort();
+    await expect(uploadPromise).rejects.toThrowError(/abort/i);
+  });
+
+  it('upload throws ApiError shape on 409 (NOT plain Error) — so downstream instanceof ApiError checks work', async () => {
+    fetchSpy.mockImplementation(() => jres({ detail: 'Asset already exists' }, 409));
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    await expect(ctx.upload(file)).rejects.toThrow();
+    // Once rejected, the error must satisfy `e instanceof ApiError` checks used by
+    // AssetSidebar/MarkdownEditor (sidebar's fetchAssets catch uses e instanceof ApiError;
+    // existing AssetSidebar.svelte:88-94 rename-hint also uses it).
+    try { await ctx.upload(file); } catch (e: any) {
+      const { ApiError } = await import('../lib/api');
+      expect(e).toBeInstanceOf(ApiError);
+      expect(e.status).toBe(409);
+    }
   });
 });
 ```
@@ -574,13 +675,31 @@ cd frontend && npx vitest run src/tests/assetContext.test.ts
 
 Expected: FAIL with module-not-found.
 
-- [ ] **Step 13: Implement `lib/assetContext.ts`**
+- [ ] **Step 13a: Extend `lib/assets.ts:uploadAsset` to accept an `AbortSignal`**
+
+Reviewer-4 catch: the current `uploadAsset(versionId, file)` signature at `frontend/src/lib/assets.ts:32` has no `signal` param. `courseAssetContext.upload` would silently drop the signal, breaking abort semantics for the course-asset path. Extend:
+
+```ts
+// frontend/src/lib/assets.ts (existing file — modify uploadAsset only)
+export async function uploadAsset(versionId: number, file: File, signal?: AbortSignal): Promise<AssetResponse> {
+  // ... existing body, but add `signal` to the fetch call options.
+}
+```
+
+Existing AssetResponse-handling and ApiError-throwing stay exactly as they were. Re-run the existing `ItemEditPage.refreshKey.svelte.test.ts` and any other tests that exercise `uploadAsset` to confirm no regression from the signature widening.
+
+- [ ] **Step 13b: Implement `lib/assetContext.ts`** (uses the now-signal-aware `uploadAsset` for course, and throws `ApiError` for run upload — reviewer-4 catch)
+
+Read `frontend/src/lib/api.ts` first to confirm:
+- `ApiError` class export shape (with `displayMessage`, `status`, `detail` fields)
+- `credentials` setting (existing `uploadAsset` uses `credentials: 'include'` + `'X-Requested-With': 'mathion'` header for CSRF — mirror exactly)
+
+Then:
 
 ```ts
 // frontend/src/lib/assetContext.ts
-import { api } from './api';
-// Course-asset functions live in lib/assets.ts (existing).
-import { listAssets, uploadAsset, deleteAsset } from './assets';
+import { api, ApiError } from './api';
+import { listAssets, uploadAsset, deleteAsset } from './assets';   // existing course wrappers (uploadAsset NOW accepts signal per 13a)
 
 export type AssetItem = {
   id: number;
@@ -617,13 +736,22 @@ export function runAssetContext(runId: number): AssetContext {
     upload: async (file, signal) => {
       const fd = new FormData();
       fd.append('file', file);
-      // Use the existing fetch wrapper that supports FormData + signal — see how
-      // assets.ts:uploadAsset does it and mirror. If api.post doesn't accept FormData,
-      // call fetch directly here (FormData implies multipart Content-Type set by browser).
-      const r = await fetch(`/api/runs/${runId}/assets`, { method: 'POST', body: fd, signal, credentials: 'same-origin' });
+      // Mirror the existing uploadAsset (lib/assets.ts) wire pattern EXACTLY:
+      //   - credentials: 'include' (NOT 'same-origin' — Vite dev runs on a different port
+      //     than the backend so cookies need 'include'; reviewer-5 catch).
+      //   - 'X-Requested-With': 'mathion' header for CSRF.
+      //   - On non-ok: throw ApiError (NOT plain Error) so downstream `e instanceof
+      //     ApiError` checks in AssetSidebar/MarkdownEditor work.
+      const r = await fetch(`/api/runs/${runId}/assets`, {
+        method: 'POST',
+        body: fd,
+        signal,
+        credentials: 'include',
+        headers: { 'X-Requested-With': 'mathion' },
+      });
       if (!r.ok) {
-        const detail = await r.json().catch(() => ({ detail: 'Upload failed' }));
-        throw Object.assign(new Error(detail.detail ?? 'Upload failed'), { status: r.status, detail: detail.detail });
+        const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
+        throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload);
       }
       return r.json();
     },
@@ -634,7 +762,7 @@ export function runAssetContext(runId: number): AssetContext {
 }
 ```
 
-**Sub-step:** before implementing `runAssetContext.upload`, read `frontend/src/lib/assets.ts:uploadAsset` to see how the existing course-side upload threads `FormData + AbortSignal`. Mirror exactly to avoid divergent fetch error-handling.
+**Before pasting:** confirm `ApiError`'s constructor signature in `lib/api.ts`. If it's `new ApiError(status, message, detail?)`, the above call site is correct. If different, mirror the existing `uploadAsset`-on-failure pattern verbatim — DON'T invent a different shape.
 
 - [ ] **Step 14: Tests pass**
 
@@ -970,17 +1098,22 @@ export async function uploadRunAsset(
   file: File,
   signal?: AbortSignal,
 ): Promise<RunAssetResponse> {
+  // Mirrors lib/assets.ts:uploadAsset wire pattern verbatim — credentials: 'include'
+  // (cross-port dev cookie), X-Requested-With CSRF header, ApiError on non-ok so
+  // downstream `e instanceof ApiError` checks work.
+  const { ApiError } = await import('./api');
   const fd = new FormData();
   fd.append('file', file);
   const r = await fetch(`/api/runs/${runId}/assets`, {
     method: 'POST',
     body: fd,
     signal,
-    credentials: 'same-origin',
+    credentials: 'include',
+    headers: { 'X-Requested-With': 'mathion' },
   });
   if (!r.ok) {
-    const detail = await r.json().catch(() => ({ detail: 'Upload failed' }));
-    throw Object.assign(new Error(detail.detail ?? 'Upload failed'), { status: r.status, detail: detail.detail });
+    const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
+    throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload);
   }
   return r.json();
 }
@@ -1047,8 +1180,12 @@ This is the most substantive task in the plan. It refactors two existing compone
 **Files:**
 - Modify: `frontend/src/components/editor/MarkdownEditor.svelte`
 - Modify: `frontend/src/components/editor/AssetSidebar.svelte`
-- Modify: `frontend/src/pages/editor/ItemEditPage.svelte`
-- Modify (if needed): existing tests under `frontend/src/tests/` that mount MarkdownEditor/AssetSidebar with `versionId={...}` prop — migrate to `assetContext={courseAssetContext(...)}`.
+- Modify: `frontend/src/pages/editor/ItemEditPage.svelte` (two MarkdownEditor instances at `:270` and `:305`)
+- **Modify: `frontend/src/tests/ItemEditPage.refreshKey.harness.svelte`** (reviewer-4 catch: the harness file referenced by `ItemEditPage.refreshKey.svelte.test.ts:3` mounts MarkdownEditor too — must migrate to `courseAssetContext`).
+- Modify (REQUIRED — reviewer-4 catch): all existing tests at `frontend/src/tests/MarkdownEditor.svelte.test.ts` and `frontend/src/tests/AssetSidebar.svelte.test.ts` that use `vi.spyOn(assetsModule, 'listAssets'/'uploadAsset'/...)`. After the refactor those spies become NO-OPS because the components no longer import `listAssets`/`uploadAsset` directly — they call through `assetContext.list()` / `assetContext.upload()`. **Without migration, tests will silently pass while making real fetch calls in jsdom.** Replace each `vi.spyOn(assetsModule, 'X')` with one of:
+  - inject a stub `assetContext = { list: vi.fn(), upload: vi.fn(), ... }` as the prop value, OR
+  - keep mounting with `courseAssetContext(...)` AND use the canonical `fetchSpy = vi.fn()` against `globalThis.fetch` (matches the `RunTeachersTab.svelte.test.ts` pattern).
+  Audit count: grep `vi.spyOn` in those two files; reviewer counted ~25 spies. Migrate each.
 
 ### T5a.A — MarkdownEditor refactor
 
@@ -1518,6 +1655,34 @@ describe('MarkdownEditor with runAssetContext', () => {
     // preview button disabled, drop handlers no-op
   });
 });
+
+describe('AssetSidebar error surfaces (reviewer-1 catch — spec lines 525, 527)', () => {
+  it('asset delete 409: surfaces backend message in sidebar error slot', async () => {
+    // Mount sidebar with one asset; click delete; mock DELETE to return 409 with
+    // {detail: "Asset 'X' is referenced by N mini-project(s). Use ?force=true to delete."}.
+    // Assert the message renders in the sidebar's error slot (post-delete state).
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/assets/1') && (init as any)?.method === 'DELETE') {
+        return jres({ detail: "Asset 'pic.png' is referenced by 2 mini-project(s). Use ?force=true to delete." }, 409);
+      }
+      return jres([{ id: 1, filename: 'pic.png', mime_type: 'image/png', file_size: 100, is_referenced: true }]);
+    });
+    mount(AssetSidebar, { target, props: {
+      assetContext: runAssetContext(42),
+      onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
+    } });
+    await settle();
+    (target.querySelector('button[data-action="delete-1"]') as HTMLButtonElement)?.click();
+    await settle();
+    // confirm delete (sidebar's inline confirm)
+    (target.querySelector('button[data-action="confirm-delete-1"]') as HTMLButtonElement)?.click();
+    await settle();
+    expect(target.textContent).toContain("referenced by 2 mini-project");
+  });
+});
 ```
 
 Fill in the `// ...` event-firing TODOs by mirroring existing test patterns (e.g., `RunTeachersTab.svelte.test.ts` for the form-submit pattern, but here you need DragEvent + DataTransfer construction — borrow from existing AssetSidebar tests if they cover drop).
@@ -1611,9 +1776,10 @@ async function settle() {
 const blocks: BlockResponse[] = [{ id: 1, version_id: 7, order: 0, title: 'Intro' }];
 
 describe('MiniProjectModal — create mode', () => {
-  it('renders block picker for create; POST body shape correct on Save', async () => {
-    fetchSpy.mockImplementation((url) => {
-      if (String(url).includes('/api/runs/10/mini-projects') && (arguments[1] as any)?.method === 'POST') {
+  it('renders block picker for create; POST body shape correct on Save (including all-null deadlines)', async () => {
+    // Reviewer-2 catch: arrow functions don't have `arguments`. Use explicit (url, init).
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/runs/10/mini-projects') && (init as any)?.method === 'POST') {
         return jres({ id: 99 } as MiniProjectResponse);
       }
       return jres([]);  // list endpoint
@@ -1635,21 +1801,44 @@ describe('MiniProjectModal — create mode', () => {
     } });
     await settle();
     expect(target.textContent).toContain('Intro');
-    // fill assignment_md
     const textarea = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
     textarea.value = 'My assignment';
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    // click Save
     const saveBtn = target.querySelector('button[data-action="save"]') as HTMLButtonElement;
     saveBtn.click();
     await settle();
-    const postCall = fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/runs/10/mini-projects') && c[1]?.method === 'POST');
+    const postCall = fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/runs/10/mini-projects') && (c[1] as any)?.method === 'POST');
     expect(postCall).toBeTruthy();
     const body = JSON.parse((postCall![1] as any).body);
     expect(body.block_id).toBe(1);
     expect(body.assignment_md).toBe('My assignment');
+    // Reviewer-2 catch: verify all three null deadlines are PRESENT (not undefined-removed by JSON.stringify)
+    expect(body.soft_deadline).toBeNull();
+    expect(body.hard_deadline).toBeNull();
+    expect(body.resubmission_deadline).toBeNull();
     expect(onSaved).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('Save disabled when availableBlocks is empty (block_id would be null)', async () => {
+    // Reviewer-5 catch: formData.block_id initializer falls back to null when
+    // availableBlocks[0]?.id is undefined; saveError must catch this so we don't POST {block_id: null}.
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'create', initial: null,
+      availableBlocks: [],  // empty
+      currentBlock: null, runIsPublished: true, runEndDate: '2026-06-30',
+      onClose: vi.fn(), onSaved: vi.fn(),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    const textarea = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    textarea.value = 'x';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    const saveBtn = target.querySelector('button[data-action="save"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
   });
 });
 
@@ -1715,24 +1904,26 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     await settle();
     expect(target.textContent).toContain('Discard unsaved changes?');
     expect(onClose).not.toHaveBeenCalled();
-    // Keep editing
-    (target.querySelector('button[data-action="cancel-inline"]') as HTMLButtonElement).click();
+    // Keep editing — InlineConfirm cancel button selected by class (no data-action on cancel)
+    (target.querySelector('button.cancel') as HTMLButtonElement).click();
     await settle();
     expect(target.textContent).not.toContain('Discard unsaved changes?');
-    // X again → InlineConfirm again → Discard
+    // X again → InlineConfirm again → Discard via confirmDataAction
     (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
     await settle();
-    (target.querySelector('button[data-action="confirm-inline"]') as HTMLButtonElement).click();
+    (target.querySelector('button[data-action="confirm-discard"]') as HTMLButtonElement).click();
     await settle();
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('mounted-flag rule: close during in-flight save → post-await write does not fire', async () => {
-    // Make POST hang; close mid-flight; resolve POST; assert no $state write on the
-    // unmounted modal (use a sentinel — e.g., onSaved is NOT called).
+  it('mounted-flag rule: close during in-flight save → post-await writes do not fire AND no throw on late-resolve', async () => {
+    // Reviewer-2 catch: `onSaved.not.toHaveBeenCalled()` is necessary but not sufficient.
+    // Strengthen: wrap the late-resolve in expect().not.toThrow() to confirm Svelte 5
+    // doesn't throw on post-destroy reactive writes (which it would if the `mounted`
+    // guard were missing in the success branch).
     let resolvePost!: (v: unknown) => void;
     fetchSpy.mockImplementation((url, init) => {
-      if (String(url).includes('/api/mini-projects/99') && init?.method === 'PATCH') {
+      if (String(url).includes('/api/mini-projects/99') && (init as any)?.method === 'PATCH') {
         return new Promise(r => { resolvePost = r; });
       }
       return jres([]);
@@ -1749,10 +1940,146 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     await settle();
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
-    unmount(cmp);  // simulate parent destroying modal mid-flight
-    resolvePost({ ok: true, status: 200, json: () => Promise.resolve(initial) } as Response);
+    unmount(cmp);
+    // Resolve the hung PATCH AFTER unmount. The mounted-guard in handleSave must
+    // prevent the success branch from writing $state on a destroyed component.
+    expect(() => {
+      resolvePost({ ok: true, status: 200, json: () => Promise.resolve(initial) } as Response);
+    }).not.toThrow();
     await settle();
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('inputs disabled while submitting: textarea, datetime fields, block picker, MarkdownEditor all set disabled', async () => {
+    // Spec line 606: verify all interactive inputs disable simultaneously when submitting.
+    let resolvePost!: (v: unknown) => void;
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/mini-projects') && (init as any)?.method === 'PATCH') {
+        return new Promise(r => { resolvePost = r; });
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'edit', initial, availableBlocks: [],
+      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      onClose: vi.fn(), onSaved: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    // All inputs disabled mid-flight
+    expect((target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement).disabled).toBe(true);
+    target.querySelectorAll('input[type="datetime-local"]').forEach(el => {
+      expect((el as HTMLInputElement).disabled).toBe(true);
+    });
+    expect((target.querySelector('button[data-action="save"]') as HTMLButtonElement).disabled).toBe(true);
+    resolvePost({ ok: true, status: 200, json: () => Promise.resolve(initial) } as Response);
+    await settle();
+  });
+
+  it('X during submitting is ignored; subsequent click after submit resolves closes normally', async () => {
+    // Spec line 615.
+    let resolvePost!: (v: unknown) => void;
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/mini-projects') && (init as any)?.method === 'PATCH') {
+        return new Promise(r => { resolvePost = r; });
+      }
+      return jres([]);
+    });
+    const onClose = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'edit', initial, availableBlocks: [],
+      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      onClose, onSaved: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    // X mid-submit: dropped
+    (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+    await settle();
+    expect(onClose).not.toHaveBeenCalled();
+    // Resolve
+    resolvePost({ ok: true, status: 200, json: () => Promise.resolve(initial) } as Response);
+    await settle();
+    // Now onClose has been called by the save-success path; if not (e.g., dirty),
+    // a fresh X click should close cleanly.
+    if (!onClose.mock.calls.length) {
+      (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+      await settle();
+      expect(onClose).toHaveBeenCalled();
+    }
+  });
+
+  it('close-during-upload aborts the in-flight upload via bind:uploadAbortController', async () => {
+    // Spec line 612. Mount with a stub MarkdownEditor that exposes a controller via
+    // its bind:uploadAbortController prop; trigger an upload that hangs; click X;
+    // assert the controller's .abort() was called.
+    // Implementation hint: this test can't easily use the real MarkdownEditor
+    // because controller is internal. Verify behavior by intercepting AbortController
+    // via vi.spyOn(globalThis, 'AbortController') OR by injecting a test-double
+    // MarkdownEditor through a Svelte test harness. Simplest: spy on AbortController
+    // prototype's abort method globally for this test.
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
+    let resolveUpload!: (v: unknown) => void;
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/runs/10/assets') && (init as any)?.method === 'POST') {
+        return new Promise(r => { resolveUpload = r; });
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'edit', initial, availableBlocks: [],
+      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      onClose: vi.fn(), onSaved: vi.fn(),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    // Simulate a drop on the textarea — the real MarkdownEditor will create the
+    // AbortController and assign it via $bindable to the modal. The test relies on
+    // production behavior, not stubbed editor.
+    const ta = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    const dt = new DataTransfer();
+    dt.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
+    ta.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    await settle();
+    // Click X mid-upload
+    (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+    await settle();
+    // closeForCurrentStage should have called abort on the in-flight controller
+    expect(abortSpy).toHaveBeenCalled();
+    // Cleanup the hanging promise so vitest doesn't hold the worker
+    resolveUpload({ ok: true, status: 200, json: () => Promise.resolve({ id: 1, filename: 'x.png' }) } as Response);
+  });
+
+  it('modal layout: max-width 1100px, max-height 90vh, overflow auto, sticky header+footer', async () => {
+    // Spec line 488 + line 616.
+    fetchSpy.mockImplementation(() => jres([]));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'edit', initial, availableBlocks: [],
+      currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
+      onClose: vi.fn(), onSaved: vi.fn(),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    const modal = target.querySelector('.modal') as HTMLElement;
+    const computed = window.getComputedStyle(modal);
+    expect(computed.maxWidth).toBe('1100px');
+    expect(computed.maxHeight).toBe('90vh');
+    expect(computed.overflow).toBe('auto');
+    // Sticky header + footer: verify the CSS classes exist (test will need the actual
+    // classes from implementation; this is a sanity check that styling is in scope).
+    expect(target.querySelector('header')?.style.position || computed.getPropertyValue('position')).toBeTruthy();
   });
 });
 ```
@@ -1824,6 +2151,7 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   onDestroy(() => { mounted = false; });
 
   let pendingClose = $state(false);
+  let discarding = $state(false);   // reviewer-3 catch: discarding flag avoids closeForCurrentStage re-entrancy
   const dirty = $derived(
     initialFormSnapshot == null
       ? false
@@ -1832,7 +2160,7 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
 
   function closeForCurrentStage() {
     if (submitting) return;
-    if (dirty && !pendingClose) {
+    if (dirty && !pendingClose && !discarding) {   // skip the gate when discarding=true
       pendingClose = true;
       return;
     }
@@ -1840,8 +2168,19 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
     onClose();
   }
 
+  function confirmDiscard() {
+    // Called from InlineConfirm's onConfirm. Set discarding=true so the next call to
+    // closeForCurrentStage bypasses the dirty gate and proceeds straight to onClose.
+    discarding = true;
+    pendingClose = false;
+    closeForCurrentStage();
+  }
+
   // Validation (spec lines 491-502, Publish-specific in T6b)
   const saveError = $derived.by((): string | null => {
+    // Reviewer-5 catch: create mode with empty availableBlocks gives block_id=null;
+    // Save must be blocked or it'll POST {block_id: null} → 422.
+    if (mode === 'create' && formData.block_id == null) return 'No available blocks to assign — every block already has a mini-project';
     if (!formData.assignment_md.trim()) return 'Assignment text is required';
     if (formData.soft_local && formData.hard_local) {
       if (new Date(localInputToISO(formData.soft_local)) > new Date(localInputToISO(formData.hard_local))) {
@@ -1935,11 +2274,15 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
       <InlineConfirm
         warning="Discard unsaved changes?"
         confirmLabel="Discard"
+        confirmDataAction="confirm-discard"
         onCancel={() => { pendingClose = false; }}
-        onConfirm={() => { pendingClose = false; closeForCurrentStage(); }}
-        data-action-confirm="confirm-inline"
-        data-action-cancel="cancel-inline"
+        onConfirm={confirmDiscard}
       />
+      <!-- Note: InlineConfirm actual API only exposes `confirmDataAction` on the
+           confirm button (verified frontend/src/components/ui/InlineConfirm.svelte:4-20).
+           The cancel button has class="cancel" but no data-action. Tests must select
+           the cancel button via `button.cancel` (NOT `button[data-action=...]`).
+           Reviewer-2/3/5 catch. -->
     {:else}
       <button onclick={closeForCurrentStage}>Cancel</button>
       <button data-action="save" disabled={submitting || !!saveError} onclick={handleSave}>
@@ -2006,7 +2349,7 @@ git commit -m "feat(frontend): MiniProjectModal create/edit + closeForCurrentSta
 
 - [ ] **Step 1: Write failing tests for publish flow**
 
-Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover:
+Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (reviewer-1/2 catches added — error-mapping rows 4-7 of spec lines 519-531 now have coverage):
 
 - `[Publish…]` button rendered only in edit mode AND `!initial.is_published`
 - Publish click → InlineConfirm with copy "Once published, this cannot be undone..."
@@ -2018,13 +2361,20 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover:
 - `hard_iso > runEndDate + 'T23:59:59Z'`: bullet shows with substituted runEndDate
 - `resub_iso > runEndDate + 'T23:59:59Z'`: bullet shows
 - 409 on publish: inline banner with `e.displayMessage`
+- **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{detail: "block_id: must be set"}`; assert field-level error renders.
+- **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422; assert inline banner with backend detail.
+- **422 on render preview (spec lines 513, 527)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
+- **5xx on publish (spec line 530)**: mount with valid preconditions; POST /publish returns 503; assert red banner stays; modal does NOT close.
 - Save and Publish share `submitting`: clicking Publish disables Save and vice versa; button text changes to "Publishing…"
+- **Mounted-flag rule for Publish (reviewer-2 catch)**: same shape as the T6a close-during-Save test — close mid-Publish, assert no post-await write fires and the late resolve doesn't throw.
 
 Use the same test scaffold from T6a (mount, settle, fetch spy).
 
 - [ ] **Step 2: Implement the publish flow**
 
-Read spec lines 484, 491-510, 519-531 verbatim. Add:
+Read spec lines 484, 491-510, 519-531 verbatim. **Note on `runEndDate` type** (reviewer-5 catch): `frontend/src/lib/types.ts:271` currently types `Run.end_date` as non-null `string`. Spec line 499 says "Run table currently allows nullable end_date in some legacy rows, so the prop type stays `string | null`". Resolution for the plan: accept `runEndDate: string | null` on the MiniProjectModal prop, AND treat the null path as defensive (most runs in practice have an end_date). If a future spec hardens the backend to non-null, drop the null bullet then. Don't change `lib/types.ts:271` in this task — that's a wider type-tightening initiative.
+
+Add:
 
 ```ts
 import { publishMiniProject } from '../../lib/miniProjects';
@@ -2317,6 +2667,10 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
   let deleteConfirmId = $state<number | null>(null);
   let forceCheckbox = $state(false);
 
+  // Reviewer-5 catch: forceCheckbox is shared $state across rows. When the user
+  // clicks delete on a DIFFERENT row, reset it so the new confirm starts unchecked.
+  $effect(() => { void deleteConfirmId; forceCheckbox = false; });
+
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0
   );
@@ -2493,29 +2847,32 @@ Add to `ActiveTab`:
 type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects';
 ```
 
-Add new $state:
+Add new $state — reviewer-3 catch: `pinned` AND `versionIsDisabled` must both be `$state` to flow into the tab's template reactively (NOT plain local `const` inside `loadAll`):
 ```ts
 let blocks = $state<BlockResponse[] | null>(null);
 let miniProjects = $state<MiniProjectResponse[] | null>(null);
 let pinnedAvailable = $state(true);
+let versionIsDisabled = $state(false);   // populated inside loadAll from pinned.is_disabled
 ```
 
-Extend `loadAll` post-`versions` resolution (around `RunDetailPage.svelte:211-232` per existing loadToken pattern):
+Extend `loadAll` post-`versions` resolution (around `RunDetailPage.svelte:211-232` per existing loadToken pattern; mirror the existing `if (myToken !== loadToken) return;` guard pattern at line 60/187/219/227/232):
 
 ```ts
-// after versions resolves and loadToken check passes:
+// after versions resolves and the existing token check passes:
 const pinned = versions.find(v => v.id === run.version_id);
 if (pinned == null) {
   pinnedAvailable = false;
+  versionIsDisabled = false;
   blocks = [];
   miniProjects = [];
 } else {
   pinnedAvailable = true;
+  versionIsDisabled = pinned.is_disabled ?? false;
   const [blocksResult, mpsResult] = await Promise.all([
     listBlocks(pinned.id),
     listMiniProjects(rid),
   ]);
-  if (myToken !== loadToken) return;
+  if (myToken !== loadToken) return;   // reviewer-4 catch: explicit token check AFTER the new Promise.all, mirroring existing pattern at :60/:187/:219/:227/:232
   blocks = blocksResult;
   miniProjects = mpsResult;
 }
@@ -2546,7 +2903,7 @@ Add 5th tab button + body:
     runIsPublished={run.is_published}
     runGroupsEnabled={run.groups_enabled}
     runEndDate={run.end_date}
-    versionIsDisabled={pinned?.is_disabled ?? false}
+    {versionIsDisabled}
     {pinnedAvailable}
     blocks={blocks ?? []}
     miniProjects={miniProjects ?? []}
