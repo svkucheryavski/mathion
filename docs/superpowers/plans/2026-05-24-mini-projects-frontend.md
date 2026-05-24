@@ -3747,7 +3747,7 @@ it('listMiniProjects fails → whole page renders loadError', async () => {
 });
 ```
 
-**Note on the reset-effect test removed in round 5** (reviewer-2 catch): the prior plan listed a "reset-effect closes modal on runId change" test, but modal state (`modalMode`, `editTarget`) actually lives **inside** RunMiniProjectsTab, not on RunDetailPage. Changing `runId` doesn't unmount the tab (tab is mounted by `{:else if activeTab === 'mini-projects'}` which stays true). The tab is the unmount boundary only when `activeTab` changes. So the reset-effect entries `showMiniProjectModal/modalMode/editTarget` on RunDetailPage are DEAD CODE — remove them. The actual unmount path is: user switches to a different tab → `{:else if}` flips → RunMiniProjectsTab unmounts → its $state (including modalMode/editTarget) is destroyed. No explicit reset needed.
+**Note on the reset-effect test removed in round 5** (reviewer-2 catch + codex round-5 cleanup): the prior plan listed a "reset-effect closes modal on runId change" test, but modal state (`modalMode`, `editTarget`) actually lives **inside** RunMiniProjectsTab, not on RunDetailPage. So the reset-effect entries `showMiniProjectModal/modalMode/editTarget` on RunDetailPage are DEAD CODE — remove them. The actual unmount path leverages the existing reset-effect's `activeTab = 'overview'` write (codex round-5 catch — earlier draft of this note incorrectly claimed runId change doesn't unmount the tab): on runId change, the existing reset effect writes `activeTab='overview'` → `{:else if activeTab === 'mini-projects'}` evaluates false → RunMiniProjectsTab unmounts → its $state (including `modalMode`, `editTarget`) is destroyed by component lifecycle. No new reset-effect entries needed; existing activeTab reset is the load-bearing cleanup path. (Cross-check Step 3 below at "Reset-effect entries dropped in round 5" — same fact, restated to be consistent.)
 
 - [ ] **Step 3: Implement RunDetailPage changes**
 
@@ -3892,9 +3892,9 @@ git commit -m "feat(frontend): RunDetailPage integration — 5th tab, blocks+MPs
   Modal state (modalMode/editTarget) lives INSIDE RunMiniProjectsTab; the
   existing reset effect already writes activeTab='overview' which unmounts
   the tab via the {:else if} gate, destroying its $state by lifecycle. No
-  new reset entries needed (round-5 reviewer-2 catch; intentional
-  divergence from spec lines 485/537/539/564 which used 'just add
-  showMiniProjectModal=false' wording).
+  new reset entries needed (round-5 reviewer-2 catch). Spec lines 486/540
+  were corrected in codex round-4 to match this behavior — no longer a
+  divergence.
 - onNavigateToTab passed through to tab/modal for banner-link navigation"
 ```
 

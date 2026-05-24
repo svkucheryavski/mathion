@@ -56,10 +56,10 @@ RunDetailPage
         ├── (empty-state CTA if no MPs)
         └── MP list (rows sorted by block.order asc)
               each row: block label, deadlines summary (browser-local TZ), status pill
-              actions:
-                Draft (unlocked):     [Edit] [Publish…] [×]
-                Published (unlocked): [Edit]            [×]
-                Locked (any):                           [×]   ← force confirm
+              actions (modal-only publish — codex r3-5 catch):
+                Draft (unlocked):     [Edit] [×]   ← Publish lives inside the modal
+                Published (unlocked): [Edit] [×]
+                Locked (any):                [×]   ← force confirm
 ```
 
 ## Backend Touchpoints
@@ -545,12 +545,12 @@ Each bullet uses `aria-describedby` on the offending field. The "Open Overview" 
 | State | UX |
 |---|---|
 | `!runGroupsEnabled` | Actionable banner; `[+ New]` disabled |
-| `versionIsDisabled` | Actionable banner; `[+ New]`, `[Edit]`, `[Publish]` disabled |
-| `!runIsPublished` | Actionable banner; `[+ New]` and `[Edit]` allowed (drafts pre-publish are valid), `[Publish]` disabled |
+| `versionIsDisabled` | Actionable banner; `[+ New]` and row `[Edit]` disabled. There is NO row-level `[Publish]` — Publish lives inside `MiniProjectModal` and is blocked there by the `publishCheckResult` precondition "This run's course version is disabled — Open Overview to re-enable it." (codex r3-5 catch: modal-only publish). |
+| `!runIsPublished` | Actionable banner; `[+ New]` and row `[Edit]` allowed (drafts pre-publish are valid). Inside the modal, `publishCheckResult` blocks Publish with the "Run must be published — Open Overview to publish." precondition (modal-only publish). |
 | `pinned == null` (defensive) | Tab body renders "Cannot load — pinned version not found"; controls hidden |
 | All blocks have MPs | `[+ New]` disabled with tooltip |
 | No MPs | Empty-state CTA + explainer + create hint |
-| MP `is_published === true && first_submitted_at === null` | Pill = "Published"; `[Publish]` hidden; `[Edit]` allowed; `[×]` allowed |
+| MP `is_published === true && first_submitted_at === null` | Pill = "Published"; row actions `[Edit]` and `[×]` only (no row-level `[Publish]` exists in any MP state — modal-only publish per codex r3-5 catch). Inside the modal, `[Publish…]` is hidden because `initial.is_published === true`. |
 | MP `first_submitted_at !== null` | Pill = "Locked"; `[Edit]` hidden entirely; `[×]` force-confirm |
 | Delete 409 (locked, no force) | Confirm row reveals force option (without count) |
 | Asset delete 409 | Inline sidebar error with backend's message |
@@ -562,7 +562,7 @@ Each bullet uses `aria-describedby` on the offending field. The "Open Overview" 
 Established patterns plus what was kept after the second-pass review:
 
 - `loadToken` ratchets on `loadAll`; stale responses dropped on runId change.
-- Existing RunDetailPage reset effect closes any open modal on runId change.
+- Existing RunDetailPage reset effect closes any open modal on runId change (via the `activeTab='overview'` write, which unmounts `RunMiniProjectsTab` and destroys its modal state by lifecycle — codex round-5 clarification).
 - Modal `onSaved()` triggers `refetchMiniProjects()`.
 - MarkdownEditor bumps `refreshKey` after non-sidebar-initiated uploads (textarea/wrapper drop) so the sidebar's `$effect` re-fetches its asset list. Sidebar uploads/deletes call `fetchAssets()` directly and do NOT bump `refreshKey`.
 - Modal-close while submitting blocked; user re-clicks after resolve.
@@ -592,8 +592,8 @@ Established patterns plus what was kept after the second-pass review:
 - `tests/RunMiniProjectsTab.svelte.test.ts`
   - Empty-state CTA + explainer + create-hint copy when no MPs
   - Actionable banner renders when `!runGroupsEnabled`; link click calls `onNavigateToTab('overview')`
-  - Banner renders when `versionIsDisabled`; controls disabled
-  - Banner renders when `!runIsPublished`; `[+ New]` allowed, `[Publish]` row-action disabled
+  - Banner renders when `versionIsDisabled`; `[+ New]` and row `[Edit]` disabled; assert no row-level `[data-action="publish"]` button exists (modal-only publish — codex r3-5 catch).
+  - Banner renders when `!runIsPublished`; `[+ New]` and `[Edit]` remain enabled (drafts pre-publish are valid); assert no row-level `[data-action="publish"]` button exists.
   - "Cannot load" message when `pinned == null`
   - All-blocks-used → `[+ New]` disabled with tooltip
   - MP rows sorted by `block.order asc`
@@ -606,6 +606,7 @@ Established patterns plus what was kept after the second-pass review:
   - Validation: deadline order; empty assignment blocks Save
   - Inputs disabled while submitting: textarea, datetime fields, block picker, sidebar upload all set `disabled={submitting}`; user keystrokes during in-flight save are no-ops
   - Publish flow: precondition bullets render with substituted runEndDate; field-level `aria-describedby`; inline confirm; 409 surfaces as inline banner
+  - **Already-open modal + versionIsDisabled flip (codex r3-5 catch)**: mount with `versionIsDisabled: false` via the propsRef-as-$state pattern; click `[Publish…]`; mutate `propsRef.versionIsDisabled = true` + `await settle()`; click confirmPublish; assert POST `/publish` is NOT called AND the precondition banner shows "This run's course version is disabled — Open Overview to re-enable it."
   - 409-PATCH: shows "Refresh to see latest"; modal stays open
   - 404 on Save: inline banner renders with Ctrl/Cmd+A/+C instructions
   - Close handler — clean form: backdrop/X/Escape → `closeForCurrentStage` → calls `onClose` immediately
