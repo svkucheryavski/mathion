@@ -1946,7 +1946,7 @@ describe('MiniProjectModal — create mode', () => {
     const onClose = vi.fn();
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10,
       mode: 'create',
       initial: null,
@@ -1983,7 +1983,7 @@ describe('MiniProjectModal — create mode', () => {
     // availableBlocks[0]?.id is undefined; saveError must catch this so we don't POST {block_id: null}.
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'create', initial: null,
       availableBlocks: [],  // empty
       currentBlock: null, runIsPublished: true, runEndDate: '2026-06-30',
@@ -2016,7 +2016,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
@@ -2032,7 +2032,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     const onClose = vi.fn();
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn(),
@@ -2071,7 +2071,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     const onClose = vi.fn();
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn(),
@@ -2144,7 +2144,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     });
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn().mockResolvedValue(undefined),
@@ -2175,7 +2175,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     const onClose = vi.fn();
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn().mockResolvedValue(undefined),
@@ -2219,7 +2219,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     });
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
@@ -2241,6 +2241,11 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(abortSpy).toHaveBeenCalled();
     // Cleanup the hanging promise so vitest doesn't hold the worker
     resolveUpload({ ok: true, status: 200, json: () => Promise.resolve({ id: 1, filename: 'x.png' }) } as Response);
+    // Round-6 reviewer-5 catch: vitest only auto-restores spies when
+    // `restoreMocks: true` is set in vitest.config — otherwise the
+    // AbortController.prototype.abort spy persists into subsequent tests and
+    // pollutes their mock-call state. Explicit restore.
+    abortSpy.mockRestore();
   });
 
   it('modal layout: container element + header + footer present (structural check, NOT computed-style)', async () => {
@@ -2255,7 +2260,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    trackedMount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose: vi.fn(), onSaved: vi.fn(),
@@ -2937,6 +2942,60 @@ describe('RunMiniProjectsTab', () => {
     unmount(cmp);
   });
 
+  it('force-delete fails (5xx): surfaces deleteError banner, keeps force-confirm view open, clears checkbox', async () => {
+    // Round-6 reviewer-4 catch (Critical C5): prior handleForceDelete had only
+    // `try { ... } finally { deleteConfirmId = null; }` — if the force-DELETE
+    // rejected, the rejection escaped the inline-arrow onclick and was
+    // swallowed. Production now routes errors to the shared deleteError banner
+    // AND keeps the force-confirm view open (deleteConfirmId not nulled) so
+    // the user can retry. Test asserts the banner copy and the surviving
+    // force-confirm DOM.
+    const blocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const lockedMp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: '2026-05-22T00:00:00Z',
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as any)?.method === 'DELETE' && String(url).includes('force=true')) {
+        return jres({ detail: 'Internal server error' }, 503);
+      }
+      return jres([lockedMp]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: {
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks, miniProjects: [lockedMp],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    // Locked row → click × opens the force-confirm view directly.
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    // Tick the checkbox; click Force delete.
+    const checkbox = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    (target.querySelector('button.danger') as HTMLButtonElement).click();
+    await settle();
+    // Force-DELETE rejects with 503 → deleteError banner appears with the
+    // server detail; force-confirm view STAYS open (deleteConfirmId not nulled)
+    // so the user can retry; checkbox is cleared so they re-affirm intent.
+    expect(target.textContent).toMatch(/Internal server error/);
+    expect(target.querySelector('[data-role="delete-error-banner"]')).toBeTruthy();
+    expect(target.textContent).toContain('Force delete will permanently remove');  // force-confirm still rendered
+    expect((target.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+    unmount(cmp);
+  });
+
   it('409 on non-locked delete + refetch ALSO fails: surfaces deleteError banner, resets confirm state', async () => {
     // Round-5 reviewer-4 catch: prior version relied on `unhandledrejection` event
     // which jsdom + vitest do NOT reliably dispatch (the rejection hits Node's
@@ -3040,13 +3099,28 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
   // Round-5 reviewer-4 catch: when the 409 refetch path itself fails (network down),
   // the prior round-4 implementation rethrew into the InlineConfirm onclick which
   // discards the rejection — user saw NOTHING. Now surface a banner instead.
+  //
+  // Round-6 reviewer-4/5 catch: this banner is plan-only enrichment beyond the
+  // spec's error-mapping table (spec lines 519-530 cover modal errors, not
+  // tab-level delete errors). Banner has explicit lifecycle managed by the
+  // handlers (reset at handler entry; cleared by Dismiss button), NOT coupled
+  // to deleteConfirmId reactivity — see Fix C1 below.
   let deleteError = $state<string | null>(null);
 
   // Reviewer-5 catch: forceCheckbox is shared $state across rows. When the user
   // clicks delete on a DIFFERENT row, reset it so the new confirm starts unchecked.
-  // Also reset deleteError so it doesn't bleed across rows.
+  //
+  // Round-6 reviewer-4/5 catch (Critical C1): DO NOT also reset deleteError here.
+  // In the catch branches below we set `deleteError = '...'; deleteConfirmId = null;`
+  // in the same tick. Svelte 5 schedules $effect runs microtask-after the sync
+  // block — the effect would see deleteConfirmId transition and wipe deleteError
+  // BEFORE the user ever sees the banner. The 'refetch-also-fails' test would
+  // assert the banner text and fail. Instead, deleteError is reset explicitly at
+  // handler entry (handleDeleteConfirm / handleForceDelete) and cleared by the
+  // Dismiss button on the banner itself. forceCheckbox has the OPPOSITE semantics:
+  // it SHOULD reset on any deleteConfirmId change (so a fresh row starts unchecked),
+  // and no handler writes to it after a deleteConfirmId-null transition.
   $effect(() => { void deleteConfirmId; forceCheckbox = false; });
-  $effect(() => { void deleteConfirmId; deleteError = null; });
 
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0
@@ -3061,20 +3135,37 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
     return '';
   });
 
+  // Round-6 reviewer-4 catch (Critical C5): the prior version had only `try { ... }
+  // finally { deleteConfirmId = null; forceCheckbox = false; }`. If
+  // deleteMiniProject(force=true) rejected with 5xx OR onRefetchMiniProjects()
+  // rejected after a successful force-delete, the rejection escaped the inline
+  // arrow onclick and was swallowed (same hazard that round 5 fixed for
+  // handleDeleteConfirm). Now wrap both awaits in try/catch and route to the
+  // shared deleteError banner. Also reset deleteError at handler entry so a
+  // stale banner from a prior failed attempt doesn't bleed into the new one.
   async function handleForceDelete(mpId: number) {
     if (!forceCheckbox) return;
+    deleteError = null;
     try {
       await deleteMiniProject(mpId, { force: true });
       await onRefetchMiniProjects();
-    } finally {
       deleteConfirmId = null;
+      forceCheckbox = false;
+    } catch (e) {
+      deleteError = (e instanceof ApiError) ? e.displayMessage : (e instanceof Error ? e.message : 'Force delete failed');
+      // Keep the force-confirm view open so the user can retry; clear the
+      // checkbox so they have to re-affirm the destructive intent.
       forceCheckbox = false;
     }
   }
 
   // Round-5 reviewer-5 catch: extracted from inline InlineConfirm onConfirm closure
   // for testability + readability. Handles the 409→force-reveal race per spec line 524.
+  //
+  // Round-6 reviewer-4/5 catch: clear deleteError at entry so prior banner doesn't
+  // bleed; do NOT rely on a $effect tied to deleteConfirmId (see banner declaration above).
   async function handleDeleteConfirm(mp: MiniProjectResponse) {
+    deleteError = null;
     try {
       await deleteMiniProject(mp.id);
       await onRefetchMiniProjects();
@@ -3091,6 +3182,9 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
         } catch {
           // Refetch ALSO failed (network drop between 409 and the GET).
           // Surface a retry-affordance banner; reset confirm state so user can act.
+          // Round-6 C1: order matters — set deleteError FIRST, then null
+          // deleteConfirmId. With the deleteError-reset $effect removed, the
+          // banner survives the deleteConfirmId transition.
           deleteError = 'Could not refresh. Please retry.';
           deleteConfirmId = null;
           forceCheckbox = false;
@@ -3277,7 +3371,7 @@ it('renders 5th "Mini-projects" tab; switching to it shows RunMiniProjectsTab', 
   fetchSpy.mockImplementation(mockCascade({}));
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
   await settle();
   await settle();   // second settle for the blocks/MPs inner Promise.all
   const mpTabBtn = Array.from(target.querySelectorAll('button')).find(b => b.textContent?.includes('Mini-projects')) as HTMLButtonElement;
@@ -3293,7 +3387,7 @@ it('pinnedAvailable=false when versions list does not contain run.version_id', a
   fetchSpy.mockImplementation(mockCascade({ noPinned: true }));
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
   await settle();
   await settle();
   const mpTabBtn = Array.from(target.querySelectorAll('button')).find(b => b.textContent?.includes('Mini-projects')) as HTMLButtonElement;
@@ -3305,26 +3399,37 @@ it('pinnedAvailable=false when versions list does not contain run.version_id', a
 
 it('listBlocks fails → whole page renders loadError (all-or-nothing load invariant)', async () => {
   // Round-5 reviewer-2 catch: test the partial-fail invariant the plan now documents.
+  //
+  // Round-6 reviewer-2/4/5 catch (Critical C3): production renders
+  // `{loadError.displayMessage}` (RunDetailPage.svelte:~241). For
+  // ApiError(503, 'blocks 5xx') the displayMessage getter returns the raw
+  // detail string 'blocks 5xx' (api.ts:14-19). The prior regex
+  // `/Failed to load|loadError/i` matches NEITHER token — test was permanently
+  // red. Assert on the actual rendered detail AND on the structural
+  // loadError container so the test stays meaningful if the copy ever changes.
   fetchSpy.mockImplementation(mockCascade({ blocksReject: true }));
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
   await settle();
   await settle();
-  // The existing loadError view (consistent with line 64-67 pattern):
-  expect(target.textContent).toMatch(/Failed to load|loadError/i);
-  // Tabs above mini-projects are NOT rendered when loadError is set (consistent with current behavior).
+  expect(target.textContent).toMatch(/blocks 5xx/);
+  // Tabs above mini-projects are NOT rendered when loadError is set; the
+  // mini-projects tab button is absent from the DOM (consistent with current behavior).
+  expect(Array.from(target.querySelectorAll('button')).find(b => b.textContent?.includes('Mini-projects'))).toBeUndefined();
   unmount(cmp);
 });
 
 it('listMiniProjects fails → whole page renders loadError', async () => {
+  // Round-6 C3: same regex correction as blocks-5xx test above.
   fetchSpy.mockImplementation(mockCascade({ mpsReject: true }));
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
   await settle();
   await settle();
-  expect(target.textContent).toMatch(/Failed to load|loadError/i);
+  expect(target.textContent).toMatch(/mps 5xx/);
+  expect(Array.from(target.querySelectorAll('button')).find(b => b.textContent?.includes('Mini-projects'))).toBeUndefined();
   unmount(cmp);
 });
 ```
@@ -3470,8 +3575,13 @@ git commit -m "feat(frontend): RunDetailPage integration — 5th tab, blocks+MPs
   run.version_id); when pinned is null set pinnedAvailable=false +
   empty arrays (defensive); otherwise Promise.all([listBlocks(pinned.id),
   listMiniProjects(rid)]) in parallel
-- reset-effect closes mini-project modal on runId change (folds into
-  existing reset alongside activeTab/rosterPrefilter/showImportModal)
+- Modal state on runId change: NOT folded into RunDetailPage reset effect.
+  Modal state (modalMode/editTarget) lives INSIDE RunMiniProjectsTab; the
+  existing reset effect already writes activeTab='overview' which unmounts
+  the tab via the {:else if} gate, destroying its $state by lifecycle. No
+  new reset entries needed (round-5 reviewer-2 catch; intentional
+  divergence from spec lines 485/537/539/564 which used 'just add
+  showMiniProjectModal=false' wording).
 - onNavigateToTab passed through to tab/modal for banner-link navigation"
 ```
 
