@@ -300,7 +300,7 @@ Props:
 - `assetContext = $derived(runAssetContext(runId))` (memoized; not constructed per render).
 - `formData` $state: `{ block_id, soft_local, hard_local, resub_local, assignment_md }` — datetime fields hold naive local strings throughout the modal; converted via `localInputToISO` only at POST/PATCH time.
 - `submitting` $state. **Inputs disabled while submitting:** `assignment_md` textarea, all three datetime inputs, the block picker, and the AssetSidebar (upload + insert-ref buttons) all set `disabled={submitting}`. This prevents the in-flight-edit data-loss case where a user keeps typing after Save → PATCH carries the pre-click snapshot → post-click edits are silently lost on the success refetch.
-- `mounted` $state: set `true` in `onMount`, false in `$effect.root` cleanup (or via Svelte 5's component teardown). Every post-await state write inside the modal (clipboard `.then`, Save success, upload `.catch` for non-abort errors, etc.) checks `if (!mounted) return;` first. This covers the unmounted-state-write race surfaced by the edge-case reviewer (covers close-during-upload, close-during-Save, close-during-publish all as one rule).
+- `mounted` $state: set `true` in `onMount`, `false` in `onDestroy`. Every post-await state write inside the modal (Save success, upload `.catch` for non-abort errors, etc.) checks `if (!mounted) return;` first. This covers the unmounted-state-write race surfaced by the edge-case reviewer (covers close-during-upload, close-during-Save, close-during-publish all as one rule).
 - **Dirty-confirm via `InlineConfirm` footer-row.** Single guarded close path:
   ```ts
   let pendingClose = $state(false);
