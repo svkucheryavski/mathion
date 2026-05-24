@@ -86,17 +86,24 @@ def _upload_asset(admin_client, run_id: int, filename: str, content: bytes = b"x
 
 
 def test_run_render_rewrites_asset_refs(admin_client, seed_run_with_groups):
-    """POST /api/runs/{rid}/render returns HTML with mathion:asset://X rewritten to /api/runs/{rid}/assets/X."""
+    """POST /api/runs/{rid}/render returns HTML with bare filename refs rewritten to /api/runs/{rid}/assets/{filename}.
+
+    Reviewer-4 catch (round 2): the production markdown convention uses BARE filenames
+    (`![diagram](diagram.png)`), NOT a fictional `mathion:asset://` URI scheme.
+    Verified in `backend/mathion/markdown.py:52-68` (`extract_asset_filenames` scans for
+    `![..](filename)` patterns that don't start with `http://`/`https://`/`mailto:`/`#`).
+    `render_with_run_assets` rewrites `src="{filename}"` → `src="/api/runs/{rid}/assets/{filename}"`
+    (helpers.py:455-458), so the assertion targets the rewritten src= attribute.
+    """
     run, _, _ = seed_run_with_groups()
     asset = _upload_asset(admin_client, run["id"], "diagram.png")
     r = admin_client.post(
         f"/api/runs/{run['id']}/render",
-        json={"content_md": f"![diagram](mathion:asset://{asset['filename']})"},
+        json={"content_md": f"![diagram]({asset['filename']})"},
     )
     assert r.status_code == status.HTTP_200_OK, r.text
     html = r.json()["html"]
-    assert f"/api/runs/{run['id']}/assets/{asset['filename']}" in html
-    assert "mathion:asset://" not in html
+    assert f'src="/api/runs/{run["id"]}/assets/{asset["filename"]}"' in html
 
 
 def test_run_render_admin_ok(admin_client, seed_run_with_groups):
@@ -106,17 +113,26 @@ def test_run_render_admin_ok(admin_client, seed_run_with_groups):
     assert r.status_code == status.HTTP_200_OK
 
 
-def test_run_render_run_teacher_ok(teacher_client, seed_run_with_groups):
-    """Run-teacher authenticated session: 200 (require_run_admin_or_teacher dep)."""
-    # If teacher_client fixture differs in this codebase, mirror the auth setup that
-    # backend/tests/test_run_assets.py uses for non-admin users — pattern is to attach
-    # a teacher via seed_run_with_groups then call as that user. Inspect conftest.py
-    # for the actual fixture name; if there's no teacher_client, this test can be
-    # skipped + documented (run_admin_or_teacher gating is also exercised in
-    # test_run_assets.py).
+def test_run_render_run_teacher_ok(teacher_client, seed_run_with_groups, admin_client):
+    """Run-teacher authenticated session: 200 (require_run_admin_or_teacher dep).
+
+    Reviewer-4 catch (round 2): the `teacher_client` fixture (`conftest.py:128-137`)
+    creates a session for `teacher@example.com`. But `seed_run_with_groups`
+    (`conftest.py:213`) attaches `teach@example.com` as the run's teacher — a
+    DIFFERENT email. Without an extra POST attaching `teacher@example.com` to the
+    run, this test would assert 200 but actually get 403 (and pass falsely if the
+    assert window included 403, which the original draft did via `status_code in
+    (200,)`-style permissiveness). Fix: explicitly attach the teacher_client user
+    to the run before calling the endpoint, AND assert strict 200.
+    """
     run, _, _ = seed_run_with_groups()
+    # Attach the teacher_client user (teacher@example.com per conftest.py:121) to this run.
+    attach_r = admin_client.post(
+        f"/api/runs/{run['id']}/teachers", json={"email": "teacher@example.com"}
+    )
+    assert attach_r.status_code in (200, 201), attach_r.text
     r = teacher_client.post(f"/api/runs/{run['id']}/render", json={"content_md": "hi"})
-    assert r.status_code == status.HTTP_200_OK
+    assert r.status_code == status.HTTP_200_OK, r.text
 
 
 def test_run_render_outsider_403(client, seed_run_with_groups):
@@ -131,7 +147,7 @@ def test_run_render_422_on_missing_asset(admin_client, seed_run_with_groups):
     run, _, _ = seed_run_with_groups()
     r = admin_client.post(
         f"/api/runs/{run['id']}/render",
-        json={"content_md": "![x](mathion:asset://missing.png)"},
+        json={"content_md": "![x](missing.png)"},
     )
     assert r.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     assert "missing.png" in r.json()["detail"]
@@ -147,14 +163,14 @@ def test_run_render_no_reference_rows_created(admin_client, seed_run_with_groups
         before = s.query(RunAssetReference).filter_by(run_asset_id=asset["id"]).count()
     admin_client.post(
         f"/api/runs/{run['id']}/render",
-        json={"content_md": f"![](mathion:asset://{asset['filename']})"},
+        json={"content_md": f"![]({asset['filename']})"},
     )
     with SessionLocal() as s:
         after = s.query(RunAssetReference).filter_by(run_asset_id=asset["id"]).count()
     assert before == after
 ```
 
-**Before writing the run-teacher test**, grep `backend/tests/conftest.py` for the actual non-admin fixture name. If the codebase has no separate `teacher_client`, attach a teacher in test setup via the existing pattern (look at how other tests verify run-teacher gating) — DON'T invent `course_admin_token`/`outsider_token`-style bearer fixtures; they don't exist.
+**Verified fixture pattern** (round-2 review): `teacher_client` exists at `backend/tests/conftest.py:128-137` and authenticates `teacher@example.com`. `seed_run_with_groups` at `:198` attaches a DIFFERENT email (`teach@example.com`) as the run's teacher, so the test must additionally POST `/api/runs/{id}/teachers` with `teacher@example.com` to grant the teacher_client user run-teacher rights. The test above does this explicitly.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -189,8 +205,11 @@ def render_run_markdown(
     db: Session = Depends(get_db),
     _user: User = Depends(require_run_admin_or_teacher),
 ) -> RunRenderResponse:
-    """Render markdown with mathion:asset:// refs resolved against this run's asset pool.
+    """Render markdown with bare-filename asset refs resolved against this run's asset pool.
 
+    Convention is `![alt](filename.png)` (markdown.py:52-68 extracts non-URL refs);
+    `render_with_run_assets` validates each against the run's RunAsset pool and rewrites
+    `src="{filename}"` / `href="{filename}"` to `/api/runs/{run_id}/assets/{filename}`.
     Side-effect-free: SELECTs only; no RunAssetReference rows are written here
     (sync_run_asset_references runs only on PATCH/POST of mini-projects).
     422 raised internally by render_with_run_assets when any referenced asset
@@ -388,9 +407,12 @@ function jres(body: unknown, status = 200) {
 
 describe('listBlocks', () => {
   it('GETs /api/versions/{vid}/blocks and returns the list', async () => {
+    // Round-2 reviewer-5 catch: BlockResponse is 7-field (id, version_id, title,
+    // slug, order, info, info_html — verified schemas.py:69 + types.ts addition in T2.B).
+    // Old 4-field literals fail strict TypeScript compilation. Use complete shape.
     const blocks: BlockResponse[] = [
-      { id: 1, version_id: 7, order: 0, title: 'Intro' },
-      { id: 2, version_id: 7, order: 1, title: 'Theory' },
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+      { id: 2, version_id: 7, title: 'Theory', slug: 'theory', order: 1, info: '', info_html: '' },
     ];
     fetchSpy.mockImplementation(() => jres(blocks));
     const result = await listBlocks(7);
@@ -751,7 +773,10 @@ export function runAssetContext(runId: number): AssetContext {
       });
       if (!r.ok) {
         const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
-        throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload);
+        // Round-2 reviewer-5 catch: ApiError's 3rd arg is `errorCode: string`
+        // (see lib/api.ts:4-12), NOT the full payload. Mirror api.ts:46 verbatim —
+        // pass payload.error_code (a string discriminant), not the whole object.
+        throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload.error_code);
       }
       return r.json();
     },
@@ -762,7 +787,7 @@ export function runAssetContext(runId: number): AssetContext {
 }
 ```
 
-**Before pasting:** confirm `ApiError`'s constructor signature in `lib/api.ts`. If it's `new ApiError(status, message, detail?)`, the above call site is correct. If different, mirror the existing `uploadAsset`-on-failure pattern verbatim — DON'T invent a different shape.
+**Verified `ApiError` constructor** (round-2 review): `lib/api.ts:4-12` defines `new ApiError(status, detail, errorCode?: string)`. The 3rd arg is a STRING (matches `body.error_code` from backend ValidationErrorDetail responses) — see api.ts:46. The plan's call sites pass `payload.error_code` (which is `undefined` when the backend doesn't include one — fine, the param is optional).
 
 - [ ] **Step 14: Tests pass**
 
@@ -1113,7 +1138,9 @@ export async function uploadRunAsset(
   });
   if (!r.ok) {
     const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
-    throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload);
+    // Round-2 reviewer-5 catch: ApiError(status, detail, errorCode?: string) —
+    // pass the string `payload.error_code` (matches api.ts:46), NOT the whole payload.
+    throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload.error_code);
   }
   return r.json();
 }
@@ -1185,7 +1212,7 @@ This is the most substantive task in the plan. It refactors two existing compone
 - Modify (REQUIRED — reviewer-4 catch): all existing tests at `frontend/src/tests/MarkdownEditor.svelte.test.ts` and `frontend/src/tests/AssetSidebar.svelte.test.ts` that use `vi.spyOn(assetsModule, 'listAssets'/'uploadAsset'/...)`. After the refactor those spies become NO-OPS because the components no longer import `listAssets`/`uploadAsset` directly — they call through `assetContext.list()` / `assetContext.upload()`. **Without migration, tests will silently pass while making real fetch calls in jsdom.** Replace each `vi.spyOn(assetsModule, 'X')` with one of:
   - inject a stub `assetContext = { list: vi.fn(), upload: vi.fn(), ... }` as the prop value, OR
   - keep mounting with `courseAssetContext(...)` AND use the canonical `fetchSpy = vi.fn()` against `globalThis.fetch` (matches the `RunTeachersTab.svelte.test.ts` pattern).
-  Audit count: grep `vi.spyOn` in those two files; reviewer counted ~25 spies. Migrate each.
+  Audit count (round-2 reviewer-4 recount): `grep -c "vi.spyOn" frontend/src/tests/MarkdownEditor.svelte.test.ts frontend/src/tests/AssetSidebar.svelte.test.ts` returns **24 + 21 = 45** spies, NOT the ~25 the first round estimated. Plan the migration with 45 spies in mind — this is a larger surface area than the prior count suggested, so allocate time accordingly.
 
 ### T5a.A — MarkdownEditor refactor
 
@@ -1654,6 +1681,44 @@ describe('MarkdownEditor with runAssetContext', () => {
     // mount with disabled=true; verify textarea has disabled attribute,
     // preview button disabled, drop handlers no-op
   });
+
+  it('editorMounted local guard: late upload resolve after unmount does NOT write state', async () => {
+    // Round-2 reviewer-1 catch: T6a covers `mounted` (modal-level), but the
+    // MarkdownEditor-internal `editorMounted` flag introduced in T5a.A Step 3
+    // has no test of its own. Without coverage, a regression that drops the
+    // `if (!editorMounted) return;` guard inside uploadOne goes unnoticed.
+    let resolveUpload: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/runs/42/assets') && (init as any)?.method === 'POST') {
+        return new Promise<Response>((resolve) => { resolveUpload = resolve; });
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(MarkdownEditor, { target, props: {
+      assetContext: runAssetContext(42),
+      value: '',
+    } });
+    await settle();
+    // Trigger a textarea drop to start an upload
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    const dt = new DataTransfer();
+    dt.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
+    ta.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    await settle();
+    // Unmount BEFORE the upload resolves
+    unmount(cmp);
+    await settle();
+    // Late resolve — uploadOne's editorMounted guard must short-circuit; no throw,
+    // no insertAtCursor on a destroyed component.
+    expect(() => {
+      resolveUpload({ ok: true, status: 200, json: () => Promise.resolve({ id: 1, filename: 'x.png', mime_type: 'image/png', file_size: 1, is_referenced: false }) } as Response);
+    }).not.toThrow();
+    await settle();
+    // No assertion on DOM (target may still contain the unmounted shell) — the
+    // contract is "no error from a post-await state write on a destroyed component".
+  });
 });
 
 describe('AssetSidebar error surfaces (reviewer-1 catch — spec lines 525, 527)', () => {
@@ -1675,10 +1740,14 @@ describe('AssetSidebar error surfaces (reviewer-1 catch — spec lines 525, 527)
       onUploadFile: vi.fn(),
     } });
     await settle();
-    (target.querySelector('button[data-action="delete-1"]') as HTMLButtonElement)?.click();
+    // Round-2 reviewer-5 catch: AssetSidebar uses data-testid="delete-trash" /
+    // "delete-confirm" / "delete-cancel" with NO id suffix (verified
+    // AssetSidebar.svelte:241/247/255). Scope the selector to the asset row by
+    // its data-testid="asset-row-1" wrapper.
+    const row1 = target.querySelector('[data-testid="asset-row-1"]') as HTMLElement;
+    (row1.querySelector('[data-testid="delete-trash"]') as HTMLButtonElement).click();
     await settle();
-    // confirm delete (sidebar's inline confirm)
-    (target.querySelector('button[data-action="confirm-delete-1"]') as HTMLButtonElement)?.click();
+    (row1.querySelector('[data-testid="delete-confirm"]') as HTMLButtonElement).click();
     await settle();
     expect(target.textContent).toContain("referenced by 2 mini-project");
   });
@@ -1773,7 +1842,17 @@ async function settle() {
   flushSync();
 }
 
-const blocks: BlockResponse[] = [{ id: 1, version_id: 7, order: 0, title: 'Intro' }];
+// Round-2 reviewer-2/5 catch: the assignment textarea lives INSIDE MarkdownEditor
+// (verified `frontend/src/components/editor/MarkdownEditor.svelte:209-219`), which
+// renders a bare `<textarea>` with no `name` attribute. Since MiniProjectModal has
+// exactly one textarea in its DOM tree, `target.querySelector('textarea')` is the
+// canonical, unambiguous selector. If a future change introduces a second textarea
+// (e.g., a notes field), narrow with `.body textarea` instead.
+
+const blocks: BlockResponse[] = [
+  // Round-2 reviewer-5 catch: full 7-field shape (schemas.py:69, types.ts T2.B).
+  { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+];
 
 describe('MiniProjectModal — create mode', () => {
   it('renders block picker for create; POST body shape correct on Save (including all-null deadlines)', async () => {
@@ -1801,7 +1880,7 @@ describe('MiniProjectModal — create mode', () => {
     } });
     await settle();
     expect(target.textContent).toContain('Intro');
-    const textarea = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
     textarea.value = 'My assignment';
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     const saveBtn = target.querySelector('button[data-action="save"]') as HTMLButtonElement;
@@ -1833,7 +1912,7 @@ describe('MiniProjectModal — create mode', () => {
       onNavigateToTab: vi.fn(),
     } });
     await settle();
-    const textarea = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
     textarea.value = 'x';
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
@@ -1861,7 +1940,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       onNavigateToTab: vi.fn(),
     } });
     await settle();
-    const ta = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
     expect(ta.value).toBe('orig text');
   });
 
@@ -1895,7 +1974,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       onNavigateToTab: vi.fn(),
     } });
     await settle();
-    const ta = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
     ta.value = 'modified';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
@@ -1971,7 +2050,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
     // All inputs disabled mid-flight
-    expect((target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement).disabled).toBe(true);
+    expect((target.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(true);
     target.querySelectorAll('input[type="datetime-local"]').forEach(el => {
       expect((el as HTMLInputElement).disabled).toBe(true);
     });
@@ -2046,7 +2125,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     // Simulate a drop on the textarea — the real MarkdownEditor will create the
     // AbortController and assign it via $bindable to the modal. The test relies on
     // production behavior, not stubbed editor.
-    const ta = target.querySelector('textarea[name="assignment_md"]') as HTMLTextAreaElement;
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
     const dt = new DataTransfer();
     dt.items.add(new File(['x'], 'x.png', { type: 'image/png' }));
     ta.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
@@ -2060,7 +2139,14 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     resolveUpload({ ok: true, status: 200, json: () => Promise.resolve({ id: 1, filename: 'x.png' }) } as Response);
   });
 
-  it('modal layout: max-width 1100px, max-height 90vh, overflow auto, sticky header+footer', async () => {
+  it('modal layout: container element + header + footer present (structural check, NOT computed-style)', async () => {
+    // Round-2 reviewer-3 catch: jsdom does NOT implement CSSOM well — `getComputedStyle`
+    // returns empty strings for unset properties and only echoes inline `style="..."`
+    // attributes. Scoped-CSS `max-width: 1100px` from <style> blocks WILL NOT show up.
+    // The original draft's `computed.maxWidth === '1100px'` assertion fails in jsdom
+    // even with correct CSS. Layout/visual regressions belong in Playwright/Cypress;
+    // here we only assert structural presence (the elements exist with the expected
+    // selectors so styling has somewhere to attach).
     // Spec line 488 + line 616.
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
@@ -2072,14 +2158,12 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       onNavigateToTab: vi.fn(),
     } });
     await settle();
-    const modal = target.querySelector('.modal') as HTMLElement;
-    const computed = window.getComputedStyle(modal);
-    expect(computed.maxWidth).toBe('1100px');
-    expect(computed.maxHeight).toBe('90vh');
-    expect(computed.overflow).toBe('auto');
-    // Sticky header + footer: verify the CSS classes exist (test will need the actual
-    // classes from implementation; this is a sanity check that styling is in scope).
-    expect(target.querySelector('header')?.style.position || computed.getPropertyValue('position')).toBeTruthy();
+    expect(target.querySelector('.modal')).toBeTruthy();
+    expect(target.querySelector('.modal > header')).toBeTruthy();
+    expect(target.querySelector('.modal > footer')).toBeTruthy();
+    expect(target.querySelector('.backdrop')).toBeTruthy();
+    // Visual regression (1100px / 90vh / sticky positioning) is owned by a future
+    // Playwright suite — see `accepted-gap` note about visual coverage.
   });
 });
 ```
@@ -2152,6 +2236,12 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
 
   let pendingClose = $state(false);
   let discarding = $state(false);   // reviewer-3 catch: discarding flag avoids closeForCurrentStage re-entrancy
+
+  // Round-2 reviewer-3 catch: hoist localTzLabel() out of the template — it was
+  // being called 3x per render (once per deadline label). One $derived call is
+  // enough; the value only changes when the host TZ changes (effectively never
+  // within one session). Inline `{tzLabel}` in template instead of `{localTzLabel()}`.
+  const tzLabel = $derived(localTzLabel());
   const dirty = $derived(
     initialFormSnapshot == null
       ? false
@@ -2165,6 +2255,12 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
       return;
     }
     uploadAbortController?.abort();
+    // Round-2 reviewer-3 catch: reset `discarding` AFTER the bypass succeeds so this
+    // function is idempotent if called again on the same modal instance. Defensive —
+    // in practice onClose() unmounts the modal so $state resets anyway, but a parent
+    // that pauses the unmount (e.g., transition) could re-enter and we'd hit the
+    // wrong branch.
+    discarding = false;
     onClose();
   }
 
@@ -2254,10 +2350,10 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
         </select>
       </label>
     {/if}
-    <!-- deadlines: 3 datetime-local inputs with localTzLabel() in label -->
-    <label>Soft deadline {localTzLabel()} <input type="datetime-local" bind:value={formData.soft_local} disabled={submitting} /></label>
-    <label>Hard deadline {localTzLabel()} <input type="datetime-local" bind:value={formData.hard_local} disabled={submitting} /></label>
-    <label>Resubmission deadline {localTzLabel()} <input type="datetime-local" bind:value={formData.resub_local} disabled={submitting} /></label>
+    <!-- deadlines: 3 datetime-local inputs; tzLabel hoisted to $derived to avoid 3 redundant calls per render (round-2 reviewer-3 catch) -->
+    <label>Soft deadline {tzLabel} <input type="datetime-local" bind:value={formData.soft_local} disabled={submitting} /></label>
+    <label>Hard deadline {tzLabel} <input type="datetime-local" bind:value={formData.hard_local} disabled={submitting} /></label>
+    <label>Resubmission deadline {tzLabel} <input type="datetime-local" bind:value={formData.resub_local} disabled={submitting} /></label>
     <!-- markdown editor + run assets sidebar -->
     <MarkdownEditor
       {assetContext}
@@ -2496,8 +2592,9 @@ async function settle() {
 }
 
 const blocks: BlockResponse[] = [
-  { id: 1, version_id: 7, order: 0, title: 'Intro' },
-  { id: 2, version_id: 7, order: 1, title: 'Theory' },
+  // Round-2 reviewer-5 catch: full 7-field shape (schemas.py:69, types.ts T2.B).
+  { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+  { id: 2, version_id: 7, title: 'Theory', slug: 'theory', order: 1, info: '', info_html: '' },
 ];
 
 describe('RunMiniProjectsTab', () => {
@@ -2674,7 +2771,10 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0
   );
-  const newDisabledTitle = $derived(() => {
+  // Round-2 reviewer-3/5 catch: `$derived(() => {...})` STORES the function — the body
+  // never re-evaluates on dep changes. Use `$derived.by(() => {...})` so the body runs
+  // each time deps change, and bind `title={newDisabledTitle}` (not `newDisabledTitle()`).
+  const newDisabledTitle = $derived.by(() => {
     if (!runGroupsEnabled) return 'Mini-projects require groups. Enable groups on Overview.';
     if (versionIsDisabled) return "This run's course version is disabled.";
     if (availableBlocks.length === 0) return 'All blocks in this course version already have a mini-project.';
@@ -2698,7 +2798,7 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
 {:else}
   <header>
     <h2>Mini-projects</h2>
-    <button data-action="new-mp" disabled={newDisabled} title={newDisabledTitle()} onclick={() => { modalMode = 'create'; }}>
+    <button data-action="new-mp" disabled={newDisabled} title={newDisabledTitle} onclick={() => { modalMode = 'create'; }}>
       + New mini-project
     </button>
   </header>
@@ -2847,29 +2947,38 @@ Add to `ActiveTab`:
 type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects';
 ```
 
-Add new $state — reviewer-3 catch: `pinned` AND `versionIsDisabled` must both be `$state` to flow into the tab's template reactively (NOT plain local `const` inside `loadAll`):
+**Round-2 reviewer-4 catch (revised approach):** `RunDetailPage.svelte:112-113` ALREADY exposes `const pinned = $derived(versions?.find((v) => v.id === run?.version_id))` and `const showDisabledBanner = $derived(pinned?.is_disabled === true)`. These are the canonical sources of truth for "is the run's pinned version disabled?" — the Overview tab uses `showDisabledBanner` at line 281, and `publishBlocked` (`:172`) wires off it too. Creating a parallel `versionIsDisabled = $state(false)` would split the source-of-truth and let it drift on `versions`/`run` reloads.
+
+Resolution: REUSE the existing `pinned` $derived AND `showDisabledBanner` $derived. Add:
+
 ```ts
+// $derived (NOT $state) — composes with the existing pinned $derived at :112
+const pinnedAvailable = $derived(versions == null || pinned != null);
+
+// $state only for async-loaded data; gate the load on pinned (a $derived) inside loadAll
 let blocks = $state<BlockResponse[] | null>(null);
 let miniProjects = $state<MiniProjectResponse[] | null>(null);
-let pinnedAvailable = $state(true);
-let versionIsDisabled = $state(false);   // populated inside loadAll from pinned.is_disabled
+let showMiniProjectModal = $state(false);
+let modalMode = $state<'create' | 'edit' | null>(null);
+let editTarget = $state<MiniProjectResponse | null>(null);
 ```
+
+Pass `versionIsDisabled={showDisabledBanner}` to `<RunMiniProjectsTab>` (reusing the existing $derived alias — no new state variable needed).
 
 Extend `loadAll` post-`versions` resolution (around `RunDetailPage.svelte:211-232` per existing loadToken pattern; mirror the existing `if (myToken !== loadToken) return;` guard pattern at line 60/187/219/227/232):
 
 ```ts
 // after versions resolves and the existing token check passes:
-const pinned = versions.find(v => v.id === run.version_id);
-if (pinned == null) {
-  pinnedAvailable = false;
-  versionIsDisabled = false;
+// Note: `pinned` is a $derived — its value is `versions?.find((v) => v.id === run?.version_id)`.
+// We READ it here (untracked-style inside an async function); subsequent changes to
+// versions/run trigger the existing reset effect, which will call loadAll() again.
+const pinnedVersion = pinned;   // snapshot the $derived once for this call
+if (pinnedVersion == null) {
   blocks = [];
   miniProjects = [];
 } else {
-  pinnedAvailable = true;
-  versionIsDisabled = pinned.is_disabled ?? false;
   const [blocksResult, mpsResult] = await Promise.all([
-    listBlocks(pinned.id),
+    listBlocks(pinnedVersion.id),
     listMiniProjects(rid),
   ]);
   if (myToken !== loadToken) return;   // reviewer-4 catch: explicit token check AFTER the new Promise.all, mirroring existing pattern at :60/:187/:219/:227/:232
@@ -2903,7 +3012,7 @@ Add 5th tab button + body:
     runIsPublished={run.is_published}
     runGroupsEnabled={run.groups_enabled}
     runEndDate={run.end_date}
-    {versionIsDisabled}
+    versionIsDisabled={showDisabledBanner}
     {pinnedAvailable}
     blocks={blocks ?? []}
     miniProjects={miniProjects ?? []}
