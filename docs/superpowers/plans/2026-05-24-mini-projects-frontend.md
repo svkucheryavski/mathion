@@ -1572,8 +1572,18 @@ git commit -m "refactor(frontend): MarkdownEditor + AssetSidebar take assetConte
 
 Each is a top-level `it()` block; mount the component with `assetContext: runAssetContext(42)`.
 
+The test file MUST start with the `makeDropEvent` helper at top-level (round-5 reviewers 2 + 5 catch: prior plan placed this in Step 3, causing Step 2's `vitest run` to fail with `ReferenceError: makeDropEvent is not defined` instead of the intended assertion failure — breaking TDD's red→green signal).
+
 ```ts
 import { runAssetContext } from '../lib/assetContext';
+
+// Module-level helper used by every drop-related `it(...)` body below.
+// Must be defined BEFORE any `describe`/`it` so the bodies see it at parse time.
+function makeDropEvent(files: File[]): DragEvent {
+  const dt = new DataTransfer();
+  for (const f of files) dt.items.add(f);
+  return new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+}
 
 describe('AssetSidebar with runAssetContext', () => {
   it('list hits /api/runs/{rid}/assets', async () => {
@@ -1816,61 +1826,18 @@ describe('AssetSidebar error surfaces (reviewer-1 catch — spec lines 525, 527)
 });
 ```
 
-Fill in the `// ...` event-firing TODOs by mirroring existing test patterns (e.g., `RunTeachersTab.svelte.test.ts` for the form-submit pattern, but here you need DragEvent + DataTransfer construction — borrow from existing AssetSidebar tests if they cover drop).
-
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
 cd frontend && npx vitest run src/tests/AssetSidebar src/tests/MarkdownEditor
 ```
 
-Expected: new test cases FAIL until each event-firing TODO is fleshed out.
+Expected: new test cases FAIL because the run-mode behaviors (run-asset URLs, runAssetContext upload path, etc.) haven't been implemented yet. The `makeDropEvent` helper is defined at the top of the file (Step 1 above), so failures are assertion failures, not `ReferenceError`s.
 
-- [ ] **Step 3: Inline the `makeDropEvent` helper into Step 1's test file at the TOP, before any `it(...)` blocks**
 
-Round-4 reviewer-2 catch: prior plan ordering put the `// ... fire drop` TODOs in Step 1 and only provided the `makeDropEvent` helper in Step 3 — which broke TDD ordering (Step 2's "expected: tests fail" was dishonest because the tests had `// ...` placeholders that wouldn't even FAIL meaningfully, just pass-as-empty). Fix: write the helper inline into the test file FIRST, then the `it(...)` bodies use it directly. The TDD sequence becomes: Step 1 = full test file with real event-firing → Step 2 = `vitest run` shows real failures → Step 3 = implement.
+- [ ] **Step 3: Implement the run-mode behaviors**
 
-The helper, used in every drop-related `it(...)` body in Step 1 above:
-
-```ts
-function makeDropEvent(files: File[]): DragEvent {
-  const dt = new DataTransfer();
-  for (const f of files) dt.items.add(f);
-  return new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
-}
-```
-
-Replace the `// ... fire a drop event with one file` (Step 1) with the concrete sequence:
-```ts
-const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
-dropZone.dispatchEvent(makeDropEvent([new File(['x'], 'x.png', { type: 'image/png' })]));
-await settle();
-expect(abortableUpload).toHaveBeenCalledTimes(1);
-```
-
-Replace the `// ... fire drop event with mixed files` (stop-on-any-invalid) with:
-```ts
-const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
-dropZone.dispatchEvent(makeDropEvent([
-  new File(['ok'], 'a.png', { type: 'image/png' }),
-  new File(['bad'], 'evil.exe', { type: 'application/octet-stream' }),
-]));
-await settle();
-expect(onUploadFile).not.toHaveBeenCalled();
-expect(target.textContent).toContain('extension not allowed');
-```
-
-Replace the multi-file 3-drop assertion with:
-```ts
-const dropZone = target.querySelector('[data-testid="drop-zone"]') as HTMLElement;
-const files = ['a.png', 'b.png', 'c.png'].map(n => new File(['x'], n, { type: 'image/png' }));
-dropZone.dispatchEvent(makeDropEvent(files));
-await settle();
-expect(onUploadFile).toHaveBeenCalledTimes(3);
-expect(onUploadFile.mock.calls[0][1]).toEqual({ current: 1, total: 3 });
-expect(onUploadFile.mock.calls[1][1]).toEqual({ current: 2, total: 3 });
-expect(onUploadFile.mock.calls[2][1]).toEqual({ current: 3, total: 3 });
-```
+T5a already implemented the AssetContext abstraction; these tests verify the run-mode path through it. Any remaining gaps (e.g., the section-label "Run assets" if not yet conditional) get implemented here.
 
 - [ ] **Step 4: Tests pass**
 
@@ -1911,17 +1878,33 @@ This is the modal shell with everything EXCEPT publish (T6b).
 Create `frontend/src/tests/MiniProjectModal.create-edit.svelte.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
 import type { MiniProjectResponse, BlockResponse } from '../lib/types';
 
 const fetchSpy = vi.fn();
+// Round-5 reviewer-2 catch: T6a's modal registers a `window` keydown listener
+// in onMount and removes it in onDestroy. If a test forgets `unmount(cmp)`,
+// the listener leaks across tests — subsequent Escape dispatches fire stale
+// onClose spies. Track mounted components and unmount them in afterEach.
+const mounted: ReturnType<typeof mount>[] = [];
+function trackedMount(...args: Parameters<typeof mount>): ReturnType<typeof mount> {
+  const cmp = mount(...args);
+  mounted.push(cmp);
+  return cmp;
+}
 
 beforeEach(() => {
   fetchSpy.mockReset();
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
   document.body.innerHTML = '';
+});
+
+afterEach(() => {
+  while (mounted.length) {
+    try { unmount(mounted.pop()!); } catch { /* already unmounted by test */ }
+  }
 });
 
 function jres(body: unknown, status = 200) {
@@ -2064,11 +2047,13 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
 
   it('clean close: Escape key → onClose called (spec line 482 — backdrop/X/Escape route through closeForCurrentStage)', async () => {
     // Round-4 reviewer-1 catch: prior test list omitted Escape coverage.
+    // Round-5 reviewer-2 catch: capture cmp + unmount so the window listener is
+    // removed before subsequent tests fire dispatchEvent.
     fetchSpy.mockImplementation(() => jres([]));
     const onClose = vi.fn();
     const target = document.createElement('div');
     document.body.appendChild(target);
-    mount(MiniProjectModal, { target, props: {
+    const cmp = mount(MiniProjectModal, { target, props: {
       runId: 10, mode: 'edit', initial, availableBlocks: [],
       currentBlock: blocks[0], runIsPublished: true, runEndDate: '2026-06-30',
       onClose, onSaved: vi.fn(),
@@ -2078,6 +2063,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
     expect(onClose).toHaveBeenCalled();
+    unmount(cmp);
   });
 
   it('dirty close: typing then X flips footer to InlineConfirm; Keep editing reverts; Discard closes', async () => {
@@ -2353,12 +2339,16 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   // Inline initialization is deterministic: at $derived-evaluation time, snapshot is
   // already defined.
   const initialFormSnapshot = currentFormSnapshot();
-  // Round-4 reviewer-1 catch: spec line 482 mandates Escape route through
-  // closeForCurrentStage alongside backdrop and [×]. Register a document-level
-  // keydown listener (modal is rendered top-level via parent's {#if}; focus may
-  // be on any descendant, so window/document listener is the simplest reliable
-  // capture). Filter to Escape only; ignore inside contenteditable / textarea
-  // selection state via target check.
+  // Spec line 482 mandates Escape route through closeForCurrentStage alongside
+  // backdrop and [×]. Register a window-level keydown listener (modal renders
+  // top-level via parent's {#if}; focus can be on any descendant).
+  //
+  // Round-5 reviewer-4/5 catch: the COMMENT used to claim a target check for
+  // contenteditable/textarea but the CODE didn't implement it. We DO want Escape
+  // inside the assignment textarea to close the modal (that's the spec: Escape
+  // anywhere in the modal triggers closeForCurrentStage). So we drop the
+  // (mis-stated) target check and the listener fires on any Escape — matching
+  // the existing spec contract.
   function onWindowKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -2373,6 +2363,10 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
     mounted = false;
     window.removeEventListener('keydown', onWindowKeydown);
   });
+  // Invariant: only ONE MiniProjectModal mounts at a time. RunMiniProjectsTab's
+  // template uses `{#if modalMode != null}` so modeswitching from edit→create
+  // unmounts the prior instance (calling onDestroy → removeEventListener) before
+  // mounting the new one. No listener-stack concern.
 
   let pendingClose = $state(false);
   let discarding = $state(false);   // reviewer-3 catch: discarding flag avoids closeForCurrentStage re-entrancy
@@ -2796,8 +2790,11 @@ describe('RunMiniProjectsTab', () => {
   });
 
   it('all-blocks-used → [+ New] disabled', async () => {
+    // Round-5 reviewer-1 catch: full 11-field MiniProjectResponse shape (title + assignment_html).
     const mps: MiniProjectResponse[] = blocks.map((b, i) => ({
-      id: i + 1, run_id: 10, block_id: b.id, assignment_md: 'x',
+      id: i + 1, run_id: 10, block_id: b.id,
+      title: `Mini project for Block ${b.order}`,
+      assignment_md: 'x', assignment_html: '<p>x</p>',
       soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
       is_published: false, first_submitted_at: null,
       created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
@@ -2870,42 +2867,13 @@ describe('RunMiniProjectsTab', () => {
   });
 
   it('409 on non-locked delete: flips row into force-confirm view (spec line 524)', async () => {
-    // Round-4 reviewers 1+2+3+4+5 ALL flagged the prior version of this test as
-    // broken (Svelte 5 mount() snapshots props; closure-mutating an outer array
-    // doesn't propagate to the mounted component; selector mismatched the
-    // production InlineConfirm; assertion was inverted and tested a dead vi.fn).
-    //
-    // The correct pattern for "parent re-passes a $state array down to a child"
-    // is a tiny test-harness `.svelte` component that owns the array as $state
-    // and renders <RunMiniProjectsTab miniProjects={mps}>. Mount the harness;
-    // mutate harness.$state from the refetch spy; the child re-renders.
-    //
-    // Mirror the existing `RunTeachersTab.svelte.test.ts` re-render harness pattern
-    // (read it first — same idea). Create the harness inline as a test fixture:
-
-    // frontend/src/tests/RunMiniProjectsTab.race-harness.svelte
-    // <script lang="ts">
-    //   import RunMiniProjectsTab from '../components/runs/RunMiniProjectsTab.svelte';
-    //   import type { BlockResponse, MiniProjectResponse } from '../lib/types';
-    //   let { runId, blocks, initialMps, onRefetchMiniProjects }: {
-    //     runId: number; blocks: BlockResponse[];
-    //     initialMps: MiniProjectResponse[];
-    //     onRefetchMiniProjects: () => Promise<void>;
-    //   } = $props();
-    //   export let miniProjects = $state(initialMps);
-    //   export function setMps(next: MiniProjectResponse[]) { miniProjects = next; }
-    // </script>
-    // <RunMiniProjectsTab
-    //   {runId} runIsPublished={true} runGroupsEnabled={true}
-    //   runEndDate="2026-06-30" versionIsDisabled={false} pinnedAvailable={true}
-    //   {blocks} {miniProjects}
-    //   {onRefetchMiniProjects}
-    //   onNavigateToTab={() => {}}
-    // />
-
-    // Then this test imports the harness and drives setMps from the refetch spy:
-    const Harness = (await import('./RunMiniProjectsTab.race-harness.svelte')).default;
-
+    // Round-5 reviewers 1+2+3+5 ALL flagged round-4's TestHarness approach as broken
+    // (`export let miniProjects = $state(...)` is invalid Svelte 5 runes syntax; the
+    // "mirrors RunTeachersTab.svelte.test.ts" reference was fictional — that test
+    // actually uses a `propsRef = $state({...})` + `mount(Comp, { props: propsRef })`
+    // + mutate-propsRef pattern with NO separate .svelte harness file). Round-5
+    // rewrite adopts the actual pattern (verified at
+    // frontend/src/tests/RunTeachersTab.svelte.test.ts:75-145) for prop re-pass.
     const blocks: BlockResponse[] = [
       { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
     ];
@@ -2928,49 +2896,54 @@ describe('RunMiniProjectsTab', () => {
       return jres([lockedMp]);
     });
 
-    let harnessInstance: { setMps: (next: MiniProjectResponse[]) => void } | null = null;
-    const onRefetchMiniProjects = vi.fn().mockImplementation(async () => {
-      // Mutate the harness $state so RunMiniProjectsTab sees the locked MP on
-      // its next render. This is the EXACT contract the production RunDetailPage
-      // satisfies via its own listMiniProjects() + miniProjects = ... assignment.
-      harnessInstance!.setMps([lockedMp]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks,
+      miniProjects: [mp],
+      onRefetchMiniProjects: vi.fn().mockImplementation(async () => {
+        // Mutate the $state propsRef so RunMiniProjectsTab sees the locked MP on
+        // its next render. Svelte 5 passes the $state object BY REFERENCE; the
+        // child re-evaluates `miniProjects` on each render and sees the mutation.
+        propsRef.miniProjects = [lockedMp];
+      }),
+      onNavigateToTab: vi.fn(),
     });
 
     const target = document.createElement('div');
     document.body.appendChild(target);
-    harnessInstance = mount(Harness, { target, props: {
-      runId: 10, blocks, initialMps: [mp], onRefetchMiniProjects,
-    } }) as any;
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
     await settle();
 
     // Open the InlineConfirm (non-locked branch) — initial MP is draft.
     (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
     await settle();
-    expect(target.querySelector('button.confirm')).toBeTruthy();   // belt-and-suspenders: production class is `confirm`
     const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
     expect(confirmBtn).toBeTruthy();
 
-    // Confirm → triggers DELETE → 409 → catch awaits onRefetchMiniProjects()
-    // → harness setMps → child re-renders with lockedMp → rowStatus='locked'
-    // → template's `{#if rowStatus === 'locked'}` branch wins → force-confirm view.
+    // Confirm → DELETE → 409 → catch awaits propsRef.onRefetchMiniProjects()
+    // → mutate propsRef.miniProjects → child re-renders with lockedMp
+    // → rowStatus='locked' → `{#if locked}` branch wins → force-confirm view.
     confirmBtn.click();
     await settle();
 
     // Spec line 524 contract — observable outcomes:
-    expect(onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    expect(propsRef.onRefetchMiniProjects).toHaveBeenCalledTimes(1);
     expect(target.textContent).toContain('Force delete will permanently remove');
     expect(target.querySelector('input[type="checkbox"]')).toBeTruthy();
-    // Cancel/danger pair from the force-confirm template:
     expect(target.querySelector('button.danger')).toBeTruthy();
 
-    unmount(harnessInstance as any);
+    unmount(cmp);
   });
 
-  it('409 on non-locked delete + refetch ALSO fails: surfaces error, resets confirm state (round-4 reviewer-4 catch)', async () => {
-    // If the refetch in the 409 catch branch itself rejects (network drops),
-    // the implementation's nested try/catch should reset deleteConfirmId + forceCheckbox
-    // and re-throw. Without this, the InlineConfirm stays open with no progress signal.
-    const Harness = (await import('./RunMiniProjectsTab.race-harness.svelte')).default;
+  it('409 on non-locked delete + refetch ALSO fails: surfaces deleteError banner, resets confirm state', async () => {
+    // Round-5 reviewer-4 catch: prior version relied on `unhandledrejection` event
+    // which jsdom + vitest do NOT reliably dispatch (the rejection hits Node's
+    // process-level handler first, failing the test). Production now sets a
+    // `deleteError = $state<string | null>(null)` banner in the inner catch
+    // instead of rethrowing — see T7 implementation below. Test asserts the
+    // banner text.
     const blocks: BlockResponse[] = [
       { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
     ];
@@ -2987,27 +2960,33 @@ describe('RunMiniProjectsTab', () => {
       }
       return jres([mp]);
     });
-    const onRefetchMiniProjects = vi.fn().mockRejectedValue(new Error('network'));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks,
+      miniProjects: [mp],
+      onRefetchMiniProjects: vi.fn().mockRejectedValue(new Error('network down')),
+      onNavigateToTab: vi.fn(),
+    });
     const target = document.createElement('div');
     document.body.appendChild(target);
-    const inst = mount(Harness, { target, props: {
-      runId: 10, blocks, initialMps: [mp], onRefetchMiniProjects,
-    } }) as any;
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
     await settle();
     (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
     await settle();
-    // Click confirm; catch the unhandled rejection from the rethrow so test doesn't fail noisily.
-    const unhandled: Error[] = [];
-    const onErr = (e: PromiseRejectionEvent) => { unhandled.push(e.reason); e.preventDefault(); };
-    window.addEventListener('unhandledrejection', onErr);
     (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
     await settle();
-    // Contract: InlineConfirm is gone (deleteConfirmId reset), refetch attempted,
-    // error rethrown. We assert the InlineConfirm is no longer visible.
+
+    // Contract — observable outcomes:
+    expect(propsRef.onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    // InlineConfirm is gone (deleteConfirmId reset).
     expect(target.querySelector('button[data-action="confirm-delete"]')).toBeNull();
-    expect(onRefetchMiniProjects).toHaveBeenCalledTimes(1);
-    window.removeEventListener('unhandledrejection', onErr);
-    unmount(inst);
+    // Delete-error banner visible with retry-affordance copy.
+    expect(target.textContent).toMatch(/Could not refresh.*retry/i);
+    expect(target.querySelector('[data-role="delete-error-banner"]')).toBeTruthy();
+
+    unmount(cmp);
   });
 });
 ```
@@ -3058,10 +3037,16 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
   let editTarget = $state<MiniProjectResponse | null>(null);
   let deleteConfirmId = $state<number | null>(null);
   let forceCheckbox = $state(false);
+  // Round-5 reviewer-4 catch: when the 409 refetch path itself fails (network down),
+  // the prior round-4 implementation rethrew into the InlineConfirm onclick which
+  // discards the rejection — user saw NOTHING. Now surface a banner instead.
+  let deleteError = $state<string | null>(null);
 
   // Reviewer-5 catch: forceCheckbox is shared $state across rows. When the user
   // clicks delete on a DIFFERENT row, reset it so the new confirm starts unchecked.
+  // Also reset deleteError so it doesn't bleed across rows.
   $effect(() => { void deleteConfirmId; forceCheckbox = false; });
+  $effect(() => { void deleteConfirmId; deleteError = null; });
 
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0
@@ -3084,6 +3069,37 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
     } finally {
       deleteConfirmId = null;
       forceCheckbox = false;
+    }
+  }
+
+  // Round-5 reviewer-5 catch: extracted from inline InlineConfirm onConfirm closure
+  // for testability + readability. Handles the 409→force-reveal race per spec line 524.
+  async function handleDeleteConfirm(mp: MiniProjectResponse) {
+    try {
+      await deleteMiniProject(mp.id);
+      await onRefetchMiniProjects();
+      deleteConfirmId = null;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // Server-side state is now locked. Refetch so the row's rowStatus()
+        // returns 'locked' on next render — the `{#if locked}` template branch
+        // takes over and renders the force-confirm view. We KEEP deleteConfirmId
+        // set so the new render lands on the locked branch (not the InlineConfirm).
+        try {
+          await onRefetchMiniProjects();
+          forceCheckbox = false;
+        } catch {
+          // Refetch ALSO failed (network drop between 409 and the GET).
+          // Surface a retry-affordance banner; reset confirm state so user can act.
+          deleteError = 'Could not refresh. Please retry.';
+          deleteConfirmId = null;
+          forceCheckbox = false;
+        }
+      } else {
+        // Some other error (5xx, 404, etc.). Surface a banner; reset confirm.
+        deleteError = (e instanceof ApiError) ? e.displayMessage : (e instanceof Error ? e.message : 'Delete failed');
+        deleteConfirmId = null;
+      }
     }
   }
 </script>
@@ -3111,6 +3127,12 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
   {#if !runIsPublished}
     <div class="banner">
       Run is not yet published. <a data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>Publish on Overview</a>
+    </div>
+  {/if}
+  {#if deleteError}
+    <div class="banner banner-error" role="alert" data-role="delete-error-banner">
+      {deleteError}
+      <button data-action="dismiss-delete-error" onclick={() => { deleteError = null; }}>Dismiss</button>
     </div>
   {/if}
 
@@ -3142,50 +3164,7 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
             <InlineConfirm warning="Delete this mini-project?" confirmLabel="Delete"
               confirmDataAction="confirm-delete"
               onCancel={() => { deleteConfirmId = null; }}
-              onConfirm={async () => {
-                // Round-3 reviewer-1 catch (spec line 524): a row the client believes is
-                // draft/published may have become locked server-side between page-load and
-                // click (a student in another tab submitted just now). The backend rejects
-                // the no-force DELETE with 409; we must flip into the force-confirm view
-                // (which the locked-branch above renders) rather than silently dismiss.
-                // Achieved by leaving deleteConfirmId set + refetching MPs so rowStatus()
-                // returns 'locked' on next render → the `{#if locked}` branch wins.
-                //
-                // Round-4 reviewer-4 catch: if the refetch ITSELF rejects (network drop
-                // between 409 and the GET), the error escapes, deleteConfirmId never
-                // resets, AND the locked branch never activates because miniProjects[]
-                // wasn't refreshed. Wrap the refetch separately and surface a banner.
-                //
-                // Round-4 reviewer-5 note: `mp` here is the per-render closure binding
-                // from `#each ... as { mp, block } (mp.id)`. After `await onRefetchMiniProjects()`,
-                // the parent reassigns `miniProjects[]`; the each-block re-renders with a
-                // NEW `mp` binding (now `lockedMp`). The branch decision is template-side
-                // (`{#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked'}`), so the
-                // live render uses the post-refetch mp — exactly what we want. The OLD
-                // closure (still mid-execution after the await) continues with its OLD `mp`,
-                // but only writes scalar state (deleteConfirmId, forceCheckbox), which is fine.
-                try {
-                  await deleteMiniProject(mp.id);
-                  await onRefetchMiniProjects();
-                  deleteConfirmId = null;
-                } catch (e) {
-                  if (e instanceof ApiError && e.status === 409) {
-                    try {
-                      await onRefetchMiniProjects();
-                      forceCheckbox = false;
-                      // Keep deleteConfirmId === mp.id so the template re-enters with the force branch.
-                    } catch (refetchErr) {
-                      // Refetch failed too — surface error and reset so the user can retry.
-                      deleteConfirmId = null;
-                      forceCheckbox = false;
-                      throw refetchErr;
-                    }
-                  } else {
-                    deleteConfirmId = null;
-                    throw e;   // caller surfaces via existing error handler
-                  }
-                }
-              }} />
+              onConfirm={() => handleDeleteConfirm(mp)} />
           {/if}
         </li>
       {/each}
@@ -3253,31 +3232,104 @@ Identify:
 - `ActiveTab` type → add `'mini-projects'`
 - Tab button row → add 5th button
 - `loadAll` → add post-versions sequenced step
-- Reset effect → add `showMiniProjectModal = false` reset
-- New $state: `blocks`, `miniProjects`, `showMiniProjectModal`, `modalMode`, `editTarget`
+- New $state: `blocks`, `miniProjects` ONLY. (Round-5 reviewer-2 catch: `modalMode`/`editTarget` live INSIDE RunMiniProjectsTab, not RunDetailPage. The earlier plan added them here too — dead writes. Remove them.)
+- Verify the existing reset effect at `RunDetailPage.svelte:~100` already nulls `activeTab` to `'overview'` (or similar) — that's the path that unmounts RunMiniProjectsTab + its internal modal state on runId change.
 
 - [ ] **Step 2: Write the failing integration test**
+
+Round-5 reviewer-2 catch: prior test stubs had `// ... mount RunDetailPage` placeholders that violated TDD ordering (Step 3 would never see a real assertion failure). Inlined below.
 
 Extend `frontend/src/tests/RunDetailPage.svelte.test.ts`:
 
 ```ts
+// Reuse the existing RunDetailPage test scaffold (fetchSpy + jres + settle). The
+// cascade of fetches is: GET /api/courses/by-slug/{slug} → Promise.all over
+// /api/runs/{rid}, /api/courses/{cid}/versions, /api/runs/{rid}/teachers,
+// /api/runs/{rid}/groups, /api/runs/{rid}/students → IF pinned in versions,
+// Promise.all over /api/versions/{pinnedId}/blocks + /api/runs/{rid}/mini-projects.
+
+function mockCascade(opts: {
+  blocksReject?: boolean;
+  mpsReject?: boolean;
+  noPinned?: boolean;
+}) {
+  return (url: string, init?: RequestInit) => {
+    const s = String(url);
+    if (s.includes('/api/courses/by-slug/')) return jres({ id: 1, slug: 'c', name: 'C' });
+    if (s.endsWith('/api/runs/10')) return jres({ id: 10, course_id: 1, version_id: opts.noPinned ? 999 : 7, title: 'R', start_date: '2026-01-01', end_date: '2026-12-31', is_published: true, groups_enabled: true });
+    if (s.includes('/api/courses/1/versions')) return jres([{ id: 7, course_id: 1, info_md: '', is_published: true, is_disabled: false }]);
+    if (s.includes('/api/runs/10/teachers')) return jres([]);
+    if (s.includes('/api/runs/10/groups')) return jres([]);
+    if (s.includes('/api/runs/10/students')) return jres([]);
+    if (s.includes('/api/versions/7/blocks')) {
+      if (opts.blocksReject) return jres({ detail: 'blocks 5xx' }, 503);
+      return jres([{ id: 1, version_id: 7, title: 'B', slug: 'b', order: 0, info: '', info_html: '' }]);
+    }
+    if (s.includes('/api/runs/10/mini-projects')) {
+      if (opts.mpsReject) return jres({ detail: 'mps 5xx' }, 503);
+      return jres([]);
+    }
+    return jres([]);
+  };
+}
+
 it('renders 5th "Mini-projects" tab; switching to it shows RunMiniProjectsTab', async () => {
-  // Mock fetch responses for: course-by-slug, run, teachers, groups, roster, versions,
-  // blocks (versions[0].id → /api/versions/{vid}/blocks), mini-projects.
-  // ... mount RunDetailPage; click "Mini-projects" tab; assert tab body contains
-  // either empty-state CTA or MP rows depending on the mock fixture.
+  fetchSpy.mockImplementation(mockCascade({}));
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  await settle();
+  await settle();   // second settle for the blocks/MPs inner Promise.all
+  const mpTabBtn = Array.from(target.querySelectorAll('button')).find(b => b.textContent?.includes('Mini-projects')) as HTMLButtonElement;
+  expect(mpTabBtn).toBeTruthy();
+  mpTabBtn.click();
+  await settle();
+  // Empty-state CTA from RunMiniProjectsTab:
+  expect(target.textContent).toContain('No mini-projects yet');
+  unmount(cmp);
 });
 
 it('pinnedAvailable=false when versions list does not contain run.version_id', async () => {
-  // mock versions response missing run.version_id
-  // ... assert tab body shows "Cannot load — pinned version not found"
+  fetchSpy.mockImplementation(mockCascade({ noPinned: true }));
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  await settle();
+  await settle();
+  const mpTabBtn = Array.from(target.querySelectorAll('button')).find(b => b.textContent?.includes('Mini-projects')) as HTMLButtonElement;
+  mpTabBtn.click();
+  await settle();
+  expect(target.textContent).toContain('Cannot load — pinned version not found');
+  unmount(cmp);
 });
 
-it('reset-effect closes modal on runId change', async () => {
-  // mount with run id 10; open mini-project modal; change runId prop to 11;
-  // assert modal is no longer in the DOM
+it('listBlocks fails → whole page renders loadError (all-or-nothing load invariant)', async () => {
+  // Round-5 reviewer-2 catch: test the partial-fail invariant the plan now documents.
+  fetchSpy.mockImplementation(mockCascade({ blocksReject: true }));
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  await settle();
+  await settle();
+  // The existing loadError view (consistent with line 64-67 pattern):
+  expect(target.textContent).toMatch(/Failed to load|loadError/i);
+  // Tabs above mini-projects are NOT rendered when loadError is set (consistent with current behavior).
+  unmount(cmp);
+});
+
+it('listMiniProjects fails → whole page renders loadError', async () => {
+  fetchSpy.mockImplementation(mockCascade({ mpsReject: true }));
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runIdParam: '10' } });
+  await settle();
+  await settle();
+  expect(target.textContent).toMatch(/Failed to load|loadError/i);
+  unmount(cmp);
 });
 ```
+
+**Note on the reset-effect test removed in round 5** (reviewer-2 catch): the prior plan listed a "reset-effect closes modal on runId change" test, but modal state (`modalMode`, `editTarget`) actually lives **inside** RunMiniProjectsTab, not on RunDetailPage. Changing `runId` doesn't unmount the tab (tab is mounted by `{:else if activeTab === 'mini-projects'}` which stays true). The tab is the unmount boundary only when `activeTab` changes. So the reset-effect entries `showMiniProjectModal/modalMode/editTarget` on RunDetailPage are DEAD CODE — remove them. The actual unmount path is: user switches to a different tab → `{:else if}` flips → RunMiniProjectsTab unmounts → its $state (including modalMode/editTarget) is destroyed. No explicit reset needed.
 
 - [ ] **Step 3: Implement RunDetailPage changes**
 
@@ -3294,12 +3346,9 @@ Resolution: REUSE the existing `pinned` $derived AND `showDisabledBanner` $deriv
 // $derived (NOT $state) — composes with the existing pinned $derived at :112
 const pinnedAvailable = $derived(versions == null || pinned != null);
 
-// $state only for async-loaded data; gate the load on pinned (a $derived) inside loadAll
+// $state only for async-loaded data; modal state lives INSIDE RunMiniProjectsTab.
 let blocks = $state<BlockResponse[] | null>(null);
 let miniProjects = $state<MiniProjectResponse[] | null>(null);
-let showMiniProjectModal = $state(false);
-let modalMode = $state<'create' | 'edit' | null>(null);
-let editTarget = $state<MiniProjectResponse | null>(null);
 ```
 
 Pass `versionIsDisabled={showDisabledBanner}` to `<RunMiniProjectsTab>` (reusing the existing $derived alias — no new state variable needed).
@@ -3316,7 +3365,11 @@ groups = null; students = null; blocks = null; miniProjects = null;
 loadError = null;
 
 // 2) After the token check at line 60 (`if (myToken !== loadToken) return;`), compute
-//    the pinned version from the LOCAL destructured values, NOT the $derived:
+//    the pinned version from the LOCAL destructured values, NOT the $derived.
+//    Round-5 reviewer-1 catch: `rid` was used in the plan but the existing component
+//    actually parameters loadAll as `loadAll(slug: string, rid: number)` (verified
+//    RunDetailPage.svelte:46) — so `rid` IS in scope inside loadAll. The OUTER
+//    refetchMiniProjects helper (below) needs to read `runIdInt` instead.
 const pinnedVersion = vs.find(v => v.id === r.version_id) ?? null;
 
 let blocksResult: BlockResponse[] = [];
@@ -3342,26 +3395,28 @@ miniProjects = mpsResult;
 - Entry-reset nulls `blocks`/`miniProjects` alongside the other fields so a runId change clears stale data immediately (round-3 reviewer-4 defensive catch).
 - **All-or-nothing load** (round-4 reviewer-4 catch): if EITHER `listBlocks` OR `listMiniProjects` rejects, `Promise.all` rejects → the existing outer try/catch sets `loadError` → the whole page renders the loadError view (NOT just the mini-projects tab). This matches the existing pattern at line 64-67. Tabs above mini-projects (overview/teachers/groups/roster) are also unavailable until the user retries. Acceptable per spec line 535 ("treat the whole-page reload as one operation").
 
-Add to the existing reset effect (around line ~100 per spec):
-```ts
-showMiniProjectModal = false;  // add alongside existing activeTab/rosterPrefilter/showImportModal resets
-modalMode = null;
-editTarget = null;
-```
+**Reset-effect entries dropped in round 5** (reviewer-2 catch): the prior plan added `showMiniProjectModal = false; modalMode = null; editTarget = null;` to the RunDetailPage reset effect. But those names refer to state that lives **inside** `RunMiniProjectsTab`, not on RunDetailPage — they were dead writes to declared-but-unused parent state. The actual modal-close path on runId change is: existing reset writes `activeTab = 'overview'` (already present in the reset effect) → `{:else if activeTab === 'mini-projects'}` flips false → `RunMiniProjectsTab` unmounts → its $state (`modalMode`, `editTarget`) is destroyed by component lifecycle. No new reset-effect entries needed.
 
-Add `refetchMiniProjects` helper. Round-4 reviewer-5 catch: gate on `pinnedAvailable`
-(the $derived) AT INVOCATION time, but explicitly accept that if the gate flips
-false BETWEEN invocation and the listMiniProjects await, the response is dropped
-on the floor — the next loadAll cycle will refill. This matches the existing
-"latest fetch wins" pattern; we don't need a loadToken here because the helper
-is only triggered by user actions (Save / Publish / Delete), not by an $effect
-that could fire repeatedly.
+If `activeTab` is currently `'mini-projects'` and the runId changes but `activeTab` doesn't reset, the tab stays mounted and the modal also stays — but the underlying mini-projects data is reloaded by `loadAll`, so the tab re-renders with fresh data and the modal's `editTarget` would point at a now-stale MP. To avoid that, ensure `activeTab = 'overview'` IS in the reset effect (verify against the current `RunDetailPage.svelte` reset).
+
+Add `refetchMiniProjects` helper. Round-5 reviewer-1 catch + reviewer-3 verification: read
+`runIdInt` at the call site (the outer scope of the component) — `runIdInt` is a $derived
+declared at module level for the route param. The `pinnedAvailable` double-gate uses the
+fact that reading a $derived inside an async function is a one-shot snapshot (no
+subscription is created when read outside a reactive context — verified by reviewer-3),
+so the post-await re-check correctly snapshots the CURRENT $derived value.
+
+Caveat (round-5 reviewer-1 + 5 catch): `pinnedAvailable = $derived(versions == null || pinned != null)`
+evaluates TRUE during `loadAll`'s entry-reset (when `versions` was just nulled). The
+double-gate does NOT catch the "runId change mid-flight" race — for that, the next
+loadAll cycle will write fresh data over whatever this helper writes. Accept this as the
+documented "within-runId re-pin not auto-detected" gap (see Accepted Gaps).
 
 ```ts
 async function refetchMiniProjects() {
-  if (!pinnedAvailable) return;
-  const fetched = await listMiniProjects(rid);
-  // If a runId change or re-pin invalidated pinnedAvailable mid-flight, drop the response.
+  if (runIdInt === null || !pinnedAvailable) return;
+  const fetched = await listMiniProjects(runIdInt);
+  // Best-effort drop if a re-pin invalidated pinnedAvailable mid-flight.
   if (!pinnedAvailable) return;
   miniProjects = fetched;
 }
@@ -3371,9 +3426,9 @@ Add 5th tab button + body:
 ```svelte
 <button class:active={activeTab === 'mini-projects'} onclick={() => activeTab = 'mini-projects'}>Mini-projects</button>
 ...
-{:else if activeTab === 'mini-projects'}
+{:else if activeTab === 'mini-projects' && runIdInt !== null && run}
   <RunMiniProjectsTab
-    runId={rid}
+    runId={runIdInt}
     runIsPublished={run.is_published}
     runGroupsEnabled={run.groups_enabled}
     runEndDate={run.end_date}
