@@ -121,7 +121,15 @@
       // jsdom DOMException doesn't extend Error — duck-check .name.
       const name = typeof e === 'object' && e !== null ? (e as { name?: string }).name : undefined;
       if (name === 'AbortError') return null;
-      const baseDetail = e instanceof ApiError ? e.displayMessage : 'Upload failed';
+      // Spec line 260: String(e?.detail ?? e?.message ?? e). For ApiError use
+      // displayMessage (the validation-aware accessor); for plain Error,
+      // surface .message verbatim; otherwise stringify.
+      const baseDetail =
+        e instanceof ApiError
+          ? e.displayMessage
+          : e instanceof Error
+            ? e.message
+            : String(e);
       const renameHint = e instanceof ApiError && e.status === 409
         ? ' Rename the file on disk and re-upload.'
         : '';

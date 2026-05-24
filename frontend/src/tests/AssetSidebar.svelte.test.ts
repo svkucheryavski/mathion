@@ -184,6 +184,45 @@ describe('AssetSidebar — refreshKey triggers re-fetch', () => {
     await Promise.resolve(); flushSync();
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it('changing assetContext refetches against the new context (covers same-page version swap)', async () => {
+    // Codex T5a finding: ItemEditPage derives `editAssetContext` from `vid`.
+    // If the router swaps `versionId` without remounting (same-page navigation
+    // between two items of different versions), the sidebar must refetch
+    // against the new context — otherwise it shows the old version's assets.
+    const ctxA = makeStubAssetContext();
+    const ctxB = makeStubAssetContext();
+    (ctxA.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      mkAsset({ id: 1, filename: 'a-only.png' }),
+    ]);
+    (ctxB.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      mkAsset({ id: 2, filename: 'b-only.png' }),
+    ]);
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      assetContext: ctxA,
+      onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
+      refreshKey: 0,
+      cursorReady: false,
+      uploading: false,
+      uploadProgress: null,
+      uploadError: null,
+    });
+    const cmp = mount(AssetSidebar, { target, props: propsRef });
+    cleanup = () => unmount(cmp);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect((ctxA.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('[data-testid="asset-row-1"]')).toBeTruthy();
+    propsRef.assetContext = ctxB;
+    flushSync();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect((ctxB.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
+    expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+  });
 });
 
 describe('AssetSidebar — uploadProgress + uploadError rendering', () => {

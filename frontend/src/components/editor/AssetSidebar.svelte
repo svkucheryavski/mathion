@@ -65,7 +65,16 @@
     }
   }
 
-  $effect(() => { void refreshKey; if (mountDone) void fetchAssets(); });
+  // Refetch on either signal: external refreshKey bump (post-upload sync from
+  // MarkdownEditor / parent) OR a fresh assetContext identity (same-page
+  // version/run swap by the router — codex T5a finding). Both reads are
+  // unguarded so $effect tracks them as dependencies; mountDone gate skips
+  // the pre-onMount tick.
+  $effect(() => {
+    void refreshKey;
+    void assetContext;
+    if (mountDone) void fetchAssets();
+  });
   onMount(() => { mountDone = true; void fetchAssets(); });
 
   function askDelete(id: number) { if (disabled) return; confirmId = id; }

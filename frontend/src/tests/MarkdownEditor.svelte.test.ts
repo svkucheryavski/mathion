@@ -356,6 +356,28 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     expect(err?.textContent).toContain('Rename the file on disk and re-upload.');
   });
 
+  it('non-ApiError Error.message is surfaced in uploadError detail (not "Upload failed")', async () => {
+    // Codex T5a finding: spec line 260 uses `String(e?.detail ?? e?.message ?? e)`
+    // for the upload-error detail. A plain Error with a meaningful .message
+    // should reach the UI, not get collapsed to a generic "Upload failed".
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('boom: assetContext exploded'),
+    );
+    const { target } = mountEditor({ value: 'abc' });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="upload-error"]');
+    expect(err?.textContent).toContain('boom: assetContext exploded');
+    expect(err?.textContent).not.toContain('Upload failed');
+  });
+
   it('non-409 errors do NOT append the rename hint', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(

@@ -123,6 +123,20 @@ describe('lib/assets', () => {
       expect(err).toMatchObject({ status: 0 });
     });
 
+    it('preserves AbortError (does NOT wrap user-cancellation as ApiError(0))', async () => {
+      // Codex T5a finding: course-context uploads previously caught EVERY
+      // fetch rejection — including AbortError — and rewrote it as
+      // ApiError(0, 'Could not reach server'). When the modal Cancel
+      // aborts an in-flight upload, the UI then showed a network error
+      // instead of silently dropping the cancellation. lib/runAssets.ts
+      // already preserves AbortError; the course path must do the same.
+      fetchSpy.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
+      const file = new File(['x'], 'foo.png', { type: 'image/png' });
+      const err = await uploadAsset(42, file).catch((e) => e);
+      expect(err).not.toBeInstanceOf(ApiError);
+      expect((err as Error).name).toBe('AbortError');
+    });
+
     it('on 401 calls emitUnauthorized(pathname + search + hash) before throwing', async () => {
       const emitSpy = vi.spyOn(events, 'emitUnauthorized').mockImplementation(() => {});
       fetchSpy.mockResolvedValueOnce(
