@@ -121,15 +121,17 @@
       // jsdom DOMException doesn't extend Error — duck-check .name.
       const name = typeof e === 'object' && e !== null ? (e as { name?: string }).name : undefined;
       if (name === 'AbortError') return null;
-      // Spec line 260: String(e?.detail ?? e?.message ?? e). For ApiError use
-      // displayMessage (the validation-aware accessor); for plain Error,
-      // surface .message verbatim; otherwise stringify.
-      const baseDetail =
-        e instanceof ApiError
-          ? e.displayMessage
-          : e instanceof Error
-            ? e.message
-            : String(e);
+      // Spec line 260: String(e?.detail ?? e?.message ?? e). ApiError uses
+      // displayMessage (the validation-aware accessor); everything else
+      // walks the .detail → .message → String(e) chain so plain objects
+      // like { detail: '...' } or { message: '...' } are surfaced too.
+      let baseDetail: string;
+      if (e instanceof ApiError) {
+        baseDetail = e.displayMessage;
+      } else {
+        const eo = e as { detail?: unknown; message?: unknown } | null | undefined;
+        baseDetail = String(eo?.detail ?? eo?.message ?? e);
+      }
       const renameHint = e instanceof ApiError && e.status === 409
         ? ' Rename the file on disk and re-upload.'
         : '';
