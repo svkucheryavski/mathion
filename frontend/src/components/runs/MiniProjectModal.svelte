@@ -328,10 +328,8 @@
     color: #7c1f1f;
     padding: var(--space-2);
   }
-  @media (max-width: 880px) {
-    .body {
-      display: flex;
-      flex-direction: column;
-    }
-  }
+  /* The 880px responsive-stack rule belongs on MarkdownEditor's `.edit-content`
+     (textarea + sidebar split) — see `MarkdownEditor.svelte`'s media query.
+     The modal `.body` is already a single-column flow; an @media on it would
+     be a no-op. Codex T6a round-1 caught the misleading placement. */
 </style>

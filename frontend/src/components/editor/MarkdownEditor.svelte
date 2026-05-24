@@ -303,6 +303,13 @@
   .tabs button { background: none; border: 0; padding: var(--space-2) var(--space-3); cursor: pointer; }
   .tabs button[aria-pressed="true"] { background: var(--surface, #f7f7f7); font-weight: 600; }
   .edit-content { display: flex; flex-direction: row; min-height: 0; }
+  /* Spec (mini-projects-frontend §"Layout") mandates the textarea + asset
+     sidebar collapse to a single column below 880px (50%-split-screen on
+     1920px + small-laptop split scenarios). The split lives here, NOT in
+     MiniProjectModal's `.body` (codex T6a r1 catch). */
+  @media (max-width: 880px) {
+    .edit-content { flex-direction: column; }
+  }
   textarea { flex: 1 1 0; min-width: 0; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
   .preview { padding: var(--space-3); min-height: 200px; }
   .preview.err { color: #a33; }

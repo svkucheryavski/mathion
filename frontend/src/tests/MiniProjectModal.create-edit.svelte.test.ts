@@ -561,4 +561,87 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(target.querySelector('.modal > footer')).toBeTruthy();
     expect(target.querySelector('.backdrop')).toBeTruthy();
   });
+
+  it('404 on Save: surfaces "deleted between open and Save" banner with Ctrl/Cmd+A/+C copy instructions (spec line 519)', async () => {
+    // Codex T6a r1 catch: 404 banner copy is implemented but had no test.
+    // Spec table row "404 on Save | MP deleted between open and Save | inline
+    // banner: 'This mini-project has been deleted. Select-all (Ctrl/Cmd+A)
+    // and copy (Ctrl/Cmd+C) from the assignment textarea if you want to
+    // preserve your work before closing.'"
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/mini-projects/99') && (init as RequestInit | undefined)?.method === 'PATCH') {
+        return jres({ detail: 'Not found' }, 404);
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, {
+      target,
+      props: {
+        runId: 10,
+        mode: 'edit',
+        initial,
+        availableBlocks: [],
+        currentBlock: blocks[0],
+        runIsPublished: true,
+        versionIsDisabled: false,
+        runEndDate: '2026-06-30',
+        onClose: vi.fn(),
+        onSaved: vi.fn().mockResolvedValue(undefined),
+        onNavigateToTab: vi.fn(),
+      },
+    });
+    await settle();
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    const banner = target.querySelector('.banner-error') as HTMLElement;
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain('This mini-project has been deleted');
+    expect(banner.textContent).toContain('Ctrl/Cmd+A');
+    expect(banner.textContent).toContain('Ctrl/Cmd+C');
+  });
+
+  it('409 on PATCH: surfaces displayMessage with "Refresh the page to see latest." suffix (spec line 524)', async () => {
+    // Codex T6a r1 catch: 409 banner suffix is implemented but had no test.
+    // Spec table row "409 on PATCH | locked-after-open OR concurrent state
+    // change | inline banner with e.displayMessage and 'Refresh the page to
+    // see latest.' Modal stays open so the user can copy markdown manually."
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/mini-projects/99') && (init as RequestInit | undefined)?.method === 'PATCH') {
+        return jres({ detail: 'Mini-project locked by concurrent edit' }, 409);
+      }
+      return jres([]);
+    });
+    const onClose = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, {
+      target,
+      props: {
+        runId: 10,
+        mode: 'edit',
+        initial,
+        availableBlocks: [],
+        currentBlock: blocks[0],
+        runIsPublished: true,
+        versionIsDisabled: false,
+        runEndDate: '2026-06-30',
+        onClose,
+        onSaved: vi.fn().mockResolvedValue(undefined),
+        onNavigateToTab: vi.fn(),
+      },
+    });
+    await settle();
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    const banner = target.querySelector('.banner-error') as HTMLElement;
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain('Mini-project locked by concurrent edit');
+    expect(banner.textContent).toContain('Refresh the page to see latest.');
+    // Modal stays open: onClose NOT called.
+    expect(onClose).not.toHaveBeenCalled();
+    // Save button re-enabled (submitting reset in finally).
+    expect((target.querySelector('button[data-action="save"]') as HTMLButtonElement).disabled).toBe(false);
+  });
 });
