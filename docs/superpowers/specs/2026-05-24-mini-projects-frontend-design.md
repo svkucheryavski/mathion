@@ -286,7 +286,7 @@ Prop signature change:
 {
   assetContext: AssetContext;
   disabled?: boolean;
-  refreshKey?: number;             // $bindable<number>; external invalidation signal — bumping it triggers the sidebar's own `$effect` at `AssetSidebar.svelte:54` to re-run `fetchAssets()`. Used by MarkdownEditor at `MarkdownEditor.svelte:95` after non-sidebar-initiated uploads (textarea/wrapper drop) so the sidebar list stays in sync. Sidebar does NOT bump it after its own uploads — it just calls `fetchAssets` directly.
+  refreshKey?: number;             // plain observed prop (NOT $bindable — sidebar never writes it in the refactored design). External invalidation signal — bumping it from MarkdownEditor triggers the sidebar's own `$effect` at `AssetSidebar.svelte:54` to re-run `fetchAssets()`. MarkdownEditor bumps it at `MarkdownEditor.svelte:95` after non-sidebar-initiated uploads (textarea/wrapper drop) so the sidebar list stays in sync. Sidebar uses its own `fetchAssets` directly after its own uploads.
   onInsert: (snippet: string) => void;
   onUploadFile: (file: File, batch?: { current: number; total: number }) => Promise<AssetItem | null>;  // = MarkdownEditor's uploadOne, injected; sidebar passes batch={current: i+1, total: files.length} for multi-file drops to preserve "n of m" UX; null return on single-flight skip / abort / error (sidebar stops iterating)
   uploading: boolean;              // $bindable
@@ -300,7 +300,14 @@ Internally:
 - **Sidebar does NOT own the upload controller and does NOT mutate `uploading` or `uploadProgress` directly.** It MAY write to `uploadError` for client-side pre-validation failures (oversize / wrong-extension) — see the pre-validation section below — since those branches never reach `uploadOne` and need a visible error. During an actual in-flight upload, only `uploadOne` writes upload-state. When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads.
   - **On success (non-null `AssetItem` returned):** sidebar calls its own `await fetchAssets()` (refetch/replace, mirroring the existing pattern at `AssetSidebar.svelte:85`) and continues to the next file in the batch. No append-then-bump — that would duplicate work, since `refreshKey`-change ALREADY triggers `fetchAssets` via the existing `$effect` at `AssetSidebar.svelte:54`. Sidebar does NOT bump `refreshKey` after its own uploads (would just re-fetch what it already re-fetched). No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
   - **On `null` returned:** no refetch, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
-  - **Multi-file OS drop:** sidebar awaits each `onUploadFile(file)` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. Test recipe: drop 3 valid files; assert all 3 land server-side in order, `fetchAssets` is called 3 times (once per file), and the rendered asset list ends with all 3.
+  - **Multi-file OS drop:** sidebar awaits each `onUploadFile` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. The loop is explicit and threads the batch counters:
+    ```ts
+    for (let i = 0; i < files.length; i++) {
+      const result = await onUploadFile(files[i], { current: i + 1, total: files.length });
+      if (result === null) break;   // batch stops on null (skip / abort / error)
+    }
+    ```
+    Test recipe: drop 3 valid files. After resetting the `fetchAssets` spy that counted the initial-mount fetch, assert it's called 3 more times (one per successful upload). Assert all 3 filenames are present in the rendered list (backend sorts by filename, so don't assert tail position — assert set-membership).
 - Delete calls `assetContext.remove(assetId)`.
 - `imgSrc(asset)` calls `assetContext.imgSrc(item)`.
 - Section label switches on `assetContext.kind`: "Course assets" vs "Run assets — shared across all MPs in this run".
@@ -310,7 +317,9 @@ Internally:
 
 ### Client-side file pre-validation (in AssetSidebar before calling `onUploadFile`)
 
-Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. Oversize or wrong-extension files: sidebar writes the message into `uploadError` directly and skips that file (does NOT call `onUploadFile` for it, so the single upload path is preserved). Validation runs per file inside the multi-file `for` loop, so one bad file in a 3-file drop fails only that file and lets the others proceed (sidebar simply does not call `onUploadFile` for the invalid one and continues to the next).
+Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. **Stop-on-any-invalid pre-pass:** sidebar validates ALL dropped files first (one pre-pass) BEFORE entering the upload loop. If any file fails validation, sidebar writes a combined message into `uploadError` (e.g., `"Cannot upload — invalid file(s): foo.exe (extension not allowed), big.zip (>20MB)"`) and does NOT call `onUploadFile` for ANY file. The user retries with a valid subset.
+
+Rationale (codex round-6 catch): per-file validation inside the upload loop hides validation errors — `uploadOne` clears `uploadError = null` at the start of each call, so a validation message set for file N gets wiped when file N+1 starts. Pre-pass + stop-on-any-invalid is simpler than per-file accumulation and gives the user a single clear message.
 
 ### AbortController plumbing
 
@@ -520,6 +529,8 @@ Established patterns plus what was kept after the second-pass review:
 - **AbortController abort leaves orphan asset row.** Server-side commit is atomic and not abort-aware (`run_assets.py:60-96`); aborted-mid-write uploads still land in the DB whether the user cancelled explicitly or simply closed the modal during upload. Sidebar refetch on next open shows them; the user manually trashes them. Phase 9: abort-aware upload.
 - **`is_referenced` is stale during in-modal edit.** Server-side flag updates only on PATCH/POST commit; in-modal references to a not-yet-saved asset don't bump the flag. Trash button can mislead. Spec accepts: matches existing course-asset behavior.
 - **Cross-TZ deadline values shift.** `isoToLocalInput` reflects current browser TZ; a traveling teacher sees displayed times move. Phase 9: per-run pinned TZ.
+- **Sidebar batch interruptible by sibling textarea/wrapper drop** (codex round-6 catch). After each successful file in a sidebar batch, `uploadOne` releases the single-flight lock briefly before the sidebar's next iteration acquires it. A textarea-drop in that window can take the slot; the sidebar's next iteration single-flight-rejects and returns `null`, stopping the batch at the current position. UX consequence: user sees the textarea-drop's file landed, sidebar list updates, but remaining sidebar-batch files were not uploaded. User can re-drop them. Documented rather than fixed (the alternative — restructuring to `uploadMany(files)` that holds the lock across the whole batch — doubles the API surface and adds a new contract for a rare edge case). Phase 9: batch-level lock if real users hit this.
+- **Concurrent `fetchAssets` responses can clobber.** The sidebar's `fetchAssets` has no request-token ratchet, so two overlapping calls (e.g., sidebar's own post-upload refetch + a refreshKey-triggered refetch from a sibling MarkdownEditor upload) could land in arbitrary order; the older response wins if it lands later. With backend sorting deterministic by filename, worst-case is a brief "N items instead of N+1" flash that the next fetch corrects. Phase 9: `loadToken` ratchet (same pattern used in RunDetailPage).
 
 ## Testing
 
