@@ -1244,6 +1244,7 @@ let {
   disabled = false,
   refreshKey = $bindable(0),
   uploadAbortController = $bindable<AbortController | null>(null),
+  ariaDescribedby = undefined,
 }: {
   assetContext: AssetContext;
   value?: string;
@@ -1251,7 +1252,30 @@ let {
   disabled?: boolean;
   refreshKey?: number;
   uploadAbortController?: AbortController | null;
+  ariaDescribedby?: string;
 } = $props();
+```
+
+Codex re-review catch: forward `ariaDescribedby` onto the textarea element
+(not the wrapper). T6a's 422 field-level UX needs the `<textarea>` itself
+to carry `aria-describedby="err-assignment_md"` so assistive tech announces
+the error when focus lands. Update the textarea opening tag at the existing
+`MarkdownEditor.svelte:209-219` to read:
+
+```svelte
+<textarea
+  bind:this={textareaEl}
+  bind:value
+  rows="14"
+  spellcheck="false"
+  disabled={disabled}
+  aria-describedby={ariaDescribedby}
+  ondragover={handleTextareaDragOver}
+  ondrop={handleTextareaDrop}
+  onfocus={onTextareaFocus}
+  onblur={onTextareaBlur}
+  onselectionchange={onTextareaSelectionChange}
+></textarea>
 ```
 
 - [ ] **Step 3: Add `editorMounted` lifecycle flag**
@@ -2049,6 +2073,14 @@ describe('MiniProjectModal — create mode', () => {
     const hardInput = Array.from(target.querySelectorAll('input[type="datetime-local"]'))
       .find(el => el.getAttribute('aria-describedby') === 'err-hard_deadline');
     expect(hardInput).toBeTruthy();
+    // Codex re-review catch: ALSO assert the <textarea> (inside MarkdownEditor)
+    // carries aria-describedby="err-assignment_md". This locks in the
+    // T5a forwarding of `ariaDescribedby` onto the inner textarea — a
+    // future regression that drops the forwarding would otherwise pass
+    // the per-input check on hard_deadline but silently break the
+    // assignment-text affordance.
+    const textareaEl = target.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textareaEl.getAttribute('aria-describedby')).toBe('err-assignment_md');
     // Summary banner also rendered (per ApiError.displayMessage on 422):
     expect(target.textContent).toContain('Please correct the highlighted fields.');
   });
@@ -2609,13 +2641,20 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
         aria-describedby={fieldErrors.resubmission_deadline ? 'err-resubmission_deadline' : undefined} />
     </label>
     {#if fieldErrors.resubmission_deadline}<span id="err-resubmission_deadline" class="field-error" role="alert">{fieldErrors.resubmission_deadline}</span>{/if}
-    <!-- markdown editor + run assets sidebar -->
+    <!-- markdown editor + run assets sidebar.
+         Codex re-review catch: `aria-describedby={...}` on a Svelte 5
+         child component lands on the rendered wrapper, NOT inner elements.
+         The textarea inside MarkdownEditor needs the attribute for
+         assistive-tech focus announcements. T5a now declares a
+         camelCase `ariaDescribedby?: string` prop on MarkdownEditor that
+         it forwards to the inner `<textarea aria-describedby={...}>` —
+         passed here with the same value the wrapping span ID uses. -->
     <MarkdownEditor
       {assetContext}
       bind:value={formData.assignment_md}
       disabled={submitting}
       bind:uploadAbortController
-      aria-describedby={fieldErrors.assignment_md ? 'err-assignment_md' : undefined}
+      ariaDescribedby={fieldErrors.assignment_md ? 'err-assignment_md' : undefined}
     />
     {#if fieldErrors.assignment_md}<span id="err-assignment_md" class="field-error" role="alert">{fieldErrors.assignment_md}</span>{/if}
     {#if serverError}
@@ -2735,8 +2774,8 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
   /publish is NOT called. Locks the contract that the full Save validation is
   re-checked at publish-preflight time, not just the publish-specific gates.
 - 409 on publish: inline banner with `e.displayMessage`
-- **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{detail: "block_id: must be set"}`; assert field-level error renders.
-- **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422; assert inline banner with backend detail.
+- **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{ detail: [{ loc: ['body', 'block_id'], msg: 'must be set', type: 'value_error' }] }` (codex re-review catch: ApiError.validationErrors() returns null for a string detail per api.ts:21-24, so the field-level branch never executes — must be `ValidationErrorDetail[]`); assert `#err-block_id` span renders with msg AND that `<select>` carries `aria-describedby="err-block_id"`. (Same `ValidationErrorDetail[]` shape as the corresponding T6a test above.)
+- **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert the field-level span renders AND the summary banner shows `"Please correct the highlighted fields."`.
 - **422 on render preview (spec lines 513, 527)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
 - **5xx on publish (spec line 530)**: mount with valid preconditions; POST /publish returns 503; assert red banner stays; modal does NOT close.
 - Save and Publish share `submitting`: clicking Publish disables Save and vice versa; button text changes to "Publishing…"
@@ -2953,13 +2992,32 @@ describe('RunMiniProjectsTab', () => {
     const newBtn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
     expect(newBtn.disabled).toBe(true);
     expect(newBtn.getAttribute('title')).toContain("course version is disabled");
+    // Codex re-review catch: lock the modal-only-publish contract (no
+    // row-level Publish button — see the rowStatus comment block in the
+    // RunMiniProjectsTab implementation for the rationale).
+    expect(target.querySelector('button[data-action="publish"]')).toBeNull();
   });
 
-  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled (spec lines 546-548, 595)', async () => {
+  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled; NO row-level Publish button (spec lines 546-548, 595 — intentional divergence)', async () => {
     // Codex catch: spec line 595 — !runIsPublished surfaces a banner BUT
     // does NOT disable authoring (unlike versionIsDisabled or
     // !runGroupsEnabled). User can still draft mini-projects while the
     // run itself is unpublished.
+    //
+    // Codex re-review catch (spec lines 548/552/595): spec describes a
+    // row-level `[Publish]` action that should be DISABLED when
+    // !runIsPublished. Plan intentionally diverges: publishing happens
+    // ONLY through the modal (T6b's `[Publish…]` button), not via a
+    // row-level button. The publishCheckResult inside the modal already
+    // gates on `runIsPublished` (pushes "Run must be published — Open
+    // Overview to publish" when false), so the user experience is:
+    //   1. Click Edit on a draft row → modal opens
+    //   2. Click [Publish…] → precondition banner shows "Run must be
+    //      published — Open Overview to publish"
+    //   3. Confirm-publish is blocked; user navigates to Overview.
+    // This single-publish-path keeps the row UI simple. The assertion
+    // below LOCKS THIS DIVERGENCE by verifying there is no row-level
+    // `data-action="publish"` button on the draft row.
     const onNav = vi.fn();
     // One draft MP so Edit button renders alongside [+ New].
     const draftMp: MiniProjectResponse = {
@@ -2989,6 +3047,9 @@ describe('RunMiniProjectsTab', () => {
     const editBtn = target.querySelector('button[data-action="edit"]') as HTMLButtonElement;
     expect(editBtn).toBeTruthy();
     expect(editBtn.disabled).toBe(false);
+    // Codex re-review catch: lock the modal-only-publish contract by
+    // asserting there is no row-level Publish button on the draft row.
+    expect(target.querySelector('button[data-action="publish"]')).toBeNull();
   });
 
   it('pinnedAvailable=false: "Cannot load — pinned version not found"', async () => {
@@ -3302,6 +3363,16 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
     if (mp.is_published) return 'published';
     return 'draft';
   }
+  // Codex re-review catch — INTENTIONAL spec divergence (spec lines
+  // 547-548, 552, 595): the spec table references a row-level [Publish]
+  // action that should be disabled under versionIsDisabled / !runIsPublished
+  // and hidden when is_published=true. The plan implements publishing as
+  // MODAL-ONLY: the only Publish entry point is T6b's `[Publish…]` button
+  // inside MiniProjectModal, which already gates on runIsPublished /
+  // versionIsDisabled via publishCheckResult. Single-publish-path
+  // keeps row UI to just [Edit] / [×] and avoids two separate gating
+  // surfaces. T7 tests lock this contract by asserting `data-action="publish"`
+  // is absent from the row DOM in the relevant state-coverage tests.
 
   let modalMode = $state<'create' | 'edit' | null>(null);
   let editTarget = $state<MiniProjectResponse | null>(null);
