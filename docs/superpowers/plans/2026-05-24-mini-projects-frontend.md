@@ -2536,7 +2536,17 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
 </div>
 
 <style>
+  /* Round-7 reviewer-1 catch: spec line 488 mandates sticky header + footer.
+     `.modal` is `overflow: auto`, so the sticky elements stick to its
+     scrolling viewport (top: 0 for header, bottom: 0 for footer). Without
+     these, long body content scrolls header/footer out of view — failing
+     spec line 488 + the related smoke step at spec 641-653. The T6a
+     "modal layout" test only asserts structural presence (jsdom can't
+     reliably check computed styles for scoped CSS), so this rule would
+     silently regress if dropped. */
   .modal { max-width: 1100px; max-height: 90vh; overflow: auto; }
+  .modal > header { position: sticky; top: 0; background: inherit; z-index: 1; }
+  .modal > footer { position: sticky; bottom: 0; background: inherit; z-index: 1; }
   @media (max-width: 880px) {
     .body { display: flex; flex-direction: column; }
   }
@@ -2602,6 +2612,12 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
 - `runEndDate === null`: bullet shows "Run end date must be set — Open Overview to set it"
 - `hard_iso > runEndDate + 'T23:59:59Z'`: bullet shows with substituted runEndDate
 - `resub_iso > runEndDate + 'T23:59:59Z'`: bullet shows
+- **Round-7 reviewer-1 catch — basic ordering preflight (spec lines 495-497)**:
+  mount in edit mode with `formData.soft_local > formData.hard_local`; click
+  `[Publish…]`; assert precondition banner shows "Soft deadline must be before
+  hard deadline" AND that POST /publish is NOT called. Same for `hard > resub`
+  asserts "Hard deadline must be before resubmission deadline". Both lock the
+  preflight contract so a future refactor doesn't drop them back to server-only.
 - 409 on publish: inline banner with `e.displayMessage`
 - **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{detail: "block_id: must be set"}`; assert field-level error renders.
 - **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422; assert inline banner with backend detail.
@@ -2624,6 +2640,23 @@ import { publishMiniProject } from '../../lib/miniProjects';
 const publishCheckResult = $derived.by(() => {
   if (mode !== 'edit' || initial?.is_published) return null;
   const unmet: string[] = [];
+  // Round-7 reviewer-1 catch: spec lines 495-497 say "For Publish, ALL of the
+  // above PLUS" — where "the above" includes the Save-level ordering checks
+  // (soft <= hard, hard <= resub). Without these here, a user with invalid
+  // ordering could click Publish and only get a server 422 — failing spec
+  // 497's preflight contract. We INCLUDE both ordering checks here (in
+  // addition to the publish-specific preconditions below) so the precondition
+  // banner surfaces them before any network call.
+  if (formData.soft_local && formData.hard_local) {
+    if (new Date(localInputToISO(formData.soft_local)) > new Date(localInputToISO(formData.hard_local))) {
+      unmet.push('Soft deadline must be before hard deadline');
+    }
+  }
+  if (formData.hard_local && formData.resub_local) {
+    if (new Date(localInputToISO(formData.hard_local)) > new Date(localInputToISO(formData.resub_local))) {
+      unmet.push('Hard deadline must be before resubmission deadline');
+    }
+  }
   if (!formData.hard_local) unmet.push('Hard deadline must be set');
   if (!formData.resub_local) unmet.push('Resubmission deadline must be set');
   if (formData.hard_local) {
