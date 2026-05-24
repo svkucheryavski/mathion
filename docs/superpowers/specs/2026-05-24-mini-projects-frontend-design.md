@@ -84,7 +84,7 @@ RunDetailPage
 
 | Endpoint | Why |
 |---|---|
-| `POST /api/runs/{rid}/render` | Mirrors `POST /api/versions/{vid}/render` (`versions.py:120`) but calls `render_with_run_assets(db, run_id, content_md)` (`helpers.py:421`). Lets the in-modal MarkdownEditor preview resolve `mathion:asset://...` refs against run-assets before save. Course-admin gated (matches the rest of the run-management surface). Side-effect-free: `render_with_run_assets` only SELECTs + string-rewrites; `RunAssetReference` writes happen separately in `sync_run_asset_references` invoked only by PATCH/POST. ~20-line addition + 1 test. |
+| `POST /api/runs/{rid}/render` | Mirrors `POST /api/versions/{vid}/render` (`versions.py:120`) but calls `render_with_run_assets(db, run_id, content_md)` (`helpers.py:421`). Lets the in-modal MarkdownEditor preview resolve `mathion:asset://...` refs against run-assets before save. Gated by `require_run_admin_or_teacher` (matches the rest of the run-asset surface — `run_assets.py` mutations + listing all use the same dep). Side-effect-free: `render_with_run_assets` only SELECTs + string-rewrites; `RunAssetReference` writes happen separately in `sync_run_asset_references` invoked only by PATCH/POST. ~20-line addition + 1 test. |
 
 **No `version.is_disabled` enforcement added in this slice.** Spec gates UX-only via `versionIsDisabled` banner + disabled buttons. Acceptable for an internal tool. Future hardening sweep.
 
@@ -229,7 +229,42 @@ Internal changes:
 - `formatRef` (filename+mime → markdown snippet, `lib/assets.ts:69`) is shape-agnostic; reused unchanged.
 - `AssetSidebar` instance receives the same `assetContext` (passed through), plus a `disabled` prop.
 - **Upload-state ownership preserved**: the existing `uploading` / `uploadProgress` / `uploadError` $state lives in MarkdownEditor and is `$bindable` into AssetSidebar so that all three upload entry points (textarea drop, wrapper drop, sidebar drop) share a single overlay + error display. AssetSidebar still receives `bind:uploading`, `bind:uploadProgress`, `bind:uploadError`.
-- **`uploadAbortController` is parent-owned in MarkdownEditor** (codex-review Critical): the controller is created here when ANY upload starts (textarea-drop, wrapper-drop, OR sidebar-drop — covers all three entry points) and cleared on resolve/reject. Exposed via `$bindable<AbortController | null>` so a consumer modal can read+abort it through `bind:uploadAbortController`. AssetSidebar does NOT own its own controller; it receives controller-creation as a callback or shares parent's state. The non-abort upload `.catch` branches set `uploadError`; the `e.name === 'AbortError'` branch is silent.
+- **All three upload entry points route through one shared `uploadOne(file)` helper inside MarkdownEditor** (codex round-3 catch — without this, sidebar-initiated and textarea/wrapper-drop uploads can race; the later upload overwrites `uploadAbortController` and the earlier upload's `finally` clears the newer controller, so a Cancel either aborts the wrong upload or none). Helper shape:
+  ```ts
+  // Internal MarkdownEditor state.
+  let editorMounted = $state(false);     // local mounted guard; flipped in onMount/onDestroy
+  // $bindable upload state shown by both editor and sidebar:
+  let uploading = $state(false);          // $bindable
+  let uploadProgress = $state(null);      // $bindable
+  let uploadError = $state(null);         // $bindable
+  let uploadAbortController = $state(null); // $bindable<AbortController | null>
+
+  async function uploadOne(file: File): Promise<AssetItem | null> {
+    if (uploading) return null;           // single-flight guard — second drop while one is in flight is a no-op
+    const controller = new AbortController();
+    uploadAbortController = controller;
+    uploading = true;
+    uploadError = null;
+    try {
+      const item = await assetContext.upload(file, controller.signal);
+      return item;
+    } catch (e: any) {
+      if (!editorMounted) return null;
+      if (e?.name === 'AbortError') return null;       // silent on abort
+      uploadError = { detail: String(e?.detail ?? e?.message ?? e) };
+      return null;
+    } finally {
+      // compare-before-clear: only clear if this invocation still owns the controller
+      // (defensive — the single-flight guard above already prevents overwrite, but
+      // this keeps the invariant local and obvious).
+      if (uploadAbortController === controller) {
+        uploadAbortController = null;
+      }
+      if (editorMounted) uploading = false;
+    }
+  }
+  ```
+  `uploadOne` is the ONLY upload path. Textarea drop, wrapper drop, and the sidebar's drop/file-picker all invoke it. The controller is exposed via `$bindable<AbortController | null>` so a consumer modal can read+abort it through `bind:uploadAbortController`. AssetSidebar does NOT own its own controller — it gets `uploadOne` injected as `onUploadFile`.
 - **`disabled` prop** (codex-review Critical): when truthy, ALL interactive handlers no-op — textarea drag-drop, wrapper drag-drop, preview button, mode toggle. Textarea itself gets `disabled={disabled}`. Sidebar is passed `disabled` through.
 
 ### `components/editor/AssetSidebar.svelte`
@@ -241,7 +276,7 @@ Prop signature change:
   disabled?: boolean;
   refreshKey?: number;             // $bindable<number>; sidebar bumps it after upload/delete so embedding MarkdownEditor (or anything else watching) re-renders preview
   onInsert: (snippet: string) => void;
-  onUploadFile: (file: File) => Promise<AssetItem>;  // injected by MarkdownEditor; wraps controller creation + signal threading + assetContext.upload call
+  onUploadFile: (file: File) => Promise<AssetItem | null>;  // = MarkdownEditor's uploadOne, injected; returns null on single-flight skip / abort / error (sidebar stops iterating)
   uploading: boolean;              // $bindable
   uploadProgress: { current: number; total: number; filename: string } | null;  // $bindable
   uploadError: { detail: string; stoppedAt?: { n: number; m: number } } | null; // $bindable
@@ -250,19 +285,7 @@ Prop signature change:
 
 Internally:
 - `fetchAssets` calls `assetContext.list()`.
-- **Sidebar does NOT own the upload controller.** When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. MarkdownEditor's implementation of `onUploadFile` is:
-  ```ts
-  const onUploadFile = async (file: File): Promise<AssetItem> => {
-    const controller = new AbortController();
-    uploadAbortController = controller;  // $bindable<AbortController | null> on MarkdownEditor
-    try {
-      return await assetContext.upload(file, controller.signal);
-    } finally {
-      uploadAbortController = null;
-    }
-  };
-  ```
-  This guarantees there is exactly ONE in-flight controller across all three entry points (textarea drop, wrapper drop, sidebar drop) and the parent modal always has a hook to abort it.
+- **Sidebar does NOT own the upload controller and does NOT mutate `uploading`/`uploadProgress`/`uploadError` directly.** When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads. A return value of `null` from `onUploadFile` signals "skipped (single-flight) / aborted / errored" and the sidebar simply stops iterating.
 - Delete calls `assetContext.remove(assetId)`.
 - `imgSrc(asset)` calls `assetContext.imgSrc(item)`.
 - Section label switches on `assetContext.kind`: "Course assets" vs "Run assets — shared across all MPs in this run".
@@ -276,7 +299,7 @@ Uses `MAX_FILE_SIZE_BYTES` and `ALLOWED_EXTENSIONS` from `lib/runAssets.ts`. Ove
 
 ### AbortController plumbing
 
-MarkdownEditor owns the upload's `AbortController` (covering ALL THREE upload entry points: textarea drop, wrapper drop, sidebar drop). The modal reads it via `bind:uploadAbortController={...}` on MarkdownEditor. Modal Cancel during upload calls `controller.abort()`. **Server-side: the upload is atomic (DB row + filesystem write commit together at `backend/mathion/api/run_assets.py:60-96`) and is NOT abort-aware** — the server may have committed by the time the client's signal fires, leaving an orphan asset row in the run pool that is visible (and trash-able) on next sidebar refetch. Spec accepts this; documented in "Race / Staleness Handling". Test recipe in jsdom: mock `fetch` rejects with `new DOMException('Aborted', 'AbortError')` when `signal` fires.
+MarkdownEditor's `uploadOne` helper owns the upload's `AbortController` and is the single upload path for all three entry points (textarea drop, wrapper drop, sidebar drop — see the `uploadOne` listing above). The modal reads the in-flight controller via `bind:uploadAbortController={...}` on MarkdownEditor. Modal Cancel during upload calls `controller.abort()`. **Server-side: the upload is atomic (DB row + filesystem write commit together at `run_assets.py:60-96`) and is NOT abort-aware** — the server may have committed by the time the client's signal fires, leaving an orphan asset row in the run pool that is visible (and trash-able) on next sidebar refetch. Spec accepts this; documented in "Race / Staleness Handling". Test recipe in jsdom: mock `fetch` rejects with `new DOMException('Aborted', 'AbortError')` when `signal` fires.
 
 ## New Components
 
@@ -342,7 +365,7 @@ Props:
 - `assetContext = $derived(runAssetContext(runId))` (memoized; not constructed per render).
 - `formData` $state: `{ block_id, soft_local, hard_local, resub_local, assignment_md }` — datetime fields hold naive local strings throughout the modal; converted via `localInputToISO` only at POST/PATCH time.
 - `submitting` $state. **Inputs disabled while submitting:** all three datetime inputs and the block picker set `disabled={submitting}` directly; the MarkdownEditor and AssetSidebar both receive `disabled={submitting}` via the new `disabled` prop documented in their contracts above (textarea + drag-drop handlers + sidebar upload/insert/delete all no-op). This prevents the in-flight-edit data-loss case where a user keeps typing after Save → PATCH carries the pre-click snapshot → post-click edits are silently lost on the success refetch.
-- `mounted` $state: set `true` in `onMount`, `false` in `onDestroy`. Every post-await state write inside the modal (Save success, upload `.catch` for non-abort errors, etc.) checks `if (!mounted) return;` first. This covers the unmounted-state-write race surfaced by the edge-case reviewer (covers close-during-upload, close-during-Save, close-during-publish all as one rule).
+- `mounted` $state: set `true` in `onMount`, `false` in `onDestroy`. Every post-await state write inside **the modal** (Save success, Publish success, force-delete refetch, etc.) checks `if (!mounted) return;` first. This covers close-during-Save and close-during-Publish. **Note:** upload `.catch`/`.finally` writes are NOT modal-scoped — they live inside MarkdownEditor's `uploadOne` and are guarded by MarkdownEditor's own local `editorMounted` flag (see the MarkdownEditor section above). The modal's `mounted` flag cannot protect post-await writes inside a child component because those writes target the child's local state, not the modal's. Two flags, two scopes, same rule applied at each lifecycle boundary.
 - **Dirty-confirm via `InlineConfirm` footer-row.** Tracks the full form snapshot (block_id, three deadlines, markdown) so accidental loss of deadline edits also triggers the confirm:
   ```ts
   // Plain-object snapshot built from formData AFTER initialization (NOT a $state proxy,
@@ -371,7 +394,11 @@ Props:
 
   let pendingClose = $state(false);
   const dirty = $derived(
-    JSON.stringify(currentFormSnapshot()) !== JSON.stringify(initialFormSnapshot)
+    // initialFormSnapshot is undefined before onMount fires (single render tick); guard
+    // so an early-render read of `dirty` doesn't evaluate truthy and surprise downstream.
+    initialFormSnapshot == null
+      ? false
+      : JSON.stringify(currentFormSnapshot()) !== JSON.stringify(initialFormSnapshot)
   );
 
   function closeForCurrentStage() {
@@ -401,6 +428,7 @@ Props:
   - `hard_local` set
   - `resub_local` set
   - `new Date(hard_iso) > new Date()` (client-side proactive warning — backend re-checks)
+  - `runEndDate !== null` (precondition for the two date-bound checks below; bullet copy when violated: "Run end date must be set — Open Overview to set it."). Run table currently allows nullable end_date in some legacy rows, so the prop type stays `string | null` and the modal renders this bullet rather than throwing.
   - `hard_iso <= runEndDate + 'T23:59:59Z'` (matches backend publish check at `mini_projects.py:258-281` which does `hard_aware.date() > run.end_date` in UTC). **Note: this is a product-visible discrepancy with the existing run-status logic at `frontend/src/lib/runStatus.ts`, which treats `run.end_date` as a browser-local end-of-day boundary.** A teacher in HST setting hard_deadline to June 30 23:30 local (= July 1 09:30 UTC) sees publish fail even though their local clock says it's still June 30. Spec accepts this as inherited backend behavior; the cleanest fix is for backend publish to switch to `hard_aware.date() > run.end_date` in the run's local TZ once per-run TZ pinning lands in Phase 9.
   - `resub_iso <= runEndDate + 'T23:59:59Z'` (codex re-review catch: backend also enforces this at `mini_projects.py:271`; same UTC-date semantics as the hard-deadline check).
   - `runIsPublished === true`
@@ -533,7 +561,7 @@ Established patterns plus what was kept after the second-pass review:
 
 - `tests/test_render_run.py` (or extend existing render tests):
   - `POST /api/runs/{rid}/render` returns HTML with `mathion:asset://X` rewritten to `/api/runs/{rid}/assets/X`
-  - Course-admin gating (non-admin → 403)
+  - Gated by `require_run_admin_or_teacher`: course-admin OK, run-teacher OK, outsider → 403
   - 422 on unknown asset ref with the exact filenames in the message
   - Side-effect-free: no `RunAssetReference` rows created
 
