@@ -1984,6 +1984,7 @@ describe('MiniProjectModal — create mode', () => {
       availableBlocks: blocks,
       currentBlock: null,
       runIsPublished: true,
+      versionIsDisabled: false,
       runEndDate: '2026-06-30',
       onClose, onSaved,
       onNavigateToTab: vi.fn(),
@@ -2784,12 +2785,16 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
 - **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422 with the same `ValidationErrorDetail[]` shape (e.g., `loc: ['body', 'assignment_md']`); assert `#err-assignment_md` span renders AND the inner `<textarea>` carries `aria-describedby="err-assignment_md"` (codex round-3 nit — lock the MarkdownEditor forwarding in this test too, not just T6a's 422-on-create) AND the summary banner shows `"Please correct the highlighted fields."`.
 - **Codex round-3 catch — versionIsDisabled while modal open (spec line 547)**:
   mount in edit mode with `versionIsDisabled: false` and valid publish
-  preconditions; click `[Publish…]`; assert InlineConfirm appears. Then
-  re-render with `versionIsDisabled: true` via the same propsRef pattern
-  used in T7 force-reveal (`propsRef = $state({...}); propsRef.versionIsDisabled = true;`
-  inside a re-render trigger). Click `confirmPublish`; assert POST /publish
-  is NOT called AND the precondition banner now shows "This run's course
-  version is disabled — Open Overview to re-enable it." Locks the
+  preconditions via the same propsRef pattern used in T7 force-reveal
+  (`const propsRef: any = $state({ ..., versionIsDisabled: false });
+  trackedMount(MiniProjectModal, { target, props: propsRef });`). Click
+  `[Publish…]`; assert InlineConfirm appears. Then mutate
+  `propsRef.versionIsDisabled = true;` AND `await settle();` (codex
+  round-4 nit — explicit flush so the $derived publishCheckResult
+  re-evaluates BEFORE the next click; without it the timing is
+  ambiguous). Click `confirmPublish`; assert POST /publish is NOT called
+  AND the precondition banner now shows "This run's course version is
+  disabled — Open Overview to re-enable it." Locks the
   already-open-modal gate so a flip-from-parent can't bypass spec 547.
 - **422 on render preview (spec lines 513, 527)**: mount with markdown that triggers preview render; backend returns 422 `{detail: "Referenced run-assets not found: foo.csv"}`; click Preview; assert inline preview-pane error shows the missing filenames.
 - **5xx on publish (spec line 530)**: mount with valid preconditions; POST /publish returns 503; assert red banner stays; modal does NOT close.

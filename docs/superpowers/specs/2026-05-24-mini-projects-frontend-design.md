@@ -422,6 +422,7 @@ Props:
   availableBlocks: BlockResponse[];        // unused blocks (for create); empty for edit
   currentBlock: BlockResponse | null;      // for edit-mode label rendering
   runIsPublished: boolean;
+  versionIsDisabled: boolean;               // codex round-3/4: needed by publishCheckResult so an already-open modal can't bypass spec line 547 if the parent flips this to true mid-edit
   runEndDate: string | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
@@ -482,7 +483,7 @@ Props:
   When `pendingClose` is true, the footer renders an `InlineConfirm` row with `warning="Discard unsaved changes?"` and `confirmLabel="Discard"`. The existing component's cancel button reads "Cancel" — equivalent to "Keep editing" in this context; no component-API extension needed. **Cancel** sets `pendingClose=false` (returns to normal footer). **Discard** calls `closeForCurrentStage` again (now passes through to `onClose`). Backdrop / `[×]` / Escape all route through `closeForCurrentStage`. Comparing plain-object snapshots (not $state proxies) avoids the proxy-key-order footgun the third reviewer flagged.
 - `uploadAbortController` $state: the latest in-flight `AbortController` for the active upload. **Created inside MarkdownEditor** (which owns ALL THREE upload entry points: textarea drop, wrapper drop, sidebar drop — see the MarkdownEditor section above) and exposed via `$bindable`. The modal reads it through `bind:uploadAbortController={...}` on MarkdownEditor so `closeForCurrentStage` can call `.abort()` before `onClose()`. MarkdownEditor's non-abort upload `.catch` branch sets `uploadError`; the `e.name === 'AbortError'` branch is silent. **Note:** abort prevents updating unmounted-modal state on the upload promise's resolution, but does NOT prevent the server-side commit (atomic upload at `run_assets.py:60-96` is not abort-aware). The resulting orphan asset row is the accepted gap documented in "Race / Staleness Handling" below.
 - `[Publish…]` rendered only when `mode === 'edit'` and `!initial.is_published`. Click flips footer into an `InlineConfirm` with copy: *"Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."*
-- **Modal close on runId change** is wired into RunDetailPage's existing reset-effect (the one at line ~100 that already resets `activeTab`, `rosterPrefilter`, `showImportModal`). Just add `showMiniProjectModal = false`. No new effect. (Single-tick window: the modal sees the new runId in $derived re-eval before the reset-effect fires; `submitting` guard + immediate close on next microtask keeps no operations from dispatching in the interim.)
+- **Modal close on runId change** is handled implicitly by the existing reset-effect's `activeTab = 'overview'` write (codex round-4 catch — corrected from earlier draft that said "add `showMiniProjectModal = false`"). The reset-effect flips activeTab → `{:else if activeTab === 'mini-projects'}` evaluates false → `RunMiniProjectsTab` unmounts → its internal `modalMode` / `editTarget` $state is destroyed by lifecycle. No new reset entries needed; modal state lives INSIDE RunMiniProjectsTab (not on RunDetailPage), and parent-driven unmount is the cleanup path.
 
 **Layout:**
 - Modal root: `max-width: 1100px; max-height: 90vh; overflow: auto`; sticky header (title + close X); sticky footer (action buttons).
@@ -534,9 +535,9 @@ Each bullet uses `aria-describedby` on the offending field. The "Open Overview" 
 - `ActiveTab` type: add `'mini-projects'`.
 - 5th tab button "Mini-projects".
 - `loadAll`: existing fan-out resolves `versions` in the inner Promise.all. **Add a sequenced step after `versions`:** find `pinned = versions.find(v => v.id === run.version_id)`. When `pinned == null` (defensive — version row hard-deleted while run kept its FK, or versions list is empty), set `blocks = []`, `miniProjects = []`, and pass `pinnedAvailable={false}` to the tab so it renders "Cannot load — pinned version not found." Otherwise, `Promise.all([listBlocks(pinned.id), listMiniProjects(rid)])` in parallel; pass `pinnedAvailable={true}`.
-- New state: `blocks: BlockResponse[] | null`, `miniProjects: MiniProjectResponse[] | null`, `showMiniProjectModal: boolean`, plus modal-mode state.
+- New state on RunDetailPage: `blocks: BlockResponse[] | null`, `miniProjects: MiniProjectResponse[] | null`. (Codex round-4 catch — corrected from earlier draft that listed `showMiniProjectModal: boolean` + modal-mode state. Modal state lives INSIDE `RunMiniProjectsTab`, not on RunDetailPage.)
 - `refetchMiniProjects()` helper passed to the tab.
-- **Modal close on runId change folds into the existing reset effect** — add `showMiniProjectModal = false` (and clear modal-related state) alongside the existing `activeTab='overview'` / `rosterPrefilter=null` / `showImportModal=false` resets.
+- **Modal cleanup on runId change is implicit via the existing reset effect's `activeTab='overview'` write** (codex round-4 catch — corrected from earlier draft that said "add `showMiniProjectModal = false`"). RunMiniProjectsTab unmounts when activeTab leaves `'mini-projects'`, destroying its modalMode/editTarget $state by component lifecycle. No new reset-effect entries needed.
 - `onNavigateToTab(tab)` setter passed through to the tab and modal.
 
 ## States & Edge Cases
