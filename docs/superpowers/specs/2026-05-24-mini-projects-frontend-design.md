@@ -239,13 +239,16 @@ Internal changes:
   let uploadError = $state(null);         // $bindable
   let uploadAbortController = $state(null); // $bindable<AbortController | null>
 
-  async function uploadOne(file: File): Promise<AssetItem | null> {
+  async function uploadOne(
+    file: File,
+    batch?: { current: number; total: number }   // optional: passed by sidebar in multi-file drops to preserve existing "n of m" progress UX
+  ): Promise<AssetItem | null> {
     if (uploading) return null;           // single-flight guard — second drop while one is in flight is a no-op
     const controller = new AbortController();
     uploadAbortController = controller;
     uploading = true;
     uploadError = null;
-    uploadProgress = { current: 1, total: 1, filename: file.name };  // single-file granularity; no progress events available from fetch upload
+    uploadProgress = { current: batch?.current ?? 1, total: batch?.total ?? 1, filename: file.name };  // multi-file callers pass {i+1, files.length}; single-file callers fall back to 1/1. No per-byte fetch progress events available (XHR.upload.onprogress is a future enhancement, out of scope).
     try {
       const item = await assetContext.upload(file, controller.signal);
       if (!editorMounted) return null;    // codex round-4: abort()-then-resolve race — fetch may fulfill just before/despite abort; do not propagate post-destroy
@@ -283,9 +286,9 @@ Prop signature change:
 {
   assetContext: AssetContext;
   disabled?: boolean;
-  refreshKey?: number;             // $bindable<number>; sidebar bumps it after upload/delete so embedding MarkdownEditor (or anything else watching) re-renders preview
+  refreshKey?: number;             // $bindable<number>; external invalidation signal — bumping it triggers the sidebar's own `$effect` at `AssetSidebar.svelte:54` to re-run `fetchAssets()`. Used by MarkdownEditor at `MarkdownEditor.svelte:95` after non-sidebar-initiated uploads (textarea/wrapper drop) so the sidebar list stays in sync. Sidebar does NOT bump it after its own uploads — it just calls `fetchAssets` directly.
   onInsert: (snippet: string) => void;
-  onUploadFile: (file: File) => Promise<AssetItem | null>;  // = MarkdownEditor's uploadOne, injected; returns null on single-flight skip / abort / error (sidebar stops iterating)
+  onUploadFile: (file: File, batch?: { current: number; total: number }) => Promise<AssetItem | null>;  // = MarkdownEditor's uploadOne, injected; sidebar passes batch={current: i+1, total: files.length} for multi-file drops to preserve "n of m" UX; null return on single-flight skip / abort / error (sidebar stops iterating)
   uploading: boolean;              // $bindable
   uploadProgress: { current: number; total: number; filename: string } | null;  // $bindable
   uploadError: { detail: string; stoppedAt?: { n: number; m: number } } | null; // $bindable
@@ -295,9 +298,9 @@ Prop signature change:
 Internally:
 - `fetchAssets` calls `assetContext.list()`.
 - **Sidebar does NOT own the upload controller and does NOT mutate `uploading` or `uploadProgress` directly.** It MAY write to `uploadError` for client-side pre-validation failures (oversize / wrong-extension) — see the pre-validation section below — since those branches never reach `uploadOne` and need a visible error. During an actual in-flight upload, only `uploadOne` writes upload-state. When the user drops/picks files, the sidebar iterates and calls `await onUploadFile(file)` for each one. `onUploadFile` is MarkdownEditor's `uploadOne` (see MarkdownEditor section above) injected by value, so the same single-flight guard, controller management, error/progress state, and `editorMounted` post-await guard apply to sidebar-initiated uploads.
-  - **On success (non-null `AssetItem` returned):** sidebar appends the item to its local asset list, bumps `refreshKey` (so any embedded MarkdownEditor preview re-renders), and continues to the next file in the batch. No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
-  - **On `null` returned:** no list append, no `refreshKey` bump, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
-  - **Multi-file OS drop:** sidebar awaits each `onUploadFile(file)` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. Test recipe: drop 3 valid files; assert all 3 land server-side in order, the asset list grows by 3, and `refreshKey` bumps 3 times.
+  - **On success (non-null `AssetItem` returned):** sidebar calls its own `await fetchAssets()` (refetch/replace, mirroring the existing pattern at `AssetSidebar.svelte:85`) and continues to the next file in the batch. No append-then-bump — that would duplicate work, since `refreshKey`-change ALREADY triggers `fetchAssets` via the existing `$effect` at `AssetSidebar.svelte:54`. Sidebar does NOT bump `refreshKey` after its own uploads (would just re-fetch what it already re-fetched). No automatic insert-at-cursor — the existing "Insert ref" button per row remains the user's hook for that.
+  - **On `null` returned:** no refetch, sidebar stops iterating the batch. The `uploadError` state set by `uploadOne` (or already present from a prior pre-validation failure) is preserved and shown via the existing error slot. Single-flight skip and AbortError are both silent (no `uploadError` set inside `uploadOne` for either); a network/server failure is the only path that surfaces an error string.
+  - **Multi-file OS drop:** sidebar awaits each `onUploadFile(file)` sequentially in a `for` loop, so the single-flight guard inside `uploadOne` never blocks the batch — each file waits for the prior one's await chain to resolve, then runs. Test recipe: drop 3 valid files; assert all 3 land server-side in order, `fetchAssets` is called 3 times (once per file), and the rendered asset list ends with all 3.
 - Delete calls `assetContext.remove(assetId)`.
 - `imgSrc(asset)` calls `assetContext.imgSrc(item)`.
 - Section label switches on `assetContext.kind`: "Course assets" vs "Run assets — shared across all MPs in this run".
@@ -507,7 +510,7 @@ Established patterns plus what was kept after the second-pass review:
 - `loadToken` ratchets on `loadAll`; stale responses dropped on runId change.
 - Existing RunDetailPage reset effect closes any open modal on runId change.
 - Modal `onSaved()` triggers `refetchMiniProjects()`.
-- AssetSidebar bumps `refreshKey` after upload/delete; preview re-renders.
+- MarkdownEditor bumps `refreshKey` after non-sidebar-initiated uploads (textarea/wrapper drop) so the sidebar's `$effect` re-fetches its asset list. Sidebar uploads/deletes call `fetchAssets()` directly and do NOT bump `refreshKey`.
 - Modal-close while submitting blocked; user re-clicks after resolve.
 - `closeForCurrentStage` aborts any in-flight upload before `onClose()` so close-during-upload doesn't update unmounted-modal state (orphan asset rows may still land server-side per the accepted gap below — abort cancels client-side promise resolution, not the server commit).
 
