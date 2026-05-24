@@ -104,14 +104,13 @@ describe('AssetSidebar with runAssetContext', () => {
     expect(target.textContent).toContain('Run assets');
   });
 
-  it('AbortController cancellation propagates: onUploadFile null result (uploadOne post-abort contract) breaks drop loop cleanly', async () => {
-    // Sidebar calls onUploadFile (the MarkdownEditor's uploadOne in production).
-    // Real uploadOne catches AbortError internally and returns null (verified
-    // MarkdownEditor.svelte:122-123); this test mirrors that contract so the
-    // sidebar's `if (result === null) break;` is exercised end-to-end. We do
-    // NOT raise DOMException here because (a) the production code never lets
-    // that escape uploadOne, and (b) doing so creates an unhandled-rejection
-    // race with vitest's test-completion gate.
+  it('sidebar drop loop breaks on first null onUploadFile result (uploadOne abort/error contract)', async () => {
+    // Real uploadOne catches AbortError/errors internally and returns null
+    // (verified MarkdownEditor.svelte:122-123 + the abort-branch test in
+    // MarkdownEditor.run-mode.svelte.test.ts). This sidebar-isolated test only
+    // verifies the break-on-null semantics in `AssetSidebar.handleDrop`. It
+    // does NOT exercise the AbortController propagation itself — that lives
+    // in MarkdownEditor's run-mode tests.
     const abortableUpload = vi.fn<(file: File, batch?: { current: number; total: number }) => Promise<null>>()
       .mockResolvedValue(null);
     fetchSpy.mockImplementation(() => jres([]));
@@ -208,12 +207,21 @@ describe('AssetSidebar error surfaces — asset delete 409 (spec line 526)', () 
     // the race where the asset becomes referenced server-side between page load and click.
     const target = document.createElement('div');
     document.body.appendChild(target);
+    // Codex round-1 catch: previous version mock-matched any /assets/1, so a
+    // regression to course-delete /api/assets/1 would still pass. Require the
+    // exact run-mode URL.
+    let deleteUrl: string | null = null;
     fetchSpy.mockImplementation((url, init) => {
-      if (String(url).includes('/assets/1') && (init as RequestInit | undefined)?.method === 'DELETE') {
-        return jres(
-          { detail: "Asset 'pic.png' is referenced by 2 mini-project(s). Use ?force=true to delete." },
-          409,
-        );
+      const u = String(url);
+      if ((init as RequestInit | undefined)?.method === 'DELETE') {
+        deleteUrl = u;
+        if (u === '/api/runs/42/assets/1') {
+          return jres(
+            { detail: "Asset 'pic.png' is referenced by 2 mini-project(s). Use ?force=true to delete." },
+            409,
+          );
+        }
+        return jres({ detail: 'wrong url' }, 404);
       }
       return jres([{ id: 1, filename: 'pic.png', mime_type: 'image/png', file_size: 100, is_referenced: false }]);
     });
@@ -232,6 +240,7 @@ describe('AssetSidebar error surfaces — asset delete 409 (spec line 526)', () 
     await settle();
     (row1.querySelector('[data-testid="delete-confirm"]') as HTMLButtonElement).click();
     await settle();
+    expect(deleteUrl).toBe('/api/runs/42/assets/1');
     expect(target.textContent).toContain('referenced by 2 mini-project');
   });
 });
