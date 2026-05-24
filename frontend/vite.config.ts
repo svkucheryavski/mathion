@@ -22,6 +22,14 @@ export default defineConfig({
     // /assets/{version_id}/{filename} route.
     assetsDir: '_app',
   },
+  // IMPORTANT: tests in lib/datetime.ts depend on TZ=Europe/Copenhagen being set
+  // BEFORE vitest launches. Node caches the host TZ at process startup, so a
+  // `setupFiles` script runs too late to influence Date formatting. The `test`
+  // and `test:watch` scripts in package.json prepend `TZ=Europe/Copenhagen` for
+  // exactly this reason — running vitest directly (e.g. `npx vitest run`)
+  // without TZ in the env will produce host-TZ-dependent failures on the
+  // datetime suite. lib/datetime.test.ts also asserts the pin in beforeAll
+  // so a missed env produces a loud failure instead of silent drift.
   test: {
     environment: 'jsdom',
     globals: false,

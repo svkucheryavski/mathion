@@ -365,6 +365,59 @@ export type BulkDeleteResponse = {
 // from teachers/groups/students/run. T10 consumes the same prop. Centralizing
 // the type here would create drift if either side adds a field.)
 
+// ---- Mini-projects (Phase 8 frontend) ----
+// Backend mirrors from backend/mathion/schemas.py:69 (BlockResponse),
+// :588 (MiniProjectResponse), :651 (RunAssetResponse).
+
+export type BlockResponse = {
+  id: number;
+  version_id: number;
+  title: string;
+  slug: string;
+  order: number;
+  info: string;
+  info_html: string;
+};
+
+export type MiniProjectResponse = {
+  id: number;
+  run_id: number;
+  block_id: number;
+  title: string;
+  assignment_md: string;
+  assignment_html: string;
+  soft_deadline: string | null;
+  hard_deadline: string | null;
+  resubmission_deadline: string | null;
+  is_published: boolean;
+  first_submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MiniProjectCreate = {
+  block_id: number;
+  assignment_md: string;
+  soft_deadline: string | null;
+  hard_deadline: string | null;
+  resubmission_deadline: string | null;
+};
+
+export type MiniProjectUpdate = Partial<Omit<MiniProjectCreate, 'block_id'>>;
+
+export type RunAssetResponse = {
+  id: number;
+  run_id: number;
+  filename: string;
+  file_size: number;
+  mime_type: string;
+  uploaded_at: string;
+  uploaded_by: number | null;
+  is_referenced: boolean;
+};
+
+export type MiniProjectRowStatus = 'draft' | 'published' | 'locked';
+
 // ---- Exhaustiveness helper ----
 export function assertNever(x: never): never {
   throw new Error(`Unhandled discriminant: ${JSON.stringify(x)}`);
