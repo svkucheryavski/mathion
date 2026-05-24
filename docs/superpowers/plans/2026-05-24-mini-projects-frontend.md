@@ -1798,13 +1798,20 @@ describe('AssetSidebar error surfaces (reviewer-1 catch — spec lines 525, 527)
     // Mount sidebar with one asset; click delete; mock DELETE to return 409 with
     // {detail: "Asset 'X' is referenced by N mini-project(s). Use ?force=true to delete."}.
     // Assert the message renders in the sidebar's error slot (post-delete state).
+    //
+    // Codex catch: AssetSidebar.svelte:231-236 hides the trash button entirely
+    // when `is_referenced: true` (renders `<span class="used">` badge instead).
+    // The 409 path exists for the race where the asset becomes referenced
+    // server-side BETWEEN page load and the delete click — so seed
+    // `is_referenced: false` (client thinks it's deletable) and have the
+    // server return 409 to model the race.
     const target = document.createElement('div');
     document.body.appendChild(target);
     fetchSpy.mockImplementation((url, init) => {
       if (String(url).includes('/assets/1') && (init as any)?.method === 'DELETE') {
         return jres({ detail: "Asset 'pic.png' is referenced by 2 mini-project(s). Use ?force=true to delete." }, 409);
       }
-      return jres([{ id: 1, filename: 'pic.png', mime_type: 'image/png', file_size: 100, is_referenced: true }]);
+      return jres([{ id: 1, filename: 'pic.png', mime_type: 'image/png', file_size: 100, is_referenced: false }]);
     });
     mount(AssetSidebar, { target, props: {
       assetContext: runAssetContext(42),
@@ -1997,6 +2004,53 @@ describe('MiniProjectModal — create mode', () => {
     await settle();
     const saveBtn = target.querySelector('button[data-action="save"]') as HTMLButtonElement;
     expect(saveBtn.disabled).toBe(true);
+  });
+
+  it('422 on POST: renders field-level error spans + aria-describedby wiring (spec line 526)', async () => {
+    // Codex catch: spec 526 mandates field-level UX for 422. Backend returns
+    // ValidationErrorDetail[] like `[{ loc: ['body', 'assignment_md'], msg: 'must be non-empty', type: 'value_error' }]`.
+    // ApiError.validationErrors() returns the array; handleSave maps last-loc-segment → msg.
+    // Template renders <span id="err-assignment_md"> + the input/editor gets aria-describedby.
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/runs/10/mini-projects') && (init as any)?.method === 'POST') {
+        return jres({
+          detail: [
+            { loc: ['body', 'assignment_md'], msg: 'must be non-empty', type: 'value_error' },
+            { loc: ['body', 'hard_deadline'], msg: 'must be ISO 8601', type: 'value_error' },
+          ],
+        }, 422);
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, { target, props: {
+      runId: 10, mode: 'create', initial: null,
+      availableBlocks: blocks, currentBlock: null,
+      runIsPublished: true, runEndDate: '2026-06-30',
+      onClose: vi.fn(), onSaved: vi.fn(),
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'x';  // satisfy client saveError so handleSave proceeds to POST
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    // Field-level error spans rendered with stable IDs:
+    const assignErr = target.querySelector('#err-assignment_md');
+    expect(assignErr).toBeTruthy();
+    expect(assignErr!.textContent).toContain('must be non-empty');
+    const hardErr = target.querySelector('#err-hard_deadline');
+    expect(hardErr).toBeTruthy();
+    expect(hardErr!.textContent).toContain('must be ISO 8601');
+    // aria-describedby wired on the corresponding inputs:
+    const hardInput = Array.from(target.querySelectorAll('input[type="datetime-local"]'))
+      .find(el => el.getAttribute('aria-describedby') === 'err-hard_deadline');
+    expect(hardInput).toBeTruthy();
+    // Summary banner also rendered (per ApiError.displayMessage on 422):
+    expect(target.textContent).toContain('Please correct the highlighted fields.');
   });
 });
 
@@ -2431,11 +2485,33 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
   });
 
   let serverError = $state<string | null>(null);  // for 409/PATCH banner, 404, 5xx
+  // Codex catch: spec line 526 mandates field-level UX for 422
+  // ValidationErrorDetail[] payloads — not just a single banner. Map
+  // ApiError.validationErrors() → `{ [fieldName]: msg }` so the template can
+  // render per-field error spans with stable IDs that match each input's
+  // `aria-describedby`. Field names come from the last segment of each
+  // ValidationErrorDetail.loc (api.ts:21-24 + types.ts:186-190 —
+  // `loc: (string|number)[]`, typical shape `['body', 'block_id']`).
+  let fieldErrors = $state<Record<string, string>>({});
+
+  function mapValidationErrors(details: import('../../lib/types').ValidationErrorDetail[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const d of details) {
+      // Pick the last string segment of loc; if loc is empty or all-numeric,
+      // bucket under '_' so the banner still surfaces something.
+      const segs = d.loc.filter((s): s is string => typeof s === 'string');
+      const key = segs.length > 0 ? segs[segs.length - 1] : '_';
+      // First wins — backend rarely emits multiple errors per field.
+      if (!(key in out)) out[key] = d.msg;
+    }
+    return out;
+  }
 
   async function handleSave() {
     if (saveError) return;
     submitting = true;
     serverError = null;
+    fieldErrors = {};   // Codex catch: clear stale field errors on retry.
     try {
       const body = {
         block_id: formData.block_id!,
@@ -2462,10 +2538,19 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
       // String-templating that array renders as "[object Object]". `displayMessage`
       // returns a friendly string ("Please correct the highlighted fields.") for that
       // shape and the raw string for plain errors. See api.ts:14-19.
+      //
+      // Codex catch: for 422 also populate `fieldErrors` from
+      // `e.validationErrors()` so the template renders per-field spans
+      // (spec line 526). The banner stays as a summary; field spans
+      // are the actionable affordance.
       if (e instanceof ApiError && e.status === 404) {
         serverError = 'This mini-project has been deleted. Select-all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C) from the assignment textarea if you want to preserve your work before closing.';
       } else if (e instanceof ApiError && e.status === 409) {
         serverError = `${e.displayMessage} Refresh the page to see latest.`;
+      } else if (e instanceof ApiError && e.status === 422) {
+        const details = e.validationErrors();
+        if (details) fieldErrors = mapValidationErrors(details);
+        serverError = e.displayMessage;  // 'Please correct the highlighted fields.'
       } else if (e instanceof ApiError) {
         serverError = e.displayMessage;
       } else {
@@ -2485,28 +2570,54 @@ Read the spec §"MiniProjectModal.svelte" lines 414-528 verbatim. Skip the publi
     <button data-action="close-x" onclick={closeForCurrentStage} aria-label="Close">×</button>
   </header>
   <div class="body">
+    <!--
+      Codex catch: spec line 526 mandates field-level UX for 422 errors.
+      Each input below renders an `aria-describedby` pointing at a stable
+      ID; if `fieldErrors[name]` is set, render a `<span id="err-{name}">`
+      after the input. Screen readers announce the error when focus lands.
+      The keys (`block_id`, `assignment_md`, `soft_deadline`, etc.) match
+      the request body field names — the backend's Pydantic loc will
+      typically end in those names, and `mapValidationErrors()` keys by
+      the last loc segment.
+    -->
     <!-- block picker (create) or read-only label (edit) -->
     {#if mode === 'create'}
       <label>
         Block
-        <select bind:value={formData.block_id} disabled={submitting}>
+        <select bind:value={formData.block_id} disabled={submitting}
+          aria-describedby={fieldErrors.block_id ? 'err-block_id' : undefined}>
           {#each availableBlocks as b (b.id)}
             <option value={b.id}>Block {b.order} — {b.title}</option>
           {/each}
         </select>
       </label>
+      {#if fieldErrors.block_id}<span id="err-block_id" class="field-error" role="alert">{fieldErrors.block_id}</span>{/if}
     {/if}
     <!-- deadlines: 3 datetime-local inputs; tzLabel hoisted to $derived to avoid 3 redundant calls per render (round-2 reviewer-3 catch) -->
-    <label>Soft deadline {tzLabel} <input type="datetime-local" bind:value={formData.soft_local} disabled={submitting} /></label>
-    <label>Hard deadline {tzLabel} <input type="datetime-local" bind:value={formData.hard_local} disabled={submitting} /></label>
-    <label>Resubmission deadline {tzLabel} <input type="datetime-local" bind:value={formData.resub_local} disabled={submitting} /></label>
+    <label>Soft deadline {tzLabel}
+      <input type="datetime-local" bind:value={formData.soft_local} disabled={submitting}
+        aria-describedby={fieldErrors.soft_deadline ? 'err-soft_deadline' : undefined} />
+    </label>
+    {#if fieldErrors.soft_deadline}<span id="err-soft_deadline" class="field-error" role="alert">{fieldErrors.soft_deadline}</span>{/if}
+    <label>Hard deadline {tzLabel}
+      <input type="datetime-local" bind:value={formData.hard_local} disabled={submitting}
+        aria-describedby={fieldErrors.hard_deadline ? 'err-hard_deadline' : undefined} />
+    </label>
+    {#if fieldErrors.hard_deadline}<span id="err-hard_deadline" class="field-error" role="alert">{fieldErrors.hard_deadline}</span>{/if}
+    <label>Resubmission deadline {tzLabel}
+      <input type="datetime-local" bind:value={formData.resub_local} disabled={submitting}
+        aria-describedby={fieldErrors.resubmission_deadline ? 'err-resubmission_deadline' : undefined} />
+    </label>
+    {#if fieldErrors.resubmission_deadline}<span id="err-resubmission_deadline" class="field-error" role="alert">{fieldErrors.resubmission_deadline}</span>{/if}
     <!-- markdown editor + run assets sidebar -->
     <MarkdownEditor
       {assetContext}
       bind:value={formData.assignment_md}
       disabled={submitting}
       bind:uploadAbortController
+      aria-describedby={fieldErrors.assignment_md ? 'err-assignment_md' : undefined}
     />
+    {#if fieldErrors.assignment_md}<span id="err-assignment_md" class="field-error" role="alert">{fieldErrors.assignment_md}</span>{/if}
     {#if serverError}
       <div class="banner banner-error" role="alert">{serverError}</div>
     {/if}
@@ -2618,6 +2729,11 @@ Create `frontend/src/tests/MiniProjectModal.publish.svelte.test.ts`. Cover (revi
   hard deadline" AND that POST /publish is NOT called. Same for `hard > resub`
   asserts "Hard deadline must be before resubmission deadline". Both lock the
   preflight contract so a future refactor doesn't drop them back to server-only.
+- **Codex catch — assignment_md preflight (spec lines 491-497)**: mount in edit
+  mode, clear the textarea (formData.assignment_md = ''); click `[Publish…]`;
+  assert precondition banner shows "Assignment text is required" AND POST
+  /publish is NOT called. Locks the contract that the full Save validation is
+  re-checked at publish-preflight time, not just the publish-specific gates.
 - 409 on publish: inline banner with `e.displayMessage`
 - **422 on create (spec line 526)**: mount in create mode; POST returns 422 with `{detail: "block_id: must be set"}`; assert field-level error renders.
 - **422 on PATCH (spec line 526)**: mount in edit mode; PATCH returns 422; assert inline banner with backend detail.
@@ -2640,13 +2756,15 @@ import { publishMiniProject } from '../../lib/miniProjects';
 const publishCheckResult = $derived.by(() => {
   if (mode !== 'edit' || initial?.is_published) return null;
   const unmet: string[] = [];
-  // Round-7 reviewer-1 catch: spec lines 495-497 say "For Publish, ALL of the
-  // above PLUS" — where "the above" includes the Save-level ordering checks
-  // (soft <= hard, hard <= resub). Without these here, a user with invalid
-  // ordering could click Publish and only get a server 422 — failing spec
-  // 497's preflight contract. We INCLUDE both ordering checks here (in
+  // Round-7 reviewer-1 + codex catch: spec lines 491-497 say "For Publish,
+  // ALL of the above PLUS" — where "the above" is the full Save validation
+  // (assignment_md non-empty AND soft<=hard AND hard<=resub when both set).
+  // Without these here, a user could clear assignment_md or invert ordering
+  // and click Publish, getting only a server 422 — failing spec 497's
+  // preflight contract. We INCLUDE all three Save-level checks here (in
   // addition to the publish-specific preconditions below) so the precondition
   // banner surfaces them before any network call.
+  if (!formData.assignment_md.trim()) unmet.push('Assignment text is required');
   if (formData.soft_local && formData.hard_local) {
     if (new Date(localInputToISO(formData.soft_local)) > new Date(localInputToISO(formData.hard_local))) {
       unmet.push('Soft deadline must be before hard deadline');
@@ -2811,6 +2929,66 @@ describe('RunMiniProjectsTab', () => {
     const link = target.querySelector('a[data-action="nav-overview"]') as HTMLElement;
     link.click();
     expect(onNav).toHaveBeenCalledWith('overview');
+  });
+
+  it('actionable banner when versionIsDisabled; [+ New] disabled with tooltip (spec lines 546-548, 594)', async () => {
+    // Codex catch: spec testing 594 + states table 546-548 require explicit
+    // coverage that the versionIsDisabled banner renders AND that [+ New] is
+    // disabled with the "version disabled" tooltip when versionIsDisabled=true.
+    const onNav = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(RunMiniProjectsTab, { target, props: {
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: true, pinnedAvailable: true,
+      blocks, miniProjects: [],
+      onRefetchMiniProjects: vi.fn(),
+      onNavigateToTab: onNav,
+    } });
+    await settle();
+    expect(target.textContent).toContain("This run's course version is disabled");
+    const link = target.querySelector('a[data-action="nav-overview"]') as HTMLElement;
+    link.click();
+    expect(onNav).toHaveBeenCalledWith('overview');
+    const newBtn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
+    expect(newBtn.disabled).toBe(true);
+    expect(newBtn.getAttribute('title')).toContain("course version is disabled");
+  });
+
+  it('actionable banner when !runIsPublished; [+ New] and Edit remain enabled (spec lines 546-548, 595)', async () => {
+    // Codex catch: spec line 595 — !runIsPublished surfaces a banner BUT
+    // does NOT disable authoring (unlike versionIsDisabled or
+    // !runGroupsEnabled). User can still draft mini-projects while the
+    // run itself is unpublished.
+    const onNav = vi.fn();
+    // One draft MP so Edit button renders alongside [+ New].
+    const draftMp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: false, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    mount(RunMiniProjectsTab, { target, props: {
+      runId: 10, runIsPublished: false, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks, miniProjects: [draftMp],
+      onRefetchMiniProjects: vi.fn(),
+      onNavigateToTab: onNav,
+    } });
+    await settle();
+    expect(target.textContent).toContain('Run is not yet published');
+    const link = target.querySelector('a[data-action="nav-overview"]') as HTMLElement;
+    link.click();
+    expect(onNav).toHaveBeenCalledWith('overview');
+    // Authoring still enabled despite the banner.
+    const newBtn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
+    expect(newBtn.disabled).toBe(false);
+    const editBtn = target.querySelector('button[data-action="edit"]') as HTMLButtonElement;
+    expect(editBtn).toBeTruthy();
+    expect(editBtn.disabled).toBe(false);
   });
 
   it('pinnedAvailable=false: "Cannot load — pinned version not found"', async () => {
@@ -3236,7 +3414,11 @@ Follow spec §"RunMiniProjectsTab.svelte" lines 372-412. Key shape:
 {:else}
   <header>
     <h2>Mini-projects</h2>
-    <button data-action="new-mp" disabled={newDisabled} title={newDisabledTitle} onclick={() => { modalMode = 'create'; }}>
+    <!-- Codex catch: spec line 400 calls for disabled + title + aria-disabled.
+         `disabled` is functional; `aria-disabled` makes the disabled state
+         explicit for assistive tech that doesn't already infer it from the
+         attribute. -->
+    <button data-action="new-mp" disabled={newDisabled} aria-disabled={newDisabled} title={newDisabledTitle} onclick={() => { modalMode = 'create'; }}>
       + New mini-project
     </button>
   </header>
