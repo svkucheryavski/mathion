@@ -195,6 +195,8 @@
             <button
               data-action="edit"
               disabled={versionIsDisabled}
+              aria-disabled={versionIsDisabled}
+              title={versionIsDisabled ? "This run's course version is disabled." : ''}
               onclick={() => {
                 editTarget = mp;
                 modalMode = 'edit';

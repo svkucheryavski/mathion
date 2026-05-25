@@ -6,6 +6,7 @@
   import { createMiniProject, updateMiniProject, publishMiniProject } from '../../lib/miniProjects';
   import MarkdownEditor from '../editor/MarkdownEditor.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
+  import FocusTrap from '../ui/FocusTrap.svelte';
   import type { MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
 
   let {
@@ -327,8 +328,11 @@
         // T9 smoke catch: the MP is gone server-side; the parent's list still
         // shows the stale row until something refetches. Fire the same
         // refetch callback the save-success path uses so the list reflects
-        // reality by the time the user clicks Discard.
-        void onSaved();
+        // reality by the time the user clicks Discard. Fire-and-forget by
+        // design (a refetch-of-refetch failure isn't worth blocking the
+        // user's copy flow); explicit .catch swallows rejection so it
+        // doesn't surface as an unhandled promise warning.
+        onSaved().catch(() => {});
       } else if (e instanceof ApiError && e.status === 409) {
         serverError = `${e.displayMessage} Refresh the page to see latest.`;
       } else if (e instanceof ApiError && e.status === 422) {
@@ -348,9 +352,10 @@
 </script>
 
 <div class="backdrop" data-role="backdrop" onclick={closeForCurrentStage} role="presentation"></div>
-<div class="modal" role="dialog" aria-modal="true">
+<FocusTrap autofocusSelector="textarea">
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mp-modal-title">
   <header>
-    <h2>
+    <h2 id="mp-modal-title">
       {mode === 'create'
         ? 'New mini-project'
         : `Edit — Block ${currentBlock?.order ?? '?'} — ${currentBlock?.title ?? ''}`}
@@ -483,6 +488,7 @@
     {/if}
   </footer>
 </div>
+</FocusTrap>
 
 <style>
   .modal {
