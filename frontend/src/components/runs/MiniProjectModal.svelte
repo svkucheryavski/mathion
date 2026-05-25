@@ -324,6 +324,11 @@
       if (e instanceof ApiError && e.status === 404) {
         serverError =
           'This mini-project has been deleted. Select-all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C) from the assignment textarea if you want to preserve your work before closing.';
+        // T9 smoke catch: the MP is gone server-side; the parent's list still
+        // shows the stale row until something refetches. Fire the same
+        // refetch callback the save-success path uses so the list reflects
+        // reality by the time the user clicks Discard.
+        void onSaved();
       } else if (e instanceof ApiError && e.status === 409) {
         serverError = `${e.displayMessage} Refresh the page to see latest.`;
       } else if (e instanceof ApiError && e.status === 422) {

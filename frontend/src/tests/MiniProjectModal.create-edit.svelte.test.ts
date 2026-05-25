@@ -574,6 +574,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       }
       return jres([]);
     });
+    const onSaved = vi.fn().mockResolvedValue(undefined);
     const target = document.createElement('div');
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, {
@@ -588,7 +589,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
         onClose: vi.fn(),
-        onSaved: vi.fn().mockResolvedValue(undefined),
+        onSaved,
         onNavigateToTab: vi.fn(),
       },
     });
@@ -600,6 +601,10 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(banner.textContent).toContain('This mini-project has been deleted');
     expect(banner.textContent).toContain('Ctrl/Cmd+A');
     expect(banner.textContent).toContain('Ctrl/Cmd+C');
+    // T9 smoke catch: 404 means the MP is gone server-side; modal fires
+    // onSaved so the parent's list refreshes immediately (the stale row
+    // is removed by the time the user clicks Discard to close).
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
   it('409 on PATCH: surfaces displayMessage with "Refresh the page to see latest." suffix (spec line 524)', async () => {
