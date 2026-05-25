@@ -55,7 +55,7 @@ The incoming file's name is ignored — backend always stores under the existing
       if a.uploaded_by is not None else None
   )
   ```
-- **N+1 only compounds on the list endpoint** (~20 micro-queries per list call at typical scale, all indexed `users.id` lookups). POST/PUT/single-GET each do exactly one email lookup. If profiling later shows the list on a hot path, a single `outerjoin(User, User.id == RunAsset.uploaded_by)` (pattern seen at `backend/mathion/api/dashboard.py:296`) is the optimization.
+- **N+1 only compounds on the list endpoint** (~20 micro-queries per list call at typical scale, all indexed `users.id` lookups). POST and PUT each do exactly one email lookup (single-row responses). The filename-keyed GET at `backend/mathion/api/run_assets.py:125` returns `FileResponse` (raw bytes) — no `RunAssetResponse`, no email lookup. If profiling later shows the list on a hot path, a single `outerjoin(User, User.id == RunAsset.uploaded_by)` (pattern seen at `backend/mathion/api/dashboard.py:296`) is the optimization.
 - `uploaded_by_email` is null when (a) the FK is null (column nullable; `ondelete="SET NULL"` for deleted users), (b) the FK points at a now-missing user row (hard delete bypassed cascade — defensive: `db.scalar(...)` returns `None`, no raise).
 - Frontend type at `frontend/src/lib/types.ts` extended in lock-step (`uploaded_by_email: string | null`).
 
@@ -95,7 +95,7 @@ const [r, vs, ts, gs, ss, assetList] = await Promise.all([
   - the "uses N" badge count,
   - the list of referencing MPs in the sub-panel,
   - the Orphan/Referenced filter pill counts (kept consistent with the sub-panel).
-- **Scan implementation matches the backend extractor** at `backend/mathion/markdown.py:52-68`, which pulls Markdown image/link targets only (not free-text mentions). Naive `assignment_md.includes(filename)` false-positives prose, code blocks, and substring overlaps (`data.csv` inside `my-data.csv`), drifting away from `is_referenced`. Use the same regex as the backend extractor — match `!\[...\](filename)` and `[...](filename)` patterns scoped to the resolved URL — wrapped in a `$derived`. A small frontend helper `extractAssetRefs(md: string): Set<string>` mirrors `markdown.extract_asset_filenames` (Python). O(assets × MPs × parse), trivial at ~20 of each.
+- **Scan implementation matches the backend extractor** at `backend/mathion/markdown.py:52-68`, which pulls Markdown image/link targets only (not free-text mentions). Naive `assignment_md.includes(filename)` false-positives prose, code blocks, and substring overlaps (`data.csv` inside `my-data.csv`), drifting away from `is_referenced`. Use the same regex as the backend extractor — match `!\[...\](target)` and `[...](target)` patterns, skipping `http://` / `https://` / `mailto:` / `#` prefixes (matches backend filter; query/fragment are NOT stripped). A small frontend helper `extractAssetRefs(md: string): Set<string>` mirrors the backend extractor. Per (asset × MP): membership check is `refs.has(asset.filename)` — set lookup, not substring match. O(assets × MPs × parse), trivial at ~20 of each. Wrapped in a `$derived`.
 - Filenames are sanitized server-side (`assets.py:sanitize_filename` strips to `[a-z0-9-]`), so URL/markdown escaping is a non-issue.
 - Backend `is_referenced` and client scan can briefly drift (e.g., stale MP list after a cascade). Documented in [Accepted gaps](#accepted-gaps). When `miniProjects === null` the badge column renders `—` (unknown), filter counts treat MPs as empty, and the **delete force flag still uses backend `is_referenced`** so the contract holds.
 
@@ -244,7 +244,7 @@ Frontend hides nothing — buttons are visible but disabled with tooltips when t
 
 - `loadToken` ratchet on RunDetailPage covers all `$state` writes after `loadAll` (T8 pattern), extended to cover `assets`.
 - `refetchAssets()` captures `rid + myToken` at entry; verifies both still match post-await before assigning `assets`.
-- **Bulk-delete loop**: `AbortController` threaded through every DELETE; per-iteration guard re-checks `myToken === loadToken && rid === runIdInt`; on mismatch calls `bulkController.abort()` and breaks (no summary write, no refetch). On unmount, an `$effect` cleanup also aborts the controller. Already-committed server-side deletes are accepted (gap).
+- **Bulk-delete loop**: `AbortController` threaded through every DELETE; per-iteration guard re-checks `myToken === loadToken && rid === runIdInt`; on mismatch calls `bulkController.abort()`, fires a refetch (so already-committed deletes surface), and breaks without writing the summary banner. On unmount or `runId` change, the `$effect` cleanup aborts the controller (the `refetchAssets` call is itself token-guarded — it no-ops via its own post-await re-check if the parent's ratchet has advanced). Already-committed server-side deletes are accepted (gap).
 - **Double-refetch on force-delete**: `await Promise.all([onRefetchAssets(), onRefetchMiniProjects()])` so both writes settle in the same microtask flush. Avoids the intermediate "new assets + stale MPs" render.
 - **In-flight upload abort**: `AbortController` tied to the tab's `mounted` flag. Server may persist a partial-state row; surfaces on next refetch (accepted gap).
 - **Cross-user 404 storm**: 500ms coalescer (single component-scoped timer + counter, cleared on unmount). Single refetch + banner per window.
@@ -304,6 +304,21 @@ Frontend hides nothing — buttons are visible but disabled with tooltips when t
 - `onPendingEditConsumed` callback fires so the parent clears `pendingEditTarget`
 - Stale `pendingEditTarget` (MP no longer in `miniProjects` list — cascade race) → modal does NOT open; consumed callback still fires to clear the dangling reference
 
+**Frontend — `frontend/src/tests/extractAssetRefs.test.ts` (new):**
+
+Parity tests against the backend extractor at `backend/mathion/markdown.py:52-68`:
+- `![alt](foo.pdf)` → `{ "foo.pdf" }` (image syntax)
+- `[link](foo.pdf)` → `{ "foo.pdf" }` (link syntax)
+- `http://example.com/foo.pdf` → `{}` (absolute URLs skipped — matches backend `http://` filter)
+- `https://example.com/foo.pdf` → `{}` (matches backend `https://` filter)
+- `mailto:user@example.com` → `{}` (matches backend `mailto:` filter)
+- `#anchor` → `{}` (matches backend `#` filter)
+- Plain prose mentioning `foo.pdf` outside any markdown link → `{}` (the round-1 false-positive concern)
+- Substring overlap: `[link](my-data.csv)` does NOT match `data.csv` (the round-1 false-positive concern)
+- Query string preserved: `[link](foo.pdf?v=2)` → `{ "foo.pdf?v=2" }` (backend does NOT strip query — match exact)
+- Fragment preserved: `[link](foo.pdf#page=3)` → `{ "foo.pdf#page=3" }` (same)
+- Multiple references in one `assignment_md` returns the full set
+
 **Frontend — `frontend/src/tests/runAssets.test.ts` (extended; file already exists):**
 - New `replaceRunAsset(runId, assetId, file, signal?)` PUT contract test — mirror the 6 wire properties locked by `uploadRunAsset` at lines 37-68: method PUT, URL `/api/runs/{rid}/assets/{aid}`, FormData body with `file`, `credentials: 'include'`, `X-Requested-With: mathion`, no manual `Content-Type`, `signal` threaded
 - `deleteRunAsset(runId, assetId, { force: true })` appends `?force=true` querystring
@@ -332,10 +347,12 @@ DELETE endpoint (force backstop):
 - `?force=false` (or omitted) by run-teacher on referenced asset → existing 409 semantics (verifies the gate distinguishes force from non-force)
 - `?force=true` by course-admin on referenced asset → 204; cascades `RunAssetReference`
 
-Schema:
-- `RunAssetResponse.uploaded_by_email` populated when user row exists
-- `RunAssetResponse.uploaded_by_email` is null when `uploaded_by` FK is null (post user-delete SET NULL)
-- `RunAssetResponse.uploaded_by_email` is null when `uploaded_by` FK points at a hard-deleted user row (FK still set, user row missing) — `db.scalar(...)` returns None, no raise
+Schema (`uploaded_by_email`) — tested at **all three** response sites that emit `RunAssetResponse`:
+- POST response includes `uploaded_by_email` populated to the uploader's email
+- GET-list response includes `uploaded_by_email` for every row (populated)
+- PUT response includes `uploaded_by_email` populated to the replacing user's email (not the original uploader's, since step 8 overwrites `uploaded_by`)
+- `uploaded_by_email` is null when `uploaded_by` FK is null (post user-delete SET NULL)
+- `uploaded_by_email` is null when `uploaded_by` FK points at a hard-deleted user row (FK still set, user row missing) — `db.scalar(...)` returns None, no raise
 
 ## Accepted gaps
 
