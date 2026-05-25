@@ -36,12 +36,45 @@ function mockHappyPath() {
     // works when it remounts with a different runId (e.g., 11).
     const m = url.match(/\/api\/runs\/(\d+)$/);
     if (m) return jres(runFixture({ id: Number(m[1]) }));
+    if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+    if (url.includes('/mini-projects')) return jres([]);
     if (url.includes('/versions')) return jres([versionFixture()]);
     if (url.includes('/teachers')) return jres([]);
     if (url.includes('/groups')) return jres([]);
     if (url.includes('/students')) return jres([]);
     return Promise.reject(new Error('unexpected ' + url));
   });
+}
+
+function mockCascade(opts: {
+  blocksReject?: boolean;
+  mpsReject?: boolean;
+  noPinned?: boolean;
+}) {
+  return (url: string) => {
+    if (url.includes('/api/courses/by-slug/')) return jres({ id: 1, slug: 'c', name: 'C' });
+    if (url.match(/\/api\/runs\/10$/))
+      return jres({
+        id: 10, course_id: 1,
+        version_id: opts.noPinned ? 999 : 7,
+        title: 'R', start_date: '2026-01-01', end_date: '2026-12-31',
+        is_published: true, groups_enabled: true,
+      });
+    if (url.includes('/api/courses/1/versions'))
+      return jres([{ id: 7, course_id: 1, info_md: '', is_published: true, is_disabled: false, created_at: '2026-01-01', published_at: '2026-01-02' }]);
+    if (url.includes('/api/runs/10/teachers')) return jres([]);
+    if (url.includes('/api/runs/10/groups')) return jres([]);
+    if (url.includes('/api/runs/10/students')) return jres([]);
+    if (url.includes('/api/versions/7/blocks')) {
+      if (opts.blocksReject) return jres({ detail: 'blocks 5xx' }, 503);
+      return jres([{ id: 1, version_id: 7, title: 'B', slug: 'b', order: 0, info: '', info_html: '' }]);
+    }
+    if (url.includes('/api/runs/10/mini-projects')) {
+      if (opts.mpsReject) return jres({ detail: 'mps 5xx' }, 503);
+      return jres([]);
+    }
+    return jres([]);
+  };
 }
 
 async function settle() {
@@ -74,6 +107,8 @@ describe('RunDetailPage shell', () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.includes('/versions')) return jres([versionFixture({ is_disabled: true })]);
       if (url.includes('/teachers')) return jres([]);
       if (url.includes('/groups')) return jres([]);
@@ -123,6 +158,8 @@ describe('RunDetailPage shell', () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ version_id: 102 }));
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.includes('/versions')) return jres([
         versionFixture({ id: 100, created_at: '2026-01-01' }),
         versionFixture({ id: 101, created_at: '2026-02-01' }),
@@ -142,10 +179,65 @@ describe('RunDetailPage shell', () => {
     unmount(cmp);
   });
 
+  it('renders 5th "Mini-projects" tab; switching to it shows RunMiniProjectsTab', async () => {
+    fetchSpy.mockImplementation(mockCascade({}));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
+    await settle();
+    await settle();
+    const mpTabBtn = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('Mini-projects')) as HTMLButtonElement;
+    expect(mpTabBtn).toBeTruthy();
+    mpTabBtn.click();
+    await settle();
+    expect(target.textContent).toContain('No mini-projects yet');
+    unmount(cmp);
+  });
+
+  it('pinnedAvailable=false when versions list does not contain run.version_id', async () => {
+    fetchSpy.mockImplementation(mockCascade({ noPinned: true }));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
+    await settle();
+    await settle();
+    const mpTabBtn = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('Mini-projects')) as HTMLButtonElement;
+    mpTabBtn.click();
+    await settle();
+    expect(target.textContent).toContain('Cannot load — pinned version not found');
+    unmount(cmp);
+  });
+
+  it('listBlocks fails → whole page renders loadError (all-or-nothing load invariant)', async () => {
+    fetchSpy.mockImplementation(mockCascade({ blocksReject: true }));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
+    await settle();
+    await settle();
+    expect(target.textContent).toMatch(/blocks 5xx/);
+    expect(Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('Mini-projects'))).toBeUndefined();
+    unmount(cmp);
+  });
+
+  it('listMiniProjects fails → whole page renders loadError', async () => {
+    fetchSpy.mockImplementation(mockCascade({ mpsReject: true }));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'c', runId: '10' } });
+    await settle();
+    await settle();
+    expect(target.textContent).toMatch(/mps 5xx/);
+    expect(Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('Mini-projects'))).toBeUndefined();
+    unmount(cmp);
+  });
+
   it('renders status badge in the header (spec §3.5 + §7 step 20)', async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ is_published: false }));
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.includes('/versions')) return jres([versionFixture()]);
       if (url.includes('/teachers')) return jres([]);
       if (url.includes('/groups')) return jres([]);
