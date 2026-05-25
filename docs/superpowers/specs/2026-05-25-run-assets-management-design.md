@@ -309,14 +309,19 @@ Frontend hides nothing — buttons are visible but disabled with tooltips when t
 Parity tests against the backend extractor at `backend/mathion/markdown.py:52-68`:
 - `![alt](foo.pdf)` → `{ "foo.pdf" }` (image syntax)
 - `[link](foo.pdf)` → `{ "foo.pdf" }` (link syntax)
-- `http://example.com/foo.pdf` → `{}` (absolute URLs skipped — matches backend `http://` filter)
-- `https://example.com/foo.pdf` → `{}` (matches backend `https://` filter)
-- `mailto:user@example.com` → `{}` (matches backend `mailto:` filter)
-- `#anchor` → `{}` (matches backend `#` filter)
+- `![alt](foo.pdf "Title")` → `{ "foo.pdf" }` (image with title — backend's `_TITLE` group strips title; only the target survives)
+- `[x](http://example.com/foo.pdf)` → `{}` (link-wrapped absolute URL skipped via `http://` prefix filter — bullets must wrap in `[](...)` to actually exercise the filter path, since bare URLs never match the regex)
+- `[x](https://example.com/foo.pdf)` → `{}` (link-wrapped `https://` filter)
+- `[x](mailto:user@example.com)` → `{}` (link-wrapped `mailto:` filter)
+- `[x](#anchor)` → `{}` (link-wrapped `#` filter)
+- `[x](HTTP://example.com/foo.pdf)` → `{ "HTTP://example.com/foo.pdf" }` (case-sensitive prefix filter — backend uses `startswith`; mixed case is NOT skipped). This pins parity; frontend `String.prototype.startsWith` is also case-sensitive.
+- Reference-style link `[text][ref]\n\n[ref]: foo.pdf` → `{}` (backend regex only matches inline `[](...)`; reference-style definitions are NOT extracted. Frontend mirror must skip too.)
 - Plain prose mentioning `foo.pdf` outside any markdown link → `{}` (the round-1 false-positive concern)
 - Substring overlap: `[link](my-data.csv)` does NOT match `data.csv` (the round-1 false-positive concern)
 - Query string preserved: `[link](foo.pdf?v=2)` → `{ "foo.pdf?v=2" }` (backend does NOT strip query — match exact)
 - Fragment preserved: `[link](foo.pdf#page=3)` → `{ "foo.pdf#page=3" }` (same)
+- Escaped brackets are NOT respected: `\[x\](foo.pdf)` → `{ "foo.pdf" }` (backend regex is naive about `\[` / `\]` escapes; frontend mirror must be equally naive — this is a deliberate parity choice, not a CommonMark bug)
+- Angle-bracket targets are captured verbatim: `[x](<foo.pdf>)` → `{ "<foo.pdf>" }` (backend's `[^)\s]+` captures the literal `<` and `>`; frontend must NOT helpfully strip them — keeps parity, ensures set-membership against `asset.filename` correctly evaluates false for the bracketed form)
 - Multiple references in one `assignment_md` returns the full set
 
 **Frontend — `frontend/src/tests/runAssets.test.ts` (extended; file already exists):**
@@ -359,6 +364,7 @@ Schema (`uploaded_by_email`) — tested at **all three** response sites that emi
 - **No version history**: replace overwrites. InlineConfirm warns about irreversibility.
 - **Broken refs after force-delete**: an MP's `![alt](filename.pdf)` markdown becomes a dangling ref. The MP modal's preview renders the raw markdown (existing Phase 6 behavior); admin must edit the MP to fix. Both refetches fire on force-delete so the MP tab reflects the cascade promptly.
 - **Reference-count drift when `miniProjects` is stale or null**: badge column renders `—` (unknown); filter counts treat MPs as empty. Contract is safe because the **delete force flag uses backend `is_referenced`**, not the scan.
+- **Filename + query/fragment mismatch**: a markdown reference like `![](foo.pdf?v=2)` will never resolve to the asset row `foo.pdf` because the matching is set-membership with the full captured target. This is consistent with backend behavior (`backend/mathion/markdown.py:resolve_asset_urls` also uses plain string replace without stripping query/fragment) — both surfaces will agree that such refs are "orphan" relative to the named asset. By design.
 - **In-flight Replace PUT cancellation**: `$effect` cleanup aborts the controller on tab unmount or `runId` prop change, but a PUT already-dispatched server-side may still commit. Same shape as the bulk-delete in-flight gap and the partial-upload gap. Surfaces on next refetch.
 - **Replace lost-update race**: two admins replacing the same asset concurrently — last writer wins. No `ETag` / `If-Unmodified-Since`. Same risk profile as other mutation endpoints.
 - **Server-side partial upload after client abort**: if client aborts after multipart parse completes, the asset row may persist on the server. Visible on next refetch; user can delete normally.
