@@ -212,7 +212,7 @@ Per-row `[↻ Replace]` flow:
 | Cross-user delete race (404, single) | Per-asset row: banner "This asset was deleted by another user." Auto-refetch. |
 | Cross-user delete race (404, storm) | First 404 starts a 500ms timer; subsequent 404s within the window are coalesced into a single banner *"Some assets were deleted by another user."* and a single refetch at flush. Mechanism: component-scoped `let storm404Timer: ReturnType<typeof setTimeout> \| null = null; let storm404Seen = 0;`. On 404: increment, start timer if null, on flush fire one refetch + banner, clear timer + counter. On unmount: `clearTimeout(storm404Timer)`. Coalescing key is "any 404 from this tab" (cross-asset). |
 | Bulk partial failure | Summary banner: "Deleted M of N. Failed: {list}. (Refetched.)" |
-| Bulk delete + runId change mid-loop | `bulkController.abort()` cancels in-flight DELETE; per-iteration guard breaks; no summary banner write. Server-side commits for already-dispatched requests are documented as Accepted gap. |
+| Bulk delete + runId change mid-loop | `bulkController.abort()` cancels in-flight DELETE; per-iteration guard breaks; fires a token-guarded refetch so already-committed deletes surface (the refetch no-ops if the parent's ratchet has advanced); no summary banner write. Server-side commits for already-dispatched requests are documented as Accepted gap. |
 | In-flight upload + tab unmount | `AbortController.abort()` via the `mounted` flag (T6a pattern). |
 | Server-side partial upload | If client aborts after multipart parse, server may persist a DB row. Visible on next refetch; user can delete normally. Accepted gap. |
 | Replace lost-update race (concurrent admins) | Last writer wins; no `ETag` / `If-Unmodified-Since`. Accepted gap. |
