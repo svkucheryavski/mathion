@@ -30,21 +30,23 @@ New `Assets` tab on `RunDetailPage` (6th button, after Mini-projects). Same `rol
 - Permissions: `require_run_admin_or_teacher` (same gate as POST/DELETE-without-force, per `backend/mathion/api/run_assets.py`).
 - **Ordering of operations** (no orphan temp file on early failures):
   1. Load existing asset row (`get_or_404` → 404 before touching disk).
-  2. Validate incoming extension matches the existing asset's extension — **case-insensitive** (both compared lowercased; 422 otherwise). Existing `assets.py:validate_extension` already lowercases on POST, so PUT uses the same helper.
-  3. Validate per-file size (`MAX_FILE_SIZE_BYTES`).
-  4. Validate per-run aggregate (`MAX_COURSE_SIZE`) using **delta** (`new_size - old_size`) so a small replace can't push the run over quota; 413 otherwise.
-  5. Write temp file (`tempfile.mkstemp`).
-  6. Atomic `os.replace` from temp → final path under the **existing** filename.
-  7. Update `file_size`, `mime_type`, `uploaded_at`, `uploaded_by`; commit.
-  8. `RunAssetReference` rows untouched (sync intentionally skipped — filename unchanged ⇒ refs still valid).
-  9. Return updated `RunAssetResponse` with `is_referenced` and `uploaded_by_email` populated consistently with GET (see below).
+  2. **Ownership check**: verify `asset.run_id == run_id` (mirrors existing DELETE at `backend/mathion/api/run_assets.py:192-194`); otherwise 404. **Pre-temp**: still no orphan temp file.
+  3. Validate incoming extension matches the existing asset's extension — **case-insensitive** (both compared lowercased; 422 otherwise). Existing `assets.py:validate_extension` already lowercases on POST, so PUT uses the same helper.
+  4. Validate per-file size (`MAX_FILE_SIZE_BYTES`).
+  5. Validate per-run aggregate (`MAX_COURSE_SIZE`) using **delta** (`new_size - old_size`) so a small replace can't push the run over quota; 413 otherwise.
+  6. Write temp file (`tempfile.mkstemp`).
+  7. Atomic `os.replace` from temp → final path under the **existing** filename.
+  8. Update `file_size`, `mime_type`, `uploaded_at`, `uploaded_by`; commit.
+  9. `RunAssetReference` rows untouched (sync intentionally skipped — filename unchanged ⇒ refs still valid).
+  10. Return updated `RunAssetResponse` with `is_referenced` and `uploaded_by_email` populated consistently with GET (see below).
 
 The incoming file's name is ignored — backend always stores under the existing row's filename so all references survive.
 
-**2. Schema extension:** `RunAssetResponse.uploaded_by_email: str | None`
+**2. Schema extension:** `RunAssetResponse.uploaded_by_email: str | None = None`
 
 - Today's `uploaded_by: int | None` (user ID) is unhelpful to teachers. Add the email alongside.
-- **Construction pattern** (no `from_model` helper exists today — the current code at `backend/mathion/api/run_assets.py:119` is `resp = RunAssetResponse.model_validate(a); resp.is_referenced = ref_count > 0`). Add post-hoc population the same way:
+- **Schema default must be `None`** so existing call sites that don't populate it pass validation. Critically: the existing POST endpoint at `backend/mathion/api/run_assets.py:97-99` returns the ORM row directly via `RunAssetResponse.model_validate(...)`. Adding the field without a default would break POST validation. Default ensures backwards-compat.
+- **Construction pattern** (no `from_model` helper exists today — the current list at `backend/mathion/api/run_assets.py:119` is `resp = RunAssetResponse.model_validate(a); resp.is_referenced = ref_count > 0`). Add post-hoc population the same way at ALL three response sites (POST, GET-list, PUT):
   ```python
   resp = RunAssetResponse.model_validate(a)
   resp.is_referenced = ref_count > 0
@@ -53,8 +55,8 @@ The incoming file's name is ignored — backend always stores under the existing
       if a.uploaded_by is not None else None
   )
   ```
-- **N+1 acknowledged**: list endpoint loops over assets and runs one email lookup per row. At typical scale (~20 assets) this is acceptable (~20 micro-queries, all on indexed `users.id`). If profiling later shows this on the hot path, a single `outerjoin(User, User.id == RunAsset.uploaded_by)` (pattern seen at `backend/mathion/api/dashboard.py:296`) is the optimization.
-- `uploaded_by_email` is null when (a) the FK is null (column was nullable before this feature, `ondelete="SET NULL"` for deleted users), (b) the FK points at a now-missing user row (hard delete bypassed the cascade — defensive: `db.scalar(...)` returns `None`, no raise).
+- **N+1 only compounds on the list endpoint** (~20 micro-queries per list call at typical scale, all indexed `users.id` lookups). POST/PUT/single-GET each do exactly one email lookup. If profiling later shows the list on a hot path, a single `outerjoin(User, User.id == RunAsset.uploaded_by)` (pattern seen at `backend/mathion/api/dashboard.py:296`) is the optimization.
+- `uploaded_by_email` is null when (a) the FK is null (column nullable; `ondelete="SET NULL"` for deleted users), (b) the FK points at a now-missing user row (hard delete bypassed cascade — defensive: `db.scalar(...)` returns `None`, no raise).
 - Frontend type at `frontend/src/lib/types.ts` extended in lock-step (`uploaded_by_email: string | null`).
 
 ### Frontend lib helpers
@@ -93,7 +95,7 @@ const [r, vs, ts, gs, ss, assetList] = await Promise.all([
   - the "uses N" badge count,
   - the list of referencing MPs in the sub-panel,
   - the Orphan/Referenced filter pill counts (kept consistent with the sub-panel).
-- Scan is `assignment_md.includes(filename)` per (asset × MP) — cheap; O(assets × MPs) trivial at ~20 each. Wrapped in `$derived`.
+- **Scan implementation matches the backend extractor** at `backend/mathion/markdown.py:52-68`, which pulls Markdown image/link targets only (not free-text mentions). Naive `assignment_md.includes(filename)` false-positives prose, code blocks, and substring overlaps (`data.csv` inside `my-data.csv`), drifting away from `is_referenced`. Use the same regex as the backend extractor — match `!\[...\](filename)` and `[...](filename)` patterns scoped to the resolved URL — wrapped in a `$derived`. A small frontend helper `extractAssetRefs(md: string): Set<string>` mirrors `markdown.extract_asset_filenames` (Python). O(assets × MPs × parse), trivial at ~20 of each.
 - Filenames are sanitized server-side (`assets.py:sanitize_filename` strips to `[a-z0-9-]`), so URL/markdown escaping is a non-issue.
 - Backend `is_referenced` and client scan can briefly drift (e.g., stale MP list after a cascade). Documented in [Accepted gaps](#accepted-gaps). When `miniProjects === null` the badge column renders `—` (unknown), filter counts treat MPs as empty, and the **delete force flag still uses backend `is_referenced`** so the contract holds.
 
@@ -104,10 +106,11 @@ const [r, vs, ts, gs, ss, assetList] = await Promise.all([
   - Captures `rid + myToken` at entry.
   - **No** `pinnedAvailable` gate (assets are run-scoped — distinct from `refetchMiniProjects` which IS gated).
   - Post-await re-check `myToken === loadToken && rid === runIdInt` before assigning `assets`.
-- **Three callback props** on RunAssetsTab (mirroring the MP tab's prop wiring):
+- **Four callback props** on RunAssetsTab (mirroring the MP tab's prop wiring):
   - `onRefetchAssets(): Promise<void>` — fired after every successful mutation.
   - `onRefetchMiniProjects(): Promise<void>` — fired **alongside** `onRefetchAssets` after force-delete (single or bulk-with-any-referenced) using `await Promise.all([onRefetchAssets(), onRefetchMiniProjects()])` so both `$state` writes settle in the same microtask flush (avoids the assets-new / MPs-old intermediate render). Both refetches capture `loadToken + rid` at entry (each independently); when the parent's `loadToken` changes mid-flight, **both** early-return symmetrically — there's no scenario where one writes and the other doesn't, because they share the ratchet.
   - `onEditMiniProject(mp: MiniProjectResponse): void` — fired when the user clicks `[Edit]` on a referencing MP in the sub-panel. **The Assets tab resolves the MP object from its local `miniProjects` prop and passes the full object** (not just the id) so the parent skips the resolution race. RunDetailPage handles the not-found case (force-delete cascade may have removed the MP between sub-panel render and click) by no-op'ing — the cascade refetch will close the stale sub-panel on its next render.
+  - `onReloadRun(): Promise<void>` — fired after a stale-permission 403 from force-delete (see [States & edge cases](#states--edge-cases)). Calls the parent's `loadAll()` so `course.is_admin` (and the rest of the run-detail context) is refreshed. Without this prop the Assets tab has no way to trigger `loadAll` — the function is parent-local at `RunDetailPage.svelte:54-89`.
 - **Parent state for cross-tab edit:** `pendingEditTarget = $state<MiniProjectResponse | null>(null)` and `activeTab = $state(...)` on RunDetailPage (existing variable; spec previously named this `currentTab` in error). `onEditMiniProject(mp)` sets `pendingEditTarget = mp`, switches `activeTab = 'mini-projects'`. A new prop on `RunMiniProjectsTab` consumes `pendingEditTarget`:
   - `$effect` watches `pendingEditTarget`; on truthy → set local `modalMode = 'edit'` + `editTarget = pendingEditTarget`, then call `onPendingEditConsumed()` callback so the parent clears `pendingEditTarget` (preventing re-trigger on subsequent tab switches).
 
@@ -148,6 +151,14 @@ Per-row `[↻ Replace]` flow:
 4. Confirm copy: *"Replace `assignment.pdf` (new size: 1.4 MB)? The current content will be overwritten and cannot be recovered. N mini-project(s) that reference this file will continue to point at the new content."* When N=0, omit the trailing sentence.
 5. `[Confirm]` → PUT request (with `AbortSignal` from a `pendingReplaceController = new AbortController()`). On 200 → `onRefetchAssets()`, row re-renders with new size + uploaded_at.
 6. `[Cancel]` or 422 → close inline confirm, file dropped, controller discarded.
+7. **Unmount / runId-change cleanup**: same Svelte 5 `$effect` pattern as the bulk loop — track `runId` explicitly and abort the controller on cleanup:
+   ```ts
+   $effect(() => {
+     runId; // tracked dep
+     return () => pendingReplaceController?.abort();
+   });
+   ```
+   Otherwise an in-flight PUT after the user navigates away may still commit server-side (same risk profile as the bulk-delete in-flight gap; documented in Accepted gaps).
 
 ## Delete flow
 
@@ -193,7 +204,7 @@ Per-row `[↻ Replace]` flow:
 | `miniProjects === null` | Badge column renders `—`; filter counts treat MPs as empty. Bulk-delete still uses backend `is_referenced` for the force flag, so the contract is safe. Documented in Accepted gaps. |
 | `!runIsPublished` | No banner, no gating — uploads to drafts are fine. |
 | Force-delete without `course.is_admin` | Danger button disabled with tooltip. Backend 403 as backstop. |
-| Force-delete 403 (stale session / role race) | Banner *"You no longer have permission to force-delete. Refresh and retry."* + call `loadAll()` so `course.is_admin` and disabled-state catch up. |
+| Force-delete 403 (stale session / role race) | Banner *"You no longer have permission to force-delete. Refresh and retry."* + call `onReloadRun()` callback prop → parent's `loadAll()` so `course.is_admin` and disabled-state catch up. |
 | Upload 409 collision | Banner "An asset named '{name}' already exists. Use Replace on the existing row, or rename your file." |
 | Replace 422 extension mismatch | Banner "New file must have the same extension as the original ({ext})." Inline confirm closes; no state change ⇒ no refetch. |
 | Replace 413 quota exceeded | Banner "Replacing would exceed this run's storage quota by {delta}." Inline confirm closes. |
@@ -275,6 +286,9 @@ Frontend hides nothing — buttons are visible but disabled with tooltips when t
 - Click "uses N" → sub-panel toggles (open/close); only one open at a time
 - `[Edit]` in sub-panel → `onEditMiniProject(mp)` called with full MP object
 - In-flight upload + tab unmount → `AbortController.abort()` fires (T6a pattern; mirror `frontend/src/tests/MiniProjectModal.create-edit.svelte.test.ts:488`)
+- In-flight Replace PUT + tab unmount → `pendingReplaceController.abort()` fires via `$effect` cleanup
+- In-flight Replace PUT + runId prop change while tab stays mounted → `$effect`'s tracked `runId` dep fires cleanup → `pendingReplaceController.abort()`
+- Force-delete 403 stale session → banner shown + `onReloadRun()` callback called once (parent `loadAll` triggered)
 - `versionIsDisabled` banner + all action buttons disabled (parallel of `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts:72-92`)
 - `pinnedAvailable === false` banner (mirror `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts:125`)
 
@@ -307,6 +321,7 @@ PUT endpoint:
 - 413 on aggregate quota exceeded (size delta enforces correctly)
 - 403 on a different run (auth boundary)
 - 404 on missing asset; **no orphan temp file on disk**: assert `os.listdir(upload_dir)` count is unchanged pre/post the 404 PUT
+- 404 on cross-run asset_id: PUT against `run_A` with an `asset_id` belonging to `run_B` (user authorized on both) → 404 (ownership check fires before temp write); assert no orphan temp file
 - File content is actually overwritten (read-after-write assertion)
 - `RunAssetReference` rows preserved across replace: **fixture has ≥2 referencing MPs**; assert `select(RunAssetReference.id).where(run_asset_id == aid)` returns the **same set of IDs** pre/post AND the row count is unchanged (forbids both delete-and-reinsert and orphan inserts)
 - Returns `is_referenced` recomputed (matches GET behavior)
@@ -327,6 +342,7 @@ Schema:
 - **No version history**: replace overwrites. InlineConfirm warns about irreversibility.
 - **Broken refs after force-delete**: an MP's `![alt](filename.pdf)` markdown becomes a dangling ref. The MP modal's preview renders the raw markdown (existing Phase 6 behavior); admin must edit the MP to fix. Both refetches fire on force-delete so the MP tab reflects the cascade promptly.
 - **Reference-count drift when `miniProjects` is stale or null**: badge column renders `—` (unknown); filter counts treat MPs as empty. Contract is safe because the **delete force flag uses backend `is_referenced`**, not the scan.
+- **In-flight Replace PUT cancellation**: `$effect` cleanup aborts the controller on tab unmount or `runId` prop change, but a PUT already-dispatched server-side may still commit. Same shape as the bulk-delete in-flight gap and the partial-upload gap. Surfaces on next refetch.
 - **Replace lost-update race**: two admins replacing the same asset concurrently — last writer wins. No `ETag` / `If-Unmodified-Since`. Same risk profile as other mutation endpoints.
 - **Server-side partial upload after client abort**: if client aborts after multipart parse completes, the asset row may persist on the server. Visible on next refetch; user can delete normally.
 - **Bulk-delete in-flight abort doesn't roll back the server**: `AbortController.abort()` cancels the client's network wait but a DELETE that's already reached the backend may still commit. Same shape as the partial-upload gap. Surfaces on next refetch.
@@ -338,6 +354,6 @@ Schema:
 
 ## Slice boundary
 
-Single slice. Backend: one new endpoint (PUT replace) + one schema field (`uploaded_by_email` populated post-hoc). Frontend: one new component (`RunAssetsTab.svelte`), one new lib helper (`replaceRunAsset`), one extension to an existing helper (`deleteRunAsset` + optional `force` + `signal`), one new tab + state + three callback props on RunDetailPage. Plus a small `RunMiniProjectsTab.svelte` change to consume `pendingEditTarget` from the parent.
+Single slice. Backend: one new endpoint (PUT replace) + one schema field (`uploaded_by_email` populated post-hoc; default `None` so the existing POST and GET sites pass validation without changes — populate at all three response sites). Frontend: one new component (`RunAssetsTab.svelte`), one new lib helper (`replaceRunAsset`), one extension to an existing helper (`deleteRunAsset` + optional `force` + `signal`), one new helper `extractAssetRefs(md): Set<string>` matching `backend/mathion/markdown.py:52-68`, one new tab + state + **four** callback props on RunDetailPage (`onRefetchAssets`, `onRefetchMiniProjects`, `onEditMiniProject`, `onReloadRun`). Plus a small `RunMiniProjectsTab.svelte` change to consume `pendingEditTarget` from the parent.
 
 If this turns out larger than expected during planning, the natural sub-slice to defer is the **Replace flow + PUT endpoint** (and the `replaceRunAsset` wrapper). The audit/cleanup/upload features stand on their own; replace can ship as a follow-up without changing any of the upload/delete/sub-panel/filter/sort surface.
