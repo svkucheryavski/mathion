@@ -3,7 +3,7 @@
   import { ApiError } from '../../lib/api';
   import { runAssetContext } from '../../lib/assetContext';
   import { localInputToISO, isoToLocalInput, localTzLabel } from '../../lib/datetime';
-  import { createMiniProject, updateMiniProject } from '../../lib/miniProjects';
+  import { createMiniProject, updateMiniProject, publishMiniProject } from '../../lib/miniProjects';
   import MarkdownEditor from '../editor/MarkdownEditor.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
@@ -14,12 +14,12 @@
     initial,
     availableBlocks,
     currentBlock,
-    runIsPublished: _runIsPublished,
-    versionIsDisabled: _versionIsDisabled,
-    runEndDate: _runEndDate,
+    runIsPublished,
+    versionIsDisabled,
+    runEndDate,
     onClose,
     onSaved,
-    onNavigateToTab: _onNavigateToTab,
+    onNavigateToTab,
   }: {
     runId: number;
     mode: 'create' | 'edit';
@@ -148,6 +148,100 @@
     return out;
   }
 
+  // Publish flow (T6b). publishCheckResult lists unmet preconditions per spec
+  // §"Validation" lines 491-510. Each bullet is a plain string; bullets that
+  // contain "Open Overview" are rendered with that substring as a link to
+  // onNavigateToTab('overview'). publishAttempted flips on the first Publish
+  // click so the "Cannot publish" banner only appears after the user tries.
+  // pendingPublishConfirm renders the InlineConfirm row. publishing flips
+  // while POST is in flight (drives the "Publishing…" button label and is
+  // distinct from save-submitting so the Save label stays "Save").
+  let publishAttempted = $state(false);
+  let pendingPublishConfirm = $state(false);
+  let publishing = $state(false);
+
+  const publishCheckResult = $derived.by((): string[] | null => {
+    if (mode !== 'edit' || initial?.is_published) return null;
+    const unmet: string[] = [];
+    // Spec lines 491-497: "For Publish, ALL of the above PLUS" — the full
+    // Save validation re-runs here so empty assignment_md / inverted
+    // ordering surface BEFORE any network call.
+    if (!formData.assignment_md.trim()) unmet.push('Assignment text is required');
+    if (formData.soft_local && formData.hard_local) {
+      if (new Date(localInputToISO(formData.soft_local)) > new Date(localInputToISO(formData.hard_local))) {
+        unmet.push('Soft deadline must be before hard deadline');
+      }
+    }
+    if (formData.hard_local && formData.resub_local) {
+      if (new Date(localInputToISO(formData.hard_local)) > new Date(localInputToISO(formData.resub_local))) {
+        unmet.push('Hard deadline must be before resubmission deadline');
+      }
+    }
+    if (!formData.hard_local) unmet.push('Hard deadline must be set');
+    if (!formData.resub_local) unmet.push('Resubmission deadline must be set');
+    if (formData.hard_local) {
+      const hardIso = localInputToISO(formData.hard_local);
+      if (runEndDate === null) {
+        unmet.push('Run end date must be set — Open Overview to set it.');
+      } else if (hardIso > `${runEndDate}T23:59:59Z`) {
+        unmet.push(`Hard deadline must be before run end (${runEndDate})`);
+      }
+    }
+    if (formData.resub_local && runEndDate !== null) {
+      const resubIso = localInputToISO(formData.resub_local);
+      if (resubIso > `${runEndDate}T23:59:59Z`) {
+        unmet.push(`Resubmission deadline must be before run end (${runEndDate})`);
+      }
+    }
+    if (!runIsPublished) unmet.push('Run must be published — Open Overview to publish.');
+    // Spec line 548: versionIsDisabled blocks the modal-only publish. Without
+    // this check, a modal already open when versionIsDisabled flips to true
+    // could still publish; T7 disables row [Edit] only.
+    if (versionIsDisabled) unmet.push("This run's course version is disabled — Open Overview to re-enable it.");
+    return unmet;
+  });
+
+  function handlePublishClick() {
+    if (submitting) return;
+    publishAttempted = true;
+    if (publishCheckResult && publishCheckResult.length > 0) return;
+    pendingPublishConfirm = true;
+  }
+
+  async function confirmPublish() {
+    pendingPublishConfirm = false;
+    // Re-check preconditions: versionIsDisabled (or runIsPublished, etc.) may
+    // have flipped from the parent between Publish-click and confirm-click.
+    if (publishCheckResult && publishCheckResult.length > 0) {
+      publishAttempted = true;
+      return;
+    }
+    if (submitting) return;
+    submitting = true;
+    publishing = true;
+    serverError = null;
+    try {
+      await publishMiniProject(initial!.id);
+      if (!mounted) return;
+      await onSaved();
+      if (!mounted) return;
+      onClose();
+    } catch (e: unknown) {
+      if (!mounted) return;
+      if (e instanceof ApiError) {
+        serverError = e.displayMessage;
+      } else {
+        const eo = e as { message?: unknown } | null | undefined;
+        serverError = typeof eo?.message === 'string' ? eo.message : 'Publish failed';
+      }
+    } finally {
+      if (mounted) {
+        submitting = false;
+        publishing = false;
+      }
+    }
+  }
+
   async function handleSave() {
     if (saveError) return;
     submitting = true;
@@ -273,6 +367,28 @@
     {#if serverError}
       <div class="banner banner-error" role="alert">{serverError}</div>
     {/if}
+    {#if publishAttempted && publishCheckResult && publishCheckResult.length > 0}
+      <div class="banner banner-error precondition-banner" data-testid="publish-preconditions" role="alert">
+        <p>Cannot publish:</p>
+        <ul>
+          {#each publishCheckResult as bullet (bullet)}
+            {#if bullet.includes('Open Overview')}
+              {@const idx = bullet.indexOf('Open Overview')}
+              <li>
+                {bullet.slice(0, idx)}<button
+                  type="button"
+                  class="linklike"
+                  data-action="publish-nav-overview"
+                  onclick={() => onNavigateToTab('overview')}>Open Overview</button
+                >{bullet.slice(idx + 'Open Overview'.length)}
+              </li>
+            {:else}
+              <li>{bullet}</li>
+            {/if}
+          {/each}
+        </ul>
+      </div>
+    {/if}
   </div>
   <footer>
     {#if pendingClose}
@@ -285,12 +401,26 @@
         }}
         onConfirm={confirmDiscard}
       />
+    {:else if pendingPublishConfirm}
+      <InlineConfirm
+        warning="Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."
+        confirmLabel="Publish"
+        confirmDataAction="confirm-publish"
+        onCancel={() => {
+          pendingPublishConfirm = false;
+        }}
+        onConfirm={confirmPublish}
+      />
     {:else}
       <button type="button" onclick={closeForCurrentStage}>Cancel</button>
       <button type="button" data-action="save" disabled={submitting || !!saveError} onclick={handleSave}>
-        {submitting ? 'Saving…' : 'Save'}
+        {submitting && !publishing ? 'Saving…' : 'Save'}
       </button>
-      <!-- [Publish…] stub — T6b implements -->
+      {#if mode === 'edit' && initial && !initial.is_published}
+        <button type="button" data-action="publish" disabled={submitting} onclick={handlePublishClick}>
+          {publishing ? 'Publishing…' : 'Publish…'}
+        </button>
+      {/if}
     {/if}
   </footer>
 </div>
@@ -328,6 +458,17 @@
     color: #7c1f1f;
     padding: var(--space-2);
   }
+  .precondition-banner ul { margin: var(--space-1) 0 0 var(--space-3); padding: 0; }
+  .linklike {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+  }
+  .linklike:hover { text-decoration: none; }
   /* The 880px responsive-stack rule belongs on MarkdownEditor's `.edit-content`
      (textarea + sidebar split) — see `MarkdownEditor.svelte`'s media query.
      The modal `.body` is already a single-column flow; an @media on it would
