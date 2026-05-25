@@ -220,6 +220,15 @@
     if (versionIsDisabled) {
       unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it." });
     }
+    // T9-smoke catch: the publish backend reads deadlines from the persisted
+    // MP, but every other check above reads `formData` (the unsaved inputs).
+    // If the user fills deadlines and clicks Publish without Save, the
+    // form-side checks pass while the backend rejects with "hard_deadline
+    // required at publish". Gate Publish on `!dirty` so the user is told to
+    // save first.
+    if (dirty) {
+      unmet.push({ text: 'Save your changes before publishing.' });
+    }
     return unmet;
   });
 

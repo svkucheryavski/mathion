@@ -223,6 +223,30 @@ describe('MiniProjectModal publish — preconditions', () => {
     expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
   });
 
+  it('unsaved changes: bullet "Save your changes before publishing." + POST not called (T9 smoke catch)', async () => {
+    // T9 smoke catch: publishCheckResult reads formData (unsaved inputs), but
+    // the backend reads the persisted MP. If user fills deadlines and clicks
+    // Publish without Save, form-side checks pass; backend rejects with
+    // "hard_deadline required at publish". Gate Publish on `!dirty`.
+    fetchSpy.mockImplementation(() => jres([]));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, {
+      target,
+      props: defaultProps({ initial: draftMp() }) as ModalProps,
+    });
+    await settle();
+    // Mutate the assignment textarea so the form becomes dirty.
+    const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
+    textarea.value = 'orig text + edits';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.textContent).toContain('Save your changes before publishing.');
+    expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
+  });
+
   it('missing resubmission_deadline: precondition bullet shows', async () => {
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
