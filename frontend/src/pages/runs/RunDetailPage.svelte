@@ -91,8 +91,12 @@
 
   async function refetchMiniProjects(): Promise<void> {
     if (runIdInt === null || !pinnedAvailable) return;
-    const fetched = await listMiniProjects(runIdInt);
-    if (!pinnedAvailable) return;
+    const rid = runIdInt;
+    const myToken = loadToken;
+    const fetched = await listMiniProjects(rid);
+    // Drop if a runId change or loadAll fired while we were in flight:
+    // writing here would overwrite the new run's miniProjects with stale data.
+    if (myToken !== loadToken || rid !== runIdInt || !pinnedAvailable) return;
     miniProjects = fetched;
   }
 

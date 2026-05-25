@@ -476,6 +476,7 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    box-sizing: border-box;
     width: min(1100px, 95vw);
     max-height: 90vh;
     overflow: auto;
