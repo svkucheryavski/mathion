@@ -182,6 +182,11 @@ describe('RunMiniProjectsTab', () => {
     expect(rows[1].textContent).toContain('Block 1');
     expect(rows[1].textContent).toContain('Published');
     expect(rows[0].querySelector('button[data-action="edit"]')).toBeNull();
+    // Modal-only-publish contract (spec line 553): NO row-level Publish button on
+    // ANY MP state, including Published and Locked rows. Locks the contract for
+    // the states this test renders.
+    expect(rows[0].querySelector('button[data-action="publish"]')).toBeNull();
+    expect(rows[1].querySelector('button[data-action="publish"]')).toBeNull();
   });
 
   it('force-delete confirm: copy includes "permanently remove" + checkbox + danger button (no count)', async () => {
