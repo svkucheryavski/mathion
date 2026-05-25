@@ -472,9 +472,18 @@
 
 <style>
   .modal {
-    max-width: 1100px;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(1100px, 95vw);
     max-height: 90vh;
     overflow: auto;
+    background: var(--surface, white);
+    border-radius: var(--radius, 8px);
+    padding: var(--space-4, 24px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    z-index: 101;
   }
   .modal > header {
     position: sticky;
@@ -492,6 +501,7 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);
+    z-index: 100;
   }
   .field-error {
     color: var(--err, #a33);
