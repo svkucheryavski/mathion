@@ -200,6 +200,29 @@ describe('MiniProjectModal publish — preconditions', () => {
     expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
   });
 
+  it('hard_deadline in the past: bullet "Hard deadline must be in the future" + POST not called (spec line 499)', async () => {
+    // Opus T6b r1 catch: spec mandates client-side proactive warning when
+    // hard_iso is in the past, plan code prescribed `'Hard deadline must be
+    // in the future'`, but the round-1 commit omitted it.
+    fetchSpy.mockImplementation(() => jres([]));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, {
+      target,
+      props: defaultProps({
+        initial: draftMp({
+          hard_deadline: '2020-01-01T00:00:00Z',
+          resubmission_deadline: '2020-01-02T00:00:00Z',
+        }),
+      }) as ModalProps,
+    });
+    await settle();
+    (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.textContent).toContain('Hard deadline must be in the future');
+    expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
+  });
+
   it('missing resubmission_deadline: precondition bullet shows', async () => {
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
@@ -370,6 +393,52 @@ describe('MiniProjectModal publish — preconditions', () => {
     await settle();
     expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
     expect(target.textContent).toContain("This run's course version is disabled");
+  });
+
+  it('aria-describedby wires precondition bullet IDs onto the offending field inputs (spec line 512)', async () => {
+    // Opus T6b r1 catch: server-validation fieldErrors get aria-describedby
+    // but publishCheckResult bullets did not — spec mandates both.
+    //
+    // Set up a draft with assignment_md empty AND hard_deadline missing.
+    // Two preconditions fire:
+    //   - "Assignment text is required" (targets assignment_md → MarkdownEditor textarea)
+    //   - "Hard deadline must be set" (targets hard_deadline input)
+    // The corresponding inputs must carry aria-describedby pointing to the
+    // bullet ID in the rendered <li> within the "Cannot publish" banner.
+    fetchSpy.mockImplementation(() => jres([]));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, {
+      target,
+      props: defaultProps({
+        initial: draftMp({
+          assignment_md: '',
+          hard_deadline: null,
+        }),
+      }) as ModalProps,
+    });
+    await settle();
+    (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
+    await settle();
+    // Resolve the bullet IDs we expect to find on each input.
+    const banner = target.querySelector('[data-testid="publish-preconditions"]') as HTMLElement;
+    expect(banner).toBeTruthy();
+    const assignBullet = Array.from(banner.querySelectorAll('li')).find((li) =>
+      li.textContent?.includes('Assignment text is required'),
+    ) as HTMLElement;
+    const hardBullet = Array.from(banner.querySelectorAll('li')).find((li) =>
+      li.textContent?.includes('Hard deadline must be set'),
+    ) as HTMLElement;
+    expect(assignBullet.id).toBeTruthy();
+    expect(hardBullet.id).toBeTruthy();
+    // Textarea (inner MarkdownEditor) wired to the assignment bullet.
+    const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea.getAttribute('aria-describedby')?.split(/\s+/)).toContain(assignBullet.id);
+    // Hard-deadline datetime input wired to the hard bullet. The three
+    // datetime-locals appear in DOM order: soft, hard, resub.
+    const dtInputs = target.querySelectorAll('input[type="datetime-local"]');
+    const hardInput = dtInputs[1] as HTMLInputElement;
+    expect(hardInput.getAttribute('aria-describedby')?.split(/\s+/)).toContain(hardBullet.id);
   });
 });
 

@@ -149,57 +149,102 @@
   }
 
   // Publish flow (T6b). publishCheckResult lists unmet preconditions per spec
-  // §"Validation" lines 491-510. Each bullet is a plain string; bullets that
-  // contain "Open Overview" are rendered with that substring as a link to
+  // §"Validation" lines 491-510. Each bullet has optional `field` — when set,
+  // the bullet's rendered <li> gets a stable ID and the corresponding form
+  // input adds it to aria-describedby (spec line 512). Bullets containing
+  // "Open Overview" render with that substring as a link to
   // onNavigateToTab('overview'). publishAttempted flips on the first Publish
   // click so the "Cannot publish" banner only appears after the user tries.
   // pendingPublishConfirm renders the InlineConfirm row. publishing flips
   // while POST is in flight (drives the "Publishing…" button label and is
   // distinct from save-submitting so the Save label stays "Save").
+  type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
+  type PreconditionBullet = { text: string; field?: FieldKey };
+
   let publishAttempted = $state(false);
   let pendingPublishConfirm = $state(false);
   let publishing = $state(false);
 
-  const publishCheckResult = $derived.by((): string[] | null => {
+  const publishCheckResult = $derived.by((): PreconditionBullet[] | null => {
     if (mode !== 'edit' || initial?.is_published) return null;
-    const unmet: string[] = [];
+    const unmet: PreconditionBullet[] = [];
     // Spec lines 491-497: "For Publish, ALL of the above PLUS" — the full
     // Save validation re-runs here so empty assignment_md / inverted
     // ordering surface BEFORE any network call.
-    if (!formData.assignment_md.trim()) unmet.push('Assignment text is required');
+    if (!formData.assignment_md.trim()) {
+      unmet.push({ text: 'Assignment text is required', field: 'assignment_md' });
+    }
     if (formData.soft_local && formData.hard_local) {
       if (new Date(localInputToISO(formData.soft_local)) > new Date(localInputToISO(formData.hard_local))) {
-        unmet.push('Soft deadline must be before hard deadline');
+        unmet.push({ text: 'Soft deadline must be before hard deadline', field: 'soft_deadline' });
       }
     }
     if (formData.hard_local && formData.resub_local) {
       if (new Date(localInputToISO(formData.hard_local)) > new Date(localInputToISO(formData.resub_local))) {
-        unmet.push('Hard deadline must be before resubmission deadline');
+        unmet.push({ text: 'Hard deadline must be before resubmission deadline', field: 'hard_deadline' });
       }
     }
-    if (!formData.hard_local) unmet.push('Hard deadline must be set');
-    if (!formData.resub_local) unmet.push('Resubmission deadline must be set');
+    if (!formData.hard_local) {
+      unmet.push({ text: 'Hard deadline must be set', field: 'hard_deadline' });
+    }
+    if (!formData.resub_local) {
+      unmet.push({ text: 'Resubmission deadline must be set', field: 'resubmission_deadline' });
+    }
     if (formData.hard_local) {
       const hardIso = localInputToISO(formData.hard_local);
+      // Spec line 499: client-side proactive "hard in future" warning.
+      if (new Date(hardIso) <= new Date()) {
+        unmet.push({ text: 'Hard deadline must be in the future', field: 'hard_deadline' });
+      }
       if (runEndDate === null) {
-        unmet.push('Run end date must be set — Open Overview to set it.');
+        unmet.push({ text: 'Run end date must be set — Open Overview to set it.', field: 'hard_deadline' });
       } else if (hardIso > `${runEndDate}T23:59:59Z`) {
-        unmet.push(`Hard deadline must be before run end (${runEndDate})`);
+        unmet.push({ text: `Hard deadline must be before run end (${runEndDate})`, field: 'hard_deadline' });
       }
     }
     if (formData.resub_local && runEndDate !== null) {
       const resubIso = localInputToISO(formData.resub_local);
       if (resubIso > `${runEndDate}T23:59:59Z`) {
-        unmet.push(`Resubmission deadline must be before run end (${runEndDate})`);
+        unmet.push({
+          text: `Resubmission deadline must be before run end (${runEndDate})`,
+          field: 'resubmission_deadline',
+        });
       }
     }
-    if (!runIsPublished) unmet.push('Run must be published — Open Overview to publish.');
+    if (!runIsPublished) {
+      unmet.push({ text: 'Run must be published — Open Overview to publish.' });
+    }
     // Spec line 548: versionIsDisabled blocks the modal-only publish. Without
     // this check, a modal already open when versionIsDisabled flips to true
     // could still publish; T7 disables row [Edit] only.
-    if (versionIsDisabled) unmet.push("This run's course version is disabled — Open Overview to re-enable it.");
+    if (versionIsDisabled) {
+      unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it." });
+    }
     return unmet;
   });
+
+  // Stable bullet IDs grouped by field, used for aria-describedby on inputs.
+  // Banner is only rendered when publishAttempted is true, so the IDs only
+  // exist in the DOM then — but computing them unconditionally is fine; the
+  // input attribute is set to undefined when no IDs apply.
+  const preconditionIdsByField = $derived.by((): Record<string, string> => {
+    const result: Record<string, string[]> = {};
+    if (!publishAttempted || !publishCheckResult) return {};
+    publishCheckResult.forEach((b, idx) => {
+      if (b.field) {
+        const id = `precondition-${idx}`;
+        (result[b.field] ??= []).push(id);
+      }
+    });
+    return Object.fromEntries(Object.entries(result).map(([k, ids]) => [k, ids.join(' ')]));
+  });
+
+  function ariaDescribedFor(field: FieldKey): string | undefined {
+    const ids: string[] = [];
+    if (fieldErrors[field]) ids.push(`err-${field}`);
+    if (preconditionIdsByField[field]) ids.push(preconditionIdsByField[field]);
+    return ids.length > 0 ? ids.join(' ') : undefined;
+  }
 
   function handlePublishClick() {
     if (submitting) return;
@@ -322,7 +367,7 @@
         type="datetime-local"
         bind:value={formData.soft_local}
         disabled={submitting}
-        aria-describedby={fieldErrors.soft_deadline ? 'err-soft_deadline' : undefined}
+        aria-describedby={ariaDescribedFor('soft_deadline')}
       />
     </label>
     {#if fieldErrors.soft_deadline}
@@ -334,7 +379,7 @@
         type="datetime-local"
         bind:value={formData.hard_local}
         disabled={submitting}
-        aria-describedby={fieldErrors.hard_deadline ? 'err-hard_deadline' : undefined}
+        aria-describedby={ariaDescribedFor('hard_deadline')}
       />
     </label>
     {#if fieldErrors.hard_deadline}
@@ -346,7 +391,7 @@
         type="datetime-local"
         bind:value={formData.resub_local}
         disabled={submitting}
-        aria-describedby={fieldErrors.resubmission_deadline ? 'err-resubmission_deadline' : undefined}
+        aria-describedby={ariaDescribedFor('resubmission_deadline')}
       />
     </label>
     {#if fieldErrors.resubmission_deadline}
@@ -359,7 +404,7 @@
       bind:value={formData.assignment_md}
       disabled={submitting}
       bind:uploadAbortController
-      ariaDescribedby={fieldErrors.assignment_md ? 'err-assignment_md' : undefined}
+      ariaDescribedby={ariaDescribedFor('assignment_md')}
     />
     {#if fieldErrors.assignment_md}
       <span id="err-assignment_md" class="field-error" role="alert">{fieldErrors.assignment_md}</span>
@@ -371,19 +416,19 @@
       <div class="banner banner-error precondition-banner" data-testid="publish-preconditions" role="alert">
         <p>Cannot publish:</p>
         <ul>
-          {#each publishCheckResult as bullet (bullet)}
-            {#if bullet.includes('Open Overview')}
-              {@const idx = bullet.indexOf('Open Overview')}
-              <li>
-                {bullet.slice(0, idx)}<button
+          {#each publishCheckResult as bullet, idx (bullet.text)}
+            {#if bullet.text.includes('Open Overview')}
+              {@const linkIdx = bullet.text.indexOf('Open Overview')}
+              <li id={`precondition-${idx}`}>
+                {bullet.text.slice(0, linkIdx)}<button
                   type="button"
                   class="linklike"
                   data-action="publish-nav-overview"
                   onclick={() => onNavigateToTab('overview')}>Open Overview</button
-                >{bullet.slice(idx + 'Open Overview'.length)}
+                >{bullet.text.slice(linkIdx + 'Open Overview'.length)}
               </li>
             {:else}
-              <li>{bullet}</li>
+              <li id={`precondition-${idx}`}>{bullet.text}</li>
             {/if}
           {/each}
         </ul>
