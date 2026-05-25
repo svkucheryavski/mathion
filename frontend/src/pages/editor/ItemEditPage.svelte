@@ -7,6 +7,7 @@
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import MarkdownEditor from '../../components/editor/MarkdownEditor.svelte';
+  import { courseAssetContext } from '../../lib/assetContext';
   import VideoFrame from '../../components/items/VideoFrame.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
@@ -18,6 +19,9 @@
     courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
   } = $props();
   const vid = $derived(Number(versionId));
+  // Memoize the AssetContext so both MarkdownEditor instances and any
+  // downstream $effect that compares identity see a stable reference per vid.
+  const editAssetContext = $derived(courseAssetContext(vid));
   const bid = $derived(Number(blockId));
   const sid = $derived(Number(sequenceId));
   const iid = $derived(Number(itemId));
@@ -267,7 +271,7 @@
         {#if item.type === 'static_page'}
           {@const t = tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>}
           <label>Content (markdown)
-            <MarkdownEditor versionId={vid} bind:value={t.current.content_md} bind:refreshKey />
+            <MarkdownEditor assetContext={editAssetContext} bind:value={t.current.content_md} bind:refreshKey />
           </label>
         {:else if item.type === 'video'}
           {@const t = tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>}
@@ -302,7 +306,7 @@
       <section class="readonly">
         {#if item.type === 'static_page'}
           <h3>{item.title}</h3>
-          <MarkdownEditor versionId={vid} value={item?.content_md ?? ''} readOnly />
+          <MarkdownEditor assetContext={editAssetContext} value={item?.content_md ?? ''} readOnly />
         {:else if item.type === 'video'}
           <h3>{item.title}</h3>
           {#if readonlyVideoPreviewUrl}

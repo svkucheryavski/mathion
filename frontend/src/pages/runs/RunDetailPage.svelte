@@ -14,9 +14,15 @@
   import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
   import RunRosterTab from '../../components/runs/RunRosterTab.svelte';
   import RosterImportModal from '../../components/runs/RosterImportModal.svelte';
-  import type { Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse } from '../../lib/types';
+  import RunMiniProjectsTab from '../../components/runs/RunMiniProjectsTab.svelte';
+  import { listBlocks } from '../../lib/blocks';
+  import { listMiniProjects } from '../../lib/miniProjects';
+  import type {
+    Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse,
+    BlockResponse, MiniProjectResponse,
+  } from '../../lib/types';
 
-  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster';
+  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects';
 
   let { courseSlug, runId }: { courseSlug: string; runId: string } = $props();
 
@@ -31,6 +37,8 @@
   let teachers = $state<RunTeacherResponse[] | null>(null);
   let groups = $state<GroupResponse[] | null>(null);
   let students = $state<RunStudentResponse[] | null>(null);
+  let blocks = $state<BlockResponse[] | null>(null);
+  let miniProjects = $state<MiniProjectResponse[] | null>(null);
   let loadError = $state<ApiError | null>(null);
 
   let activeTab = $state<ActiveTab>('overview');
@@ -46,7 +54,8 @@
   async function loadAll(slug: string, rid: number) {
     const myToken = ++loadToken;
     course = null; run = null; versions = null; teachers = null;
-    groups = null; students = null; loadError = null;
+    groups = null; students = null; blocks = null; miniProjects = null;
+    loadError = null;
     try {
       const c = await api.get<Course>(`/api/courses/by-slug/${slug}`);
       if (myToken !== loadToken) return;
@@ -58,12 +67,37 @@
         listRunStudents(rid),
       ]);
       if (myToken !== loadToken) return;
+      // Compute pinned from LOCAL destructured values, NOT the `pinned` $derived
+      // (which reads `versions`/`run` $state, still null at this point).
+      const pinnedVersion = vs.find((v) => v.id === r.version_id) ?? null;
+      let blocksResult: BlockResponse[] = [];
+      let mpsResult: MiniProjectResponse[] = [];
+      if (pinnedVersion != null) {
+        [blocksResult, mpsResult] = await Promise.all([
+          listBlocks(pinnedVersion.id),
+          listMiniProjects(rid),
+        ]);
+        if (myToken !== loadToken) return;
+      }
       course = c; run = r; versions = vs; teachers = ts; groups = gs; students = ss;
+      blocks = blocksResult;
+      miniProjects = mpsResult;
     } catch (e) {
       if (myToken !== loadToken) return;
       if (e instanceof ApiError && e.status === 401) return;
       loadError = (e instanceof ApiError) ? e : new ApiError(500, 'Failed to load run.');
     }
+  }
+
+  async function refetchMiniProjects(): Promise<void> {
+    if (runIdInt === null || !pinnedAvailable) return;
+    const rid = runIdInt;
+    const myToken = loadToken;
+    const fetched = await listMiniProjects(rid);
+    // Drop if a runId change or loadAll fired while we were in flight:
+    // writing here would overwrite the new run's miniProjects with stale data.
+    if (myToken !== loadToken || rid !== runIdInt || !pinnedAvailable) return;
+    miniProjects = fetched;
   }
 
   async function refetchRosterData(): Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }> {
@@ -111,6 +145,7 @@
 
   const pinned = $derived(versions?.find((v) => v.id === run?.version_id));
   const showDisabledBanner = $derived(pinned?.is_disabled === true);
+  const pinnedAvailable = $derived(versions == null || pinned != null);
 
   const runStatusBadge = $derived(run ? runStatus(run) : null);
 
@@ -239,7 +274,7 @@
   <div class="error">Invalid run.</div>
 {:else if loadError}
   <div class="error">{loadError.displayMessage}</div>
-{:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null}
+{:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null || blocks === null || miniProjects === null}
   <LoadingPlaceholder label="Loading run…" />
 {:else}
   <header class="run-header">
@@ -289,6 +324,7 @@
     <button role="tab" aria-selected={activeTab === 'teachers'} onclick={() => (activeTab = 'teachers')}>Teachers</button>
     <button role="tab" aria-selected={activeTab === 'groups'} onclick={() => (activeTab = 'groups')}>Groups</button>
     <button role="tab" aria-selected={activeTab === 'roster'} onclick={() => (activeTab = 'roster')}>Roster</button>
+    <button role="tab" aria-selected={activeTab === 'mini-projects'} onclick={() => (activeTab = 'mini-projects')}>Mini-projects</button>
   </div>
 
   <section class="tab-body">
@@ -334,6 +370,19 @@
           onClose={() => (showImportModal = false)}
         />
       {/if}
+    {:else if activeTab === 'mini-projects'}
+      <RunMiniProjectsTab
+        runId={runIdInt!}
+        runIsPublished={run.is_published}
+        runGroupsEnabled={run.groups_enabled}
+        runEndDate={run.end_date}
+        versionIsDisabled={showDisabledBanner}
+        {pinnedAvailable}
+        blocks={blocks ?? []}
+        miniProjects={miniProjects ?? []}
+        onRefetchMiniProjects={refetchMiniProjects}
+        onNavigateToTab={(t) => (activeTab = t)}
+      />
     {/if}
   </section>
 {/if}

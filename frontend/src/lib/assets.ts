@@ -29,7 +29,11 @@ export type AssetResponse = {
 
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 
-export async function uploadAsset(versionId: number, file: File): Promise<AssetResponse> {
+export async function uploadAsset(
+  versionId: number,
+  file: File,
+  signal?: AbortSignal,
+): Promise<AssetResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
@@ -40,8 +44,14 @@ export async function uploadAsset(versionId: number, file: File): Promise<AssetR
       credentials: 'include',
       headers: { 'X-Requested-With': 'mathion' },
       body: formData,
+      signal,
     });
-  } catch {
+  } catch (e: unknown) {
+    // Preserve AbortError so modal-cancel paths stay silent (jsdom's
+    // DOMException doesn't extend Error — duck-check `.name`). Matches
+    // lib/runAssets.ts wire pattern so both surfaces handle cancel
+    // identically.
+    if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
     // Network failure (DNS, offline, CORS). Surface a uniform ApiError so
     // the UI maps it through the same channel as server errors.
     throw new ApiError(0, 'Could not reach server. Check your connection.');

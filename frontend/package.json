@@ -8,8 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "TZ=Europe/Copenhagen vitest run",
+    "test:watch": "TZ=Europe/Copenhagen vitest"
   },
   "dependencies": {
     "svelte": "^5.0.0"

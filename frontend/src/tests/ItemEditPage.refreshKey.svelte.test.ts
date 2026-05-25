@@ -46,7 +46,12 @@ describe('ItemEditPage refreshKey wiring', () => {
     expect(out.textContent).toBe('0');
   });
 
-  it('MarkdownEditor writes refreshKey (via $bindable) propagate to parent', async () => {
+  // Real bind:refreshKey coverage on the actual MarkdownEditor component
+  // lives at MarkdownEditor.svelte.test.ts ("drop on textarea uploads +
+  // inserts + bumps refreshKey"). This test exercises the SIMULATED parent
+  // refresh-key pattern used by ItemEditPage via the harness's local state
+  // bump — it does not mount MarkdownEditor itself.
+  it('parent harness refreshKey increments propagate via simulated child writes', async () => {
     const target = document.createElement('div');
     document.body.appendChild(target);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

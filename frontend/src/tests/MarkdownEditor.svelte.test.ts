@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import MarkdownEditor from '../components/editor/MarkdownEditor.svelte';
-import * as assetsModule from '../lib/assets';
 import type { AssetResponse } from '../lib/assets';
+import type { AssetContext, AssetItem } from '../lib/assetContext';
 import { ApiError } from '../lib/api';
 
 const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
@@ -17,7 +17,30 @@ const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   ...overrides,
 });
 
+// T5a refactor: components take an AssetContext, not a versionId. Each test
+// gets a fresh stub via the top-level beforeEach below; per-describe blocks
+// mutate stubCtx.list/upload/remove via `.mockResolvedValue(...)` instead of
+// the old `(stubCtx.list as ReturnType<typeof vi.fn>)` pattern. The wire layer
+// (lib/assets.ts / lib/runAssets.ts) is tested separately; here the
+// component is tested through its boundary.
+function makeStubAssetContext(): AssetContext {
+  return {
+    kind: 'course',
+    list: vi.fn<AssetContext['list']>().mockResolvedValue([]),
+    upload: vi.fn<AssetContext['upload']>(),
+    remove: vi.fn<AssetContext['remove']>().mockResolvedValue(undefined),
+    imgSrc: (item: AssetItem) => `/assets/42/${item.filename}`,
+    renderPreview: vi.fn<AssetContext['renderPreview']>().mockResolvedValue({ html: '<p>x</p>' }),
+  };
+}
+
+let stubCtx: AssetContext;
 let cleanup: (() => void) | null = null;
+
+beforeEach(() => {
+  stubCtx = makeStubAssetContext();
+});
+
 afterEach(() => {
   cleanup?.();
   cleanup = null;
@@ -30,7 +53,7 @@ function mountEditor(overrides: Record<string, unknown> = {}) {
   document.body.appendChild(target);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const propsRef: any = $state({
-    versionId: 42,
+    assetContext: stubCtx,
     value: '',
     readOnly: false,
     ...overrides,
@@ -42,7 +65,7 @@ function mountEditor(overrides: Record<string, unknown> = {}) {
 
 describe('MarkdownEditor — sidebar mount', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('mounts AssetSidebar in Edit mode and unmounts it in Preview mode', async () => {
@@ -66,7 +89,7 @@ describe('MarkdownEditor — sidebar mount', () => {
 
 describe('MarkdownEditor — click insert at cursor', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: 'a.png', mime_type: 'image/png' }),
     ]);
   });
@@ -100,7 +123,7 @@ describe('MarkdownEditor — click insert at cursor', () => {
 
 describe('MarkdownEditor — cursorReady', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: 'a.png', mime_type: 'image/png' }),
     ]);
   });
@@ -130,7 +153,7 @@ describe('MarkdownEditor — cursorReady', () => {
 
 describe('MarkdownEditor — value prop bind:value', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('typing in the textarea updates parent value', async () => {
@@ -146,7 +169,7 @@ describe('MarkdownEditor — value prop bind:value', () => {
 
 describe('MarkdownEditor — textarea drop', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   function makeDropEvent(files: File[], target: EventTarget, opts: { stopSpy?: () => void; preventSpy?: () => void } = {}) {
@@ -159,8 +182,7 @@ describe('MarkdownEditor — textarea drop', () => {
   }
 
   it('drop on textarea uploads + inserts + bumps refreshKey', async () => {
-    const uploadSpy = vi
-      .spyOn(assetsModule, 'uploadAsset')
+    const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockResolvedValue(mkAsset({ filename: 'dropped.png', mime_type: 'image/png' }));
     const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
     await Promise.resolve(); flushSync();
@@ -178,13 +200,13 @@ describe('MarkdownEditor — textarea drop', () => {
     expect(stopSpy).toHaveBeenCalled();
     await Promise.resolve(); flushSync();
     await Promise.resolve(); flushSync();
-    expect(uploadSpy).toHaveBeenCalledWith(42, file);
+    expect(uploadSpy).toHaveBeenCalledWith(file, expect.any(AbortSignal));
     expect(propsRef.value).toBe('a\n![dropped](dropped.png)\nbc');
     expect(propsRef.refreshKey).toBe(1);
   });
 
   it('drop on textarea with no precise offset falls back to lastOffset (= end if never focused)', async () => {
-    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockResolvedValue(
       mkAsset({ filename: 'fb.png', mime_type: 'image/png' }),
     );
     const { target, propsRef } = mountEditor({ value: 'abc' });
@@ -198,7 +220,7 @@ describe('MarkdownEditor — textarea drop', () => {
   });
 
   it('textarea drop does not bubble to .edit-content (stopPropagation is effective)', async () => {
-    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockResolvedValue(
       mkAsset({ filename: 'bubble.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
@@ -220,12 +242,11 @@ describe('MarkdownEditor — textarea drop', () => {
 
 describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('drop on wrapper uploads (no insert) and bumps refreshKey', async () => {
-    const uploadSpy = vi
-      .spyOn(assetsModule, 'uploadAsset')
+    const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockResolvedValue(mkAsset({ filename: 'wd.png', mime_type: 'image/png' }));
     const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
     await Promise.resolve(); flushSync();
@@ -239,7 +260,7 @@ describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
     wrapper.dispatchEvent(ev);
     expect(preventSpy).toHaveBeenCalled();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    expect(uploadSpy).toHaveBeenCalledWith(42, file);
+    expect(uploadSpy).toHaveBeenCalledWith(file, expect.any(AbortSignal));
     expect(propsRef.value).toBe('abc');
     expect(propsRef.refreshKey).toBe(1);
   });
@@ -247,14 +268,13 @@ describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
 
 describe('MarkdownEditor — re-entrancy guard', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('a second textarea drop while uploading is rejected (uploadAsset called once)', async () => {
     let resolveFirst: (a: AssetResponse) => void = () => {};
     const firstPromise = new Promise<AssetResponse>((r) => { resolveFirst = r; });
-    const uploadSpy = vi
-      .spyOn(assetsModule, 'uploadAsset')
+    const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockReturnValueOnce(firstPromise)
       .mockResolvedValueOnce(mkAsset({ filename: 'second.png' }));
     const { target } = mountEditor({ value: '' });
@@ -285,11 +305,11 @@ describe('MarkdownEditor — re-entrancy guard', () => {
 
 describe('MarkdownEditor — multi-file batch with mid-error', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('batch halts on mid-loop error and writes uploadError with stoppedAt', async () => {
-    vi.spyOn(assetsModule, 'uploadAsset')
+    (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(mkAsset({ filename: '1.png' }))
       .mockResolvedValueOnce(mkAsset({ filename: '2.png' }))
       .mockRejectedValueOnce(new ApiError(400, 'File size 999 exceeds max 100'))
@@ -304,8 +324,12 @@ describe('MarkdownEditor — multi-file batch with mid-error', () => {
     Object.defineProperty(ev, 'dataTransfer', { value: { files } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    // Drain ~3 await chains: one per uploadOne invocation. Each iteration =
+    // uploadOne's await + $bindable propagation + outer-loop continuation.
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+      flushSync();
+    }
     const err = target.querySelector('[data-testid="upload-error"]');
     expect(err?.textContent).toContain('Upload stopped at file 3 of 4');
     expect(err?.textContent).toContain('File size 999 exceeds max 100');
@@ -314,8 +338,8 @@ describe('MarkdownEditor — multi-file batch with mid-error', () => {
 
 describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
   it('409 from uploadAsset in textarea drop surfaces the rename hint appended to the server detail', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    vi.spyOn(assetsModule, 'uploadAsset').mockRejectedValueOnce(
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new ApiError(409, "Asset 'foo.png' already exists in this version"),
     );
     const { target } = mountEditor({ value: 'abc' });
@@ -332,9 +356,53 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     expect(err?.textContent).toContain('Rename the file on disk and re-upload.');
   });
 
+  it('thrown plain object with .detail is surfaced (full spec fallback chain)', async () => {
+    // Codex round-2 finding: spec line 260 is `String(e?.detail ?? e?.message ?? e)`.
+    // The first round of fix handled `Error.message` but not plain objects
+    // with a `.detail` key, which would render as "[object Object]".
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce({
+      detail: 'plain-object detail from non-Error throw',
+    });
+    const { target } = mountEditor({ value: 'abc' });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="upload-error"]');
+    expect(err?.textContent).toContain('plain-object detail from non-Error throw');
+    expect(err?.textContent).not.toContain('[object Object]');
+  });
+
+  it('non-ApiError Error.message is surfaced in uploadError detail (not "Upload failed")', async () => {
+    // Codex T5a finding: spec line 260 uses `String(e?.detail ?? e?.message ?? e)`
+    // for the upload-error detail. A plain Error with a meaningful .message
+    // should reach the UI, not get collapsed to a generic "Upload failed".
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('boom: assetContext exploded'),
+    );
+    const { target } = mountEditor({ value: 'abc' });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const file = new File(['x'], 'x.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const err = target.querySelector('[data-testid="upload-error"]');
+    expect(err?.textContent).toContain('boom: assetContext exploded');
+    expect(err?.textContent).not.toContain('Upload failed');
+  });
+
   it('non-409 errors do NOT append the rename hint', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    vi.spyOn(assetsModule, 'uploadAsset').mockRejectedValueOnce(
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new ApiError(400, 'Extension not allowed'),
     );
     const { target } = mountEditor({ value: 'abc' });
@@ -354,8 +422,8 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
 
 describe('MarkdownEditor — sidebar drop suppression', () => {
   it('drop on sidebar drop-zone does NOT bubble to <aside> (drop-zone stopPropagation works)', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockResolvedValue(
       mkAsset({ filename: 'dz.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
@@ -378,8 +446,8 @@ describe('MarkdownEditor — sidebar drop suppression', () => {
   });
 
   it('drop directly on <aside> (catch-all path) does NOT bubble to .edit-content wrapper (aside stopPropagation works)', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue(
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockResolvedValue(
       mkAsset({ filename: 'as.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
@@ -400,10 +468,10 @@ describe('MarkdownEditor — sidebar drop suppression', () => {
 
 describe('MarkdownEditor — shared uploadProgress visible in sidebar', () => {
   it('uploadProgress written by textarea drop renders in AssetSidebar progress row', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     let resolveFirst: (a: AssetResponse) => void = () => {};
     const firstPending = new Promise<AssetResponse>((r) => { resolveFirst = r; });
-    vi.spyOn(assetsModule, 'uploadAsset')
+    (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockReturnValueOnce(firstPending)
       .mockResolvedValueOnce(mkAsset({ filename: 'progress2.png' }));
     const { target } = mountEditor({ value: 'abc' });
@@ -434,10 +502,10 @@ describe('MarkdownEditor — shared uploadProgress visible in sidebar', () => {
 
 describe('MarkdownEditor — Edit→Preview mid-upload race', () => {
   it('switching to Preview while upload is in flight does not crash; refreshKey still bumps on success', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     let resolveUpload: (a: AssetResponse) => void = () => {};
     const pending = new Promise<AssetResponse>((r) => { resolveUpload = r; });
-    vi.spyOn(assetsModule, 'uploadAsset').mockReturnValueOnce(pending);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockReturnValueOnce(pending);
     const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
@@ -467,7 +535,7 @@ describe('MarkdownEditor — Edit→Preview mid-upload race', () => {
 
 describe('MarkdownEditor — window-level file-drop navigation guard', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('window-level file drop has preventDefault called while editor is mounted', async () => {

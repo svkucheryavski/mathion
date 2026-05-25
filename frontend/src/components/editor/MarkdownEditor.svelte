@@ -1,22 +1,35 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { api, ApiError } from '../../lib/api';
-  import { formatRef, uploadAsset, type AssetResponse } from '../../lib/assets';
+  import { ApiError } from '../../lib/api';
+  import { formatRef } from '../../lib/assets';
+  import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import AssetSidebar from './AssetSidebar.svelte';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
 
   let {
-    versionId,
+    assetContext,
     value = $bindable<string>(''),
     readOnly = false,
+    disabled = false,
     refreshKey = $bindable<number>(0),
+    uploading = $bindable<boolean>(false),
+    uploadProgress = $bindable<UploadProgress>(null),
+    uploadError = $bindable<UploadError>(null),
+    uploadAbortController = $bindable<AbortController | null>(null),
+    ariaDescribedby = undefined,
   }: {
-    versionId: number;
+    assetContext: AssetContext;
     value?: string;
     readOnly?: boolean;
+    disabled?: boolean;
     refreshKey?: number;
+    uploading?: boolean;
+    uploadProgress?: UploadProgress;
+    uploadError?: UploadError;
+    uploadAbortController?: AbortController | null;
+    ariaDescribedby?: string;
   } = $props();
 
   let _mode = $state<'edit' | 'preview'>('edit');
@@ -30,9 +43,10 @@
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
   let lastOffset = $state(0);
   let cursorReady = $state(false);
-  let uploading = $state(false);
-  let uploadProgress = $state<UploadProgress>(null);
-  let uploadError = $state<UploadError>(null);
+
+  // editorMounted gates post-await writes inside uploadOne so a fetch that
+  // resolves after the modal closes does not write to dead $state.
+  let editorMounted = $state(false);
 
   $effect(() => { if (!cursorReady) lastOffset = value.length; });
 
@@ -79,33 +93,64 @@
     flashTimer = setTimeout(() => { flashUntil = 0; flashTimer = null; }, 1500);
   }
 
-  async function runMarkdownEditorUpload(
-    files: File[],
-    onEachSuccess: (asset: AssetResponse, index: number) => void,
-  ): Promise<void> {
-    if (uploading) { flashOverlay(); return; }
+  // Single shared upload helper. Textarea drop, wrapper drop, AND the sidebar's
+  // drop/file-picker all route through this so the AbortController, single-
+  // flight guard, and overlay state are owned in ONE place. Without this
+  // single path, sidebar-initiated and textarea/wrapper-drop uploads can race
+  // and clear each other's controllers.
+  async function uploadOne(
+    file: File,
+    batch?: { current: number; total: number },
+  ): Promise<AssetItem | null> {
+    if (uploading) { flashOverlay(); return null; }
+    const controller = new AbortController();
+    uploadAbortController = controller;
     uploading = true;
     uploadError = null;
-    let i = 0;
+    uploadProgress = {
+      current: batch?.current ?? 1,
+      total: batch?.total ?? 1,
+      filename: file.name,
+    };
     try {
-      for (; i < files.length; i++) {
-        uploadProgress = { current: i + 1, total: files.length, filename: files[i].name };
-        const asset = await uploadAsset(versionId, files[i]);
-        onEachSuccess(asset, i);
-        refreshKey++;
+      const item = await assetContext.upload(file, controller.signal);
+      if (!editorMounted) return null;
+      return item;
+    } catch (e: unknown) {
+      if (!editorMounted) return null;
+      // jsdom DOMException doesn't extend Error — duck-check .name.
+      const name = typeof e === 'object' && e !== null ? (e as { name?: string }).name : undefined;
+      if (name === 'AbortError') return null;
+      // Spec line 260: String(e?.detail ?? e?.message ?? e). ApiError uses
+      // displayMessage (the validation-aware accessor); everything else
+      // walks the .detail → .message → String(e) chain so plain objects
+      // like { detail: '...' } or { message: '...' } are surfaced too.
+      let baseDetail: string;
+      if (e instanceof ApiError) {
+        baseDetail = e.displayMessage;
+      } else {
+        const eo = e as { detail?: unknown; message?: unknown } | null | undefined;
+        baseDetail = String(eo?.detail ?? eo?.message ?? e);
       }
-    } catch (e) {
-      const baseDetail = e instanceof ApiError ? e.displayMessage : 'Upload failed';
       const renameHint = e instanceof ApiError && e.status === 409
         ? ' Rename the file on disk and re-upload.'
         : '';
       uploadError = {
         detail: baseDetail + renameHint,
-        stoppedAt: files.length > 1 ? { n: i + 1, m: files.length } : undefined,
+        stoppedAt: batch && batch.total > 1 ? { n: batch.current, m: batch.total } : undefined,
       };
+      return null;
     } finally {
-      uploading = false;
-      uploadProgress = null;
+      // compare-before-clear so a later upload's controller isn't nuked by
+      // this upload's finally (single-flight prevents concurrent in-flight,
+      // but the mounted guard protects post-destroy writes).
+      if (editorMounted && uploadAbortController === controller) {
+        uploadAbortController = null;
+      }
+      if (editorMounted) {
+        uploading = false;
+        uploadProgress = null;
+      }
     }
   }
 
@@ -127,33 +172,42 @@
     e.preventDefault();
     e.stopPropagation();
   }
-  function handleTextareaDrop(e: DragEvent) {
+  async function handleTextareaDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
+    if (disabled) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     let offset = dropOffsetFromPoint(e);
-    void runMarkdownEditorUpload(files, (asset) => {
-      const ref = formatRef(asset.filename, asset.mime_type);
+    for (let i = 0; i < files.length; i++) {
+      const result = await uploadOne(files[i], { current: i + 1, total: files.length });
+      if (result === null) break;
+      const ref = formatRef(result.filename, result.mime_type);
       insertAtCursor(ref, offset);
       offset += ref.length;
       cursorReady = true;
-    });
+      refreshKey++;
+    }
   }
 
   function handleWrapperDragOver(e: DragEvent) {
     e.preventDefault();
   }
-  function handleWrapperDrop(e: DragEvent) {
+  async function handleWrapperDrop(e: DragEvent) {
     e.preventDefault();
+    if (disabled) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
-    void runMarkdownEditorUpload(files, () => { /* no insert */ });
+    for (let i = 0; i < files.length; i++) {
+      const result = await uploadOne(files[i], { current: i + 1, total: files.length });
+      if (result === null) break;
+      refreshKey++;
+    }
   }
 
-  function handleSidebarInsert(filename: string, mimeType: string) {
+  function handleSidebarInsert(snippet: string) {
     cursorReady = true;
-    insertAtCursor(formatRef(filename, mimeType));
+    insertAtCursor(snippet);
   }
 
   async function loadPreview() {
@@ -161,7 +215,7 @@
     loading = true;
     error = null;
     try {
-      const res = await api.post<{ html: string }>(`/api/versions/${versionId}/render`, { content_md: value });
+      const res = await assetContext.renderPreview(value);
       if (reqId !== latestReq) return;
       html = res.html;
     } catch (e) {
@@ -173,16 +227,19 @@
   }
 
   function setMode(m: 'edit' | 'preview') {
+    if (disabled) return;
     _mode = m;
     if (m === 'preview') loadPreview();
   }
 
   onMount(() => {
+    editorMounted = true;
     if (readOnly) void loadPreview();
     window.addEventListener('dragover', guardFileDropNavigation);
     window.addEventListener('drop', guardFileDropNavigation);
   });
   onDestroy(() => {
+    editorMounted = false;
     latestReq++;
     if (flashTimer !== null) clearTimeout(flashTimer);
     window.removeEventListener('dragover', guardFileDropNavigation);
@@ -193,8 +250,8 @@
 <div class="editor">
   {#if !readOnly}
     <div class="tabs">
-      <button type="button" aria-pressed={mode === 'edit'} onclick={() => setMode('edit')}>Edit</button>
-      <button type="button" aria-pressed={mode === 'preview'} onclick={() => setMode('preview')}>Preview</button>
+      <button type="button" data-action="edit" aria-pressed={mode === 'edit'} disabled={disabled} onclick={() => setMode('edit')}>Edit</button>
+      <button type="button" data-action="preview" aria-pressed={mode === 'preview'} disabled={disabled} onclick={() => setMode('preview')}>Preview</button>
     </div>
   {/if}
   {#if mode === 'edit' && !readOnly}
@@ -211,6 +268,8 @@
         bind:value
         rows="14"
         spellcheck="false"
+        disabled={disabled}
+        aria-describedby={ariaDescribedby}
         ondragover={handleTextareaDragOver}
         ondrop={handleTextareaDrop}
         onfocus={onTextareaFocus}
@@ -218,8 +277,10 @@
         onselectionchange={onTextareaSelectionChange}
       ></textarea>
       <AssetSidebar
-        {versionId}
+        {assetContext}
+        {disabled}
         onInsert={handleSidebarInsert}
+        onUploadFile={uploadOne}
         {refreshKey}
         {cursorReady}
         bind:uploading
@@ -242,6 +303,13 @@
   .tabs button { background: none; border: 0; padding: var(--space-2) var(--space-3); cursor: pointer; }
   .tabs button[aria-pressed="true"] { background: var(--surface, #f7f7f7); font-weight: 600; }
   .edit-content { display: flex; flex-direction: row; min-height: 0; }
+  /* Spec (mini-projects-frontend §"Layout") mandates the textarea + asset
+     sidebar collapse to a single column below 880px (50%-split-screen on
+     1920px + small-laptop split scenarios). The split lives here, NOT in
+     MiniProjectModal's `.body` (codex T6a r1 catch). */
+  @media (max-width: 880px) {
+    .edit-content { flex-direction: column; }
+  }
   textarea { flex: 1 1 0; min-width: 0; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
   .preview { padding: var(--space-3); min-height: 200px; }
   .preview.err { color: #a33; }

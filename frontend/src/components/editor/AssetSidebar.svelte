@@ -2,66 +2,91 @@
   import { onMount } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
-  import {
-    listAssets,
-    uploadAsset,
-    deleteAsset,
-    type AssetResponse,
-  } from '../../lib/assets';
+  import { formatRef } from '../../lib/assets';
+  import type { AssetContext, AssetItem } from '../../lib/assetContext';
+  import { MAX_FILE_SIZE_BYTES, ALLOWED_EXTENSIONS } from '../../lib/runAssets';
+  import { formatFileSize } from '../../lib/format';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
 
   let {
-    versionId,
-    onInsert,
+    assetContext,
+    disabled = false,
     refreshKey = 0,
     cursorReady = false,
+    onInsert,
+    onUploadFile,
     uploading = $bindable<boolean>(false),
     uploadProgress = $bindable<UploadProgress>(null),
     uploadError = $bindable<UploadError>(null),
   }: {
-    versionId: number;
-    onInsert: (filename: string, mimeType: string) => void;
+    assetContext: AssetContext;
+    disabled?: boolean;
     refreshKey?: number;
     cursorReady?: boolean;
+    onInsert: (snippet: string) => void;
+    onUploadFile: (file: File, batch?: { current: number; total: number }) => Promise<AssetItem | null>;
     uploading?: boolean;
     uploadProgress?: UploadProgress;
     uploadError?: UploadError;
   } = $props();
 
-  let assets = $state<AssetResponse[]>([]);
+  let assets = $state<AssetItem[]>([]);
   let listError = $state<string | null>(null);
   let loading = $state(true);
   let fileInputEl = $state<HTMLInputElement | null>(null);
+  // Plain `let`, NOT $state — used as a gate inside $effect to skip the
+  // pre-mount tick. Making it reactive would cause the $effect to re-run
+  // when onMount flips it, triggering a spurious second fetchAssets.
   let mountDone = false;
   let confirmId = $state<number | null>(null);
   let deleteErrorMsg = $state<string | null>(null);
   const deletingIds = new SvelteSet<number>();
 
+  // Plain `let`, NOT $state — fetchAssets is called from a $effect and a
+  // reactive token would re-trigger that effect on every increment,
+  // creating a refetch loop.
+  let loadToken = 0;
+
   async function fetchAssets() {
+    loadToken += 1;
+    const myToken = loadToken;
     loading = true;
     listError = null;
     try {
-      assets = await listAssets(versionId);
+      const list = await assetContext.list();
+      if (myToken === loadToken) assets = list;
     } catch (e) {
-      listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
+      if (myToken === loadToken) {
+        listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
+      }
     } finally {
-      loading = false;
+      if (myToken === loadToken) loading = false;
     }
   }
 
-  $effect(() => { void refreshKey; if (mountDone) void fetchAssets(); });
+  // Refetch on either signal: external refreshKey bump (post-upload sync from
+  // MarkdownEditor / parent) OR a fresh assetContext identity (same-page
+  // version/run swap by the router — codex T5a finding). Both reads are
+  // unguarded so $effect tracks them as dependencies; mountDone gate skips
+  // the pre-onMount tick.
+  $effect(() => {
+    void refreshKey;
+    void assetContext;
+    if (mountDone) void fetchAssets();
+  });
   onMount(() => { mountDone = true; void fetchAssets(); });
 
-  function askDelete(id: number) { confirmId = id; }
+  function askDelete(id: number) { if (disabled) return; confirmId = id; }
   function cancelDelete() { confirmId = null; }
   async function confirmDelete(id: number) {
+    if (disabled) return;
     if (deletingIds.has(id)) return;
     deletingIds.add(id);
     deleteErrorMsg = null;
     try {
-      await deleteAsset(id);
+      await assetContext.remove(id);
     } catch (e) {
       deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
     } finally {
@@ -71,48 +96,58 @@
     }
   }
 
-  function pickFile() { fileInputEl?.click(); }
+  function pickFile() { if (disabled || uploading) return; fileInputEl?.click(); }
 
-  async function runUpload(files: File[]) {
-    if (uploading) return;
-    uploading = true;
-    uploadError = null;
-    let i = 0;
-    try {
-      for (; i < files.length; i++) {
-        uploadProgress = { current: i + 1, total: files.length, filename: files[i].name };
-        await uploadAsset(versionId, files[i]);
-        await fetchAssets();
-      }
-    } catch (e) {
-      const baseDetail = e instanceof ApiError ? e.displayMessage : 'Upload failed';
-      const renameHint = e instanceof ApiError && e.status === 409
-        ? ' Rename the file on disk and re-upload.'
-        : '';
+  function validateFile(file: File): string | null {
+    if (file.size > MAX_FILE_SIZE_BYTES) return `${file.name} (file exceeds 20MB)`;
+    const dot = file.name.lastIndexOf('.');
+    const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : '';
+    if (!ALLOWED_EXTENSIONS.has(ext)) return `${file.name} (extension not allowed)`;
+    return null;
+  }
+
+  // Stop-on-any-invalid pre-pass: validate ALL files BEFORE invoking onUploadFile.
+  // If any file fails, write a single uploadError summarizing them and call
+  // nothing. Rationale: uploadOne clears uploadError at its start, so per-file
+  // validation messages would get wiped by the next file's upload start.
+  async function handleDrop(files: File[]) {
+    if (disabled || uploading) return;
+    const invalid: string[] = [];
+    for (const f of files) {
+      const err = validateFile(f);
+      if (err) invalid.push(err);
+    }
+    if (invalid.length > 0) {
       uploadError = {
-        detail: baseDetail + renameHint,
-        stoppedAt: files.length > 1 ? { n: i + 1, m: files.length } : undefined,
+        detail: invalid.length === 1
+          ? `Cannot upload: ${invalid[0]}`
+          : `Cannot upload ${invalid.length} files: ${invalid.join(', ')}`,
       };
-    } finally {
-      uploading = false;
-      uploadProgress = null;
+      return;
+    }
+    for (let i = 0; i < files.length; i++) {
+      const result = await onUploadFile(files[i], { current: i + 1, total: files.length });
+      if (result === null) break;
+      await fetchAssets();
     }
   }
 
   function handleDropZone(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
+    if (disabled) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
-    void runUpload(files);
+    void handleDrop(files);
   }
 
   function handleAsideRootDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
+    if (disabled) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
-    void runUpload(files);
+    void handleDrop(files);
   }
 
   function handleDragOver(e: DragEvent) { e.preventDefault(); e.stopPropagation(); }
@@ -122,13 +157,10 @@
     const files = Array.from(input.files ?? []);
     input.value = '';
     if (files.length === 0) return;
-    void runUpload(files);
+    void handleDrop(files);
   }
 
-  function imgSrc(a: AssetResponse) {
-    return `/assets/${a.version_id}/${a.filename}`;
-  }
-  function extChip(a: AssetResponse): string {
+  function extChip(a: AssetItem): string {
     const dot = a.filename.lastIndexOf('.');
     return dot === -1 ? '?' : a.filename.slice(dot + 1).toUpperCase();
   }
@@ -139,13 +171,10 @@
     const MAX = 24;
     if (filename.length <= MAX) return filename;
     const dot = filename.lastIndexOf('.');
-    // No extension (or dotfile like .gitignore): plain end truncation.
     if (dot <= 0) return filename.slice(0, MAX - 3) + '...';
     const ext = filename.slice(dot);
     const stem = filename.slice(0, dot);
-    // Reserve room for: '...' (3) + 1 stem-tail char + ext.length.
     const reserve = 3 + 1 + ext.length;
-    // If extension is so long it leaves no room for prefix+tail, fall back.
     if (reserve >= MAX) return filename.slice(0, MAX - 3) + '...';
     const prefixLen = MAX - reserve;
     return stem.slice(0, prefixLen) + '...' + stem.slice(-1) + ext;
@@ -158,7 +187,7 @@
   ondragover={handleDragOver}
   ondrop={handleAsideRootDrop}
 >
-  <h3>Assets</h3>
+  <h3>{assetContext.kind === 'run' ? 'Run assets — shared across all MPs in this run' : 'Course assets'}</h3>
 
   {#if !cursorReady}
     <p class="banner" data-testid="cursor-banner">
@@ -215,17 +244,22 @@
     <ul class="list">
       {#each assets as a (a.id)}
         <li class="row" data-testid={`asset-row-${a.id}`}>
-          <button type="button" class="row-click" onclick={() => onInsert(a.filename, a.mime_type)}>
+          <button
+            type="button"
+            class="row-click"
+            disabled={disabled}
+            onclick={() => onInsert(formatRef(a.filename, a.mime_type))}
+          >
             <span class="thumb">
               {#if isImage(a.mime_type)}
-                <img loading="lazy" src={imgSrc(a)} alt="" />
+                <img loading="lazy" src={assetContext.imgSrc(a)} alt="" />
               {:else}
                 <span class="chip">{extChip(a)}</span>
               {/if}
             </span>
             <span class="meta">
               <span class="name" title={a.filename}>{displayName(a.filename)}</span>
-              <span class="size">{a.file_size} B</span>
+              <span class="size">{formatFileSize(a.file_size)}</span>
             </span>
           </button>
           {#if a.is_referenced}
@@ -239,7 +273,7 @@
               <button
                 type="button"
                 data-testid="delete-confirm"
-                disabled={deletingIds.has(a.id)}
+                disabled={disabled || deletingIds.has(a.id)}
                 onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
               >Confirm</button>
               <button
@@ -253,6 +287,7 @@
               type="button"
               class="trash"
               data-testid="delete-trash"
+              disabled={disabled}
               aria-label={`Delete ${a.filename}`}
               onclick={(e) => { e.stopPropagation(); askDelete(a.id); }}
             >🗑</button>
@@ -271,16 +306,17 @@
     tabindex="0"
     onclick={pickFile}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFile(); } }}
-    class:disabled={uploading}
+    class:disabled={disabled || uploading}
   >
     Drop here or click to pick
   </div>
   <input
     type="file"
     hidden
+    multiple
     data-testid="file-picker"
     bind:this={fileInputEl}
-    disabled={uploading}
+    disabled={disabled || uploading}
     onchange={handleFileInput}
   />
 </aside>

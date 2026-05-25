@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import AssetSidebar from '../components/editor/AssetSidebar.svelte';
-import * as assetsModule from '../lib/assets';
 import type { AssetResponse } from '../lib/assets';
+import type { AssetContext, AssetItem } from '../lib/assetContext';
 
 const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   id: 1,
@@ -16,7 +16,27 @@ const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   ...overrides,
 });
 
+// T5a refactor: sidebar takes an AssetContext + injected onUploadFile, not a
+// versionId. Each test gets a fresh stub; per-describe blocks mutate
+// stubCtx.list/remove via `.mockResolvedValue(...)`.
+function makeStubAssetContext(): AssetContext {
+  return {
+    kind: 'course',
+    list: vi.fn<AssetContext['list']>().mockResolvedValue([]),
+    upload: vi.fn<AssetContext['upload']>(),
+    remove: vi.fn<AssetContext['remove']>().mockResolvedValue(undefined),
+    imgSrc: (item: AssetItem) => `/assets/42/${item.filename}`,
+    renderPreview: vi.fn<AssetContext['renderPreview']>().mockResolvedValue({ html: '<p>x</p>' }),
+  };
+}
+
+let stubCtx: AssetContext;
 let cleanup: (() => void) | null = null;
+
+beforeEach(() => {
+  stubCtx = makeStubAssetContext();
+});
+
 afterEach(() => {
   cleanup?.();
   cleanup = null;
@@ -28,8 +48,9 @@ function mountSidebar(overrides: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.appendChild(target);
   const props = {
-    versionId: 42,
+    assetContext: stubCtx,
     onInsert: vi.fn(),
+    onUploadFile: vi.fn<(file: File, batch?: { current: number; total: number }) => Promise<AssetItem | null>>(),
     refreshKey: 0,
     cursorReady: false,
     uploading: false,
@@ -39,12 +60,12 @@ function mountSidebar(overrides: Record<string, unknown> = {}) {
   };
   const cmp = mount(AssetSidebar, { target, props });
   cleanup = () => unmount(cmp);
-  return { cmp, target };
+  return { cmp, target, props };
 }
 
 describe('AssetSidebar — list render', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: 'a.png', mime_type: 'image/png' }),
       mkAsset({ id: 2, filename: 'b.pdf', mime_type: 'application/pdf', is_referenced: true }),
     ]);
@@ -66,7 +87,7 @@ describe('AssetSidebar — list render', () => {
     // resolves.
     let resolveList: (assets: AssetResponse[]) => void = () => {};
     const pending = new Promise<AssetResponse[]>((r) => { resolveList = r; });
-    vi.spyOn(assetsModule, 'listAssets').mockReturnValueOnce(pending);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockReturnValueOnce(pending);
     const { target } = mountSidebar();
     flushSync();
     expect(target.querySelector('[data-testid="loading-indicator"]')).toBeTruthy();
@@ -88,7 +109,7 @@ describe('AssetSidebar — list render', () => {
 
 describe('AssetSidebar — first-time banner', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('renders the canonical banner literal when cursorReady is false', async () => {
@@ -110,7 +131,7 @@ describe('AssetSidebar — first-time banner', () => {
 
 describe('AssetSidebar — click to insert', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: 'a.png', mime_type: 'image/png' }),
     ]);
   });
@@ -122,13 +143,15 @@ describe('AssetSidebar — click to insert', () => {
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
     const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
     clickBtn.click();
-    expect(onInsert).toHaveBeenCalledWith('a.png', 'image/png');
+    // Sidebar now emits a formatted ref snippet (formatRef applies the
+    // image-vs-link template + leading/trailing newlines).
+    expect(onInsert).toHaveBeenCalledWith('\n![a](a.png)\n');
   });
 });
 
 describe('AssetSidebar — empty list', () => {
   it('renders the no-assets prompt when listAssets returns []', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync();
     await Promise.resolve(); flushSync();
@@ -138,13 +161,14 @@ describe('AssetSidebar — empty list', () => {
 
 describe('AssetSidebar — refreshKey triggers re-fetch', () => {
   it('changing refreshKey re-invokes listAssets', async () => {
-    const spy = vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    const spy = (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const target = document.createElement('div');
     document.body.appendChild(target);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const propsRef: any = $state({
-      versionId: 42,
+      assetContext: stubCtx,
       onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
       refreshKey: 0,
       cursorReady: false,
       uploading: false,
@@ -160,11 +184,50 @@ describe('AssetSidebar — refreshKey triggers re-fetch', () => {
     await Promise.resolve(); flushSync();
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it('changing assetContext refetches against the new context (covers same-page version swap)', async () => {
+    // Codex T5a finding: ItemEditPage derives `editAssetContext` from `vid`.
+    // If the router swaps `versionId` without remounting (same-page navigation
+    // between two items of different versions), the sidebar must refetch
+    // against the new context — otherwise it shows the old version's assets.
+    const ctxA = makeStubAssetContext();
+    const ctxB = makeStubAssetContext();
+    (ctxA.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      mkAsset({ id: 1, filename: 'a-only.png' }),
+    ]);
+    (ctxB.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      mkAsset({ id: 2, filename: 'b-only.png' }),
+    ]);
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      assetContext: ctxA,
+      onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
+      refreshKey: 0,
+      cursorReady: false,
+      uploading: false,
+      uploadProgress: null,
+      uploadError: null,
+    });
+    const cmp = mount(AssetSidebar, { target, props: propsRef });
+    cleanup = () => unmount(cmp);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect((ctxA.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('[data-testid="asset-row-1"]')).toBeTruthy();
+    propsRef.assetContext = ctxB;
+    flushSync();
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect((ctxB.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
+    expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+  });
 });
 
 describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
   it('renders "Uploading file N of M: <filename>" when uploadProgress is non-null', async () => {
@@ -190,8 +253,9 @@ describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
   it('clicking the × dismiss button writes uploadError = null through $bindable', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const propsRef: any = $state({
-      versionId: 42,
+      assetContext: stubCtx,
       onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
       refreshKey: 0,
       cursorReady: false,
       uploading: false,
@@ -212,14 +276,12 @@ describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
 
 describe('AssetSidebar — drop on sidebar', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
 
-  it('drop on the drop zone calls stopPropagation synchronously and uploads', async () => {
-    const uploadSpy = vi
-      .spyOn(assetsModule, 'uploadAsset')
-      .mockResolvedValue(mkAsset({ filename: 'dropped.png' }));
-    const { target } = mountSidebar();
+  it('drop on the drop zone calls stopPropagation synchronously and invokes onUploadFile', async () => {
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'dropped.png' }));
+    const { target } = mountSidebar({ onUploadFile });
     await Promise.resolve(); flushSync();
     const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
     const stopSpy = vi.fn();
@@ -237,14 +299,12 @@ describe('AssetSidebar — drop on sidebar', () => {
     expect(stopSpy).toHaveBeenCalled();
     await Promise.resolve(); flushSync();
     await Promise.resolve(); flushSync();
-    expect(uploadSpy).toHaveBeenCalledWith(42, expect.any(File));
+    expect(onUploadFile).toHaveBeenCalledWith(expect.any(File), { current: 1, total: 1 });
   });
 
   it('drop on the root <aside> outside the drop zone also uploads (root-level handler)', async () => {
-    const uploadSpy = vi
-      .spyOn(assetsModule, 'uploadAsset')
-      .mockResolvedValue(mkAsset({ filename: 'rooted.png' }));
-    const { target } = mountSidebar();
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'rooted.png' }));
+    const { target } = mountSidebar({ onUploadFile });
     await Promise.resolve(); flushSync();
     const aside = target.querySelector<HTMLElement>('aside[data-testid="asset-sidebar"]')!;
     const stopSpy = vi.fn();
@@ -260,17 +320,15 @@ describe('AssetSidebar — drop on sidebar', () => {
     expect(stopSpy).toHaveBeenCalled();
     await Promise.resolve(); flushSync();
     await Promise.resolve(); flushSync();
-    expect(uploadSpy).toHaveBeenCalledWith(42, expect.any(File));
+    expect(onUploadFile).toHaveBeenCalledWith(expect.any(File), { current: 1, total: 1 });
   });
 });
 
 describe('AssetSidebar — file picker', () => {
-  it('selecting a file via the picker calls uploadAsset', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    const uploadSpy = vi
-      .spyOn(assetsModule, 'uploadAsset')
-      .mockResolvedValue(mkAsset({ filename: 'picked.png' }));
-    const { target } = mountSidebar();
+  it('selecting a file via the picker invokes onUploadFile', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'picked.png' }));
+    const { target } = mountSidebar({ onUploadFile });
     await Promise.resolve(); flushSync();
     const input = target.querySelector<HTMLInputElement>('[data-testid="file-picker"]')!;
     const file = new File(['x'], 'picked.png', { type: 'image/png' });
@@ -278,13 +336,13 @@ describe('AssetSidebar — file picker', () => {
     input.dispatchEvent(new Event('change', { bubbles: true }));
     await Promise.resolve(); flushSync();
     await Promise.resolve(); flushSync();
-    expect(uploadSpy).toHaveBeenCalledWith(42, file);
+    expect(onUploadFile).toHaveBeenCalledWith(file, { current: 1, total: 1 });
   });
 });
 
 describe('AssetSidebar — delete UI', () => {
   beforeEach(() => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
       mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true }),
     ]);
@@ -300,8 +358,8 @@ describe('AssetSidebar — delete UI', () => {
   });
 
   it('trash → confirm → deleteAsset called and list refreshes', async () => {
-    const deleteSpy = vi.spyOn(assetsModule, 'deleteAsset').mockResolvedValue(undefined);
-    vi.mocked(assetsModule.listAssets)
+    const deleteSpy = (stubCtx.remove as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (stubCtx.list as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([
         mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
         mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true }),
@@ -322,8 +380,8 @@ describe('AssetSidebar — delete UI', () => {
 
   it('404 on delete (race) surfaces inline error + refreshes the list', async () => {
     const { ApiError } = await import('../lib/api');
-    vi.spyOn(assetsModule, 'deleteAsset').mockRejectedValue(new ApiError(404, 'Asset not found'));
-    vi.mocked(assetsModule.listAssets)
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockRejectedValue(new ApiError(404, 'Asset not found'));
+    (stubCtx.list as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([
         mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
         mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true }),
@@ -344,10 +402,10 @@ describe('AssetSidebar — delete UI', () => {
 
   it('confirm button is disabled while delete is in flight (re-entrancy guard)', async () => {
     let resolveDelete!: () => void;
-    vi.spyOn(assetsModule, 'deleteAsset').mockReturnValue(
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(
       new Promise<void>((resolve) => { resolveDelete = () => resolve(); })
     );
-    vi.mocked(assetsModule.listAssets)
+    (stubCtx.list as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([
         mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
       ])
@@ -369,11 +427,11 @@ describe('AssetSidebar — delete UI', () => {
     // Two deferred delete promises so we control ordering precisely.
     let resolveDelete1!: () => void;
     let resolveDelete2!: () => void;
-    const deleteMock = vi.spyOn(assetsModule, 'deleteAsset')
+    const deleteMock = (stubCtx.remove as ReturnType<typeof vi.fn>)
       .mockImplementationOnce(() => new Promise<void>((r) => { resolveDelete1 = () => r(); }))
       .mockImplementationOnce(() => new Promise<void>((r) => { resolveDelete2 = () => r(); }));
 
-    vi.mocked(assetsModule.listAssets)
+    (stubCtx.list as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([
         mkAsset({ id: 1, filename: 'a.png', is_referenced: false }),
         mkAsset({ id: 2, filename: 'b.png', is_referenced: false }),
@@ -428,47 +486,14 @@ describe('AssetSidebar — delete UI', () => {
   });
 });
 
-describe('AssetSidebar — 409 duplicate upload rename hint', () => {
-  it('409 from uploadAsset surfaces the rename hint appended to the server detail', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    const { ApiError } = await import('../lib/api');
-    vi.spyOn(assetsModule, 'uploadAsset').mockRejectedValueOnce(
-      new ApiError(409, "Asset 'foo.png' already exists in this version"),
-    );
-    const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const picker = target.querySelector<HTMLInputElement>('[data-testid="file-picker"]')!;
-    const file = new File(['x'], 'foo.png', { type: 'image/png' });
-    Object.defineProperty(picker, 'files', { value: [file], configurable: true });
-    picker.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const err = target.querySelector('[data-testid="upload-error"]');
-    expect(err?.textContent).toContain("Asset 'foo.png' already exists in this version");
-    expect(err?.textContent).toContain('Rename the file on disk and re-upload.');
-  });
-
-  it('non-409 errors do NOT append the rename hint', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([]);
-    const { ApiError } = await import('../lib/api');
-    vi.spyOn(assetsModule, 'uploadAsset').mockRejectedValueOnce(
-      new ApiError(400, 'Extension not allowed'),
-    );
-    const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const picker = target.querySelector<HTMLInputElement>('[data-testid="file-picker"]')!;
-    const file = new File(['x'], 'bad.exe', { type: 'application/octet-stream' });
-    Object.defineProperty(picker, 'files', { value: [file], configurable: true });
-    picker.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const err = target.querySelector('[data-testid="upload-error"]');
-    expect(err?.textContent).toContain('Extension not allowed');
-    expect(err?.textContent).not.toContain('Rename the file on disk and re-upload.');
-  });
-});
+// 409 rename-hint coverage moved to MarkdownEditor.svelte.test.ts (the new
+// uploadOne helper now owns the rename-hint append). Sidebar receives the
+// error string via $bindable uploadError; its rendering of that state is
+// already covered by the "renders Upload stopped at file N of M" tests above.
 
 describe('AssetSidebar — long filename truncation', () => {
   it('does not truncate filenames at or below the cap', async () => {
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: 'short.pdf' }),
     ]);
     const { target } = mountSidebar();
@@ -480,7 +505,7 @@ describe('AssetSidebar — long filename truncation', () => {
 
   it('truncates long filenames with middle ellipsis and preserves the extension', async () => {
     const full = 'Presentation 2 (corrected version of the lecture slides).pdf';
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: full }),
     ]);
     const { target } = mountSidebar();
@@ -497,7 +522,7 @@ describe('AssetSidebar — long filename truncation', () => {
 
   it('falls back to end truncation for filenames without an extension', async () => {
     const full = 'this-is-a-name-without-any-extension';  // 36 chars, no dot
-    vi.spyOn(assetsModule, 'listAssets').mockResolvedValue([
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
       mkAsset({ id: 1, filename: full }),
     ]);
     const { target } = mountSidebar();
