@@ -5,6 +5,7 @@
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import { MAX_FILE_SIZE_BYTES, ALLOWED_EXTENSIONS } from '../../lib/runAssets';
+  import { formatFileSize } from '../../lib/format';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
@@ -258,7 +259,7 @@
             </span>
             <span class="meta">
               <span class="name" title={a.filename}>{displayName(a.filename)}</span>
-              <span class="size">{a.file_size} B</span>
+              <span class="size">{formatFileSize(a.file_size)}</span>
             </span>
           </button>
           {#if a.is_referenced}
