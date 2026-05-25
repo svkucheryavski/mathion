@@ -106,7 +106,7 @@ const [r, vs, ts, gs, ss, assetList] = await Promise.all([
   - Post-await re-check `myToken === loadToken && rid === runIdInt` before assigning `assets`.
 - **Three callback props** on RunAssetsTab (mirroring the MP tab's prop wiring):
   - `onRefetchAssets(): Promise<void>` — fired after every successful mutation.
-  - `onRefetchMiniProjects(): Promise<void>` — fired **alongside** `onRefetchAssets` after force-delete (single or bulk-with-any-referenced) using `await Promise.all([onRefetchAssets(), onRefetchMiniProjects()])` so both `$state` writes settle in the same microtask flush (avoids the assets-new / MPs-old intermediate render).
+  - `onRefetchMiniProjects(): Promise<void>` — fired **alongside** `onRefetchAssets` after force-delete (single or bulk-with-any-referenced) using `await Promise.all([onRefetchAssets(), onRefetchMiniProjects()])` so both `$state` writes settle in the same microtask flush (avoids the assets-new / MPs-old intermediate render). Both refetches capture `loadToken + rid` at entry (each independently); when the parent's `loadToken` changes mid-flight, **both** early-return symmetrically — there's no scenario where one writes and the other doesn't, because they share the ratchet.
   - `onEditMiniProject(mp: MiniProjectResponse): void` — fired when the user clicks `[Edit]` on a referencing MP in the sub-panel. **The Assets tab resolves the MP object from its local `miniProjects` prop and passes the full object** (not just the id) so the parent skips the resolution race. RunDetailPage handles the not-found case (force-delete cascade may have removed the MP between sub-panel render and click) by no-op'ing — the cascade refetch will close the stale sub-panel on its next render.
 - **Parent state for cross-tab edit:** `pendingEditTarget = $state<MiniProjectResponse | null>(null)` and `activeTab = $state(...)` on RunDetailPage (existing variable; spec previously named this `currentTab` in error). `onEditMiniProject(mp)` sets `pendingEditTarget = mp`, switches `activeTab = 'mini-projects'`. A new prop on `RunMiniProjectsTab` consumes `pendingEditTarget`:
   - `$effect` watches `pendingEditTarget`; on truthy → set local `modalMode = 'edit'` + `editTarget = pendingEditTarget`, then call `onPendingEditConsumed()` callback so the parent clears `pendingEditTarget` (preventing re-trigger on subsequent tab switches).
@@ -136,7 +136,7 @@ Error banners render at the **top of the tab body** (above filter pills, and bel
 
 ## Replace flow
 
-**File picker mechanics:** one hidden `<input type="file">` per tab (single shared input). A `pendingReplaceAssetId = $state<number | null>(null)` tracks which row triggered. `handleReplaceClick(assetId)` sets `pendingReplaceAssetId = assetId` then `.click()`s the input. The `onchange` handler reads `pendingReplaceAssetId`, validates+confirms+PUTs, and resets `input.value = ''` (matching `AssetSidebar.svelte:155-161,313-321` reset pattern).
+**File picker mechanics:** one hidden `<input type="file">` per tab (single shared input). A `pendingReplaceAssetId = $state<number | null>(null)` tracks which row triggered. `handleReplaceClick(assetId)` sets `pendingReplaceAssetId = assetId` then `.click()`s the input. The `onchange` handler reads `pendingReplaceAssetId`, validates+confirms+PUTs, then resets BOTH `input.value = ''` AND `pendingReplaceAssetId = null` (matching `AssetSidebar.svelte:155-161,313-321` reset pattern). Also wire `oncancel` (HTML spec, Chromium 113+/Safari 16.4+) to reset `pendingReplaceAssetId = null` so an OS dialog-cancel doesn't leave stale state.
 
 Per-row `[↻ Replace]` flow:
 1. Click → file picker opens. Picker fires **first**.
@@ -144,7 +144,7 @@ Per-row `[↻ Replace]` flow:
    - Extension must match — lowercase both sides before compare.
    - Size under `MAX_FILE_SIZE_BYTES`.
    - On failure → row-local inline error (red text under the actions cell); no confirm shown.
-3. Validation passes → **per-row InlineConfirm** rendered **alongside** the actions cell (mirrors `frontend/src/components/runs/RunMiniProjectsTab.svelte:206-243` pattern: the `[↻ Replace]` / `[×]` stay visible while the confirm is shown in the same `<li>`/cell). Per-row mutual exclusion: opening a confirm closes any other open confirm in the table.
+3. Validation passes → **per-row InlineConfirm** rendered **alongside** the actions cell (mirrors `frontend/src/components/runs/RunMiniProjectsTab.svelte:206-243` pattern: the `[↻ Replace]` / `[×]` stay visible while the confirm is shown in the same `<li>`/cell). **Mutual exclusion** is enforced by a single shared `openConfirm = $state<{ assetId: number; kind: 'replace' | 'delete' } | null>(null)` — replace and delete confirms share the slot, so opening one closes any other (per-row or cross-row).
 4. Confirm copy: *"Replace `assignment.pdf` (new size: 1.4 MB)? The current content will be overwritten and cannot be recovered. N mini-project(s) that reference this file will continue to point at the new content."* When N=0, omit the trailing sentence.
 5. `[Confirm]` → PUT request (with `AbortSignal` from a `pendingReplaceController = new AbortController()`). On 200 → `onRefetchAssets()`, row re-renders with new size + uploaded_at.
 6. `[Cancel]` or 422 → close inline confirm, file dropped, controller discarded.
@@ -166,13 +166,19 @@ Per-row `[↻ Replace]` flow:
 
 - Header-row checkbox selects all currently-**visible** rows (respects the active filter).
 - **Filter change clears the selection** (simplest invariant; user explicitly re-selects after re-filtering). No banner — the empty selection is its own feedback.
-- N rows checked → **action strip** below the filter pills: `N selected` + `[Delete N selected]` button. **Sticky scope:** the tab body doesn't establish a scroll container (`RunDetailPage.svelte:406`'s `.tab-body` has no `overflow`/`height` constraint), so `position: sticky` resolves against the page scrollingElement. Use page-level sticky with `top: var(--tabs-height, 48px)` so the strip clears the tab-button row at `RunDetailPage.svelte:322-328`. Document the offset variable.
+- N rows checked → **action strip** below the filter pills: `N selected` + `[Delete N selected]` button. **In-flow placement** (not sticky): the tab body has no scroll container, and the tabs row itself (`RunDetailPage.svelte:322-328`) is not sticky either, so a `position: sticky` strip would float against an empty viewport when the user scrolls past it. At the expected scale (~20 assets) the strip rarely leaves the viewport; if it does, the user scrolls back up to the filter pills. Simpler than introducing a new `--tabs-height` variable + making the tabs row sticky.
 - **Mutual exclusion with per-row InlineConfirm:** opening the bulk-confirm strip closes any open per-row confirm; toggling a row checkbox while a per-row confirm is open closes that confirm.
 - Click → InlineConfirm-on-strip with a single confirmation for the batch. Lists "M orphan, N referenced"; force-required if any are referenced; the force-disable + tooltip + `course.is_admin` gate applies the same way.
 - Confirm → sequential DELETE per asset, threaded through a single `AbortController`:
   - Bulk controller (`bulkController = new AbortController()`) created on Confirm; its `signal` is threaded into each `deleteRunAsset(..., { signal: bulkController.signal })`.
-  - Each iteration **re-checks** `myToken === loadToken && rid === runIdInt` before dispatching the next DELETE; on mismatch the loop calls `bulkController.abort()` and breaks (no summary write, no refetch — the ratchet handles the new state).
-  - On unmount (or `runIdInt` change at the parent), an `$effect` cleanup also calls `bulkController?.abort()`.
+  - Each iteration **re-checks** `myToken === loadToken && rid === runIdInt` before dispatching the next DELETE; on mismatch the loop calls `bulkController.abort()` and breaks. It still fires a refetch (so the user sees any already-committed deletes) but skips the summary banner — the user navigated away anyway.
+  - On unmount OR on `runId` prop change, an `$effect` aborts the controller. **Svelte 5 footgun**: `$effect` cleanup only runs on unmount or when a reactive value *read inside the effect body* changes. RunAssetsTab stays mounted across `runIdInt` changes while `activeTab === 'assets'`, so the effect must explicitly track the `runId` prop:
+    ```ts
+    $effect(() => {
+      runId; // tracked dep — re-runs (and runs cleanup) when parent's runIdInt changes
+      return () => bulkController?.abort();
+    });
+    ```
   - Each DELETE uses its own `force` flag derived from the per-row backend `is_referenced` (NOT the client-side scan — important when MPs are stale).
   - On per-row error (4xx/5xx) the loop continues. `AbortError` is detected and breaks the loop cleanly.
   - Final summary banner (token+rid guarded): `Deleted M of N. Failed: {filename1}, {filename2}. (Refetched.)`
@@ -258,7 +264,9 @@ Frontend hides nothing — buttons are visible but disabled with tooltips when t
 - Replace: 404 mid-flight → banner + auto-refetch
 - Bulk-select action strip: visibility, count, mutual exclusion with per-row InlineConfirm
 - Bulk delete with mixed orphan + referenced: each DELETE carries correct `?force` per row
-- Bulk delete + runId changes mid-loop → `bulkController.abort()` called, loop breaks, no summary banner write
+- Bulk delete + runId changes mid-loop → `bulkController.abort()` called, loop breaks, refetch fires, no summary banner write
+- Bulk delete + tab unmount mid-loop → `$effect` cleanup fires `bulkController.abort()` (parallel of the upload-unmount test at line cited below)
+- Bulk delete + `runId` prop change while tab stays mounted (e.g., navigating between runs while `activeTab === 'assets'`) → `$effect`'s tracked `runId` dep fires cleanup → `bulkController.abort()`
 - Bulk delete partial-failure summary banner; refetch settles
 - Selection clears on filter change
 - 404 on delete (single): per-row banner + auto-refetch
