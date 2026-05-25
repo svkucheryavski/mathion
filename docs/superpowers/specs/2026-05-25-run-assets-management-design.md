@@ -29,7 +29,13 @@ Accepts multipart upload. Preserves the existing row's `filename` (incoming file
 
 Permissions: `require_run_admin_or_teacher` (same gate as POST/DELETE-without-force).
 
-No change to `RunAssetResponse` shape: existing `is_referenced: bool` is sufficient. References are resolved CLIENT-SIDE by scanning each MP's `assignment_md` for the asset's filename (O(assets × MPs), trivial at typical scale of ~20 each; wrapped in a `$derived`).
+No change to `RunAssetResponse` shape. The existing `is_referenced: bool` (set by the backend from `RunAssetReference` joins) is the authoritative flag used for:
+- the `?force=true` decision when deleting (bulk and single)
+- the 403 backstop check on the backend
+
+The per-asset reference *enumeration* (count for the "uses N" badge + the list of referencing MPs shown in the sub-panel) is computed CLIENT-SIDE by scanning each MP's `assignment_md` for the asset's filename — O(assets × MPs), trivial at typical scale of ~20 each, wrapped in a `$derived`. The Orphan/Referenced filter pill counts are derived from the same client-side scan so they stay consistent with the sub-panel.
+
+Backend `is_referenced` and client-side scan can briefly drift if the MP list is stale (e.g., between a force-delete cascade on the backend and the next MP refetch). Documented in [Accepted gaps](#accepted-gaps).
 
 ## Data flow
 
@@ -95,7 +101,7 @@ Filename of the picked file is ignored — the backend always stores under the e
 | `!runIsPublished` | No banner, no gating — uploads to drafts are fine. |
 | Force-delete without `course.is_admin` | Danger button disabled with tooltip. Backend 403 as backstop. |
 | Upload 409 collision | Banner "An asset named '{name}' already exists. Use Replace on the existing row, or rename your file." |
-| Replace 422 extension mismatch | Banner "New file must have the same extension as the original ({ext})." Modal close + refetch. |
+| Replace 422 extension mismatch | Banner "New file must have the same extension as the original ({ext})." Inline confirm closes; no refetch needed (no state change). |
 | Cross-user delete race (404) | Per-asset row: banner "This asset was deleted by another user." Auto-refetch. |
 | Bulk partial failure | Summary banner: "Deleted M of N. Failed: {list}." Refetch settles to actual server state. |
 | In-flight upload + tab unmount | `AbortController.abort()` via the `mounted` flag (T6a pattern). |
