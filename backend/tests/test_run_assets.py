@@ -1,4 +1,5 @@
 import io
+import os
 
 from mathion.auth import request_pin, verify_pin
 from mathion.main import app
@@ -266,3 +267,294 @@ def test_post_asset_returns_uploaded_by_email(admin_client, seed_run_with_groups
     body = resp.json()
     # admin_client is logged in as the superuser fixture (admin@example.com)
     assert body["uploaded_by_email"] == "admin@example.com"
+
+
+# ---------------------------------------------------------------------------
+# T2: PUT /api/runs/{rid}/assets/{aid} — replace endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_put_replace_asset_success_same_extension(admin_client, seed_run_with_groups):
+    """PUT replaces the file content. Preserves the original filename;
+    incoming filename is ignored. Returns updated response with
+    is_referenced + uploaded_by_email populated."""
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\nINITIAL\n"), "application/pdf")},
+    ).json()
+    asset_id = initial["id"]
+    initial_size = initial["file_size"]
+    initial_uploaded_at = initial["uploaded_at"]
+
+    new_content = b"%PDF-1.4\nREPLACED-LARGER-PAYLOAD\n"
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/{asset_id}",
+        files={"file": ("ignored-name.pdf", io.BytesIO(new_content), "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == asset_id
+    assert body["filename"] == "doc.pdf"  # original filename preserved
+    assert body["file_size"] == len(new_content)
+    assert body["file_size"] != initial_size
+    assert body["uploaded_at"] != initial_uploaded_at  # touched
+    assert body["uploaded_by_email"] == "admin@example.com"
+    assert body["is_referenced"] is False  # no MPs reference it
+
+
+def test_put_replace_case_insensitive_extension(admin_client, seed_run_with_groups):
+    """Uppercase incoming extension (.PDF) replaces lowercase asset (.pdf)."""
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    ).json()
+
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/{initial['id']}",
+        files={"file": ("NEW.PDF", io.BytesIO(b"%PDF-1.4\nNEW\n"), "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    # filename preserved as the original lowercased version
+    assert resp.json()["filename"] == "doc.pdf"
+
+
+def test_put_replace_422_on_extension_mismatch(admin_client, seed_run_with_groups):
+    """Different extension (.png replacing .pdf) → 422 with 'extension' in detail."""
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    ).json()
+
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/{initial['id']}",
+        files={"file": ("doc.png", io.BytesIO(b"\x89PNG\r\n"), "image/png")},
+    )
+    assert resp.status_code == 422
+    assert "extension" in resp.json()["detail"].lower()
+
+
+def test_put_replace_404_on_missing_asset_no_orphan_temp(
+    admin_client, seed_run_with_groups, asset_tmpdir
+):
+    """PUT against a nonexistent asset_id → 404 BEFORE any disk write."""
+    run, _, _ = seed_run_with_groups()
+    # The asset storage dir is created lazily on first POST; snapshot the run dir
+    # contents (if any) so we can confirm nothing new appears after a failed PUT.
+    from mathion.api.helpers import run_asset_storage_dir
+    dirpath = run_asset_storage_dir(run["id"])
+    before = set(os.listdir(dirpath)) if os.path.isdir(dirpath) else set()
+
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/999999",
+        files={"file": ("ghost.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    )
+    assert resp.status_code == 404
+
+    after = set(os.listdir(dirpath)) if os.path.isdir(dirpath) else set()
+    assert before == after, f"Orphan temp file(s): {after - before}"
+
+
+def test_put_replace_404_on_cross_run_asset_id(
+    admin_client, db, seed_run_with_groups, asset_tmpdir
+):
+    """User authorized on both runs; PUT against run_A with asset belonging to
+    run_B → 404. Mirrors the ownership-check semantics of DELETE."""
+    from mathion.models import Run
+
+    from mathion.models import CourseVersion
+
+    run_a, _, _ = seed_run_with_groups()
+    # Create run_B on the same course (course already exists from the first seed).
+    run_a_obj = db.get(Run, run_a["id"])
+    version_obj = db.get(CourseVersion, run_a_obj.version_id)
+    course_id = version_obj.course_id
+
+    run_b_resp = admin_client.post(
+        f"/api/courses/{course_id}/runs",
+        json={
+            "title": "R-B",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "groups_enabled": False,
+        },
+    )
+    assert run_b_resp.status_code == 201, run_b_resp.text
+    run_b = run_b_resp.json()
+
+    # Upload an asset to run_B
+    asset_b = admin_client.post(
+        f"/api/runs/{run_b['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    ).json()
+
+    from mathion.api.helpers import run_asset_storage_dir
+    dirpath_a = run_asset_storage_dir(run_a["id"])
+    before = set(os.listdir(dirpath_a)) if os.path.isdir(dirpath_a) else set()
+
+    # PUT against run_A with run_B's asset_id
+    resp = admin_client.put(
+        f"/api/runs/{run_a['id']}/assets/{asset_b['id']}",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\nNEW\n"), "application/pdf")},
+    )
+    assert resp.status_code == 404
+
+    after = set(os.listdir(dirpath_a)) if os.path.isdir(dirpath_a) else set()
+    assert before == after, f"Orphan temp file(s) in run_A dir: {after - before}"
+
+
+def test_put_replace_403_on_unauthorized_user(
+    admin_client, auth_client, seed_run_with_groups
+):
+    """User with no role on the run → 403 (auth_client is logged in as
+    test@example.com, which has no role on the seeded run)."""
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    ).json()
+
+    resp = auth_client.put(
+        f"/api/runs/{run['id']}/assets/{initial['id']}",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\nNEW\n"), "application/pdf")},
+    )
+    assert resp.status_code == 403
+
+
+def test_put_replace_overwrites_file_content(admin_client, seed_run_with_groups):
+    """File on disk is actually overwritten — GET serve returns the new bytes."""
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"INITIAL"), "application/pdf")},
+    ).json()
+
+    serve = admin_client.get(f"/api/runs/{run['id']}/assets/doc.pdf")
+    assert serve.content == b"INITIAL"
+
+    admin_client.put(
+        f"/api/runs/{run['id']}/assets/{initial['id']}",
+        files={"file": ("doc.pdf", io.BytesIO(b"REPLACED"), "application/pdf")},
+    )
+
+    serve2 = admin_client.get(f"/api/runs/{run['id']}/assets/doc.pdf")
+    assert serve2.content == b"REPLACED"
+
+
+def test_put_replace_preserves_RunAssetReference_rows(
+    admin_client, db, seed_run_with_groups
+):
+    """Replace must NOT touch RunAssetReference rows: pre/post id-set equality
+    + row count unchanged forbids delete-and-reinsert + orphan inserts."""
+    from mathion.models import Block, Run, RunAssetReference
+    from sqlalchemy import select as _select
+
+    run, _, _ = seed_run_with_groups()
+    asset = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("data.csv", io.BytesIO(b"a,b\n1,2\n"), "text/csv")},
+    ).json()
+    aid = asset["id"]
+
+    # Seed creates one block; add a second so we can create 2 MPs (one per block).
+    run_obj = db.get(Run, run["id"])
+    block_a = db.execute(
+        _select(Block).where(Block.version_id == run_obj.version_id)
+    ).scalars().first()
+    block_b = Block(
+        version_id=run_obj.version_id, title="B2", slug="b2", order=2
+    )
+    db.add(block_b)
+    db.commit()
+    db.refresh(block_b)
+
+    # Create 2 MPs that reference data.csv — the existing POST /mini-projects
+    # path runs sync_run_asset_references automatically.
+    for block_id, body_md in [
+        (block_a.id, "See ![data](data.csv) for details."),
+        (block_b.id, "Also references [data](data.csv)."),
+    ]:
+        mp_resp = admin_client.post(
+            f"/api/runs/{run['id']}/mini-projects",
+            json={
+                "block_id": block_id,
+                "assignment_md": body_md,
+                "hard_deadline": "2026-06-01T23:59:00Z",
+                "resubmission_deadline": "2026-06-15T23:59:00Z",
+            },
+        )
+        assert mp_resp.status_code in (200, 201), mp_resp.text
+
+    pre_ids = set(
+        db.scalars(
+            _select(RunAssetReference.id).where(RunAssetReference.run_asset_id == aid)
+        ).all()
+    )
+    assert len(pre_ids) >= 2, f"Expected ≥2 refs, got {pre_ids}"
+
+    admin_client.put(
+        f"/api/runs/{run['id']}/assets/{aid}",
+        files={"file": ("ignored.csv", io.BytesIO(b"a,b,c\n1,2,3\n"), "text/csv")},
+    )
+
+    post_ids = set(
+        db.scalars(
+            _select(RunAssetReference.id).where(RunAssetReference.run_asset_id == aid)
+        ).all()
+    )
+    assert post_ids == pre_ids, "RunAssetReference.id set must be preserved"
+
+
+def test_put_replace_413_on_oversize(admin_client, seed_run_with_groups, monkeypatch):
+    """File larger than settings.max_file_size → 413.
+
+    Targets `mathion.api.run_assets.settings` (the alias the endpoint
+    actually reads). Necessary because `test_main_spa.py` does
+    `importlib.reload(mathion.config)` which rebinds
+    `mathion.config.settings` to a new instance while leaving the
+    run_assets module's bound reference pointing at the old one.
+    """
+    # Import the alias the endpoint actually uses
+    from mathion.api import run_assets as _ra
+
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    ).json()
+
+    monkeypatch.setattr(_ra.settings, "max_file_size", 10)
+
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/{initial['id']}",
+        files={"file": ("doc.pdf", io.BytesIO(b"X" * 100), "application/pdf")},
+    )
+    assert resp.status_code == 413
+
+
+def test_put_replace_413_on_quota_delta_exceeded(
+    admin_client, seed_run_with_groups, monkeypatch
+):
+    """Replacement that pushes the run's aggregate over max_course_size → 413.
+
+    Targets `mathion.api.run_assets.settings` for the same reason as
+    test_put_replace_413_on_oversize above.
+    """
+    from mathion.api import run_assets as _ra
+
+    run, _, _ = seed_run_with_groups()
+    initial = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"X" * 10), "application/pdf")},
+    ).json()
+
+    monkeypatch.setattr(_ra.settings, "max_course_size", 50)
+
+    # Replacing 10-byte file with 200-byte file → delta +190 > 50 → 413
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/{initial['id']}",
+        files={"file": ("doc.pdf", io.BytesIO(b"X" * 200), "application/pdf")},
+    )
+    assert resp.status_code == 413
