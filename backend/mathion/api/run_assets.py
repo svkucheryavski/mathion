@@ -96,7 +96,14 @@ def upload_run_asset(
 
     db.commit()
     db.refresh(asset)
-    return asset
+    resp = RunAssetResponse.model_validate(asset)
+    resp.is_referenced = False
+    resp.uploaded_by_email = (
+        db.scalar(select(User.email).where(User.id == asset.uploaded_by))
+        if asset.uploaded_by is not None
+        else None
+    )
+    return resp
 
 
 @router.get("/api/runs/{run_id}/assets", response_model=list[RunAssetResponse])
@@ -118,6 +125,11 @@ def list_run_assets(
         )
         resp = RunAssetResponse.model_validate(a)
         resp.is_referenced = ref_count > 0
+        resp.uploaded_by_email = (
+            db.scalar(select(User.email).where(User.id == a.uploaded_by))
+            if a.uploaded_by is not None
+            else None
+        )
         result.append(resp)
     return result
 

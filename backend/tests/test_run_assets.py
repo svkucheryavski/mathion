@@ -170,3 +170,99 @@ def test_force_delete_referenced_as_admin(admin_client, db, seed_run_with_groups
     )
     response = admin_client.delete(f"/api/runs/{run['id']}/assets/{asset['id']}?force=true")
     assert response.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# T1: RunAssetResponse.uploaded_by_email
+# ---------------------------------------------------------------------------
+
+
+def test_list_assets_returns_uploaded_by_email(admin_client, seed_run_with_groups):
+    """GET-list response includes uploaded_by_email for each asset."""
+    run, _, _ = seed_run_with_groups()
+    upload = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    )
+    assert upload.status_code == 201
+
+    list_resp = admin_client.get(f"/api/runs/{run['id']}/assets")
+    assert list_resp.status_code == 200
+    rows = list_resp.json()
+    assert len(rows) == 1
+    # admin_client is logged in as the superuser fixture (admin@example.com)
+    assert rows[0]["uploaded_by_email"] == "admin@example.com"
+
+
+def test_list_assets_uploaded_by_email_null_when_user_deleted_set_null(
+    admin_client, db, seed_run_with_groups
+):
+    """uploaded_by=NULL (SET NULL on user delete) → uploaded_by_email=None."""
+    from mathion.models import RunAsset
+
+    run, _, _ = seed_run_with_groups()
+    a = RunAsset(
+        run_id=run["id"],
+        filename="orphan.pdf",
+        file_size=10,
+        mime_type="application/pdf",
+        uploaded_by=None,
+    )
+    db.add(a)
+    db.commit()
+
+    list_resp = admin_client.get(f"/api/runs/{run['id']}/assets")
+    assert list_resp.status_code == 200
+    rows = list_resp.json()
+    assert any(
+        r["filename"] == "orphan.pdf" and r["uploaded_by_email"] is None for r in rows
+    )
+
+
+def test_list_assets_uploaded_by_email_null_when_user_row_missing(
+    admin_client, db, seed_run_with_groups
+):
+    """uploaded_by points at a nonexistent user row → uploaded_by_email=None.
+
+    Simulates a hard-delete that bypassed the SET NULL cascade (defensive
+    guarantee). PRAGMA off needed because SQLite FK enforcement (on by
+    default in conftest) would otherwise reject the insert.
+    """
+    from sqlalchemy import text
+
+    from mathion.models import RunAsset
+
+    run, _, _ = seed_run_with_groups()
+    db.execute(text("PRAGMA foreign_keys=OFF"))
+    try:
+        a = RunAsset(
+            run_id=run["id"],
+            filename="ghost.pdf",
+            file_size=10,
+            mime_type="application/pdf",
+            uploaded_by=99999,  # nonexistent user row
+        )
+        db.add(a)
+        db.commit()
+    finally:
+        db.execute(text("PRAGMA foreign_keys=ON"))
+
+    list_resp = admin_client.get(f"/api/runs/{run['id']}/assets")
+    assert list_resp.status_code == 200
+    rows = list_resp.json()
+    assert any(
+        r["filename"] == "ghost.pdf" and r["uploaded_by_email"] is None for r in rows
+    )
+
+
+def test_post_asset_returns_uploaded_by_email(admin_client, seed_run_with_groups):
+    """POST handler populates uploaded_by_email in the response body."""
+    run, _, _ = seed_run_with_groups()
+    resp = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("hello.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    # admin_client is logged in as the superuser fixture (admin@example.com)
+    assert body["uploaded_by_email"] == "admin@example.com"
