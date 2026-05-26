@@ -1,8 +1,33 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 
+vi.mock('../lib/runAssets', async () => {
+  const actual = await vi.importActual<typeof import('../lib/runAssets')>('../lib/runAssets');
+  return {
+    ...actual,
+    uploadRunAsset: vi.fn(),
+    replaceRunAsset: vi.fn(),
+    deleteRunAsset: vi.fn(),
+  };
+});
+
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
+import { uploadRunAsset } from '../lib/runAssets';
 import type { Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
+
+// jsdom doesn't ship DataTransfer/DragEvent constructors with a writable
+// `files` property, so build a minimal shape via Object.defineProperty —
+// mirrors AssetSidebar.run-mode.svelte.test.ts:14-19.
+function makeDropEvent(files: File[]): DragEvent {
+  const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+  Object.defineProperty(ev, 'dataTransfer', { value: { files } });
+  return ev;
+}
+
+async function settle() {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  flushSync();
+}
 
 const baseCourse: Course = {
   id: 1,
@@ -559,5 +584,269 @@ describe('RunAssetsTab — uses badge + sub-panel', () => {
     const cells = Array.from(target.querySelectorAll('tbody td'));
     const dashCells = cells.filter((c) => c.textContent?.trim() === '—');
     expect(dashCells.length).toBeGreaterThan(0);
+  });
+});
+
+describe('RunAssetsTab — upload via file picker', () => {
+  beforeEach(() => {
+    (uploadRunAsset as any).mockReset();
+  });
+
+  it('renders [+ Upload] button paired with a hidden multi-file <input>', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+    const uploadBtn = findButton(target, /\+ Upload/);
+    expect(uploadBtn).not.toBeNull();
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(hiddenInput).not.toBeNull();
+    expect(hiddenInput!.multiple).toBe(true);
+  });
+
+  it('clicking [+ Upload] forwards the click to the hidden input', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+    const uploadBtn = findButton(target, /\+ Upload/)!;
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const clickSpy = vi.spyOn(hiddenInput, 'click').mockImplementation(() => {});
+    uploadBtn.click();
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('selecting a file calls uploadRunAsset and fires onRefetchAssets on success', async () => {
+    (uploadRunAsset as any).mockResolvedValue(mkAsset(99, 'new.pdf'));
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ onRefetchAssets } as any),
+    });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'new.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(uploadRunAsset).toHaveBeenCalledTimes(1);
+    const callArgs = (uploadRunAsset as any).mock.calls[0];
+    expect(callArgs[0]).toBe(1);
+    expect(callArgs[1]).toBe(file);
+    expect(onRefetchAssets).toHaveBeenCalled();
+  });
+
+  it('upload 409 collision shows banner naming the duplicate file', async () => {
+    (uploadRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('Conflict'), { status: 409 }),
+    );
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'dup.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.textContent).toMatch(/asset named .*dup\.pdf.* already exists/i);
+  });
+
+  it('picking an oversize file blocks upload and shows inline error', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    // Avoid actually allocating a 20MB+ buffer; stub size after construction.
+    const file = new File(['x'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: 20 * 1024 * 1024 + 1 });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.textContent).toMatch(/file too large/i);
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('picking a wrong-extension file blocks upload and shows inline error', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'evil.exe', { type: 'application/octet-stream' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.textContent).toMatch(/extension not allowed/i);
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('renders aria-live upload progress and clears it after completion', async () => {
+    let release!: (a: RunAssetResponse) => void;
+    (uploadRunAsset as any).mockImplementation(
+      () => new Promise<RunAssetResponse>((res) => { release = res; }),
+    );
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'p.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve();
+    flushSync();
+
+    const live = target.querySelector('[aria-live="polite"]');
+    expect(live).not.toBeNull();
+    expect(live!.textContent ?? '').toMatch(/Uploading\s+0\s+of\s+1/i);
+
+    release(mkAsset(99, 'p.pdf'));
+    await settle();
+    // Progress region should be gone once the batch finishes.
+    expect(target.querySelector('[aria-live="polite"]')).toBeNull();
+  });
+});
+
+describe('RunAssetsTab — upload via drop zone', () => {
+  beforeEach(() => {
+    (uploadRunAsset as any).mockReset();
+  });
+
+  it('drops a valid file → uploadRunAsset is called with the file', async () => {
+    (uploadRunAsset as any).mockResolvedValue(mkAsset(99, 'dropped.pdf'));
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ onRefetchAssets } as any),
+    });
+    flushSync();
+
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    const file = new File(['data'], 'dropped.pdf', { type: 'application/pdf' });
+    dropZone.dispatchEvent(makeDropEvent([file]));
+    await settle();
+
+    expect(uploadRunAsset).toHaveBeenCalledTimes(1);
+    expect((uploadRunAsset as any).mock.calls[0][1]).toBe(file);
+    expect(onRefetchAssets).toHaveBeenCalled();
+  });
+
+  it('drops an oversize file → inline "file too large" error, no upload', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    const file = new File(['x'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: 20 * 1024 * 1024 + 1 });
+    dropZone.dispatchEvent(makeDropEvent([file]));
+    await settle();
+
+    expect(target.textContent).toMatch(/file too large/i);
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('drops a wrong-extension file → inline "extension not allowed" error', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    const file = new File(['x'], 'evil.exe', { type: 'application/octet-stream' });
+    dropZone.dispatchEvent(makeDropEvent([file]));
+    await settle();
+
+    expect(target.textContent).toMatch(/extension not allowed/i);
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('dragover toggles the drag-over class on the section; dragleave clears it', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    expect(dropZone.classList.contains('drag-over')).toBe(false);
+
+    const dragOver = new Event('dragover', { bubbles: true, cancelable: true });
+    dropZone.dispatchEvent(dragOver);
+    flushSync();
+    expect(dropZone.classList.contains('drag-over')).toBe(true);
+    expect(dragOver.defaultPrevented).toBe(true);
+
+    dropZone.dispatchEvent(new Event('dragleave', { bubbles: true }));
+    flushSync();
+    expect(dropZone.classList.contains('drag-over')).toBe(false);
+  });
+
+  it('stop-on-first-invalid pre-pass: invalid file in batch blocks all uploads', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    const good = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    const bad = new File(['y'], 'b.exe', { type: 'application/octet-stream' });
+    dropZone.dispatchEvent(makeDropEvent([good, bad]));
+    await settle();
+
+    expect(target.textContent).toMatch(/extension not allowed/i);
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+});
+
+describe('RunAssetsTab — upload lifecycle hardening', () => {
+  beforeEach(() => {
+    (uploadRunAsset as any).mockReset();
+  });
+
+  it('unmounting during an in-flight upload aborts the controller', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    (uploadRunAsset as any).mockImplementation(
+      (_id: number, _f: File, signal?: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise<RunAssetResponse>(() => {
+          /* never resolves */
+        });
+      },
+    );
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'p.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve();
+    flushSync();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    unmount(component);
+    component = null;
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it('drop is rejected when versionIsDisabled is true (no upload, no banner)', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ versionIsDisabled: true }),
+    });
+    flushSync();
+
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    const file = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    dropZone.dispatchEvent(makeDropEvent([file]));
+    await settle();
+
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('picker resets input.value so the same file can be re-picked', async () => {
+    (uploadRunAsset as any).mockResolvedValue(mkAsset(99, 'same.pdf'));
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'same.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(hiddenInput.value).toBe('');
   });
 });

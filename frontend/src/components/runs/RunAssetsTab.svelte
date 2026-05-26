@@ -7,6 +7,11 @@
   import { formatFileSize } from '../../lib/format';
   import { formatLocalWithTz } from '../../lib/datetime';
   import { extractAssetRefs } from '../../lib/extractAssetRefs';
+  import {
+    ALLOWED_EXTENSIONS,
+    MAX_FILE_SIZE_BYTES,
+    uploadRunAsset,
+  } from '../../lib/runAssets';
 
   let {
     runId,
@@ -38,6 +43,79 @@
   let sortField = $state<SortField>('filename');
   let sortDir = $state<SortDir>('ascending');
   let openSubPanelAssetId = $state<number | null>(null);
+
+  let uploadInputEl: HTMLInputElement | null = $state(null);
+  let uploadProgress = $state<{ current: number; total: number } | null>(null);
+  let uploadError = $state<string | null>(null);
+  let dragOver = $state(false);
+  // Plain let (not $state): only read inside async callbacks + $effect cleanup,
+  // never in reactive/template positions.
+  let mounted = true;
+  // Single-upload design: `performUpload` is the only entry point and runs
+  // sequentially. If concurrency is ever introduced, this needs to become a Set.
+  let activeUploadController: AbortController | null = null;
+  $effect(() => () => {
+    mounted = false;
+    activeUploadController?.abort();
+  });
+
+  function isExtensionAllowed(name: string): boolean {
+    const idx = name.lastIndexOf('.');
+    const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
+    return ALLOWED_EXTENSIONS.has(ext);
+  }
+
+  function validateFile(f: File): string | null {
+    if (f.size > MAX_FILE_SIZE_BYTES) return `${f.name}: file too large.`;
+    if (!isExtensionAllowed(f.name)) return `${f.name}: extension not allowed.`;
+    return null;
+  }
+
+  async function performUpload(files: File[]): Promise<void> {
+    if (versionIsDisabled) return;
+    uploadError = null;
+    for (const f of files) {
+      const err = validateFile(f);
+      if (err) { uploadError = err; return; }
+    }
+    uploadProgress = { current: 0, total: files.length };
+    const controller = new AbortController();
+    activeUploadController = controller;
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (!mounted) return;
+        try {
+          await uploadRunAsset(runId, files[i]!, controller.signal);
+          if (!mounted) return;
+          uploadProgress = { current: i + 1, total: files.length };
+        } catch (e: unknown) {
+          const err = e as { name?: string; status?: number } | null;
+          if (err?.name === 'AbortError' || !mounted) return;
+          if (err?.status === 409) {
+            uploadError = `An asset named '${files[i]!.name}' already exists. Use Replace on the existing row, or rename your file.`;
+            return;
+          }
+          throw e;
+        }
+      }
+      if (mounted) await onRefetchAssets();
+    } finally {
+      if (activeUploadController === controller) activeUploadController = null;
+      if (mounted) uploadProgress = null;
+    }
+  }
+
+  function handleUploadPicker(): void {
+    uploadInputEl?.click();
+  }
+
+  async function onUploadInputChange(e: Event): Promise<void> {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = '';
+    if (files.length === 0) return;
+    await performUpload(files);
+  }
 
   // Map { mpId -> Set<filename refs> }. Empty when miniProjects is null.
   const refsByMp = $derived.by(() => {
@@ -127,30 +205,70 @@
 {#if false}
   <span aria-hidden="true">
     {course.name} {versionIsDisabled}
-    <button onclick={() => onRefetchAssets()}>x</button>
     <button onclick={() => onRefetchMiniProjects()}>x</button>
     <button onclick={() => onReloadRun()}>x</button>
   </span>
 {/if}
 
-<section class="run-assets-tab">
-  <div class="filter-pills" role="group" aria-label="Filter assets">
-    <button
-      type="button"
-      aria-pressed={activeFilter === 'all'}
-      onclick={() => (activeFilter = 'all')}
-    >All ({counts.all})</button>
-    <button
-      type="button"
-      aria-pressed={activeFilter === 'orphan'}
-      onclick={() => (activeFilter = 'orphan')}
-    >Orphan ({counts.orphan})</button>
-    <button
-      type="button"
-      aria-pressed={activeFilter === 'referenced'}
-      onclick={() => (activeFilter = 'referenced')}
-    >Referenced ({counts.referenced})</button>
+<section
+  class="run-assets-tab"
+  class:drag-over={dragOver}
+  aria-label="Run assets"
+  ondragover={(e) => {
+    e.preventDefault();
+    dragOver = true;
+  }}
+  ondragleave={() => (dragOver = false)}
+  ondrop={async (e) => {
+    e.preventDefault();
+    dragOver = false;
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length > 0) await performUpload(files);
+  }}
+>
+  <div class="toolbar">
+    <div class="filter-pills" role="group" aria-label="Filter assets">
+      <button
+        type="button"
+        aria-pressed={activeFilter === 'all'}
+        onclick={() => (activeFilter = 'all')}
+      >All ({counts.all})</button>
+      <button
+        type="button"
+        aria-pressed={activeFilter === 'orphan'}
+        onclick={() => (activeFilter = 'orphan')}
+      >Orphan ({counts.orphan})</button>
+      <button
+        type="button"
+        aria-pressed={activeFilter === 'referenced'}
+        onclick={() => (activeFilter = 'referenced')}
+      >Referenced ({counts.referenced})</button>
+    </div>
+    <div class="upload-area">
+      <button
+        type="button"
+        disabled={versionIsDisabled}
+        onclick={handleUploadPicker}
+      >+ Upload</button>
+      <input
+        type="file"
+        multiple
+        bind:this={uploadInputEl}
+        onchange={onUploadInputChange}
+        style="display:none"
+        aria-hidden="true"
+      />
+    </div>
   </div>
+
+  {#if uploadError}
+    <div role="alert" class="banner banner-error">{uploadError}</div>
+  {/if}
+  {#if uploadProgress}
+    <div role="status" aria-live="polite" class="upload-progress">
+      Uploading {uploadProgress.current} of {uploadProgress.total}…
+    </div>
+  {/if}
 
   {#if assets.length === 0}
     <div class="empty-state">
@@ -245,10 +363,56 @@
   .run-assets-tab {
     padding: 1rem 0;
   }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    gap: 1rem;
+  }
+  .upload-area {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .upload-area button {
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    border: 1px solid #1976d2;
+    background: #1976d2;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .upload-area button[disabled] {
+    background: #ccc;
+    border-color: #ccc;
+    cursor: not-allowed;
+  }
+  .upload-progress {
+    font-size: 0.85rem;
+    color: #555;
+    padding: 0.25rem 0.5rem;
+  }
+  .banner {
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 0;
+    border-radius: 4px;
+  }
+  .banner-error {
+    background: #fdecea;
+    color: #b71c1c;
+    border: 1px solid #f5c6cb;
+  }
+  .run-assets-tab.drag-over .assets-table,
+  .run-assets-tab.drag-over .empty-state {
+    outline: 2px dashed #1976d2;
+    outline-offset: -2px;
+  }
   .filter-pills {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0;
   }
   .filter-pills button {
     padding: 0.25rem 0.75rem;
