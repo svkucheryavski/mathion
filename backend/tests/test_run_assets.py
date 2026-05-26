@@ -558,3 +558,100 @@ def test_put_replace_413_on_quota_delta_exceeded(
         files={"file": ("doc.pdf", io.BytesIO(b"X" * 200), "application/pdf")},
     )
     assert resp.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# T3: DELETE force-flag role-boundary lock-down tests
+# ---------------------------------------------------------------------------
+#
+# The existing DELETE endpoint at backend/mathion/api/run_assets.py:180-213
+# already enforces `require_course_admin_for_run` when force=true (line
+# 190-191). These tests lock the contract that the gate distinguishes
+# force=true (course-admin-only) from non-force (run-teacher allowed).
+
+
+def _create_referenced_asset(admin_client, db, run, filename):
+    """Helper: upload asset and create one MP that references it. Returns asset dict."""
+    from mathion.models import Block, Run
+    from sqlalchemy import select as _select
+
+    asset = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": (filename, io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    ).json()
+
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(
+        _select(Block).where(Block.version_id == run_obj.version_id)
+    ).scalars().first()
+    mp_resp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={
+            "block_id": block.id,
+            "assignment_md": f"See [ref]({filename}).",
+            "hard_deadline": "2026-06-01T23:59:00Z",
+            "resubmission_deadline": "2026-06-15T23:59:00Z",
+        },
+    )
+    assert mp_resp.status_code in (200, 201), mp_resp.text
+    return asset
+
+
+def test_force_delete_referenced_by_run_teacher_403(
+    admin_client, db, seed_run_with_groups
+):
+    """Run-teacher (not course-admin) DELETE ?force=true on referenced asset
+    → 403. Locks the force-flag gate: only course-admins / superusers may
+    force-delete a referenced asset."""
+    run, _, _ = seed_run_with_groups()
+    asset = _create_referenced_asset(admin_client, db, run, "ref.pdf")
+
+    # seed_run_with_groups adds teach@example.com as a RunTeacher; that user
+    # is NOT a CourseAdmin and NOT a superuser.
+    teacher = _client_for(db, "teach@example.com")
+    resp = teacher.delete(f"/api/runs/{run['id']}/assets/{asset['id']}?force=true")
+    assert resp.status_code == 403
+
+
+def test_delete_referenced_by_run_teacher_without_force_returns_409(
+    admin_client, db, seed_run_with_groups
+):
+    """Run-teacher DELETE without force on referenced asset → 409 (existing
+    semantics: non-force is allowed for run-teachers, but the referenced
+    check returns 409 because the asset has refs)."""
+    run, _, _ = seed_run_with_groups()
+    asset = _create_referenced_asset(admin_client, db, run, "ref2.pdf")
+
+    teacher = _client_for(db, "teach@example.com")
+    resp = teacher.delete(f"/api/runs/{run['id']}/assets/{asset['id']}")
+    assert resp.status_code == 409
+
+
+def test_force_delete_by_course_admin_cascades_RunAssetReference(
+    admin_client, db, seed_run_with_groups
+):
+    """Force-delete by course-admin (superuser bypass) → 204 AND the asset's
+    RunAssetReference rows are cascade-deleted (FK ON DELETE CASCADE)."""
+    from mathion.models import RunAssetReference
+    from sqlalchemy import func as _func, select as _select
+
+    run, _, _ = seed_run_with_groups()
+    asset = _create_referenced_asset(admin_client, db, run, "cascade.pdf")
+    aid = asset["id"]
+
+    pre_count = db.scalar(
+        _select(_func.count(RunAssetReference.id)).where(
+            RunAssetReference.run_asset_id == aid
+        )
+    )
+    assert pre_count >= 1
+
+    resp = admin_client.delete(f"/api/runs/{run['id']}/assets/{aid}?force=true")
+    assert resp.status_code == 204
+
+    post_count = db.scalar(
+        _select(_func.count(RunAssetReference.id)).where(
+            RunAssetReference.run_asset_id == aid
+        )
+    )
+    assert post_count == 0
