@@ -17,6 +17,8 @@
     miniProjects,
     onRefetchMiniProjects,
     onNavigateToTab,
+    pendingEditTarget,
+    onPendingEditConsumed,
   }: {
     runId: number;
     runIsPublished: boolean;
@@ -28,7 +30,11 @@
     miniProjects: MiniProjectResponse[];
     onRefetchMiniProjects: () => Promise<void>;
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
+    // Pre-declared in T13 so parent type-checks; consumer wired up in T14.
+    pendingEditTarget?: MiniProjectResponse | null;
+    onPendingEditConsumed?: () => void;
   } = $props();
+
 
   const usedBlockIds = $derived(new Set(miniProjects.map((mp) => mp.block_id)));
   const availableBlocks = $derived(blocks.filter((b) => !usedBlockIds.has(b.id)));
@@ -118,6 +124,12 @@
     }
   }
 </script>
+
+<!-- T13 placeholder: declared in T13 so the parent type-checks; T14 wires
+     the real $effect consumer. Svelte dead-strips {#if false}. -->
+{#if false}
+  <span aria-hidden="true">{pendingEditTarget?.id}{onPendingEditConsumed}</span>
+{/if}
 
 {#if !pinnedAvailable}
   <div class="error-banner">Cannot load — pinned version not found.</div>

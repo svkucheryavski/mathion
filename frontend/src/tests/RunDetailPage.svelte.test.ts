@@ -38,6 +38,7 @@ function mockHappyPath() {
     if (m) return jres(runFixture({ id: Number(m[1]) }));
     if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
     if (url.includes('/mini-projects')) return jres([]);
+    if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
     if (url.includes('/versions')) return jres([versionFixture()]);
     if (url.includes('/teachers')) return jres([]);
     if (url.includes('/groups')) return jres([]);
@@ -73,6 +74,7 @@ function mockCascade(opts: {
       if (opts.mpsReject) return jres({ detail: 'mps 5xx' }, 503);
       return jres([]);
     }
+    if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
     return jres([]);
   };
 }
@@ -108,7 +110,8 @@ describe('RunDetailPage shell', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes('/mini-projects')) return jres([]);
+      if (url.includes("/mini-projects")) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([versionFixture({ is_disabled: true })]);
       if (url.includes('/teachers')) return jres([]);
       if (url.includes('/groups')) return jres([]);
@@ -159,7 +162,8 @@ describe('RunDetailPage shell', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ version_id: 102 }));
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes('/mini-projects')) return jres([]);
+      if (url.includes("/mini-projects")) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([
         versionFixture({ id: 100, created_at: '2026-01-01' }),
         versionFixture({ id: 101, created_at: '2026-02-01' }),
@@ -237,7 +241,8 @@ describe('RunDetailPage shell', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ is_published: false }));
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes('/mini-projects')) return jres([]);
+      if (url.includes("/mini-projects")) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([versionFixture()]);
       if (url.includes('/teachers')) return jres([]);
       if (url.includes('/groups')) return jres([]);
@@ -251,6 +256,88 @@ describe('RunDetailPage shell', () => {
     const badge = target.querySelector('[data-testid="status-badge"]');
     expect(badge?.textContent).toBe('Draft');
     expect(badge?.classList.contains('badge-draft')).toBe(true);
+    unmount(cmp);
+  });
+});
+
+describe('RunDetailPage — Assets tab integration', () => {
+  it('renders 6th "Assets" tab; clicking switches to RunAssetsTab empty state', async () => {
+    mockHappyPath();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const assetsBtn = Array.from(target.querySelectorAll('button[role="tab"]'))
+      .find((b) => b.textContent?.trim() === 'Assets') as HTMLButtonElement;
+    expect(assetsBtn).toBeTruthy();
+    assetsBtn.click();
+    flushSync();
+    expect(assetsBtn.getAttribute('aria-selected')).toBe('true');
+    expect(target.textContent).toMatch(/No assets yet/i);
+    unmount(cmp);
+  });
+
+  it('listRunAssets failure → whole page renders loadError (all-or-nothing)', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes("/mini-projects")) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres({ detail: 'assets 5xx' }, 503);
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    expect(target.textContent).toMatch(/assets 5xx/);
+    expect(
+      Array.from(target.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Assets',
+      ),
+    ).toBeUndefined();
+    unmount(cmp);
+  });
+
+  it('assets === null loading guard prevents tab-bar flash', async () => {
+    let resolveAssets: ((v: Response) => void) | null = null;
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes("/mini-projects")) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) {
+        return new Promise<Response>((r) => { resolveAssets = r; });
+      }
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    // Mid-load: spinner up, no tab buttons yet
+    expect(target.textContent).toContain('Loading');
+    expect(target.querySelectorAll('button[role="tab"]').length).toBe(0);
+
+    resolveAssets!({
+      ok: true, status: 200,
+      json: () => Promise.resolve([]),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    } as unknown as Response);
+    await settle();
+    const tabs = target.querySelectorAll('button[role="tab"]');
+    expect(tabs.length).toBe(6);
+    expect(
+      Array.from(tabs).find((b) => b.textContent?.trim() === 'Assets'),
+    ).toBeTruthy();
     unmount(cmp);
   });
 });

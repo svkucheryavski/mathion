@@ -15,14 +15,16 @@
   import RunRosterTab from '../../components/runs/RunRosterTab.svelte';
   import RosterImportModal from '../../components/runs/RosterImportModal.svelte';
   import RunMiniProjectsTab from '../../components/runs/RunMiniProjectsTab.svelte';
+  import RunAssetsTab from '../../components/runs/RunAssetsTab.svelte';
   import { listBlocks } from '../../lib/blocks';
   import { listMiniProjects } from '../../lib/miniProjects';
+  import { listRunAssets } from '../../lib/runAssets';
   import type {
     Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse,
-    BlockResponse, MiniProjectResponse,
+    BlockResponse, MiniProjectResponse, RunAssetResponse,
   } from '../../lib/types';
 
-  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects';
+  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets';
 
   let { courseSlug, runId }: { courseSlug: string; runId: string } = $props();
 
@@ -39,6 +41,8 @@
   let students = $state<RunStudentResponse[] | null>(null);
   let blocks = $state<BlockResponse[] | null>(null);
   let miniProjects = $state<MiniProjectResponse[] | null>(null);
+  let assets = $state<RunAssetResponse[] | null>(null);
+  let pendingEditTarget = $state<MiniProjectResponse | null>(null);
   let loadError = $state<ApiError | null>(null);
 
   let activeTab = $state<ActiveTab>('overview');
@@ -55,16 +59,18 @@
     const myToken = ++loadToken;
     course = null; run = null; versions = null; teachers = null;
     groups = null; students = null; blocks = null; miniProjects = null;
+    assets = null; pendingEditTarget = null;
     loadError = null;
     try {
       const c = await api.get<Course>(`/api/courses/by-slug/${slug}`);
       if (myToken !== loadToken) return;
-      const [r, vs, ts, gs, ss] = await Promise.all([
+      const [r, vs, ts, gs, ss, as] = await Promise.all([
         getRun(rid),
         listVersions(c.id),
         listRunTeachers(rid),
         listGroups(rid),
         listRunStudents(rid),
+        listRunAssets(rid),
       ]);
       if (myToken !== loadToken) return;
       // Compute pinned from LOCAL destructured values, NOT the `pinned` $derived
@@ -82,6 +88,7 @@
       course = c; run = r; versions = vs; teachers = ts; groups = gs; students = ss;
       blocks = blocksResult;
       miniProjects = mpsResult;
+      assets = as;
     } catch (e) {
       if (myToken !== loadToken) return;
       if (e instanceof ApiError && e.status === 401) return;
@@ -98,6 +105,22 @@
     // writing here would overwrite the new run's miniProjects with stale data.
     if (myToken !== loadToken || rid !== runIdInt || !pinnedAvailable) return;
     miniProjects = fetched;
+  }
+
+  // Run-scoped (no pinnedAvailable gate). Token + rid guards mirror
+  // refetchMiniProjects so a runId change mid-fetch drops the stale write.
+  async function refetchAssets(): Promise<void> {
+    if (runIdInt === null) return;
+    const rid = runIdInt;
+    const myToken = loadToken;
+    const fetched = await listRunAssets(rid);
+    if (myToken !== loadToken || rid !== runIdInt) return;
+    assets = fetched;
+  }
+
+  async function reloadRun(): Promise<void> {
+    if (runIdInt === null) return;
+    await loadAll(courseSlug, runIdInt);
   }
 
   async function refetchRosterData(): Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }> {
@@ -274,7 +297,7 @@
   <div class="error">Invalid run.</div>
 {:else if loadError}
   <div class="error">{loadError.displayMessage}</div>
-{:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null || blocks === null || miniProjects === null}
+{:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null || blocks === null || miniProjects === null || assets === null}
   <LoadingPlaceholder label="Loading run…" />
 {:else}
   <header class="run-header">
@@ -325,6 +348,7 @@
     <button role="tab" aria-selected={activeTab === 'groups'} onclick={() => (activeTab = 'groups')}>Groups</button>
     <button role="tab" aria-selected={activeTab === 'roster'} onclick={() => (activeTab = 'roster')}>Roster</button>
     <button role="tab" aria-selected={activeTab === 'mini-projects'} onclick={() => (activeTab = 'mini-projects')}>Mini-projects</button>
+    <button role="tab" aria-selected={activeTab === 'assets'} onclick={() => (activeTab = 'assets')}>Assets</button>
   </div>
 
   <section class="tab-body">
@@ -382,6 +406,20 @@
         miniProjects={miniProjects ?? []}
         onRefetchMiniProjects={refetchMiniProjects}
         onNavigateToTab={(t) => (activeTab = t)}
+        pendingEditTarget={pendingEditTarget}
+        onPendingEditConsumed={() => (pendingEditTarget = null)}
+      />
+    {:else if activeTab === 'assets'}
+      <RunAssetsTab
+        runId={runIdInt!}
+        assets={assets ?? []}
+        miniProjects={miniProjects ?? []}
+        course={course!}
+        versionIsDisabled={showDisabledBanner}
+        onRefetchAssets={refetchAssets}
+        onRefetchMiniProjects={refetchMiniProjects}
+        onEditMiniProject={(mp) => { pendingEditTarget = mp; activeTab = 'mini-projects'; }}
+        onReloadRun={reloadRun}
       />
     {/if}
   </section>
