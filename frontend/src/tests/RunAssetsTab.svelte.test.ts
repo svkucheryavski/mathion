@@ -12,7 +12,7 @@ vi.mock('../lib/runAssets', async () => {
 });
 
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
-import { uploadRunAsset } from '../lib/runAssets';
+import { uploadRunAsset, replaceRunAsset } from '../lib/runAssets';
 import type { Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
 
 // jsdom doesn't ship DataTransfer/DragEvent constructors with a writable
@@ -848,5 +848,323 @@ describe('RunAssetsTab — upload lifecycle hardening', () => {
     await settle();
 
     expect(hiddenInput.value).toBe('');
+  });
+});
+
+describe('RunAssetsTab — replace flow', () => {
+  beforeEach(() => {
+    (replaceRunAsset as any).mockReset();
+  });
+
+  function getReplaceInput(): HTMLInputElement {
+    return target.querySelector('input[type="file"][data-role="replace"]') as HTMLInputElement;
+  }
+
+  function pickReplaceFile(file: File): void {
+    const input = getReplaceInput();
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  it('clicking [↻ Replace] then picking same-ext file shows InlineConfirm; Confirm calls replaceRunAsset', async () => {
+    (replaceRunAsset as any).mockResolvedValue(mkAsset(1, 'doc.pdf'));
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, onRefetchAssets } as any),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'whatever.pdf', { type: 'application/pdf' }));
+    await settle();
+
+    expect(target.textContent).toMatch(/Replace.*doc\.pdf/i);
+
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(replaceRunAsset).toHaveBeenCalledTimes(1);
+    const args = (replaceRunAsset as any).mock.calls[0];
+    expect(args[0]).toBe(1);   // runId
+    expect(args[1]).toBe(1);   // assetId
+    expect((args[2] as File).name).toBe('whatever.pdf');
+    expect(onRefetchAssets).toHaveBeenCalled();
+  });
+
+  it('extension mismatch → inline error, no InlineConfirm shown', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.png', { type: 'image/png' }));
+    await settle();
+
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(target.textContent).toMatch(/same extension/i);
+    expect(replaceRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('.PDF replaces .pdf (case-insensitive extension match)', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'NEW.PDF', { type: 'application/pdf' }));
+    await settle();
+
+    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+  });
+
+  it('oversize file → inline error before InlineConfirm', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    const big = new File(['x'], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { value: 20 * 1024 * 1024 + 1 });
+    pickReplaceFile(big);
+    await settle();
+
+    expect(target.textContent).toMatch(/file too large/i);
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+  });
+
+  it('Cancel on InlineConfirm clears state without calling replaceRunAsset', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+
+    findButton(target, /^Cancel$/)!.click();
+    flushSync();
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(replaceRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('PUT 404 mid-flight → "deleted by another user" banner + auto-refetch', async () => {
+    (replaceRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('not found'), { status: 404 }),
+    );
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, onRefetchAssets } as any),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/deleted by another user/i);
+    expect(onRefetchAssets).toHaveBeenCalled();
+  });
+
+  it('PUT 422 → "same extension" banner', async () => {
+    (replaceRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('mismatch'), { status: 422 }),
+    );
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/same extension/i);
+  });
+
+  it('PUT 413 → "exceed.*quota" banner', async () => {
+    (replaceRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('too large'), { status: 413 }),
+    );
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/exceed.*quota/i);
+  });
+
+  it('versionIsDisabled blocks [↻ Replace] button (disabled attribute)', () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, versionIsDisabled: true }),
+    });
+    flushSync();
+    const btn = findButton(target, /↻ Replace/)!;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('in-flight replace + unmount → AbortController.abort fires', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    (replaceRunAsset as any).mockImplementation(
+      (_rid: number, _aid: number, _f: File, signal?: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise(() => {
+          /* never resolves */
+        });
+      },
+    );
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await Promise.resolve();
+    flushSync();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    unmount(component);
+    component = null;
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it('runId prop change while tab stays mounted → AbortController.abort fires', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    (replaceRunAsset as any).mockImplementation(
+      (_rid: number, _aid: number, _f: File, signal?: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise(() => {
+          /* never resolves */
+        });
+      },
+    );
+    const assets = [mkAsset(1, 'doc.pdf')];
+    const box = $state({ ...baseProps({ assets }) });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await Promise.resolve();
+    flushSync();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    box.runId = 999;
+    flushSync();
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it('runId prop change clears the open InlineConfirm', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    const box = $state({ ...baseProps({ assets }) });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+
+    box.runId = 999;
+    flushSync();
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+  });
+
+  it('runId prop change clears a stale banner', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    const box = $state({ ...baseProps({ assets }) });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+
+    // Trigger upload validation failure → banner set, no openConfirm.
+    const uploadInput = target.querySelector('input[type="file"]:not([data-role])') as HTMLInputElement;
+    const bad = new File(['x'], 'evil.exe', { type: 'application/octet-stream' });
+    Object.defineProperty(uploadInput, 'files', { value: [bad], configurable: true });
+    uploadInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.querySelector('.banner')).not.toBeNull();
+
+    box.runId = 999;
+    flushSync();
+    expect(target.querySelector('.banner')).toBeNull();
+  });
+
+  it('single banner slot: a new replace error overwrites a prior upload error', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    // First, surface an upload-side error via the wrong-ext rejection path.
+    const uploadInput = target.querySelector('input[type="file"]:not([data-role])') as HTMLInputElement;
+    const bad = new File(['x'], 'evil.exe', { type: 'application/octet-stream' });
+    Object.defineProperty(uploadInput, 'files', { value: [bad], configurable: true });
+    uploadInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toMatch(/extension not allowed/i);
+
+    // Now trigger a replace-side ext-mismatch error.
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['x'], 'wrong.png', { type: 'image/png' }));
+    await settle();
+
+    // Only ONE banner visible — the replace one.
+    const banners = target.querySelectorAll('.banner');
+    expect(banners.length).toBe(1);
+    expect(banners[0]!.textContent).toMatch(/same extension/i);
+    expect(banners[0]!.textContent).not.toMatch(/not allowed/i);
   });
 });

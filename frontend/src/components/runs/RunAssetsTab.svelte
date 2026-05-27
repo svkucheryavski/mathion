@@ -11,6 +11,7 @@
     ALLOWED_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
     uploadRunAsset,
+    replaceRunAsset,
   } from '../../lib/runAssets';
 
   let {
@@ -46,17 +47,50 @@
 
   let uploadInputEl: HTMLInputElement | null = $state(null);
   let uploadProgress = $state<{ current: number; total: number } | null>(null);
-  let uploadError = $state<string | null>(null);
   let dragOver = $state(false);
+
+  // Single banner slot (spec line 138): newer banners replace older. All
+  // upload + replace + (future) delete + bulk error paths write to this.
+  let banner = $state<string | null>(null);
+
+  // Shared confirm slot (spec line 150): mutual exclusion across replace,
+  // delete, and bulk-delete confirms. T10 adds `delete`; T11 adds `bulk-delete`.
+  type OpenConfirm = { kind: 'replace'; assetId: number; file: File };
+  let openConfirm = $state<OpenConfirm | null>(null);
+
   // Plain let (not $state): only read inside async callbacks + $effect cleanup,
   // never in reactive/template positions.
   let mounted = true;
-  // Single-upload design: `performUpload` is the only entry point and runs
-  // sequentially. If concurrency is ever introduced, this needs to become a Set.
+  // Single-upload / single-replace design: each entry point creates its own
+  // controller; the active one is tracked so $effect cleanup can abort.
   let activeUploadController: AbortController | null = null;
+  let activeReplaceController: AbortController | null = null;
+
+  // Unmount + runId-change cleanup. Svelte 5 footgun: cleanup runs on a tracked
+  // dep change OR on unmount, but only if the dep is READ inside the effect.
+  // Aborts every in-flight controller and clears UI state so navigating between
+  // runs (tab stays mounted) doesn't leave stale confirms/banners visible.
+  // Declared BEFORE the mounted-only effect so on unmount its cleanup fires
+  // first: state clears run while `mounted` is still true, then `mounted` flips.
+  $effect(() => {
+    runId;
+    return () => {
+      activeUploadController?.abort();
+      activeUploadController = null;
+      activeReplaceController?.abort();
+      activeReplaceController = null;
+      openConfirm = null;
+      banner = null;
+      uploadProgress = null;
+      pendingReplaceAssetId = null;
+      dragOver = false;
+    };
+  });
+
+  // Unmount-only cleanup: pins `mounted` to false so post-await state writes
+  // are skipped. No tracked deps → only runs on component teardown.
   $effect(() => () => {
     mounted = false;
-    activeUploadController?.abort();
   });
 
   function isExtensionAllowed(name: string): boolean {
@@ -73,10 +107,10 @@
 
   async function performUpload(files: File[]): Promise<void> {
     if (versionIsDisabled) return;
-    uploadError = null;
+    banner = null;
     for (const f of files) {
       const err = validateFile(f);
-      if (err) { uploadError = err; return; }
+      if (err) { banner = err; return; }
     }
     uploadProgress = { current: 0, total: files.length };
     const controller = new AbortController();
@@ -92,7 +126,7 @@
           const err = e as { name?: string; status?: number } | null;
           if (err?.name === 'AbortError' || !mounted) return;
           if (err?.status === 409) {
-            uploadError = `An asset named '${files[i]!.name}' already exists. Use Replace on the existing row, or rename your file.`;
+            banner = `An asset named '${files[i]!.name}' already exists. Use Replace on the existing row, or rename your file.`;
             return;
           }
           throw e;
@@ -115,6 +149,77 @@
     input.value = '';
     if (files.length === 0) return;
     await performUpload(files);
+  }
+
+  let replaceInputEl: HTMLInputElement | null = $state(null);
+  let pendingReplaceAssetId = $state<number | null>(null);
+
+  function fileExt(name: string): string {
+    const idx = name.lastIndexOf('.');
+    return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
+  }
+
+  function handleReplaceClick(assetId: number): void {
+    if (versionIsDisabled) return;
+    pendingReplaceAssetId = assetId;
+    banner = null;
+    openConfirm = null;
+    replaceInputEl?.click();
+  }
+
+  function onReplaceInputChange(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
+    const aid = pendingReplaceAssetId;
+    pendingReplaceAssetId = null;
+    if (!file || aid == null) return;
+    const asset = assets.find((a) => a.id === aid);
+    if (!asset) { banner = 'This asset is no longer in the list.'; return; }
+    if (fileExt(file.name) !== fileExt(asset.filename)) {
+      banner = `New file must have the same extension as the original (.${fileExt(asset.filename)}).`;
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      banner = `${file.name}: file too large.`;
+      return;
+    }
+    openConfirm = { kind: 'replace', assetId: aid, file };
+  }
+
+  function onReplaceCancel(): void {
+    pendingReplaceAssetId = null;
+    openConfirm = null;
+  }
+
+  async function performReplace(): Promise<void> {
+    if (openConfirm?.kind !== 'replace') return;
+    const { assetId, file } = openConfirm;
+    const controller = new AbortController();
+    activeReplaceController = controller;
+    try {
+      await replaceRunAsset(runId, assetId, file, controller.signal);
+      if (!mounted) return;
+      openConfirm = null;
+      banner = null;
+      await onRefetchAssets();
+    } catch (e: unknown) {
+      const err = e as { name?: string; status?: number; message?: string } | null;
+      if (err?.name === 'AbortError' || !mounted) return;
+      openConfirm = null;
+      if (err?.status === 404) {
+        banner = 'This asset was deleted by another user.';
+        await onRefetchAssets();
+      } else if (err?.status === 422) {
+        banner = 'New file must have the same extension as the original.';
+      } else if (err?.status === 413) {
+        banner = "Replacing would exceed this run's storage quota.";
+      } else {
+        banner = err?.message ?? 'Replace failed.';
+      }
+    } finally {
+      if (activeReplaceController === controller) activeReplaceController = null;
+    }
   }
 
   // Map { mpId -> Set<filename refs> }. Empty when miniProjects is null.
@@ -258,11 +363,20 @@
         style="display:none"
         aria-hidden="true"
       />
+      <input
+        type="file"
+        data-role="replace"
+        bind:this={replaceInputEl}
+        oncancel={() => { pendingReplaceAssetId = null; }}
+        onchange={onReplaceInputChange}
+        style="display:none"
+        aria-hidden="true"
+      />
     </div>
   </div>
 
-  {#if uploadError}
-    <div role="alert" class="banner banner-error">{uploadError}</div>
+  {#if banner}
+    <div role="status" class="banner banner-error">{banner}</div>
   {/if}
   {#if uploadProgress}
     <div role="status" aria-live="polite" class="upload-progress">
@@ -327,7 +441,28 @@
                 >{refIds.length} use{refIds.length === 1 ? '' : 's'}</button>
               {/if}
             </td>
-            <td>—</td>
+            <td class="actions-cell">
+              {#if openConfirm?.kind === 'replace' && openConfirm.assetId === a.id}
+                {@const refCount = miniProjects == null ? 0 : referencingMpIds(a).length}
+                <div class="inline-confirm">
+                  <p>
+                    Replace <code>{a.filename}</code> (new size: {formatFileSize(openConfirm.file.size)})?
+                    The current content will be overwritten and cannot be recovered.
+                    {#if refCount > 0}
+                      {refCount} mini-project{refCount === 1 ? '' : 's'} that reference this file will continue to point at the new content.
+                    {/if}
+                  </p>
+                  <button type="button" onclick={performReplace}>Confirm</button>
+                  <button type="button" onclick={onReplaceCancel}>Cancel</button>
+                </div>
+              {/if}
+              <button
+                type="button"
+                disabled={versionIsDisabled}
+                title={versionIsDisabled ? "This run's course version is disabled." : ''}
+                onclick={() => handleReplaceClick(a.id)}
+              >↻ Replace</button>
+            </td>
           </tr>
           {#if openSubPanelAssetId === a.id && miniProjects != null}
             {@const refIds = referencingMpIds(a)}
@@ -479,5 +614,31 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.25rem 0;
+  }
+  .actions-cell {
+    white-space: nowrap;
+  }
+  .actions-cell button {
+    margin-left: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .inline-confirm {
+    background: #fff3e0;
+    border: 1px solid #ffe0b2;
+    padding: 0.5rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    white-space: normal;
+  }
+  .inline-confirm p {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+  }
+  .inline-confirm code {
+    background: #fff;
+    padding: 0 0.25rem;
+    border-radius: 2px;
   }
 </style>
