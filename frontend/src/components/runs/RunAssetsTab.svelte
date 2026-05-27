@@ -565,6 +565,7 @@
       <button
         type="button"
         disabled={versionIsDisabled}
+        title={versionIsDisabled ? "This run's course version is disabled." : ''}
         onclick={handleUploadPicker}
       >+ Upload</button>
       <input
@@ -636,6 +637,7 @@
         <button
           type="button"
           disabled={versionIsDisabled}
+          title={versionIsDisabled ? "This run's course version is disabled." : ''}
           onclick={openBulkConfirm}
         >Delete {selectedIds.size} selected</button>
       {/if}

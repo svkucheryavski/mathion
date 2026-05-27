@@ -1965,3 +1965,61 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
     }
   });
 });
+
+describe('RunAssetsTab — versionIsDisabled tooltips', () => {
+  const DISABLED_TOOLTIP = "This run's course version is disabled.";
+
+  it('disables [+ Upload], [↻ Replace], and [×] with the version-disabled tooltip', () => {
+    const assets = [{ ...mkAsset(1, 'doc.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, versionIsDisabled: true }),
+    });
+    flushSync();
+
+    const upload = findButton(target, /\+ Upload/)!;
+    expect(upload).not.toBeNull();
+    expect(upload.disabled).toBe(true);
+    expect(upload.title).toBe(DISABLED_TOOLTIP);
+
+    const replace = findButton(target, /↻ Replace/)!;
+    expect(replace).not.toBeNull();
+    expect(replace.disabled).toBe(true);
+    expect(replace.title).toBe(DISABLED_TOOLTIP);
+
+    const del = target.querySelector(
+      'button[aria-label="Delete doc.pdf"]',
+    ) as HTMLButtonElement;
+    expect(del).not.toBeNull();
+    expect(del.disabled).toBe(true);
+    expect(del.title).toBe(DISABLED_TOOLTIP);
+  });
+
+  it('bulk-strip [Delete N selected] reports disabled + tooltip when parent flips versionIsDisabled mid-selection', () => {
+    const assets = [
+      { ...mkAsset(1, 'a.pdf'), is_referenced: false },
+      { ...mkAsset(2, 'b.pdf'), is_referenced: false },
+    ];
+    const box = $state({
+      ...baseProps({ assets, versionIsDisabled: false }),
+    });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+
+    (target.querySelector(
+      'input[type="checkbox"][aria-label="Select all"]',
+    ) as HTMLInputElement).click();
+    flushSync();
+    const stripBtn = findButton(target, /Delete 2 selected/i)!;
+    expect(stripBtn).not.toBeNull();
+    expect(stripBtn.disabled).toBe(false);
+
+    box.versionIsDisabled = true;
+    flushSync();
+
+    const stripBtnAfter = findButton(target, /Delete 2 selected/i)!;
+    expect(stripBtnAfter).not.toBeNull();
+    expect(stripBtnAfter.disabled).toBe(true);
+    expect(stripBtnAfter.title).toBe(DISABLED_TOOLTIP);
+  });
+});
