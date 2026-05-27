@@ -29,12 +29,10 @@
     blocks: BlockResponse[];
     miniProjects: MiniProjectResponse[];
     onRefetchMiniProjects: () => Promise<void>;
-    onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
-    // Pre-declared in T13 so parent type-checks; consumer wired up in T14.
+    onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
     pendingEditTarget?: MiniProjectResponse | null;
     onPendingEditConsumed?: () => void;
   } = $props();
-
 
   const usedBlockIds = $derived(new Set(miniProjects.map((mp) => mp.block_id)));
   const availableBlocks = $derived(blocks.filter((b) => !usedBlockIds.has(b.id)));
@@ -64,6 +62,23 @@
   $effect(() => {
     void deleteConfirmId;
     forceCheckbox = false;
+  });
+
+  // Parent (RunDetailPage) hands us a MP to open in edit mode when the
+  // Assets tab's [Edit] action navigates here. Stale-cascade safe: if the
+  // MP is no longer in our local list (refetch dropped it), we skip
+  // opening the modal but still fire onPendingEditConsumed so the parent
+  // clears the dangling reference. The early-return on null prevents
+  // re-entry once the parent clears pendingEditTarget.
+  $effect(() => {
+    if (!pendingEditTarget) return;
+    const target = pendingEditTarget;
+    const stillExists = miniProjects.some((mp) => mp.id === target.id);
+    if (stillExists) {
+      editTarget = target;
+      modalMode = 'edit';
+    }
+    onPendingEditConsumed?.();
   });
 
   const newDisabled = $derived(
@@ -124,12 +139,6 @@
     }
   }
 </script>
-
-<!-- T13 placeholder: declared in T13 so the parent type-checks; T14 wires
-     the real $effect consumer. Svelte dead-strips {#if false}. -->
-{#if false}
-  <span aria-hidden="true">{pendingEditTarget?.id}{onPendingEditConsumed}</span>
-{/if}
 
 {#if !pinnedAvailable}
   <div class="error-banner">Cannot load — pinned version not found.</div>

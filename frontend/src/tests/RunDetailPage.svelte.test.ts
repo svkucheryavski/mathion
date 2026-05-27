@@ -110,7 +110,7 @@ describe('RunDetailPage shell', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes("/mini-projects")) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([versionFixture({ is_disabled: true })]);
       if (url.includes('/teachers')) return jres([]);
@@ -162,7 +162,7 @@ describe('RunDetailPage shell', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ version_id: 102 }));
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes("/mini-projects")) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([
         versionFixture({ id: 100, created_at: '2026-01-01' }),
@@ -241,7 +241,7 @@ describe('RunDetailPage shell', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ is_published: false }));
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes("/mini-projects")) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([versionFixture()]);
       if (url.includes('/teachers')) return jres([]);
@@ -282,7 +282,7 @@ describe('RunDetailPage — Assets tab integration', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes("/mini-projects")) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres({ detail: 'assets 5xx' }, 503);
       if (url.includes('/versions')) return jres([versionFixture()]);
       if (url.includes('/teachers')) return jres([]);
@@ -309,7 +309,7 @@ describe('RunDetailPage — Assets tab integration', () => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
-      if (url.includes("/mini-projects")) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
       if (url.match(/\/api\/runs\/\d+\/assets$/)) {
         return new Promise<Response>((r) => { resolveAssets = r; });
       }

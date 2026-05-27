@@ -92,7 +92,7 @@ describe('Publish bar', () => {
       if (url.includes('/unpublish')) return jres({ detail: 'Run is not published' }, 409);
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
       if (url.includes('/mini-projects')) return jres([]);
-    if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([{ id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false }]);
       if (url.includes('/teachers')) return jres([{ user_id: 1, user_email: 't@x.com' }]);
       if (url.includes('/groups')) return jres([]);
@@ -123,7 +123,7 @@ describe('Publish bar', () => {
       if (url.match(/\/api\/runs\/10$/)) return jres({ id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30', is_published: false, groups_enabled: false });
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
       if (url.includes('/mini-projects')) return jres([]);
-    if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([{ id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: true }]);
       if (url.includes('/teachers')) return jres([{ user_id: 1, user_email: 't@x.com' }]);
       if (url.includes('/groups')) return jres([]);
