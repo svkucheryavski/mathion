@@ -12,7 +12,7 @@ vi.mock('../lib/runAssets', async () => {
 });
 
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
-import { uploadRunAsset, replaceRunAsset } from '../lib/runAssets';
+import { uploadRunAsset, replaceRunAsset, deleteRunAsset } from '../lib/runAssets';
 import type { Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
 
 // jsdom doesn't ship DataTransfer/DragEvent constructors with a writable
@@ -27,6 +27,12 @@ function makeDropEvent(files: File[]): DragEvent {
 async function settle() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
   flushSync();
+}
+
+function pickReplaceFile(file: File): void {
+  const input = document.querySelector('input[type="file"][data-role="replace"]') as HTMLInputElement;
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 const baseCourse: Course = {
@@ -856,16 +862,6 @@ describe('RunAssetsTab — replace flow', () => {
     (replaceRunAsset as any).mockReset();
   });
 
-  function getReplaceInput(): HTMLInputElement {
-    return target.querySelector('input[type="file"][data-role="replace"]') as HTMLInputElement;
-  }
-
-  function pickReplaceFile(file: File): void {
-    const input = getReplaceInput();
-    Object.defineProperty(input, 'files', { value: [file], configurable: true });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
   it('clicking [↻ Replace] then picking same-ext file shows InlineConfirm; Confirm calls replaceRunAsset', async () => {
     (replaceRunAsset as any).mockResolvedValue(mkAsset(1, 'doc.pdf'));
     const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
@@ -1166,5 +1162,359 @@ describe('RunAssetsTab — replace flow', () => {
     expect(banners.length).toBe(1);
     expect(banners[0]!.textContent).toMatch(/same extension/i);
     expect(banners[0]!.textContent).not.toMatch(/not allowed/i);
+  });
+});
+
+describe('RunAssetsTab — delete (orphan)', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+  });
+
+  function findDeleteBtn(filename: string): HTMLButtonElement {
+    return target.querySelector(`button[aria-label="Delete ${filename}"]`) as HTMLButtonElement;
+  }
+
+  it('clicking [×] on orphan opens "Delete this asset?" confirm; Confirm calls deleteRunAsset', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, onRefetchAssets } as any),
+    });
+    flushSync();
+
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/Delete this asset\?/);
+
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(deleteRunAsset).toHaveBeenCalledTimes(1);
+    const args = (deleteRunAsset as any).mock.calls[0];
+    expect(args[0]).toBe(1);
+    expect(args[1]).toBe(1);
+    expect(args[2]).toMatchObject({ force: false });
+    expect(onRefetchAssets).toHaveBeenCalled();
+  });
+
+  it('Cancel closes the InlineConfirm without calling deleteRunAsset', async () => {
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+
+    findButton(target, /^Cancel$/)!.click();
+    flushSync();
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(deleteRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('versionIsDisabled disables the [×] button', () => {
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, versionIsDisabled: true }),
+    });
+    flushSync();
+    expect(findDeleteBtn('orphan.pdf').disabled).toBe(true);
+  });
+});
+
+describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+  });
+
+  const refAssets = [{ ...mkAsset(1, 'ref.pdf'), is_referenced: true }];
+  const refMps = [mkMp(10, 'M', '![](ref.pdf)')];
+
+  function findDeleteBtn(filename: string): HTMLButtonElement {
+    return target.querySelector(`button[aria-label="Delete ${filename}"]`) as HTMLButtonElement;
+  }
+
+  it('opens force-confirm view with checkbox + danger button (disabled until checked)', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: refAssets, miniProjects: refMps }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/referenced by 1 mini-project/i);
+    const danger = findButton(target, /Force delete/i)!;
+    expect(danger.disabled).toBe(true);
+
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(danger.disabled).toBe(false);
+  });
+
+  it('Force delete fires DELETE with force=true + both refetches', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: refAssets,
+        miniProjects: refMps,
+        onRefetchAssets,
+        onRefetchMiniProjects,
+      } as any),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    findButton(target, /Force delete/i)!.click();
+    await settle();
+
+    expect(deleteRunAsset).toHaveBeenCalledTimes(1);
+    const args = (deleteRunAsset as any).mock.calls[0];
+    expect(args[2]).toMatchObject({ force: true });
+    expect(onRefetchAssets).toHaveBeenCalled();
+    expect(onRefetchMiniProjects).toHaveBeenCalled();
+  });
+
+  it('!course.is_admin → Force delete stays disabled with tooltip even after checkbox', async () => {
+    const nonAdminCourse: Course = { ...baseCourse, is_admin: false };
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: refAssets,
+        miniProjects: refMps,
+        course: nonAdminCourse,
+      }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    const danger = findButton(target, /Force delete/i)!;
+    expect(danger.disabled).toBe(true);
+    expect(danger.getAttribute('title') ?? '').toMatch(/course admins/i);
+  });
+
+  it('403 stale-permission → banner + onReloadRun called once', async () => {
+    (deleteRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('forbidden'), { status: 403 }),
+    );
+    const onReloadRun = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: refAssets,
+        miniProjects: refMps,
+        onReloadRun,
+      } as any),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    findButton(target, /Force delete/i)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/no longer have permission to force-delete/i);
+    expect(onReloadRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('404 cross-user → banner + auto-refetch', async () => {
+    (deleteRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('not found'), { status: 404 }),
+    );
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: refAssets,
+        miniProjects: refMps,
+        onRefetchAssets,
+      } as any),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    findButton(target, /Force delete/i)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/deleted by another user/i);
+    expect(onRefetchAssets).toHaveBeenCalled();
+  });
+
+  it('warning aria-describedby points at the warning paragraph id', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: refAssets, miniProjects: refMps }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const danger = findButton(target, /Force delete/i)!;
+    const describedBy = danger.getAttribute('aria-describedby');
+    expect(describedBy).toBe('warn-1');
+    const warningPara = target.querySelector('#warn-1');
+    expect(warningPara).not.toBeNull();
+    expect(warningPara!.textContent).toMatch(/referenced by/i);
+  });
+
+  it('orphan success does NOT call onRefetchMiniProjects', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, onRefetchAssets, onRefetchMiniProjects } as any),
+    });
+    flushSync();
+
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(onRefetchAssets).toHaveBeenCalled();
+    expect(onRefetchMiniProjects).not.toHaveBeenCalled();
+  });
+
+  it('generic 500 error → banner shows error message', async () => {
+    (deleteRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('Server boom'), { status: 500 }),
+    );
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/Server boom|Delete failed/i);
+  });
+
+  it('double-click on Confirm fires deleteRunAsset only once', async () => {
+    (deleteRunAsset as any).mockImplementation(
+      () => new Promise(() => { /* hangs forever */ }),
+    );
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    const confirm = findButton(target, /^Confirm$/)!;
+    confirm.click();
+    confirm.click();
+    await Promise.resolve();
+    flushSync();
+
+    expect(deleteRunAsset).toHaveBeenCalledTimes(1);
+  });
+
+  it('miniProjects==null + a.is_referenced=true shows generic "other mini-projects" copy', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: refAssets, miniProjects: null }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/referenced by other mini-projects/i);
+    expect(target.textContent).not.toMatch(/referenced by 0 mini-projects/i);
+  });
+
+  it('slow successful delete does not clobber a newer banner set mid-flight', async () => {
+    let resolveDelete!: () => void;
+    (deleteRunAsset as any).mockImplementation(
+      () => new Promise<void>((res) => { resolveDelete = res; }),
+    );
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await Promise.resolve();
+    flushSync();
+
+    // Delete is in-flight. Trigger an upload validation banner now.
+    const uploadInput = target.querySelector('input[type="file"]:not([data-role])') as HTMLInputElement;
+    const bad = new File(['x'], 'evil.exe', { type: 'application/octet-stream' });
+    Object.defineProperty(uploadInput, 'files', { value: [bad], configurable: true });
+    uploadInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toMatch(/extension not allowed/i);
+
+    // Now resolve the in-flight delete. The success path must NOT clear the
+    // newer upload banner.
+    resolveDelete();
+    await settle();
+    expect(target.textContent).toMatch(/extension not allowed/i);
+  });
+
+  it('mutual exclusion: opening delete closes an open replace InlineConfirm', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets }),
+    });
+    flushSync();
+
+    // Open replace confirm
+    findButton(target, /↻ Replace/)!.click();
+    flushSync();
+    pickReplaceFile(new File(['x'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    expect(target.textContent).toMatch(/Replace.*doc\.pdf/);
+
+    // Click [×] → openConfirm flips to delete; replace InlineConfirm gone
+    findDeleteBtn('doc.pdf').click();
+    flushSync();
+    expect(target.textContent).not.toMatch(/Replace.*doc\.pdf/);
+    expect(target.textContent).toMatch(/Delete this asset\?/);
   });
 });

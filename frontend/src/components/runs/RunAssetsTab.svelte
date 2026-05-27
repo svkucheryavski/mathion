@@ -12,6 +12,7 @@
     MAX_FILE_SIZE_BYTES,
     uploadRunAsset,
     replaceRunAsset,
+    deleteRunAsset,
   } from '../../lib/runAssets';
 
   let {
@@ -54,8 +55,10 @@
   let banner = $state<string | null>(null);
 
   // Shared confirm slot (spec line 150): mutual exclusion across replace,
-  // delete, and bulk-delete confirms. T10 adds `delete`; T11 adds `bulk-delete`.
-  type OpenConfirm = { kind: 'replace'; assetId: number; file: File };
+  // delete, and bulk-delete confirms. T11 will add `bulk-delete`.
+  type OpenConfirm =
+    | { kind: 'replace'; assetId: number; file: File }
+    | { kind: 'delete'; assetId: number; isReferenced: boolean; checkboxChecked: boolean };
   let openConfirm = $state<OpenConfirm | null>(null);
 
   // Plain let (not $state): only read inside async callbacks + $effect cleanup,
@@ -192,21 +195,67 @@
     openConfirm = null;
   }
 
+  function handleDeleteClick(assetId: number, isReferenced: boolean): void {
+    if (versionIsDisabled) return;
+    banner = null;
+    openConfirm = { kind: 'delete', assetId, isReferenced, checkboxChecked: false };
+  }
+
+  function cancelDelete(): void {
+    openConfirm = null;
+  }
+
+  async function performDelete(): Promise<void> {
+    if (openConfirm?.kind !== 'delete') return;
+    const { assetId, isReferenced } = openConfirm;
+    const force = isReferenced;
+    // Clear the confirm slot BEFORE awaiting so the user can't double-submit
+    // and a slow request can't clobber state set by newer interactions.
+    openConfirm = null;
+    // Snapshot the banner: on success we only clear it if no newer banner
+    // (e.g., from an in-flight upload validation) replaced ours during await.
+    const bannerAtStart = banner;
+    try {
+      await deleteRunAsset(runId, assetId, { force });
+    } catch (e: unknown) {
+      const err = e as { name?: string; status?: number; message?: string } | null;
+      if (err?.name === 'AbortError' || !mounted) return;
+      if (err?.status === 403) {
+        banner = 'You no longer have permission to force-delete. Refresh and retry.';
+        await onReloadRun();
+      } else if (err?.status === 404) {
+        banner = 'This asset was deleted by another user.';
+        await onRefetchAssets();
+      } else {
+        banner = err?.message ?? 'Delete failed.';
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (banner === bannerAtStart) banner = null;
+    if (force) {
+      await Promise.all([onRefetchAssets(), onRefetchMiniProjects()]);
+    } else {
+      await onRefetchAssets();
+    }
+  }
+
   async function performReplace(): Promise<void> {
     if (openConfirm?.kind !== 'replace') return;
     const { assetId, file } = openConfirm;
+    // Clear the confirm slot BEFORE awaiting so the user can't double-submit
+    // and a slow request can't clobber state set by newer interactions.
+    openConfirm = null;
+    // Snapshot the banner: on success we only clear it if no newer banner
+    // (e.g., from an in-flight upload validation) replaced ours during await.
+    const bannerAtStart = banner;
     const controller = new AbortController();
     activeReplaceController = controller;
     try {
       await replaceRunAsset(runId, assetId, file, controller.signal);
-      if (!mounted) return;
-      openConfirm = null;
-      banner = null;
-      await onRefetchAssets();
     } catch (e: unknown) {
       const err = e as { name?: string; status?: number; message?: string } | null;
       if (err?.name === 'AbortError' || !mounted) return;
-      openConfirm = null;
       if (err?.status === 404) {
         banner = 'This asset was deleted by another user.';
         await onRefetchAssets();
@@ -217,9 +266,13 @@
       } else {
         banner = err?.message ?? 'Replace failed.';
       }
+      return;
     } finally {
       if (activeReplaceController === controller) activeReplaceController = null;
     }
+    if (!mounted) return;
+    if (banner === bannerAtStart) banner = null;
+    await onRefetchAssets();
   }
 
   // Map { mpId -> Set<filename refs> }. Empty when miniProjects is null.
@@ -456,12 +509,60 @@
                   <button type="button" onclick={onReplaceCancel}>Cancel</button>
                 </div>
               {/if}
+              {#if openConfirm?.kind === 'delete' && openConfirm.assetId === a.id}
+                {@const refCount = miniProjects == null ? 0 : referencingMpIds(a).length}
+                <div class="inline-confirm">
+                  {#if !openConfirm.isReferenced}
+                    <p>Delete this asset?</p>
+                    <button type="button" onclick={performDelete}>Confirm</button>
+                    <button type="button" onclick={cancelDelete}>Cancel</button>
+                  {:else}
+                    <p id="warn-{a.id}">
+                      {#if miniProjects == null}
+                        This asset is referenced by other mini-projects.
+                      {:else}
+                        This asset is referenced by {refCount} mini-project{refCount === 1 ? '' : 's'}.
+                      {/if}
+                      Deleting it will leave their <code>![ref]</code> markdown broken. This cannot be undone.
+                    </p>
+                    <label>
+                      <input
+                        type="checkbox"
+                        data-role="force-confirm"
+                        checked={openConfirm.checkboxChecked}
+                        onchange={(e) => {
+                          if (openConfirm?.kind === 'delete') {
+                            openConfirm.checkboxChecked = (e.currentTarget as HTMLInputElement).checked;
+                          }
+                        }}
+                      />
+                      I understand
+                    </label>
+                    <button
+                      type="button"
+                      class="danger"
+                      aria-describedby="warn-{a.id}"
+                      disabled={!openConfirm.checkboxChecked || !course.is_admin}
+                      title={!course.is_admin ? 'Only course admins can force-delete a referenced asset.' : ''}
+                      onclick={performDelete}
+                    >Force delete</button>
+                    <button type="button" onclick={cancelDelete}>Cancel</button>
+                  {/if}
+                </div>
+              {/if}
               <button
                 type="button"
                 disabled={versionIsDisabled}
                 title={versionIsDisabled ? "This run's course version is disabled." : ''}
                 onclick={() => handleReplaceClick(a.id)}
               >↻ Replace</button>
+              <button
+                type="button"
+                disabled={versionIsDisabled}
+                aria-label="Delete {a.filename}"
+                title={versionIsDisabled ? "This run's course version is disabled." : ''}
+                onclick={() => handleDeleteClick(a.id, a.is_referenced)}
+              >×</button>
             </td>
           </tr>
           {#if openSubPanelAssetId === a.id && miniProjects != null}
@@ -640,5 +741,22 @@
     background: #fff;
     padding: 0 0.25rem;
     border-radius: 2px;
+  }
+  .inline-confirm label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-right: 0.5rem;
+    font-size: 0.85rem;
+  }
+  button.danger {
+    background: #c62828;
+    color: #fff;
+    border: 1px solid #c62828;
+  }
+  button.danger:disabled {
+    background: #ef9a9a;
+    border-color: #ef9a9a;
+    cursor: not-allowed;
   }
 </style>
