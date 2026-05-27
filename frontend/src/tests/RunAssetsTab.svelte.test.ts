@@ -1344,32 +1344,45 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     expect(onReloadRun).toHaveBeenCalledTimes(1);
   });
 
-  it('404 cross-user → banner + auto-refetch', async () => {
-    (deleteRunAsset as any).mockRejectedValue(
-      Object.assign(new Error('not found'), { status: 404 }),
-    );
-    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
-    component = mount(RunAssetsTab, {
-      target,
-      props: baseProps({
-        assets: refAssets,
-        miniProjects: refMps,
-        onRefetchAssets,
-      } as any),
-    });
-    flushSync();
+  it('404 cross-user → banner + auto-refetch (after 500ms storm window)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (deleteRunAsset as any).mockRejectedValue(
+        Object.assign(new Error('not found'), { status: 404 }),
+      );
+      const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+      component = mount(RunAssetsTab, {
+        target,
+        props: baseProps({
+          assets: refAssets,
+          miniProjects: refMps,
+          onRefetchAssets,
+        } as any),
+      });
+      flushSync();
 
-    findDeleteBtn('ref.pdf').click();
-    flushSync();
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
-    checkbox.checked = true;
-    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
-    findButton(target, /Force delete/i)!.click();
-    await settle();
+      findDeleteBtn('ref.pdf').click();
+      flushSync();
+      const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      findButton(target, /Force delete/i)!.click();
+      // Let microtasks settle (rejection propagates + note404 schedules timer).
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      flushSync();
 
-    expect(target.textContent).toMatch(/deleted by another user/i);
-    expect(onRefetchAssets).toHaveBeenCalled();
+      // Window not yet elapsed; no banner.
+      expect(target.textContent).not.toMatch(/deleted by another user/i);
+
+      await vi.advanceTimersByTimeAsync(500);
+      flushSync();
+
+      expect(target.textContent).toMatch(/this asset was deleted by another user/i);
+      expect(onRefetchAssets).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('warning aria-describedby points at the warning paragraph id', async () => {
@@ -1516,5 +1529,439 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     flushSync();
     expect(target.textContent).not.toMatch(/Replace.*doc\.pdf/);
     expect(target.textContent).toMatch(/Delete this asset\?/);
+  });
+});
+
+describe('RunAssetsTab — bulk selection + action strip', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+  });
+
+  const mixedAssets = [
+    { ...mkAsset(1, 'a.pdf'), is_referenced: false },
+    { ...mkAsset(2, 'b.pdf'), is_referenced: false },
+    { ...mkAsset(3, 'c.pdf'), is_referenced: true },
+  ];
+  const mixedMps = [mkMp(10, 'M', '![](c.pdf)')];
+
+  function selectAllCheckbox(): HTMLInputElement {
+    return target.querySelector('input[type="checkbox"][aria-label="Select all"]') as HTMLInputElement;
+  }
+
+  function rowCheckbox(filename: string): HTMLInputElement {
+    return target.querySelector(`input[type="checkbox"][aria-label="Select ${filename}"]`) as HTMLInputElement;
+  }
+
+  it('header checkbox selects all visible rows and shows the action strip', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: mixedAssets, miniProjects: mixedMps }),
+    });
+    flushSync();
+
+    expect(target.textContent).not.toMatch(/3 selected/);
+    selectAllCheckbox().click();
+    flushSync();
+
+    expect(target.textContent).toMatch(/3 selected/);
+    expect(findButton(target, /Delete 3 selected/i)).not.toBeNull();
+  });
+
+  it('row checkbox toggles individual selection', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: mixedAssets, miniProjects: mixedMps }),
+    });
+    flushSync();
+
+    rowCheckbox('a.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/1 selected/);
+
+    rowCheckbox('b.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/2 selected/);
+
+    rowCheckbox('a.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/1 selected/);
+  });
+
+  it('clicking header again when all selected deselects everything', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: mixedAssets, miniProjects: mixedMps }),
+    });
+    flushSync();
+    selectAllCheckbox().click();
+    flushSync();
+    expect(target.textContent).toMatch(/3 selected/);
+
+    selectAllCheckbox().click();
+    flushSync();
+    expect(target.textContent).not.toMatch(/selected/);
+  });
+
+  it('filter change clears the selection', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: mixedAssets, miniProjects: mixedMps }),
+    });
+    flushSync();
+    selectAllCheckbox().click();
+    flushSync();
+    expect(target.textContent).toMatch(/3 selected/);
+
+    findButton(target, /^Orphan/)!.click();
+    flushSync();
+    expect(target.textContent).not.toMatch(/selected/);
+  });
+
+  it('versionIsDisabled disables both the header checkbox and per-row checkboxes', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: mixedAssets, miniProjects: mixedMps, versionIsDisabled: true }),
+    });
+    flushSync();
+    expect(selectAllCheckbox().disabled).toBe(true);
+    expect(rowCheckbox('a.pdf').disabled).toBe(true);
+  });
+});
+
+describe('RunAssetsTab — bulk delete execution', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+  });
+
+  const mixedAssets = [
+    { ...mkAsset(1, 'a.pdf'), is_referenced: false },
+    { ...mkAsset(2, 'b.pdf'), is_referenced: false },
+    { ...mkAsset(3, 'c.pdf'), is_referenced: true },
+  ];
+  const mixedMps = [mkMp(10, 'M', '![](c.pdf)')];
+
+  function selectAllCheckbox(): HTMLInputElement {
+    return target.querySelector('input[type="checkbox"][aria-label="Select all"]') as HTMLInputElement;
+  }
+
+  it('mixed batch: orphans send force=false, referenced send force=true; both refetches fire', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: mixedAssets,
+        miniProjects: mixedMps,
+        onRefetchAssets,
+        onRefetchMiniProjects,
+      } as any),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 3 selected/i)!.click();
+    flushSync();
+    // Referenced count > 0 → checkbox + Force delete
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    findButton(target, /Force delete/i)!.click();
+    await settle();
+
+    expect(deleteRunAsset).toHaveBeenCalledTimes(3);
+    const callsByAid = new Map<number, any>();
+    for (const call of (deleteRunAsset as any).mock.calls) {
+      callsByAid.set(call[1], call[2]);
+    }
+    expect(callsByAid.get(1)?.force).toBe(false);
+    expect(callsByAid.get(2)?.force).toBe(false);
+    expect(callsByAid.get(3)?.force).toBe(true);
+    expect(onRefetchAssets).toHaveBeenCalled();
+    expect(onRefetchMiniProjects).toHaveBeenCalled();
+    expect(target.textContent).toMatch(/Deleted 3 of 3/);
+  });
+
+  it('all-orphan batch shows plain Confirm (no checkbox / no Force button)', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    const orphans = [
+      { ...mkAsset(1, 'a.pdf'), is_referenced: false },
+      { ...mkAsset(2, 'b.pdf'), is_referenced: false },
+    ];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: orphans,
+        onRefetchAssets,
+        onRefetchMiniProjects,
+      } as any),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 2 selected/i)!.click();
+    flushSync();
+    // No checkbox needed in this branch
+    expect(target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]')).toBeNull();
+    expect(findButton(target, /Force delete/i)).toBeNull();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(deleteRunAsset).toHaveBeenCalledTimes(2);
+    expect((deleteRunAsset as any).mock.calls[0][2]).toMatchObject({ force: false });
+    expect(onRefetchAssets).toHaveBeenCalled();
+    expect(onRefetchMiniProjects).not.toHaveBeenCalled();
+  });
+
+  it('force flag is derived from backend is_referenced (not client scan)', async () => {
+    // Backend flags it referenced, but no MPs reference the file in their assignment_md
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const staleAssets = [{ ...mkAsset(1, 'stale.pdf'), is_referenced: true }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: staleAssets, miniProjects: [] }),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    findButton(target, /Force delete/i)!.click();
+    await settle();
+
+    expect((deleteRunAsset as any).mock.calls[0][2]).toMatchObject({ force: true });
+  });
+
+  it('partial failure → summary banner lists failed filenames', async () => {
+    (deleteRunAsset as any).mockImplementation((_rid: number, aid: number) => {
+      if (aid === 2) return Promise.reject(new Error('server boom'));
+      return Promise.resolve(undefined);
+    });
+    const orphans = [
+      { ...mkAsset(1, 'ok-1.pdf'), is_referenced: false },
+      { ...mkAsset(2, 'fail.pdf'), is_referenced: false },
+      { ...mkAsset(3, 'ok-3.pdf'), is_referenced: false },
+    ];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: orphans }),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 3 selected/i)!.click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/Deleted 2 of 3/);
+    expect(target.textContent).toMatch(/fail\.pdf/);
+  });
+
+  it('Cancel on the bulk-confirm closes the confirm without firing DELETE', async () => {
+    const orphans = [{ ...mkAsset(1, 'a.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: orphans }),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+    findButton(target, /^Cancel$/)!.click();
+    flushSync();
+
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(deleteRunAsset).not.toHaveBeenCalled();
+  });
+
+  it('bulk delete with !course.is_admin keeps Force button disabled with tooltip', async () => {
+    const nonAdminCourse: Course = { ...baseCourse, is_admin: false };
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: mixedAssets,
+        miniProjects: mixedMps,
+        course: nonAdminCourse,
+      }),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 3 selected/i)!.click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    const danger = findButton(target, /Force delete/i)!;
+    expect(danger.disabled).toBe(true);
+    expect(danger.getAttribute('title') ?? '').toMatch(/course admins/i);
+  });
+});
+
+describe('RunAssetsTab — 404 storm coalescing', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+  });
+
+  function selectAllCheckbox(): HTMLInputElement {
+    return target.querySelector('input[type="checkbox"][aria-label="Select all"]') as HTMLInputElement;
+  }
+
+  it('multiple 404s within 500ms → single banner + single refetch', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (deleteRunAsset as any).mockRejectedValue(
+        Object.assign(new Error('not found'), { status: 404 }),
+      );
+      const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+      const assets = [
+        { ...mkAsset(1, 'a.pdf'), is_referenced: false },
+        { ...mkAsset(2, 'b.pdf'), is_referenced: false },
+      ];
+      component = mount(RunAssetsTab, {
+        target,
+        props: baseProps({ assets, onRefetchAssets } as any),
+      });
+      flushSync();
+
+      // Bulk-delete both → both fail with 404, coalesced into one window
+      selectAllCheckbox().click();
+      flushSync();
+      findButton(target, /Delete 2 selected/i)!.click();
+      flushSync();
+      findButton(target, /^Confirm$/)!.click();
+      // Microtask drain so both rejections + note404 schedule the timer.
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      flushSync();
+
+      // Window not elapsed; no banner.
+      expect(target.textContent).not.toMatch(/by another user/i);
+
+      await vi.advanceTimersByTimeAsync(500);
+      flushSync();
+
+      expect(target.textContent).toMatch(/some assets were deleted by another user/i);
+      // Spec L213: exactly one onRefetchAssets per storm window. The bulk
+      // path must NOT also call refetch on completion when 404s scheduled
+      // the storm timer.
+      expect(onRefetchAssets).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('storm timer is cleared on unmount — no refetch fires after teardown', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (deleteRunAsset as any).mockRejectedValue(
+        Object.assign(new Error('not found'), { status: 404 }),
+      );
+      const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+      const assets = [{ ...mkAsset(1, 'a.pdf'), is_referenced: false }];
+      component = mount(RunAssetsTab, {
+        target,
+        props: baseProps({ assets, onRefetchAssets } as any),
+      });
+      flushSync();
+
+      // Trigger a single 404 via single-row delete (not bulk, so bulk's own
+      // post-refetch can't muddy the assertion).
+      const deleteBtn = target.querySelector(`button[aria-label="Delete a.pdf"]`) as HTMLButtonElement;
+      deleteBtn.click();
+      flushSync();
+      findButton(target, /^Confirm$/)!.click();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      flushSync();
+
+      const callsBeforeUnmount = onRefetchAssets.mock.calls.length;
+
+      // Unmount before the 500ms storm timer fires
+      unmount(component);
+      component = null;
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Cleared timer means no new refetch + no banner write.
+      expect(onRefetchAssets.mock.calls.length).toBe(callsBeforeUnmount);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('storm coalesces a single-row 404 + a bulk 404 into one banner + one refetch', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (deleteRunAsset as any).mockRejectedValue(
+        Object.assign(new Error('not found'), { status: 404 }),
+      );
+      const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+      const assets = [
+        { ...mkAsset(1, 'one.pdf'), is_referenced: false },
+        { ...mkAsset(2, 'two.pdf'), is_referenced: false },
+        { ...mkAsset(3, 'three.pdf'), is_referenced: false },
+      ];
+      component = mount(RunAssetsTab, {
+        target,
+        props: baseProps({ assets, onRefetchAssets } as any),
+      });
+      flushSync();
+
+      // Single-row delete fires first 404 → schedules storm timer.
+      const deleteBtn = target.querySelector(
+        `button[aria-label="Delete one.pdf"]`,
+      ) as HTMLButtonElement;
+      deleteBtn.click();
+      flushSync();
+      findButton(target, /^Confirm$/)!.click();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      flushSync();
+
+      // Within the 500ms window: bulk-delete the other two → 2 more 404s,
+      // each note404()'d, sharing the same timer.
+      target.querySelector<HTMLInputElement>(
+        'input[type="checkbox"][aria-label="Select two.pdf"]',
+      )!.click();
+      flushSync();
+      target.querySelector<HTMLInputElement>(
+        'input[type="checkbox"][aria-label="Select three.pdf"]',
+      )!.click();
+      flushSync();
+      findButton(target, /Delete 2 selected/i)!.click();
+      flushSync();
+      findButton(target, /^Confirm$/)!.click();
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+      flushSync();
+
+      // Still pre-window: no banner, no refetch.
+      expect(target.textContent).not.toMatch(/by another user/i);
+      expect(onRefetchAssets).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(500);
+      flushSync();
+
+      // Single banner across both sources; single refetch across both.
+      expect(target.querySelectorAll('.banner-error')).toHaveLength(1);
+      expect(target.textContent).toMatch(/some assets were deleted by another user/i);
+      expect(onRefetchAssets).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

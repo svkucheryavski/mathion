@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import type {
     Course,
     MiniProjectResponse,
@@ -55,11 +56,26 @@
   let banner = $state<string | null>(null);
 
   // Shared confirm slot (spec line 150): mutual exclusion across replace,
-  // delete, and bulk-delete confirms. T11 will add `bulk-delete`.
+  // delete, and bulk-delete confirms.
   type OpenConfirm =
     | { kind: 'replace'; assetId: number; file: File }
-    | { kind: 'delete'; assetId: number; isReferenced: boolean; checkboxChecked: boolean };
+    | { kind: 'delete'; assetId: number; isReferenced: boolean; checkboxChecked: boolean }
+    | { kind: 'bulk-delete'; orphanCount: number; referencedCount: number; checkboxChecked: boolean };
   let openConfirm = $state<OpenConfirm | null>(null);
+
+  // Bulk selection (filter-aware). Filter changes clear it; single source of
+  // truth for the action strip + bulk-delete loop.
+  let selectedIds = $state<Set<number>>(new Set());
+  // Bulk summary banner (informational; separate from the single `banner`
+  // error slot so a partial-fail summary persists alongside any newer error).
+  let summaryBanner = $state<string | null>(null);
+  let bulkController: AbortController | null = null;
+
+  // 404 storm coalescer (spec L213): first 404 starts a 500ms timer;
+  // subsequent 404s within the window are coalesced into ONE banner +
+  // ONE refetch on flush.
+  let storm404Timer: ReturnType<typeof setTimeout> | null = null;
+  let storm404Seen = 0;
 
   // Plain let (not $state): only read inside async callbacks + $effect cleanup,
   // never in reactive/template positions.
@@ -82,12 +98,33 @@
       activeUploadController = null;
       activeReplaceController?.abort();
       activeReplaceController = null;
+      bulkController?.abort();
+      bulkController = null;
+      if (storm404Timer != null) {
+        clearTimeout(storm404Timer);
+        storm404Timer = null;
+        storm404Seen = 0;
+      }
       openConfirm = null;
       banner = null;
+      summaryBanner = null;
       uploadProgress = null;
       pendingReplaceAssetId = null;
       dragOver = false;
+      selectedIds = new Set();
     };
+  });
+
+  // Filter change clears the selection (spec L179: "simplest invariant").
+  // Only `activeFilter` is tracked; the openConfirm read is wrapped in
+  // untrack() so opening a bulk-confirm doesn't re-fire this effect and
+  // clobber its own state.
+  $effect(() => {
+    activeFilter;
+    untrack(() => {
+      selectedIds = new Set();
+      if (openConfirm?.kind === 'bulk-delete') openConfirm = null;
+    });
   });
 
   // Unmount-only cleanup: pins `mounted` to false so post-await state writes
@@ -195,6 +232,127 @@
     openConfirm = null;
   }
 
+  function toggleSelectAll(): void {
+    if (versionIsDisabled) return;
+    const visible = sortedAssets;
+    if (visible.length === 0) return;
+    const allSelected = visible.every((a) => selectedIds.has(a.id));
+    selectedIds = allSelected ? new Set() : new Set(visible.map((a) => a.id));
+  }
+
+  function toggleRow(id: number): void {
+    if (versionIsDisabled) return;
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedIds = next;
+  }
+
+  function openBulkConfirm(): void {
+    if (versionIsDisabled || selectedIds.size === 0) return;
+    let orphanCount = 0;
+    let referencedCount = 0;
+    for (const a of assets) {
+      if (!selectedIds.has(a.id)) continue;
+      if (a.is_referenced) referencedCount++;
+      else orphanCount++;
+    }
+    banner = null;
+    openConfirm = {
+      kind: 'bulk-delete',
+      orphanCount,
+      referencedCount,
+      checkboxChecked: referencedCount === 0,
+    };
+  }
+
+  function cancelBulk(): void {
+    if (openConfirm?.kind === 'bulk-delete') openConfirm = null;
+  }
+
+  // Storm coalescer (spec L213). Idempotent across single-delete + bulk-loop
+  // 404s. First 404 schedules the 500ms timer; subsequent 404s in the window
+  // increment the counter. On flush: one banner + one onRefetchAssets().
+  function note404(): void {
+    storm404Seen++;
+    if (storm404Timer != null) return;
+    storm404Timer = setTimeout(async () => {
+      const seen = storm404Seen;
+      storm404Timer = null;
+      storm404Seen = 0;
+      if (!mounted) return;
+      banner = seen > 1
+        ? 'Some assets were deleted by another user.'
+        : 'This asset was deleted by another user.';
+      await onRefetchAssets();
+    }, 500);
+  }
+
+  async function performBulkDelete(): Promise<void> {
+    if (openConfirm?.kind !== 'bulk-delete' || selectedIds.size === 0) return;
+    const myRunId = runId;
+    const ids = Array.from(selectedIds);
+    const bannerAtStart = banner;
+    openConfirm = null;
+    const controller = new AbortController();
+    bulkController = controller;
+    const failed: string[] = [];
+    let done = 0;
+    let had404 = false;
+    const total = ids.length;
+    try {
+      for (const aid of ids) {
+        if (!mounted || runId !== myRunId) {
+          controller.abort();
+          if (mounted) await onRefetchAssets();
+          return;
+        }
+        const asset = assets.find((x) => x.id === aid);
+        if (!asset) { failed.push(`#${aid}`); continue; }
+        try {
+          await deleteRunAsset(runId, aid, {
+            force: asset.is_referenced,
+            signal: controller.signal,
+          });
+          done++;
+        } catch (e: unknown) {
+          const err = e as { name?: string; status?: number } | null;
+          if (err?.name === 'AbortError') {
+            if (mounted) await onRefetchAssets();
+            return;
+          }
+          if (err?.status === 404) {
+            note404();
+            had404 = true;
+            done++;
+            continue;
+          }
+          failed.push(asset.filename);
+        }
+      }
+      if (!mounted) return;
+      if (banner === bannerAtStart) banner = null;
+      // Spec L213: if any 404 fired note404(), the storm timer owns the assets
+      // refetch — skip the bulk's own to avoid a duplicate. miniProjects is
+      // never refetched by the storm coalescer, so it still runs when needed.
+      const anyReferenced = ids.some((id) => assets.find((a) => a.id === id)?.is_referenced);
+      if (had404) {
+        if (anyReferenced) await onRefetchMiniProjects();
+      } else if (anyReferenced) {
+        await Promise.all([onRefetchAssets(), onRefetchMiniProjects()]);
+      } else {
+        await onRefetchAssets();
+      }
+      summaryBanner = failed.length === 0
+        ? `Deleted ${done} of ${total}.`
+        : `Deleted ${done} of ${total}. Failed: ${failed.join(', ')}.`;
+      selectedIds = new Set();
+    } finally {
+      // Identity guard: only clear if no newer bulk has reassigned.
+      if (bulkController === controller) bulkController = null;
+    }
+  }
+
   function handleDeleteClick(assetId: number, isReferenced: boolean): void {
     if (versionIsDisabled) return;
     banner = null;
@@ -224,8 +382,9 @@
         banner = 'You no longer have permission to force-delete. Refresh and retry.';
         await onReloadRun();
       } else if (err?.status === 404) {
-        banner = 'This asset was deleted by another user.';
-        await onRefetchAssets();
+        // Route through the storm coalescer (spec L212/213) — banner +
+        // refetch happen at the 500ms flush.
+        note404();
       } else {
         banner = err?.message ?? 'Delete failed.';
       }
@@ -431,6 +590,57 @@
   {#if banner}
     <div role="status" class="banner banner-error">{banner}</div>
   {/if}
+  {#if summaryBanner}
+    <div role="status" class="banner banner-info">{summaryBanner}</div>
+  {/if}
+  {#if selectedIds.size > 0}
+    <div class="bulk-strip">
+      <span>{selectedIds.size} selected</span>
+      {#if openConfirm?.kind === 'bulk-delete'}
+        {@const total = openConfirm.orphanCount + openConfirm.referencedCount}
+        <div class="inline-confirm bulk-inline-confirm">
+          <p>
+            Delete {total} selected ({openConfirm.orphanCount} orphan, {openConfirm.referencedCount} referenced)?
+            {#if openConfirm.referencedCount > 0}
+              This will break <code>![ref]</code> markdown in {openConfirm.referencedCount} mini-project{openConfirm.referencedCount === 1 ? '' : 's'}.
+              This cannot be undone.
+            {/if}
+          </p>
+          {#if openConfirm.referencedCount > 0}
+            <label>
+              <input
+                type="checkbox"
+                data-role="bulk-confirm"
+                checked={openConfirm.checkboxChecked}
+                onchange={(e) => {
+                  if (openConfirm?.kind === 'bulk-delete') {
+                    openConfirm.checkboxChecked = (e.currentTarget as HTMLInputElement).checked;
+                  }
+                }}
+              />
+              I understand
+            </label>
+            <button
+              type="button"
+              class="danger"
+              disabled={!openConfirm.checkboxChecked || !course.is_admin}
+              title={!course.is_admin ? 'Only course admins can force-delete a referenced asset.' : ''}
+              onclick={performBulkDelete}
+            >Force delete</button>
+          {:else}
+            <button type="button" onclick={performBulkDelete}>Confirm</button>
+          {/if}
+          <button type="button" onclick={cancelBulk}>Cancel</button>
+        </div>
+      {:else}
+        <button
+          type="button"
+          disabled={versionIsDisabled}
+          onclick={openBulkConfirm}
+        >Delete {selectedIds.size} selected</button>
+      {/if}
+    </div>
+  {/if}
   {#if uploadProgress}
     <div role="status" aria-live="polite" class="upload-progress">
       Uploading {uploadProgress.current} of {uploadProgress.total}…
@@ -449,7 +659,15 @@
     <table class="assets-table">
       <thead>
         <tr>
-          <th scope="col"><input type="checkbox" disabled aria-label="Select all" /></th>
+          <th scope="col">
+            <input
+              type="checkbox"
+              aria-label="Select all"
+              checked={sortedAssets.length > 0 && sortedAssets.every((a) => selectedIds.has(a.id))}
+              disabled={versionIsDisabled}
+              onclick={toggleSelectAll}
+            />
+          </th>
           <th scope="col" aria-sort={sortField === 'filename' ? sortDir : 'none'}>
             <button type="button" class="sort-btn" onclick={() => cycleSort('filename')}>Filename</button>
           </th>
@@ -467,7 +685,15 @@
       <tbody>
         {#each sortedAssets as a (a.id)}
           <tr data-asset-id={a.id}>
-            <td><input type="checkbox" aria-label="Select {a.filename}" /></td>
+            <td>
+              <input
+                type="checkbox"
+                aria-label="Select {a.filename}"
+                checked={selectedIds.has(a.id)}
+                disabled={versionIsDisabled}
+                onclick={() => toggleRow(a.id)}
+              />
+            </td>
             <td>
               <a href={serveUrl(a.filename)} target="_blank" rel="noopener noreferrer">
                 {a.filename}
@@ -639,6 +865,27 @@
     background: #fdecea;
     color: #b71c1c;
     border: 1px solid #f5c6cb;
+  }
+  .banner-info {
+    background: #e3f2fd;
+    color: #0d47a1;
+    border: 1px solid #90caf9;
+  }
+  .bulk-strip {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    border-radius: 4px;
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+  .bulk-inline-confirm {
+    flex: 1 1 100%;
+    margin-bottom: 0;
   }
   .run-assets-tab.drag-over .assets-table,
   .run-assets-tab.drag-over .empty-state {
