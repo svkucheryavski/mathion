@@ -124,6 +124,7 @@
     untrack(() => {
       selectedIds = new Set();
       if (openConfirm?.kind === 'bulk-delete') openConfirm = null;
+      summaryBanner = null;
     });
   });
 

@@ -1775,6 +1775,39 @@ describe('RunAssetsTab — bulk delete execution', () => {
     expect(onRefetchMiniProjects).not.toHaveBeenCalled();
   });
 
+  it('switching filter pill clears the bulk-delete summary banner', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    const orphans = [
+      { ...mkAsset(1, 'a.pdf'), is_referenced: false },
+      { ...mkAsset(2, 'b.pdf'), is_referenced: false },
+    ];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: orphans,
+        onRefetchAssets,
+        onRefetchMiniProjects,
+      } as any),
+    });
+    flushSync();
+
+    selectAllCheckbox().click();
+    flushSync();
+    findButton(target, /Delete 2 selected/i)!.click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/Deleted 2 of 2/);
+
+    findButton(target, /Orphan/)!.click();
+    await settle();
+
+    expect(target.textContent).not.toMatch(/Deleted 2 of 2/);
+  });
+
   it('force flag is derived from backend is_referenced (not client scan)', async () => {
     // Backend flags it referenced, but no MPs reference the file in their assignment_md
     (deleteRunAsset as any).mockResolvedValue(undefined);
