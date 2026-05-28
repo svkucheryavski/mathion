@@ -556,6 +556,13 @@
     if (files.length > 0) await performUpload(files);
   }}
 >
+  {#if banner}
+    <div role="status" class="banner banner-error">{banner}</div>
+  {/if}
+  {#if summaryBanner}
+    <div role="status" class="banner banner-info">{summaryBanner}</div>
+  {/if}
+
   <div class="toolbar">
     <div class="filter-pills" role="group" aria-label="Filter assets">
       <button
@@ -601,12 +608,6 @@
     </div>
   </div>
 
-  {#if banner}
-    <div role="status" class="banner banner-error">{banner}</div>
-  {/if}
-  {#if summaryBanner}
-    <div role="status" class="banner banner-info">{summaryBanner}</div>
-  {/if}
   {#if selectedIds.size > 0}
     <div class="bulk-strip">
       <span>{selectedIds.size} selected</span>
