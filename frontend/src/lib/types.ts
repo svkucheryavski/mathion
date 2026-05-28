@@ -413,6 +413,7 @@ export type RunAssetResponse = {
   mime_type: string;
   uploaded_at: string;
   uploaded_by: number | null;
+  uploaded_by_email: string | null;
   is_referenced: boolean;
 };
 

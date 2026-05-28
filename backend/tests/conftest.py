@@ -22,6 +22,11 @@ class CSRFTestClient(BaseTestClient):
         kwargs["headers"].setdefault("X-Requested-With", "mathion")
         return super().patch(*args, **kwargs)
 
+    def put(self, *args, **kwargs):
+        kwargs.setdefault("headers", {})
+        kwargs["headers"].setdefault("X-Requested-With", "mathion")
+        return super().put(*args, **kwargs)
+
     def delete(self, *args, **kwargs):
         kwargs.setdefault("headers", {})
         kwargs["headers"].setdefault("X-Requested-With", "mathion")

@@ -656,6 +656,7 @@ class RunAssetResponse(BaseModel):
     mime_type: str
     uploaded_at: datetime
     uploaded_by: int | None
+    uploaded_by_email: str | None = None
     is_referenced: bool = False
 
     model_config = {"from_attributes": True}

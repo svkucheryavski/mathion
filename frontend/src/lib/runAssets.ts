@@ -57,6 +57,51 @@ export async function uploadRunAsset(
   return r.json();
 }
 
-export function deleteRunAsset(runId: number, assetId: number): Promise<void> {
-  return api.delete(`/api/runs/${runId}/assets/${assetId}`);
+// Mirrors uploadRunAsset's wire pattern exactly (PUT + asset_id in URL):
+// credentials: 'include', X-Requested-With CSRF, no manual Content-Type (browser
+// sets multipart boundary), AbortError pass-through, network -> ApiError(0),
+// 401 -> emitUnauthorized + ApiError(401), non-ok -> ApiError(status, detail,
+// error_code). The incoming file's name is irrelevant — backend preserves the
+// existing asset's filename.
+export async function replaceRunAsset(
+  runId: number,
+  assetId: number,
+  file: File,
+  signal?: AbortSignal,
+): Promise<RunAssetResponse> {
+  const fd = new FormData();
+  fd.append('file', file);
+  let r: Response;
+  try {
+    r = await fetch(`/api/runs/${runId}/assets/${assetId}`, {
+      method: 'PUT',
+      body: fd,
+      signal,
+      credentials: 'include',
+      headers: { 'X-Requested-With': 'mathion' },
+    });
+  } catch (e: unknown) {
+    if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
+    throw new ApiError(0, 'Could not reach server. Check your connection.');
+  }
+  if (r.status === 401) {
+    emitUnauthorized(location.pathname + location.search + location.hash);
+    throw new ApiError(401, 'Not authenticated');
+  }
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({ detail: 'Replace failed' }));
+    throw new ApiError(r.status, payload.detail ?? 'Replace failed', payload.error_code);
+  }
+  return r.json();
+}
+
+export function deleteRunAsset(
+  runId: number,
+  assetId: number,
+  options?: { force?: boolean; signal?: AbortSignal },
+): Promise<void> {
+  const query = options?.force === true ? '?force=true' : '';
+  return api.delete(`/api/runs/${runId}/assets/${assetId}${query}`, {
+    signal: options?.signal,
+  });
 }

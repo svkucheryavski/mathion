@@ -16,7 +16,10 @@
     blocks,
     miniProjects,
     onRefetchMiniProjects,
+    onRefetchAssets,
     onNavigateToTab,
+    pendingEditTarget,
+    onPendingEditConsumed,
   }: {
     runId: number;
     runIsPublished: boolean;
@@ -27,8 +30,18 @@
     blocks: BlockResponse[];
     miniProjects: MiniProjectResponse[];
     onRefetchMiniProjects: () => Promise<void>;
-    onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
+    onRefetchAssets?: () => Promise<void>;
+    onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
+    pendingEditTarget?: MiniProjectResponse | null;
+    onPendingEditConsumed?: () => void;
   } = $props();
+
+  async function refetchAll(): Promise<void> {
+    await Promise.all([
+      onRefetchMiniProjects(),
+      onRefetchAssets?.() ?? Promise.resolve(),
+    ]);
+  }
 
   const usedBlockIds = $derived(new Set(miniProjects.map((mp) => mp.block_id)));
   const availableBlocks = $derived(blocks.filter((b) => !usedBlockIds.has(b.id)));
@@ -60,6 +73,23 @@
     forceCheckbox = false;
   });
 
+  // Parent (RunDetailPage) hands us a MP to open in edit mode when the
+  // Assets tab's [Edit] action navigates here. Stale-cascade safe: if the
+  // MP is no longer in our local list (refetch dropped it), we skip
+  // opening the modal but still fire onPendingEditConsumed so the parent
+  // clears the dangling reference. The early-return on null prevents
+  // re-entry once the parent clears pendingEditTarget.
+  $effect(() => {
+    if (!pendingEditTarget) return;
+    const target = pendingEditTarget;
+    const stillExists = miniProjects.some((mp) => mp.id === target.id);
+    if (stillExists) {
+      editTarget = target;
+      modalMode = 'edit';
+    }
+    onPendingEditConsumed?.();
+  });
+
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0,
   );
@@ -76,7 +106,7 @@
     deleteError = null;
     try {
       await deleteMiniProject(mpId, { force: true });
-      await onRefetchMiniProjects();
+      await refetchAll();
       deleteConfirmId = null;
       forceCheckbox = false;
     } catch (e) {
@@ -94,7 +124,7 @@
     deleteError = null;
     try {
       await deleteMiniProject(mp.id);
-      await onRefetchMiniProjects();
+      await refetchAll();
       deleteConfirmId = null;
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -260,7 +290,7 @@
         modalMode = null;
         editTarget = null;
       }}
-      onSaved={onRefetchMiniProjects}
+      onSaved={refetchAll}
       {onNavigateToTab}
     />
   {/if}

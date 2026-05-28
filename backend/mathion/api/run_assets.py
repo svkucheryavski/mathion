@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -46,7 +47,7 @@ def upload_run_asset(
     content = file.file.read(settings.max_file_size + 1)
     if len(content) > settings.max_file_size:
         raise HTTPException(
-            status_code=400,
+            status_code=413,
             detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
         )
 
@@ -55,7 +56,7 @@ def upload_run_asset(
     )
     if current_total + len(content) > settings.max_course_size:
         raise HTTPException(
-            status_code=400,
+            status_code=413,
             detail=f"Total run asset size would exceed limit ({settings.max_course_size} bytes)",
         )
 
@@ -96,7 +97,116 @@ def upload_run_asset(
 
     db.commit()
     db.refresh(asset)
-    return asset
+    resp = RunAssetResponse.model_validate(asset)
+    resp.is_referenced = False
+    resp.uploaded_by_email = (
+        db.scalar(select(User.email).where(User.id == asset.uploaded_by))
+        if asset.uploaded_by is not None
+        else None
+    )
+    return resp
+
+
+@router.put("/api/runs/{run_id}/assets/{asset_id}", response_model=RunAssetResponse)
+def replace_run_asset(
+    run_id: int,
+    asset_id: int,
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Replace the file content of an existing RunAsset.
+
+    Preserves the row's filename so all RunAssetReference rows stay valid
+    (the incoming file's name is intentionally ignored). Operation ordering
+    guarantees no orphan temp file on any pre-rename failure:
+    `get_or_404` -> ownership check -> extension match (case-insensitive)
+    -> per-file size -> quota delta -> tempfile.mkstemp -> os.replace
+    -> DB commit.
+    """
+    run = get_or_404(db, Run, run_id)
+    require_run_admin_or_teacher(db, user, run)
+
+    asset = get_or_404(db, RunAsset, asset_id)
+    if asset.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Asset not found in this run")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    incoming_ext = validate_extension(file.filename)
+    if incoming_ext is None:
+        raise HTTPException(
+            status_code=400, detail=f"File extension not allowed: {file.filename}"
+        )
+
+    existing_ext = (
+        asset.filename.rsplit(".", 1)[-1].lower() if "." in asset.filename else ""
+    )
+    if incoming_ext != existing_ext:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Extension must match the existing asset's extension ({existing_ext}).",
+        )
+
+    content = file.file.read(settings.max_file_size + 1)
+    if len(content) > settings.max_file_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
+        )
+
+    size_delta = len(content) - asset.file_size
+    if size_delta > 0:
+        current_total = db.scalar(
+            select(func.coalesce(func.sum(RunAsset.file_size), 0)).where(
+                RunAsset.run_id == run_id
+            )
+        )
+        if (current_total or 0) + size_delta > settings.max_course_size:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Total run asset size would exceed limit "
+                    f"({settings.max_course_size} bytes)"
+                ),
+            )
+
+    dirpath = run_asset_storage_dir(run_id)
+    filepath = os.path.join(dirpath, asset.filename)
+    tmp_path: str | None = None
+    try:
+        os.makedirs(dirpath, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=dirpath, prefix=".upload-", suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        os.replace(tmp_path, filepath)
+        tmp_path = None
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail="Failed to write asset file")
+
+    asset.file_size = len(content)
+    asset.mime_type = get_mime_type(incoming_ext)
+    asset.uploaded_at = datetime.now(timezone.utc)
+    asset.uploaded_by = user.id
+    db.commit()
+    db.refresh(asset)
+
+    ref_count = db.scalar(
+        select(func.count()).where(RunAssetReference.run_asset_id == asset.id)
+    )
+    resp = RunAssetResponse.model_validate(asset)
+    resp.is_referenced = (ref_count or 0) > 0
+    resp.uploaded_by_email = (
+        db.scalar(select(User.email).where(User.id == asset.uploaded_by))
+        if asset.uploaded_by is not None
+        else None
+    )
+    return resp
 
 
 @router.get("/api/runs/{run_id}/assets", response_model=list[RunAssetResponse])
@@ -118,6 +228,11 @@ def list_run_assets(
         )
         resp = RunAssetResponse.model_validate(a)
         resp.is_referenced = ref_count > 0
+        resp.uploaded_by_email = (
+            db.scalar(select(User.email).where(User.id == a.uploaded_by))
+            if a.uploaded_by is not None
+            else None
+        )
         result.append(resp)
     return result
 
@@ -174,7 +289,12 @@ def serve_run_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Asset file missing")
-    return FileResponse(filepath, media_type=asset.mime_type, filename=filename)
+    return FileResponse(
+        filepath,
+        media_type=asset.mime_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.delete("/api/runs/{run_id}/assets/{asset_id}", status_code=204)

@@ -354,4 +354,128 @@ describe('RunMiniProjectsTab', () => {
 
     unmount(cmp);
   });
+
+  it('successful normal delete refetches BOTH miniProjects and assets (keeps is_referenced in sync)', async () => {
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const mp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE' && String(url).endsWith('/api/mini-projects/1')) {
+        return jres(null, 204);
+      }
+      return jres([]);
+    });
+
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: {
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [mp],
+      onRefetchMiniProjects,
+      onRefetchAssets,
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
+    confirmBtn.click();
+    await settle();
+
+    expect(onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    expect(onRefetchAssets).toHaveBeenCalledTimes(1);
+
+    unmount(cmp);
+  });
+});
+
+describe('RunMiniProjectsTab — pendingEditTarget consumption', () => {
+  const mpFix: MiniProjectResponse = {
+    id: 10, run_id: 10, block_id: 1, title: 'MP A',
+    assignment_md: 'doc body', assignment_html: '<p>doc body</p>',
+    soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+    is_published: false, first_submitted_at: null,
+    created_at: '2026-05-20T12:00:00Z', updated_at: '2026-05-20T12:00:00Z',
+  };
+
+  function baseProps(overrides: Record<string, unknown> = {}) {
+    return {
+      runId: 10, runIsPublished: false, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks, miniProjects: [mpFix],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it('truthy pendingEditTarget → modal opens in edit mode + onPendingEditConsumed fires once', async () => {
+    const onPendingEditConsumed = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, {
+      target,
+      props: baseProps({ pendingEditTarget: mpFix, onPendingEditConsumed }),
+    });
+    await settle();
+
+    const dialog = target.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    // Edit-mode signature: header reads "Edit — Block 0 — Intro" (mode === 'edit')
+    const heading = target.querySelector('#mp-modal-title');
+    expect(heading?.textContent ?? '').toMatch(/^Edit —/);
+    expect(heading?.textContent ?? '').toContain('Intro');
+    expect(onPendingEditConsumed).toHaveBeenCalledTimes(1);
+
+    unmount(cmp);
+  });
+
+  it('stale pendingEditTarget (id not in miniProjects) → modal NOT opened, consumed still fires', async () => {
+    const onPendingEditConsumed = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, {
+      target,
+      props: baseProps({
+        pendingEditTarget: { ...mpFix, id: 99999 },
+        onPendingEditConsumed,
+      }),
+    });
+    await settle();
+
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(onPendingEditConsumed).toHaveBeenCalledTimes(1);
+
+    unmount(cmp);
+  });
+
+  it('null pendingEditTarget → effect short-circuits, no consumed callback, no modal', async () => {
+    const onPendingEditConsumed = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, {
+      target,
+      props: baseProps({ pendingEditTarget: null, onPendingEditConsumed }),
+    });
+    await settle();
+
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(onPendingEditConsumed).not.toHaveBeenCalled();
+
+    unmount(cmp);
+  });
 });
