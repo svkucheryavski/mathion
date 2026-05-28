@@ -507,6 +507,41 @@ def test_put_replace_preserves_RunAssetReference_rows(
     assert post_ids == pre_ids, "RunAssetReference.id set must be preserved"
 
 
+def test_post_upload_413_on_oversize(admin_client, seed_run_with_groups, monkeypatch):
+    """File larger than settings.max_file_size on POST → 413 (parity with PUT)."""
+    from mathion.api import run_assets as _ra
+
+    run, _, _ = seed_run_with_groups()
+    monkeypatch.setattr(_ra.settings, "max_file_size", 10)
+
+    resp = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("doc.pdf", io.BytesIO(b"X" * 100), "application/pdf")},
+    )
+    assert resp.status_code == 413
+
+
+def test_post_upload_413_on_quota_exceeded(
+    admin_client, seed_run_with_groups, monkeypatch
+):
+    """Upload that pushes the run's aggregate over max_course_size → 413 (parity with PUT)."""
+    from mathion.api import run_assets as _ra
+
+    run, _, _ = seed_run_with_groups()
+    admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("first.pdf", io.BytesIO(b"X" * 30), "application/pdf")},
+    )
+
+    monkeypatch.setattr(_ra.settings, "max_course_size", 50)
+
+    resp = admin_client.post(
+        f"/api/runs/{run['id']}/assets",
+        files={"file": ("second.pdf", io.BytesIO(b"X" * 40), "application/pdf")},
+    )
+    assert resp.status_code == 413
+
+
 def test_put_replace_413_on_oversize(admin_client, seed_run_with_groups, monkeypatch):
     """File larger than settings.max_file_size → 413.
 

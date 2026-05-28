@@ -47,7 +47,7 @@ def upload_run_asset(
     content = file.file.read(settings.max_file_size + 1)
     if len(content) > settings.max_file_size:
         raise HTTPException(
-            status_code=400,
+            status_code=413,
             detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
         )
 
@@ -56,7 +56,7 @@ def upload_run_asset(
     )
     if current_total + len(content) > settings.max_course_size:
         raise HTTPException(
-            status_code=400,
+            status_code=413,
             detail=f"Total run asset size would exceed limit ({settings.max_course_size} bytes)",
         )
 
