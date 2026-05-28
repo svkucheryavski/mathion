@@ -1312,6 +1312,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
     expect(checkbox).not.toBeNull();
+    expect(document.activeElement).toBe(checkbox);
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();

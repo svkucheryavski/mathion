@@ -149,6 +149,10 @@
     mounted = false;
   });
 
+  function autoFocus(el: HTMLElement): void {
+    el.focus();
+  }
+
   function isExtensionAllowed(name: string): boolean {
     const idx = name.lastIndexOf('.');
     const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
@@ -642,6 +646,7 @@
                 type="checkbox"
                 data-role="bulk-confirm"
                 checked={openConfirm.checkboxChecked}
+                use:autoFocus
                 onchange={(e) => {
                   if (openConfirm?.kind === 'bulk-delete') {
                     openConfirm.checkboxChecked = (e.currentTarget as HTMLInputElement).checked;
@@ -787,6 +792,7 @@
                         type="checkbox"
                         data-role="force-confirm"
                         checked={openConfirm.checkboxChecked}
+                        use:autoFocus
                         onchange={(e) => {
                           if (openConfirm?.kind === 'delete') {
                             openConfirm.checkboxChecked = (e.currentTarget as HTMLInputElement).checked;
