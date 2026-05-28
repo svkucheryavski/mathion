@@ -80,6 +80,17 @@ def test_serve_asset_admin(admin_client, seed_run_with_groups):
     assert response.content == b"hello"
 
 
+def test_serve_asset_uses_inline_content_disposition(admin_client, seed_run_with_groups):
+    """Serve endpoint must set Content-Disposition: inline so browsers render
+    PDFs/images inline instead of forcing a download (T15 step 5)."""
+    run, _, _ = seed_run_with_groups()
+    admin_client.post(f"/api/runs/{run['id']}/assets",
+                      files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")})
+    response = admin_client.get(f"/api/runs/{run['id']}/assets/doc.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("inline")
+
+
 def test_non_member_cannot_serve(auth_client, admin_client, seed_run_with_groups):
     run, _, _ = seed_run_with_groups()
     admin_client.post(f"/api/runs/{run['id']}/assets",

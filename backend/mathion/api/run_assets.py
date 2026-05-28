@@ -289,7 +289,12 @@ def serve_run_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Asset file missing")
-    return FileResponse(filepath, media_type=asset.mime_type, filename=filename)
+    return FileResponse(
+        filepath,
+        media_type=asset.mime_type,
+        filename=filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.delete("/api/runs/{run_id}/assets/{asset_id}", status_code=204)
