@@ -1775,6 +1775,66 @@ describe('RunAssetsTab — bulk delete execution', () => {
     expect(onRefetchMiniProjects).not.toHaveBeenCalled();
   });
 
+  it('switching filter pill clears the error banner', async () => {
+    (deleteRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('Delete failed: backend on fire'), { status: 500 }),
+    );
+    const orphans = [{ ...mkAsset(1, 'a.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: orphans } as any),
+    });
+    flushSync();
+
+    // Single-row delete triggers banner via the 500 fallback.
+    const deleteBtn = target.querySelector('button.row-action-delete') as HTMLButtonElement
+      ?? findButton(target, /^×$/);
+    deleteBtn!.click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+
+    expect(target.textContent).toMatch(/Delete failed: backend on fire/);
+
+    findButton(target, /Orphan/)!.click();
+    await settle();
+
+    expect(target.textContent).not.toMatch(/Delete failed: backend on fire/);
+  });
+
+  it('error banner auto-dismisses after 30s', async () => {
+    vi.useFakeTimers();
+    try {
+      (deleteRunAsset as any).mockRejectedValue(
+        Object.assign(new Error('Delete failed: backend on fire'), { status: 500 }),
+      );
+      const orphans = [{ ...mkAsset(1, 'a.pdf'), is_referenced: false }];
+      component = mount(RunAssetsTab, {
+        target,
+        props: baseProps({ assets: orphans } as any),
+      });
+      flushSync();
+
+      const deleteBtn = target.querySelector('button.row-action-delete') as HTMLButtonElement
+        ?? findButton(target, /^×$/);
+      deleteBtn!.click();
+      flushSync();
+      findButton(target, /^Confirm$/)!.click();
+      // Drain microtasks without real-time advance.
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+      flushSync();
+
+      expect(target.textContent).toMatch(/Delete failed: backend on fire/);
+
+      vi.advanceTimersByTime(30_000);
+      flushSync();
+
+      expect(target.textContent).not.toMatch(/Delete failed: backend on fire/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('switching filter pill clears the bulk-delete summary banner', async () => {
     (deleteRunAsset as any).mockResolvedValue(undefined);
     const onRefetchAssets = vi.fn().mockResolvedValue(undefined);

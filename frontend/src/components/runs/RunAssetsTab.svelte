@@ -124,8 +124,23 @@
     untrack(() => {
       selectedIds = new Set();
       if (openConfirm?.kind === 'bulk-delete') openConfirm = null;
+      banner = null;
       summaryBanner = null;
     });
+  });
+
+  // Auto-dismiss banners after 30s so transient errors / summaries don't
+  // linger forever when the user moves on. Each banner has its own effect
+  // so setting one doesn't reset the other's timer.
+  $effect(() => {
+    if (!banner) return;
+    const t = setTimeout(() => { if (mounted) banner = null; }, 30_000);
+    return () => clearTimeout(t);
+  });
+  $effect(() => {
+    if (!summaryBanner) return;
+    const t = setTimeout(() => { if (mounted) summaryBanner = null; }, 30_000);
+    return () => clearTimeout(t);
   });
 
   // Unmount-only cleanup: pins `mounted` to false so post-await state writes
@@ -839,7 +854,10 @@
 
 <style>
   .run-assets-tab {
-    padding: 1rem 0;
+    padding: 0 0 1rem 0;
+  }
+  .banner:first-child {
+    margin-top: 0;
   }
   .toolbar {
     display: flex;
