@@ -155,24 +155,36 @@
     uploadProgress = { current: 0, total: files.length };
     const controller = new AbortController();
     activeUploadController = controller;
+    const bannerAtStart = banner;
+    let anySuccess = false;
     try {
       for (let i = 0; i < files.length; i++) {
         if (!mounted) return;
         try {
           await uploadRunAsset(runId, files[i]!, controller.signal);
           if (!mounted) return;
+          anySuccess = true;
           uploadProgress = { current: i + 1, total: files.length };
         } catch (e: unknown) {
-          const err = e as { name?: string; status?: number } | null;
-          if (err?.name === 'AbortError' || !mounted) return;
-          if (err?.status === 409) {
-            banner = `An asset named '${files[i]!.name}' already exists. Use Replace on the existing row, or rename your file.`;
+          const err = e as { name?: string; status?: number; message?: string } | null;
+          if (!mounted) return;
+          if (err?.name === 'AbortError') {
+            if (anySuccess) await onRefetchAssets();
             return;
           }
-          throw e;
+          if (err?.status === 409) {
+            banner = `An asset named '${files[i]!.name}' already exists. Use Replace on the existing row, or rename your file.`;
+          } else if (err?.status === 413) {
+            banner = `Uploading '${files[i]!.name}' would exceed this run's storage quota.`;
+          } else {
+            banner = err?.message ?? `Failed to upload '${files[i]!.name}'.`;
+          }
+          if (anySuccess && mounted) await onRefetchAssets();
+          return;
         }
       }
       if (mounted) await onRefetchAssets();
+      if (mounted && banner === bannerAtStart) banner = null;
     } finally {
       if (activeUploadController === controller) activeUploadController = null;
       if (mounted) uploadProgress = null;

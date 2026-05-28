@@ -656,6 +656,63 @@ describe('RunAssetsTab — upload via file picker', () => {
     expect(target.textContent).toMatch(/asset named .*dup\.pdf.* already exists/i);
   });
 
+  it('upload 500 backend error surfaces as banner (not unhandled rejection)', async () => {
+    (uploadRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('Failed to write asset file'), { status: 500 }),
+    );
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'doc.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.textContent).toMatch(/Failed to write asset file/i);
+  });
+
+  it('upload 413 quota error shows dedicated storage-quota banner', async () => {
+    (uploadRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('Quota exceeded'), { status: 413 }),
+    );
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.textContent).toMatch(/big\.pdf.*exceed.*storage quota/i);
+  });
+
+  it('multi-file partial success then failure refetches so the persisted file appears', async () => {
+    let callCount = 0;
+    (uploadRunAsset as any).mockImplementation((_rid: number, file: File) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve(mkAsset(99, file.name));
+      return Promise.reject(
+        Object.assign(new Error('Failed to write asset file'), { status: 500 }),
+      );
+    });
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, { target, props: { ...baseProps(), onRefetchAssets } });
+    flushSync();
+
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file1 = new File(['x'], 'good.pdf', { type: 'application/pdf' });
+    const file2 = new File(['y'], 'bad.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file1, file2], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(uploadRunAsset).toHaveBeenCalledTimes(2);
+    expect(onRefetchAssets).toHaveBeenCalled();
+    expect(target.textContent).toMatch(/Failed to write asset file/i);
+  });
+
   it('picking an oversize file blocks upload and shows inline error', async () => {
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
