@@ -16,6 +16,7 @@
     blocks,
     miniProjects,
     onRefetchMiniProjects,
+    onRefetchAssets,
     onNavigateToTab,
     pendingEditTarget,
     onPendingEditConsumed,
@@ -29,10 +30,18 @@
     blocks: BlockResponse[];
     miniProjects: MiniProjectResponse[];
     onRefetchMiniProjects: () => Promise<void>;
+    onRefetchAssets?: () => Promise<void>;
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
     pendingEditTarget?: MiniProjectResponse | null;
     onPendingEditConsumed?: () => void;
   } = $props();
+
+  async function refetchAll(): Promise<void> {
+    await Promise.all([
+      onRefetchMiniProjects(),
+      onRefetchAssets?.() ?? Promise.resolve(),
+    ]);
+  }
 
   const usedBlockIds = $derived(new Set(miniProjects.map((mp) => mp.block_id)));
   const availableBlocks = $derived(blocks.filter((b) => !usedBlockIds.has(b.id)));
@@ -97,7 +106,7 @@
     deleteError = null;
     try {
       await deleteMiniProject(mpId, { force: true });
-      await onRefetchMiniProjects();
+      await refetchAll();
       deleteConfirmId = null;
       forceCheckbox = false;
     } catch (e) {
@@ -115,7 +124,7 @@
     deleteError = null;
     try {
       await deleteMiniProject(mp.id);
-      await onRefetchMiniProjects();
+      await refetchAll();
       deleteConfirmId = null;
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -281,7 +290,7 @@
         modalMode = null;
         editTarget = null;
       }}
-      onSaved={onRefetchMiniProjects}
+      onSaved={refetchAll}
       {onNavigateToTab}
     />
   {/if}

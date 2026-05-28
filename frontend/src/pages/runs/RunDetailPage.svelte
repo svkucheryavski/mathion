@@ -405,6 +405,7 @@
         blocks={blocks ?? []}
         miniProjects={miniProjects ?? []}
         onRefetchMiniProjects={refetchMiniProjects}
+        onRefetchAssets={refetchAssets}
         onNavigateToTab={(t) => (activeTab = t)}
         pendingEditTarget={pendingEditTarget}
         onPendingEditConsumed={() => (pendingEditTarget = null)}

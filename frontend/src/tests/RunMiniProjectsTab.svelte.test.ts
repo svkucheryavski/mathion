@@ -354,6 +354,53 @@ describe('RunMiniProjectsTab', () => {
 
     unmount(cmp);
   });
+
+  it('successful normal delete refetches BOTH miniProjects and assets (keeps is_referenced in sync)', async () => {
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const mp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE' && String(url).endsWith('/api/mini-projects/1')) {
+        return jres(null, 204);
+      }
+      return jres([]);
+    });
+
+    const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: {
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [mp],
+      onRefetchMiniProjects,
+      onRefetchAssets,
+      onNavigateToTab: vi.fn(),
+    } });
+    await settle();
+
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
+    confirmBtn.click();
+    await settle();
+
+    expect(onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    expect(onRefetchAssets).toHaveBeenCalledTimes(1);
+
+    unmount(cmp);
+  });
 });
 
 describe('RunMiniProjectsTab — pendingEditTarget consumption', () => {
