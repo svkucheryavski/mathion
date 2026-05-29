@@ -501,9 +501,11 @@ def sync_run_asset_references(db: Session, run_id: int, content_md: str | None, 
 def has_run_teacher_on_course(db: Session, user: "User", course_id: int) -> bool:
     """Return True iff the user has a RunTeacher row on any run of any version of the course.
 
+    WARNING: READ-ONLY UI predicate. Do NOT use as a write-path authorization gate —
+    write paths must use `require_course_admin` / `require_run_admin_or_teacher`.
+
     Used by `GET /api/courses/by-slug/{slug}` only. The version-list and block-list
     endpoints use tighter predicates (IN-subquery / has_run_pinned_to_version).
-    UI-relevant predicate; never used for any write-path authorization decision.
     """
     from sqlalchemy import exists
     from mathion.models import CourseVersion, Run, RunTeacher
@@ -521,9 +523,11 @@ def has_run_teacher_on_course(db: Session, user: "User", course_id: int) -> bool
 def has_run_pinned_to_version(db: Session, user: "User", version_id: int) -> bool:
     """Return True iff the user has a RunTeacher row on a run whose version_id matches.
 
+    WARNING: READ-ONLY UI predicate. Do NOT use as a write-path authorization gate —
+    write paths must use `require_course_admin` / `require_run_admin_or_teacher`.
+
     Used by `GET /api/versions/{vid}/blocks` and `GET /assets/{vid}/{filename}`.
     No `course_id` parameter required — CourseVersion.id is globally unique.
-    UI-relevant predicate; never used for any write-path authorization decision.
     """
     from sqlalchemy import exists
     from mathion.models import Run, RunTeacher
