@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.api.helpers import get_or_404, has_run_teacher_on_course, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user, require_superuser
 from mathion.models import Course, CourseAdmin, CourseVersion
@@ -74,10 +74,26 @@ def get_course_by_slug(slug: str, db: Session = Depends(get_db), user: User = De
     course = db.execute(select(Course).where(Course.slug == slug)).scalar_one_or_none()
     if not course:
         raise HTTPException(status_code=404, detail="Not found")
-    if not _is_admin_for(db, user, course.id):
+
+    # Compute role precedence ONCE — superuser > course-admin > run-teacher.
+    # `out.is_admin` is assigned exactly once at the end so a teacher branch
+    # cannot accidentally inherit an admin flag from a copy-paste omission
+    # (spec §3.1.1).
+    is_admin_role: bool = False
+    if user.is_superuser:
+        is_admin_role = True
+    elif db.scalar(select(exists().where(
+        CourseAdmin.user_id == user.id,
+        CourseAdmin.course_id == course.id,
+    ))):
+        is_admin_role = True
+    elif has_run_teacher_on_course(db, user, course.id):
+        is_admin_role = False  # explicit: teachers allowed, not admin
+    else:
         raise HTTPException(status_code=403, detail="Access denied")
+
     out = CourseResponse.model_validate(course)
-    out.is_admin = True
+    out.is_admin = is_admin_role
     return out
 
 
