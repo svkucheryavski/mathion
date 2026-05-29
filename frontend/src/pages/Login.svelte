@@ -1,7 +1,7 @@
 <script lang="ts">
   import { requestPin, verifyPin } from '../lib/auth.svelte';
   import { ApiError } from '../lib/api';
-  import { navigate, safeNext } from '../lib/router.svelte';
+  import { navigate, safeNext, defaultLandingPath } from '../lib/router.svelte';
   import Button from '../components/ui/Button.svelte';
   import Input from '../components/ui/Input.svelte';
   import FormRow from '../components/ui/FormRow.svelte';
@@ -33,10 +33,13 @@
     error = '';
     busy = true;
     try {
-      await verifyPin(email.trim(), pin.trim(), duration);
-      const params = new URLSearchParams(location.search);
-      const next = params.get('next') ?? '/courses';
-      navigate(safeNext(decodeURIComponent(next), location.origin), { replace: true });
+      const user = await verifyPin(email.trim(), pin.trim(), duration);
+      const rawNext = new URLSearchParams(location.search).get('next');
+      const fallback = defaultLandingPath(user);
+      const dest = (rawNext === null || rawNext === '/')
+        ? fallback
+        : safeNext(rawNext, location.origin, fallback);
+      navigate(dest, { replace: true });
     } catch (err: unknown) {
       error = err instanceof ApiError ? err.displayMessage : 'Could not verify PIN.';
     } finally {

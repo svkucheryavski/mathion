@@ -32,11 +32,11 @@ export async function verifyPin(
   pin: string,
   duration_days: 1 | 7 | 30,
 ): Promise<User> {
-  const { user } = await api.post<{ user: User }>('/api/auth/verify-pin', {
-    email,
-    pin,
-    duration_days,
-  });
+  const { user } = await api.post<{ user: User }>(
+    '/api/auth/verify-pin',
+    { email, pin, duration_days },
+    { skipAuthRedirect: true },
+  );
   session.user = user;
   return user;
 }
