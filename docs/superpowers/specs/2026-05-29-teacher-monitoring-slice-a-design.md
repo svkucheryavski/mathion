@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5+5+5+5+5 reviewer pass — rev 6 fixes round-5 Important: §3.1.3a NEW — `GET /assets/{vid}/{filename}` 4th teacher branch using `has_run_pinned_to_version` (without this, `<img>` tags inside `info_html` 403 for teachers, producing broken images in §5.4 banner + block content); §3.1.1 implementation hint pinning `out.is_admin = False` for the teacher branch at `courses.py:80` (copy-paste hazard prevention); §3.2.2 corrects badge-class claim — `.badge-*` is NOT global, scoped inside `RunDetailPage.svelte:433-437`, with explicit guidance for `TeacherRunListPage`; §3.2.4 drops the wrong "line 29" Course-fixture citation (that's `versionFixture`); §3.2.4 mount-count reconciliation: `RunMiniProjectsTab.svelte.test.ts` = 15 (was 13), `RunOverviewTab.checklist.svelte.test.ts` = 7 (was 5); §6.1 corrects inline-seeding citation from `test_run_teachers.py` to `test_run_assets.py:9-17`; §6.2 clarifies `__resetGuardsForTests` vs direct `currentRoute.path` assignment; block-level `info_md` trade-off explicitly acknowledged)
+**Status:** Design (post 5×5+5 reviewer pass — rev 7 fixes round-6 Critical: (1) re-inserts the `#### 3.1.4 Extend GET /me AND PIN-verify response with role flags` heading that rev 6 accidentally consumed when inserting §3.1.3a (this broke §5.6 and §6.1 citations to §3.1.4); (2) corrects §3.1.3a's overreaching "regardless of `is_disabled`" promise — the existing `assets.py:139-140` short-circuit 403s ALL roles on disabled versions (locked in by `test_assets_api.py:216-229`), so the rev-7 design is admin-symmetric — teachers see broken `<img>` on disabled-version content, exactly like admins do today; §5.4 + §6.1 updated. Rev 7 also: promotes the §3.1.1 `is_admin` flag warning to a required single-assignment-site refactor (`courses.py:80`'s unconditional `out.is_admin = True` is deleted; new pattern computes `is_admin_role` once and assigns once); fixes `resolve_asset_urls` citation to `markdown.py:71-80`; tightens §3.1.3a description of the existing StudentEnrollment branch (direct `version_id` join, no Run table); clarifies that `_client_for(db, email)` only logs in (CourseAdmin must be seeded separately first); cites `_create_published_version` for asset upload setup; adds a shared `_seed_teacher_with_pinned_version_and_asset` helper recommendation for the 7 asset tests; flips `test_assets_serve_allows_teacher_on_pinned_disabled_version` to `test_assets_serve_rejects_teacher_on_pinned_disabled_version` (admin-symmetric); adds `test_assets_list_still_admin_only_for_teacher`; fixes `RunOverviewTab.checklist` mount count 7→6; adds `description: ''` to the Course-fixture audit; fixes `validate_session` citation to `auth.py:129-146`.)
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -78,7 +78,9 @@ def has_run_teacher_on_course(db: Session, user: User, course_id: int) -> bool:
 
 The pattern `select(exists().where(...))` with multi-table predicates is already used in this codebase (`helpers.py:267-272`); SQLAlchemy generates an EXISTS over the implicit-cross-join reduced by the WHERE clauses, and `user_id` / `run_id` / `version_id` / `course_id` are all indexed.
 
-**Implementation hazard — `is_admin` flag flip.** The current handler at `backend/mathion/api/courses.py:80` unconditionally sets `out.is_admin = True` after passing the admin/superuser gate. The new teacher branch MUST explicitly set `out.is_admin = False` before returning. A copy-paste mistake that omits this line would expose the entire admin UI to teachers — every `{#if course.is_admin}` hide in §3.2.4 bypassed, publish/unpublish/delete-run buttons visible, MP toggles visible, teacher add/remove visible. Plan task and review MUST diff this line explicitly.
+**Implementation hazard — refactor to a single `is_admin` assignment site.** The current handler at `backend/mathion/api/courses.py:80` unconditionally sets `out.is_admin = True` after passing the admin/superuser gate. Naively adding a teacher branch with an "also remember to set `is_admin = False`" comment is fragile — a copy-paste omission would expose the entire admin UI to teachers (every `{#if course.is_admin}` in §3.2.4 bypassed, publish/unpublish/delete-run visible, MP toggles visible, teacher add/remove visible).
+
+**Required refactor:** compute a boolean `is_admin_role` in the gate logic (`True` for superuser / `CourseAdmin`, `False` for teacher), then assign `out.is_admin = is_admin_role` at exactly ONE site. `CourseResponse.is_admin: bool = False` (`backend/mathion/schemas.py:24`) already defaults to False, so even if the new branch forgets the assignment, the response defaults safely closed — no admin-UI leak. The unconditional `out.is_admin = True` line at `courses.py:80` MUST be deleted as part of this task. Plan task wording: "Refactor `get_course_by_slug` to compute `is_admin_role` once and assign it exactly once."
 
 #### 3.1.2 Open `GET /api/courses/{course_id}/versions` to teachers — pinned-versions-only filter
 
@@ -165,17 +167,41 @@ Write endpoints on versions/blocks/sequences/items remain `require_course_admin`
 
 #### 3.1.3a Open `GET /assets/{version_id}/{filename}` to teachers — same pinned-version-only gate
 
-`VersionResponse.info_html` (§3.1.2) and `BlockResponse.info_html` (§3.1.3) embed `<img src="/assets/{vid}/{filename}">` URLs generated by `resolve_asset_urls` (`backend/mathion/api/helpers.py:308`). Without opening the asset-serving endpoint, every embedded image and downloadable file returns 403 to teachers — the §5.4 disabled-version banner and any block content referencing assets render as broken images. This is the natural read-companion to §3.1.2 and §3.1.3.
+`VersionResponse.info_html` (§3.1.2) and `BlockResponse.info_html` (§3.1.3) embed `<img src="/assets/{vid}/{filename}">` URLs generated by `resolve_asset_urls` (`backend/mathion/markdown.py:71-80`; called from `backend/mathion/api/helpers.py:308`). Without opening the asset-serving endpoint, every embedded image and downloadable file returns 403 to teachers — block content and the version info panel render as broken images. This is the natural read-companion to §3.1.2 and §3.1.3.
 
-Current handler `serve_asset` at `backend/mathion/api/assets.py:130-158` allows three branches: `user.is_superuser` OR `CourseAdmin` on the owning course OR active `StudentEnrollment` on a run pinned to this version. Add a fourth branch:
+Current handler `serve_asset` at `backend/mathion/api/assets.py:130-182` has this gate structure:
 
-4. `has_run_pinned_to_version(db, user, version_id)` is True → allow (NEW).
+```
+1. version = get_or_404(db, CourseVersion, version_id)
+2. if version.is_disabled: 403 (for ALL roles — pre-existing behavior; admins included)
+3. if not user.is_superuser:
+     if not CourseAdmin on version.course_id:
+       if not StudentEnrollment.is_active on version_id (direct join, no Run table):
+         403
+4. asset existence + path-safety checks; return FileResponse
+```
 
-Same helper as §3.1.3 — no new function. The handler stays a single `serve_asset` with the four-branch gate; the existing FileResponse/streaming logic is unchanged. Write endpoints on assets (`upload_asset`, `list_assets` admin-only list, `delete_asset`) stay `require_course_admin`.
+Slice A inserts a 4th role branch at step 3, after the StudentEnrollment check:
 
-The teacher branch allows reads regardless of `version.state` (including `created`-state drafts) and regardless of `version.is_disabled` — same UX rationale as §3.1.3. A teacher of a run pinned to a `created`-state v2 with an image asset CAN download it; the run-detail UI renders the image instead of 403.
+```
+3. if not user.is_superuser:
+     if not CourseAdmin on version.course_id:
+       if not StudentEnrollment.is_active on version_id:
+         if not has_run_pinned_to_version(db, user, version_id):  # NEW
+           403
+```
 
-**Existence-confirmation oracle.** The existing endpoints already 404 for missing vs 403 for forbidden (`assets.py` checks asset existence before the gate); same oracle exists today for admins. Acceptable risk; not in scope to tighten.
+Same helper as §3.1.3 — no new function. The handler stays a single `serve_asset` with the four-branch gate; `FileResponse`, asset-existence check, and path-safety realpath verification (`assets.py:175-180`) are all unchanged. Write endpoints on assets (`upload_asset`, `list_assets` admin-only list, `delete_asset`) stay `require_course_admin`.
+
+The teacher branch allows reads regardless of `version.state` (including `created`-state drafts) — same UX rationale as §3.1.3 for block content. A teacher of a run pinned to a `created`-state v2 with an image asset CAN download it; the block UI renders the image instead of 403.
+
+**`is_disabled` semantics — admin-symmetric (NOT changed).** The pre-existing `assets.py:139-140` short-circuit raises 403 on `version.is_disabled` BEFORE any role branch — for everyone, including superusers and admins. This is locked in by the existing test `test_serve_asset_disabled_version_blocks_admin` at `backend/tests/test_assets_api.py:216-229`. Slice A does NOT change this: when a pinned version is disabled, embedded `<img>` tags 403 for teachers, the same way they 403 for admins today. The §5.4 disabled-version banner copy (and the tooltip overlays on action buttons) DOES still render — the banner is driven by `versionIsDisabled` frontend state, not by an HTTP asset fetch. What 403s is only the embedded image content authored inside `info_html`. This is acceptable: the UX is symmetric with admin behavior, and an admin who disabled a version doesn't expect its image content to remain live anyway. Widening this to teacher-only would be (a) inconsistent (admins would still see broken images) and (b) a behavior change requiring its own design pass; out of scope for Slice A.
+
+**Existence-confirmation oracle.** The asset-existence check at `assets.py:160-167` runs AFTER the gate — so 404 leaks only to authorized callers (admin / enrolled / pinned-teacher). Non-pinned non-admins get 403 with no existence signal. Same oracle exists today; Slice A doesn't widen it.
+
+**Path-traversal defenses unchanged.** `upload_asset` sanitizer (`backend/mathion/assets.py:29-49`) restricts filenames to `[a-z0-9-]+` plus extension; `serve_asset` defends in depth via `os.path.realpath` + `commonpath` at `assets.py:175-180`. Adding the teacher branch does not change the file-system boundary — teachers of a pinned version are bounded to `_asset_dir(version_id)`. No new attack surface.
+
+#### 3.1.4 Extend `GET /me` AND PIN-verify response with role flags
 
 `UserResponse` (`backend/mathion/schemas.py`) gains two booleans with defaults to preserve `from_attributes=True` deserialization from the ORM:
 
@@ -451,7 +477,7 @@ Required (not optional) — RunDetailPage always loads `course` before mounting 
 | File | Mount sites (verified by grep at rev-6 spec time; verify at impl time) |
 |---|---|
 | `frontend/src/tests/RunOverviewTab.svelte.test.ts` | 7 (shared `mountOverview` helper — single helper edit) |
-| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | 7 (separate file ALSO mounting RunOverviewTab; shared `mountTab` helper) |
+| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | 6 (separate file ALSO mounting RunOverviewTab; shared `mountTab` helper at line 38 — the helper DECLARATION is not a mount site; calls are at lines 62/79/106/117/129/140) |
 | `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` | 15 (NO shared helper today — extract `mountMpTab` as part of this task, then one helper edit) |
 | `frontend/src/tests/RunTeachersTab.svelte.test.ts` | 6 (inline mounts) |
 | `frontend/src/tests/RunDetailPage.svelte.test.ts` | indirect; audit `course = {...}` and `/api/courses/by-slug/` response literals for missing `is_admin` (see below) |
@@ -459,7 +485,7 @@ Required (not optional) — RunDetailPage always loads `course` before mounting 
 
 **Required:** as part of this task, extract a `mountMpTab(extra)` helper inside `RunMiniProjectsTab.svelte.test.ts` (mirroring the existing `mountOverview` pattern) so the 15 mount sites are updated through one helper, not 15 inline edits. The plan task MUST size for this. Without the helper, the prop change touches every test body and the cleanup-cost balloons.
 
-**Test-fixture audit required for `RunDetailPage.svelte.test.ts`.** At least one Course-shape inline `/api/courses/by-slug/` response inside this file is MISSING the `is_admin` field at rev-6 spec time: line 56 has `jres({ id: 1, slug: 'c', name: 'C' })` with no `is_admin` (and no `description`). Line 23 has the canonical `courseFixture` with `is_admin: true` (correct); line 29 is `versionFixture` (NOT a Course — earlier revisions of this spec mis-cited this line). Because `Course.is_admin` is non-optional, an absent value flows as `undefined → false`, hiding admin controls under `{#if course.is_admin}` and silently regressing the Publish-bar and Assets-tab-integration tests. The prop-wiring task MUST grep the file end-to-end for `/courses/by-slug/` responses and for `course = {...}` literals — there may be more than one beyond line 56 (line ranges below 199 already verified at spec time; verify above 199 at impl time) — and explicitly set `is_admin: true` (preserving today's behavior) before running the suite.
+**Test-fixture audit required for `RunDetailPage.svelte.test.ts`.** At least one Course-shape inline `/api/courses/by-slug/` response inside this file is MISSING the `is_admin` AND `description` fields at rev-7 spec time: line 56 has `jres({ id: 1, slug: 'c', name: 'C' })` with no `is_admin` and no `description`. Line 23 has the canonical `courseFixture` with `is_admin: true` (correct); line 29 is `versionFixture` (NOT a Course — earlier revisions of this spec mis-cited this line). Because both `Course.is_admin` and `Course.description` are non-optional in `frontend/src/lib/types.ts:198-200`, an absent `is_admin` flows as `undefined → false`, hiding admin controls under `{#if course.is_admin}` and silently regressing the Publish-bar and Assets-tab-integration tests; an absent `description` triggers TS-strict warnings. The prop-wiring task MUST grep the file end-to-end for `/courses/by-slug/` responses and for `course = {...}` literals — there may be more than one beyond line 56 (line ranges below 199 already verified at spec time; verify above 199 at impl time) — and explicitly set `is_admin: true` AND `description: ''` (preserving today's behavior) before running the suite.
 
 **Conditional hides inside each tab:**
 
@@ -621,7 +647,9 @@ If an admin removes a teacher's `RunTeacher` row while the teacher has the run-d
 
 ### 5.4 Course pinned version disabled
 
-Existing `versionIsDisabled` UX (banner above tab content + tooltips on action buttons) already works for both roles — the `pinnedVersion.is_disabled` field flows through the same loadAll path. The §3.1.3 teacher branch explicitly allows reads on `is_disabled` versions to preserve this. Manual smoke step 6b confirms.
+Existing `versionIsDisabled` UX (banner above tab content + tooltips on action buttons) already works for both roles — the `pinnedVersion.is_disabled` field flows through the same loadAll path. The §3.1.3 teacher branch explicitly allows reads on `is_disabled` versions, so block text content (including `info_html` markup) renders. Manual smoke step 6b confirms.
+
+**Embedded asset `<img>` images on disabled versions — admin-symmetric broken-image behavior, accepted.** `serve_asset` 403s for ALL roles when `version.is_disabled` (pre-existing behavior, locked in by `test_assets_api.py:216-229`). So when a pinned version is disabled, the banner and tooltips render normally, but embedded `<img>` references inside `info_html` show broken-image icons — exactly as they do for admins today. Slice A does not widen the asset gate to teacher-only on disabled versions; the asymmetry would be confusing (admins would still see broken images on their own disabled versions), and the use case is rare (admin disabling a live-pinned version mid-term).
 
 ### 5.5 Deep-link from email
 
@@ -639,7 +667,7 @@ Student-only users get `has_course_admin: false` and `has_run_teacher: false`. T
 
 If an admin removes ALL of user X's `RunTeacher` rows AND X has no `CourseAdmin` rows AND X has no enrollment, X's cookie still authenticates `/me`. They see the header with no nav links and an empty `/courses`. Degenerate state; tightening it is out of scope.
 
-`is_disabled` users are handled at the auth layer — `validate_session` (`backend/mathion/auth.py:142-146`) destroys the session and returns `None` when `user.is_disabled`. A disabled teacher cannot reach any of the new endpoints. Flipping `is_disabled` mid-session invalidates the very next request (not the current page state) — the user's next API call returns 401 and the frontend's ApiError flow takes over. No extra guard needed.
+`is_disabled` users are handled at the auth layer — `validate_session` (`backend/mathion/auth.py:129-146`) destroys the session and returns `None` when `user.is_disabled`. A disabled teacher cannot reach any of the new endpoints. Flipping `is_disabled` mid-session invalidates the very next request (not the current page state) — the user's next API call returns 401 and the frontend's ApiError flow takes over. No extra guard needed.
 
 If an admin deletes the user row outright, `validate_session`'s `db.get(User, session.user_id)` returns `None` and `get_current_user` (`dependencies.py:22-23`) cleanly 401s the next request — no 500 risk.
 
@@ -667,7 +695,7 @@ If `session.user` is null when `/teaching` mounts (cookie restore not yet comple
 
 ### 6.1 Backend (pytest, `backend/.venv`)
 
-New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` fixtures already exist in `backend/tests/conftest.py:124-130` and `:133-142` — leverage them. There is NO `course_admin_client` fixture; for tests that need a non-superuser `CourseAdmin`, follow the inline-seeding pattern at `backend/tests/test_run_assets.py:9-17` (`_client_for(db, email)` helper that calls `request_pin` + `verify_pin` directly and mints an authenticated client) — copy that helper into `test_teaching.py`, create a User row, insert a `CourseAdmin` row, then mint the client via the local helper. (Earlier revisions of this spec cited `test_run_teachers.py` as the precedent; that file actually uses `admin_client` (superuser) exclusively. The genuine non-superuser inline-seeding pattern is in `test_run_assets.py`.)
+New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` fixtures already exist in `backend/tests/conftest.py:124-130` and `:133-142` — leverage them. There is NO `course_admin_client` fixture; for tests that need a non-superuser `CourseAdmin`, copy `_client_for(db, email)` from `backend/tests/test_run_assets.py:9-17` (calls `request_pin` + `verify_pin` and mints a cookied client). **IMPORTANT — the helper logs in only.** It does NOT seed any role rows; the caller must FIRST seed the `User` row AND insert the `CourseAdmin(user_id=u.id, course_id=c.id)` row, THEN call `_client_for(db, u.email)` to get the authenticated client. A plan-writer who treats `_client_for(...)` as a one-shot like `admin_client` will produce tests where the cascade-guard assertions pass for the wrong reason (the user is just a plain authenticated user, not a CourseAdmin). Pattern: seed → `_client_for` → exercise. (Earlier revisions of this spec cited `test_run_teachers.py` as the precedent; that file actually uses `admin_client` (superuser) exclusively. The genuine non-superuser inline-seeding pattern is in `test_run_assets.py`.)
 
 **Helper unit tests** are called as Python functions (NOT via HTTP), matching the precedent at `backend/tests/test_slugify.py:3` and `test_run_permissions.py:6` — `from mathion.api.helpers import has_run_teacher_on_course, has_run_pinned_to_version` and call with the `db` session + inline-seeded rows. No HTTP round-trip needed.
 
@@ -704,13 +732,18 @@ New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` 
 - `test_blocks_list_allows_teacher_on_pinned_draft_state_version` (locks Critical loader-mount fix)
 - `test_blocks_list_rejects_teacher_on_unpinned_published_version` (cross-version leak guard)
 - `test_blocks_list_still_rejects_non_member`
-- `test_assets_serve_allows_teacher_on_pinned_version` (§3.1.3a — fixture: upload a small asset via admin, then GET `/assets/{vid}/{filename}` as teacher; assert 200 + correct body bytes)
-- `test_assets_serve_allows_teacher_on_pinned_disabled_version` (locks §5.4 banner rendering with embedded `<img>`)
-- `test_assets_serve_allows_teacher_on_pinned_draft_state_version` (locks §3.1.3a draft loader-mount)
+- `test_assets_serve_allows_teacher_on_pinned_version` (§3.1.3a — fixture: upload a small asset via admin (see helper note below), then `GET /assets/{vid}/{filename}` as teacher; assert 200 + correct body bytes)
+- `test_assets_serve_rejects_teacher_on_pinned_disabled_version` (admin-symmetric — `is_disabled` 403s for all roles; this test LOCKS the §5.4 accepted-broken-image trade-off, NOT a teacher-allowed case. Parallel to existing `test_serve_asset_disabled_version_blocks_admin` at `backend/tests/test_assets_api.py:216-229`.)
+- `test_assets_serve_allows_teacher_on_pinned_draft_state_version` (locks §3.1.3a draft loader-mount — `state` does NOT short-circuit, only `is_disabled` does)
 - `test_assets_serve_rejects_teacher_on_unpinned_version` (cross-version leak guard parallel to blocks test)
 - `test_assets_serve_still_rejects_non_member`
+- `test_assets_list_still_admin_only_for_teacher` (regression — `list_assets` admin-only list path stays admin)
 - `test_assets_upload_still_admin_only_for_teacher` (regression — write path stays admin)
 - `test_assets_delete_still_admin_only_for_teacher` (regression — write path stays admin)
+
+**Asset-upload helper.** The asset-serving tests need an asset on disk under the version's `_asset_dir`. Use the existing pattern from `backend/tests/test_assets_api.py:8-17` — `_create_published_version(admin_client)` + an admin-client POST to `/api/versions/{vid}/assets` with a small in-memory binary. Do NOT confuse this with `/api/runs/{rid}/assets` (run-level uploads use a different URL shape and are not what `serve_asset` reads).
+
+**Shared local helper for the 7 asset tests.** Each test repeats: create course + version, upload one asset via admin, create teacher User row, insert RunTeacher row pinning teacher's run to the version, mint teacher client. To avoid ~80 lines of duplication, extract a `_seed_teacher_with_pinned_version_and_asset(db, *, state='published', is_disabled=False)` helper at the top of `test_teaching.py` returning the tuple `(teacher_client, version, asset_filename)`. The 7 asset tests then vary only the kwargs and the assertions.
 
 **Cascade guard** (lock in that opening `/blocks` does NOT cascade to authoring leaves). Cascade URL patterns verified against current handlers:
 - `test_sequences_list_still_admin_only_for_teacher` — `GET /api/blocks/{block_id}/sequences` (`backend/mathion/api/blocks.py:272`)
@@ -854,7 +887,7 @@ Extend `src/tests/RunTeachersTab.svelte.test.ts`:
 8. To exercise the empty-state path: as the admin from step 2, REMOVE the teacher's `RunTeacher` row via the same `RunTeachersTab`. Log out (admin), log in as the teacher again. The teacher's flags now: `has_run_teacher: false` (assuming no other rows). AppHeader shows no nav links; `/teaching` direct-load still fetches `/api/teaching/runs` and gets `[]`, rendering the page-level empty state ("You're not assigned to any runs yet…").
 9. Direct URL `/courses/:slug/runs/:rid` as a teacher → loads correctly with hidden admin actions.
 10. Direct URL `/courses/:slug/runs/:rid` as a non-member → 403 "Access denied" via existing error path.
-10b. Asset-serving smoke (locks §3.1.3a). As an admin, upload an asset to the pinned course version (existing admin Assets UI under `/courses/{slug}/version/{vid}/assets`); reference the asset via Markdown image syntax in the version `info_md` (or in a block's `info_md`). Log out, log in as the teacher of a run pinned to that version, navigate to the run-detail page. Verify the rendered `info_html` `<img>` loads (HTTP 200, image visible — NO broken-image icon). Devtools Network panel: `GET /assets/{vid}/{filename}` returns 200, not 403.
+10b. Asset-serving smoke (locks §3.1.3a). Use a NON-disabled, NON-draft pinned version for this step (disabled-version embedded images 403 for everyone per §5.4; this step verifies the live path). As an admin, upload an asset to the pinned course version (existing admin Assets UI under `/courses/{slug}/version/{vid}/assets`); reference the asset via Markdown image syntax in the version `info_md` or in a block's `info_md`. Log out, log in as the teacher of a run pinned to that version, navigate to the run-detail page. Verify the rendered `info_html` `<img>` loads (HTTP 200, image visible — NO broken-image icon). Devtools Network panel: `GET /assets/{vid}/{filename}` returns 200, not 403.
 
 11. Pinned-version-switch smoke (locks the IN-subquery filter behavior): as the course admin, create a new version v2 on a course you've assigned the teacher to. The admin UI does NOT expose a run-level re-pin control (verified — `PATCH /api/runs/{rid}` does not accept `version_id`), so re-pin directly in the dev DB: `sqlite3 backend/mathion.db "UPDATE runs SET version_id = <v2.id> WHERE id = <run.id>;"`. Log out, log in as the teacher, reload the run-detail page. Verify `GET /api/courses/{cid}/versions` returns v2 only — v1 should no longer appear in the response, and the version dropdown reflects v2.
 
@@ -930,7 +963,7 @@ No database schema change. No migrations needed.
 - `frontend/src/tests/teaching.test.ts` — new (wire-module).
 - `frontend/src/tests/router.test.ts` — extend with `defaultLandingPath` unit tests.
 - `frontend/src/tests/RunOverviewTab.svelte.test.ts` — extend (7 mount sites via `mountOverview`; update existing tests to pass stub `course={ ..., is_admin: true }`; add `is_admin: false` cases).
-- `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` — extend (7 mount sites via `mountTab`, SAME PROP UPDATES; this file ALSO mounts RunOverviewTab).
+- `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` — extend (6 mount sites via `mountTab`, SAME PROP UPDATES; this file ALSO mounts RunOverviewTab).
 - `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (15 mount sites; extract a `mountMpTab(extra)` helper as part of this task to avoid touching every site).
 - `frontend/src/tests/RunTeachersTab.svelte.test.ts` — extend (6 mount sites; inline mounts).
 - `frontend/src/tests/RunDetailPage.svelte.test.ts` — extend (indirect; RunDetailPage now passes `course` to three more tabs — verify integration).
