@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5×6+codex×2 reviewer pass — rev 9 fixes 2 Critical + 2 Important findings from codex round 8 that survived rev 8): (1) **Publish-bar wrap regression**: status badge and version label are INSIDE `.publish-bar` at `RunDetailPage.svelte:311-316`. Rev 8 said "wrap the entire publish-bar" which would have hidden them too. Rev 9 splits the wrap: badge + label stay outside the `{#if course.is_admin}` block (either via restructure into a sibling `.run-meta` div — recommended — or via narrower inline wrap around only the publish/unpublish buttons at lines 317-335). (2) **`MiniProjectResponse.has_submissions` does NOT exist**: rev 8 used a phantom field. The real lock signal is `first_submitted_at !== null` (`schemas.py:599`, `types.ts:393`, backend uses `mp.first_submitted_at is not None` at `mini_projects.py:145, 203`). Rev 9 swaps all uses; adds `isLocked` helper. (3) **§3.1.6 PATCH `is_published` claim removed**: `RunUpdate` (`schemas.py:394-399`) only has `title`, `start_date`, `end_date`, `groups_enabled`. The "teachers can effectively publish via PATCH" asymmetry sentence was wrong; deleted. (4) **Admin-dead "Open Overview" CTAs**: `RunMiniProjectsTab.svelte:185` ("Publish on Overview") and `MiniProjectModal.svelte:216,222` ("Open Overview to publish/re-enable it") point teachers at admin-only flows. Rev 9 passes `course` into `MiniProjectModal` and wraps the link-rendering portions in `{#if course.is_admin}`; the warning text stays visible; the "Open Overview to set it" (end_date) link stays unconditional because `end_date` is teacher-editable. (5) Stale Minor: user story #2 wording updated; §6.2 line 894 AppHeader claim corrected.
+**Status:** Design (post 5×6+codex×3 reviewer pass — rev 10 fixes 3 Important + 4 Minor from codex round 9): (1) **Run-asset force-delete contract** at `run_assets.py:309-311` — DELETE referenced assets with `?force=true` is course-admin-only (parallel to MP force-delete). Frontend already gates this at `RunAssetsTab.svelte:658-664, 804-811`. §3.1.6 + §3.2.4 + smoke + new §6.2 RunAssetsTab regression tests now document the contract. (2) **"Enable on Overview" CTA + `newDisabledTitle` tooltip** at `RunMiniProjectsTab.svelte:96-99, 170-174` — additional admin-dead surfaces codex round-8 didn't catch. Groups are teacher-editable via `RunUpdate` ONLY when `!run.is_published`; the gate is `{#if !runIsPublished || course.is_admin}`. Tooltip rewrites to a course-aware computation. "See Overview" version-disabled CTA at line 179 also wrapped. (3) **§3.2.4 / §6.2 / §6.3 publish-bar contract reconciliation** — §3.2.4 minimal patch left `.publish-bar` div in DOM, but §6.2 asserted it gone and §6.3 said "GONE." Rev 10 expresses the contract via specific testids: `button[data-action="publish"|"unpublish"]` absent + `[data-testid="status-badge"]` AND `[data-testid="version-label"]` present — works for BOTH wrap options. (4) Minor: mount-counts refreshed via codex round-9 grep (RunOverviewTab 8 / checklist 7 / MP 22 / Teachers 12); `MiniProjectModal` test file renamed to `MiniProjectModal.teacher-gating.svelte.test.ts` to match existing split convention (no plain `MiniProjectModal.svelte.test.ts` exists today); `TeachingRunRow` location reconciled — defined locally in `lib/teaching.ts` per §3.2.3, not in `lib/types.ts`.
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -339,6 +339,8 @@ Assets, mini-projects (CRUD/list/get/render), roster (read/write), groups, evalu
 
 **Force-delete locked MPs is course-admin-only.** `DELETE /api/mini-projects/{mid}?force=true` re-checks `require_course_admin` at `backend/mathion/api/mini_projects.py:204-209` when the MP is locked (has submissions). Non-locked MP delete stays teacher-allowed. §3.2.4 commits accordingly.
 
+**Force-delete REFERENCED run-assets is course-admin-only — same pattern.** `DELETE /api/runs/{rid}/assets/{aid}?force=true` re-checks `require_course_admin_for_run` at `backend/mathion/api/run_assets.py:309-311`. Non-force delete (unreferenced asset) stays teacher-allowed. The frontend already reflects this at `frontend/src/components/runs/RunAssetsTab.svelte:658-664, 804-811` (the force-delete button is gated on `!course.is_admin` already because `RunAssetsTab` already receives `course`). Slice A KEEPS the existing gating — no UI change needed in `RunAssetsTab` since it already consumes `course.is_admin`; only the spec needs to document it correctly so smoke + tests cover it.
+
 ### 3.2 Frontend changes
 
 #### 3.2.1 New `components/chrome/AppHeader.svelte`
@@ -482,10 +484,11 @@ Required (not optional) — RunDetailPage always loads `course` before mounting 
 
 | File | Mount sites (verified by grep at rev-6 spec time; verify at impl time) |
 |---|---|
-| `frontend/src/tests/RunOverviewTab.svelte.test.ts` | 7 (shared `mountOverview` helper — single helper edit) |
-| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | 6 (separate file ALSO mounting RunOverviewTab; shared `mountTab` helper at line 38 — the helper DECLARATION is not a mount site; calls are at lines 62/79/106/117/129/140) |
-| `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` | 15 (NO shared helper today — extract `mountMpTab` as part of this task, then one helper edit) |
-| `frontend/src/tests/RunTeachersTab.svelte.test.ts` | 6 (inline mounts) |
+| `frontend/src/tests/RunOverviewTab.svelte.test.ts` | 8 `mountOverview()` call sites (shared `mountOverview` helper — single helper edit. Verified by `grep -c 'mountOverview(' ...` at rev-10 spec time.) |
+| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | 7 `mountTab()` call sites (separate file ALSO mounting RunOverviewTab; shared `mountTab` helper — single helper edit). |
+| `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` | ~22 mount sites total (mix of helper + direct mounts; codex round-9 grep). Extract a `mountMpTab(extra)` helper as part of this task so the prop change touches one helper, not 22 sites. |
+| `frontend/src/tests/RunTeachersTab.svelte.test.ts` | ~12 mount sites (inline; codex round-9 grep). |
+| `frontend/src/tests/RunAssetsTab.svelte.test.ts` | N/A for prop wiring (already receives `course`); add the new regression tests per §6.2 RunAssetsTab block. |
 | `frontend/src/tests/RunDetailPage.svelte.test.ts` | indirect; audit `course = {...}` and `/api/courses/by-slug/` response literals for missing `is_admin` (see below) |
 | `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` | ~5 (indirect; `setup({...})` helper) |
 
@@ -513,14 +516,29 @@ Required (not optional) — RunDetailPage always loads `course` before mounting 
 
 No new components. The hides are `{#if course.is_admin}` blocks; the prop wiring extends to `RunDetailPage` itself + 3 tabs + `MiniProjectModal` (for the admin-dead navigation CTAs — see next paragraph). The modal's Publish button stays visible to all roles per Option A.
 
-**Admin-dead navigation CTAs in MP flow** (codex round-8). The MP UI surfaces several "Open Overview to ..." link-buttons that point teachers toward admin-only actions. They MUST be conditionally hidden for teachers; the informational warning text stays visible.
+**Admin-dead navigation CTAs in MP flow** (codex rounds 8 + 9). The MP UI surfaces several "Open Overview to ..." link-buttons that point teachers toward admin-only actions. They MUST be conditionally hidden for teachers; the informational warning text stays visible.
 
-- `frontend/src/components/runs/RunMiniProjectsTab.svelte:185` — `<button data-action="nav-overview">Publish on Overview</button>`. The button targets the run publish-bar, which is course-admin-only. Wrap in `{#if course.is_admin}`. The surrounding "Run is not yet published." banner stays visible for teachers (informational; tells them why MP creation may be blocked).
-- `frontend/src/components/runs/MiniProjectModal.svelte:216` — "Run must be published — Open Overview to publish." Hide the "Open Overview to publish" link portion for teachers; keep the "Run must be published" text. Requires passing `course` prop into `MiniProjectModal`.
-- `frontend/src/components/runs/MiniProjectModal.svelte:222` — "This run's course version is disabled — Open Overview to re-enable it." Hide the "Open Overview to re-enable it" link portion for teachers; keep the warning text. (Re-enabling is course-version authoring, admin-only.)
-- `frontend/src/components/runs/MiniProjectModal.svelte:201` — "Run end date must be set — Open Overview to set it." **Keep visible to teachers** — `end_date` is teacher-editable via `RunUpdate` (§3.1.6), so the navigation CTA is functional for them. No change.
+In `RunMiniProjectsTab.svelte`:
 
-Plan-task implementation pattern: pass `course: Course` into `MiniProjectModal` (new required prop) and gate the link-rendering branches in `MiniProjectModal.svelte:439-447` on `course.is_admin` for the two admin-only bullets. The bullet `text` strings stay verbatim; only the `<button>` wrapping the "Open Overview" substring is conditional.
+- **Line 185 — "Publish on Overview"** (`<button data-action="nav-overview">`). Targets the publish-bar, course-admin-only. Wrap in `{#if course.is_admin}`. The surrounding "Run is not yet published." banner stays visible for teachers.
+- **Line 170-175 — "Enable on Overview"** in the `!runGroupsEnabled` banner. Groups are teacher-editable via `RunUpdate` (§3.1.6) ONLY WHEN the run is NOT published; the `RunOverviewTab.svelte:161-167` toggle is hard-disabled by `disabled={run.is_published || groupsEnabledBusy}`. So the gate is `{#if !runIsPublished || course.is_admin}`. Banner text stays unconditional.
+- **Line 96-99 — `newDisabledTitle` tooltip** "Mini-projects require groups. Enable groups on Overview." This tooltip lies to a teacher on a published run (they cannot enable groups without admin unpublishing first). Replace with a course-aware computation:
+  ```ts
+  if (!runGroupsEnabled) {
+    return (!runIsPublished || course.is_admin)
+      ? 'Mini-projects require groups. Enable groups on Overview.'
+      : 'Mini-projects require groups. Ask a course admin to unpublish the run and enable groups.';
+  }
+  ```
+- **Line 179 — "See Overview"** in the `versionIsDisabled` banner. Navigates to Overview which shows the same warning (re-enable is course-version authoring, admin-only). For teachers the CTA has no actionable destination. Wrap in `{#if course.is_admin}`; banner text stays.
+
+In `MiniProjectModal.svelte`:
+
+- **Line 216 — "Open Overview to publish"** (precondition bullet for `!run.is_published`). Hide link portion for teachers; warning text stays.
+- **Line 222 — "Open Overview to re-enable it"** (precondition bullet for `pinnedVersion.is_disabled`). Hide link portion for teachers; warning text stays. (Re-enabling is course-version authoring.)
+- **Line 201 — "Open Overview to set it"** (precondition bullet for `!run.end_date`). **Keep visible to teachers** — `end_date` is teacher-editable. No change.
+
+Plan-task implementation pattern: pass `course: Course` into BOTH `MiniProjectModal` (new required prop) AND require `RunMiniProjectsTab` to have `course` + `runIsPublished` available (it already receives `runIsPublished`). Gate the link-rendering branches in `MiniProjectModal.svelte:439-447` on `course.is_admin` for the two admin-only bullets; the bullet `text` strings stay verbatim, only the `<button>` wrapping the "Open Overview" substring is conditional.
 
 **Breadcrumb fix for pure teachers.** `RunDetailPage.svelte:304-307` renders breadcrumbs as `Courses › {course.name} › Runs › {run.title}` with the first two links pointing at `/courses` and `/courses/{slug}/runs`. For pure teachers (`!course.is_admin`), `/courses` returns an empty list and `/courses/{slug}/runs` is course-admin-gated — both are dead-ends. Rev-8 hide:
 
@@ -896,8 +914,8 @@ Extend `src/tests/RunOverviewTab.svelte.test.ts`:
 - PATCH-title, PATCH-end-date, and `groups_enabled` toggle ARE in the DOM regardless of `course.is_admin` (locks the teacher-allowed PATCH semantics — see §3.1.6).
 
 Extend `src/tests/RunDetailPage.publish.svelte.test.ts` (and/or `RunDetailPage.svelte.test.ts`):
-- When `course.is_admin === false`, the header `.publish-bar` is NOT in the DOM (no Publish button, no Unpublish button, no unpublish-confirm). Status badge and version label ARE still visible.
-- When `course.is_admin === true`, the publish-bar IS in the DOM with all today's behavior unchanged.
+- When `course.is_admin === false`: `button[data-action="publish"]`, `button[data-action="unpublish"]`, and the unpublish `InlineConfirm` are all NOT in the DOM. `[data-testid="status-badge"]` AND `[data-testid="version-label"]` ARE still in the DOM. (This assertion shape works for BOTH publish-bar wrap options in §3.2.4: whether the `.publish-bar` div is empty/removed or restructured into a sibling `.run-meta` is an implementation detail — the contract is about specific buttons absent and specific testid elements present.)
+- When `course.is_admin === true`: Publish or Unpublish button IS in the DOM (whichever matches `run.is_published`); badge + version label IS in the DOM; today's interaction behavior unchanged.
 
 Extend `src/tests/RunMiniProjectsTab.svelte.test.ts`:
 - Existing tests pass `course={ ..., is_admin: true }`.
@@ -908,16 +926,24 @@ Extend `src/tests/RunMiniProjectsTab.svelte.test.ts`:
 - When `course.is_admin === false` AND `!run.is_published`, the "Publish on Overview" link-button at `RunMiniProjectsTab.svelte:185` is NOT in the DOM; the surrounding "Run is not yet published" banner text IS in the DOM.
 - When `course.is_admin === true` AND `!run.is_published`, both the banner AND the "Publish on Overview" link-button ARE in the DOM.
 
-New / extend `src/tests/MiniProjectModal.svelte.test.ts`:
-- Existing tests pass `course={ ..., is_admin: true }` to preserve today's behavior.
-- When `course.is_admin === false` AND `!run.is_published`, the modal's "Open Overview to publish" link-button portion of the precondition bullet at line 216 is NOT in the DOM; the "Run must be published" text IS in the DOM.
-- When `course.is_admin === false` AND `pinnedVersion.is_disabled`, the modal's "Open Overview to re-enable it" link-button portion of the precondition bullet at line 222 is NOT in the DOM; the "This run's course version is disabled" text IS in the DOM.
-- When `course.is_admin === false` AND `!run.end_date`, the modal's "Open Overview to set it" link-button portion at line 201 IS in the DOM (teacher-editable; locks the §3.1.6 PATCH end_date allowance).
+New `src/tests/MiniProjectModal.teacher-gating.svelte.test.ts` (matches the existing split convention — `MiniProjectModal.publish.svelte.test.ts` and `MiniProjectModal.create-edit.svelte.test.ts` already exist; do NOT create a generic `MiniProjectModal.svelte.test.ts`. Verify split convention at impl time):
+- Existing modal tests in the two existing files pass `course={ ..., is_admin: true }` to preserve today's behavior (no `is_admin: false` cases needed in those files — they cover different surfaces).
+- New file `teacher-gating`:
+  - When `course.is_admin === false` AND `!run.is_published`, the modal's "Open Overview to publish" link-button portion of the precondition bullet at line 216 is NOT in the DOM; the "Run must be published" text IS in the DOM.
+  - When `course.is_admin === false` AND `pinnedVersion.is_disabled`, the modal's "Open Overview to re-enable it" link-button portion of the precondition bullet at line 222 is NOT in the DOM; the "This run's course version is disabled" text IS in the DOM.
+  - When `course.is_admin === false` AND `!run.end_date`, the modal's "Open Overview to set it" link-button portion at line 201 IS in the DOM (teacher-editable; locks the §3.1.6 PATCH end_date allowance).
+  - When `course.is_admin === true`, all three link-button portions ARE in the DOM (admin-precedence regression guard).
 
 Extend `src/tests/RunTeachersTab.svelte.test.ts`:
 - Existing tests pass `course={ ..., is_admin: true }`.
 - When `course.is_admin === false`, the Add-teacher form and per-row Remove buttons are NOT in the DOM.
 - When `course.is_admin === true`, both ARE in the DOM (regression guard).
+
+Extend `src/tests/RunAssetsTab.svelte.test.ts` (RunAssetsTab already receives `course` and already gates referenced-asset force-delete — these are regression guards for the existing behavior, locking the §3.1.6 contract):
+- When `course.is_admin === false` AND the asset is REFERENCED by ≥1 MP, the force-delete affordance at `RunAssetsTab.svelte:658-664, 804-811` is NOT enabled / not in the DOM.
+- When `course.is_admin === true` AND the asset is REFERENCED, the force-delete affordance IS enabled / in the DOM.
+- When `course.is_admin === false` AND the asset is unreferenced, the normal Delete button IS in the DOM (teacher-allowed per `run_assets.py:309-311`).
+- Upload, list, replace, and render-URL behavior is unchanged regardless of `course.is_admin`.
 
 **No `App.svelte.test.ts` integration test.** No existing precedent for integration-testing `App.svelte` routing in jsdom. The `defaultLandingPath` helper unit tests cover the routing logic; AppHeader visibility on `/login` and during `session.loading` is NOT covered by `AppHeader.svelte.test.ts` (that conditional lives in `App.svelte`, not in AppHeader — codex round-7); manual smoke (§6.3 steps 0, 1, 7) confirms end-to-end.
 
@@ -929,7 +955,7 @@ Extend `src/tests/RunTeachersTab.svelte.test.ts`:
 3. Log out, then log in as the target teacher user. `/me` returns `has_run_teacher: true` (and `has_course_admin: false` unless they're also an admin elsewhere). AppHeader shows Teaching (active for teacher-only users); brand href is `/teaching`.
 4. Click Teaching → land on `/teaching` with pills, default Active, table populated.
 5. Switch through each pill and verify row counts match pill counts and rows within each group appear in the documented sort order (e.g. for Active, leftmost end-date first).
-6. Click a row → run-detail page; verify: (a) the header `.publish-bar` is GONE (no Publish, no Unpublish — these are course-admin-only); (b) Status badge and version label ARE still shown above the (now hidden) publish-bar; (c) Overview tab has NO `Delete run` button (course-admin-only); (d) Overview PATCH-title, PATCH-end-date, and `groups_enabled` toggle ARE present (teachers CAN edit run metadata); (e) MP tab — modal Publish button IS present (teachers CAN publish MPs per §3.1.6); locked-row force-delete affordance is GONE; non-locked Delete IS present; Edit IS present; (f) Teachers tab has NO add-form and NO Remove buttons; (g) Assets, Groups, Evaluations tabs work normally; (h) breadcrumb shows `Teaching › {course.name} › {run.title}` with the `Teaching` link working — NO `/courses` link visible.
+6. Click a row → run-detail page; verify: (a) the header Publish and Unpublish buttons are GONE (course-admin-only); (b) Status badge and version label ARE still shown in the header (the `.publish-bar` div itself may be empty or restructured — only the lifecycle buttons must be absent); (c) Overview tab has NO `Delete run` button (course-admin-only); (d) Overview PATCH-title, PATCH-end-date, and `groups_enabled` toggle ARE present (teachers CAN edit run metadata; `groups_enabled` toggle is enabled iff `!run.is_published` — same as today); (e) MP tab — modal Publish button IS present (teachers CAN publish MPs per §3.1.6); locked-row force-delete affordance is GONE; non-locked Delete IS present; Edit IS present; "Publish on Overview" link is GONE; "Enable on Overview" link is GONE if `run.is_published`, present if `!run.is_published`; "See Overview" link in the version-disabled banner is GONE; (f) Teachers tab has NO add-form and NO Remove buttons; (g) Assets tab — force-delete affordance on REFERENCED assets is GONE (admin-only per §3.1.6); non-force delete on unreferenced assets IS present; upload IS present; (h) Groups, Evaluations tabs work normally; (i) breadcrumb shows `Teaching › {course.name} › {run.title}` with the `Teaching` link working — NO `/courses` link visible.
 6b. As the teacher, view a run whose pinned version is disabled. The Authoring UI doesn't expose a "disable" toggle currently — set `course_versions.is_disabled = true` for the relevant `version.id` directly in the dev DB (`backend/.venv` → `sqlite3 backend/mathion.db "UPDATE course_versions SET is_disabled = 1 WHERE id = <vid>;"`). Verify the version-disabled banner renders and tooltips on disabled actions still appear. Restore with `is_disabled = 0` afterwards.
 6c. As the teacher, view a run whose pinned version is in `created` state (locks the loader-mount Critical fix). The Authoring UI doesn't expose a "downgrade-to-draft" action; set `course_versions.state = 'created'` for the pinned version directly in the dev DB. Verify the run-detail page mounts successfully, the version dropdown shows that one version, and the blocks tab renders (no white screen). Restore `state = 'published'` afterwards.
 7. Log in as a teacher-only user (no `CourseAdmin` rows): AppHeader shows Teaching only; `/` redirects to `/teaching`; brand href is `/teaching`.
@@ -999,7 +1025,7 @@ No database schema change. No migrations needed.
 - `frontend/src/components/chrome/AppHeader.svelte` — new.
 - `frontend/src/pages/teaching/TeacherRunListPage.svelte` — new.
 - `frontend/src/lib/teaching.ts` — new.
-- `frontend/src/lib/types.ts` — extend `User` type with `has_course_admin: boolean` + `has_run_teacher: boolean`; add `TeachingRunRow` interface.
+- `frontend/src/lib/types.ts` — extend `User` type with `has_course_admin: boolean` + `has_run_teacher: boolean`. (`TeachingRunRow` interface is defined LOCALLY in `frontend/src/lib/teaching.ts` per §3.2.3 — same pattern as wire-module-local types elsewhere in this codebase.)
 - `frontend/src/lib/router.svelte.ts` — add `defaultLandingPath(user)` helper.
 - `frontend/src/App.svelte` — render `AppHeader`; update default-route `$effect` (keep auth-guard branch using existing local names `matched` / `matched.route.auth`); add `TeacherRunListPage` to component map.
 - `frontend/src/routes.ts` — add `/teaching` route.
@@ -1014,8 +1040,9 @@ No database schema change. No migrations needed.
 - `frontend/src/tests/router.test.ts` — extend with `defaultLandingPath` unit tests.
 - `frontend/src/tests/RunOverviewTab.svelte.test.ts` — extend (7 mount sites via `mountOverview`; update existing tests to pass stub `course={ ..., is_admin: true }`; add `is_admin: false` cases).
 - `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` — extend (6 mount sites via `mountTab`, SAME PROP UPDATES; this file ALSO mounts RunOverviewTab).
-- `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (15 mount sites; extract a `mountMpTab(extra)` helper as part of this task to avoid touching every site). Add modal-Publish-visible-regardless-of-is_admin test (must open modal); add locked-row force-delete hide test (use `first_submitted_at: ISO-string` fixture for locked, `null` for unlocked); add "Publish on Overview" link-button hide test.
-- `frontend/src/tests/MiniProjectModal.svelte.test.ts` — new or extend (depending on whether the file exists today; verify at impl time) — add the three precondition-link tests for "Open Overview to publish" / "Open Overview to re-enable it" / "Open Overview to set it" per §3.2.4.
+- `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (~22 mount sites per codex round-9 grep; extract a `mountMpTab(extra)` helper as part of this task to avoid touching every site). Add modal-Publish-visible-regardless-of-is_admin test (must open modal, scoped to within it so the existing global "no row publish button" assertion at lines 185-189 stays valid); add locked-row force-delete hide test (use `first_submitted_at: ISO-string` fixture for locked, `null` for unlocked); add "Publish on Overview" link-button hide test; add "Enable on Overview" link-button conditional test (visible iff `!run.is_published || course.is_admin`); add "See Overview" version-disabled-banner link-button hide test; add `newDisabledTitle` tooltip-message-aware-of-course-is_admin test.
+- `frontend/src/tests/MiniProjectModal.teacher-gating.svelte.test.ts` — NEW (separate file matching the existing split convention; existing `MiniProjectModal.publish.svelte.test.ts` and `MiniProjectModal.create-edit.svelte.test.ts` are NOT extended) — add the four precondition-link tests for "Open Overview to publish" / "Open Overview to re-enable it" / "Open Overview to set it" (kept visible for teachers) / admin-precedence per §3.2.4.
+- `frontend/src/tests/RunAssetsTab.svelte.test.ts` — extend with the 4 force-delete + non-force-delete regression tests per §6.2 RunAssetsTab block. RunAssetsTab already receives `course` and already gates force-delete on `!course.is_admin` (verified at `frontend/src/components/runs/RunAssetsTab.svelte:658-664, 804-811`) — these tests lock the existing behavior so the §3.1.6 contract isn't accidentally broken by future refactors.
 - `frontend/src/tests/RunTeachersTab.svelte.test.ts` — extend (6 mount sites; inline mounts).
 - `frontend/src/tests/RunDetailPage.svelte.test.ts` — extend (indirect; RunDetailPage now passes `course` to three more tabs — verify integration).
 - `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` — extend (~5 mount sites, indirect).
