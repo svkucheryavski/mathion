@@ -699,10 +699,18 @@ class TestTeachingRunsEndpoint:
         assert r.json()[0]["student_count"] == 3
 
     def test_superuser_sees_only_own_teacher_rows(
-        self, admin_client, superuser, seed_publishable_version, db,
+        self, admin_client, seed_publishable_version,
     ):
-        # Superuser → NO RunTeacher row → empty response (NO superuser bypass)
-        seed_publishable_version()
+        # Superuser → NO RunTeacher row → empty response (NO superuser bypass).
+        # A Run MUST exist so the test would catch a hypothetical bypass branch
+        # like `if user.is_superuser: return db.query(Run).all()`. Without the
+        # run, the assertion would falsely pass against such a regression.
+        course, _ = seed_publishable_version()
+        admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "NotMine", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        )
         r = admin_client.get("/api/teaching/runs")
         assert r.status_code == 200
         assert r.json() == []
@@ -744,7 +752,39 @@ class TestTeachingRunsEndpoint:
         db.commit()
         r = teacher_client.get("/api/teaching/runs")
         ids = [row["run"]["id"] for row in r.json()]
-        assert ids == sorted(ids)
+        # Lock the exact ASC order, not just `sorted(ids)` (which trivially
+        # passes for 0- or 1-element lists and wouldn't catch a regression
+        # that limited / filtered the response down to a single row).
+        assert ids == [r1["id"], r2["id"]]
+
+    def test_excludes_runs_on_other_courses(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        # Teacher on course A must NOT see runs from course B. Locks the
+        # RunTeacher → Run → CourseVersion → Course join chain against a
+        # regression that widened cross-course.
+        course_a, _ = seed_publishable_version(slug="course-a", name="Course A")
+        course_b, _ = seed_publishable_version(slug="course-b", name="Course B")
+        run_a = admin_client.post(
+            f"/api/courses/{course_a['id']}/runs",
+            json={"title": "RA", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        run_b = admin_client.post(
+            f"/api/courses/{course_b['id']}/runs",
+            json={"title": "RB", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run_a["id"], user_id=teacher_user.id))
+        db.commit()
+        body = teacher_client.get("/api/teaching/runs").json()
+        ids = [row["run"]["id"] for row in body]
+        assert run_a["id"] in ids
+        assert run_b["id"] not in ids
+        # And confirm the surfaced row carries course A's identity, not B's
+        a_row = next(row for row in body if row["run"]["id"] == run_a["id"])
+        assert a_row["course_id"] == course_a["id"]
+        assert a_row["course_slug"] == course_a["slug"]
 
     def test_response_key_set(
         self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
