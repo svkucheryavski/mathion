@@ -3,6 +3,20 @@
 // for hash changes), so we listen for both. App.svelte re-renders on any
 // change to currentRoute.
 
+import type { User } from './types';
+
+/**
+ * Default landing path based on user role flags.
+ * Admin/superuser → /courses, teacher-only → /teaching, otherwise /courses.
+ * Admin precedence: a user who is both admin and teacher still lands on /courses.
+ * Null user (signed out / pre-auth) → /courses.
+ */
+export function defaultLandingPath(user: User | null): string {
+  if (user?.has_course_admin) return '/courses';
+  if (user?.has_run_teacher) return '/teaching';
+  return '/courses';
+}
+
 export type Route = {
   path: string;            // pattern: '/courses/:courseSlug'
   component: string;       // logical name; App.svelte maps to imported component
@@ -189,21 +203,27 @@ function matchPattern(pattern: string, path: string): Record<string, string> | n
 
 /**
  * Validate `next` query-string values: must resolve to the same origin as
- * `origin`. Falls back to '/courses' for any cross-origin, malformed, or
- * scheme-bearing input. Pass `location.origin` in production; tests inject.
+ * `origin`. Falls back to `fallback` (default '/courses') for any cross-origin,
+ * malformed, or scheme-bearing input. Pass `location.origin` in production;
+ * tests inject. The `fallback` parameter lets callers steer post-login routing
+ * by role (e.g. teacher login bounces to '/teaching').
  */
-export function safeNext(next: string, origin: string): string {
-  if (!next) return '/courses';
+export function safeNext(next: string, origin: string, fallback = '/courses'): string {
+  if (!next) return fallback;
   // Reject backslash-leading inputs that some browsers normalize to //.
-  if (next.startsWith('\\')) return '/courses';
+  if (next.startsWith('\\')) return fallback;
   try {
     const u = new URL(next, origin);
-    if (u.origin !== origin) return '/courses';
+    if (u.origin !== origin) return fallback;
     // Never bounce back to /login — would trap users who arrived via a
     // compound `?next=/login?next=...` URL built up by redirect loops.
-    if (u.pathname === '/login') return '/courses';
+    if (u.pathname === '/login') return fallback;
+    // decodeURI guard: new URL() accepts malformed percent-encoded pathnames
+    // (e.g. '%') that decodeURI rejects with URIError. Reject those here so
+    // downstream consumers never see a pathname they can't safely decode.
+    try { decodeURI(u.pathname); } catch { return fallback; }
     return u.pathname + u.search + u.hash;
   } catch {
-    return '/courses';
+    return fallback;
   }
 }

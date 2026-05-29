@@ -8,7 +8,7 @@ describe('stores/session', () => {
   });
 
   it('clearSession sets user=null and loading=false', () => {
-    session.user = { id: 1, email: 'a@b', full_name: null, is_superuser: false, is_disabled: false, photo_url: null };
+    session.user = { id: 1, email: 'a@b', full_name: null, is_superuser: false, is_disabled: false, photo_url: null, has_course_admin: false, has_run_teacher: false };
     session.loading = true;
     clearSession();
     expect(session.user).toBeNull();

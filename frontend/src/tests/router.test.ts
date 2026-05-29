@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { matchRoute, safeNext } from '../lib/router.svelte';
+import { matchRoute, safeNext, defaultLandingPath } from '../lib/router.svelte';
 import {
   navigate,
   registerNavigationGuard,
@@ -321,5 +321,57 @@ describe('navigation guards', () => {
 
     history.pushState = realPush;
     dispose();
+  });
+});
+
+describe('defaultLandingPath', () => {
+  const base = {
+    id: 1, email: 'x', full_name: null,
+    is_superuser: false, is_disabled: false, photo_url: null,
+  };
+
+  it('returns /courses for admin', () => {
+    expect(defaultLandingPath({ ...base, has_course_admin: true, has_run_teacher: false }))
+      .toBe('/courses');
+  });
+  it('returns /teaching for teacher-only', () => {
+    expect(defaultLandingPath({ ...base, has_course_admin: false, has_run_teacher: true }))
+      .toBe('/teaching');
+  });
+  it('returns /courses for student/empty', () => {
+    expect(defaultLandingPath({ ...base, has_course_admin: false, has_run_teacher: false }))
+      .toBe('/courses');
+  });
+  it('returns /courses for superuser-also-teacher (admin precedence)', () => {
+    expect(defaultLandingPath({
+      ...base, is_superuser: true,
+      has_course_admin: true, has_run_teacher: true,
+    })).toBe('/courses');
+  });
+  it('returns /courses for null user', () => {
+    expect(defaultLandingPath(null)).toBe('/courses');
+  });
+});
+
+describe('safeNext fallback parameter', () => {
+  const origin = 'http://localhost:3000';
+
+  it('default fallback is /courses', () => {
+    expect(safeNext('', origin)).toBe('/courses');
+  });
+  it('honors fallback parameter for empty', () => {
+    expect(safeNext('', origin, '/teaching')).toBe('/teaching');
+  });
+  it('/login short-circuit honors fallback (PIN-401 regression guard)', () => {
+    expect(safeNext('/login?next=foo', origin, '/teaching')).toBe('/teaching');
+  });
+  it('cross-origin honors fallback', () => {
+    expect(safeNext('https://evil.example/x', origin, '/teaching')).toBe('/teaching');
+  });
+  it('valid next is not replaced by fallback', () => {
+    expect(safeNext('/teaching', origin, '/courses')).toBe('/teaching');
+  });
+  it('malformed pathname (%) falls back via decodeURI guard', () => {
+    expect(safeNext('%', origin, '/teaching')).toBe('/teaching');
   });
 });
