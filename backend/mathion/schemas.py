@@ -184,6 +184,8 @@ class UserResponse(BaseModel):
     is_superuser: bool
     is_disabled: bool
     photo_url: str | None
+    has_course_admin: bool = False   # NEW — overwritten by _user_response_with_flags
+    has_run_teacher: bool = False    # NEW — overwritten by _user_response_with_flags
 
     model_config = {"from_attributes": True}
 

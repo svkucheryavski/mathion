@@ -1,15 +1,34 @@
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from mathion.auth import destroy_session, request_pin, verify_pin
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
+from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
 from mathion.schemas import PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _user_response_with_flags(db: Session, user: User) -> UserResponse:
+    """Build a UserResponse with `has_course_admin` and `has_run_teacher` populated.
+
+    Flags are UI hints for nav rendering only. Server-side authorization is
+    always re-evaluated via require_* helpers. Do NOT branch on these flags in
+    any new endpoint.
+    """
+    has_admin = user.is_superuser or bool(db.scalar(
+        select(exists().where(CourseAdmin.user_id == user.id))
+    ))
+    has_teacher = bool(db.scalar(
+        select(exists().where(RunTeacher.user_id == user.id))
+    ))
+    return UserResponse.model_validate(user).model_copy(
+        update={"has_course_admin": has_admin, "has_run_teacher": has_teacher}
+    )
 
 
 def _require_csrf(request: Request):
@@ -43,12 +62,15 @@ def api_verify_pin(request: Request, data: PinVerifySchema, response: Response, 
 
     email = data.email.strip().lower()
     user = db.execute(select(User).where(User.email == email)).scalar_one()
-    return {"user": UserResponse.model_validate(user)}
+    return {"user": _user_response_with_flags(db, user)}
 
 
 @router.get("/me", response_model=UserResponse)
-def get_profile(user: User = Depends(get_current_user)):
-    return user
+def get_profile(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> UserResponse:
+    return _user_response_with_flags(db, user)
 
 
 @router.patch("/me", response_model=UserResponse)
