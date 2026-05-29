@@ -624,3 +624,211 @@ class TestCascadeGuards:
             f"/api/courses/{course['id']}/versions", json={"info_md": ""}
         )
         assert r.status_code == 403
+
+
+# ============================================================================
+# T4: GET /api/teaching/runs endpoint tests
+# ============================================================================
+
+
+class TestTeachingRunsEndpoint:
+    def test_returns_only_my_runs(
+        self, teacher_client, teacher_user, admin_client,
+        seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        my_run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "Mine", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        other_run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "NotMine", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=my_run["id"], user_id=teacher_user.id))
+        db.commit()
+        r = teacher_client.get("/api/teaching/runs")
+        assert r.status_code == 200
+        rows = r.json()
+        ids = [row["run"]["id"] for row in rows]
+        assert my_run["id"] in ids
+        assert other_run["id"] not in ids
+
+    def test_empty(self, teacher_client):
+        r = teacher_client.get("/api/teaching/runs")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_student_count_zero(
+        self, teacher_client, teacher_user, admin_client,
+        seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        r = teacher_client.get("/api/teaching/runs")
+        assert r.json()[0]["student_count"] == 0
+
+    def test_student_count_multiple(
+        self, teacher_client, teacher_user, admin_client,
+        seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": True},
+        ).json()
+        # Add students via admin
+        admin_client.post(f"/api/runs/{run['id']}/students",
+                          json={"email": "s1@x"})
+        admin_client.post(f"/api/runs/{run['id']}/students",
+                          json={"email": "s2@x"})
+        admin_client.post(f"/api/runs/{run['id']}/students",
+                          json={"email": "s3@x"})
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        r = teacher_client.get("/api/teaching/runs")
+        assert r.json()[0]["student_count"] == 3
+
+    def test_superuser_sees_only_own_teacher_rows(
+        self, admin_client, superuser, seed_publishable_version, db,
+    ):
+        # Superuser → NO RunTeacher row → empty response (NO superuser bypass)
+        seed_publishable_version()
+        r = admin_client.get("/api/teaching/runs")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_excludes_runs_where_user_is_course_admin_but_not_teacher(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        # Make teacher_user a CourseAdmin but NOT a RunTeacher
+        db.add(CourseAdmin(user_id=teacher_user.id, course_id=course["id"]))
+        db.commit()
+        r = teacher_client.get("/api/teaching/runs")
+        assert r.status_code == 200
+        assert r.json() == []
+        # sanity: the run exists
+        assert run["id"]
+
+    def test_orders_by_id_asc(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        r1 = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R1", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        r2 = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R2", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=r1["id"], user_id=teacher_user.id))
+        db.add(RunTeacher(run_id=r2["id"], user_id=teacher_user.id))
+        db.commit()
+        r = teacher_client.get("/api/teaching/runs")
+        ids = [row["run"]["id"] for row in r.json()]
+        assert ids == sorted(ids)
+
+    def test_response_key_set(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        body = teacher_client.get("/api/teaching/runs").json()
+        assert len(body) == 1
+        row = body[0]
+        assert set(row.keys()) == {"run", "course_id", "course_name",
+                                   "course_slug", "student_count"}
+        for k in ("id", "title", "start_date", "end_date", "is_published",
+                  "created_at"):
+            assert k in row["run"], f"missing {k!r} in nested run"
+
+    def test_course_slug_populated(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        row = teacher_client.get("/api/teaching/runs").json()[0]
+        assert row["course_slug"] == course["slug"]
+        assert row["course_slug"]  # non-empty
+
+    def test_includes_runs_pinned_to_disabled_versions(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        from mathion.models import CourseVersion as CV
+        course, v = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.query(CV).filter(CV.id == v["id"]).update({"is_disabled": True})
+        db.commit()
+        body = teacher_client.get("/api/teaching/runs").json()
+        assert any(row["run"]["id"] == run["id"] for row in body)
+
+    def test_includes_unpublished_draft_runs(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        # Run is unpublished by default — included
+        body = teacher_client.get("/api/teaching/runs").json()
+        ids = [row["run"]["id"] for row in body]
+        assert run["id"] in ids
+        assert any(not row["run"]["is_published"] for row in body)
+
+    def test_returns_run_when_user_is_one_of_multiple_teachers(
+        self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
+    ):
+        other = User(email="other@x", full_name="Other")
+        db.add(other); db.commit(); db.refresh(other)
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.add(RunTeacher(run_id=run["id"], user_id=other.id))
+        db.commit()
+        body = teacher_client.get("/api/teaching/runs").json()
+        run_ids = [row["run"]["id"] for row in body]
+        # exactly one row, no duplication despite the two-teacher row
+        assert run_ids.count(run["id"]) == 1

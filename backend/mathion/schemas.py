@@ -662,3 +662,18 @@ class RunAssetResponse(BaseModel):
     is_referenced: bool = False
 
     model_config = {"from_attributes": True}
+
+
+# ============================================================================
+# Slice A T4: Teacher monitoring — landing page row
+# ============================================================================
+
+
+class TeachingRunRow(BaseModel):
+    run: "RunResponse"
+    course_id: int
+    course_name: str
+    course_slug: str
+    student_count: int
+    # No `model_config` — this row is built field-by-field in the handler, not
+    # from a single ORM model, so `from_attributes` would not apply correctly.
