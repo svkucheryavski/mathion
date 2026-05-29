@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5×6+codex×7 reviewer pass — rev 14 fixes 1 Critical + 2 Important + 2 Minor from codex round 13): (1) **Login landing flow** — `frontend/src/pages/Login.svelte:36-39` defaults missing `next` to `/courses`, which is admin-dead for teacher-only users (they bounce from `/login?next=/courses` → `/courses` → empty list). The previously-spec'd App.svelte `$effect` would have also sent unauthenticated `/` through `defaultLandingPath(null) = /courses`, then through `/login?next=/courses`, with the same admin-dead end state. Rev 14 (a) sends unauthenticated `/` to `/login?next=%2F` (literal `/` as a "decide by role" sentinel), (b) rewrites the Login.svelte post-PIN block to call `defaultLandingPath(user)` when `next` is absent OR equals `/`, falling back to `safeNext` for real next values. Adds Login.svelte to §12 file list. (2) **`User` import path** in §3 snippet at line 38 — User lives in `backend/mathion/models_auth.py:9`, NOT `mathion.models` (which has CourseAdmin/RunTeacher at line 23/211). Rev 14 splits the import: `from mathion.models import (Course, CourseVersion, Run, RunStudent, RunTeacher, CourseAdmin)` + `from mathion.models_auth import User`. Plan-writer trap acknowledged inline. (3) **`_client_for` description contradiction at §6.1 fixture-name notes** — rev-12 said "creates User"; rev-13 corrected the §6.1 prologue but left the fixture-name list inconsistent. Rev 14 syncs both: "authenticates an already-seeded User; does NOT create the User row or any role rows." (4) Minor: `_client_for` line range 9-17 → 9-20 in the fixture-name list; §10 AppHeader tabindex claim dropped (§6.2 doesn't list a tabindex assertion — rewrite to "No element receives a negative `tabindex` (anchors and the logout button are natively focusable)").
+**Status:** Design (post 5×6+codex×8 reviewer pass — rev 15 fixes 1 Critical + 3 Important + 1 Minor from codex round 14): (1) **PIN error path mutates `?next=` to `/courses`** — `frontend/src/lib/auth.svelte.ts:35 verifyPin()` calls `api.post(...)` WITHOUT `{ skipAuthRedirect: true }`. A wrong PIN returns 401 → `api.ts:39-42` fires `emitUnauthorized('/login?next=%2F')` → `main.ts:16` calls `safeNext('/login?next=%2F', origin)` → `router.svelte.ts:204` short-circuits any `/login` pathname to the hardcoded `/courses` fallback → URL rewrites to `/login?next=%2Fcourses` → next successful PIN lands a teacher-only user on `/courses` (admin-dead). Rev 15 adds `{ skipAuthRedirect: true }` to the `verifyPin` `api.post` call, symmetric with `bootstrapSession` at `auth.svelte.ts:9`. Adds `auth.svelte.ts` to §12. New §6.3 step 0b smoke locks the behavior. (2) **Login.svelte import path** — rev 14 wrote `./lib/router.svelte`; Login.svelte lives in `frontend/src/pages/` so the actual path is `../lib/router.svelte` (`Login.svelte:4`). Rev 15 fixes both the inline import example and the §12 entry. (3) **App.svelte missing `defaultLandingPath` import** — §3.2.5 prescribed `defaultLandingPath(session.user)` in the `$effect` but didn't tell the plan-writer to add it to the `App.svelte:3` import line. Rev 15 makes the import extension explicit. (4) **`safeNext` fallback hardcoded** — `router.svelte.ts:195-207` returns `/courses` for any unsafe input. After the rev-15 PIN fix this is no longer reachable via the wrong-PIN path, but other unsafe-`next` sources (compound `?next=/login?...`, malformed, cross-origin) still admin-dead teachers. Rev 15 adds a defaulted `fallback = '/courses'` parameter; `main.ts:16` keeps default behavior, Login.svelte passes `defaultLandingPath(user)`. New router-test bullets in §6.2 lock the contract. (5) Minor: `NotFound.svelte:5` `<a href="/courses">Back to courses</a>` is the last hardcoded admin-dead CTA outside §12. Rev 15 rewrites to `defaultLandingPath(session.user)`. AppHeader still provides a Teaching escape independently, but NotFound.svelte is the canonical 404 landing — fixing it costs three lines and removes the last `/courses` literal in the auth/landing path.
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -607,7 +607,7 @@ The change is local to `RunDetailPage.svelte:304-307`; no new helper. Plan-write
 
 (The existing route-rendering pattern in `App.svelte:46-53` is preserved as-is; AppHeader is a sibling above it. AppHeader is hidden on `/login`, hidden during initial session load, and visible on every authenticated route — including `NotFound`, where it's correct to keep the chrome visible.)
 
-`currentRoute` is imported from `./lib/router.svelte` (already imported in `App.svelte:3`).
+`currentRoute` is imported from `./lib/router.svelte` (already imported in `App.svelte:3`). The same import line must be extended to also pull in `defaultLandingPath` for the new `/` branch below: `import { currentRoute, matchRoute, navigate, defaultLandingPath } from './lib/router.svelte';`.
 
 **Default-route effect — merged form preserving the auth guard.** The current `$effect` at `App.svelte:34-43` handles BOTH the auth-guard for protected routes (with a `?next=...` round-trip so deep links survive login) AND would benefit from a `/` redirect branch. Slice A adds the `/` branch; preserves the auth-guard's `next` query-string construction + `force: true` flag verbatim (those are load-bearing for §5.5 — deep link from email survives login); and performs ONE small refactor: hoists `!session.loading` out of both branches into a top-level early-return. Behaviorally equivalent; structurally cleaner. The snippet:
 
@@ -658,11 +658,50 @@ const rawNext = new URLSearchParams(location.search).get('next');
 const decoded = rawNext ? decodeURIComponent(rawNext) : null;
 const dest = (decoded === null || decoded === '/')
   ? defaultLandingPath(user)
-  : safeNext(decoded, location.origin);
+  : safeNext(decoded, location.origin, defaultLandingPath(user));
 navigate(dest, { replace: true });
 ```
 
-`verifyPin` already returns `Promise<User>` (`frontend/src/lib/auth.svelte.ts:30-42`); no signature change. `defaultLandingPath` is imported from `./lib/router.svelte` (same file the `safeNext` and `navigate` imports already come from at `Login.svelte:4`).
+`verifyPin` already returns `Promise<User>` (`frontend/src/lib/auth.svelte.ts:30-42`); no signature change. `defaultLandingPath` is added to the existing import at `Login.svelte:4`: `import { navigate, safeNext, defaultLandingPath } from '../lib/router.svelte';` (the existing imports are from `../lib/router.svelte` because Login.svelte lives in `frontend/src/pages/`; a relative-path mistake here would type-check fail).
+
+**`verifyPin` must skip the global 401 redirect.** Today `frontend/src/lib/auth.svelte.ts:35` calls `api.post(...)` WITHOUT `{ skipAuthRedirect: true }`. A wrong-PIN attempt returns 401; `frontend/src/lib/api.ts:39-42` then fires `emitUnauthorized(location.pathname + location.search + location.hash)` BEFORE Login.svelte's catch runs. The handler in `frontend/src/main.ts:12-17` calls `safeNext(path, location.origin)` on the current `/login?next=%2F` URL; `safeNext` at `frontend/src/lib/router.svelte.ts:202-204` short-circuits any `/login` pathname to the hardcoded `/courses` fallback. Result: the URL is rewritten to `/login?next=%2Fcourses` and the next successful PIN lands a teacher-only user on `/courses` (admin-dead). Slice A makes `verifyPin` symmetric with `bootstrapSession` (`auth.svelte.ts:9` already uses `skipAuthRedirect: true`):
+
+```ts
+export async function verifyPin(
+  email: string,
+  pin: string,
+  duration_days: 1 | 7 | 30,
+): Promise<User> {
+  const { user } = await api.post<{ user: User }>(
+    '/api/auth/verify-pin',
+    { email, pin, duration_days },
+    { skipAuthRedirect: true },
+  );
+  session.user = user;
+  return user;
+}
+```
+
+With `skipAuthRedirect: true`, a 401 from a bad PIN falls through to `api.ts:44-47`, which reads the backend's response body and throws `ApiError(401, body.detail)`. Login.svelte's existing catch at lines 40-44 surfaces `err.displayMessage` to the form (real error text instead of the current hardcoded "Not authenticated") and the URL stays at `/login?next=%2F` — so a subsequent successful PIN still resolves through `defaultLandingPath(user)`.
+
+**`safeNext` gains a `fallback` parameter (defense in depth).** Even after the PIN-401 fix, `safeNext` is the last line of defense against admin-dead landings whenever the caller controls the post-success destination. Today the hardcoded `/courses` fallback (`router.svelte.ts:196, 198, 201, 204, 207`) is admin-dead for teacher-only users on any malformed or cross-origin `next`. Slice A widens the signature with a defaulted parameter so the existing call site (`main.ts:16`, pre-login: no user, can't compute a role-aware fallback) keeps today's behavior, and the post-login caller (Login.svelte) can pass `defaultLandingPath(user)`:
+
+```ts
+export function safeNext(next: string, origin: string, fallback = '/courses'): string {
+  if (!next) return fallback;
+  if (next.startsWith('\\')) return fallback;
+  try {
+    const u = new URL(next, origin);
+    if (u.origin !== origin) return fallback;
+    if (u.pathname === '/login') return fallback;
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return fallback;
+  }
+}
+```
+
+No call-site change required in `main.ts`. The existing `safeNext` unit tests in `frontend/src/tests/router.test.ts` continue to pass unchanged; a new test asserts that `safeNext('/login?...', origin, '/teaching')` returns `/teaching`.
 
 Diff against the existing `App.svelte:34-43` before editing — variable names (`matched`, `matched.route.auth`, `currentRoute.search`, `currentRoute.hash`) must match the real file exactly.
 
@@ -717,6 +756,8 @@ without going through Login — e.g., a fresh tab with a valid cookie):
 ```
 
 On a fresh tab with a valid cookie, `/me` (which now goes through `_user_response_with_flags`) populates `session.user` BEFORE the App effect resolves '/'. AppHeader renders link visibility from the same flags.
+
+**Wrong-PIN sub-flow (preserves `?next=`).** A 401 from `POST /api/auth/verify-pin` would normally trigger the global unauthorized handler at `main.ts:12-17`, which calls `safeNext` on `location.pathname + search + hash` (currently `/login?next=%2F`); `safeNext` would short-circuit any `/login` pathname to `/courses` and rewrite the URL to `/login?next=%2Fcourses`. Rev 15 prevents the rewrite by passing `{ skipAuthRedirect: true }` to the `verifyPin` `api.post` call — the 401 is handled as a local form error in `Login.svelte` and the URL keeps its `?next=%2F` query, so a subsequent successful PIN still resolves through `defaultLandingPath(user)`.
 
 ### 4.2 Teacher opens a run
 
@@ -1036,6 +1077,11 @@ Extend `src/tests/router.test.ts`:
 - `defaultLandingPath({ has_course_admin: false, has_run_teacher: false, ... })` → `/courses`.
 - `defaultLandingPath({ is_superuser: true, has_course_admin: true, has_run_teacher: true })` → `/courses` (locks admin-precedence contract; the helper just reads the flag, but explicit case documents that superusers go to Authoring).
 - `defaultLandingPath(null)` → `/courses`.
+- `safeNext('', origin)` → `/courses` (existing default fallback preserved).
+- `safeNext('', origin, '/teaching')` → `/teaching` (new fallback parameter honored).
+- `safeNext('/login?next=foo', origin, '/teaching')` → `/teaching` (the `/login` short-circuit at router.svelte.ts:204 must return the fallback, NOT hardcoded `/courses`). This test is the regression guard for the rev-15 PIN-401 admin-dead path.
+- `safeNext('https://evil.example/x', origin, '/teaching')` → `/teaching` (cross-origin still falls back, now honors fallback).
+- `safeNext('/teaching', origin, '/courses')` → `/teaching` (a valid `next` is NOT replaced by the fallback).
 
 Extend `src/tests/RunOverviewTab.svelte.test.ts`:
 - Existing tests are updated to pass `course={ ...stub, is_admin: true }` (preserves today's "controls visible" behavior).
@@ -1097,6 +1143,7 @@ Extend `src/tests/RunAssetsTab.svelte.test.ts` (RunAssetsTab already receives `c
 ### 6.3 Manual smoke walkthrough (the plan's final task)
 
 0. Visit `/login` without auth → AppHeader is NOT visible.
+0b. **Wrong-PIN smoke (locks the rev-15 `skipAuthRedirect` fix).** Visit `/` as an unauthenticated teacher-only user (no session cookie). Verify URL becomes `/login?next=%2F`. Submit a wrong 6-digit PIN. Verify (a) the URL stays at `/login?next=%2F` — it does NOT rewrite to `/login?next=%2Fcourses`; (b) the form shows the backend's actual error text (e.g., "Invalid PIN") — NOT the hardcoded "Not authenticated"; (c) entering the correct PIN on the same form lands on `/teaching`. If the URL rewrites to `/login?next=%2Fcourses` at step (a), the rev-15 `skipAuthRedirect` fix has regressed.
 1. Login as a course-admin-only user → AppHeader shows Authoring (active), no Teaching link; lands on `/courses`; brand href is `/courses`.
 2. As the course-admin of some course (the user from step 1, or a different course-admin if needed), navigate to a run's `RunTeachersTab` and add the target email via the existing UI. The frontend POSTs `/api/runs/{rid}/teachers`, creates/updates the user, and the new `RunTeacher` row is in place. (Course admins can manage teachers on their own courses — `require_course_admin_for_run` allows it. No superuser session required.)
 3. Log out, then log in as the target teacher user. `/me` returns `has_run_teacher: true` (and `has_course_admin: false` unless they're also an admin elsewhere). AppHeader shows Teaching (active for teacher-only users); brand href is `/teaching`.
@@ -1175,7 +1222,10 @@ No database schema change. No migrations needed.
 - `frontend/src/lib/types.ts` — extend `User` type with `has_course_admin: boolean` + `has_run_teacher: boolean`. (`TeachingRunRow` interface is defined LOCALLY in `frontend/src/lib/teaching.ts` per §3.2.3 — same pattern as wire-module-local types elsewhere in this codebase.)
 - `frontend/src/lib/router.svelte.ts` — add `defaultLandingPath(user)` helper.
 - `frontend/src/App.svelte` — render `AppHeader`; update default-route `$effect` (keep auth-guard branch using existing local names `matched` / `matched.route.auth`; unauthenticated `/` → `/login?next=%2F`, authenticated `/` → `defaultLandingPath(session.user)`); add `TeacherRunListPage` to component map.
-- `frontend/src/pages/Login.svelte` — rewrite the post-PIN navigate at lines 36-39 to call `defaultLandingPath(user)` when `next` is absent OR equals `/` (the App-side "decide by role" sentinel); keep the `safeNext` path for real `next` values. Capture the User returned from `verifyPin` (`lib/auth.svelte.ts:34`); import `defaultLandingPath` from `./lib/router.svelte`.
+- `frontend/src/pages/Login.svelte` — rewrite the post-PIN navigate at lines 36-39 to call `defaultLandingPath(user)` when `next` is absent OR equals `/` (the App-side "decide by role" sentinel); for real `next` values, call `safeNext(decoded, location.origin, defaultLandingPath(user))` so a malformed/cross-origin/`/login` `next` falls back to the role-aware landing instead of `/courses`. Capture the User returned from `verifyPin` (`lib/auth.svelte.ts:34`); extend the existing import at `Login.svelte:4` to include `defaultLandingPath` from `../lib/router.svelte` (the leading `../` is required — Login.svelte lives in `pages/`, not at the project root).
+- `frontend/src/lib/auth.svelte.ts` — add `{ skipAuthRedirect: true }` as the third argument to the `api.post('/api/auth/verify-pin', ...)` call at line 35. Symmetric with `bootstrapSession` (line 9). Without this, a wrong-PIN 401 rewrites the `?next=` query (see §3.2.5 narrative) and admin-deads teacher-only users on the next successful PIN.
+- `frontend/src/lib/router.svelte.ts` — add `defaultLandingPath(user)` helper AND widen `safeNext` signature with `fallback = '/courses'` defaulted parameter (replace each of the five hardcoded `'/courses'` returns at lines 196, 198, 201, 204, 207 with `fallback`). `main.ts:16` call site keeps default behavior; Login.svelte passes `defaultLandingPath(user)` as the fallback.
+- `frontend/src/pages/NotFound.svelte` — replace the hardcoded `<a href="/courses">Back to courses</a>` at line 5 with a role-aware link: `<a href={defaultLandingPath(session.user)}>Back</a>` (`session` from `../stores/session.svelte`, `defaultLandingPath` from `../lib/router.svelte`). A teacher-only user reaching a 404 today sees an admin-dead "Back to courses" link; this rewrite is consistent with the AppHeader brand-href contract at §3.2.1.
 - `frontend/src/routes.ts` — add `/teaching` route.
 - `frontend/src/pages/runs/RunDetailPage.svelte` — thread `course` prop to FOUR additional tabs (RunOverviewTab, RunMiniProjectsTab, RunTeachersTab, RunGroupsTab; already passed to RunAssetsTab) AND `runIsPublished` to RunGroupsTab AND `course` to `MiniProjectModal` (via `RunMiniProjectsTab`); SPLIT the header `.publish-bar` at lines 310-336 so status badge (311-313) and version label (314-316) stay visible to all roles; wrap only Publish/Unpublish/InlineConfirm (lines 317-335) in `{#if course.is_admin}` (recommended: extract badge + label to a sibling `<div class="run-meta">` per §3.2.4); rewrite breadcrumbs at lines 304-307 to use `Teaching` root + drop the `Runs` segment for teachers (per §3.2.4 breadcrumb-fix); rewrite the disabled-version banner copy at lines 339-342 to be course-aware (admin sees "Re-enable it under Course Editor..."; teacher sees "Some editing actions are locked until a course admin re-enables it." — per §5.4).
 - `frontend/src/components/runs/RunOverviewTab.svelte` — accept required `course: Course` prop; `{#if course.is_admin}` around `Delete run` button + confirm at lines 199-207 (publish/unpublish are in RunDetailPage header, NOT here); rewrite the groups-toggle `title` at line 161 to be role-aware (admin sees "Unpublish to change."; teacher sees "Ask a course admin to unpublish before changing.").
