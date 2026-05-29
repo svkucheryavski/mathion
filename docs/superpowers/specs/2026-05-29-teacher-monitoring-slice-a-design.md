@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5+5 reviewer pass — rev 3 incorporates round-2 Critical & Important fixes, including authz Critical: pinned-versions-only filter replaces state filter to fix loader-mount + cross-version leak)
+**Status:** Design (post 5+5+5 reviewer pass — rev 4 fixes round-3 Critical: routing $effect must preserve `?next=...` + `force: true`; plus Important: ~38 existing tab tests across 6 files, MP test helper extraction, multi-pinned-version test, /teaching/runs disabled+unpublished+multi-teacher tests, PIN-verify body using request_pin service, helper-test split, pinned-version deletion semantics, manual smoke 6c + step 11)
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -61,9 +61,10 @@ New helper in `backend/mathion/api/helpers.py`:
 def has_run_teacher_on_course(db: Session, user: User, course_id: int) -> bool:
     """Return True iff the user has a RunTeacher row on any run of any version of the course.
 
-    This is a UI-relevant predicate used to widen READ access on three course-info
-    endpoints. It is NOT used for any write-path authorization decision; the existing
-    require_* helpers continue to gate writes.
+    Used by `GET /api/courses/by-slug/{slug}` ONLY (§3.1.1). The version-list and
+    block-list endpoints (§3.1.2, §3.1.3) use tighter predicates: an IN-subquery
+    over pinned versions and the `has_run_pinned_to_version` helper, respectively.
+    UI-relevant predicate; never used for any write-path authorization decision.
     """
     return bool(db.scalar(
         select(exists().where(
@@ -85,15 +86,20 @@ Same gate-order extension as §3.1.1, BUT with a content filter on the teacher b
 - **Cross-version leak** — a teacher of a run pinned to v2 cannot read v1's structure even if v1 is published.
 - **Loader-mount safety** — `frontend/src/pages/runs/RunDetailPage.svelte:78` resolves `pinnedVersion = vs.find(v => v.id === r.version_id) ?? null`. If the response excluded the pinned version (e.g., because it's still in `created` state), `pinnedVersion` would be `null` and the block-load branch would be silently skipped. The pinned-versions-only filter guarantees the pinned version is always present.
 
-Implementation:
+Implementation — **two branches, explicit**. The admin and teacher paths run different SELECTs so the existing admin behavior is preserved exactly:
 
-- Superuser / admin path: return ALL versions of the course regardless of state (unchanged).
-- Teacher path:
+- **Superuser / admin path: unchanged.** Returns all versions ordered by `CourseVersion.created_at DESC, CourseVersion.id DESC` with the existing `limit`/`offset` pagination from `versions.py:138-145`. Slice A does not touch this code path.
+- **Teacher path: new SELECT.** Returns only versions pinned by the teacher's runs on this course, ordered by `CourseVersion.id ASC`. No pagination (teacher's pinned set is small — typically 1, occasionally a handful):
   ```python
   versions = db.scalars(
       select(CourseVersion)
       .where(
+          # Outer scope: versions on the requested course.
           CourseVersion.course_id == course_id,
+          # Inner scope: version IDs pinned by ANY of the user's runs (across all
+          # courses; the outer `course_id` filter intersects to this course). Safe
+          # because CourseVersion.id is a globally-unique PK belonging to exactly
+          # one course via the course_id FK.
           CourseVersion.id.in_(
               select(Run.version_id)
               .select_from(Run)
@@ -104,7 +110,8 @@ Implementation:
       .order_by(CourseVersion.id.asc())
   ).all()
   ```
-  The IN-subquery returns every version ID pinned by any of the teacher's runs (across all courses); the outer query intersects with versions on this specific course. Net effect: the teacher sees exactly the versions their runs need — typically one, sometimes a small set if they teach multiple runs on the same course with different pinned versions.
+
+Order divergence between branches is intentional and load-bearing only for admins (they need the most-recent-version-first display in the editor). Teachers see their pinned set — order doesn't affect the loader (`vs.find(v => v.id === r.version_id)` is order-agnostic).
 
 The filter applies regardless of `state` — a teacher of a run pinned to a `created`-state draft (unusual but admin-possible) still sees that one version, so the run-detail page mounts correctly.
 
@@ -127,14 +134,19 @@ The teacher branch allows reads regardless of `version.state` (including `create
 - A teacher of a run pinned to a disabled v2 CAN read v2's blocks (the existing run-detail UX in §5.4 requires this).
 - A teacher of a run pinned to a `created`-state v2 CAN read v2's blocks (locks loader-mount safety for the edge case admin allows).
 
+**Accepted trade-off — `info_md` exposure on pinned drafts.** Because §3.1.2 returns the full `VersionResponse` (`info_md` + `info_html` per `schemas.py:48-60`) for a pinned `created`-state version, a teacher of a run pinned to a draft sees the author's working-draft markdown source. This is intentional: an admin pinning a draft to a live run has implicitly designated the draft as operationally in production, and the run-detail UI needs `info_html` (rendered from `info_md`) to display the version info panel. The risk surface is bounded by the admin's pinning decision, not by the spec.
+
 New helper in `backend/mathion/api/helpers.py`:
 
 ```python
 def has_run_pinned_to_version(db: Session, user: User, version_id: int) -> bool:
     """Return True iff the user has a RunTeacher row on a run whose version_id matches.
 
-    Used by /api/versions/{vid}/blocks to scope teacher reads to exactly the versions
-    their runs need. UI-relevant predicate; never used for any write-path authorization.
+    Used by `GET /api/versions/{vid}/blocks` to scope teacher reads to exactly the
+    versions their runs need. No `course_id` parameter is required: `CourseVersion.id`
+    is a globally-unique PK belonging to exactly one course via the `course_id` FK,
+    so course scoping is implicit. UI-relevant predicate; never used for any
+    write-path authorization decision.
     """
     return bool(db.scalar(
         select(exists().where(
@@ -342,6 +354,7 @@ const byStatus: Record<Status, typeof withStatus> = {
 };
 for (const x of withStatus) byStatus[x.status].push(x);
 
+const cmp = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;  // ISO date strings sort lexicographically
 function byEndDateAscThenId(a, b)   { return cmp(a.row.run.end_date, b.row.run.end_date)   || a.row.run.id - b.row.run.id; }
 function byStartDateAscThenId(a, b) { return cmp(a.row.run.start_date, b.row.run.start_date) || a.row.run.id - b.row.run.id; }
 function byEndDateDescThenId(a, b)  { return cmp(b.row.run.end_date, a.row.run.end_date)   || a.row.run.id - b.row.run.id; }
@@ -402,7 +415,22 @@ Mirrors `lib/runs.ts` conventions. `api.get` at `frontend/src/lib/api.ts:48` ret
 
 **Current state:** `RunDetailPage.svelte` passes `course` to `<RunAssetsTab>` (line 418, `course={course!}`). The other three tabs (`<RunOverviewTab>`, `<RunMiniProjectsTab>`, `<RunTeachersTab>`) currently receive NO `course` prop. Slice A threads `course` into all three to match the existing `RunAssetsTab` precedent — same prop shape across all four tabs.
 
-**Prop shape — `course: Course` (required), matching `RunAssetsTab.svelte:23,33`.** Each tab destructures `let { course, /* ...existing props */ } = $props<{ course: Course; /* ... */ }>()` and reads `course.is_admin` directly. Required (not optional) — RunDetailPage always loads `course` before mounting the tab; existing tests of each tab will be updated to supply a stub `course: { is_admin: true }` (preserving today's "controls visible" behavior). Tests that want to assert the teacher view supply `course: { is_admin: false }`.
+**Prop shape — `course: Course` (required), matching `RunAssetsTab.svelte:23,33`.** Each tab destructures `let { course, /* ...existing props */ } = $props<{ course: Course; /* ... */ }>()` and reads `course.is_admin` directly. `Course.is_admin` in `frontend/src/lib/types.ts` is non-optional `boolean` — `{#if course.is_admin}` is type-safe; test stubs must always set the field.
+
+Required (not optional) — RunDetailPage always loads `course` before mounting the tab; existing tests of each tab will be updated to supply a stub `course: { is_admin: true }` (preserving today's "controls visible" behavior). Tests that want to assert the teacher view supply `course: { is_admin: false }`.
+
+**Existing-test update scope is broader than one file per tab.** The prop change touches ~38 existing tests across SIX test files (counts approximate, verify at impl time):
+
+| File | Mount sites |
+|---|---|
+| `frontend/src/tests/RunOverviewTab.svelte.test.ts` | ~7 (shared `mountOverview` helper) |
+| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | ~5 (separate file ALSO mounting RunOverviewTab) |
+| `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` | ~15 (NO shared helper — inline mounts at many test bodies) |
+| `frontend/src/tests/RunTeachersTab.svelte.test.ts` | ~6 |
+| `frontend/src/tests/RunDetailPage.svelte.test.ts` | indirect via RunDetailPage rendering |
+| `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` | ~5 indirect |
+
+Recommended: as part of this task, extract a `mountMpTab(extra)` helper inside `RunMiniProjectsTab.svelte.test.ts` (mirroring the existing `mountOverview` pattern) so the 15 sites are updated through one helper. The plan task that does the prop wiring must size for this.
 
 **Conditional hides inside each tab:**
 
@@ -429,27 +457,31 @@ No new components. The hides are `{#if course.is_admin}` blocks; the prop wiring
 
 `currentRoute` is imported from `./lib/router.svelte` (already imported in `App.svelte:3`).
 
-**Default-route effect — merged form preserving the auth guard.** The current `$effect` at `App.svelte:34-43` handles BOTH the `/` redirect AND an auth-guard for protected routes. Use the existing local variable names (per `App.svelte:34-43`: `matched` is the route-match object; the auth guard reads `matched.route.auth`):
+**Default-route effect — merged form preserving the auth guard.** The current `$effect` at `App.svelte:34-43` handles BOTH the auth-guard for protected routes (with a `?next=...` round-trip so deep links survive login) AND would benefit from a `/` redirect branch. Slice A adds ONLY the `/` branch; the existing auth-guard branch must be preserved verbatim — including the `next` query-string construction and the `force: true` flag — or §5.5 (deep-link from email survives login) regresses:
 
 ```svelte
 $effect(() => {
   if (session.loading) return;
 
   // 1. Default route: '/' redirects based on session role flags.
+  //    (NEW in Slice A.)
   if (currentRoute.path === '/') {
     navigate(defaultLandingPath(session.user), { replace: true });
     return;
   }
 
-  // 2. Auth guard for protected routes (preserved verbatim from existing code).
-  if (matched?.route.auth && !session.user) {
-    navigate('/login', { replace: true });
-    return;
+  // 2. Auth guard for protected routes — preserved verbatim from existing
+  //    App.svelte:39-42. DO NOT drop the `?next=...` or `force: true`.
+  if (matched && matched.route.auth && session.user === null) {
+    const next = encodeURIComponent(
+      currentRoute.path + currentRoute.search + currentRoute.hash
+    );
+    navigate(`/login?next=${next}`, { replace: true, force: true });
   }
 });
 ```
 
-The plan task that touches `App.svelte` must keep the auth-guard branch intact; this snippet is illustrative — diff against the existing file before editing.
+Diff against the existing `App.svelte:34-43` before editing — variable names (`matched`, `matched.route.auth`, `currentRoute.search`, `currentRoute.hash`) must match the real file exactly.
 
 **Extract `defaultLandingPath(user)` helper.** To make the routing decision unit-testable without driving jsdom navigation, extract the inner ternary into a pure function in `frontend/src/lib/router.svelte.ts`:
 
@@ -465,7 +497,9 @@ export function defaultLandingPath(user: User | null): string {
 
 Unit-tested in `frontend/src/tests/router.test.ts` (existing file). The `App.svelte` `$effect` and the AppHeader's brand href both call it; smoke covers the end-to-end navigation.
 
-**New route entry in `routes.ts`:** `{ path: '/teaching', component: 'TeacherRunListPage', auth: true }`. Add `TeacherRunListPage` import + entry to `componentMap`.
+**New route entry in `routes.ts`:** `{ path: '/teaching', component: 'TeacherRunListPage', auth: true }`. In `App.svelte`: (a) add `import TeacherRunListPage from './pages/teaching/TeacherRunListPage.svelte'`, and (b) add a `TeacherRunListPage` entry to the `componentMap` object that the existing route-rendering uses to dispatch on `route.component`. Both edits are required — adding the route entry without the componentMap entry will route to an unknown component.
+
+**Ordering constraint for the plan.** The `User` type at `frontend/src/lib/types.ts:5-12` must be extended with `has_course_admin: boolean` and `has_run_teacher: boolean` BEFORE `defaultLandingPath(user)` is consumed. If the types extension is staged into one plan task and the AppHeader / `App.svelte` routing into another, sequence the types task first so the consumers type-check.
 
 #### 3.2.6 Session store
 
@@ -590,11 +624,21 @@ Possible if an admin both enrolls and teaches a user. `by-slug` returns `is_admi
 
 ### 5.11 Teacher viewing a run whose pinned version was later disabled
 
-Per §3.1.3, teacher branch allows reads on disabled versions (and §5.4 confirms the existing UX renders). A test in §6.1 (`test_blocks_disabled_version_readable_by_teacher`) locks this in.
+Per §3.1.3, teacher branch allows reads on disabled versions (and §5.4 confirms the existing UX renders). Test `test_blocks_list_allows_teacher_on_pinned_disabled_version` (§6.1) locks this in.
 
 ### 5.12 Session race during cookie restore
 
-If `session.user` is null when `/teaching` mounts (cookie restore not yet completed), the existing `App.svelte` auth-guard `$effect` redirects to `/login`. No additional guard is required on the page itself.
+If `session.user` is null when `/teaching` mounts (cookie restore not yet completed), the existing `App.svelte` auth-guard `$effect` redirects to `/login?next=...` (preserving the deep link). No additional guard is required on the page itself.
+
+### 5.13 Pinned-version deletion semantics
+
+If an admin deletes a `CourseVersion` row that a teacher's run is pinned to, the outcome depends on the FK between `Run.version_id` and `CourseVersion.id`. Read `backend/mathion/models.py` at implementation time to confirm the actual `ondelete` behavior; the three possible cases:
+
+- **CASCADE** — the run is deleted too. The teacher's `RunTeacher` row may also cascade (depending on `RunTeacher.run_id` FK). Result: teacher cleanly loses access via row absence; `/api/teaching/runs` no longer returns the row.
+- **RESTRICT / NO ACTION** — admin cannot delete a pinned version; the constraint forces them to re-pin or delete the run first. Defensive default.
+- **SET NULL** — the run row remains with `version_id = NULL`. The current schema declares `Run.version_id` as `nullable=False` (`models.py:195`), so SET NULL is not viable; the FK is either CASCADE or RESTRICT.
+
+In all viable cases the design is safe: a teacher cannot reach a version that no longer exists, and `has_run_pinned_to_version(... version_id)` returns False once the version row is gone. No additional guard is required; tests do not need to fixture-prove this case for Slice A.
 
 ## 6. Testing
 
@@ -614,17 +658,19 @@ New test file `tests/test_teaching.py`. The `teacher_client` fixture already exi
 - `test_has_pinned_hits_when_teacher_row_on_run_with_this_version_id`
 - `test_has_pinned_misses_when_teacher_row_on_run_with_different_version_id`
 - `test_has_pinned_misses_when_no_teacher_row`
-- `test_has_pinned_hits_regardless_of_version_state_or_is_disabled`
+- `test_has_pinned_hits_when_pinned_version_is_created_state` (locks state-agnostic loader-mount fix)
+- `test_has_pinned_hits_when_pinned_version_is_disabled` (locks §5.4/§5.11)
 
 **Opened endpoints — gate behavior**:
 - `test_by_slug_allows_run_teacher_returns_is_admin_false`
 - `test_by_slug_admin_who_is_also_teacher_returns_is_admin_true` (admin precedence)
 - `test_by_slug_superuser_returns_is_admin_true`
 - `test_by_slug_still_rejects_non_member`
-- `test_versions_list_returns_only_pinned_versions_for_teacher` (asserts other versions on course excluded)
+- `test_versions_list_returns_only_pinned_versions_for_teacher` — fixture: course C with v1/v2/v3 (all published), teacher's only run pinned to v2; assert response IDs = `[v2.id]` exactly.
+- `test_versions_list_returns_multiple_pinned_versions_when_teacher_teaches_multiple_runs_on_same_course` — fixture: course C with v1/v2/v3, teacher's runs r1→v1 and r2→v2; assert response IDs = `[v1.id, v2.id]` in `id ASC` order.
 - `test_versions_list_includes_pinned_draft_state_version_for_teacher` (locks loader-mount safety)
 - `test_versions_list_includes_pinned_disabled_version_for_teacher` (locks §5.4/§5.11)
-- `test_versions_list_admin_still_sees_all_versions` (regression for admin path)
+- `test_versions_list_admin_still_sees_all_versions_with_original_order_and_pagination` (regression for admin path — assert `created_at DESC, id DESC` and that limit/offset still work)
 - `test_versions_list_still_rejects_non_member`
 - `test_blocks_list_allows_teacher_on_pinned_version`
 - `test_blocks_list_allows_teacher_on_pinned_disabled_version` (§5.4/§5.11)
@@ -652,27 +698,28 @@ New test file `tests/test_teaching.py`. The `teacher_client` fixture already exi
 - `test_me_response_shape_includes_existing_fields` (regression — ensures `id`, `email`, `full_name`, `is_superuser`, `is_disabled`, `photo_url` all still present alongside the new flags)
 
 **`api_verify_pin` flag test — concrete body**:
+
 ```python
+from mathion.auth import request_pin   # service-layer fn returns the raw PIN
+
 def test_verify_pin_response_includes_role_flags(client, teacher_user, db_session):
-    # 1. Request PIN
-    r = client.post("/api/auth/request-pin", json={"email": teacher_user.email})
-    assert r.status_code == 200
-    # 2. Read the PIN (use whatever helper the existing conftest exposes — pattern from
-    #    backend/tests/conftest.py request_pin/verify_pin fixtures; if no helper exists
-    #    yet, add one that returns the PIN from the auth.pins table or notification log)
-    pin = read_latest_pin_for(db_session, teacher_user.email)
-    # 3. Verify
+    # 1. Request a PIN via the service layer (returns the raw PIN — same pattern
+    #    used by backend/tests/conftest.py:107-141 fixtures; no separate helper).
+    pin = request_pin(db_session, teacher_user.email)
+    # 2. Verify via the HTTP route (this is what exercises _user_response_with_flags).
     r = client.post("/api/auth/verify-pin", json={"email": teacher_user.email, "pin": pin})
     assert r.status_code == 200
     body = r.json()
-    # 4. Assert wrap preserved AND new flags present
+    # 3. Wrap preserved AND new flags present.
     assert "user" in body
     assert body["user"]["has_run_teacher"] is True
     assert body["user"]["has_course_admin"] is False
-    # 5. Assert pre-existing fields still present (regression for schema-change risk)
+    # 4. Pre-existing fields still present (regression for schema-change risk).
     for key in ("id", "email", "full_name", "is_superuser", "is_disabled", "photo_url"):
         assert key in body["user"]
 ```
+
+Note: `api_verify_pin` (`backend/mathion/api/auth.py:29-46`) has NO `response_model` decorator — it returns a plain `dict` `{"user": UserResponse(...)}` that FastAPI serializes via `jsonable_encoder`. Adding the new flags requires NO decorator change.
 
 **`/api/teaching/runs` tests**:
 - `test_teaching_runs_returns_only_my_runs`
@@ -684,8 +731,11 @@ def test_verify_pin_response_includes_role_flags(client, teacher_user, db_sessio
 - `test_teaching_runs_student_count_multiple` (run with N>1 students returns COUNT)
 - `test_teaching_runs_superuser_sees_only_own_teacher_rows` (locks §3.1.5 no-bypass)
 - `test_teaching_runs_orders_by_id_asc` (with 2+ runs in fixture, assert backend stable order — frontend re-sorts but tests need a known baseline)
-- `test_teaching_runs_response_key_set` (assert top-level row keys exactly: `{run, course_id, course_name, course_slug, student_count}`. Paired with frontend mock-shape assertion.)
+- `test_teaching_runs_response_key_set` — assert top-level row keys exactly: `{run, course_id, course_name, course_slug, student_count}` AND nested `run` includes at least `{id, title, start_date, end_date, is_published, created_at}` (the fields the frontend grouping/sort depends on). Paired with frontend mock-shape assertion.
 - `test_teaching_runs_course_slug_populated` (frontend builds the URL from this — assert non-null/non-empty)
+- `test_teaching_runs_includes_runs_pinned_to_disabled_versions` (no `is_disabled` filter on the SQL — regression guard against accidental future filter)
+- `test_teaching_runs_includes_unpublished_draft_runs` (no `is_published` filter — Draft pill consumers depend on this)
+- `test_teaching_runs_returns_run_when_user_is_one_of_multiple_teachers` (fixture: run has `[user, otherTeacher]` rows; assert response has exactly one row for this run — no duplication despite no DISTINCT in SQL, because `RunTeacher.user_id == user.id` narrows to one row)
 
 (The earlier `test_teaching_runs_no_n_plus_one` is DROPPED for slice A — no `capture_queries` helper exists in `backend/tests/conftest.py`. Adding one is its own work item; the SQL is reviewed visibly in §3.1.5.)
 
@@ -759,11 +809,13 @@ Extend `src/tests/RunTeachersTab.svelte.test.ts`:
 4. Click Teaching → land on `/teaching` with pills, default Active, table populated.
 5. Switch through each pill and verify row counts match pill counts and rows within each group appear in the documented sort order (e.g. for Active, leftmost end-date first).
 6. Click a row → run-detail page; verify Overview tab has NO publish/unpublish/delete; PATCH-title and PATCH-end-date ARE present (teachers can edit metadata); MP tab has NO publish toggle on rows; Teachers tab has NO add-form and NO Remove buttons; Assets, Groups, Evaluations tabs work normally.
-6b. As the teacher, view a run whose pinned version is disabled (admin sets `is_disabled` via Authoring's version actions, OR if the admin UI doesn't expose disable, set `course_versions.is_disabled = true` directly in the dev DB): verify the version-disabled banner renders and tooltips on disabled actions still appear.
+6b. As the teacher, view a run whose pinned version is disabled. The Authoring UI doesn't expose a "disable" toggle currently — set `course_versions.is_disabled = true` for the relevant `version.id` directly in the dev DB (`backend/.venv` → `sqlite3 backend/mathion.db "UPDATE course_versions SET is_disabled = 1 WHERE id = <vid>;"`). Verify the version-disabled banner renders and tooltips on disabled actions still appear. Restore with `is_disabled = 0` afterwards.
+6c. As the teacher, view a run whose pinned version is in `created` state (locks the loader-mount Critical fix). The Authoring UI doesn't expose a "downgrade-to-draft" action; set `course_versions.state = 'created'` for the pinned version directly in the dev DB. Verify the run-detail page mounts successfully, the version dropdown shows that one version, and the blocks tab renders (no white screen). Restore `state = 'published'` afterwards.
 7. Log in as a teacher-only user (no `CourseAdmin` rows): AppHeader shows Teaching only; `/` redirects to `/teaching`; brand href is `/teaching`.
 8. To exercise the empty-state path: as the admin from step 2, REMOVE the teacher's `RunTeacher` row via the same `RunTeachersTab`. Log out (admin), log in as the teacher again. The teacher's flags now: `has_run_teacher: false` (assuming no other rows). AppHeader shows no nav links; `/teaching` direct-load still fetches `/api/teaching/runs` and gets `[]`, rendering the page-level empty state ("You're not assigned to any runs yet…").
 9. Direct URL `/courses/:slug/runs/:rid` as a teacher → loads correctly with hidden admin actions.
 10. Direct URL `/courses/:slug/runs/:rid` as a non-member → 403 "Access denied" via existing error path.
+11. Pinned-version-switch smoke (locks the IN-subquery filter behavior): as the course admin, create a new version v2 on a course you've assigned the teacher to, then re-pin the run from v1 → v2 via the admin run-edit UI. Log out, log in as the teacher, reload the run-detail page. Verify `GET /api/courses/{cid}/versions` returns v2 (the new pin) — v1 should no longer appear in the response, and the version dropdown reflects v2.
 
 ## 7. Migration / data
 
@@ -811,7 +863,7 @@ No database schema change. No migrations needed.
 - `backend/mathion/api/courses.py` — extend `get_course_by_slug` gate (4-tier order).
 - `backend/mathion/api/versions.py` — extend `list_versions` gate + pinned-versions-only subquery filter on teacher branch.
 - `backend/mathion/api/blocks.py` — extend `list_blocks` gate using `has_run_pinned_to_version`.
-- `backend/mathion/api/auth.py` — add `_user_response_with_flags` private helper colocated with handlers; widen `get_profile` signature with `db: Session = Depends(get_db)`; wire helper into both `get_profile` and `api_verify_pin` (preserving the `{"user": ...}` wrap on `api_verify_pin`); add imports `from sqlalchemy import exists, select` and `from mathion.models import CourseAdmin, RunTeacher` if not already present.
+- `backend/mathion/api/auth.py` — add `_user_response_with_flags` private helper colocated with handlers; widen `get_profile` signature with `db: Session = Depends(get_db)`; wire helper into both `get_profile` and `api_verify_pin` (preserving the `{"user": ...}` dict wrap on `api_verify_pin` — no `response_model` change needed because the handler has none). New imports: `from sqlalchemy import exists` (currently absent) and `from mathion.models import CourseAdmin, RunTeacher` (currently absent). `select` and `Session` are already imported.
 - `backend/mathion/schemas.py` — extend `UserResponse` with two `bool = False` defaults; add `TeachingRunRow` (no `model_config`).
 - `backend/mathion/api/teaching.py` — new router file.
 - `backend/mathion/main.py` — register `teaching_router` between `dashboard_router` (line 50) and the `@app.get("/health")` block (line 53), BEFORE the SPA catch-all (`main.py:66-71`).
@@ -835,9 +887,12 @@ No database schema change. No migrations needed.
 - `frontend/src/tests/TeacherRunListPage.svelte.test.ts` — new.
 - `frontend/src/tests/teaching.test.ts` — new (wire-module).
 - `frontend/src/tests/router.test.ts` — extend with `defaultLandingPath` unit tests.
-- `frontend/src/tests/RunOverviewTab.svelte.test.ts` — extend (update existing tests to pass stub `course` prop; add `is_admin: false` case).
-- `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (same pattern).
-- `frontend/src/tests/RunTeachersTab.svelte.test.ts` — extend (same pattern).
+- `frontend/src/tests/RunOverviewTab.svelte.test.ts` — extend (~7 mount sites; update existing tests to pass stub `course={ ..., is_admin: true }`; add `is_admin: false` cases).
+- `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` — extend (~5 mount sites, SAME PROP UPDATES; this file ALSO mounts RunOverviewTab).
+- `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (~15 mount sites; extract a `mountMpTab(extra)` helper as part of this task to avoid touching every site).
+- `frontend/src/tests/RunTeachersTab.svelte.test.ts` — extend (~6 mount sites).
+- `frontend/src/tests/RunDetailPage.svelte.test.ts` — extend (indirect; RunDetailPage now passes `course` to three more tabs — verify integration).
+- `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` — extend (~5 mount sites, indirect).
 
 (No `App.svelte.test.ts` extension — see §6.2 final paragraph.)
 
