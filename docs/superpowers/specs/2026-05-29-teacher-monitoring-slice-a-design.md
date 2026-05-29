@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5×6+codex×5 reviewer pass — rev 12 fixes 2 Important + 3 Minor from codex round 11): (1) **`RunGroupsTab` parent prop contradiction** — rev 11 said `runIsPublished` was "already a parent-supplied prop", but `RunDetailPage.svelte:367-375` actually passes only `runId`, `groups`, `groupsEnabled`, callbacks. Rev 12 makes it explicit: Slice A ADDS `course` AND `runIsPublished` to the parent call site. Also fixes stale "three additional tabs" wording in §3.2.4 + §12 → four additional tabs (RunOverviewTab + RunMiniProjectsTab + RunTeachersTab + RunGroupsTab; RunAssetsTab was already wired). (2) **Phantom Evaluations tab** — §6.3 step 6h smoke said "Evaluations tab works normally" but the tab doesn't exist (`RunDetailPage.svelte:27` defines active tabs as `overview | teachers | groups | roster | mini-projects | assets`; `ls components/runs/ | grep -i eval` returns nothing). Rev 12 removes the reference; replaced with `Roster tab works normally` to keep the tab-coverage chain intact. (3) Minor: §5.11 tightens the "teacher branch allows reads on disabled versions" claim — versions/blocks YES, embedded assets NO (admin-symmetric per §3.1.3a). (4) Minor: mount counts narrowed via codex round-11 direct-mount grep — `RunMiniProjectsTab.svelte.test.ts` 22 → 15; `RunTeachersTab.svelte.test.ts` 12 → 6. The round-9 broader counts had double-counted helper definitions and indirect patterns.
+**Status:** Design (post 5×6+codex×6 reviewer pass — rev 13 fixes 3 Important + 4 Minor from codex round 12): (1) **`RunOverviewTab` groups-toggle tooltip** at line 161 — "Locked once the run is published. Unpublish to change." is admin-dead for teachers. Rev 13 rewrites to role-aware: admin sees today's "Unpublish to change."; teacher sees "Ask a course admin to unpublish before changing." New §6.2 tests lock the contract. (2) **`RunDetailPage` disabled-version banner** at lines 339-342 — "Re-enable it under Course Editor before publishing." is doubly admin-dead for teachers ("Course Editor" + "publishing"). Rev 13 rewrites to course-aware: admin sees today's text; teacher sees "Some editing actions are locked until a course admin re-enables it." §5.4 + §6.2 + §6.3 step 6b updated. Codex round 10 had marked this Minor; codex round 12 upgraded it to Important after the §5.4 admin-symmetric design crystallized. (3) **Broken PIN-verify test body** — rev-7 snippet (a) called `client.post(...)` without the required `duration_days` field (`PinVerifySchema` at `schemas.py:172` has `int = Field(ge=1, le=30)` → 422 without it) and (b) relied on `teacher_user` having `has_run_teacher=True` which is FALSE (fixture creates only a `User` row, no `RunTeacher`). Rev 13 rewrites the snippet to seed a course via `seed_publishable_version`, create a run via `admin_client`, insert `RunTeacher(run_id, user_id)`, then call verify-pin with `duration_days: 7` (matching conftest fixtures at lines 110/119/140/195). (4) Minor: stale "3 tabs" stragglers fixed (§3.2.4 line 549 + §12 line 1106); §12 RunMiniProjectsTab summary line now lists all four CTA/tooltip fixes; §12 RunOverviewTab summary includes the tooltip rewrite; `_client_for` wording corrected — "does NOT create the User row" (rev-12 said "create User").
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -504,7 +504,17 @@ Required (not optional) — RunDetailPage always loads `course` before mounting 
   2. **Minimal patch**: keep the structure, wrap only the publish/unpublish block (lines 317-335) in `{#if course.is_admin}`. The badge (311-313) and version label (314-316) stay outside the `{#if}` block. CSS flex container holds; the bar collapses to badge + label for teachers.
 
   Either way the contract is: status badge + version label visible to ALL roles; Publish/Unpublish/InlineConfirm visible only when `course.is_admin`. (Earlier reviewer rounds mis-located these controls inside `RunOverviewTab` — codex round-7 caught it; codex round-8 caught the badges-inside-bar regression.)
-- **`RunOverviewTab` Delete-run only** — accept required `course: Course` prop; wrap the `Delete run` button + delete confirm at `frontend/src/components/runs/RunOverviewTab.svelte:199-207` inside `{#if course.is_admin}`. PATCH-title / PATCH-end-date / `groups_enabled` toggle / metadata edits stay visible (PATCH on the run is `require_run_admin_or_teacher` per §3.1.6).
+- **`RunOverviewTab`** — accept required `course: Course` prop. Two changes:
+  1. Wrap the `Delete run` button + delete confirm at `frontend/src/components/runs/RunOverviewTab.svelte:199-207` inside `{#if course.is_admin}`.
+  2. **Groups-toggle tooltip rewrite** at line 161 — `title={run.is_published ? 'Locked once the run is published. Unpublish to change.' : ''}` tells a teacher to do something they cannot. Rewrite to be course-aware:
+     ```svelte
+     title={run.is_published
+       ? (course.is_admin
+         ? 'Locked once the run is published. Unpublish to change.'
+         : 'Locked once the run is published. Ask a course admin to unpublish before changing.')
+       : ''}
+     ```
+  PATCH-title / PATCH-end-date / metadata edits stay visible (PATCH on the run is `require_run_admin_or_teacher` per §3.1.6). The `groups_enabled` toggle stays visible and remains hard-disabled when `is_published` (same as today); only the tooltip becomes role-aware.
 - **`RunMiniProjectsTab`** — accept required `course: Course` prop. **No MP-publish hide** — `publish_mini_project` is teacher-allowed (§3.1.6) and the modal Publish button (`MiniProjectModal.svelte:483-485`) stays visible to teachers. The only hide is for **force-delete of locked MPs**: when the row's MP is locked AND `!course.is_admin`, hide (or disable with tooltip) the force-confirm Delete affordance. Non-locked delete stays teacher-visible. **Locked signal:** `MiniProjectResponse.has_submissions` does NOT exist — the actual signal is `first_submitted_at !== null` per `backend/mathion/schemas.py:599` (`first_submitted_at: datetime | None`), exposed to the frontend at `frontend/src/lib/types.ts:393`, and matching the backend `is_locked = mp.first_submitted_at is not None` checks at `backend/mathion/api/mini_projects.py:145, 203`. Add a small derived helper at the top of `RunMiniProjectsTab.svelte`:
 
   ```ts
@@ -546,7 +556,7 @@ Required (not optional) — RunDetailPage always loads `course` before mounting 
   ```
   When groups ARE enabled, the existing CRUD (add/rename/delete + assignment) is teacher-allowed at the backend and STAYS visible. No `{#if course.is_admin}` wrap on the group CRUD itself.
 
-No new components. The hides are `{#if course.is_admin}` blocks; the prop wiring extends to `RunDetailPage` itself + 3 tabs + `MiniProjectModal` (for the admin-dead navigation CTAs — see next paragraph). The modal's Publish button stays visible to all roles per Option A.
+No new components. The hides are `{#if course.is_admin}` blocks; the prop wiring extends to `RunDetailPage` itself + 4 tabs (RunOverviewTab + RunMiniProjectsTab + RunTeachersTab + RunGroupsTab) + `MiniProjectModal` (for the admin-dead navigation CTAs — see next paragraph). The modal's Publish button stays visible to all roles per Option A.
 
 **Admin-dead navigation CTAs in MP flow** (codex rounds 8 + 9). The MP UI surfaces several "Open Overview to ..." link-buttons that point teachers toward admin-only actions. They MUST be conditionally hidden for teachers; the informational warning text stays visible.
 
@@ -735,6 +745,22 @@ Existing `versionIsDisabled` UX (banner above tab content + tooltips on action b
 
 **Embedded asset `<img>` images on disabled versions — admin-symmetric broken-image behavior, accepted.** `serve_asset` 403s for ALL roles when `version.is_disabled` (pre-existing behavior, locked in by `test_assets_api.py:216-229`). So when a pinned version is disabled, the banner and tooltips render normally, but embedded `<img>` references inside `info_html` show broken-image icons — exactly as they do for admins today. Slice A does not widen the asset gate to teacher-only on disabled versions; the asymmetry would be confusing (admins would still see broken images on their own disabled versions), and the use case is rare (admin disabling a live-pinned version mid-term).
 
+**Disabled-version banner copy — course-aware** (`frontend/src/pages/runs/RunDetailPage.svelte:339-342`). Today's banner reads `"This run's course version is disabled. Re-enable it under Course Editor before publishing."` Both "Re-enable in Course Editor" (admin authoring) and "before publishing" (admin-only POST publish) are admin-dead for teachers. Slice A rewrites:
+
+```svelte
+{#if showDisabledBanner}
+  <div class="banner-warning">
+    {#if course.is_admin}
+      This run's course version is disabled. Re-enable it under Course Editor before publishing.
+    {:else}
+      This run's course version is disabled. Some editing actions are locked until a course admin re-enables it.
+    {/if}
+  </div>
+{/if}
+```
+
+`RunDetailPage` already has `course` in scope. The `publishTooltip` at `RunDetailPage.svelte:231-233` is now inside the `{#if course.is_admin}`-wrapped `.publish-bar` (per §3.2.4), so it never renders for teachers — no rewrite needed there. Smoke step §6.3 step 6b verifies the teacher-facing banner copy.
+
 ### 5.5 Deep-link from email
 
 When a course admin invites a teacher via email, the email may contain a deep link to `/courses/:slug/runs/:rid`. After login, the user lands on the deep link route, `by-slug` succeeds, run loads. Identical to the admin path.
@@ -779,7 +805,7 @@ If `session.user` is null when `/teaching` mounts (cookie restore not yet comple
 
 ### 6.1 Backend (pytest, `backend/.venv`)
 
-New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` fixtures already exist in `backend/tests/conftest.py:124-130` and `:133-142` — leverage them. There is NO `course_admin_client` fixture; for tests that need a non-superuser `CourseAdmin`, copy `_client_for(db, email)` from `backend/tests/test_run_assets.py:9-17` (calls `request_pin` + `verify_pin` and mints a cookied client). **IMPORTANT — the helper logs in only.** It does NOT seed any role rows; the caller must FIRST seed the `User` row AND insert the `CourseAdmin(user_id=u.id, course_id=c.id)` row, THEN call `_client_for(db, u.email)` to get the authenticated client. A plan-writer who treats `_client_for(...)` as a one-shot like `admin_client` will produce tests where the cascade-guard assertions pass for the wrong reason (the user is just a plain authenticated user, not a CourseAdmin). Pattern: seed → `_client_for` → exercise. (Earlier revisions of this spec cited `test_run_teachers.py` as the precedent; that file actually uses `admin_client` (superuser) exclusively. The genuine non-superuser inline-seeding pattern is in `test_run_assets.py`.)
+New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` fixtures already exist in `backend/tests/conftest.py:124-130` and `:133-142` — leverage them. There is NO `course_admin_client` fixture; for tests that need a non-superuser `CourseAdmin`, copy `_client_for(db, email)` from `backend/tests/test_run_assets.py:9-20` (calls `request_pin` + `verify_pin` and mints a cookied client). **IMPORTANT — the helper logs in only.** It does NOT create the User row and does NOT seed any role rows; the caller must FIRST seed the `User(email=...)` row AND insert the `CourseAdmin(user_id=u.id, course_id=c.id)` row, THEN call `_client_for(db, u.email)` to get the authenticated client. A plan-writer who treats `_client_for(...)` as a one-shot like `admin_client` will produce tests where the cascade-guard assertions pass for the wrong reason (the user is just a plain authenticated user, not a CourseAdmin). Pattern: seed → `_client_for` → exercise. (Earlier revisions of this spec cited `test_run_teachers.py` as the precedent; that file actually uses `admin_client` (superuser) exclusively. The genuine non-superuser inline-seeding pattern is in `test_run_assets.py`.)
 
 **Helper unit tests** are called as Python functions (NOT via HTTP), matching the precedent at `backend/tests/test_slugify.py:3` and `test_run_permissions.py:6` — `from mathion.api.helpers import has_run_teacher_on_course, has_run_pinned_to_version` and call with the `db` session + inline-seeded rows. No HTTP round-trip needed.
 
@@ -854,21 +880,53 @@ New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` 
 
 ```python
 from mathion.auth import request_pin   # service-layer fn returns the raw PIN; signature: (db, email) -> str | None
+from mathion.models import RunTeacher
 
-def test_verify_pin_response_includes_role_flags(client, teacher_user, db):
-    # 1. Request a PIN via the service layer (returns the raw PIN — same pattern
+def test_verify_pin_response_includes_role_flags(
+    client, admin_client, teacher_user, seed_publishable_version, db,
+):
+    # 1. Seed: teacher_user fixture (conftest.py:124-130) only creates a User row
+    #    with NO RunTeacher row. For `has_run_teacher: True` we need a real
+    #    RunTeacher row, so create a course + version + run via the admin client
+    #    (the only path that satisfies require_course_admin_for_run), then insert
+    #    the RunTeacher link directly via the db session.
+    course, _version = seed_publishable_version()
+    run_resp = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={
+            "title": "R",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "groups_enabled": False,
+        },
+    )
+    assert run_resp.status_code == 201, run_resp.text
+    run = run_resp.json()
+    db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+    db.commit()
+
+    # 2. Request a PIN via the service layer (returns the raw PIN — same pattern
     #    used by backend/tests/conftest.py:107-141 fixtures; no separate helper).
     pin = request_pin(db, teacher_user.email)
-    assert pin is not None  # rate-limit defensive check, mirroring conftest.py:194 student_client_for pattern
-    # 2. Verify via the HTTP route (this is what exercises _user_response_with_flags).
-    r = client.post("/api/auth/verify-pin", json={"email": teacher_user.email, "pin": pin})
-    assert r.status_code == 200
+    assert pin is not None  # rate-limit defensive check
+
+    # 3. Verify via the HTTP route. `duration_days` is REQUIRED by
+    #    PinVerifySchema at backend/mathion/schemas.py:169-172 — omitting it
+    #    returns 422. Use 7 to match the conftest fixtures
+    #    (`conftest.py:110, 119, 140, 195`).
+    r = client.post(
+        "/api/auth/verify-pin",
+        json={"email": teacher_user.email, "pin": pin, "duration_days": 7},
+    )
+    assert r.status_code == 200, r.text
     body = r.json()
-    # 3. Wrap preserved AND new flags present.
+
+    # 4. Wrap preserved AND new flags present.
     assert "user" in body
     assert body["user"]["has_run_teacher"] is True
     assert body["user"]["has_course_admin"] is False
-    # 4. Pre-existing fields still present (regression for schema-change risk).
+
+    # 5. Pre-existing fields still present (regression for schema-change risk).
     for key in ("id", "email", "full_name", "is_superuser", "is_disabled", "photo_url"):
         assert key in body["user"]
 ```
@@ -944,10 +1002,15 @@ Extend `src/tests/RunOverviewTab.svelte.test.ts`:
 - When `course.is_admin === false`, the `Delete run` button is NOT in the DOM (assert via `queryByText`/`queryByRole` returning null).
 - When `course.is_admin === true`, the `Delete run` button IS in the DOM (regression guard).
 - PATCH-title, PATCH-end-date, and `groups_enabled` toggle ARE in the DOM regardless of `course.is_admin` (locks the teacher-allowed PATCH semantics — see §3.1.6).
+- When `course.is_admin === false` AND `run.is_published === true`, the groups toggle's `title` attribute is `"Locked once the run is published. Ask a course admin to unpublish before changing."` (NOT the admin-facing "Unpublish to change." text).
+- When `course.is_admin === true` AND `run.is_published === true`, the groups toggle's `title` attribute is `"Locked once the run is published. Unpublish to change."`
+- When `run.is_published === false`, the groups toggle's `title` attribute is empty regardless of `course.is_admin`.
 
 Extend `src/tests/RunDetailPage.publish.svelte.test.ts` (and/or `RunDetailPage.svelte.test.ts`):
 - When `course.is_admin === false`: `button[data-action="publish"]`, `button[data-action="unpublish"]`, and the unpublish `InlineConfirm` are all NOT in the DOM. `[data-testid="status-badge"]` AND `[data-testid="version-label"]` ARE still in the DOM. (This assertion shape works for BOTH publish-bar wrap options in §3.2.4: whether the `.publish-bar` div is empty/removed or restructured into a sibling `.run-meta` is an implementation detail — the contract is about specific buttons absent and specific testid elements present.)
 - When `course.is_admin === true`: Publish or Unpublish button IS in the DOM (whichever matches `run.is_published`); badge + version label IS in the DOM; today's interaction behavior unchanged.
+- When `course.is_admin === false` AND `pinnedVersion.is_disabled === true`, the disabled-version banner text is `"This run's course version is disabled. Some editing actions are locked until a course admin re-enables it."`
+- When `course.is_admin === true` AND `pinnedVersion.is_disabled === true`, the disabled-version banner text is `"This run's course version is disabled. Re-enable it under Course Editor before publishing."`
 
 Extend `src/tests/RunMiniProjectsTab.svelte.test.ts`:
 - Existing tests pass `course={ ..., is_admin: true }`.
@@ -1000,7 +1063,7 @@ Extend `src/tests/RunAssetsTab.svelte.test.ts` (RunAssetsTab already receives `c
 4. Click Teaching → land on `/teaching` with pills, default Active, table populated.
 5. Switch through each pill and verify row counts match pill counts and rows within each group appear in the documented sort order (e.g. for Active, leftmost end-date first).
 6. Click a row → run-detail page; verify: (a) the header Publish and Unpublish buttons are GONE (course-admin-only); (b) Status badge and version label ARE still shown in the header (the `.publish-bar` div itself may be empty or restructured — only the lifecycle buttons must be absent); (c) Overview tab has NO `Delete run` button (course-admin-only); (d) Overview PATCH-title, PATCH-end-date, and `groups_enabled` toggle ARE present (teachers CAN edit run metadata; `groups_enabled` toggle is enabled iff `!run.is_published` — same as today); (e) MP tab — modal Publish button IS present (teachers CAN publish MPs per §3.1.6); locked-row force-delete affordance is GONE; non-locked Delete IS present; Edit IS present; "Publish on Overview" link is GONE; "Enable on Overview" link is GONE if `run.is_published`, present if `!run.is_published`; "See Overview" link in the version-disabled banner is GONE; (f) Teachers tab has NO add-form and NO Remove buttons; (g) Assets tab — open the referenced-asset confirm: "Force delete" button IS visible but DISABLED with tooltip "Only course admins can force-delete a referenced asset." (current code keeps the button visible for discoverability — not absent); non-force delete on unreferenced assets works normally; upload IS present; (h) Groups tab — if groups disabled AND run published, placeholder reads "Ask a course admin to unpublish the run and enable groups." (NOT "Enable in Overview → Settings"); if groups disabled AND run NOT published, placeholder reads the original "Enable in Overview → Settings..." (teacher can act); if groups enabled, Add/Rename/Delete CRUD works normally; Roster tab works normally; (i) breadcrumb shows `Teaching › {course.name} › {run.title}` with the `Teaching` link working — NO `/courses` link visible.
-6b. As the teacher, view a run whose pinned version is disabled. The Authoring UI doesn't expose a "disable" toggle currently — set `course_versions.is_disabled = true` for the relevant `version.id` directly in the dev DB (`backend/.venv` → `sqlite3 backend/mathion.db "UPDATE course_versions SET is_disabled = 1 WHERE id = <vid>;"`). Verify the version-disabled banner renders and tooltips on disabled actions still appear. Restore with `is_disabled = 0` afterwards.
+6b. As the teacher, view a run whose pinned version is disabled. The Authoring UI doesn't expose a "disable" toggle currently — set `course_versions.is_disabled = true` for the relevant `version.id` directly in the dev DB (`backend/.venv` → `sqlite3 backend/mathion.db "UPDATE course_versions SET is_disabled = 1 WHERE id = <vid>;"`). Verify: (a) the version-disabled banner shows the teacher-aware copy `"This run's course version is disabled. Some editing actions are locked until a course admin re-enables it."` (NOT "Re-enable it under Course Editor before publishing." — that's the admin-facing copy); (b) tooltips on disabled actions still appear normally. Then log in as a course admin on the same run and verify the banner shows the admin-facing copy `"Re-enable it under Course Editor before publishing."` Restore with `is_disabled = 0` afterwards.
 6c. As the teacher, view a run whose pinned version is in `created` state (locks the loader-mount Critical fix). The Authoring UI doesn't expose a "downgrade-to-draft" action; set `course_versions.state = 'created'` for the pinned version directly in the dev DB. Verify the run-detail page mounts successfully, the version dropdown shows that one version, and the blocks tab renders (no white screen). Restore `state = 'published'` afterwards.
 7. Log in as a teacher-only user (no `CourseAdmin` rows): AppHeader shows Teaching only; `/` redirects to `/teaching`; brand href is `/teaching`.
 8. To exercise the empty-state path: as the admin from step 2, REMOVE the teacher's `RunTeacher` row via the same `RunTeachersTab`. Log out (admin), log in as the teacher again. The teacher's flags now: `has_run_teacher: false` (assuming no other rows). AppHeader shows no nav links; `/teaching` direct-load still fetches `/api/teaching/runs` and gets `[]`, rendering the page-level empty state ("You're not assigned to any runs yet…").
@@ -1073,9 +1136,9 @@ No database schema change. No migrations needed.
 - `frontend/src/lib/router.svelte.ts` — add `defaultLandingPath(user)` helper.
 - `frontend/src/App.svelte` — render `AppHeader`; update default-route `$effect` (keep auth-guard branch using existing local names `matched` / `matched.route.auth`); add `TeacherRunListPage` to component map.
 - `frontend/src/routes.ts` — add `/teaching` route.
-- `frontend/src/pages/runs/RunDetailPage.svelte` — thread `course` prop to FOUR additional tabs (RunOverviewTab, RunMiniProjectsTab, RunTeachersTab, RunGroupsTab; already passed to RunAssetsTab) AND `runIsPublished` to RunGroupsTab AND `course` to `MiniProjectModal` (via `RunMiniProjectsTab`); SPLIT the header `.publish-bar` at lines 310-336 so status badge (311-313) and version label (314-316) stay visible to all roles; wrap only Publish/Unpublish/InlineConfirm (lines 317-335) in `{#if course.is_admin}` (recommended: extract badge + label to a sibling `<div class="run-meta">` per §3.2.4); rewrite breadcrumbs at lines 304-307 to use `Teaching` root + drop the `Runs` segment for teachers (per §3.2.4 breadcrumb-fix).
-- `frontend/src/components/runs/RunOverviewTab.svelte` — accept required `course: Course` prop; `{#if course.is_admin}` around `Delete run` button + confirm at lines 199-207 (publish/unpublish are in RunDetailPage header, NOT here).
-- `frontend/src/components/runs/RunMiniProjectsTab.svelte` — accept required `course: Course` prop; pass `course` to `MiniProjectModal`; add `const isLocked = (mp) => mp.first_submitted_at !== null` helper; for locked MPs AND `!course.is_admin`, hide the force-confirm Delete affordance; wrap the "Publish on Overview" link-button at line 185 in `{#if course.is_admin}`. No MP-publish hide on the modal Publish button (teacher-allowed per §3.1.6).
+- `frontend/src/pages/runs/RunDetailPage.svelte` — thread `course` prop to FOUR additional tabs (RunOverviewTab, RunMiniProjectsTab, RunTeachersTab, RunGroupsTab; already passed to RunAssetsTab) AND `runIsPublished` to RunGroupsTab AND `course` to `MiniProjectModal` (via `RunMiniProjectsTab`); SPLIT the header `.publish-bar` at lines 310-336 so status badge (311-313) and version label (314-316) stay visible to all roles; wrap only Publish/Unpublish/InlineConfirm (lines 317-335) in `{#if course.is_admin}` (recommended: extract badge + label to a sibling `<div class="run-meta">` per §3.2.4); rewrite breadcrumbs at lines 304-307 to use `Teaching` root + drop the `Runs` segment for teachers (per §3.2.4 breadcrumb-fix); rewrite the disabled-version banner copy at lines 339-342 to be course-aware (admin sees "Re-enable it under Course Editor..."; teacher sees "Some editing actions are locked until a course admin re-enables it." — per §5.4).
+- `frontend/src/components/runs/RunOverviewTab.svelte` — accept required `course: Course` prop; `{#if course.is_admin}` around `Delete run` button + confirm at lines 199-207 (publish/unpublish are in RunDetailPage header, NOT here); rewrite the groups-toggle `title` at line 161 to be role-aware (admin sees "Unpublish to change."; teacher sees "Ask a course admin to unpublish before changing.").
+- `frontend/src/components/runs/RunMiniProjectsTab.svelte` — accept required `course: Course` prop; pass `course` to `MiniProjectModal`; add `const isLocked = (mp) => mp.first_submitted_at !== null` helper; for locked MPs AND `!course.is_admin`, hide the force-confirm Delete affordance; wrap the "Publish on Overview" link-button at line 185 in `{#if course.is_admin}`; gate "Enable on Overview" link-button at line 170-175 on `{#if !runIsPublished || course.is_admin}`; wrap "See Overview" link-button at line 179 in `{#if course.is_admin}`; rewrite the `newDisabledTitle` derivation at line 96-99 to be course/published-state aware. No MP-publish hide on the modal Publish button (teacher-allowed per §3.1.6).
 - `frontend/src/components/runs/MiniProjectModal.svelte` — accept required `course: Course` prop; gate the link-rendering branches for the "Open Overview to publish" bullet (line 216) and "Open Overview to re-enable it" bullet (line 222) on `course.is_admin`. Keep the bullet text and the "Open Overview to set it" (end_date, line 201) link unconditional.
 - `frontend/src/components/runs/RunTeachersTab.svelte` — accept required `course: Course` prop; `{#if course.is_admin}` around add-teacher form and per-row Remove.
 - `frontend/src/components/runs/RunGroupsTab.svelte` — accept required `course: Course` AND `runIsPublished: boolean` props; rewrite the groups-disabled placeholder at lines 100-103 with a 3-branch text based on `runIsPublished` + `course.is_admin` (see §3.2.4). No changes to the groups-enabled CRUD section (Add/Rename/Delete are teacher-allowed at the backend).
@@ -1103,7 +1166,7 @@ Plan-sized estimate: ~10-13 tasks with aggressive bundling, e.g.:
 5. Frontend: AppHeader component + tests.
 6. Frontend: TeacherRunListPage component + tests.
 7. Frontend: App.svelte routing + routes.ts.
-8. Frontend: RunDetailPage prop-threading + 3 tab prop updates + 3 hide blocks + 3 test extensions.
+8. Frontend: RunDetailPage prop-threading (incl. publish-bar split, breadcrumb rewrite, disabled-version banner copy split) + 4 tab prop updates (Overview / MP / Teachers / Groups) + modal prop threading + 6 component hide/copy blocks + test extensions across 6 test files.
 9. Manual smoke walkthrough.
 10. Cleanup / merge.
 
