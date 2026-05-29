@@ -661,6 +661,24 @@ class TestTeachingRunsEndpoint:
         assert r.status_code == 200
         assert r.json() == []
 
+    def test_excludes_runs_without_teacher_row(
+        self, teacher_client, admin_client, seed_publishable_version,
+    ):
+        # Spec §6.1 names this case as a standalone test. A Run exists but no
+        # RunTeacher row links the requesting user to it → response is empty.
+        # Functionally also covered by test_returns_only_my_runs (the unowned
+        # half of that two-run setup), but the spec lists it by name and a
+        # dedicated lock makes the invariant obvious in the test report.
+        course, _ = seed_publishable_version()
+        admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "Unowned", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        )
+        r = teacher_client.get("/api/teaching/runs")
+        assert r.status_code == 200
+        assert r.json() == []
+
     def test_student_count_zero(
         self, teacher_client, teacher_user, admin_client,
         seed_publishable_version, db,
