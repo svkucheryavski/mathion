@@ -1,6 +1,7 @@
 import os
 import re
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -10,6 +11,9 @@ from sqlalchemy.orm import Session
 from mathion.assets import sanitize_filename
 from mathion.config import settings
 from mathion.database import Base
+
+if TYPE_CHECKING:
+    from mathion.models_auth import User
 
 
 _NON_SLUG = re.compile(r"[^a-z0-9]+")
@@ -492,3 +496,42 @@ def sync_run_asset_references(db: Session, run_id: int, content_md: str | None, 
     ).scalars().all()
     for aid in asset_ids:
         db.add(RunAssetReference(run_asset_id=aid, mini_project_id=mini_project_id))
+
+
+def has_run_teacher_on_course(db: Session, user: "User", course_id: int) -> bool:
+    """Return True iff the user has a RunTeacher row on any run of any version of the course.
+
+    Used by `GET /api/courses/by-slug/{slug}` only. The version-list and block-list
+    endpoints use tighter predicates (IN-subquery / has_run_pinned_to_version).
+    UI-relevant predicate; never used for any write-path authorization decision.
+    """
+    from sqlalchemy import exists
+    from mathion.models import CourseVersion, Run, RunTeacher
+
+    return bool(db.scalar(
+        select(exists().where(
+            RunTeacher.user_id == user.id,
+            RunTeacher.run_id == Run.id,
+            Run.version_id == CourseVersion.id,
+            CourseVersion.course_id == course_id,
+        ))
+    ))
+
+
+def has_run_pinned_to_version(db: Session, user: "User", version_id: int) -> bool:
+    """Return True iff the user has a RunTeacher row on a run whose version_id matches.
+
+    Used by `GET /api/versions/{vid}/blocks` and `GET /assets/{vid}/{filename}`.
+    No `course_id` parameter required — CourseVersion.id is globally unique.
+    UI-relevant predicate; never used for any write-path authorization decision.
+    """
+    from sqlalchemy import exists
+    from mathion.models import Run, RunTeacher
+
+    return bool(db.scalar(
+        select(exists().where(
+            RunTeacher.user_id == user.id,
+            RunTeacher.run_id == Run.id,
+            Run.version_id == version_id,
+        ))
+    ))
