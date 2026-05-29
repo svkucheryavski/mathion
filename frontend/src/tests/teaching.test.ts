@@ -24,8 +24,13 @@ describe('listTeachingRuns', () => {
         course_id: 10, course_name: 'C', course_slug: 'c', student_count: 0,
       },
     ];
-    vi.stubGlobal('fetch', mockFetch(200, fixture));
+    const f = mockFetch(200, fixture);
+    vi.stubGlobal('fetch', f);
     const out = await listTeachingRuns();
     expect(out).toEqual(fixture);
+    expect(f).toHaveBeenCalledWith(
+      '/api/teaching/runs',
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
 });
