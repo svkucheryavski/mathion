@@ -12,7 +12,7 @@ from mathion.api.helpers import (
     has_run_teacher_on_course,
     has_run_pinned_to_version,
 )
-from mathion.models import Course, CourseVersion, Run, RunTeacher
+from mathion.models import Course, CourseAdmin, CourseVersion, Run, RunTeacher
 from mathion.models_auth import User
 
 
@@ -167,7 +167,7 @@ class TestBySlugTeacherAccess:
         assert r.status_code == 200, r.text
         assert r.json()["is_admin"] is False
 
-    def test_by_slug_admin_who_is_also_teacher_returns_is_admin_true(
+    def test_by_slug_superuser_who_is_also_teacher_returns_is_admin_true(
         self, admin_client, superuser, seed_publishable_version, db,
     ):
         course, _ = seed_publishable_version()
@@ -180,7 +180,29 @@ class TestBySlugTeacherAccess:
         db.commit()
         r = admin_client.get(f"/api/courses/by-slug/{course['slug']}")
         assert r.status_code == 200
-        assert r.json()["is_admin"] is True  # admin precedence
+        assert r.json()["is_admin"] is True  # superuser precedence
+
+    def test_by_slug_course_admin_who_is_also_teacher_returns_is_admin_true(
+        self, admin_client, student_client_for, seed_publishable_version, db,
+    ):
+        # Non-superuser User who is BOTH CourseAdmin and RunTeacher must get
+        # is_admin=True via the CourseAdmin precedence branch (spec §3.1.1
+        # gate order: superuser → CourseAdmin → RunTeacher → 403).
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        dual = User(email="dual@example.com", full_name="Dual")
+        db.add(dual); db.commit(); db.refresh(dual)
+        db.add(CourseAdmin(course_id=course["id"], user_id=dual.id))
+        db.add(RunTeacher(run_id=run["id"], user_id=dual.id))
+        db.commit()
+        dual_client = student_client_for("dual@example.com")
+        r = dual_client.get(f"/api/courses/by-slug/{course['slug']}")
+        assert r.status_code == 200
+        assert r.json()["is_admin"] is True
 
     def test_by_slug_superuser_returns_is_admin_true(
         self, admin_client, seed_publishable_version,
@@ -284,7 +306,7 @@ class TestVersionsListTeacherAccess:
     def test_includes_pinned_disabled_version_for_teacher(
         self, teacher_client, teacher_user, admin_client, seed_publishable_version, db,
     ):
-        from mathion.models import CourseVersion as CV, Run
+        from mathion.models import CourseVersion as CV
         course, v1 = seed_publishable_version()
         run = admin_client.post(
             f"/api/courses/{course['id']}/runs",
@@ -313,13 +335,13 @@ class TestVersionsListTeacherAccess:
         r = admin_client.get(f"/api/courses/{course['id']}/versions")
         assert r.status_code == 200
         all_ids = [v["id"] for v in r.json()]
-        assert set(all_ids) == {v1["id"], v2["id"], v3["id"]}
-        # created_at DESC, id DESC — newest first
-        assert all_ids[0] == v3["id"]
+        # Spec §6.1: lock full created_at DESC, id DESC order — newest first.
+        assert all_ids == [v3["id"], v2["id"], v1["id"]]
 
+        # Spec §6.1: ?limit=1&offset=1 must return the middle row only.
         r2 = admin_client.get(f"/api/courses/{course['id']}/versions?limit=1&offset=1")
         assert r2.status_code == 200
-        assert len(r2.json()) == 1
+        assert [v["id"] for v in r2.json()] == [v2["id"]]
 
     def test_versions_list_still_rejects_non_member(
         self, teacher_client, seed_publishable_version,
@@ -403,7 +425,7 @@ class TestBlocksListTeacherAccess:
     def test_blocks_list_still_rejects_non_member(
         self, teacher_client, seed_publishable_version,
     ):
-        course, v = seed_publishable_version()
+        _, v = seed_publishable_version()
         r = teacher_client.get(f"/api/versions/{v['id']}/blocks")
         assert r.status_code == 403
 
@@ -430,7 +452,7 @@ def _seed_teacher_with_pinned_version_and_asset(
     NOTE (deviation from plan): the upload must happen BEFORE we apply the
     `is_disabled` SQL update — otherwise the admin upload endpoint 403s because
     `is_disabled` short-circuits write paths. The plan's helper order would
-    deadlock the seed; this corrected order preserves the intent."""
+    fail the seed (upload step 403s); this corrected order preserves the intent."""
     from mathion.models import CourseVersion as CV
     course, v = seed_publishable_version()
     run = admin_client.post(
@@ -542,7 +564,7 @@ class TestServeAssetTeacherAccess:
         # real delete endpoint is /api/assets/{asset_id}. Adapted to use the
         # asset id returned by the upload helper. Intent (teacher cannot
         # delete) is preserved.
-        _, v, _, asset = _seed_teacher_with_pinned_version_and_asset(
+        _, _, _, asset = _seed_teacher_with_pinned_version_and_asset(
             db, admin_client, teacher_user, seed_publishable_version,
         )
         r = teacher_client.delete(f"/api/assets/{asset['id']}")
