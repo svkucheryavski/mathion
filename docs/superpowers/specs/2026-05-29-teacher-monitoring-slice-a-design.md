@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5+5+5+5 reviewer pass — rev 5 fixes round-4 Critical: `db_session` → `db` fixture name; plus Important: step 11 dev-DB fallback (no UI for re-pin), §5.13 pinned to RESTRICT (deterministic), §3.2.5 acknowledges `!session.loading` hoist refactor, `mountMpTab` Required (not Recommended), §6.1 helper tests as Python functions, no `course_admin_client` fixture clarified, cascade URLs pinned, admin /versions regression assertion shape, RunDetailPage Course-fixture `is_admin` audit required, `_misses_when_only_other_user` defenses for both helpers, §3.1.5 SQL tuple destructuring matches codebase precedent, §11 deferred Authoring UI warning for pinned drafts)
+**Status:** Design (post 5+5+5+5+5 reviewer pass — rev 6 fixes round-5 Important: §3.1.3a NEW — `GET /assets/{vid}/{filename}` 4th teacher branch using `has_run_pinned_to_version` (without this, `<img>` tags inside `info_html` 403 for teachers, producing broken images in §5.4 banner + block content); §3.1.1 implementation hint pinning `out.is_admin = False` for the teacher branch at `courses.py:80` (copy-paste hazard prevention); §3.2.2 corrects badge-class claim — `.badge-*` is NOT global, scoped inside `RunDetailPage.svelte:433-437`, with explicit guidance for `TeacherRunListPage`; §3.2.4 drops the wrong "line 29" Course-fixture citation (that's `versionFixture`); §3.2.4 mount-count reconciliation: `RunMiniProjectsTab.svelte.test.ts` = 15 (was 13), `RunOverviewTab.checklist.svelte.test.ts` = 7 (was 5); §6.1 corrects inline-seeding citation from `test_run_teachers.py` to `test_run_assets.py:9-17`; §6.2 clarifies `__resetGuardsForTests` vs direct `currentRoute.path` assignment; block-level `info_md` trade-off explicitly acknowledged)
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -78,6 +78,8 @@ def has_run_teacher_on_course(db: Session, user: User, course_id: int) -> bool:
 
 The pattern `select(exists().where(...))` with multi-table predicates is already used in this codebase (`helpers.py:267-272`); SQLAlchemy generates an EXISTS over the implicit-cross-join reduced by the WHERE clauses, and `user_id` / `run_id` / `version_id` / `course_id` are all indexed.
 
+**Implementation hazard — `is_admin` flag flip.** The current handler at `backend/mathion/api/courses.py:80` unconditionally sets `out.is_admin = True` after passing the admin/superuser gate. The new teacher branch MUST explicitly set `out.is_admin = False` before returning. A copy-paste mistake that omits this line would expose the entire admin UI to teachers — every `{#if course.is_admin}` hide in §3.2.4 bypassed, publish/unpublish/delete-run buttons visible, MP toggles visible, teacher add/remove visible. Plan task and review MUST diff this line explicitly.
+
 #### 3.1.2 Open `GET /api/courses/{course_id}/versions` to teachers — pinned-versions-only filter
 
 Same gate-order extension as §3.1.1, BUT with a content filter on the teacher branch that returns ONLY the versions actually pinned by at least one of the teacher's runs on this course. This is tighter than a state filter and fixes two issues at once:
@@ -136,6 +138,8 @@ The teacher branch allows reads regardless of `version.state` (including `create
 
 **Accepted trade-off — `info_md` exposure on pinned drafts.** Because §3.1.2 returns the full `VersionResponse` (`info_md` + `info_html` per `schemas.py:48-60`) for a pinned `created`-state version, a teacher of a run pinned to a draft sees the author's working-draft markdown source. This is intentional: an admin pinning a draft to a live run has implicitly designated the draft as operationally in production, and the run-detail UI needs `info_html` (rendered from `info_md`) to display the version info panel. The risk surface is bounded by the admin's pinning decision, not by the spec.
 
+The same trade-off applies at the block level: `BlockResponse.info` + `info_html` (`schemas.py:69-77`) is teacher-visible on pinned drafts via this endpoint. Same framing as the version-level trade-off above — bounded by the admin's pinning decision; no additional spec guard.
+
 New helper in `backend/mathion/api/helpers.py`:
 
 ```python
@@ -159,7 +163,19 @@ def has_run_pinned_to_version(db: Session, user: User, version_id: int) -> bool:
 
 Write endpoints on versions/blocks/sequences/items remain `require_course_admin`. Teachers can read the blocks of their pinned version(s), but cannot modify them. Cascade endpoints under blocks — `list_sequences` (`backend/mathion/api/blocks.py:272-280`), `list_items`, `list_questions`, `list_options` — all stay admin-only; see §6.1 for guard tests.
 
-#### 3.1.4 Extend `GET /me` AND PIN-verify response with role flags
+#### 3.1.3a Open `GET /assets/{version_id}/{filename}` to teachers — same pinned-version-only gate
+
+`VersionResponse.info_html` (§3.1.2) and `BlockResponse.info_html` (§3.1.3) embed `<img src="/assets/{vid}/{filename}">` URLs generated by `resolve_asset_urls` (`backend/mathion/api/helpers.py:308`). Without opening the asset-serving endpoint, every embedded image and downloadable file returns 403 to teachers — the §5.4 disabled-version banner and any block content referencing assets render as broken images. This is the natural read-companion to §3.1.2 and §3.1.3.
+
+Current handler `serve_asset` at `backend/mathion/api/assets.py:130-158` allows three branches: `user.is_superuser` OR `CourseAdmin` on the owning course OR active `StudentEnrollment` on a run pinned to this version. Add a fourth branch:
+
+4. `has_run_pinned_to_version(db, user, version_id)` is True → allow (NEW).
+
+Same helper as §3.1.3 — no new function. The handler stays a single `serve_asset` with the four-branch gate; the existing FileResponse/streaming logic is unchanged. Write endpoints on assets (`upload_asset`, `list_assets` admin-only list, `delete_asset`) stay `require_course_admin`.
+
+The teacher branch allows reads regardless of `version.state` (including `created`-state drafts) and regardless of `version.is_disabled` — same UX rationale as §3.1.3. A teacher of a run pinned to a `created`-state v2 with an image asset CAN download it; the run-detail UI renders the image instead of 403.
+
+**Existence-confirmation oracle.** The existing endpoints already 404 for missing vs 403 for forbidden (`assets.py` checks asset existence before the gate); same oracle exists today for admins. Acceptable risk; not in scope to tighten.
 
 `UserResponse` (`backend/mathion/schemas.py`) gains two booleans with defaults to preserve `from_attributes=True` deserialization from the ORM:
 
@@ -389,7 +405,17 @@ Table:
 - **Status column** is kept so the "All" view stays meaningful when statuses mix; renders `displayLabel(status)`.
 - **Course column** renders `row.course_name` (not `course_slug`).
 
-**Styles.** `RunListPage.svelte` has NO per-component `<style>` block — it uses ambient global classes/utility patterns. TeacherRunListPage uses the same global patterns; no per-component styles are required. If a layout tweak is unavoidable at implementation time, add a small scoped `<style>` block then. The rev-2 instruction "duplicate the table styles" was incorrect — there is no source `<style>` block to copy.
+**Styles.** `RunListPage.svelte` has NO per-component `<style>` block. The page-shell, headings, and table elements (`<table>`/`<thead>`/`<tbody>`) inherit from global stylesheets (`frontend/src/styles/*.css`) — TeacherRunListPage uses the same global patterns for those elements, no per-component styles required.
+
+**Status-badge styles are NOT global.** The `.badge` / `.badge-active` / `.badge-upcoming` / `.badge-ended` / `.badge-draft` rules live ONLY inside `RunDetailPage.svelte:433-437` (Svelte-scoped); there are no global badge styles in `app.css` / `styles/base.css` / `styles/reset.css`. `RunListPage.svelte:117` currently renders unstyled "badges" — a pre-existing visual gap.
+
+To avoid mirroring that gap in `TeacherRunListPage`, pick one of these at implementation time (NOT in scope to refactor RunListPage's pre-existing bug):
+
+1. **Recommended:** Copy the four `.badge-*` rules into a scoped `<style>` block at the bottom of `TeacherRunListPage.svelte`. Same rules, scoped duplicate. Slice A keeps shipping value without touching `RunListPage`.
+2. Extract `.badge-*` to a global stylesheet (`frontend/src/styles/badges.css` or similar) and use everywhere. Out of scope — a small follow-up.
+3. Drop the Status column's badge styling and render plain text. Lowest effort; weaker visual cue.
+
+Plan task should pick (1) unless the implementer prefers (3) for slice-A simplicity.
 
 #### 3.2.3 New `lib/teaching.ts`
 
@@ -420,20 +446,20 @@ Mirrors `lib/runs.ts` conventions. `api.get` at `frontend/src/lib/api.ts:48` ret
 
 Required (not optional) — RunDetailPage always loads `course` before mounting the tab; existing tests of each tab will be updated to supply a stub `course: { is_admin: true }` (preserving today's "controls visible" behavior). Tests that want to assert the teacher view supply `course: { is_admin: false }`.
 
-**Existing-test update scope is broader than one file per tab.** The prop change touches ~38 existing tests across SIX test files (counts approximate, verify at impl time):
+**Existing-test update scope is broader than one file per tab.** The prop change touches ~40 existing tests across SIX test files (counts verified at rev-6 spec time; may drift):
 
-| File | Mount sites (verified by grep at rev-5 spec time; may drift) |
+| File | Mount sites (verified by grep at rev-6 spec time; verify at impl time) |
 |---|---|
-| `frontend/src/tests/RunOverviewTab.svelte.test.ts` | ~7 (shared `mountOverview` helper — single helper edit) |
-| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | ~5 (separate file ALSO mounting RunOverviewTab; shared `mountTab` helper) |
-| `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` | ~13 (NO shared helper today — extract `mountMpTab` as part of this task, then one helper edit) |
-| `frontend/src/tests/RunTeachersTab.svelte.test.ts` | ~6 (inline mounts) |
-| `frontend/src/tests/RunDetailPage.svelte.test.ts` | indirect; audit `course = {...}` literals for missing `is_admin` (see below) |
+| `frontend/src/tests/RunOverviewTab.svelte.test.ts` | 7 (shared `mountOverview` helper — single helper edit) |
+| `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` | 7 (separate file ALSO mounting RunOverviewTab; shared `mountTab` helper) |
+| `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` | 15 (NO shared helper today — extract `mountMpTab` as part of this task, then one helper edit) |
+| `frontend/src/tests/RunTeachersTab.svelte.test.ts` | 6 (inline mounts) |
+| `frontend/src/tests/RunDetailPage.svelte.test.ts` | indirect; audit `course = {...}` and `/api/courses/by-slug/` response literals for missing `is_admin` (see below) |
 | `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` | ~5 (indirect; `setup({...})` helper) |
 
-**Required:** as part of this task, extract a `mountMpTab(extra)` helper inside `RunMiniProjectsTab.svelte.test.ts` (mirroring the existing `mountOverview` pattern) so the 13 mount sites are updated through one helper, not 13 inline edits. The plan task MUST size for this. Without the helper, the prop change touches every test body and the cleanup-cost balloons.
+**Required:** as part of this task, extract a `mountMpTab(extra)` helper inside `RunMiniProjectsTab.svelte.test.ts` (mirroring the existing `mountOverview` pattern) so the 15 mount sites are updated through one helper, not 15 inline edits. The plan task MUST size for this. Without the helper, the prop change touches every test body and the cleanup-cost balloons.
 
-**Test-fixture audit required for `RunDetailPage.svelte.test.ts`.** Three Course fixtures inside this file are MISSING the `is_admin` field at the time of writing: roughly lines 29 and 56 (verify line numbers at impl time). Because `Course.is_admin` is non-optional, an absent value flows as `undefined → false`, hiding admin controls under `{#if course.is_admin}` and silently regressing the Publish-bar and Assets-tab-integration tests. The prop-wiring task MUST audit every `course = {...}` literal in this file and explicitly set `is_admin: true` (preserving today's behavior) before running the suite.
+**Test-fixture audit required for `RunDetailPage.svelte.test.ts`.** At least one Course-shape inline `/api/courses/by-slug/` response inside this file is MISSING the `is_admin` field at rev-6 spec time: line 56 has `jres({ id: 1, slug: 'c', name: 'C' })` with no `is_admin` (and no `description`). Line 23 has the canonical `courseFixture` with `is_admin: true` (correct); line 29 is `versionFixture` (NOT a Course — earlier revisions of this spec mis-cited this line). Because `Course.is_admin` is non-optional, an absent value flows as `undefined → false`, hiding admin controls under `{#if course.is_admin}` and silently regressing the Publish-bar and Assets-tab-integration tests. The prop-wiring task MUST grep the file end-to-end for `/courses/by-slug/` responses and for `course = {...}` literals — there may be more than one beyond line 56 (line ranges below 199 already verified at spec time; verify above 199 at impl time) — and explicitly set `is_admin: true` (preserving today's behavior) before running the suite.
 
 **Conditional hides inside each tab:**
 
@@ -641,7 +667,7 @@ If `session.user` is null when `/teaching` mounts (cookie restore not yet comple
 
 ### 6.1 Backend (pytest, `backend/.venv`)
 
-New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` fixtures already exist in `backend/tests/conftest.py:124-130` and `:133-142` — leverage them. There is NO `course_admin_client` fixture; for tests that need a non-superuser `CourseAdmin`, follow the inline-seeding pattern used by `backend/tests/test_run_teachers.py`: create a User row, insert a `CourseAdmin` row, and either call the auth-service `request_pin`/`verify_pin` pair directly or use whatever `client_for(email)` factory is available at impl time.
+New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` fixtures already exist in `backend/tests/conftest.py:124-130` and `:133-142` — leverage them. There is NO `course_admin_client` fixture; for tests that need a non-superuser `CourseAdmin`, follow the inline-seeding pattern at `backend/tests/test_run_assets.py:9-17` (`_client_for(db, email)` helper that calls `request_pin` + `verify_pin` directly and mints an authenticated client) — copy that helper into `test_teaching.py`, create a User row, insert a `CourseAdmin` row, then mint the client via the local helper. (Earlier revisions of this spec cited `test_run_teachers.py` as the precedent; that file actually uses `admin_client` (superuser) exclusively. The genuine non-superuser inline-seeding pattern is in `test_run_assets.py`.)
 
 **Helper unit tests** are called as Python functions (NOT via HTTP), matching the precedent at `backend/tests/test_slugify.py:3` and `test_run_permissions.py:6` — `from mathion.api.helpers import has_run_teacher_on_course, has_run_pinned_to_version` and call with the `db` session + inline-seeded rows. No HTTP round-trip needed.
 
@@ -678,6 +704,13 @@ New test file `tests/test_teaching.py`. The `teacher_user` and `teacher_client` 
 - `test_blocks_list_allows_teacher_on_pinned_draft_state_version` (locks Critical loader-mount fix)
 - `test_blocks_list_rejects_teacher_on_unpinned_published_version` (cross-version leak guard)
 - `test_blocks_list_still_rejects_non_member`
+- `test_assets_serve_allows_teacher_on_pinned_version` (§3.1.3a — fixture: upload a small asset via admin, then GET `/assets/{vid}/{filename}` as teacher; assert 200 + correct body bytes)
+- `test_assets_serve_allows_teacher_on_pinned_disabled_version` (locks §5.4 banner rendering with embedded `<img>`)
+- `test_assets_serve_allows_teacher_on_pinned_draft_state_version` (locks §3.1.3a draft loader-mount)
+- `test_assets_serve_rejects_teacher_on_unpinned_version` (cross-version leak guard parallel to blocks test)
+- `test_assets_serve_still_rejects_non_member`
+- `test_assets_upload_still_admin_only_for_teacher` (regression — write path stays admin)
+- `test_assets_delete_still_admin_only_for_teacher` (regression — write path stays admin)
 
 **Cascade guard** (lock in that opening `/blocks` does NOT cascade to authoring leaves). Cascade URL patterns verified against current handlers:
 - `test_sequences_list_still_admin_only_for_teacher` — `GET /api/blocks/{block_id}/sequences` (`backend/mathion/api/blocks.py:272`)
@@ -723,7 +756,7 @@ def test_verify_pin_response_includes_role_flags(client, teacher_user, db):
 
 Fixture-name notes (verified against `backend/tests/conftest.py`):
 - `db` is the session fixture (line 60) — NOT `db_session`.
-- `client` (unauthenticated), `teacher_user` (line 124-130), `teacher_client` (line 133-142), `admin_client` (line 116-121, **superuser-backed**) exist. There is NO `course_admin_client` fixture. Tests that need a non-superuser `CourseAdmin` must seed inline (pattern: `test_run_teachers.py` — create a User row, insert a `CourseAdmin` row, mint a client cookie via `client_for(email)` if a factory exists, or call `request_pin` + `verify_pin` directly).
+- `client` (unauthenticated), `teacher_user` (line 124-130), `teacher_client` (line 133-142), `admin_client` (line 116-121, **superuser-backed**) exist. There is NO `course_admin_client` fixture. Tests that need a non-superuser `CourseAdmin` must seed inline; copy the `_client_for(db, email)` helper from `backend/tests/test_run_assets.py:9-17` (creates User, calls `request_pin`/`verify_pin`, mints the cookie).
 - `api_verify_pin` (`backend/mathion/api/auth.py:29-46`) has NO `response_model` decorator — it returns a plain dict that FastAPI serializes via `jsonable_encoder`. Adding the new flags requires NO decorator change.
 - `get_profile` (`backend/mathion/api/auth.py:49`) DOES carry `response_model=UserResponse`. After widening to return `_user_response_with_flags(db, user)` (which returns a `UserResponse`), FastAPI re-serializes through the same response_model — the new flag fields are part of the post-§3.1.4 UserResponse schema, so the decorator stays unchanged.
 
@@ -752,11 +785,11 @@ New `src/tests/AppHeader.svelte.test.ts`:
 - Renders only one link when only one flag true.
 - Renders no nav links (just brand + name + logout) when both flags false.
 - Active link gets `aria-current="page"` when the route matches the prefix — including deep routes like `/courses/foo/runs/bar` (Authoring should still be marked).
-- `aria-current` updates reactively when `currentRoute.path` changes (not just on initial render).
+- `aria-current` updates reactively when `currentRoute.path` changes (not just on initial render). Implementation hint: `AppHeader.svelte` must `import { currentRoute } from '../../lib/router.svelte'` for the reactive update to fire — same pattern as `App.svelte:3`. Without this import the test fails because the `$state`-tracked object isn't subscribed.
 - Logout button click awaits `logout()` (mocked from `lib/auth.svelte.ts`) THEN navigates to `/login`.
 - Shows `full_name` when present.
 - Falls back to `email` when `full_name === null`.
-- Hidden on `/login` route (set `currentRoute.path = '/login'` via the existing test pattern — `__resetGuardsForTests` in `router.test.ts:5-9`).
+- Hidden on `/login` route. Existing pattern: directly assign `currentRoute.path = '/login'` (the `$state`-wrapped object accepts the assignment — see `frontend/src/tests/router.test.ts:100-102`). `__resetGuardsForTests` at `router.test.ts:5-9` resets URL-guard counters and is called separately in `beforeEach` blocks — it does NOT set `currentRoute.path`. Don't conflate the two.
 - Hidden during `session.loading === true`.
 - Brand href resolves to `/courses` for admin, `/teaching` for teacher-only, `/courses` for student/empty.
 
@@ -821,6 +854,8 @@ Extend `src/tests/RunTeachersTab.svelte.test.ts`:
 8. To exercise the empty-state path: as the admin from step 2, REMOVE the teacher's `RunTeacher` row via the same `RunTeachersTab`. Log out (admin), log in as the teacher again. The teacher's flags now: `has_run_teacher: false` (assuming no other rows). AppHeader shows no nav links; `/teaching` direct-load still fetches `/api/teaching/runs` and gets `[]`, rendering the page-level empty state ("You're not assigned to any runs yet…").
 9. Direct URL `/courses/:slug/runs/:rid` as a teacher → loads correctly with hidden admin actions.
 10. Direct URL `/courses/:slug/runs/:rid` as a non-member → 403 "Access denied" via existing error path.
+10b. Asset-serving smoke (locks §3.1.3a). As an admin, upload an asset to the pinned course version (existing admin Assets UI under `/courses/{slug}/version/{vid}/assets`); reference the asset via Markdown image syntax in the version `info_md` (or in a block's `info_md`). Log out, log in as the teacher of a run pinned to that version, navigate to the run-detail page. Verify the rendered `info_html` `<img>` loads (HTTP 200, image visible — NO broken-image icon). Devtools Network panel: `GET /assets/{vid}/{filename}` returns 200, not 403.
+
 11. Pinned-version-switch smoke (locks the IN-subquery filter behavior): as the course admin, create a new version v2 on a course you've assigned the teacher to. The admin UI does NOT expose a run-level re-pin control (verified — `PATCH /api/runs/{rid}` does not accept `version_id`), so re-pin directly in the dev DB: `sqlite3 backend/mathion.db "UPDATE runs SET version_id = <v2.id> WHERE id = <run.id>;"`. Log out, log in as the teacher, reload the run-detail page. Verify `GET /api/courses/{cid}/versions` returns v2 only — v1 should no longer appear in the response, and the version dropdown reflects v2.
 
 ## 7. Migration / data
@@ -870,6 +905,7 @@ No database schema change. No migrations needed.
 - `backend/mathion/api/courses.py` — extend `get_course_by_slug` gate (4-tier order).
 - `backend/mathion/api/versions.py` — extend `list_versions` gate + pinned-versions-only subquery filter on teacher branch.
 - `backend/mathion/api/blocks.py` — extend `list_blocks` gate using `has_run_pinned_to_version`.
+- `backend/mathion/api/assets.py` — extend `serve_asset` gate (line 130-158) with a 4th branch using `has_run_pinned_to_version` (§3.1.3a). No other handler in this file changes; `upload_asset`, `list_assets`, `delete_asset` stay `require_course_admin`.
 - `backend/mathion/api/auth.py` — add `_user_response_with_flags` private helper colocated with handlers; widen `get_profile` signature with `db: Session = Depends(get_db)` (keep existing `response_model=UserResponse` decorator — no change needed; the new flags become part of the schema via §3.1.4); wire helper into both `get_profile` and `api_verify_pin` (preserving the `{"user": ...}` dict wrap on `api_verify_pin` — that handler has NO `response_model` decorator, also no change needed). New imports: `from sqlalchemy import exists` (currently absent — `select` and `Session` are already imported at lines 2-3) and a new line `from mathion.models import CourseAdmin, RunTeacher` (currently the file imports only `from mathion.models_auth import User`; the new line is needed because CourseAdmin and RunTeacher live in `mathion.models`, not `models_auth`).
 - `backend/mathion/schemas.py` — extend `UserResponse` with two `bool = False` defaults; add `TeachingRunRow` (no `model_config`).
 - `backend/mathion/api/teaching.py` — new router file.
@@ -893,17 +929,17 @@ No database schema change. No migrations needed.
 - `frontend/src/tests/TeacherRunListPage.svelte.test.ts` — new.
 - `frontend/src/tests/teaching.test.ts` — new (wire-module).
 - `frontend/src/tests/router.test.ts` — extend with `defaultLandingPath` unit tests.
-- `frontend/src/tests/RunOverviewTab.svelte.test.ts` — extend (~7 mount sites; update existing tests to pass stub `course={ ..., is_admin: true }`; add `is_admin: false` cases).
-- `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` — extend (~5 mount sites, SAME PROP UPDATES; this file ALSO mounts RunOverviewTab).
-- `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (~15 mount sites; extract a `mountMpTab(extra)` helper as part of this task to avoid touching every site).
-- `frontend/src/tests/RunTeachersTab.svelte.test.ts` — extend (~6 mount sites).
+- `frontend/src/tests/RunOverviewTab.svelte.test.ts` — extend (7 mount sites via `mountOverview`; update existing tests to pass stub `course={ ..., is_admin: true }`; add `is_admin: false` cases).
+- `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` — extend (7 mount sites via `mountTab`, SAME PROP UPDATES; this file ALSO mounts RunOverviewTab).
+- `frontend/src/tests/RunMiniProjectsTab.svelte.test.ts` — extend (15 mount sites; extract a `mountMpTab(extra)` helper as part of this task to avoid touching every site).
+- `frontend/src/tests/RunTeachersTab.svelte.test.ts` — extend (6 mount sites; inline mounts).
 - `frontend/src/tests/RunDetailPage.svelte.test.ts` — extend (indirect; RunDetailPage now passes `course` to three more tabs — verify integration).
 - `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` — extend (~5 mount sites, indirect).
 
 (No `App.svelte.test.ts` extension — see §6.2 final paragraph.)
 
 Plan-sized estimate: ~10-13 tasks with aggressive bundling, e.g.:
-1. Backend: helper + 3 read-endpoint gate-opens + state filter + backend tests.
+1. Backend: helpers (`has_run_teacher_on_course` + `has_run_pinned_to_version`) + 4 read-endpoint gate-opens (by-slug, versions w/ pinned-versions filter, blocks, assets) + cascade-guard tests + backend tests.
 2. Backend: `_user_response_with_flags` + UserResponse extension + `get_profile` widening + `api_verify_pin` wiring + tests.
 3. Backend: new `/api/teaching/runs` router + schema + tests + router registration.
 4. Frontend: types extension + `lib/teaching.ts` + `defaultLandingPath` + their unit tests.
