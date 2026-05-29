@@ -1,7 +1,7 @@
 # Teacher Monitoring Surface — Slice A: unblock + landing
 
 **Date:** 2026-05-29
-**Status:** Design (post 5×6+codex×6 reviewer pass — rev 13 fixes 3 Important + 4 Minor from codex round 12): (1) **`RunOverviewTab` groups-toggle tooltip** at line 161 — "Locked once the run is published. Unpublish to change." is admin-dead for teachers. Rev 13 rewrites to role-aware: admin sees today's "Unpublish to change."; teacher sees "Ask a course admin to unpublish before changing." New §6.2 tests lock the contract. (2) **`RunDetailPage` disabled-version banner** at lines 339-342 — "Re-enable it under Course Editor before publishing." is doubly admin-dead for teachers ("Course Editor" + "publishing"). Rev 13 rewrites to course-aware: admin sees today's text; teacher sees "Some editing actions are locked until a course admin re-enables it." §5.4 + §6.2 + §6.3 step 6b updated. Codex round 10 had marked this Minor; codex round 12 upgraded it to Important after the §5.4 admin-symmetric design crystallized. (3) **Broken PIN-verify test body** — rev-7 snippet (a) called `client.post(...)` without the required `duration_days` field (`PinVerifySchema` at `schemas.py:172` has `int = Field(ge=1, le=30)` → 422 without it) and (b) relied on `teacher_user` having `has_run_teacher=True` which is FALSE (fixture creates only a `User` row, no `RunTeacher`). Rev 13 rewrites the snippet to seed a course via `seed_publishable_version`, create a run via `admin_client`, insert `RunTeacher(run_id, user_id)`, then call verify-pin with `duration_days: 7` (matching conftest fixtures at lines 110/119/140/195). (4) Minor: stale "3 tabs" stragglers fixed (§3.2.4 line 549 + §12 line 1106); §12 RunMiniProjectsTab summary line now lists all four CTA/tooltip fixes; §12 RunOverviewTab summary includes the tooltip rewrite; `_client_for` wording corrected — "does NOT create the User row" (rev-12 said "create User").
+**Status:** Design (post 5×6+codex×7 reviewer pass — rev 14 fixes 1 Critical + 2 Important + 2 Minor from codex round 13): (1) **Login landing flow** — `frontend/src/pages/Login.svelte:36-39` defaults missing `next` to `/courses`, which is admin-dead for teacher-only users (they bounce from `/login?next=/courses` → `/courses` → empty list). The previously-spec'd App.svelte `$effect` would have also sent unauthenticated `/` through `defaultLandingPath(null) = /courses`, then through `/login?next=/courses`, with the same admin-dead end state. Rev 14 (a) sends unauthenticated `/` to `/login?next=%2F` (literal `/` as a "decide by role" sentinel), (b) rewrites the Login.svelte post-PIN block to call `defaultLandingPath(user)` when `next` is absent OR equals `/`, falling back to `safeNext` for real next values. Adds Login.svelte to §12 file list. (2) **`User` import path** in §3 snippet at line 38 — User lives in `backend/mathion/models_auth.py:9`, NOT `mathion.models` (which has CourseAdmin/RunTeacher at line 23/211). Rev 14 splits the import: `from mathion.models import (Course, CourseVersion, Run, RunStudent, RunTeacher, CourseAdmin)` + `from mathion.models_auth import User`. Plan-writer trap acknowledged inline. (3) **`_client_for` description contradiction at §6.1 fixture-name notes** — rev-12 said "creates User"; rev-13 corrected the §6.1 prologue but left the fixture-name list inconsistent. Rev 14 syncs both: "authenticates an already-seeded User; does NOT create the User row or any role rows." (4) Minor: `_client_for` line range 9-17 → 9-20 in the fixture-name list; §10 AppHeader tabindex claim dropped (§6.2 doesn't list a tabindex assertion — rewrite to "No element receives a negative `tabindex` (anchors and the logout button are natively focusable)").
 **Slice:** A — minimum viable unblock + landing page
 **Out of scope:** Submissions review surface (B), evaluations writing UI (C), teacher dashboards consuming `/dashboard/*` endpoints (D), notifications (E)
 
@@ -36,9 +36,12 @@ All Python snippets below assume these imports at file top (already present wher
 from sqlalchemy import select, exists, func
 from sqlalchemy.orm import Session
 from mathion.models import (
-    Course, CourseVersion, Run, RunStudent, RunTeacher, CourseAdmin, User,
+    Course, CourseVersion, Run, RunStudent, RunTeacher, CourseAdmin,
 )
+from mathion.models_auth import User
 ```
+
+(Note: `User` lives in `backend/mathion/models_auth.py:9`, NOT in `mathion.models`. The split-import precedent is `backend/mathion/api/helpers.py:38, 51` and the §3.1.4 narrative at line 1124. Copying `User` into the `mathion.models` group is the most common transcription error when a plan-writer copies one of these helper signatures into a new file.)
 
 All `db.scalar(select(exists().where(...)))` returns are coerced via `bool(...)`. The test DB is SQLite (`backend/mathion/config.py:7`) and SQLAlchemy's SQLite dialect returns integer `1` / `0` for scalar EXISTS, NOT Python `True` / `False` — so a plain `is True` check evaluates to `False` and silently breaks the role check. The existing precedent at `backend/mathion/api/helpers.py:267-272` (`has_submissions`) uses `... or False`; rev 3 uses `bool(...)` for the same effect, just more explicit.
 
@@ -613,9 +616,15 @@ $effect(() => {
   if (session.loading) return;
 
   // 1. Default route: '/' redirects based on session role flags.
-  //    (NEW in Slice A.)
+  //    (NEW in Slice A.) Unauthenticated `/` is sent through the login
+  //    round-trip with `next=/` so post-login routing also goes through
+  //    `defaultLandingPath(user)` (see Login.svelte spec below).
   if (currentRoute.path === '/') {
-    navigate(defaultLandingPath(session.user), { replace: true });
+    if (session.user === null) {
+      navigate('/login?next=%2F', { replace: true, force: true });
+    } else {
+      navigate(defaultLandingPath(session.user), { replace: true });
+    }
     return;
   }
 
@@ -629,6 +638,31 @@ $effect(() => {
   }
 });
 ```
+
+**Why the unauthenticated `/` branch is NOT `navigate(defaultLandingPath(null))`.** With `session.user === null`, `defaultLandingPath(null)` returns `/courses` (the student/empty fallback). For a teacher-only user this is admin-dead: `/courses` requires auth → bounces through `/login?next=%2Fcourses` → post-login lands on `/courses` (not `/teaching`). Sending unauthenticated `/` directly to `/login?next=%2F` keeps the role-aware landing decision deferred until AFTER the user is known. The post-login routing then resolves via the Login.svelte rewrite below: a literal `next=/` value triggers the `defaultLandingPath(user)` branch instead of a verbatim navigate to `/`.
+
+**Login.svelte rewrite.** The current `frontend/src/pages/Login.svelte:36-39` defaults the post-PIN destination to `/courses`:
+
+```svelte
+await verifyPin(email.trim(), pin.trim(), duration);
+const params = new URLSearchParams(location.search);
+const next = params.get('next') ?? '/courses';
+navigate(safeNext(decodeURIComponent(next), location.origin), { replace: true });
+```
+
+This is admin-dead for teacher-only users. Slice A rewrites the post-PIN block to call `defaultLandingPath(user)` when there is no `next` (and when `next` is exactly `/`, since that's the App-side sentinel for "decide based on role"):
+
+```svelte
+const user = await verifyPin(email.trim(), pin.trim(), duration);
+const rawNext = new URLSearchParams(location.search).get('next');
+const decoded = rawNext ? decodeURIComponent(rawNext) : null;
+const dest = (decoded === null || decoded === '/')
+  ? defaultLandingPath(user)
+  : safeNext(decoded, location.origin);
+navigate(dest, { replace: true });
+```
+
+`verifyPin` already returns `Promise<User>` (`frontend/src/lib/auth.svelte.ts:30-42`); no signature change. `defaultLandingPath` is imported from `./lib/router.svelte` (same file the `safeNext` and `navigate` imports already come from at `Login.svelte:4`).
 
 Diff against the existing `App.svelte:34-43` before editing — variable names (`matched`, `matched.route.auth`, `currentRoute.search`, `currentRoute.hash`) must match the real file exactly.
 
@@ -669,14 +703,20 @@ api_verify_pin handler builds {"user": _user_response_with_flags(db, user)}
         ↓
 session.user populated immediately with flags (no second /me call required)
         ↓
-App.svelte $effect on '/' :
-  navigate(defaultLandingPath(session.user), { replace: true })
+Login.svelte post-PIN:
+  - next is absent OR next === '/'  → navigate(defaultLandingPath(user))
+  - next is a real path             → navigate(safeNext(next))
     has_course_admin       → '/courses'
     else has_run_teacher   → '/teaching'
     else                   → '/courses'   (student/empty fallback)
+        ↓
+App.svelte $effect on '/' (only fires when the user lands directly on '/'
+without going through Login — e.g., a fresh tab with a valid cookie):
+  - session.user === null  → navigate('/login?next=%2F')
+  - else                   → navigate(defaultLandingPath(session.user))
 ```
 
-On a fresh tab with a valid cookie, the same flow runs via `GET /me` (which now goes through `_user_response_with_flags`) instead of `verify-pin`. AppHeader renders link visibility from the same flags.
+On a fresh tab with a valid cookie, `/me` (which now goes through `_user_response_with_flags`) populates `session.user` BEFORE the App effect resolves '/'. AppHeader renders link visibility from the same flags.
 
 ### 4.2 Teacher opens a run
 
@@ -933,7 +973,7 @@ def test_verify_pin_response_includes_role_flags(
 
 Fixture-name notes (verified against `backend/tests/conftest.py`):
 - `db` is the session fixture (line 60) — NOT `db_session`.
-- `client` (unauthenticated), `teacher_user` (line 124-130), `teacher_client` (line 133-142), `admin_client` (line 116-121, **superuser-backed**) exist. There is NO `course_admin_client` fixture. Tests that need a non-superuser `CourseAdmin` must seed inline; copy the `_client_for(db, email)` helper from `backend/tests/test_run_assets.py:9-17` (creates User, calls `request_pin`/`verify_pin`, mints the cookie).
+- `client` (unauthenticated), `teacher_user` (line 124-130), `teacher_client` (line 133-142), `admin_client` (line 116-121, **superuser-backed**) exist. There is NO `course_admin_client` fixture. Tests that need a non-superuser `CourseAdmin` must seed inline; copy the `_client_for(db, email)` helper from `backend/tests/test_run_assets.py:9-20` (authenticates an already-seeded User; does NOT create the User row or any role rows — see §6.1 prologue for the seed → `_client_for` → exercise pattern).
 - `api_verify_pin` (`backend/mathion/api/auth.py:29-46`) has NO `response_model` decorator — it returns a plain dict that FastAPI serializes via `jsonable_encoder`. Adding the new flags requires NO decorator change.
 - `get_profile` (`backend/mathion/api/auth.py:49`) DOES carry `response_model=UserResponse`. After widening to return `_user_response_with_flags(db, user)` (which returns a `UserResponse`), FastAPI re-serializes through the same response_model — the new flag fields are part of the post-§3.1.4 UserResponse schema, so the decorator stays unchanged.
 
@@ -1094,7 +1134,7 @@ No database schema change. No migrations needed.
 - AppHeader uses semantic `<nav>` containing `<a>` elements. Brand is `<a>`. Active link marked with `aria-current="page"`. Logout button has visible text "Logout" (icon-only swap later will require an `aria-label`).
 - TeacherRunListPage pills are `<button>` elements with `aria-pressed`; selection state communicated.
 - Table uses semantic `<table>`/`<thead>`/`<tbody>` with column headers in `<th scope="col">`. Row navigation via cell-anchors so keyboard users can tab through rows.
-- Tab order through the header: brand → Authoring → Teaching → Logout. AppHeader tests assert focusability via `tabindex` (absence of negative tabindex on anchor/button elements).
+- Tab order through the header: brand → Authoring → Teaching → Logout. No element receives a negative `tabindex` (anchors and the logout button are natively focusable).
 
 ## 11. Open questions and explicit deferrals
 
@@ -1134,7 +1174,8 @@ No database schema change. No migrations needed.
 - `frontend/src/lib/teaching.ts` — new.
 - `frontend/src/lib/types.ts` — extend `User` type with `has_course_admin: boolean` + `has_run_teacher: boolean`. (`TeachingRunRow` interface is defined LOCALLY in `frontend/src/lib/teaching.ts` per §3.2.3 — same pattern as wire-module-local types elsewhere in this codebase.)
 - `frontend/src/lib/router.svelte.ts` — add `defaultLandingPath(user)` helper.
-- `frontend/src/App.svelte` — render `AppHeader`; update default-route `$effect` (keep auth-guard branch using existing local names `matched` / `matched.route.auth`); add `TeacherRunListPage` to component map.
+- `frontend/src/App.svelte` — render `AppHeader`; update default-route `$effect` (keep auth-guard branch using existing local names `matched` / `matched.route.auth`; unauthenticated `/` → `/login?next=%2F`, authenticated `/` → `defaultLandingPath(session.user)`); add `TeacherRunListPage` to component map.
+- `frontend/src/pages/Login.svelte` — rewrite the post-PIN navigate at lines 36-39 to call `defaultLandingPath(user)` when `next` is absent OR equals `/` (the App-side "decide by role" sentinel); keep the `safeNext` path for real `next` values. Capture the User returned from `verifyPin` (`lib/auth.svelte.ts:34`); import `defaultLandingPath` from `./lib/router.svelte`.
 - `frontend/src/routes.ts` — add `/teaching` route.
 - `frontend/src/pages/runs/RunDetailPage.svelte` — thread `course` prop to FOUR additional tabs (RunOverviewTab, RunMiniProjectsTab, RunTeachersTab, RunGroupsTab; already passed to RunAssetsTab) AND `runIsPublished` to RunGroupsTab AND `course` to `MiniProjectModal` (via `RunMiniProjectsTab`); SPLIT the header `.publish-bar` at lines 310-336 so status badge (311-313) and version label (314-316) stay visible to all roles; wrap only Publish/Unpublish/InlineConfirm (lines 317-335) in `{#if course.is_admin}` (recommended: extract badge + label to a sibling `<div class="run-meta">` per §3.2.4); rewrite breadcrumbs at lines 304-307 to use `Teaching` root + drop the `Runs` segment for teachers (per §3.2.4 breadcrumb-fix); rewrite the disabled-version banner copy at lines 339-342 to be course-aware (admin sees "Re-enable it under Course Editor..."; teacher sees "Some editing actions are locked until a course admin re-enables it." — per §5.4).
 - `frontend/src/components/runs/RunOverviewTab.svelte` — accept required `course: Course` prop; `{#if course.is_admin}` around `Delete run` button + confirm at lines 199-207 (publish/unpublish are in RunDetailPage header, NOT here); rewrite the groups-toggle `title` at line 161 to be role-aware (admin sees "Unpublish to change."; teacher sees "Ask a course admin to unpublish before changing.").
