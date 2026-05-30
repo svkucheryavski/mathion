@@ -3,13 +3,17 @@
   import { addRunTeacher, removeRunTeacher } from '../../lib/runTeachers';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { RunTeacherResponse } from '../../lib/types';
+  import type { Course, RunTeacherResponse } from '../../lib/types';
 
-  let { runId, teachers, onRefetch }: {
+  let { runId, teachers, onRefetch, course }: {
     runId: number;
     teachers: RunTeacherResponse[];
     onRefetch: () => Promise<void>;
+    course?: Course;
   } = $props();
+
+  // T10: course threaded as optional; T11 will tighten to required and use it.
+  $effect(() => { void course; });
 
   let email = $state('');
   let addError: string | null = $state(null);

@@ -5,7 +5,7 @@
   import type { DirtyTracker } from '../../lib/dirty.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { GroupResponse } from '../../lib/types';
+  import type { Course, GroupResponse } from '../../lib/types';
 
   let {
     runId,
@@ -13,13 +13,20 @@
     groupsEnabled,
     onRefetchGroups,
     onRefetchGroupsAndStudents,
+    course,
+    runIsPublished,
   }: {
     runId: number;
     groups: GroupResponse[];
     groupsEnabled: boolean;
     onRefetchGroups: () => Promise<void>;
     onRefetchGroupsAndStudents: () => Promise<void>;
+    course?: Course;
+    runIsPublished?: boolean;
   } = $props();
+
+  // T10: course + runIsPublished threaded as optional; T11/T12 will tighten and use them.
+  $effect(() => { void course; void runIsPublished; });
 
   let newName = $state('');
   let addError: string | null = $state(null);

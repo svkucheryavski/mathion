@@ -5,7 +5,7 @@
   import type { DirtyTracker } from '../../lib/dirty.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse, RunUpdateRequest } from '../../lib/types';
+  import type { Course, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse, RunUpdateRequest } from '../../lib/types';
 
   type RunForm = { title: string; start_date: string; end_date: string };
   type ChecklistRow = { id: string; label: string; state: 'ok' | 'violated' | 'na'; hint?: string };
@@ -20,6 +20,7 @@
     readiness,
     onNavigateTab,
     onDeleteRun,
+    course,
   }: {
     run: RunResponse;
     setRun: (r: RunResponse) => void;
@@ -29,12 +30,13 @@
     readiness: Readiness;
     onNavigateTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster', prefilter?: 'unassigned' | null) => void;
     onDeleteRun: () => void;
+    course?: Course;
   } = $props();
 
-  // T10: reference still-unused props (teachers, groups, students) inside an
-  // $effect so svelte-check stays clean. T11/T12 will surface them.
+  // T10: reference still-unused props (teachers, groups, students, course)
+  // inside an $effect so svelte-check stays clean. T11/T12 will surface them.
   $effect(() => {
-    void teachers; void groups; void students;
+    void teachers; void groups; void students; void course;
   });
 
   let tracker = $state<DirtyTracker<RunForm> | null>(null);

@@ -4,7 +4,7 @@
   import { deleteMiniProject } from '../../lib/miniProjects';
   import MiniProjectModal from './MiniProjectModal.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { MiniProjectResponse, BlockResponse } from '../../lib/types';
+  import type { Course, MiniProjectResponse, BlockResponse } from '../../lib/types';
 
   let {
     runId,
@@ -20,6 +20,7 @@
     onNavigateToTab,
     pendingEditTarget,
     onPendingEditConsumed,
+    course,
   }: {
     runId: number;
     runIsPublished: boolean;
@@ -34,7 +35,11 @@
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
     pendingEditTarget?: MiniProjectResponse | null;
     onPendingEditConsumed?: () => void;
+    course?: Course;
   } = $props();
+
+  // T10: course threaded as optional; T11/T12 will tighten and use it.
+  $effect(() => { void course; });
 
   async function refetchAll(): Promise<void> {
     await Promise.all([
