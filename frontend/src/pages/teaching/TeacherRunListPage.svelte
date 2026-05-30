@@ -22,11 +22,11 @@
       // generic Errors fall back to .message, then to a default. We coalesce
       // empty strings to the default so the {:else if error} branch fires.
       if (e instanceof ApiError) {
-        error = e.displayMessage || 'Could not load runs.';
+        error = e.displayMessage || 'unknown error';
       } else if (e instanceof Error) {
-        error = e.message || 'Could not load runs.';
+        error = e.message || 'unknown error';
       } else {
-        error = 'Could not load runs.';
+        error = 'unknown error';
       }
     } finally {
       loading = false;
@@ -87,7 +87,7 @@
 {#if loading}
   <LoadingPlaceholder label="Loading runs…" />
 {:else if error}
-  <div class="error-banner">
+  <div class="error-banner" role="alert">
     <p>Could not load runs: {error}</p>
     <button type="button" onclick={load}>Try again</button>
   </div>
