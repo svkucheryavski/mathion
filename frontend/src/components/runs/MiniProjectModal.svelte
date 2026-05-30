@@ -162,10 +162,12 @@
   // while POST is in flight (drives the "Publishing…" button label and is
   // distinct from save-submitting so the Save label stays "Save").
   type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
-  // `adminOnly` flags a bullet whose "Open Overview" link is only renderable
-  // by course-admins (e.g. publishing the run, re-enabling a disabled course
-  // version). Teachers cannot perform those actions, so the link must be
-  // hidden — the bullet text still renders, minus the navigational suffix.
+  // `adminOnly` flags a bullet whose "Open Overview" affordance is only
+  // actionable by course-admins (e.g. publishing the run, re-enabling a
+  // disabled course version). Bullets containing "Open Overview" render
+  // that substring as a clickable <button> for users who can act
+  // (course.is_admin OR not adminOnly); otherwise it renders as plain
+  // text. The surrounding bullet text is rendered verbatim in either case.
   // Spec §6.2 RunMiniProjectsTab + MiniProjectModal teacher-gating.
   type PreconditionBullet = { text: string; field?: FieldKey; adminOnly?: boolean };
 

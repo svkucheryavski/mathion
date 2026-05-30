@@ -645,6 +645,73 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     expect(target.textContent).not.toContain('Force delete will permanently remove');
     expect(target.textContent).not.toContain('I understand');
 
+    // Teacher MUST receive explicit feedback via the deleteError banner —
+    // pin the exact wording so a silent removal of the assignment in
+    // handleDeleteConfirm's non-admin 409 branch fails this test.
+    const banner = target.querySelector('[data-role="delete-error-banner"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain(
+      'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.',
+    );
+
+    unmount(cmp);
+  });
+
+  it('teacher: external rowStatus flip to locked while deleteConfirmId is set — force-confirm panel does NOT render (line-269 gate isolation)', async () => {
+    // This test pins the line-269 `course.is_admin` clause specifically:
+    // it bypasses handleDeleteConfirm (which would clear deleteConfirmId
+    // for teachers in the 409 path) by mutating miniProjects directly
+    // through the $state proxy. Without the line-269 gate, the force-confirm
+    // panel would render after the row flips to locked.
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const unlocked: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    const locked: MiniProjectResponse = {
+      ...unlocked,
+      first_submitted_at: '2026-04-15T10:00:00Z',
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [unlocked],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+      course: { ...baseCourse, is_admin: false },
+    });
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+
+    // Open InlineConfirm on the unlocked row → deleteConfirmId = mp.id.
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('button[data-action="confirm-delete"]')).not.toBeNull();
+
+    // Flip the row to locked WITHOUT going through handleDeleteConfirm —
+    // simulates an external state change (parent prop refetch, webhook,
+    // etc.). deleteConfirmId remains set from the prior click.
+    propsRef.miniProjects = [locked];
+    await settle();
+
+    // For the teacher, the force-confirm panel must NOT render even though
+    // deleteConfirmId is set AND rowStatus is now 'locked'. The line-269
+    // `&& course.is_admin` gate is the only thing preventing it.
+    expect(target.querySelector('.force-confirm')).toBeNull();
+    expect(target.textContent).not.toContain('I understand');
+    expect(target.textContent).not.toContain('Force delete will permanently');
+
     unmount(cmp);
   });
 
