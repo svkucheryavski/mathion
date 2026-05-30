@@ -578,6 +578,76 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     expect(btn.getAttribute('title')).toContain('Enable groups on Overview');
   });
 
+  it('teacher: 409-race transition — force-confirm panel does NOT render after locally-unlocked MP becomes locked server-side', async () => {
+    // T12 R1 fix: defense-in-depth gate. If a teacher opens InlineConfirm on
+    // a row that was unlocked at click time, but a student submits in the
+    // gap so the server-side state becomes locked, the post-409 refetch
+    // will deliver a now-locked MP. The render branch for the
+    // force-confirm <div> must remain hidden for !course.is_admin even
+    // when deleteConfirmId is still set from the prior click.
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const unlocked: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    const lockedAfterRace: MiniProjectResponse = {
+      ...unlocked,
+      first_submitted_at: '2026-04-15T10:00:00Z',
+    };
+
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE' && String(url).endsWith('/api/mini-projects/1')) {
+        return jres(
+          { detail: 'Mini-project has submissions; use ?force=true to delete.' },
+          409,
+        );
+      }
+      return jres([lockedAfterRace]);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [unlocked],
+      onRefetchMiniProjects: vi.fn().mockImplementation(async () => {
+        propsRef.miniProjects = [lockedAfterRace];
+      }),
+      onNavigateToTab: vi.fn(),
+      course: { ...baseCourse, is_admin: false },
+    });
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+
+    // Teacher sees Delete × because the row is unlocked at click time.
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+
+    confirmBtn.click();
+    await settle();
+
+    expect(propsRef.onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    // Defense-in-depth: force-confirm panel must NOT appear for teachers
+    // even though the (now-locked) MP would trigger the locked branch for
+    // an admin.
+    expect(target.querySelector('.force-confirm')).toBeNull();
+    expect(target.textContent).not.toContain('Force delete will permanently remove');
+    expect(target.textContent).not.toContain('I understand');
+
+    unmount(cmp);
+  });
+
   it('modal Publish button is teacher-visible (spec §3.1.6 — MP publish stays teacher-allowed)', async () => {
     // Spec §3.1.6: mini-project publish is allowed for teachers. Ensure the
     // modal's [Publish…] button stays in the DOM for a teacher viewing an

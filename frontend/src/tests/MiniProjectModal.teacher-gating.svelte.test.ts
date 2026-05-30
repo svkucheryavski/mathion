@@ -124,22 +124,17 @@ describe('MiniProjectModal teacher-gating (spec §6.2)', () => {
     await settle();
     const banner = target.querySelector('[data-testid="publish-preconditions"]') as HTMLElement;
     expect(banner).toBeTruthy();
-    expect(banner.textContent).toContain('Run must be published');
-    // The "Open Overview" call-to-action MUST NOT appear for teachers on the
-    // publish-precondition bullet.
-    const links = banner.querySelectorAll('button[data-action="publish-nav-overview"]');
-    const publishLink = Array.from(links).find((l) => l.textContent?.includes('Open Overview'));
-    // Find the specific bullet — assert it has no link descendant.
+    // T12 R1 fix: bullet text stays verbatim — including the "— Open Overview
+    // to publish." trailing clause — for teachers; only the <button> wrap is
+    // omitted so the call-to-action becomes plain text instead of a link.
     const publishBullet = Array.from(banner.querySelectorAll('li')).find((li) =>
       li.textContent?.includes('Run must be published'),
     ) as HTMLElement | undefined;
     expect(publishBullet).toBeTruthy();
+    expect(publishBullet!.textContent?.trim()).toBe(
+      'Run must be published — Open Overview to publish.',
+    );
     expect(publishBullet!.querySelector('button[data-action="publish-nav-overview"]')).toBeNull();
-    // Sanity: there might be other admin-only-suffixed links (none in this
-    // setup) — but the specific bullet has none. publishLink could still be
-    // truthy if other bullets carried it; here we only assert about THIS
-    // bullet.
-    void publishLink;
   });
 
   it('teacher + versionIsDisabled: bullet "course version is disabled" present, "Open Overview to re-enable" link NOT rendered', async () => {
@@ -158,11 +153,14 @@ describe('MiniProjectModal teacher-gating (spec §6.2)', () => {
     await settle();
     const banner = target.querySelector('[data-testid="publish-preconditions"]') as HTMLElement;
     expect(banner).toBeTruthy();
-    expect(banner.textContent).toContain("course version is disabled");
+    // T12 R1 fix: full verbatim bullet text for teachers, no truncation.
     const versionBullet = Array.from(banner.querySelectorAll('li')).find((li) =>
       li.textContent?.includes('course version is disabled'),
     ) as HTMLElement | undefined;
     expect(versionBullet).toBeTruthy();
+    expect(versionBullet!.textContent?.trim()).toBe(
+      "This run's course version is disabled — Open Overview to re-enable it.",
+    );
     expect(versionBullet!.querySelector('button[data-action="publish-nav-overview"]')).toBeNull();
   });
 

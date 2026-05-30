@@ -141,6 +141,15 @@
         try {
           await onRefetchMiniProjects();
           forceCheckbox = false;
+          // Teachers cannot force-delete; close the inline-confirm and
+          // surface a banner so they see *some* feedback instead of a
+          // silent no-op (admins keep the row open so the refetch can
+          // reveal the force-confirm panel).
+          if (!course.is_admin) {
+            deleteConfirmId = null;
+            deleteError =
+              'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.';
+          }
         } catch {
           deleteError = 'Could not refresh. Please retry.';
           deleteConfirmId = null;
@@ -257,7 +266,7 @@
               }}>×</button
             >
           {/if}
-          {#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked'}
+          {#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked' && course.is_admin}
             <div class="force-confirm">
               <p>
                 Force delete will permanently remove all submissions and evaluations for this
@@ -278,7 +287,7 @@
                 onclick={() => handleForceDelete(mp.id)}>Force delete</button
               >
             </div>
-          {:else if deleteConfirmId === mp.id}
+          {:else if deleteConfirmId === mp.id && rowStatus(mp) !== 'locked'}
             <InlineConfirm
               warning="Delete this mini-project?"
               confirmLabel="Delete"

@@ -443,21 +443,23 @@
         <p>Cannot publish:</p>
         <ul>
           {#each publishCheckResult as bullet, idx (bullet.text)}
-            {#if bullet.text.includes('Open Overview') && (!bullet.adminOnly || course.is_admin)}
+            {#if bullet.text.includes('Open Overview')}
               {@const linkIdx = bullet.text.indexOf('Open Overview')}
-              <li id={`precondition-${idx}`}>
-                {bullet.text.slice(0, linkIdx)}<button
-                  type="button"
-                  class="linklike"
-                  data-action="publish-nav-overview"
-                  onclick={() => onNavigateToTab('overview')}>Open Overview</button
-                >{bullet.text.slice(linkIdx + 'Open Overview'.length)}
-              </li>
-            {:else if bullet.adminOnly && !course.is_admin && bullet.text.includes(' — Open Overview')}
-              <!-- Teachers cannot publish the run nor re-enable a disabled
-                   version; render the bullet text without the trailing
-                   "— Open Overview to ..." action so it stays informative. -->
-              <li id={`precondition-${idx}`}>{bullet.text.slice(0, bullet.text.indexOf(' — Open Overview'))}</li>
+              {@const before = bullet.text.slice(0, linkIdx)}
+              {@const after = bullet.text.slice(linkIdx + 'Open Overview'.length)}
+              <!-- Render the bullet text verbatim. The "Open Overview"
+                   substring becomes a <button> when the viewer can act on
+                   the precondition (admin, or non-admin-only bullet); for
+                   admin-only bullets viewed by a teacher it falls back to
+                   plain text so the sentence stays grammatical. -->
+              <li id={`precondition-${idx}`}
+                >{before}{#if !bullet.adminOnly || course.is_admin}<button
+                    type="button"
+                    class="linklike"
+                    data-action="publish-nav-overview"
+                    onclick={() => onNavigateToTab('overview')}>Open Overview</button
+                  >{:else}Open Overview{/if}{after}</li
+              >
             {:else}
               <li id={`precondition-${idx}`}>{bullet.text}</li>
             {/if}
