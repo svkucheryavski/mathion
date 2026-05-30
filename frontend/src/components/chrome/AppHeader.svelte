@@ -15,17 +15,21 @@
 </script>
 
 <header class="app-header">
-  <nav>
-    <a class="brand" href={brandHref}>Mathion</a>
+  <nav aria-label="Primary">
+    <a class="brand"
+       href={brandHref}
+       onclick={(e) => { e.preventDefault(); navigate(brandHref); }}>Mathion</a>
 
     <div class="links">
       {#if session.user?.has_course_admin}
         <a href="/courses"
-           aria-current={isAuthoringActive ? 'page' : undefined}>Authoring</a>
+           aria-current={isAuthoringActive ? 'page' : undefined}
+           onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Authoring</a>
       {/if}
       {#if session.user?.has_run_teacher}
         <a href="/teaching"
-           aria-current={isTeachingActive ? 'page' : undefined}>Teaching</a>
+           aria-current={isTeachingActive ? 'page' : undefined}
+           onclick={(e) => { e.preventDefault(); navigate('/teaching'); }}>Teaching</a>
       {/if}
     </div>
 
@@ -39,7 +43,7 @@
 <style>
   .app-header {
     border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    background: var(--surface, var(--bg));
   }
   nav {
     display: flex;
@@ -56,7 +60,7 @@
   }
   .links a[aria-current="page"] {
     font-weight: 600;
-    border-bottom: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent, var(--primary));
   }
   .right { display: flex; align-items: center; gap: var(--space-2); }
   .name { color: var(--muted); }

@@ -114,9 +114,9 @@ describe('AppHeader', () => {
     expect(link?.getAttribute('aria-current')).toBe('page');
   });
 
-  it('marks Teaching active on /teaching prefix', () => {
+  it('marks Teaching active on deep /teaching routes (startsWith, not ===)', () => {
     setSession({ has_course_admin: true, has_run_teacher: true });
-    currentRoute.path = '/teaching';
+    currentRoute.path = '/teaching/runs/42';
     component = mount(AppHeader, { target });
     flushSync();
     const link = linkByText(target, 'Teaching');
@@ -149,7 +149,7 @@ describe('AppHeader', () => {
     expect(nodeByText(target, 'u@x')).not.toBeNull();
   });
 
-  it('brand href is /courses for admin, /teaching for teacher-only', () => {
+  it('brand href is /courses for admin, /teaching for teacher-only, /courses for student/empty', () => {
     setSession({ has_course_admin: true, has_run_teacher: false });
     component = mount(AppHeader, { target });
     flushSync();
@@ -165,10 +165,25 @@ describe('AppHeader', () => {
     expect(linkByText(target2, 'Mathion')?.getAttribute('href')).toBe('/teaching');
     unmount(c2);
     document.body.removeChild(target2);
+
+    setSession({ has_course_admin: false, has_run_teacher: false });
+    const target3 = document.createElement('div');
+    document.body.appendChild(target3);
+    const c3 = mount(AppHeader, { target: target3 });
+    flushSync();
+    expect(linkByText(target3, 'Mathion')?.getAttribute('href')).toBe('/courses');
+    unmount(c3);
+    document.body.removeChild(target3);
   });
 
-  it('logout button awaits logout() and navigates to /login', async () => {
+  it('logout button awaits logout() BEFORE navigating to /login', async () => {
+    // Lock the ordering: navigate must NOT be called until logout() resolves.
+    // Without `await`, a `logout(); navigate('/login')` regression would
+    // call navigate synchronously and this test would catch it.
     setSession({ has_course_admin: true, has_run_teacher: false });
+    let resolveLogout: () => void = () => {};
+    const logoutPromise = new Promise<void>((res) => { resolveLogout = res; });
+    vi.mocked(logout).mockImplementationOnce(() => logoutPromise);
     const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
     component = mount(AppHeader, { target });
     flushSync();
@@ -176,10 +191,16 @@ describe('AppHeader', () => {
     const logoutBtn = buttons.find((b) => (b.textContent ?? '').trim() === 'Logout');
     expect(logoutBtn).toBeDefined();
     logoutBtn!.click();
-    // allow microtasks for the await chain in onLogout()
+    // Drain any synchronous microtasks; logout has NOT resolved yet, so
+    // navigate must not have fired if the component is awaiting.
     for (let i = 0; i < 8; i++) await Promise.resolve();
     flushSync();
     expect(logout).toHaveBeenCalled();
+    expect(navSpy).not.toHaveBeenCalled();
+    // Now resolve logout and drain again; navigate should fire after the await.
+    resolveLogout();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    flushSync();
     expect(navSpy).toHaveBeenCalledWith('/login');
   });
 });
