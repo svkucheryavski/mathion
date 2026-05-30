@@ -7,7 +7,7 @@
   import MarkdownEditor from '../editor/MarkdownEditor.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import FocusTrap from '../ui/FocusTrap.svelte';
-  import type { MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
+  import type { Course, MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
 
   let {
     runId,
@@ -18,6 +18,7 @@
     runIsPublished,
     versionIsDisabled,
     runEndDate,
+    course,
     onClose,
     onSaved,
     onNavigateToTab,
@@ -30,6 +31,7 @@
     runIsPublished: boolean;
     versionIsDisabled: boolean;
     runEndDate: string | null;
+    course: Course;
     onClose: () => void;
     onSaved: () => Promise<void>;
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
@@ -160,7 +162,12 @@
   // while POST is in flight (drives the "Publishing…" button label and is
   // distinct from save-submitting so the Save label stays "Save").
   type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
-  type PreconditionBullet = { text: string; field?: FieldKey };
+  // `adminOnly` flags a bullet whose "Open Overview" link is only renderable
+  // by course-admins (e.g. publishing the run, re-enabling a disabled course
+  // version). Teachers cannot perform those actions, so the link must be
+  // hidden — the bullet text still renders, minus the navigational suffix.
+  // Spec §6.2 RunMiniProjectsTab + MiniProjectModal teacher-gating.
+  type PreconditionBullet = { text: string; field?: FieldKey; adminOnly?: boolean };
 
   let publishAttempted = $state(false);
   let pendingPublishConfirm = $state(false);
@@ -213,13 +220,13 @@
       }
     }
     if (!runIsPublished) {
-      unmet.push({ text: 'Run must be published — Open Overview to publish.' });
+      unmet.push({ text: 'Run must be published — Open Overview to publish.', adminOnly: true });
     }
     // Spec line 548: versionIsDisabled blocks the modal-only publish. Without
     // this check, a modal already open when versionIsDisabled flips to true
     // could still publish; T7 disables row [Edit] only.
     if (versionIsDisabled) {
-      unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it." });
+      unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it.", adminOnly: true });
     }
     // T9-smoke catch: the publish backend reads deadlines from the persisted
     // MP, but every other check above reads `formData` (the unsaved inputs).
@@ -436,7 +443,7 @@
         <p>Cannot publish:</p>
         <ul>
           {#each publishCheckResult as bullet, idx (bullet.text)}
-            {#if bullet.text.includes('Open Overview')}
+            {#if bullet.text.includes('Open Overview') && (!bullet.adminOnly || course.is_admin)}
               {@const linkIdx = bullet.text.indexOf('Open Overview')}
               <li id={`precondition-${idx}`}>
                 {bullet.text.slice(0, linkIdx)}<button
@@ -446,6 +453,11 @@
                   onclick={() => onNavigateToTab('overview')}>Open Overview</button
                 >{bullet.text.slice(linkIdx + 'Open Overview'.length)}
               </li>
+            {:else if bullet.adminOnly && !course.is_admin && bullet.text.includes(' — Open Overview')}
+              <!-- Teachers cannot publish the run nor re-enable a disabled
+                   version; render the bullet text without the trailing
+                   "— Open Overview to ..." action so it stays informative. -->
+              <li id={`precondition-${idx}`}>{bullet.text.slice(0, bullet.text.indexOf(' — Open Overview'))}</li>
             {:else}
               <li id={`precondition-${idx}`}>{bullet.text}</li>
             {/if}

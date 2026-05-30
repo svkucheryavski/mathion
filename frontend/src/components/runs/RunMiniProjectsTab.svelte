@@ -35,11 +35,8 @@
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
     pendingEditTarget?: MiniProjectResponse | null;
     onPendingEditConsumed?: () => void;
-    course?: Course;
+    course: Course;
   } = $props();
-
-  // T10: course threaded as optional; T11/T12 will tighten and use it.
-  $effect(() => { void course; });
 
   async function refetchAll(): Promise<void> {
     await Promise.all([
@@ -98,8 +95,16 @@
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0,
   );
+  // Role-aware tooltip per spec §3.2.4. Teachers viewing a *published* run
+  // cannot un-publish or enable groups themselves, so the affordance copy
+  // routes them to a course admin; in any other state they (and admins) can
+  // act on Overview directly.
   const newDisabledTitle = $derived.by(() => {
-    if (!runGroupsEnabled) return 'Mini-projects require groups. Enable groups on Overview.';
+    if (!runGroupsEnabled) {
+      return (!runIsPublished || course.is_admin)
+        ? 'Mini-projects require groups. Enable groups on Overview.'
+        : 'Mini-projects require groups. Ask a course admin to unpublish the run and enable groups.';
+    }
     if (versionIsDisabled) return "This run's course version is disabled.";
     if (availableBlocks.length === 0)
       return 'All blocks in this course version already have a mini-project.';
@@ -175,19 +180,25 @@
   {#if !runGroupsEnabled}
     <div class="banner">
       Mini-projects require groups.
-      <button type="button" class="linklike" data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>Enable on Overview</button>
+      {#if !runIsPublished || course.is_admin}
+        <button type="button" class="linklike" data-action="nav-overview-groups" onclick={() => onNavigateToTab('overview')}>Enable on Overview</button>
+      {/if}
     </div>
   {/if}
   {#if versionIsDisabled}
     <div class="banner">
       This run's course version is disabled.
-      <button type="button" class="linklike" data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>See Overview</button>
+      {#if course.is_admin}
+        <button type="button" class="linklike" data-action="nav-overview-version" onclick={() => onNavigateToTab('overview')}>See Overview</button>
+      {/if}
     </div>
   {/if}
   {#if !runIsPublished}
     <div class="banner">
       Run is not yet published.
-      <button type="button" class="linklike" data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+      {#if course.is_admin}
+        <button type="button" class="linklike" data-action="nav-overview-publish" onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+      {/if}
     </div>
   {/if}
   {#if deleteError}
@@ -238,12 +249,14 @@
               }}>Edit</button
             >
           {/if}
-          <button
-            data-action="delete"
-            onclick={() => {
-              deleteConfirmId = mp.id;
-            }}>×</button
-          >
+          {#if course.is_admin || rowStatus(mp) !== 'locked'}
+            <button
+              data-action="delete"
+              onclick={() => {
+                deleteConfirmId = mp.id;
+              }}>×</button
+            >
+          {/if}
           {#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked'}
             <div class="force-confirm">
               <p>
@@ -291,6 +304,7 @@
       {runIsPublished}
       {versionIsDisabled}
       {runEndDate}
+      {course}
       onClose={() => {
         modalMode = null;
         editTarget = null;

@@ -8,7 +8,9 @@ import {
   type ComponentProps,
 } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
-import type { MiniProjectResponse, BlockResponse } from '../lib/types';
+import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
+
+const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 // ComponentProps extracts the modal's prop shape from the compiled component
 // type. Earlier draft used `Parameters<typeof MiniProjectModal>[0]` which
@@ -98,6 +100,7 @@ function defaultProps(overrides: Partial<Record<string, unknown>> = {}): Record<
     runIsPublished: true,
     versionIsDisabled: false,
     runEndDate: '2026-06-30',
+    course: baseCourse,
     onClose: vi.fn(),
     onSaved: vi.fn().mockResolvedValue(undefined),
     onNavigateToTab: vi.fn(),
