@@ -21,12 +21,9 @@
     groupsEnabled: boolean;
     onRefetchGroups: () => Promise<void>;
     onRefetchGroupsAndStudents: () => Promise<void>;
-    course?: Course;
-    runIsPublished?: boolean;
+    course: Course;
+    runIsPublished: boolean;
   } = $props();
-
-  // T10: course + runIsPublished threaded as optional; T11/T12 will tighten and use them.
-  $effect(() => { void course; void runIsPublished; });
 
   let newName = $state('');
   let addError: string | null = $state(null);
@@ -106,7 +103,13 @@
 
 {#if !groupsEnabled}
   <section class="groups-disabled-placeholder">
-    Groups are disabled for this run. Enable in Overview → Settings to manage groups.
+    {#if !runIsPublished}
+      Groups are disabled for this run. Enable in Overview → Settings to manage groups.
+    {:else if course.is_admin}
+      Groups are disabled for this run. Unpublish in Overview before enabling groups.
+    {:else}
+      Groups are disabled for this run. Ask a course admin to unpublish the run and enable groups.
+    {/if}
   </section>
 {:else}
   <section class="groups-tab">

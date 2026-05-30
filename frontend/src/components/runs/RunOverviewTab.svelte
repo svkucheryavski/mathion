@@ -30,13 +30,14 @@
     readiness: Readiness;
     onNavigateTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster', prefilter?: 'unassigned' | null) => void;
     onDeleteRun: () => void;
-    course?: Course;
+    course: Course;
   } = $props();
 
-  // T10: reference still-unused props (teachers, groups, students, course)
-  // inside an $effect so svelte-check stays clean. T11/T12 will surface them.
+  // teachers/groups/students remain unread here today (T11/T12 surface them
+  // via the readiness checklist alongside `course`). Keep the void-sink so
+  // svelte-check stays clean — `course` is now consumed in JSX below.
   $effect(() => {
-    void teachers; void groups; void students; void course;
+    void teachers; void groups; void students;
   });
 
   let tracker = $state<DirtyTracker<RunForm> | null>(null);
@@ -160,7 +161,11 @@
 
   <section class="run-settings">
     <h3>Settings</h3>
-    <label title={run.is_published ? 'Locked once the run is published. Unpublish to change.' : ''}>
+    <label title={run.is_published
+      ? (course.is_admin
+        ? 'Locked once the run is published. Unpublish to change.'
+        : 'Locked once the run is published. Ask a course admin to unpublish before changing.')
+      : ''}>
       <input
         type="checkbox"
         name="groups_enabled"
@@ -195,7 +200,7 @@
     </ul>
   </section>
 
-  {#if !run.is_published}
+  {#if !run.is_published && course.is_admin}
     <section class="danger-zone">
       <h3>Danger zone</h3>
       {#if confirmDeleteOpen}

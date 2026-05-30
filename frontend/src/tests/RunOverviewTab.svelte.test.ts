@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunOverviewTab from '../components/runs/RunOverviewTab.svelte';
-import type { RunResponse } from '../lib/types';
+import type { Course, RunResponse } from '../lib/types';
+
+const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 
@@ -32,8 +34,16 @@ async function settle() {
 function mountOverview(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  let run = makeRun();
+  const runOverride = (extra.run as Partial<RunResponse> | undefined) ?? {};
+  let run = makeRun(runOverride);
   const setRun = vi.fn((r: RunResponse) => (run = r));
+  // Caller may override `course` partially (e.g. { is_admin: false }); merge
+  // onto a complete base so the prop stays type-correct.
+  const courseOverride = (extra.course as Partial<Course> | undefined) ?? {};
+  const course: Course = { ...baseCourse, ...courseOverride };
+  // Strip helper-only keys before forwarding the rest of `extra` as raw props.
+  const { run: _r, course: _c, ...rest } = extra;
+  void _r; void _c;
   const cmp = mount(RunOverviewTab, {
     target,
     props: {
@@ -45,7 +55,8 @@ function mountOverview(extra: Record<string, unknown> = {}) {
       readiness: { checks: [], firstViolation: null },
       onNavigateTab: vi.fn(),
       onDeleteRun: vi.fn(),
-      ...extra,
+      course,
+      ...rest,
     },
   });
   return { target, cmp, setRun };
@@ -178,5 +189,56 @@ describe('RunOverviewTab inline edits', () => {
     await settle();
     expect(titleInput.value).toBe('Autumn'); // not reverted
     unmount(cmp);
+  });
+});
+
+describe('RunOverviewTab Delete-run role gating', () => {
+  it('hides Delete-run when course.is_admin === false (teacher view)', async () => {
+    const { target, cmp } = mountOverview({ course: { is_admin: false } });
+    await settle();
+    expect(target.querySelector('button[data-action="delete-run"]')).toBeNull();
+    unmount(cmp);
+  });
+
+  it('shows Delete-run when course.is_admin === true (admin view)', async () => {
+    const { target, cmp } = mountOverview({ course: { is_admin: true } });
+    await settle();
+    expect(target.querySelector('button[data-action="delete-run"]')).not.toBeNull();
+    unmount(cmp);
+  });
+
+  it('Title / End date / Groups enabled controls render for teachers too', async () => {
+    const { target, cmp } = mountOverview({ course: { is_admin: false } });
+    await settle();
+    expect(target.querySelector('input[name="title"]')).not.toBeNull();
+    expect(target.querySelector('input[name="end_date"]')).not.toBeNull();
+    expect(target.querySelector('input[name="groups_enabled"]')).not.toBeNull();
+    unmount(cmp);
+  });
+});
+
+describe('RunOverviewTab groups-toggle tooltip role-aware', () => {
+  function tooltipFor(extra: Record<string, unknown>): string | null {
+    const { target, cmp } = mountOverview(extra);
+    flushSync();
+    const cb = target.querySelector('input[name="groups_enabled"]') as HTMLInputElement;
+    const title = cb.closest('label')!.getAttribute('title');
+    unmount(cmp);
+    return title;
+  }
+
+  it('teacher + published: "Ask a course admin to unpublish before changing."', () => {
+    expect(tooltipFor({ course: { is_admin: false }, run: { is_published: true } }))
+      .toBe('Locked once the run is published. Ask a course admin to unpublish before changing.');
+  });
+
+  it('admin + published: "Unpublish to change."', () => {
+    expect(tooltipFor({ course: { is_admin: true }, run: { is_published: true } }))
+      .toBe('Locked once the run is published. Unpublish to change.');
+  });
+
+  it('!published: title is empty regardless of role', () => {
+    expect(tooltipFor({ course: { is_admin: false }, run: { is_published: false } })).toBe('');
+    expect(tooltipFor({ course: { is_admin: true }, run: { is_published: false } })).toBe('');
   });
 });

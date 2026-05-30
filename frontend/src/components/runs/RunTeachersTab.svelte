@@ -9,11 +9,8 @@
     runId: number;
     teachers: RunTeacherResponse[];
     onRefetch: () => Promise<void>;
-    course?: Course;
+    course: Course;
   } = $props();
-
-  // T10: course threaded as optional; T11 will tighten to required and use it.
-  $effect(() => { void course; });
 
   let email = $state('');
   let addError: string | null = $state(null);
@@ -63,36 +60,40 @@
 </script>
 
 <section class="teachers-tab">
-  <form onsubmit={submit}>
-    <input
-      name="email"
-      type="email"
-      maxlength="254"
-      placeholder="teacher@example.com"
-      bind:this={emailInput}
-      bind:value={email}
-    />
-    <button type="submit" disabled={busy || !email.trim()}>Add teacher</button>
-  </form>
-  {#if addError}<p class="error">{addError}</p>{/if}
+  {#if course.is_admin}
+    <form onsubmit={submit}>
+      <input
+        name="email"
+        type="email"
+        maxlength="254"
+        placeholder="teacher@example.com"
+        bind:this={emailInput}
+        bind:value={email}
+      />
+      <button type="submit" disabled={busy || !email.trim()}>Add teacher</button>
+    </form>
+    {#if addError}<p class="error">{addError}</p>{/if}
+  {/if}
 
   {#if teachers.length === 0}
-    <p class="empty">No teachers assigned yet. Add one above.</p>
+    <p class="empty">No teachers assigned yet{course.is_admin ? '. Add one above.' : '.'}</p>
   {:else}
     <ul>
       {#each sortedTeachers as t (t.user_id)}
         <li>
           {t.user_full_name || '—'} ({t.user_email})
           {#if t.user_full_name === null}<span class="badge">(invited)</span>{/if}
-          {#if pendingRemove === t.user_id}
-            <InlineConfirm
-              confirmLabel="Confirm Remove"
-              confirmDataAction="confirm-remove"
-              onConfirm={() => confirmRemove(t.user_id)}
-              onCancel={() => (pendingRemove = null)}
-            />
-          {:else}
-            <button data-action="remove" onclick={() => (pendingRemove = t.user_id)}>Remove</button>
+          {#if course.is_admin}
+            {#if pendingRemove === t.user_id}
+              <InlineConfirm
+                confirmLabel="Confirm Remove"
+                confirmDataAction="confirm-remove"
+                onConfirm={() => confirmRemove(t.user_id)}
+                onCancel={() => (pendingRemove = null)}
+              />
+            {:else}
+              <button data-action="remove" onclick={() => (pendingRemove = t.user_id)}>Remove</button>
+            {/if}
           {/if}
         </li>
       {/each}
