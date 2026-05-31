@@ -218,7 +218,7 @@ return SequenceItemStateResponse(
 )
 ```
 
-Four sequential queries **inside the handler**: (1) `get_or_404(Run)`, (2) `_resolve_student_user_in_run` (RunStudent JOIN User), (3) `_resolve_sequence_in_version` (Sequence JOIN Block), (4) items LEFT JOIN UIS — matching §10 Performance. The project-wide `require_run_admin_or_teacher` auth dep at `helpers.py:118-130` adds 3 more queries on the non-superuser path (CourseVersion lookup + CourseAdmin SELECT + RunTeacher SELECT); that overhead is not specific to this endpoint.
+Four endpoint-specific queries, excluding the shared authorization helper: (1) `get_or_404(Run)`, (2) `_resolve_student_user_in_run` (RunStudent JOIN User), (3) `_resolve_sequence_in_version` (Sequence JOIN Block), (4) items LEFT JOIN UIS — matching §10 Performance. The project-wide `require_run_admin_or_teacher` helper (`helpers.py:109-132`, NOT a FastAPI dependency — it's an imperative call inside the handler body) adds 3 more queries on the non-superuser path (CourseVersion lookup at line 118 + CourseAdmin SELECT at lines 119-124 + RunTeacher SELECT at lines 125-130); that overhead is shared across every endpoint using the helper. **Non-superuser total: normally 7 SQL statements; superuser short-circuits to 4** (helper returns early at lines 115-116).
 
 #### Pydantic schemas (added to `backend/mathion/schemas.py`)
 
@@ -311,9 +311,9 @@ Note: `student.full_name` is `str | None` (mirrors `User.full_name`, which is nu
 
 #### Computation strategy (no N+1, illustrative — actual impl uses SQLAlchemy ORM)
 
-Four sequential queries **inside the handler** (the project-wide `require_run_admin_or_teacher` auth dep at `helpers.py:118-130` adds 3 more — CourseVersion lookup + CourseAdmin SELECT + RunTeacher SELECT — for the non-superuser path; that overhead is not specific to this endpoint):
+Four endpoint-specific queries, excluding the shared authorization helper (the `require_run_admin_or_teacher` call inside the handler adds 3 more on the non-superuser path — CourseVersion lookup + CourseAdmin SELECT + RunTeacher SELECT — so the non-superuser total is normally 7 SQL statements; superuser short-circuits to 4):
 
-1. Resolve and authorize the run (1 SQL).
+1. Resolve the run (1 SQL — `get_or_404(Run)`). The separate authorization helper call follows immediately after and is not counted in this 4-query budget.
 2. Resolve sequence + its block in one join (1 SQL), guarding `block.version_id == run.version_id`.
 3. Resolve user existence + RunStudent membership (1 SQL — join `users` and `run_students`).
 4. Resolve items in the sequence LEFT JOIN their `UserItemState` for this user (1 SQL).
