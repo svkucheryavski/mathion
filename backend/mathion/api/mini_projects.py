@@ -34,6 +34,16 @@ from mathion.schemas import MiniProjectCreate, MiniProjectResponse, MiniProjectU
 router = APIRouter(tags=["mini-projects"])
 
 
+def mini_project_title(block: Block) -> str:
+    """Centralized MP title format — `Mini project for Block <order>`.
+
+    Used by:
+      - The MP creation path (this module) — `block.order` driven title.
+      - The dashboard endpoint (`dashboard.py`) — adds `title` to per-MP rows.
+    """
+    return f"Mini project for Block {block.order}"
+
+
 def _serialize_mini_project(db: Session, mp: MiniProject) -> dict:
     """Return mini-project response dict with derived `title`."""
     block = db.get(Block, mp.block_id)
@@ -41,7 +51,7 @@ def _serialize_mini_project(db: Session, mp: MiniProject) -> dict:
         "id": mp.id,
         "run_id": mp.run_id,
         "block_id": mp.block_id,
-        "title": f"Mini project for Block {block.order}",
+        "title": mini_project_title(block),
         "assignment_md": mp.assignment_md,
         "assignment_html": mp.assignment_html,
         "soft_deadline": mp.soft_deadline,

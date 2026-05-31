@@ -362,3 +362,18 @@ def test_mp_dashboard_disabled_group_visible(admin_client, db):
     body = admin_client.get(f"/api/runs/{run['id']}/dashboard/mini-projects").json()
     g_entry = body["mini_projects"][0]["groups"][0]
     assert g_entry["group_is_disabled"] is True
+
+
+def test_mini_projects_dashboard_includes_mp_title(admin_client, db):
+    """The dashboard response includes the per-MP title (spec §5.2 additive change)."""
+    ctx = _make_run_with_mp(admin_client, db, slug="title")
+
+    response = admin_client.get(f"/api/runs/{ctx['run']['id']}/dashboard/mini-projects")
+    assert response.status_code == 200
+    body = response.json()
+    assert "mini_projects" in body
+    assert len(body["mini_projects"]) >= 1
+
+    first_mp = body["mini_projects"][0]
+    assert "title" in first_mp, "MP rows must include `title` per spec §5.2"
+    assert first_mp["title"] == f"Mini project for Block {ctx['block'].order}"

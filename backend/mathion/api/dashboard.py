@@ -1,10 +1,11 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import get_or_404, require_run_admin_or_teacher
+from mathion.api.mini_projects import mini_project_title
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import (
@@ -21,6 +22,13 @@ from mathion.models import (
     Submission,
 )
 from mathion.models_auth import User, UserItemState
+from mathion.schemas import (
+    SequenceItemScore,
+    SequenceItemState,
+    SequenceItemStateResponse,
+    _SequenceMeta,
+    _StudentMeta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +359,7 @@ def get_mini_projects(
             "block_id": block.id,
             "block_order": block.order,
             "block_title": block.title,
+            "title": mini_project_title(block),
             "is_published": mp.is_published,
             "first_submitted_at": mp.first_submitted_at.isoformat() if mp.first_submitted_at else None,
             "soft_deadline": mp.soft_deadline.isoformat() if mp.soft_deadline else None,
@@ -368,3 +377,142 @@ def get_mini_projects(
         },
         "mini_projects": mp_entries,
     }
+
+
+# ============================================================================
+# Teacher Dashboards (T1): per-(student, sequence) item drilldown
+# Spec: docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md §5.1
+# ============================================================================
+
+
+def _resolve_run_student_with_user(
+    db: Session, run: Run, user_id: int
+) -> tuple[RunStudent, User] | None:
+    """Return (RunStudent, User) iff the user is a student of this run, else None.
+
+    Returns BOTH so the endpoint can populate _StudentMeta.{full_name, email}
+    without a second query. Caller raises probe-safe 404 on None.
+    """
+    row = db.execute(
+        select(RunStudent, User)
+        .join(User, User.id == RunStudent.user_id)
+        .where(
+            RunStudent.run_id == run.id,
+            RunStudent.user_id == user_id,
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    # SQLAlchemy 2.x Row unpacks directly; .tuple() is deprecated.
+    rs, user = row
+    return rs, user
+
+
+def _resolve_sequence_in_version(
+    db: Session, version_id: int, sequence_id: int
+) -> tuple[Sequence, Block] | None:
+    """Return (Sequence, Block) iff the sequence belongs to a block in the given
+    course version, else None.
+
+    Returns BOTH so the endpoint can populate _SequenceMeta.{block_id, block_title}
+    without a second query / lazy-load. Caller raises probe-safe 404 on None.
+    """
+    row = db.execute(
+        select(Sequence, Block)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(
+            Sequence.id == sequence_id,
+            Block.version_id == version_id,
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    seq, block = row
+    return seq, block
+
+
+@router.get(
+    "/api/runs/{run_id}/students/{user_id}/sequences/{sequence_id}/items",
+    response_model=SequenceItemStateResponse,
+)
+def get_sequence_item_state(
+    run_id: int,
+    user_id: int,
+    sequence_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Per-item state drilldown for one (run, student, sequence) tuple.
+
+    Auth: admin of the course OR teacher of the run OR superuser.
+    All 404 responses use detail="Resource not found" to prevent enumeration.
+    """
+    # Step 1: resolve run (probe-safe 404). Fires BEFORE the role check
+    # (uniform with the rest of the FastAPI codebase — see spec §5.1).
+    run = get_or_404(db, Run, run_id, detail="Resource not found")
+
+    # Step 2: authorize (403 if not admin/teacher/superuser).
+    require_run_admin_or_teacher(db, current_user, run)
+
+    # Step 3: resolve student (probe-safe 404 if not enrolled).
+    student_pair = _resolve_run_student_with_user(db, run, user_id)
+    if student_pair is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    _rs, student_user = student_pair
+
+    # Step 4: resolve sequence within the run's pinned version (probe-safe 404).
+    seq_pair = _resolve_sequence_in_version(db, run.version_id, sequence_id)
+    if seq_pair is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    seq, block = seq_pair
+
+    # Step 5: items LEFT JOIN UserItemState, ordered by Item.order.
+    rows = db.execute(
+        select(Item, UserItemState)
+        .outerjoin(
+            UserItemState,
+            (UserItemState.item_id == Item.id) & (UserItemState.user_id == user_id),
+        )
+        .where(Item.sequence_id == seq.id)
+        .order_by(Item.order.asc())
+    ).all()
+
+    item_states: list[SequenceItemState] = []
+    for row in rows:
+        item, uis = row  # Row unpacks directly in SQLA 2.x.
+        is_covered = bool(uis is not None and uis.is_covered)
+        # Spec §5.1 Cell conventions: last_score is null when:
+        #   (a) item is NOT quiz, OR
+        #   (b) no UIS row exists, OR
+        #   (c) row exists but BOTH score columns are None (visited but not attempted).
+        last_score: SequenceItemScore | None = None
+        if item.type == "quiz" and uis is not None:
+            c, t = uis.last_score_correct, uis.last_score_total
+            if c is not None and t is not None:
+                last_score = SequenceItemScore(correct=c, total=t)
+        # last_visited_at is a top-level field (NOT nested under last_score).
+        last_visited_at = uis.last_visited_at if uis is not None else None
+        item_states.append(SequenceItemState(
+            item_id=item.id,
+            item_order=item.order,
+            item_title=item.title,
+            item_type=item.type,
+            is_covered=is_covered,
+            last_score=last_score,
+            last_visited_at=last_visited_at,
+        ))
+
+    return SequenceItemStateResponse(
+        sequence=_SequenceMeta(
+            sequence_id=seq.id,
+            sequence_title=seq.title,
+            block_id=block.id,
+            block_title=block.title,
+        ),
+        student=_StudentMeta(
+            user_id=student_user.id,
+            full_name=student_user.full_name,
+            email=student_user.email,
+        ),
+        items=item_states,
+    )

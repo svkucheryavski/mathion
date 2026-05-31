@@ -677,3 +677,51 @@ class TeachingRunRow(BaseModel):
     student_count: int
     # No `model_config` — this row is built field-by-field in the handler, not
     # from a single ORM model, so `from_attributes` would not apply correctly.
+
+
+# ============================================================================
+# Teacher Dashboards (T1): per-(student, sequence) item drilldown
+# Spec: docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md §5.1
+# ============================================================================
+
+
+class SequenceItemScore(BaseModel):
+    """Quiz score on a single item — nested object on SequenceItemState."""
+    correct: int
+    total: int
+
+
+class SequenceItemState(BaseModel):
+    """Per-item state row in the drilldown response."""
+    item_id: int
+    item_order: int
+    item_title: str
+    item_type: Literal["static_page", "video", "quiz", "interactive_app"]
+    is_covered: bool
+    # last_score is null when: (a) item is not quiz, (b) no UIS row exists,
+    # OR (c) row exists but BOTH score columns are None (visited but never attempted).
+    last_score: SequenceItemScore | None
+    # Top-level field (not nested under last_score) — mirrors UserItemState.last_visited_at.
+    last_visited_at: datetime | None
+
+
+class _SequenceMeta(BaseModel):
+    """Sequence + parent block metadata for the drilldown panel header."""
+    sequence_id: int
+    sequence_title: str
+    block_id: int
+    block_title: str
+
+
+class _StudentMeta(BaseModel):
+    """Student metadata for the drilldown panel header."""
+    user_id: int
+    full_name: str | None
+    email: str
+
+
+class SequenceItemStateResponse(BaseModel):
+    """Top-level response for the per-(student, sequence) drilldown endpoint."""
+    sequence: _SequenceMeta
+    student: _StudentMeta
+    items: list[SequenceItemState]
