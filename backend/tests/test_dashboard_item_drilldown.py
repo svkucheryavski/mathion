@@ -7,13 +7,10 @@ Exactly 15 tests covering the spec's enumerated test list (lines 362-378).
 """
 from datetime import date, datetime, timezone
 
-from fastapi.testclient import TestClient
-
-from mathion.auth import request_pin, verify_pin
-from mathion.main import app
 from mathion.models import (
     Block,
     Course,
+    CourseAdmin,
     CourseVersion,
     Item,
     Run,
@@ -26,7 +23,17 @@ from mathion.models_auth import User, UserItemState
 
 def _publish_minimal_run(db):
     """Create a published run with one block, one sequence containing 3 items
-    (1 static_page + 2 quiz), and one enrolled student. Returns (run, seq, items, student)."""
+    (1 static_page + 2 quiz), and one enrolled student.
+
+    Items are CREATED in non-natural order (order=3 first, then 1, then 2) so
+    that any test that asserts `[1, 2, 3]` actually exercises the SQL
+    `ORDER BY Item.order ASC` clause rather than passively relying on
+    insertion order.
+
+    Returns (run, seq, items, student, course, block) — `items` is sorted by
+    `order` ASC for caller convenience; `course` and `block` are returned so
+    callers don't need to re-query.
+    """
     course = Course(slug="drilldown-test", name="Drilldown", description="")
     db.add(course); db.commit(); db.refresh(course)
 
@@ -42,17 +49,19 @@ def _publish_minimal_run(db):
     seq = Sequence(block_id=block.id, title="Seq 1", slug="seq-1", order=1)
     db.add(seq); db.commit(); db.refresh(seq)
 
-    items = [
-        Item(sequence_id=seq.id, title="Item 1", slug="item-1", order=1, type="static_page",
-             content_md="x", content_html="<p>x</p>"),
-        Item(sequence_id=seq.id, title="Item 2", slug="item-2", order=2, type="quiz"),
-        Item(sequence_id=seq.id, title="Item 3", slug="item-3", order=3, type="quiz"),
-    ]
-    for it in items:
+    # Insert items in non-natural order (3, 1, 2) so the SQL ORDER BY is
+    # actually exercised by the items-order test.
+    item3 = Item(sequence_id=seq.id, title="Item 3", slug="item-3", order=3, type="quiz")
+    item1 = Item(sequence_id=seq.id, title="Item 1", slug="item-1", order=1, type="static_page",
+                 content_md="x", content_html="<p>x</p>")
+    item2 = Item(sequence_id=seq.id, title="Item 2", slug="item-2", order=2, type="quiz")
+    for it in (item3, item1, item2):
         db.add(it)
     db.commit()
-    for it in items:
+    for it in (item3, item1, item2):
         db.refresh(it)
+    # Return items sorted by order (callers expect [item-1, item-2, item-3]).
+    items = [item1, item2, item3]
 
     run = Run(
         version_id=version.id, title="Spring 2026",
@@ -67,17 +76,7 @@ def _publish_minimal_run(db):
     db.add(RunStudent(run_id=run.id, user_id=student.id))
     db.commit()
 
-    return run, seq, items, student
-
-
-def _client_for(db, email: str) -> TestClient:
-    """Return a TestClient logged in as the user with the given email."""
-    raw = request_pin(db, email)
-    tok = verify_pin(db, email, raw, duration_days=7)
-    c = TestClient(app)
-    c.cookies.set("session_token", tok)
-    c.headers.update({"X-Requested-With": "mathion"})
-    return c
+    return run, seq, items, student, course, block
 
 
 # ============================================================================
@@ -85,18 +84,30 @@ def _client_for(db, email: str) -> TestClient:
 # ============================================================================
 
 
-def test_admin_returns_200_with_full_payload(client, db, admin_client):
-    """Spec #1: Admin returns 200 with full payload (sequence + student + items)."""
-    run, seq, _items, student = _publish_minimal_run(db)
-    r = admin_client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
+def test_admin_returns_200_with_full_payload(db, student_client_for):
+    """Spec #1: CourseAdmin returns 200 with full payload (sequence + student + items).
+
+    Uses a non-superuser User + CourseAdmin row to exercise the
+    `require_run_admin_or_teacher` CourseAdmin branch (helpers.py:118-127),
+    NOT the `is_superuser` short-circuit at helpers.py:115-116. The superuser
+    path is covered separately by `test_superuser_returns_200`.
+    """
+    run, seq, _items, student, course, _block = _publish_minimal_run(db)
+    admin_user = User(email="course-admin@test", full_name="Course Admin")
+    db.add(admin_user); db.commit(); db.refresh(admin_user)
+    db.add(CourseAdmin(course_id=course.id, user_id=admin_user.id))
+    db.commit()
+
+    c = student_client_for(admin_user.email)
+    r = c.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     assert r.status_code == 200
     body = r.json()
-    # _SequenceMeta per spec §5.1 (NO sequence_order field exposed)
+    # SequenceMeta per spec §5.1 (NO sequence_order field exposed)
     assert body["sequence"]["sequence_id"] == seq.id
     assert body["sequence"]["sequence_title"] == "Seq 1"
     assert "sequence_order" not in body["sequence"]
     assert body["sequence"]["block_title"] == "Block 1"
-    # _StudentMeta
+    # StudentMeta
     assert body["student"]["user_id"] == student.id
     assert body["student"]["full_name"] == "Student One"
     assert body["student"]["email"] == "s1@test"
@@ -104,38 +115,38 @@ def test_admin_returns_200_with_full_payload(client, db, admin_client):
     assert [it["item_order"] for it in body["items"]] == [1, 2, 3]
 
 
-def test_run_teacher_returns_200(client, db, teacher_user, teacher_client):
+def test_run_teacher_returns_200(db, teacher_user, teacher_client):
     """Spec #2: Run teacher of THIS run returns 200."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     db.add(RunTeacher(run_id=run.id, user_id=teacher_user.id))
     db.commit()
     r = teacher_client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     assert r.status_code == 200
 
 
-def test_superuser_returns_200(client, db):
+def test_superuser_returns_200(db, student_client_for):
     """Spec #3: Superuser returns 200 (verifies helper short-circuit)."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     su = User(email="su@test", full_name="SU", is_superuser=True)
     db.add(su); db.commit()
-    c = _client_for(db, su.email)
+    c = student_client_for(su.email)
     r = c.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     assert r.status_code == 200
 
 
-def test_non_member_returns_403(client, db):
+def test_non_member_returns_403(db, student_client_for):
     """Spec #4: Non-member (no CourseAdmin, no RunTeacher, not enrolled, not superuser) returns 403."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     nm = User(email="nm@test", full_name="NM")
     db.add(nm); db.commit()
-    c = _client_for(db, nm.email)
+    c = student_client_for(nm.email)
     r = c.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     assert r.status_code == 403
 
 
-def test_teacher_of_different_run_returns_403(client, db):
+def test_teacher_of_different_run_returns_403(db, student_client_for):
     """Spec #5: Teacher of a DIFFERENT run (course-distinct) returns 403."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     # Create a second course/run with its own teacher.
     other_course = Course(slug="other-course", name="Other", description="")
     db.add(other_course); db.commit(); db.refresh(other_course)
@@ -155,15 +166,15 @@ def test_teacher_of_different_run_returns_403(client, db):
     db.add(RunTeacher(run_id=other_run.id, user_id=other_teacher.id))
     db.commit()
 
-    c = _client_for(db, other_teacher.email)
+    c = student_client_for(other_teacher.email)
     r = c.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     assert r.status_code == 403
 
 
-def test_student_of_this_run_returns_403(client, db):
+def test_student_of_this_run_returns_403(db, student_client_for):
     """Spec #6: Student of THIS run (no admin/teacher role) returns 403 even for their own data."""
-    run, seq, _items, student = _publish_minimal_run(db)
-    c = _client_for(db, student.email)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
+    c = student_client_for(student.email)
     r = c.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     assert r.status_code == 403
 
@@ -173,10 +184,10 @@ def test_student_of_this_run_returns_403(client, db):
 # ============================================================================
 
 
-def test_student_not_in_run_returns_404_identical_detail(client, db, admin_client):
+def test_student_not_in_run_returns_404_identical_detail(db, admin_client):
     """Spec #7: Student-not-in-this-run (different run / not enrolled / nonexistent) returns 404
     with identical `"Resource not found"` detail."""
-    run, seq, _items, _student = _publish_minimal_run(db)
+    run, seq, _items, _student, _course, _block = _publish_minimal_run(db)
 
     # Case A: real user, not enrolled
     other = User(email="other@test", full_name="Other")
@@ -191,9 +202,9 @@ def test_student_not_in_run_returns_404_identical_detail(client, db, admin_clien
     assert r2.json()["detail"] == "Resource not found"
 
 
-def test_sequence_not_in_pinned_version_returns_404(client, db, admin_client):
+def test_sequence_not_in_pinned_version_returns_404(db, admin_client):
     """Spec #8: Sequence-not-in-pinned-version returns 404 with identical detail."""
-    run, _seq, _items, student = _publish_minimal_run(db)
+    run, _seq, _items, student, _course, _block = _publish_minimal_run(db)
     other_course = Course(slug="other", name="Other", description="")
     db.add(other_course); db.commit(); db.refresh(other_course)
     other_version = CourseVersion(
@@ -211,9 +222,9 @@ def test_sequence_not_in_pinned_version_returns_404(client, db, admin_client):
     assert r.json()["detail"] == "Resource not found"
 
 
-def test_nonexistent_sequence_returns_404(client, db, admin_client):
+def test_nonexistent_sequence_returns_404(db, admin_client):
     """Spec #9: Nonexistent sequence_id returns 404."""
-    run, _seq, _items, student = _publish_minimal_run(db)
+    run, _seq, _items, student, _course, _block = _publish_minimal_run(db)
     r = admin_client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/999999/items")
     assert r.status_code == 404
     assert r.json()["detail"] == "Resource not found"
@@ -224,12 +235,9 @@ def test_nonexistent_sequence_returns_404(client, db, admin_client):
 # ============================================================================
 
 
-def test_empty_sequence_returns_items_empty_list(client, db, admin_client):
+def test_empty_sequence_returns_items_empty_list(db, admin_client):
     """Spec #10: Empty sequence (zero items) returns items: []."""
-    run, _seq, _items, student = _publish_minimal_run(db)
-    block = db.execute(
-        Block.__table__.select().where(Block.version_id == run.version_id)
-    ).first()
+    run, _seq, _items, student, _course, block = _publish_minimal_run(db)
     empty_seq = Sequence(block_id=block.id, title="Empty", slug="empty", order=2)
     db.add(empty_seq); db.commit(); db.refresh(empty_seq)
 
@@ -238,10 +246,10 @@ def test_empty_sequence_returns_items_empty_list(client, db, admin_client):
     assert r.json()["items"] == []
 
 
-def test_zero_touched_items_returns_default_fields(client, db, admin_client):
+def test_zero_touched_items_returns_default_fields(db, admin_client):
     """Spec #11: Zero touched items returns full item list with is_covered=false defaults,
     last_score=null, last_visited_at=null."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     # NO UserItemState rows for any item.
     r = admin_client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
     body = r.json()
@@ -252,10 +260,10 @@ def test_zero_touched_items_returns_default_fields(client, db, admin_client):
         assert it["last_visited_at"] is None
 
 
-def test_quiz_with_attempt_populates_last_score_non_quiz_is_null(client, db, admin_client):
+def test_quiz_with_attempt_populates_last_score_non_quiz_is_null(db, admin_client):
     """Spec #12: Quiz item with attempt returns last_score: {correct, total} populated;
     non-quiz items return last_score: null."""
-    run, seq, items, student = _publish_minimal_run(db)
+    run, seq, items, student, _course, _block = _publish_minimal_run(db)
     static_item, quiz_a, _quiz_b = items
     visited_at = datetime(2026, 4, 10, 9, 32, tzinfo=timezone.utc)
     # Quiz item with full attempt.
@@ -287,9 +295,9 @@ def test_quiz_with_attempt_populates_last_score_non_quiz_is_null(client, db, adm
 # ============================================================================
 
 
-def test_disabled_user_returns_200(client, db, admin_client):
+def test_disabled_user_returns_200(db, admin_client):
     """Spec #13: Disabled user returns 200 — admin/teacher can still view."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     student.is_disabled = True
     db.commit()
     r = admin_client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
@@ -297,9 +305,9 @@ def test_disabled_user_returns_200(client, db, admin_client):
     assert r.json()["student"]["user_id"] == student.id
 
 
-def test_disabled_version_returns_200(client, db, admin_client):
+def test_disabled_version_returns_200(db, admin_client):
     """Spec #14: Disabled version returns 200 — admin/teacher reads historical state."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     version = db.get(CourseVersion, run.version_id)
     version.is_disabled = True
     db.commit()
@@ -307,9 +315,9 @@ def test_disabled_version_returns_200(client, db, admin_client):
     assert r.status_code == 200
 
 
-def test_unpublished_run_returns_200(client, db, admin_client):
+def test_unpublished_run_returns_200(db, admin_client):
     """Spec #15: Unpublished run returns 200 for admin/teacher (preview)."""
-    run, seq, _items, student = _publish_minimal_run(db)
+    run, seq, _items, student, _course, _block = _publish_minimal_run(db)
     run.is_published = False
     db.commit()
     r = admin_client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")

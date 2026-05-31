@@ -705,7 +705,7 @@ class SequenceItemState(BaseModel):
     last_visited_at: datetime | None
 
 
-class _SequenceMeta(BaseModel):
+class SequenceMeta(BaseModel):
     """Sequence + parent block metadata for the drilldown panel header."""
     sequence_id: int
     sequence_title: str
@@ -713,7 +713,7 @@ class _SequenceMeta(BaseModel):
     block_title: str
 
 
-class _StudentMeta(BaseModel):
+class StudentMeta(BaseModel):
     """Student metadata for the drilldown panel header."""
     user_id: int
     full_name: str | None
@@ -722,6 +722,6 @@ class _StudentMeta(BaseModel):
 
 class SequenceItemStateResponse(BaseModel):
     """Top-level response for the per-(student, sequence) drilldown endpoint."""
-    sequence: _SequenceMeta
-    student: _StudentMeta
+    sequence: SequenceMeta
+    student: StudentMeta
     items: list[SequenceItemState]

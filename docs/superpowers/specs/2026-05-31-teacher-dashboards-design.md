@@ -218,7 +218,7 @@ return SequenceItemStateResponse(
 )
 ```
 
-Four sequential queries total: (1) `get_or_404(Run)`, (2) `_resolve_run_student_with_user` (RunStudent JOIN User), (3) `_resolve_sequence_in_version` (Sequence JOIN Block), (4) items LEFT JOIN UIS — matching §10 Performance.
+Four sequential queries **inside the handler**: (1) `get_or_404(Run)`, (2) `_resolve_student_user_in_run` (RunStudent JOIN User), (3) `_resolve_sequence_in_version` (Sequence JOIN Block), (4) items LEFT JOIN UIS — matching §10 Performance. The project-wide `require_run_admin_or_teacher` auth dep at `helpers.py:118-130` adds 3 more queries on the non-superuser path (CourseVersion lookup + CourseAdmin SELECT + RunTeacher SELECT); that overhead is not specific to this endpoint.
 
 #### Pydantic schemas (added to `backend/mathion/schemas.py`)
 
@@ -311,7 +311,7 @@ Note: `student.full_name` is `str | None` (mirrors `User.full_name`, which is nu
 
 #### Computation strategy (no N+1, illustrative — actual impl uses SQLAlchemy ORM)
 
-Four sequential queries:
+Four sequential queries **inside the handler** (the project-wide `require_run_admin_or_teacher` auth dep at `helpers.py:118-130` adds 3 more — CourseVersion lookup + CourseAdmin SELECT + RunTeacher SELECT — for the non-superuser path; that overhead is not specific to this endpoint):
 
 1. Resolve and authorize the run (1 SQL).
 2. Resolve sequence + its block in one join (1 SQL), guarding `block.version_id == run.version_id`.

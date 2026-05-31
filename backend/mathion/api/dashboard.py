@@ -26,8 +26,8 @@ from mathion.schemas import (
     SequenceItemScore,
     SequenceItemState,
     SequenceItemStateResponse,
-    _SequenceMeta,
-    _StudentMeta,
+    SequenceMeta,
+    StudentMeta,
 )
 
 logger = logging.getLogger(__name__)
@@ -385,13 +385,14 @@ def get_mini_projects(
 # ============================================================================
 
 
-def _resolve_run_student_with_user(
+def _resolve_student_user_in_run(
     db: Session, run: Run, user_id: int
-) -> tuple[RunStudent, User] | None:
-    """Return (RunStudent, User) iff the user is a student of this run, else None.
+) -> User | None:
+    """Return the User iff they are a student of this run, else None.
 
-    Returns BOTH so the endpoint can populate _StudentMeta.{full_name, email}
-    without a second query. Caller raises probe-safe 404 on None.
+    Joins User against RunStudent and returns only the User — the endpoint
+    populates StudentMeta.{full_name, email} from it. Caller raises probe-safe
+    404 on None.
     """
     row = db.execute(
         select(RunStudent, User)
@@ -404,8 +405,8 @@ def _resolve_run_student_with_user(
     if row is None:
         return None
     # SQLAlchemy 2.x Row unpacks directly; .tuple() is deprecated.
-    rs, user = row
-    return rs, user
+    _rs, user = row
+    return user
 
 
 def _resolve_sequence_in_version(
@@ -414,7 +415,7 @@ def _resolve_sequence_in_version(
     """Return (Sequence, Block) iff the sequence belongs to a block in the given
     course version, else None.
 
-    Returns BOTH so the endpoint can populate _SequenceMeta.{block_id, block_title}
+    Returns BOTH so the endpoint can populate SequenceMeta.{block_id, block_title}
     without a second query / lazy-load. Caller raises probe-safe 404 on None.
     """
     row = db.execute(
@@ -455,10 +456,9 @@ def get_sequence_item_state(
     require_run_admin_or_teacher(db, current_user, run)
 
     # Step 3: resolve student (probe-safe 404 if not enrolled).
-    student_pair = _resolve_run_student_with_user(db, run, user_id)
-    if student_pair is None:
+    student_user = _resolve_student_user_in_run(db, run, user_id)
+    if student_user is None:
         raise HTTPException(status_code=404, detail="Resource not found")
-    _rs, student_user = student_pair
 
     # Step 4: resolve sequence within the run's pinned version (probe-safe 404).
     seq_pair = _resolve_sequence_in_version(db, run.version_id, sequence_id)
@@ -479,8 +479,8 @@ def get_sequence_item_state(
 
     item_states: list[SequenceItemState] = []
     for row in rows:
-        item, uis = row  # Row unpacks directly in SQLA 2.x.
-        is_covered = bool(uis is not None and uis.is_covered)
+        item, uis = row
+        is_covered = uis is not None and uis.is_covered
         # Spec §5.1 Cell conventions: last_score is null when:
         #   (a) item is NOT quiz, OR
         #   (b) no UIS row exists, OR
@@ -503,13 +503,13 @@ def get_sequence_item_state(
         ))
 
     return SequenceItemStateResponse(
-        sequence=_SequenceMeta(
+        sequence=SequenceMeta(
             sequence_id=seq.id,
             sequence_title=seq.title,
             block_id=block.id,
             block_title=block.title,
         ),
-        student=_StudentMeta(
+        student=StudentMeta(
             user_id=student_user.id,
             full_name=student_user.full_name,
             email=student_user.email,
