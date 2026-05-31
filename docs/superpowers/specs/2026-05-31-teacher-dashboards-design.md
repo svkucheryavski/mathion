@@ -149,7 +149,7 @@ The FastAPI auth dependency (`get_current_user`) fires FIRST and raises 401 for 
 
 **All 404 responses use the identical detail string `"Resource not found"` to prevent enumeration via diffing.**
 
-> **Implementation note on `get_or_404` default detail.** The helper at `backend/mathion/api/helpers.py:45-50` defaults `detail` to `f"{model.__name__} not found"` (e.g., `"Run not found"`). To satisfy the identical-string requirement, every `get_or_404` call AND every `HTTPException(404, ...)` raised by `_resolve_student_user_in_run` / `_resolve_sequence_in_version` MUST pass `detail="Resource not found"` explicitly.
+> **Implementation note on `get_or_404` default detail.** The helper at `backend/mathion/api/helpers.py:45-50` defaults `detail` to `f"{model.__name__} not found"` (e.g., `"Run not found"`). To satisfy the identical-string requirement, every `get_or_404` call AND every `HTTPException(404, ...)` the handler raises after `_resolve_student_user_in_run` / `_resolve_sequence_in_version` return `None` MUST pass `detail="Resource not found"` explicitly. (Both helpers return `... | None` and let the caller raise, keeping the 404-emission centralized in the handler body.)
 >
 > **Known asymmetry — existing endpoint.** The sibling endpoints `/dashboard/progress` and `/dashboard/mini-projects` (`dashboard.py:176, 276`) currently use the default `"Run not found"` detail. They are NOT modified in this slice; teachers probing the new endpoint get uniform 404s, but probing those two endpoints still leaks via detail string diffs. Out-of-scope hardening tracked for a future security pass.
 
@@ -180,11 +180,13 @@ def _resolve_sequence_in_version(
 
 def _resolve_student_user_in_run(
     db: Session, run: Run, user_id: int
-) -> tuple[RunStudent, User]:
-    """Return (RunStudent, User) iff the user is a student of this run, else 404.
+) -> User | None:
+    """Return the User iff they are a student of this run, else None.
 
-    Returns BOTH so the endpoint can populate _StudentMeta.{full_name, email}
-    without a second query.
+    Joins User against RunStudent to enforce membership, then returns only the
+    User — the endpoint populates _StudentMeta.{full_name, email} from it.
+    Caller raises probe-safe 404 on None (keeps the 404-raising responsibility
+    in the handler alongside the run/sequence 404s, for consistency).
     """
     row = db.execute(
         select(RunStudent, User)
@@ -195,16 +197,21 @@ def _resolve_student_user_in_run(
         )
     ).one_or_none()
     if row is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    run_student, user = row
-    return run_student, user
+        return None
+    _rs, user = row   # SQLAlchemy 2.x Row unpacks directly; .tuple() is deprecated
+    return user
 ```
 
 Endpoint usage:
 
 ```python
-run_student, user = _resolve_student_user_in_run(db, run, user_id)
-sequence, block = _resolve_sequence_in_version(db, run.version_id, sequence_id)
+student_user = _resolve_student_user_in_run(db, run, user_id)
+if student_user is None:
+    raise HTTPException(status_code=404, detail="Resource not found")
+seq_pair = _resolve_sequence_in_version(db, run.version_id, sequence_id)
+if seq_pair is None:
+    raise HTTPException(status_code=404, detail="Resource not found")
+sequence, block = seq_pair
 items = db.execute(stmt).all()  # the LEFT JOIN query above
 return SequenceItemStateResponse(
     sequence=_SequenceMeta(
@@ -212,7 +219,7 @@ return SequenceItemStateResponse(
         block_id=block.id, block_title=block.title,
     ),
     student=_StudentMeta(
-        user_id=user.id, full_name=user.full_name, email=user.email,
+        user_id=student_user.id, full_name=student_user.full_name, email=student_user.email,
     ),
     items=[...],
 )
@@ -2110,7 +2117,7 @@ This rev incorporates findings from the 5-Opus panel round 4 against rev 4.
 3. **Smoke step 13 needs files-on-disk.** `submissions.py:286-310` and `evaluations.py:205-232` check `os.path.isfile(abs_path)` → 404 "File missing" if absent. §14 now requires the seed to write placeholder bytes (e.g., 1-byte file) at every Submission `file_path` and every Evaluation `feedback_file` under the configured storage dirs, with `os.makedirs(..., exist_ok=True)` for rerun safety. Otherwise §14 step 13 fails on Download buttons.
 
 **Important fixes (rev 4 → rev 5):**
-- **Stale `_resolve_run_student` references scrubbed.** Lines 147, 152 renamed to the current helper name. Dead helper definition (lines 159-169) DELETED. Line 1557 (§15 files-touched) renamed. The `_resolve_run_student` name no longer appears anywhere in the spec. (Naming was further refined during T1 implementation — see "Implementation notes" below.)
+- **Stale `_resolve_run_student` references scrubbed.** Lines 147, 152 renamed to the current helper name. Dead helper definition (lines 159-169) DELETED. Line 1557 (§15 files-touched) renamed. The bare `_resolve_run_student` name no longer appears in the live spec body — remaining mentions live only in the change-log entries below (§24 rev 3→4 and §25 rev 2→3) where they describe the original rev 3 name. (Naming was further refined during T1 implementation — see §24 below.)
 - **`Row.tuple()` deprecated in SQLAlchemy 2.0.19+** (emits `DeprecationWarning` which could fail tests under `-W error`). Both `_resolve_sequence_in_version` and `_resolve_student_user_in_run` rewritten to use direct row unpack: `seq, block = row; return seq, block`. Matches existing project pattern.
 - **§5.1 query count claim**: "Three queries total" → "Four sequential queries total" (the numbered list immediately following enumerates 4 queries; matches §10 Performance).
 - **`refresh()` function body now explicit** in §6.3 (and same shape applies to `RunSubmissionTab.svelte`). Previously only described in prose.
@@ -2141,7 +2148,7 @@ This rev incorporates findings from the codex independent review (round 3) after
 **Important fixes (rev 3 → rev 4):**
 - §14 idempotency claim rewritten. Slice A's seed always drops-and-recreates `teaching-smoke-101` (per `seed_teaching_smoke.py:50-63`); the dashboards seed calls Slice A's `seed()` first and then layers its entities on top. Combined script is idempotent across reruns; the "additive" claim is now framed as "additive on top of Slice A's fresh state".
 - `_resolve_sequence_in_version` now returns `(Sequence, Block)` tuple to avoid an extra lazy-load query for `block_title` — keeps §10 4-query claim accurate.
-- NEW helper `_resolve_student_user_in_run` returns `(RunStudent, User)` so the endpoint can populate `_StudentMeta.{full_name, email}` without an extra `db.get(User, ...)` query. Replaces rev 3's `_resolve_run_student`. (Helper was introduced in rev 4; the name was further refined during T1 implementation.)
+- NEW helper `_resolve_student_user_in_run` joins User against RunStudent in one query so the endpoint can populate `_StudentMeta.{full_name, email}` without an extra `db.get(User, ...)` query. Replaces rev 3's `_resolve_run_student`. (Helper was introduced in rev 4 returning `tuple[RunStudent, User]`; during T1 implementation both the name and the return shape were refined — current contract `-> User | None`, with the handler raising the 404 — RunStudent is now used only to filter the JOIN.)
 - Refresh button (both tabs) wires the same `abortCtl?.abort()` + new `AbortController` pattern. Otherwise a Refresh click during in-flight initial load lets stale data win.
 - §5.1 probe-safety wording corrected: previous rev 3 text claimed "any authenticated user probing nonexistent run IDs sees the same 404 they'd see for an existing-but-unauthorized run" — wrong. An authenticated user CAN distinguish 404 (nonexistent) from 403 (unauthorized); §11 already documents this honestly. §5.1 now matches §11.
 - §11 dropped the stale ", open details" suffix from heatmap aria-label (already removed from §6.3).

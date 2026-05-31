@@ -356,9 +356,11 @@ Add the two module-local helpers per spec §5.1:
 ```python
 def _resolve_student_user_in_run(
     db: Session, run: Run, user_id: int
-) -> tuple[RunStudent, User] | None:
-    """Look up the RunStudent + User in one query. Returns None if either
-    is missing OR if the user is not enrolled in this run (probe-safe 404)."""
+) -> User | None:
+    """Look up the User in one JOIN against RunStudent. Returns None if the
+    user is not enrolled in this run (probe-safe 404). Only the User is
+    returned — the endpoint populates StudentMeta from it; RunStudent is
+    used only to filter membership."""
     row = db.execute(
         select(RunStudent, User)
         .join(User, User.id == RunStudent.user_id)
@@ -366,8 +368,8 @@ def _resolve_student_user_in_run(
     ).one_or_none()
     if row is None:
         return None
-    rs, user = row  # SQLAlchemy 2.x Row unpacks directly
-    return rs, user
+    _rs, user = row  # SQLAlchemy 2.x Row unpacks directly
+    return user
 
 
 def _resolve_sequence_in_version(
@@ -407,10 +409,9 @@ def get_sequence_item_state(
     require_run_admin_or_teacher(db, current_user, run)
 
     # Resolve student (probe-safe 404 if not enrolled)
-    student_pair = _resolve_student_user_in_run(db, run, uid)
-    if student_pair is None:
+    student = _resolve_student_user_in_run(db, run, uid)
+    if student is None:
         raise HTTPException(404, detail="Resource not found")
-    _rs, student = student_pair
 
     # Resolve sequence (probe-safe 404 if sequence doesn't belong to this version)
     seq_pair = _resolve_sequence_in_version(db, run.version_id, sid)
