@@ -100,14 +100,30 @@ Expected: PASS.
 
 - [ ] **Step 6: Add Pydantic schemas in `schemas.py`**
 
-Open `backend/mathion/schemas.py`. Add at the bottom of the file (or near the other dashboard schemas if they live in this file):
+**Schemas MUST match spec §5.1 lines 225-260 verbatim** — the spec's wire shape is canonical (drives both the FastAPI response_model AND the T2 TypeScript interfaces). Open `backend/mathion/schemas.py`. Add at the bottom of the file (or near the other dashboard schemas if they live in this file):
 
 ```python
+class SequenceItemScore(BaseModel):
+    """Quiz score on a single item — nested object on SequenceItemState."""
+    correct: int
+    total: int
+
+
+class SequenceItemState(BaseModel):
+    """Per-item state row in the drilldown response."""
+    item_id: int
+    item_order: int
+    item_title: str
+    item_type: Literal["static_page", "video", "quiz", "interactive_app"]  # match Item.type enum in models.py / existing schemas.py:97
+    is_covered: bool
+    last_score: SequenceItemScore | None  # null when not quiz, OR no UIS row, OR row has both score columns None
+    last_visited_at: datetime | None       # top-level (UserItemState.last_visited_at, models_auth.py:83)
+
+
 class _SequenceMeta(BaseModel):
     """Sequence + parent block metadata for the drilldown panel header."""
     sequence_id: int
     sequence_title: str
-    sequence_order: int
     block_id: int
     block_title: str
 
@@ -119,23 +135,6 @@ class _StudentMeta(BaseModel):
     email: str
 
 
-class SequenceItemScore(BaseModel):
-    """Quiz score on a single item — None when student has not attempted."""
-    last_score_correct: int | None
-    last_score_total: int | None
-    last_visited_at: datetime | None
-
-
-class SequenceItemState(BaseModel):
-    """Per-item state row in the drilldown response."""
-    item_id: int
-    item_order: int
-    item_title: str
-    item_type: Literal["static_page", "video", "quiz"]  # match Item.type enum in models.py
-    is_covered: bool
-    quiz: SequenceItemScore | None  # populated only for quiz items the student has attempted
-
-
 class SequenceItemStateResponse(BaseModel):
     """Top-level response for `GET /api/runs/{rid}/students/{uid}/sequences/{sid}/items`."""
     sequence: _SequenceMeta
@@ -143,7 +142,7 @@ class SequenceItemStateResponse(BaseModel):
     items: list[SequenceItemState]
 ```
 
-Add imports if missing: `from datetime import datetime`, `from typing import Literal`, `from pydantic import BaseModel`.
+Add imports if missing: `from datetime import datetime`, `from typing import Literal`, `from pydantic import BaseModel`. Per spec §5.1 Cell conventions (line 307): `last_score` is `null` whenever ANY of (a) item is not quiz, (b) no `UserItemState` row exists, (c) row exists but BOTH `last_score_correct` AND `last_score_total` are `None`.
 
 - [ ] **Step 7: Create `backend/tests/test_dashboard_item_drilldown.py` with fixtures**
 
@@ -301,9 +300,10 @@ class TestResponseShape:
         run, seq, _items, student = _publish_minimal_run(db)
         r = client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
         body = r.json()
+        # _SequenceMeta per spec §5.1: sequence_id, sequence_title, block_id, block_title (NO sequence_order)
         assert body["sequence"]["sequence_id"] == seq.id
         assert body["sequence"]["sequence_title"] == "Seq 1"
-        assert body["sequence"]["sequence_order"] == 1
+        assert body["sequence"]["block_id"] is not None
         assert body["sequence"]["block_title"] == "Block 1"
 
     def test_response_includes_student_metadata(self, client, db, admin_login):
@@ -329,14 +329,17 @@ class TestResponseShape:
         body = r.json()
         for it in body["items"]:
             assert it["is_covered"] is False, "default when no UIS row"
+            assert it["last_score"] is None
+            assert it["last_visited_at"] is None
 
-    def test_quiz_is_null_for_static_page_items(self, client, db, admin_login):
+    def test_last_score_is_null_for_static_page_items(self, client, db, admin_login):
+        """Spec §5.1 Cell conventions: last_score is null when item is not quiz."""
         run, seq, items, student = _publish_minimal_run(db)
         r = client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
         body = r.json()
         # items[0] is the static_page item
         static_row = next(it for it in body["items"] if it["item_type"] == "static_page")
-        assert static_row["quiz"] is None
+        assert static_row["last_score"] is None
 ```
 
 Total: 15 tests across `TestAuth` (5), `TestNotFound` (5), `TestResponseShape` (5). Use the project's existing fixtures (`client`, `db`, `admin_user`, `admin_login`, `teacher_user`, `teacher_login`, `student_user`, `student_login`) — verify their exact names in `backend/tests/conftest.py` and adjust the test signatures if they differ.
@@ -430,29 +433,28 @@ def get_sequence_item_state(
     for row in rows:
         item, uis = row  # Row unpacks directly in SQLA 2.x
         is_covered = bool(uis and uis.is_covered)
-        quiz: SequenceItemScore | None = None
+        # Spec §5.1 Cell conventions: last_score is null when item is NOT quiz,
+        # OR no UIS row exists, OR row exists but both score columns are None.
+        last_score: SequenceItemScore | None = None
         if item.type == "quiz" and uis is not None:
             c, t = uis.last_score_correct, uis.last_score_total
             if c is not None and t is not None:
-                quiz = SequenceItemScore(
-                    last_score_correct=c,
-                    last_score_total=t,
-                    last_visited_at=uis.last_visited_at,
-                )
+                last_score = SequenceItemScore(correct=c, total=t)
+        # last_visited_at is top-level on SequenceItemState (not nested under last_score)
         items.append(SequenceItemState(
             item_id=item.id,
             item_order=item.order,
             item_title=item.title,
             item_type=item.type,
             is_covered=is_covered,
-            quiz=quiz,
+            last_score=last_score,
+            last_visited_at=uis.last_visited_at if uis is not None else None,
         ))
 
     return SequenceItemStateResponse(
         sequence=_SequenceMeta(
             sequence_id=seq.id,
             sequence_title=seq.title,
-            sequence_order=seq.order,
             block_id=block.id,
             block_title=block.title,
         ),
