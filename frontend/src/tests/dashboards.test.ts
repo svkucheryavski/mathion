@@ -22,10 +22,11 @@ describe('wire URL + signal threading', () => {
     vi.stubGlobal('fetch', f);
     const ctrl = new AbortController();
     await getProgressDashboard(42, { signal: ctrl.signal });
-    expect(f).toHaveBeenCalledWith(
-      expect.stringContaining('/api/runs/42/dashboard/progress'),
-      expect.objectContaining({ signal: ctrl.signal }),
-    );
+    const url = (f.mock.calls as unknown[][])[0][0] as string;
+    const init = (f.mock.calls as unknown[][])[0][1] as RequestInit;
+    expect(url).toContain('/api/runs/42/dashboard/progress');
+    expect(init.method).toBe('GET');
+    expect(init.signal).toBe(ctrl.signal);
   });
 
   it('getMiniProjectsDashboard fetches the correct URL with signal', async () => {
@@ -33,10 +34,11 @@ describe('wire URL + signal threading', () => {
     vi.stubGlobal('fetch', f);
     const ctrl = new AbortController();
     await getMiniProjectsDashboard(7, { signal: ctrl.signal });
-    expect(f).toHaveBeenCalledWith(
-      expect.stringContaining('/api/runs/7/dashboard/mini-projects'),
-      expect.objectContaining({ signal: ctrl.signal }),
-    );
+    const url = (f.mock.calls as unknown[][])[0][0] as string;
+    const init = (f.mock.calls as unknown[][])[0][1] as RequestInit;
+    expect(url).toContain('/api/runs/7/dashboard/mini-projects');
+    expect(init.method).toBe('GET');
+    expect(init.signal).toBe(ctrl.signal);
   });
 
   it('getSequenceItemState fetches the correct URL with signal', async () => {
@@ -44,10 +46,11 @@ describe('wire URL + signal threading', () => {
     vi.stubGlobal('fetch', f);
     const ctrl = new AbortController();
     await getSequenceItemState(3, 14, 99, { signal: ctrl.signal });
-    expect(f).toHaveBeenCalledWith(
-      expect.stringContaining('/api/runs/3/students/14/sequences/99/items'),
-      expect.objectContaining({ signal: ctrl.signal }),
-    );
+    const url = (f.mock.calls as unknown[][])[0][0] as string;
+    const init = (f.mock.calls as unknown[][])[0][1] as RequestInit;
+    expect(url).toContain('/api/runs/3/students/14/sequences/99/items');
+    expect(init.method).toBe('GET');
+    expect(init.signal).toBe(ctrl.signal);
   });
 });
 
