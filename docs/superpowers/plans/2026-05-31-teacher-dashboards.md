@@ -28,7 +28,7 @@
 
 **Files:**
 - Modify: `backend/mathion/api/mini_projects.py` — extract `mini_project_title(block)` helper from the inline expression at line 44.
-- Modify: `backend/mathion/api/dashboard.py` — add `title` to the per-MP row assembly in `/dashboard/mini-projects`; add the new endpoint `GET /api/runs/{rid}/students/{uid}/sequences/{sid}/items` with its two module-local helpers `_resolve_run_student_with_user` and `_resolve_sequence_in_version`.
+- Modify: `backend/mathion/api/dashboard.py` — add `title` to the per-MP row assembly in `/dashboard/mini-projects`; add the new endpoint `GET /api/runs/{rid}/students/{uid}/sequences/{sid}/items` with its two module-local helpers `_resolve_student_user_in_run` and `_resolve_sequence_in_version`.
 - Modify: `backend/mathion/schemas.py` — add `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, and the private `_SequenceMeta` / `_StudentMeta` Pydantic models.
 - Create: `backend/tests/test_dashboard_item_drilldown.py` — 15 tests per §5.1 / §13.
 - Modify: `backend/tests/test_dashboard_mini_projects.py` — add 1 test: `test_mini_projects_dashboard_includes_mp_title`.
@@ -354,7 +354,7 @@ Expected: 15 FAIL (endpoint not implemented yet). The MP-title test from step 5 
 Add the two module-local helpers per spec §5.1:
 
 ```python
-def _resolve_run_student_with_user(
+def _resolve_student_user_in_run(
     db: Session, run: Run, user_id: int
 ) -> tuple[RunStudent, User] | None:
     """Look up the RunStudent + User in one query. Returns None if either
@@ -407,7 +407,7 @@ def get_sequence_item_state(
     require_run_admin_or_teacher(db, current_user, run)
 
     # Resolve student (probe-safe 404 if not enrolled)
-    student_pair = _resolve_run_student_with_user(db, run, uid)
+    student_pair = _resolve_student_user_in_run(db, run, uid)
     if student_pair is None:
         raise HTTPException(404, detail="Resource not found")
     _rs, student = student_pair
