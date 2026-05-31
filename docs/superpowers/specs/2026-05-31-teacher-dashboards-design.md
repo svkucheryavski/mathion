@@ -158,11 +158,13 @@ The FastAPI auth dependency (`get_current_user`) fires FIRST and raises 401 for 
 ```python
 def _resolve_sequence_in_version(
     db: Session, version_id: int, sequence_id: int
-) -> tuple[Sequence, Block]:
-    """Return (Sequence, Block) iff the sequence belongs to the given version, else 404.
+) -> tuple[Sequence, Block] | None:
+    """Return (Sequence, Block) iff the sequence belongs to the given version, else None.
 
-    Returns BOTH so the endpoint can populate _SequenceMeta.{block_id, block_title}
-    without a second query / lazy-load on Sequence.block. Keeps the endpoint at 4 queries.
+    Returns BOTH so the endpoint can populate SequenceMeta.{block_id, block_title}
+    without a second query / lazy-load on Sequence.block. Keeps the endpoint at 4
+    queries. Caller raises probe-safe 404 on None (404-emission centralized in the
+    handler alongside the run/student 404s).
     """
     row = db.execute(
         select(Sequence, Block)
@@ -173,7 +175,7 @@ def _resolve_sequence_in_version(
         )
     ).one_or_none()
     if row is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
+        return None
     seq, block = row   # SQLAlchemy 2.x Row unpacks directly; avoid the now-deprecated .tuple()
     return seq, block
 
@@ -184,7 +186,7 @@ def _resolve_student_user_in_run(
     """Return the User iff they are a student of this run, else None.
 
     Joins User against RunStudent to enforce membership, then returns only the
-    User — the endpoint populates _StudentMeta.{full_name, email} from it.
+    User — the endpoint populates StudentMeta.{full_name, email} from it.
     Caller raises probe-safe 404 on None (keeps the 404-raising responsibility
     in the handler alongside the run/sequence 404s, for consistency).
     """
@@ -214,11 +216,11 @@ if seq_pair is None:
 sequence, block = seq_pair
 items = db.execute(stmt).all()  # the LEFT JOIN query above
 return SequenceItemStateResponse(
-    sequence=_SequenceMeta(
+    sequence=SequenceMeta(
         sequence_id=sequence.id, sequence_title=sequence.title,
         block_id=block.id, block_title=block.title,
     ),
-    student=_StudentMeta(
+    student=StudentMeta(
         user_id=student_user.id, full_name=student_user.full_name, email=student_user.email,
     ),
     items=[...],
@@ -248,22 +250,22 @@ class SequenceItemState(BaseModel):
     last_visited_at: datetime | None
 
 
-class _SequenceMeta(BaseModel):
+class SequenceMeta(BaseModel):
     sequence_id: int
     sequence_title: str
     block_id: int
     block_title: str
 
 
-class _StudentMeta(BaseModel):
+class StudentMeta(BaseModel):
     user_id: int
     full_name: str | None
     email: str
 
 
 class SequenceItemStateResponse(BaseModel):
-    sequence: _SequenceMeta
-    student: _StudentMeta
+    sequence: SequenceMeta
+    student: StudentMeta
     items: list[SequenceItemState]
 ```
 
@@ -1863,7 +1865,7 @@ The combined script is idempotent across reruns: Slice A's seed always drops-and
 **Backend:**
 - `backend/mathion/api/dashboard.py` — new endpoint `/api/runs/{rid}/students/{uid}/sequences/{sid}/items`; new module-local helpers `_resolve_student_user_in_run`, `_resolve_sequence_in_version`; additive `title` field in `/dashboard/mini-projects` row assembly.
 - `backend/mathion/api/mini_projects.py` — extract `mini_project_title(block)` helper from the existing inline expression at line 44.
-- `backend/mathion/schemas.py` — new `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, plus the private `_SequenceMeta` and `_StudentMeta` models (or inline as nested classes — implementor's choice).
+- `backend/mathion/schemas.py` — new `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, plus `SequenceMeta` and `StudentMeta` models (or inline as nested classes — implementor's choice). (Spec revs ≤12 used underscore-prefixed names `_SequenceMeta` / `_StudentMeta`; renamed during T1 implementation per code-quality round 1.)
 - `backend/mathion/api/helpers.py` — verified, no changes (`require_run_admin_or_teacher` already exists at line 109).
 - `backend/scripts/seed_teaching_dashboards_smoke.py` — NEW seed script (see §14 for content).
 - `backend/tests/test_dashboard_item_drilldown.py` — NEW, 15 tests.
@@ -2117,7 +2119,7 @@ This rev incorporates findings from the 5-Opus panel round 4 against rev 4.
 3. **Smoke step 13 needs files-on-disk.** `submissions.py:286-310` and `evaluations.py:205-232` check `os.path.isfile(abs_path)` → 404 "File missing" if absent. §14 now requires the seed to write placeholder bytes (e.g., 1-byte file) at every Submission `file_path` and every Evaluation `feedback_file` under the configured storage dirs, with `os.makedirs(..., exist_ok=True)` for rerun safety. Otherwise §14 step 13 fails on Download buttons.
 
 **Important fixes (rev 4 → rev 5):**
-- **Stale `_resolve_run_student` references scrubbed.** Lines 147, 152 renamed to the current helper name. Dead helper definition (lines 159-169) DELETED. Line 1557 (§15 files-touched) renamed. The bare `_resolve_run_student` name no longer appears in the live spec body — remaining mentions live only in the change-log entries below (§24 rev 3→4 and §25 rev 2→3) where they describe the original rev 3 name. (Naming was further refined during T1 implementation — see §24 below.)
+- **Stale `_resolve_run_student` references scrubbed.** Lines 147, 152 renamed to the current helper name. Dead helper definition (lines 159-169) DELETED. Line 1557 (§15 files-touched) renamed. The legacy name is now confined to historical change-log entries (this one, plus §24 rev 3→4 and §25 rev 2→3 — all describing the original rev 3 name); the live spec body no longer references it. (Naming was further refined during T1 implementation — see §24 below.)
 - **`Row.tuple()` deprecated in SQLAlchemy 2.0.19+** (emits `DeprecationWarning` which could fail tests under `-W error`). Both `_resolve_sequence_in_version` and `_resolve_student_user_in_run` rewritten to use direct row unpack: `seq, block = row; return seq, block`. Matches existing project pattern.
 - **§5.1 query count claim**: "Three queries total" → "Four sequential queries total" (the numbered list immediately following enumerates 4 queries; matches §10 Performance).
 - **`refresh()` function body now explicit** in §6.3 (and same shape applies to `RunSubmissionTab.svelte`). Previously only described in prose.

@@ -29,7 +29,7 @@
 **Files:**
 - Modify: `backend/mathion/api/mini_projects.py` — extract `mini_project_title(block)` helper from the inline expression at line 44.
 - Modify: `backend/mathion/api/dashboard.py` — add `title` to the per-MP row assembly in `/dashboard/mini-projects`; add the new endpoint `GET /api/runs/{rid}/students/{uid}/sequences/{sid}/items` with its two module-local helpers `_resolve_student_user_in_run` and `_resolve_sequence_in_version`.
-- Modify: `backend/mathion/schemas.py` — add `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, and the private `_SequenceMeta` / `_StudentMeta` Pydantic models.
+- Modify: `backend/mathion/schemas.py` — add `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, `SequenceMeta`, and `StudentMeta` Pydantic models.
 - Create: `backend/tests/test_dashboard_item_drilldown.py` — 15 tests per §5.1 / §13.
 - Modify: `backend/tests/test_dashboard_mini_projects.py` — add 1 test: `test_mini_projects_dashboard_includes_mp_title`.
 
@@ -120,7 +120,7 @@ class SequenceItemState(BaseModel):
     last_visited_at: datetime | None       # top-level (UserItemState.last_visited_at, models_auth.py:83)
 
 
-class _SequenceMeta(BaseModel):
+class SequenceMeta(BaseModel):
     """Sequence + parent block metadata for the drilldown panel header."""
     sequence_id: int
     sequence_title: str
@@ -128,7 +128,7 @@ class _SequenceMeta(BaseModel):
     block_title: str
 
 
-class _StudentMeta(BaseModel):
+class StudentMeta(BaseModel):
     """Student metadata for the drilldown panel header."""
     user_id: int
     full_name: str | None
@@ -137,8 +137,8 @@ class _StudentMeta(BaseModel):
 
 class SequenceItemStateResponse(BaseModel):
     """Top-level response for `GET /api/runs/{rid}/students/{uid}/sequences/{sid}/items`."""
-    sequence: _SequenceMeta
-    student: _StudentMeta
+    sequence: SequenceMeta
+    student: StudentMeta
     items: list[SequenceItemState]
 ```
 
@@ -300,7 +300,7 @@ class TestResponseShape:
         run, seq, _items, student = _publish_minimal_run(db)
         r = client.get(f"/api/runs/{run.id}/students/{student.id}/sequences/{seq.id}/items")
         body = r.json()
-        # _SequenceMeta per spec §5.1: sequence_id, sequence_title, block_id, block_title (NO sequence_order)
+        # SequenceMeta per spec §5.1: sequence_id, sequence_title, block_id, block_title (NO sequence_order)
         assert body["sequence"]["sequence_id"] == seq.id
         assert body["sequence"]["sequence_title"] == "Seq 1"
         assert body["sequence"]["block_id"] is not None
@@ -453,13 +453,13 @@ def get_sequence_item_state(
         ))
 
     return SequenceItemStateResponse(
-        sequence=_SequenceMeta(
+        sequence=SequenceMeta(
             sequence_id=seq.id,
             sequence_title=seq.title,
             block_id=block.id,
             block_title=block.title,
         ),
-        student=_StudentMeta(
+        student=StudentMeta(
             user_id=student.id,
             full_name=student.full_name,
             email=student.email,
@@ -468,7 +468,7 @@ def get_sequence_item_state(
     )
 ```
 
-Add imports as needed: `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, `_SequenceMeta`, `_StudentMeta` from `mathion.schemas`; `RunStudent`, `Sequence`, `Block`, `Item`, `Run` from `mathion.models`; `User`, `UserItemState` from `mathion.models_auth`; `require_run_admin_or_teacher` from `mathion.api.helpers`.
+Add imports as needed: `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, `SequenceMeta`, `StudentMeta` from `mathion.schemas`; `RunStudent`, `Sequence`, `Block`, `Item`, `Run` from `mathion.models`; `User`, `UserItemState` from `mathion.models_auth`; `require_run_admin_or_teacher` from `mathion.api.helpers`.
 
 - [ ] **Step 11: Run all 16 tests and verify pass**
 
@@ -555,7 +555,7 @@ Continue with the §6.1 interface declarations. Copy them verbatim from spec §6
 - `DashboardMpGroupEntry` (with `group_id`, `group_name`, `group_is_disabled`, `status: MpGroupStatus`)
 - `DashboardMpRow` (with `id`, `block_id`, `block_title`, `title`, `groups[]`, `counts`)
 - `DashboardMiniProjectsResponse`
-- `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, and the private `_SequenceMeta` / `_StudentMeta` if exposed
+- `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, `SequenceMeta`, `StudentMeta`
 
 - [ ] **Step 2: Add the three wire functions**
 
