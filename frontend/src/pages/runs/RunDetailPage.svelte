@@ -301,44 +301,58 @@
   <LoadingPlaceholder label="Loading run…" />
 {:else}
   <header class="run-header">
-    <nav class="breadcrumb">
-      <a href="/courses" onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Courses</a> ›
-      <a href={`/courses/${course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}`); }}>{course.name}</a> ›
-      <a href={`/courses/${course.slug}/runs`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs`); }}>Runs</a> ›
-      {run.title}
+    <nav aria-label="Breadcrumb" class="breadcrumb">
+      {#if course.is_admin}
+        <a href="/courses" onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Courses</a> ›
+        <a href={`/courses/${course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}`); }}>{course.name}</a> ›
+        <a href={`/courses/${course.slug}/runs`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs`); }}>Runs</a> ›
+        {run.title}
+      {:else}
+        <a href="/teaching" onclick={(e) => { e.preventDefault(); navigate('/teaching'); }}>Teaching</a> ›
+        {course.name} ›
+        {run.title}
+      {/if}
     </nav>
-    <div class="publish-bar">
+    <div class="run-meta">
       {#if runStatusBadge}
         <span class="badge badge-{runStatusBadge}" data-testid="status-badge">{runStatusBadge[0].toUpperCase() + runStatusBadge.slice(1)}</span>
       {/if}
       {#if versionLabel}
         <span class="version-label" data-testid="version-label">{versionLabel}</span>
       {/if}
-      {#if !run.is_published}
-        <button
-          data-action="publish"
-          disabled={publishBlocked}
-          title={publishTooltip}
-          onclick={doPublish}
-        >
-          Publish
-        </button>
-      {:else if unpublishConfirmOpen}
-        <InlineConfirm
-          confirmLabel="Confirm Unpublish"
-          warning="Students will lose access immediately. Their progress data is preserved."
-          onConfirm={doUnpublish}
-          onCancel={() => (unpublishConfirmOpen = false)}
-        />
-      {:else}
-        <button data-action="unpublish" onclick={() => (unpublishConfirmOpen = true)}>Unpublish</button>
-      {/if}
     </div>
+    {#if course.is_admin}
+      <div class="publish-bar">
+        {#if !run.is_published}
+          <button
+            data-action="publish"
+            disabled={publishBlocked}
+            title={publishTooltip}
+            onclick={doPublish}
+          >
+            Publish
+          </button>
+        {:else if unpublishConfirmOpen}
+          <InlineConfirm
+            confirmLabel="Confirm Unpublish"
+            warning="Students will lose access immediately. Their progress data is preserved."
+            onConfirm={doUnpublish}
+            onCancel={() => (unpublishConfirmOpen = false)}
+          />
+        {:else}
+          <button data-action="unpublish" onclick={() => (unpublishConfirmOpen = true)}>Unpublish</button>
+        {/if}
+      </div>
+    {/if}
   </header>
 
   {#if showDisabledBanner}
     <div class="banner-warning">
-      This run's course version is disabled. Re-enable it under Course Editor before publishing.
+      {#if course.is_admin}
+        This run's course version is disabled. Re-enable it under Course Editor before publishing.
+      {:else}
+        This run's course version is disabled. Some editing actions are locked until a course admin re-enables it.
+      {/if}
     </div>
   {/if}
 
@@ -362,9 +376,10 @@
         {readiness}
         onNavigateTab={gotoTab}
         {onDeleteRun}
+        course={course!}
       />
     {:else if activeTab === 'teachers'}
-      <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} />
+      <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} course={course!} />
     {:else if activeTab === 'groups'}
       <RunGroupsTab
         runId={runIdInt!}
@@ -372,6 +387,8 @@
         groupsEnabled={run.groups_enabled}
         onRefetchGroups={refetchGroups}
         onRefetchGroupsAndStudents={refetchGroupsAndStudents}
+        course={course!}
+        runIsPublished={run.is_published}
       />
     {:else if activeTab === 'roster'}
       <RunRosterTab
@@ -409,6 +426,7 @@
         onNavigateToTab={(t) => (activeTab = t)}
         pendingEditTarget={pendingEditTarget}
         onPendingEditConsumed={() => (pendingEditTarget = null)}
+        course={course!}
       />
     {:else if activeTab === 'assets'}
       <RunAssetsTab
@@ -428,7 +446,7 @@
 
 <style>
   .run-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 16px); padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
-  .publish-bar { display: flex; align-items: center; gap: 8px; }
+  .publish-bar, .run-meta { display: flex; align-items: center; gap: 8px; }
   .version-label { font-size: 0.875rem; color: var(--text-muted, #666); font-variant-numeric: tabular-nums; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 500; line-height: 1.4; }
   .badge-draft { background: #e5e7eb; color: #374151; }

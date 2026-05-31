@@ -7,7 +7,7 @@
   import MarkdownEditor from '../editor/MarkdownEditor.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import FocusTrap from '../ui/FocusTrap.svelte';
-  import type { MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
+  import type { Course, MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
 
   let {
     runId,
@@ -18,6 +18,7 @@
     runIsPublished,
     versionIsDisabled,
     runEndDate,
+    course,
     onClose,
     onSaved,
     onNavigateToTab,
@@ -30,6 +31,7 @@
     runIsPublished: boolean;
     versionIsDisabled: boolean;
     runEndDate: string | null;
+    course: Course;
     onClose: () => void;
     onSaved: () => Promise<void>;
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
@@ -160,7 +162,14 @@
   // while POST is in flight (drives the "Publishing…" button label and is
   // distinct from save-submitting so the Save label stays "Save").
   type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
-  type PreconditionBullet = { text: string; field?: FieldKey };
+  // `adminOnly` flags a bullet whose "Open Overview" affordance is only
+  // actionable by course-admins (e.g. publishing the run, re-enabling a
+  // disabled course version). Bullets containing "Open Overview" render
+  // that substring as a clickable <button> for users who can act
+  // (course.is_admin OR not adminOnly); otherwise it renders as plain
+  // text. The surrounding bullet text is rendered verbatim in either case.
+  // Spec §6.2 RunMiniProjectsTab + MiniProjectModal teacher-gating.
+  type PreconditionBullet = { text: string; field?: FieldKey; adminOnly?: boolean };
 
   let publishAttempted = $state(false);
   let pendingPublishConfirm = $state(false);
@@ -213,13 +222,13 @@
       }
     }
     if (!runIsPublished) {
-      unmet.push({ text: 'Run must be published — Open Overview to publish.' });
+      unmet.push({ text: 'Run must be published — Open Overview to publish.', adminOnly: true });
     }
     // Spec line 548: versionIsDisabled blocks the modal-only publish. Without
     // this check, a modal already open when versionIsDisabled flips to true
     // could still publish; T7 disables row [Edit] only.
     if (versionIsDisabled) {
-      unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it." });
+      unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it.", adminOnly: true });
     }
     // T9-smoke catch: the publish backend reads deadlines from the persisted
     // MP, but every other check above reads `formData` (the unsaved inputs).
@@ -438,14 +447,21 @@
           {#each publishCheckResult as bullet, idx (bullet.text)}
             {#if bullet.text.includes('Open Overview')}
               {@const linkIdx = bullet.text.indexOf('Open Overview')}
-              <li id={`precondition-${idx}`}>
-                {bullet.text.slice(0, linkIdx)}<button
-                  type="button"
-                  class="linklike"
-                  data-action="publish-nav-overview"
-                  onclick={() => onNavigateToTab('overview')}>Open Overview</button
-                >{bullet.text.slice(linkIdx + 'Open Overview'.length)}
-              </li>
+              {@const before = bullet.text.slice(0, linkIdx)}
+              {@const after = bullet.text.slice(linkIdx + 'Open Overview'.length)}
+              <!-- Render the bullet text verbatim. The "Open Overview"
+                   substring becomes a <button> when the viewer can act on
+                   the precondition (admin, or non-admin-only bullet); for
+                   admin-only bullets viewed by a teacher it falls back to
+                   plain text so the sentence stays grammatical. -->
+              <li id={`precondition-${idx}`}
+                >{before}{#if !bullet.adminOnly || course.is_admin}<button
+                    type="button"
+                    class="linklike"
+                    data-action="publish-nav-overview"
+                    onclick={() => onNavigateToTab('overview')}>Open Overview</button
+                  >{:else}Open Overview{/if}{after}</li
+              >
             {:else}
               <li id={`precondition-${idx}`}>{bullet.text}</li>
             {/if}

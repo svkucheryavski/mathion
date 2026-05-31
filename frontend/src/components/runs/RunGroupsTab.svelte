@@ -5,7 +5,7 @@
   import type { DirtyTracker } from '../../lib/dirty.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { GroupResponse } from '../../lib/types';
+  import type { Course, GroupResponse } from '../../lib/types';
 
   let {
     runId,
@@ -13,12 +13,16 @@
     groupsEnabled,
     onRefetchGroups,
     onRefetchGroupsAndStudents,
+    course,
+    runIsPublished,
   }: {
     runId: number;
     groups: GroupResponse[];
     groupsEnabled: boolean;
     onRefetchGroups: () => Promise<void>;
     onRefetchGroupsAndStudents: () => Promise<void>;
+    course: Course;
+    runIsPublished: boolean;
   } = $props();
 
   let newName = $state('');
@@ -99,7 +103,13 @@
 
 {#if !groupsEnabled}
   <section class="groups-disabled-placeholder">
-    Groups are disabled for this run. Enable in Overview → Settings to manage groups.
+    {#if !runIsPublished}
+      Groups are disabled for this run. Enable in Overview → Settings to manage groups.
+    {:else if course.is_admin}
+      Groups are disabled for this run. Unpublish in Overview before enabling groups.
+    {:else}
+      Groups are disabled for this run. Ask a course admin to unpublish the run and enable groups.
+    {/if}
   </section>
 {:else}
   <section class="groups-tab">

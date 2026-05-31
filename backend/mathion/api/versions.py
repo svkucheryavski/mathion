@@ -3,14 +3,14 @@ import shutil
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.helpers import bump_content_updated_at, get_or_404, has_run_teacher_on_course, render_with_assets, require_course_admin, sync_asset_references
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import AnswerOption, Asset, Block, Course, CourseVersion, Item, Question, Run, Sequence
+from mathion.models import AnswerOption, Asset, Block, Course, CourseAdmin, CourseVersion, Item, Question, Run, RunTeacher, Sequence
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
 
@@ -134,15 +134,40 @@ def render_version_md(
 @router.get("/api/courses/{course_id}/versions", response_model=list[VersionResponse])
 def list_versions(course_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     get_or_404(db, Course, course_id)
-    require_course_admin(db, user, course_id)
-    versions = db.execute(
+    is_admin = user.is_superuser or bool(db.scalar(select(exists().where(
+        CourseAdmin.user_id == user.id,
+        CourseAdmin.course_id == course_id,
+    ))))
+    if is_admin:
+        # Admin path — unchanged.
+        versions = db.execute(
+            select(CourseVersion)
+            .where(CourseVersion.course_id == course_id)
+            .order_by(CourseVersion.created_at.desc(), CourseVersion.id.desc())
+            .offset(offset)
+            .limit(limit)
+        ).scalars().all()
+        return versions
+
+    # Teacher path: only versions pinned by a RunTeacher row of this user on
+    # any run of this course. Returned id ASC (oldest first) — distinct
+    # ordering from the admin DESC view so the UI can branch cleanly.
+    if not has_run_teacher_on_course(db, user, course_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    versions = db.scalars(
         select(CourseVersion)
-        .where(CourseVersion.course_id == course_id)
-        .order_by(CourseVersion.created_at.desc(), CourseVersion.id.desc())
-        .offset(offset)
-        .limit(limit)
-    ).scalars().all()
-    return versions
+        .where(
+            CourseVersion.course_id == course_id,
+            CourseVersion.id.in_(
+                select(Run.version_id)
+                .select_from(Run)
+                .join(RunTeacher, RunTeacher.run_id == Run.id)
+                .where(RunTeacher.user_id == user.id)
+            ),
+        )
+        .order_by(CourseVersion.id.asc())
+    ).all()
+    return [VersionResponse.model_validate(v) for v in versions]
 
 
 @router.post("/api/versions/{version_id}/publish", response_model=VersionResponse)

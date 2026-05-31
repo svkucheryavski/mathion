@@ -2174,3 +2174,134 @@ describe('RunAssetsTab — versionIsDisabled tooltips', () => {
     expect(stripBtnAfter.title).toBe(DISABLED_TOOLTIP);
   });
 });
+
+describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regression)', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+    (uploadRunAsset as any).mockReset();
+    (replaceRunAsset as any).mockReset();
+  });
+
+  function findDeleteBtn(filename: string): HTMLButtonElement {
+    return target.querySelector(`button[aria-label="Delete ${filename}"]`) as HTMLButtonElement;
+  }
+
+  const refAssets = [{ ...mkAsset(1, 'ref.pdf'), is_referenced: true }];
+  const refMps = [mkMp(10, 'M', '![](ref.pdf)')];
+
+  it('teacher: Force delete button visible but disabled with tooltip (even after acknowledge)', async () => {
+    const teacherCourse: Course = { ...baseCourse, is_admin: false };
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: refAssets, miniProjects: refMps, course: teacherCourse }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const danger = findButton(target, /Force delete/i)!;
+    expect(danger).toBeTruthy();
+    expect(danger.disabled).toBe(true);
+    expect(danger.getAttribute('title') ?? '').toBe(
+      'Only course admins can force-delete a referenced asset.',
+    );
+    // Acknowledging does NOT enable the button for teachers.
+    const checkbox = target.querySelector(
+      'input[type="checkbox"][data-role="force-confirm"]',
+    ) as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(danger.disabled).toBe(true);
+    expect(danger.getAttribute('title') ?? '').toBe(
+      'Only course admins can force-delete a referenced asset.',
+    );
+  });
+
+  it('admin: Force delete visible, enabled after acknowledge, empty tooltip', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: refAssets, miniProjects: refMps }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const danger = findButton(target, /Force delete/i)!;
+    expect(danger).toBeTruthy();
+    expect(danger.disabled).toBe(true);  // gated by checkbox initially
+    const checkbox = target.querySelector(
+      'input[type="checkbox"][data-role="force-confirm"]',
+    ) as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(danger.disabled).toBe(false);
+    expect(danger.getAttribute('title') ?? '').toBe('');
+  });
+
+  it('teacher: unreferenced asset delete is enabled (teacher-allowed orphan delete)', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    const teacherCourse: Course = { ...baseCourse, is_admin: false };
+    const orphans = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: orphans, course: teacherCourse }),
+    });
+    flushSync();
+    const del = findDeleteBtn('orphan.pdf');
+    expect(del).toBeTruthy();
+    expect(del.disabled).toBe(false);
+
+    del.click();
+    flushSync();
+    expect(target.textContent).toMatch(/Delete this asset\?/);
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+    expect(deleteRunAsset).toHaveBeenCalledTimes(1);
+    expect((deleteRunAsset as any).mock.calls[0][2]).toMatchObject({ force: false });
+  });
+
+  it('smoke: upload + list + replace UI render identically regardless of course.is_admin', async () => {
+    const assets = [mkAsset(1, 'doc.pdf')];
+    const adminCourse: Course = { ...baseCourse, is_admin: true };
+    const teacherCourse: Course = { ...baseCourse, is_admin: false };
+
+    // Render once with admin
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets, course: adminCourse }),
+    });
+    flushSync();
+    expect(findButton(target, /\+ Upload/)).not.toBeNull();
+    expect(findButton(target, /↻ Replace/)).not.toBeNull();
+    const adminLink = target.querySelector('a')!.textContent?.trim();
+    expect(adminLink).toBe('doc.pdf');
+    unmount(component);
+    component = null;
+
+    // Render again with teacher — same upload/list/replace UI.
+    const target2 = document.createElement('div');
+    document.body.appendChild(target2);
+    try {
+      const cmp2 = mount(RunAssetsTab, {
+        target: target2,
+        props: baseProps({ assets, course: teacherCourse }),
+      });
+      flushSync();
+      const uploadBtn = Array.from(target2.querySelectorAll('button')).find((b) =>
+        /\+ Upload/.test(b.textContent ?? ''),
+      );
+      const replaceBtn = Array.from(target2.querySelectorAll('button')).find((b) =>
+        /↻ Replace/.test(b.textContent ?? ''),
+      );
+      expect(uploadBtn).toBeDefined();
+      expect(replaceBtn).toBeDefined();
+      const teacherLink = target2.querySelector('a')!.textContent?.trim();
+      expect(teacherLink).toBe('doc.pdf');
+      unmount(cmp2);
+    } finally {
+      document.body.removeChild(target2);
+    }
+  });
+});

@@ -4,7 +4,7 @@
   import { deleteMiniProject } from '../../lib/miniProjects';
   import MiniProjectModal from './MiniProjectModal.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import type { MiniProjectResponse, BlockResponse } from '../../lib/types';
+  import type { Course, MiniProjectResponse, BlockResponse } from '../../lib/types';
 
   let {
     runId,
@@ -20,6 +20,7 @@
     onNavigateToTab,
     pendingEditTarget,
     onPendingEditConsumed,
+    course,
   }: {
     runId: number;
     runIsPublished: boolean;
@@ -34,6 +35,7 @@
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
     pendingEditTarget?: MiniProjectResponse | null;
     onPendingEditConsumed?: () => void;
+    course: Course;
   } = $props();
 
   async function refetchAll(): Promise<void> {
@@ -93,8 +95,16 @@
   const newDisabled = $derived(
     !runGroupsEnabled || versionIsDisabled || availableBlocks.length === 0,
   );
+  // Role-aware tooltip per spec §3.2.4. Teachers viewing a *published* run
+  // cannot un-publish or enable groups themselves, so the affordance copy
+  // routes them to a course admin; in any other state they (and admins) can
+  // act on Overview directly.
   const newDisabledTitle = $derived.by(() => {
-    if (!runGroupsEnabled) return 'Mini-projects require groups. Enable groups on Overview.';
+    if (!runGroupsEnabled) {
+      return (!runIsPublished || course.is_admin)
+        ? 'Mini-projects require groups. Enable groups on Overview.'
+        : 'Mini-projects require groups. Ask a course admin to unpublish the run and enable groups.';
+    }
     if (versionIsDisabled) return "This run's course version is disabled.";
     if (availableBlocks.length === 0)
       return 'All blocks in this course version already have a mini-project.';
@@ -131,6 +141,15 @@
         try {
           await onRefetchMiniProjects();
           forceCheckbox = false;
+          // Teachers cannot force-delete; close the inline-confirm and
+          // surface a banner so they see *some* feedback instead of a
+          // silent no-op (admins keep the row open so the refetch can
+          // reveal the force-confirm panel).
+          if (!course.is_admin) {
+            deleteConfirmId = null;
+            deleteError =
+              'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.';
+          }
         } catch {
           deleteError = 'Could not refresh. Please retry.';
           deleteConfirmId = null;
@@ -170,19 +189,25 @@
   {#if !runGroupsEnabled}
     <div class="banner">
       Mini-projects require groups.
-      <button type="button" class="linklike" data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>Enable on Overview</button>
+      {#if !runIsPublished || course.is_admin}
+        <button type="button" class="linklike" data-action="nav-overview-groups" onclick={() => onNavigateToTab('overview')}>Enable on Overview</button>
+      {/if}
     </div>
   {/if}
   {#if versionIsDisabled}
     <div class="banner">
       This run's course version is disabled.
-      <button type="button" class="linklike" data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>See Overview</button>
+      {#if course.is_admin}
+        <button type="button" class="linklike" data-action="nav-overview-version" onclick={() => onNavigateToTab('overview')}>See Overview</button>
+      {/if}
     </div>
   {/if}
   {#if !runIsPublished}
     <div class="banner">
       Run is not yet published.
-      <button type="button" class="linklike" data-action="nav-overview" onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+      {#if course.is_admin}
+        <button type="button" class="linklike" data-action="nav-overview-publish" onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+      {/if}
     </div>
   {/if}
   {#if deleteError}
@@ -233,13 +258,15 @@
               }}>Edit</button
             >
           {/if}
-          <button
-            data-action="delete"
-            onclick={() => {
-              deleteConfirmId = mp.id;
-            }}>×</button
-          >
-          {#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked'}
+          {#if course.is_admin || rowStatus(mp) !== 'locked'}
+            <button
+              data-action="delete"
+              onclick={() => {
+                deleteConfirmId = mp.id;
+              }}>×</button
+            >
+          {/if}
+          {#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked' && course.is_admin}
             <div class="force-confirm">
               <p>
                 Force delete will permanently remove all submissions and evaluations for this
@@ -260,7 +287,7 @@
                 onclick={() => handleForceDelete(mp.id)}>Force delete</button
               >
             </div>
-          {:else if deleteConfirmId === mp.id}
+          {:else if deleteConfirmId === mp.id && rowStatus(mp) !== 'locked'}
             <InlineConfirm
               warning="Delete this mini-project?"
               confirmLabel="Delete"
@@ -286,6 +313,7 @@
       {runIsPublished}
       {versionIsDisabled}
       {runEndDate}
+      {course}
       onClose={() => {
         modalMode = null;
         editTarget = null;

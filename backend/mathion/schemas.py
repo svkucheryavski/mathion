@@ -184,6 +184,8 @@ class UserResponse(BaseModel):
     is_superuser: bool
     is_disabled: bool
     photo_url: str | None
+    has_course_admin: bool = False   # NEW — overwritten by _user_response_with_flags
+    has_run_teacher: bool = False    # NEW — overwritten by _user_response_with_flags
 
     model_config = {"from_attributes": True}
 
@@ -660,3 +662,18 @@ class RunAssetResponse(BaseModel):
     is_referenced: bool = False
 
     model_config = {"from_attributes": True}
+
+
+# ============================================================================
+# Slice A T4: Teacher monitoring — landing page row
+# ============================================================================
+
+
+class TeachingRunRow(BaseModel):
+    run: "RunResponse"
+    course_id: int
+    course_name: str
+    course_slug: str
+    student_count: int
+    # No `model_config` — this row is built field-by-field in the handler, not
+    # from a single ORM model, so `from_attributes` would not apply correctly.

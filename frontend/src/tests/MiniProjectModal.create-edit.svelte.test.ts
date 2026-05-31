@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, type Component, type MountOptions } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
-import type { MiniProjectResponse, BlockResponse } from '../lib/types';
+import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
+
+const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -98,6 +100,7 @@ describe('MiniProjectModal — create mode', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose,
         onSaved,
         onNavigateToTab: vi.fn(),
@@ -147,6 +150,7 @@ describe('MiniProjectModal — create mode', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -189,6 +193,7 @@ describe('MiniProjectModal — create mode', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -252,6 +257,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -278,6 +284,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose,
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -306,6 +313,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose,
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -334,6 +342,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose,
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -384,6 +393,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved,
         onNavigateToTab: vi.fn(),
@@ -423,6 +433,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved: vi.fn().mockResolvedValue(undefined),
         onNavigateToTab: vi.fn(),
@@ -464,6 +475,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose,
         onSaved: vi.fn().mockResolvedValue(undefined),
         onNavigateToTab: vi.fn(),
@@ -510,6 +522,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -550,6 +563,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved: vi.fn(),
         onNavigateToTab: vi.fn(),
@@ -588,6 +602,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose: vi.fn(),
         onSaved,
         onNavigateToTab: vi.fn(),
@@ -632,6 +647,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         runIsPublished: true,
         versionIsDisabled: false,
         runEndDate: '2026-06-30',
+        course: baseCourse,
         onClose,
         onSaved: vi.fn().mockResolvedValue(undefined),
         onNavigateToTab: vi.fn(),

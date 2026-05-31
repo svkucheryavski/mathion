@@ -53,7 +53,7 @@ function mockCascade(opts: {
   noPinned?: boolean;
 }) {
   return (url: string) => {
-    if (url.includes('/api/courses/by-slug/')) return jres({ id: 1, slug: 'c', name: 'C' });
+    if (url.includes('/api/courses/by-slug/')) return jres({ id: 1, slug: 'c', name: 'C', description: '', is_admin: true });
     if (url.match(/\/api\/runs\/10$/))
       return jres({
         id: 10, course_id: 1,

@@ -23,6 +23,7 @@ from mathion.api.run_roster import router as run_roster_router
 from mathion.api.run_teachers import router as run_teachers_router
 from mathion.api.runs import router as runs_router
 from mathion.api.submissions import router as submissions_router
+from mathion.api.teaching import router as teaching_router
 from mathion.api.versions import router as versions_router
 from mathion.config import settings
 
@@ -48,6 +49,7 @@ app.include_router(run_roster_router)
 app.include_router(submissions_router)
 app.include_router(evaluations_router)
 app.include_router(dashboard_router)
+app.include_router(teaching_router)
 
 
 @app.get("/health")

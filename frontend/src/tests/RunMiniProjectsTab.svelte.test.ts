@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunMiniProjectsTab from '../components/runs/RunMiniProjectsTab.svelte';
-import type { MiniProjectResponse, BlockResponse } from '../lib/types';
+import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -35,17 +35,41 @@ const blocks: BlockResponse[] = [
   { id: 2, version_id: 7, title: 'Theory', slug: 'theory', order: 1, info: '', info_html: '' },
 ];
 
+const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
+
+// Centralised mount helper: builds defaults for all required props (including
+// `course`, threaded as required by RunMiniProjectsTab at T12) and merges
+// caller overrides. Course may be passed partial; it merges onto baseCourse so
+// tests can write `course: { is_admin: false }`.
+function mountMpTab(extra: Record<string, unknown> = {}) {
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const courseOverride = (extra.course as Partial<Course> | undefined) ?? {};
+  const course: Course = { ...baseCourse, ...courseOverride };
+  const { course: _c, ...rest } = extra;
+  void _c;
+  const defaults = {
+    runId: 10,
+    runIsPublished: true,
+    runGroupsEnabled: true,
+    runEndDate: '2026-06-30',
+    versionIsDisabled: false,
+    pinnedAvailable: true,
+    blocks,
+    miniProjects: [] as MiniProjectResponse[],
+    onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+    onNavigateToTab: vi.fn(),
+  };
+  const cmp = mount(RunMiniProjectsTab, {
+    target,
+    props: { ...defaults, ...rest, course },
+  });
+  return { target, cmp };
+}
+
 describe('RunMiniProjectsTab', () => {
   it('empty state CTA with explainer + create hint when no MPs', async () => {
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: [],
-      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
-      onNavigateToTab: vi.fn(),
-    } });
+    const { target } = mountMpTab();
     await settle();
     expect(target.textContent).toContain('No mini-projects yet');
     expect(target.textContent).toContain('Click + New mini-project');
@@ -53,36 +77,20 @@ describe('RunMiniProjectsTab', () => {
 
   it('actionable banner when !runGroupsEnabled; link → onNavigateToTab("overview")', async () => {
     const onNav = vi.fn();
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: false,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: [],
-      onRefetchMiniProjects: vi.fn(),
-      onNavigateToTab: onNav,
-    } });
+    const { target } = mountMpTab({ runGroupsEnabled: false, onNavigateToTab: onNav });
     await settle();
     expect(target.textContent).toContain('Mini-projects require groups');
-    const link = target.querySelector('button[data-action="nav-overview"]') as HTMLElement;
+    const link = target.querySelector('button[data-action="nav-overview-groups"]') as HTMLElement;
     link.click();
     expect(onNav).toHaveBeenCalledWith('overview');
   });
 
   it('actionable banner when versionIsDisabled; [+ New] disabled with tooltip (spec lines 548, 595)', async () => {
     const onNav = vi.fn();
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: true, pinnedAvailable: true,
-      blocks, miniProjects: [],
-      onRefetchMiniProjects: vi.fn(),
-      onNavigateToTab: onNav,
-    } });
+    const { target } = mountMpTab({ versionIsDisabled: true, onNavigateToTab: onNav });
     await settle();
     expect(target.textContent).toContain("This run's course version is disabled");
-    const link = target.querySelector('button[data-action="nav-overview"]') as HTMLElement;
+    const link = target.querySelector('button[data-action="nav-overview-version"]') as HTMLElement;
     link.click();
     expect(onNav).toHaveBeenCalledWith('overview');
     const newBtn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
@@ -100,18 +108,14 @@ describe('RunMiniProjectsTab', () => {
       is_published: false, first_submitted_at: null,
       created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
     };
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: false, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: [draftMp],
-      onRefetchMiniProjects: vi.fn(),
+    const { target } = mountMpTab({
+      runIsPublished: false,
+      miniProjects: [draftMp],
       onNavigateToTab: onNav,
-    } });
+    });
     await settle();
     expect(target.textContent).toContain('Run is not yet published');
-    const link = target.querySelector('button[data-action="nav-overview"]') as HTMLElement;
+    const link = target.querySelector('button[data-action="nav-overview-publish"]') as HTMLElement;
     link.click();
     expect(onNav).toHaveBeenCalledWith('overview');
     const newBtn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
@@ -123,15 +127,7 @@ describe('RunMiniProjectsTab', () => {
   });
 
   it('pinnedAvailable=false: "Cannot load — pinned version not found"', async () => {
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: false,
-      blocks: [], miniProjects: [],
-      onRefetchMiniProjects: vi.fn(),
-      onNavigateToTab: vi.fn(),
-    } });
+    const { target } = mountMpTab({ pinnedAvailable: false, blocks: [] });
     await settle();
     expect(target.textContent).toContain('Cannot load');
   });
@@ -145,15 +141,7 @@ describe('RunMiniProjectsTab', () => {
       is_published: false, first_submitted_at: null,
       created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
     }));
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: mps,
-      onRefetchMiniProjects: vi.fn(),
-      onNavigateToTab: vi.fn(),
-    } });
+    const { target } = mountMpTab({ miniProjects: mps });
     await settle();
     const btn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
@@ -165,15 +153,7 @@ describe('RunMiniProjectsTab', () => {
       { id: 2, run_id: 10, block_id: 2, title: 'Mini project for Block 1', assignment_md: 'x', assignment_html: '<p>x</p>', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: true, first_submitted_at: null, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
       { id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0', assignment_md: 'x', assignment_html: '<p>x</p>', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: false, first_submitted_at: '2026-05-22T00:00:00Z', created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
     ];
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: mps,
-      onRefetchMiniProjects: vi.fn(),
-      onNavigateToTab: vi.fn(),
-    } });
+    const { target } = mountMpTab({ miniProjects: mps });
     await settle();
     const rows = Array.from(target.querySelectorAll('[data-role="mp-row"]'));
     expect(rows.length).toBe(2);
@@ -197,15 +177,7 @@ describe('RunMiniProjectsTab', () => {
       is_published: true, first_submitted_at: '2026-05-22T00:00:00Z',
       created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
     };
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: [mp],
-      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
-      onNavigateToTab: vi.fn(),
-    } });
+    const { target } = mountMpTab({ miniProjects: [mp] });
     await settle();
     (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
     await settle();
@@ -237,6 +209,10 @@ describe('RunMiniProjectsTab', () => {
       return jres([lockedMp]);
     });
 
+    // Mount this case directly (NOT via mountMpTab) because the `$state`
+    // proxy must be forwarded verbatim to `mount(...)`'s `props` — spreading
+    // into `{ ...defaults, ...rest }` materialises a fresh object and breaks
+    // the reactive link so the post-refetch mutation never re-renders.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const propsRef: any = $state({
       runId: 10, runIsPublished: true, runGroupsEnabled: true,
@@ -247,6 +223,7 @@ describe('RunMiniProjectsTab', () => {
         propsRef.miniProjects = [lockedMp];
       }),
       onNavigateToTab: vi.fn(),
+      course: baseCourse,
     });
 
     const target = document.createElement('div');
@@ -287,15 +264,7 @@ describe('RunMiniProjectsTab', () => {
       }
       return jres([lockedMp]);
     });
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks: localBlocks, miniProjects: [lockedMp],
-      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
-      onNavigateToTab: vi.fn(),
-    } });
+    const { target, cmp } = mountMpTab({ blocks: localBlocks, miniProjects: [lockedMp] });
     await settle();
     (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
     await settle();
@@ -337,6 +306,7 @@ describe('RunMiniProjectsTab', () => {
       miniProjects: [mp],
       onRefetchMiniProjects: vi.fn().mockRejectedValue(new Error('network down')),
       onNavigateToTab: vi.fn(),
+      course: baseCourse,
     });
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -377,17 +347,12 @@ describe('RunMiniProjectsTab', () => {
     const onRefetchMiniProjects = vi.fn().mockResolvedValue(undefined);
     const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
 
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunMiniProjectsTab, { target, props: {
-      runId: 10, runIsPublished: true, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+    const { target, cmp } = mountMpTab({
       blocks: localBlocks,
       miniProjects: [mp],
       onRefetchMiniProjects,
       onRefetchAssets,
-      onNavigateToTab: vi.fn(),
-    } });
+    });
     await settle();
 
     (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
@@ -414,23 +379,15 @@ describe('RunMiniProjectsTab — pendingEditTarget consumption', () => {
 
   function baseProps(overrides: Record<string, unknown> = {}) {
     return {
-      runId: 10, runIsPublished: false, runGroupsEnabled: true,
-      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
-      blocks, miniProjects: [mpFix],
-      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
-      onNavigateToTab: vi.fn(),
+      runIsPublished: false,
+      miniProjects: [mpFix],
       ...overrides,
     };
   }
 
   it('truthy pendingEditTarget → modal opens in edit mode + onPendingEditConsumed fires once', async () => {
     const onPendingEditConsumed = vi.fn();
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunMiniProjectsTab, {
-      target,
-      props: baseProps({ pendingEditTarget: mpFix, onPendingEditConsumed }),
-    });
+    const { target, cmp } = mountMpTab(baseProps({ pendingEditTarget: mpFix, onPendingEditConsumed }));
     await settle();
 
     const dialog = target.querySelector('[role="dialog"]');
@@ -446,15 +403,10 @@ describe('RunMiniProjectsTab — pendingEditTarget consumption', () => {
 
   it('stale pendingEditTarget (id not in miniProjects) → modal NOT opened, consumed still fires', async () => {
     const onPendingEditConsumed = vi.fn();
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunMiniProjectsTab, {
-      target,
-      props: baseProps({
-        pendingEditTarget: { ...mpFix, id: 99999 },
-        onPendingEditConsumed,
-      }),
-    });
+    const { target, cmp } = mountMpTab(baseProps({
+      pendingEditTarget: { ...mpFix, id: 99999 },
+      onPendingEditConsumed,
+    }));
     await settle();
 
     expect(target.querySelector('[role="dialog"]')).toBeNull();
@@ -465,17 +417,325 @@ describe('RunMiniProjectsTab — pendingEditTarget consumption', () => {
 
   it('null pendingEditTarget → effect short-circuits, no consumed callback, no modal', async () => {
     const onPendingEditConsumed = vi.fn();
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunMiniProjectsTab, {
-      target,
-      props: baseProps({ pendingEditTarget: null, onPendingEditConsumed }),
-    });
+    const { target, cmp } = mountMpTab(baseProps({ pendingEditTarget: null, onPendingEditConsumed }));
     await settle();
 
     expect(target.querySelector('[role="dialog"]')).toBeNull();
     expect(onPendingEditConsumed).not.toHaveBeenCalled();
 
     unmount(cmp);
+  });
+});
+
+// T12 — Slice A teacher-gating (spec §6.2):
+//   * RunMiniProjectsTab.teacher-gating bullets
+//     - locked-row force-delete affordance hidden for teachers
+//     - "Publish on Overview" CTA hidden for teachers
+//     - "Enable on Overview" CTA hidden for teachers when published
+//     - "See Overview" version-disabled CTA hidden for teachers
+//     - newDisabledTitle wording for teachers when groups missing on published run
+//   * Admin counterparts must keep current behaviour (regression coverage).
+describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
+  const lockedMp: MiniProjectResponse = {
+    id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+    assignment_md: 'x', assignment_html: '<p>x</p>',
+    soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+    is_published: true, first_submitted_at: '2026-04-15T10:00:00Z',
+    created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+  };
+  const unlockedMp: MiniProjectResponse = {
+    ...lockedMp,
+    first_submitted_at: null,
+  };
+
+  it('teacher + locked MP: no Delete × button rendered for that row, no force-confirm UI', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      miniProjects: [lockedMp],
+    });
+    await settle();
+    const row = target.querySelector('[data-role="mp-row"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row.querySelector('button[data-action="delete"]')).toBeNull();
+    expect(target.textContent).not.toContain('Force delete will permanently remove');
+  });
+
+  it('admin + locked MP: Delete × button present; clicking opens force-confirm with "I understand"', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: true },
+      miniProjects: [lockedMp],
+    });
+    await settle();
+    const btn = target.querySelector('button[data-action="delete"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    btn.click();
+    await settle();
+    expect(target.textContent).toContain('Force delete will permanently remove');
+    expect(target.textContent).toContain('I understand');
+  });
+
+  it('teacher + unlocked MP: Delete × button IS rendered (teacher-allowed normal delete)', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      miniProjects: [unlockedMp],
+    });
+    await settle();
+    const row = target.querySelector('[data-role="mp-row"]') as HTMLElement;
+    expect(row.querySelector('button[data-action="delete"]')).toBeTruthy();
+  });
+
+  it('teacher + !runIsPublished: "Run is not yet published" banner text rendered, but "Publish on Overview" link NOT in DOM', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      runIsPublished: false,
+    });
+    await settle();
+    expect(target.textContent).toContain('Run is not yet published');
+    expect(target.querySelector('button[data-action="nav-overview-publish"]')).toBeNull();
+  });
+
+  it('admin + !runIsPublished: BOTH banner text AND "Publish on Overview" link are present', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: true },
+      runIsPublished: false,
+    });
+    await settle();
+    expect(target.textContent).toContain('Run is not yet published');
+    expect(target.querySelector('button[data-action="nav-overview-publish"]')).toBeTruthy();
+  });
+
+  it('teacher + published + !runGroupsEnabled: "Enable on Overview" link NOT rendered, banner text IS', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      runIsPublished: true,
+      runGroupsEnabled: false,
+    });
+    await settle();
+    expect(target.textContent).toContain('Mini-projects require groups');
+    expect(target.querySelector('button[data-action="nav-overview-groups"]')).toBeNull();
+  });
+
+  it('teacher + !published + !runGroupsEnabled: "Enable on Overview" link IS rendered (teacher can act while unpublished)', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      runIsPublished: false,
+      runGroupsEnabled: false,
+    });
+    await settle();
+    expect(target.textContent).toContain('Mini-projects require groups');
+    expect(target.querySelector('button[data-action="nav-overview-groups"]')).toBeTruthy();
+  });
+
+  it('admin + !runGroupsEnabled (published): "Enable on Overview" link IS rendered regardless of publish state', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: true },
+      runIsPublished: true,
+      runGroupsEnabled: false,
+    });
+    await settle();
+    expect(target.querySelector('button[data-action="nav-overview-groups"]')).toBeTruthy();
+  });
+
+  it('teacher + versionIsDisabled: "See Overview" link NOT rendered, banner text IS', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      versionIsDisabled: true,
+    });
+    await settle();
+    expect(target.textContent).toContain("This run's course version is disabled");
+    expect(target.querySelector('button[data-action="nav-overview-version"]')).toBeNull();
+  });
+
+  it('admin + versionIsDisabled: "See Overview" link IS rendered', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: true },
+      versionIsDisabled: true,
+    });
+    await settle();
+    expect(target.querySelector('button[data-action="nav-overview-version"]')).toBeTruthy();
+  });
+
+  it('teacher + runIsPublished + !runGroupsEnabled: newDisabledTitle on [+ New] mentions "Ask a course admin"', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      runIsPublished: true,
+      runGroupsEnabled: false,
+    });
+    await settle();
+    const btn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.getAttribute('title')).toContain('Ask a course admin');
+  });
+
+  it('teacher + !runIsPublished + !runGroupsEnabled: newDisabledTitle on [+ New] uses "Enable groups on Overview" wording', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      runIsPublished: false,
+      runGroupsEnabled: false,
+    });
+    await settle();
+    const btn = target.querySelector('button[data-action="new-mp"]') as HTMLButtonElement;
+    expect(btn.getAttribute('title')).toContain('Enable groups on Overview');
+  });
+
+  it('teacher: 409-race transition — force-confirm panel does NOT render after locally-unlocked MP becomes locked server-side', async () => {
+    // T12 R1 fix: defense-in-depth gate. If a teacher opens InlineConfirm on
+    // a row that was unlocked at click time, but a student submits in the
+    // gap so the server-side state becomes locked, the post-409 refetch
+    // will deliver a now-locked MP. The render branch for the
+    // force-confirm <div> must remain hidden for !course.is_admin even
+    // when deleteConfirmId is still set from the prior click.
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const unlocked: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    const lockedAfterRace: MiniProjectResponse = {
+      ...unlocked,
+      first_submitted_at: '2026-04-15T10:00:00Z',
+    };
+
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE' && String(url).endsWith('/api/mini-projects/1')) {
+        return jres(
+          { detail: 'Mini-project has submissions; use ?force=true to delete.' },
+          409,
+        );
+      }
+      return jres([lockedAfterRace]);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [unlocked],
+      onRefetchMiniProjects: vi.fn().mockImplementation(async () => {
+        propsRef.miniProjects = [lockedAfterRace];
+      }),
+      onNavigateToTab: vi.fn(),
+      course: { ...baseCourse, is_admin: false },
+    });
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+
+    // Teacher sees Delete × because the row is unlocked at click time.
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+
+    confirmBtn.click();
+    await settle();
+
+    expect(propsRef.onRefetchMiniProjects).toHaveBeenCalledTimes(1);
+    // Defense-in-depth: force-confirm panel must NOT appear for teachers
+    // even though the (now-locked) MP would trigger the locked branch for
+    // an admin.
+    expect(target.querySelector('.force-confirm')).toBeNull();
+    expect(target.textContent).not.toContain('Force delete will permanently remove');
+    expect(target.textContent).not.toContain('I understand');
+
+    // Teacher MUST receive explicit feedback via the deleteError banner —
+    // pin the exact wording so a silent removal of the assignment in
+    // handleDeleteConfirm's non-admin 409 branch fails this test.
+    const banner = target.querySelector('[data-role="delete-error-banner"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain(
+      'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.',
+    );
+
+    unmount(cmp);
+  });
+
+  it('teacher: external rowStatus flip to locked while deleteConfirmId is set — force-confirm panel does NOT render (line-269 gate isolation)', async () => {
+    // This test pins the line-269 `course.is_admin` clause specifically:
+    // it bypasses handleDeleteConfirm (which would clear deleteConfirmId
+    // for teachers in the 409 path) by mutating miniProjects directly
+    // through the $state proxy. Without the line-269 gate, the force-confirm
+    // panel would render after the row flips to locked.
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const unlocked: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    const locked: MiniProjectResponse = {
+      ...unlocked,
+      first_submitted_at: '2026-04-15T10:00:00Z',
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [unlocked],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+      course: { ...baseCourse, is_admin: false },
+    });
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+
+    // Open InlineConfirm on the unlocked row → deleteConfirmId = mp.id.
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('button[data-action="confirm-delete"]')).not.toBeNull();
+
+    // Flip the row to locked WITHOUT going through handleDeleteConfirm —
+    // simulates an external state change (parent prop refetch, webhook,
+    // etc.). deleteConfirmId remains set from the prior click.
+    propsRef.miniProjects = [locked];
+    await settle();
+
+    // For the teacher, the force-confirm panel must NOT render even though
+    // deleteConfirmId is set AND rowStatus is now 'locked'. The line-269
+    // `&& course.is_admin` gate is the only thing preventing it.
+    expect(target.querySelector('.force-confirm')).toBeNull();
+    expect(target.textContent).not.toContain('I understand');
+    expect(target.textContent).not.toContain('Force delete will permanently');
+
+    unmount(cmp);
+  });
+
+  it('modal Publish button is teacher-visible (spec §3.1.6 — MP publish stays teacher-allowed)', async () => {
+    // Spec §3.1.6: mini-project publish is allowed for teachers. Ensure the
+    // modal's [Publish…] button stays in the DOM for a teacher viewing an
+    // unpublished MP via the Edit modal.
+    const draftMp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: '2026-06-15T10:00:00Z',
+      resubmission_deadline: '2026-06-20T10:00:00Z',
+      is_published: false, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      miniProjects: [draftMp],
+    });
+    await settle();
+    (target.querySelector('button[data-action="edit"]') as HTMLButtonElement).click();
+    await settle();
+    const dialog = target.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.querySelector('button[data-action="publish"]')).toBeTruthy();
   });
 });

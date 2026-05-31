@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunTeachersTab from '../components/runs/RunTeachersTab.svelte';
-import type { RunTeacherResponse } from '../lib/types';
+import type { Course, RunTeacherResponse } from '../lib/types';
+
+const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 
@@ -31,7 +33,7 @@ describe('RunTeachersTab', () => {
     document.body.appendChild(target);
     const cmp = mount(RunTeachersTab, {
       target,
-      props: { runId: 10, teachers: [], onRefetch: vi.fn().mockResolvedValue(undefined) },
+      props: { runId: 10, teachers: [], onRefetch: vi.fn().mockResolvedValue(undefined), course: baseCourse },
     });
     await settle();
     expect(target.textContent).toContain('No teachers assigned');
@@ -52,6 +54,7 @@ describe('RunTeachersTab', () => {
       runId: 10,
       teachers: [invitedTeacher],
       onRefetch: vi.fn(),
+      course: baseCourse,
     } });
     await settle();
     expect(target.textContent).toContain('(invited)');
@@ -86,6 +89,7 @@ describe('RunTeachersTab', () => {
           },
         ];
       }),
+      course: baseCourse,
     });
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -125,6 +129,7 @@ describe('RunTeachersTab', () => {
         // Backend returns ASC: oldest first, newest last.
         propsRef.teachers = [oldTeacher, newTeacher];
       }),
+      course: baseCourse,
     });
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -150,7 +155,7 @@ describe('RunTeachersTab', () => {
     document.body.appendChild(target);
     const cmp = mount(RunTeachersTab, {
       target,
-      props: { runId: 10, teachers: [], onRefetch: vi.fn().mockResolvedValue(undefined) },
+      props: { runId: 10, teachers: [], onRefetch: vi.fn().mockResolvedValue(undefined), course: baseCourse },
     });
     await settle();
     const emailInput = target.querySelector('input[name="email"]') as HTMLInputElement;
@@ -181,7 +186,7 @@ describe('RunTeachersTab', () => {
     document.body.appendChild(target);
     const cmp = mount(RunTeachersTab, {
       target,
-      props: { runId: 10, teachers, onRefetch: refetch },
+      props: { runId: 10, teachers, onRefetch: refetch, course: baseCourse },
     });
     await settle();
     (target.querySelector('button[data-action="remove"]') as HTMLButtonElement).click();
@@ -189,6 +194,65 @@ describe('RunTeachersTab', () => {
     (target.querySelector('button[data-action="confirm-remove"]') as HTMLButtonElement).click();
     await settle();
     expect(refetch).toHaveBeenCalled();
+    unmount(cmp);
+  });
+
+  it('teacher view (course.is_admin=false): Add form and Remove buttons absent', async () => {
+    const teachers: RunTeacherResponse[] = [
+      {
+        id: 1,
+        run_id: 10,
+        user_id: 1,
+        user_email: 't@x.com',
+        user_full_name: 'T One',
+        created_at: '2026-05-22T00:00:00Z',
+      },
+    ];
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, {
+      target,
+      props: {
+        runId: 10,
+        teachers,
+        onRefetch: vi.fn().mockResolvedValue(undefined),
+        course: { ...baseCourse, is_admin: false },
+      },
+    });
+    await settle();
+    expect(target.querySelector('input[name="email"]')).toBeNull();
+    expect(target.querySelector('form')).toBeNull();
+    expect(target.querySelector('button[data-action="remove"]')).toBeNull();
+    // Teacher still sees the roster row content.
+    expect(target.textContent).toContain('t@x.com');
+    unmount(cmp);
+  });
+
+  it('admin view (course.is_admin=true): Add form and Remove buttons present', async () => {
+    const teachers: RunTeacherResponse[] = [
+      {
+        id: 1,
+        run_id: 10,
+        user_id: 1,
+        user_email: 't@x.com',
+        user_full_name: 'T One',
+        created_at: '2026-05-22T00:00:00Z',
+      },
+    ];
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, {
+      target,
+      props: {
+        runId: 10,
+        teachers,
+        onRefetch: vi.fn().mockResolvedValue(undefined),
+        course: { ...baseCourse, is_admin: true },
+      },
+    });
+    await settle();
+    expect(target.querySelector('input[name="email"]')).not.toBeNull();
+    expect(target.querySelectorAll('button[data-action="remove"]').length).toBeGreaterThan(0);
     unmount(cmp);
   });
 });

@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunOverviewTab from '../components/runs/RunOverviewTab.svelte';
-import type { RunResponse } from '../lib/types';
+import type { Course, RunResponse } from '../lib/types';
+
+const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 
@@ -33,6 +35,7 @@ async function settle() {
 type Extra = {
   run?: Partial<RunResponse>;
   readiness?: { checks: Array<{ id: string; label: string; state: 'ok' | 'violated' | 'na'; hint?: string }>; firstViolation: string | null };
+  course?: Partial<Course>;
 };
 
 function mountTab(extra: Extra = {}) {
@@ -41,6 +44,7 @@ function mountTab(extra: Extra = {}) {
   const setRun = vi.fn();
   const onNavigateTab = vi.fn();
   const onDeleteRun = vi.fn();
+  const course: Course = { ...baseCourse, ...(extra.course ?? {}) };
   const cmp = mount(RunOverviewTab, {
     target,
     props: {
@@ -52,6 +56,7 @@ function mountTab(extra: Extra = {}) {
       readiness: extra.readiness ?? { checks: [], firstViolation: null },
       onNavigateTab,
       onDeleteRun,
+      course,
     },
   });
   return { target, cmp, setRun, onNavigateTab, onDeleteRun };

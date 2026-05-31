@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin
+from mathion.api.helpers import get_or_404, has_run_pinned_to_version, require_course_admin
 from mathion.assets import get_mime_type, sanitize_filename, validate_extension
 from mathion.config import settings
 from mathion.database import get_db
@@ -155,7 +155,11 @@ def serve_asset(
                 )
             ).scalar_one_or_none()
             if not is_enrolled:
-                raise HTTPException(status_code=403, detail="No access to this version")
+                # 4th branch (spec §3.1.3a): allow run-teachers pinned to this
+                # exact version. Reached only after admin/enrolment checks fail
+                # — never used as a write-path gate.
+                if not has_run_pinned_to_version(db, user, version_id):
+                    raise HTTPException(status_code=403, detail="No access to this version")
 
     asset = db.execute(
         select(Asset).where(

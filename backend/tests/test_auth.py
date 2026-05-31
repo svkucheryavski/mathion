@@ -235,3 +235,102 @@ def test_email_normalization_in_api_request_pin(client, db):
     response = client.post("/api/auth/request-pin", json={"email": "ALICE@EXAMPLE.COM"},
                            headers={"X-Requested-With": "mathion"})
     assert response.status_code == 200
+
+
+import pytest
+
+from mathion.models import CourseAdmin, Run, RunTeacher
+from mathion.models_auth import User
+from mathion.auth import request_pin
+
+
+class TestMeRoleFlags:
+    def test_me_admin_only(self, admin_client, superuser, seed_publishable_version, db):
+        # superuser → has_course_admin: True via short-circuit
+        r = admin_client.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["has_course_admin"] is True
+        assert body["has_run_teacher"] is False
+
+    def test_me_teacher_only(self, teacher_client, teacher_user, admin_client,
+                             seed_publishable_version, db):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        r = teacher_client.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["has_course_admin"] is False
+        assert body["has_run_teacher"] is True
+
+    def test_me_both(self, teacher_client, teacher_user, admin_client,
+                     seed_publishable_version, db):
+        course, _ = seed_publishable_version()
+        run = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={"title": "R", "start_date": "2026-01-01",
+                  "end_date": "2026-12-31", "groups_enabled": False},
+        ).json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.add(CourseAdmin(user_id=teacher_user.id, course_id=course["id"]))
+        db.commit()
+        r = teacher_client.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["has_course_admin"] is True
+        assert body["has_run_teacher"] is True
+
+    def test_me_neither(self, teacher_client):
+        r = teacher_client.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["has_course_admin"] is False
+        assert body["has_run_teacher"] is False
+
+    def test_me_response_shape_includes_existing_fields(self, teacher_client):
+        r = teacher_client.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        for key in ("id", "email", "full_name", "is_superuser", "is_disabled", "photo_url"):
+            assert key in body, f"missing {key!r} in /me response"
+
+
+class TestVerifyPinFlags:
+    def test_verify_pin_response_includes_role_flags(
+        self, client, admin_client, teacher_user, seed_publishable_version, db,
+    ):
+        course, _version = seed_publishable_version()
+        run_resp = admin_client.post(
+            f"/api/courses/{course['id']}/runs",
+            json={
+                "title": "R",
+                "start_date": "2026-01-01",
+                "end_date": "2026-12-31",
+                "groups_enabled": False,
+            },
+        )
+        assert run_resp.status_code == 201, run_resp.text
+        run = run_resp.json()
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+
+        pin = request_pin(db, teacher_user.email)
+        assert pin is not None
+
+        r = client.post(
+            "/api/auth/verify-pin",
+            json={"email": teacher_user.email, "pin": pin, "duration_days": 7},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "user" in body
+        assert body["user"]["has_run_teacher"] is True
+        assert body["user"]["has_course_admin"] is False
+        for key in ("id", "email", "full_name", "is_superuser", "is_disabled", "photo_url"):
+            assert key in body["user"]

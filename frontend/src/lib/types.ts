@@ -9,6 +9,8 @@ export type User = {
   is_superuser: boolean;
   is_disabled: boolean;
   photo_url: string | null;
+  has_course_admin: boolean;   // backend always populates via _user_response_with_flags
+  has_run_teacher: boolean;
 };
 
 // ---- Course list ----

@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, require_course_admin, slugify
+from mathion.api.helpers import get_or_404, has_run_pinned_to_version, require_course_admin, slugify
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.markdown import render_markdown
-from mathion.models import Block, CourseVersion, Sequence
+from mathion.models import Block, CourseAdmin, CourseVersion, Sequence
 from mathion.models_auth import User
 from mathion.schemas import (
     BlockCreate,
@@ -96,7 +96,15 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
 @router.get("/api/versions/{version_id}/blocks", response_model=list[BlockResponse])
 def list_blocks(version_id: int, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = get_or_404(db, CourseVersion, version_id)
-    require_course_admin(db, user, version.course_id)
+    # Read-side gate: admins/superusers OR teachers pinned to this exact
+    # version. Write endpoints below continue to use `require_course_admin`.
+    if not user.is_superuser:
+        is_admin = bool(db.scalar(select(exists().where(
+            CourseAdmin.user_id == user.id,
+            CourseAdmin.course_id == version.course_id,
+        ))))
+        if not is_admin and not has_run_pinned_to_version(db, user, version_id):
+            raise HTTPException(status_code=403, detail="Access denied")
     blocks = db.execute(
         select(Block).where(Block.version_id == version_id).order_by(Block.order).offset(offset).limit(limit)
     ).scalars().all()
