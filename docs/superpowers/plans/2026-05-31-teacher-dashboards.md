@@ -546,48 +546,52 @@ export const STATUS_PRIORITY: Record<MpGroupStatus, number> = {
 };
 ```
 
-Continue with the §6.1 interface declarations. Copy them verbatim from spec §6.1 (the spec is the source of truth):
+Continue with the §6.1 interface declarations. **Copy them verbatim from spec §6.1 lines 425-593 — the spec is the source of truth for all field names, types, optionality, and JSDoc/comments.** The spec lists:
 
-- `DashboardRun`
-- `DashboardSequence`
-- `DashboardStudent` (with `group_id: number | null`, `group_name: string | null`, `group_is_disabled: boolean`)
-- `DashboardProgressResponse` (with `run`, `sequences[]`, `students[]`)
-- `DashboardMpGroupEntry` (with `group_id`, `group_name`, `group_is_disabled`, `status: MpGroupStatus`)
-- `DashboardMpRow` (with `id`, `block_id`, `block_title`, `title`, `groups[]`, `counts`)
-- `DashboardMiniProjectsResponse`
-- `SequenceItemStateResponse`, `SequenceItemState`, `SequenceItemScore`, `SequenceMeta`, `StudentMeta`
+- `DashboardSequence` (8 fields including `block_order`, `total_items`, `has_quiz_items`)
+- `DashboardCoverageCell` (`sequence_id`, `covered`, `total`)
+- `DashboardQuizCell` (`sequence_id`, `correct: number | null`, `total: number | null`)
+- `DashboardStudent` (with `quizzes: DashboardQuizCell[]` — note plural — and `coverage: DashboardCoverageCell[]`, positionally aligned with `sequences[]`)
+- `DashboardProgressResponse` (with inline `run: { id, title, groups_enabled, version_is_disabled }`, `sequences[]`, `students[]` — no separate `DashboardRun` interface)
+- `MpGroupStatus` (5-value union; ALREADY declared above with the constants — don't redeclare)
+- `DashboardMpGroupEntry` (with `latest_submission: {...} | null` and `latest_evaluation: {...} | null` nested objects)
+- `DashboardMpRow` (with `title`, `block_order`, `is_published`, `first_submitted_at`, `soft_deadline`, `hard_deadline`, `resubmission_deadline`, and `counts: { total_groups, not_submitted, awaiting_eval, needs_revision, accepted, rejected }`)
+- `DashboardMiniProjectsResponse` (with inline `run: { id, title, groups_enabled }` — no `version_is_disabled` on this one per spec)
+- `SequenceItemScore` (`correct: number; total: number`)
+- `SequenceItemState` (with `last_score: SequenceItemScore | null` AND top-level `last_visited_at: string | null` — NOT nested under `quiz`)
+- `SequenceItemStateResponse` (with inline `sequence: {...}` and `student: {...}` — spec §6.1 inlines these, not separate `SequenceMeta`/`StudentMeta` interfaces; the backend Pydantic classes are named `SequenceMeta`/`StudentMeta` but the TS side uses inline object types per spec §6.1 lines 533-537)
 
 - [ ] **Step 2: Add the three wire functions**
 
 ```ts
-export function getProgressDashboard(
+export async function getProgressDashboard(
   runId: number,
   opts?: { signal?: AbortSignal },
 ): Promise<DashboardProgressResponse> {
-  return api.get(`/api/runs/${runId}/dashboard/progress`, { signal: opts?.signal });
+  return api.get<DashboardProgressResponse>(`/api/runs/${runId}/dashboard/progress`, opts);
 }
 
-export function getMiniProjectsDashboard(
+export async function getMiniProjectsDashboard(
   runId: number,
   opts?: { signal?: AbortSignal },
 ): Promise<DashboardMiniProjectsResponse> {
-  return api.get(`/api/runs/${runId}/dashboard/mini-projects`, { signal: opts?.signal });
+  return api.get<DashboardMiniProjectsResponse>(`/api/runs/${runId}/dashboard/mini-projects`, opts);
 }
 
-export function getSequenceItemState(
+export async function getSequenceItemState(
   runId: number,
   userId: number,
   sequenceId: number,
   opts?: { signal?: AbortSignal },
 ): Promise<SequenceItemStateResponse> {
-  return api.get(
+  return api.get<SequenceItemStateResponse>(
     `/api/runs/${runId}/students/${userId}/sequences/${sequenceId}/items`,
-    { signal: opts?.signal },
+    opts,
   );
 }
 ```
 
-Verify the `api.get` signature in `frontend/src/lib/api.ts` and adjust the `{ signal }` threading if the project's helper uses a different shape (e.g., `fetch`-style `{ init: { signal } }`).
+**Verify the `api.get` signature in `frontend/src/lib/api.ts`** before committing — the project may use `api.get<T>(url, opts?)` where `opts` is forwarded to `fetch` as `RequestInit`, OR a different shape. If the helper doesn't accept a typed generic or `opts` directly, adapt — but keep the `AbortSignal` threading semantically equivalent.
 
 - [ ] **Step 3: Create `frontend/src/tests/dashboards.test.ts` with mockFetch scaffolding**
 
@@ -661,55 +665,95 @@ describe('wire URL + signal threading', () => {
 
 Per spec §13: mock the literal-shaped JSON body, then runtime-assert that the consumer extracts all expected keys with the expected types. This protects against backend renames that TypeScript's compile-time check can't catch.
 
+**Mock body shapes MUST match spec §6.1 verbatim.** Use this list of field names + types as the source of truth:
+- `DashboardSequence`: `block_id, block_order, block_title, sequence_id, sequence_order, sequence_title, total_items, has_quiz_items`
+- `DashboardCoverageCell`: `{ sequence_id, covered, total }` (positionally aligned with `sequences[]`)
+- `DashboardQuizCell`: `{ sequence_id, correct: number | null, total: number | null }` (positionally aligned)
+- `DashboardStudent.quizzes`: PLURAL key (`quizzes`, not `quiz`)
+- `DashboardMpRow.counts`: `{ total_groups, not_submitted, awaiting_eval, needs_revision, accepted, rejected }` — 6 keys
+- `DashboardMpGroupEntry`: also has `latest_submission: {...} | null` and `latest_evaluation: {...} | null` per spec §6.1 lines 472-489
+- `SequenceItemState`: `last_score: { correct, total } | null` (NOT `quiz`), plus TOP-LEVEL `last_visited_at: string | null` (NOT nested)
+- `getMiniProjectsDashboard` response: `run: { id, title, groups_enabled }` — NO `version_is_disabled` on this endpoint (spec §6.1 line 515)
+
 ```ts
 describe('response-shape conformance', () => {
   it('getProgressDashboard extracts run/sequences/students keys', async () => {
     const mockBody = {
       run: { id: 1, title: 'R', groups_enabled: true, version_is_disabled: false },
-      sequences: [{ sequence_id: 10, sequence_title: 'S', sequence_order: 1, block_id: 5, block_title: 'B' }],
+      sequences: [{
+        block_id: 5, block_order: 1, block_title: 'B',
+        sequence_id: 10, sequence_order: 1, sequence_title: 'S',
+        total_items: 4, has_quiz_items: true,
+      }],
       students: [{
-        user_id: 100, full_name: 'A', email: 'a@x', user_is_disabled: false,
+        user_id: 100, email: 'a@x', full_name: 'A', user_is_disabled: false,
         group_id: 1, group_name: 'G1', group_is_disabled: false,
-        coverage: [{ covered: 2, total: 4 }], quiz: [{ correct: 1, total: 2 }],
+        coverage: [{ sequence_id: 10, covered: 2, total: 4 }],
+        quizzes: [{ sequence_id: 10, correct: 1, total: 2 }],
       }],
     };
     vi.stubGlobal('fetch', mockFetch(200, mockBody));
     const res = await getProgressDashboard(1);
     expect(res.run.groups_enabled).toBe(true);
     expect(res.sequences[0].sequence_id).toBe(10);
+    expect(res.sequences[0].has_quiz_items).toBe(true);
     expect(res.students[0].user_id).toBe(100);
     expect(res.students[0].coverage[0].covered).toBe(2);
+    expect(res.students[0].quizzes[0].correct).toBe(1);
   });
 
   it('getMiniProjectsDashboard extracts run/mini_projects keys including title', async () => {
     const mockBody = {
-      run: { id: 1, title: 'R', groups_enabled: true, version_is_disabled: false },
+      run: { id: 1, title: 'R', groups_enabled: true },
       mini_projects: [{
-        id: 1, block_id: 5, block_title: 'B', title: 'Mini project for Block 1',
-        groups: [{ group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'not_submitted' }],
-        counts: { groups: 1, awaiting_eval: 0, needs_revision: 0, rejected: 0 },
+        id: 1, title: 'Mini project for Block 1',
+        block_id: 5, block_order: 1, block_title: 'B',
+        is_published: true,
+        first_submitted_at: null, soft_deadline: null,
+        hard_deadline: null, resubmission_deadline: null,
+        counts: {
+          total_groups: 1, not_submitted: 1, awaiting_eval: 0,
+          needs_revision: 0, accepted: 0, rejected: 0,
+        },
+        groups: [{
+          group_id: 1, group_name: 'G1', group_is_disabled: false,
+          status: 'not_submitted',
+          latest_submission: null,
+          latest_evaluation: null,
+        }],
       }],
     };
     vi.stubGlobal('fetch', mockFetch(200, mockBody));
     const res = await getMiniProjectsDashboard(1);
     expect(res.mini_projects[0].title).toBe('Mini project for Block 1');
+    expect(res.mini_projects[0].counts.total_groups).toBe(1);
     expect(res.mini_projects[0].groups[0].status).toBe('not_submitted');
+    expect(res.mini_projects[0].groups[0].latest_submission).toBeNull();
   });
 
   it('getSequenceItemState extracts sequence/student/items', async () => {
     const mockBody = {
-      sequence: { sequence_id: 10, sequence_title: 'S', sequence_order: 1, block_id: 5, block_title: 'B' },
+      sequence: { sequence_id: 10, sequence_title: 'S', block_id: 5, block_title: 'B' },
       student: { user_id: 100, full_name: 'A', email: 'a@x' },
       items: [
-        { item_id: 1, item_order: 1, item_title: 'I1', item_type: 'static_page', is_covered: true, quiz: null },
-        { item_id: 2, item_order: 2, item_title: 'I2', item_type: 'quiz', is_covered: true,
-          quiz: { last_score_correct: 3, last_score_total: 5, last_visited_at: '2026-05-31T12:00:00Z' } },
+        {
+          item_id: 1, item_order: 1, item_title: 'I1', item_type: 'static_page',
+          is_covered: true, last_score: null, last_visited_at: '2026-05-31T12:00:00Z',
+        },
+        {
+          item_id: 2, item_order: 2, item_title: 'I2', item_type: 'quiz',
+          is_covered: true,
+          last_score: { correct: 3, total: 5 },
+          last_visited_at: '2026-05-31T12:05:00Z',
+        },
       ],
     };
     vi.stubGlobal('fetch', mockFetch(200, mockBody));
     const res = await getSequenceItemState(1, 100, 10);
-    expect(res.items[1].quiz?.last_score_correct).toBe(3);
-    expect(res.items[0].quiz).toBeNull();
+    expect(res.items[1].last_score?.correct).toBe(3);
+    expect(res.items[1].last_score?.total).toBe(5);
+    expect(res.items[0].last_score).toBeNull();
+    expect(res.items[1].last_visited_at).toBe('2026-05-31T12:05:00Z');
   });
 });
 ```
