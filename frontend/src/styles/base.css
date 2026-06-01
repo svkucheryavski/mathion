@@ -14,6 +14,17 @@
   --space-6: 3rem;
   --radius: 4px;
   --font-size-base: 16px;
+
+  /* Surface fallback for heatmap cells with no ratio (Progress tab). */
+  --surface-muted: #f3f4f6;
+
+  /* Status colors — variable names mirror status enum (underscores → dashes).
+     All pairs ≥ 4.5:1 contrast (verified per WCAG AA). */
+  --status-not-submitted-bg: #f3f4f6;  --status-not-submitted-fg: #374151;
+  --status-awaiting-eval-bg: #dbeafe;  --status-awaiting-eval-fg: #1e40af;
+  --status-needs-revision-bg: #fef3c7; --status-needs-revision-fg: #92400e;
+  --status-accepted-bg:      #d1fae5;  --status-accepted-fg:      #065f46;
+  --status-rejected-bg:      #fee2e2;  --status-rejected-fg:      #991b1b;
 }
 
 body {
