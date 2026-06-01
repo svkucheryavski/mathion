@@ -1,9 +1,9 @@
-# Session Handoff — Teacher Dashboards (T2 awaiting codex R2)
+# Session Handoff — Teacher Dashboards (T2 awaiting explicit user OK)
 
 **Date saved:** 2026-06-01
-**Branch:** `teacher-dashboards` (12 commits ahead of `main`)
-**Last commit:** `6c8dfb0 test(dashboards): T2 R1 fix — assert method GET + signal identity directly`
-**Status:** T1 complete. T2 implementation done (commit `0043f3a`) + R1 fix done (`6c8dfb0`). **Pending: user runs codex R2 paste-back, then explicit OK to mark T2 complete and dispatch T3.**
+**Branch:** `teacher-dashboards` (13 commits ahead of `main`, including this doc)
+**Last commit:** `5bdeca3 docs: session handoff for machine restart (2026-06-01)`
+**Status:** T1 complete. T2 implementation + R1 fix committed (`0043f3a`, `6c8dfb0`). Codex R2 already returned **PASS** earlier in this session (0 Critical, 0 Important, observational Minors). **Pending: explicit user OK to mark T2 complete and dispatch T3** — there is no codex round left to run.
 
 > **NB:** This is a different feature branch from the previous slice. `teacher-monitoring-slice-a` was a different work-stream (covered by `SESSION-HANDOFF-2026-05-29.md`); the current branch is `teacher-dashboards`, started after that work merged to main.
 
@@ -17,7 +17,7 @@
 | Task | Status | Notes |
 |---|---|---|
 | T1 — backend drilldown endpoint + MP title + tests | ✅ complete | passed 6 review rounds (codex R1 through R6); 30/30 tests pass |
-| T2 — `lib/dashboards.ts` wire module + tests | ⏳ awaiting codex R2 | implementer DONE; spec reviewer ✅; codex R1 returned REVISE; R1 fix landed (`6c8dfb0`); codex R2 paste-back script is pending user execution |
+| T2 — `lib/dashboards.ts` wire module + tests | ⏳ awaiting explicit user OK | implementer DONE (`0043f3a`); spec reviewer ✅; codex R1 returned REVISE; R1 fix landed (`6c8dfb0`); codex R2 returned **PASS** — 0 Critical, 0 Important, observational Minors only; 8/8 tests pass, 0 type errors |
 | T3 — `lib/csvWrite.ts` + tests | pending | |
 | T4 — `StatusBadge.svelte` + CSS variables | pending | |
 | T5 — `RunProgressTab.svelte` + ~22 tests | pending | |
@@ -46,29 +46,21 @@ ba6efc3 docs(plan): T2 interfaces + mock bodies align to spec §6.1
 
 ## What's next when you resume
 
-### Step 1 — Re-orient on the new machine
+### Step 1 — Re-orient
 
-- Working dir: `/Users/svkucheryavski/Documents/Developing/mathion` (adjust if restored elsewhere).
+- Working dir: `/Users/svkucheryavski/Documents/Developing/mathion`.
 - `git status` → should show `teacher-dashboards`, clean.
-- `git log -1 --oneline` → should be `6c8dfb0 test(dashboards): T2 R1 fix...`.
-- `git log --oneline main..HEAD | wc -l` → should be 12.
+- `git log -1 --oneline` → should be `5bdeca3 docs: session handoff...` (or later if the handoff doc itself got updated).
+- `git log --oneline main..HEAD | wc -l` → should be 13.
 
-### Step 2 — Run the pending codex R2 paste-back
+### Step 2 — On user's explicit OK, mark T2 complete and dispatch T3
 
-The R2 script (3814 bytes) lived at `/tmp/codex-dashboards-T2-r2.sh` and will NOT survive restart. Recreate it from the appendix at the bottom of this file, then run:
+Codex R2 has already returned PASS. The only remaining gate is the strict-review-no-shortcuts memory: wait for the user to say "ok mark T2 done" (or equivalent) before doing the next two actions.
 
-```
-bash /tmp/codex-dashboards-T2-r2.sh
-```
-
-Paste codex's output back into the session. The expected verdict is PASS (R1 fix was small and surgical), but if codex returns REVISE, apply the findings as a new commit + re-run codex R3.
-
-### Step 3 — After codex PASS
-
-1. Wait for explicit user OK ("ok mark T2 done" or equivalent) — **do NOT mark T2 complete unilaterally** per the `strict-review-no-shortcuts` memory.
-2. `TaskUpdate` T2 (#17) to `completed`.
-3. `TaskUpdate` T3 (#18) to `in_progress`.
-4. Dispatch T3 implementer subagent for `frontend/src/lib/csvWrite.ts` + tests (plan lines 753-1031). Spec §6.7 is source of truth. **Pre-check plan vs. spec for divergence** (same pattern as T2 — commit `ba6efc3` pre-aligned the plan; do the same for T3 if needed).
+When the OK comes:
+1. `TaskUpdate` T2 (#17) to `completed`.
+2. `TaskUpdate` T3 (#18) to `in_progress`.
+3. Dispatch T3 implementer subagent for `frontend/src/lib/csvWrite.ts` + tests (plan lines 753-1031). Spec §6.7 is source of truth. **Pre-check plan vs. spec for divergence** (same pattern as T2 — commit `ba6efc3` pre-aligned the plan; do the same for T3 if needed).
 
 ### Subsequent tasks
 
@@ -160,102 +152,51 @@ npm install
 ## Quick re-entry prompt for the next session
 
 > Resume the teacher-dashboards work. T1 complete; T2 implementation + R1 fix are committed
-> (`0043f3a`, `6c8dfb0`). The pending codex R2 paste-back script needs to be recreated
-> from the appendix in `docs/superpowers/SESSION-HANDOFF-2026-06-01.md` and run; after
-> codex returns PASS and I give explicit OK, mark T2 complete and dispatch T3.
+> (`0043f3a`, `6c8dfb0`); codex R2 already returned PASS. I will give the explicit OK to
+> mark T2 complete and dispatch T3 in this session. See
+> `docs/superpowers/SESSION-HANDOFF-2026-06-01.md` for full state.
 
 ---
 
 ## Verification checklist for the new machine
 
-- [ ] `git -C <repo> log -1 --oneline` shows `6c8dfb0 test(dashboards): T2 R1 fix...`
-- [ ] `git -C <repo> log --oneline main..HEAD | wc -l` returns `12`
+- [ ] `git -C <repo> log -1 --oneline` shows `5bdeca3 docs: session handoff...` (or later)
+- [ ] `git -C <repo> log --oneline main..HEAD | wc -l` returns `13` (or more if the handoff doc was updated)
 - [ ] `git -C <repo> status` shows working tree clean on `teacher-dashboards`
 - [ ] `docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md` exists
 - [ ] `docs/superpowers/plans/2026-05-31-teacher-dashboards.md` exists
 - [ ] `backend/.venv/bin/pytest backend/tests/test_dashboard_item_drilldown.py backend/tests/test_dashboard_mini_projects.py -q 2>&1 | tail -3` shows 30 passed
 - [ ] `npm test -- src/tests/dashboards.test.ts 2>&1 | tail -3` from repo root shows 8 passed
 - [ ] `npm run check 2>&1 | tail -3` shows 0 ERRORS
-- [ ] T2 R2 codex script recreated from appendix below and ready to paste
 
 ---
 
-## Appendix — pending codex R2 paste-back script
+## Codex R2 result (already received)
 
-Save the block below as `/tmp/codex-dashboards-T2-r2.sh`, then `chmod +x` and run.
-
-```bash
-#!/bin/bash
-codex exec \
-  --sandbox read-only \
-  -c model_reasoning_effort=high \
-  -c project_doc="./CLAUDE.md" \
-  - <<'PROMPT'
-You are doing **round-2 review of T2** (frontend wire module `lib/dashboards.ts`) for the Teacher Dashboards implementation on the mathion project. Round 1 you returned 1 Important: the 3 URL+signal tests didn't assert `init.method === 'GET'` or `init.signal === ctrl.signal` directly. Your job: verify the fix landed cleanly and nothing else slipped in.
-
-## Round 1 finding
-
-> "Test surface misses the spec's method assertion. Spec §13 requires URL + method + signal-threading tests (docs/.../design.md:1623-1625), but the three tests only assert URL substring and `signal` via `objectContaining` (frontend/src/tests/dashboards.test.ts:25-28, 36-39, 47-50). Prefer capturing the actual second fetch arg and asserting `init.method === 'GET'` and `init.signal === ctrl.signal`."
-
-## R1 fix commit
-
-- **Commit:** `6c8dfb0` on branch `teacher-dashboards`
-- **What changed:** `git diff 0043f3a..6c8dfb0` — test file only, 15+/12-, no code changes
-- **Reported fixes:** The 3 tests in the `'wire URL + signal threading'` describe block now capture `(f.mock.calls as unknown[][])[0][0]` as the URL and `[0][1]` as the `RequestInit`, then assert URL via `toContain`, `init.method === 'GET'` via strict equality, and `init.signal === ctrl.signal` via identity. The previous `expect(f).toHaveBeenCalledWith(..., objectContaining({ signal: ctrl.signal }))` pattern was dropped. Cast pattern matches `runGroups.test.ts:21`.
-
-## Your re-review questions
-
-### Verification of your round-1 finding
-
-1. **Method + signal-identity assertions.** Read `frontend/src/tests/dashboards.test.ts` lines 19-55 (the `'wire URL + signal threading'` describe block). For each of the 3 tests, confirm:
-   - `init.method` is asserted with strict equality (`.toBe('GET')`), not loose matching
-   - `init.signal` is asserted with identity (`.toBe(ctrl.signal)`), not via `objectContaining`
-   - URL is asserted with `.toContain(...)` substring match (unchanged from R1)
-   - The mock-call indexing matches the project pattern at `runGroups.test.ts:21`
-
-2. **Spec §13 coverage.** Does the fix now satisfy "URL + method + signal-threading (one test)" per spec line 1623-1625? Cite anything still missing.
-
-### Anything new
-
-3. **R1 fix scope.** Run `git diff 0043f3a..6c8dfb0 --stat`. Should show only `frontend/src/tests/dashboards.test.ts` changed. Confirm.
-
-4. **Test count.** Still exactly 8 tests? No tests added or removed?
-
-5. **TypeScript strictness.** The R1 fix uses `as RequestInit` cast. Is this acceptable per project conventions (the prior `runGroups.test.ts:21` uses similar casts)? Any type-safety concern?
-
-6. **Other test groups intact.** Read the response-shape conformance describe block (lines ~57-130 ish) AND the constants describe block (lines ~135 onward). Confirm these were NOT modified by R1 fix.
-
-7. **Commit message.** Run `git log -1 6c8dfb0`. Does the message include the `Co-Authored-By: Claude Opus 4.7 (1M context)` trailer per project convention?
-
-### Sanity
-
-8. Run `npm test -- src/tests/dashboards.test.ts 2>&1 | tail -5` from the repo root. Should be 8 passing (or report sandbox-blocked).
-9. Run `npm run check 2>&1 | tail -5`. Should be 0 errors (warnings OK if pre-existing in unrelated files).
-10. Run `git log --oneline main..HEAD` to confirm only the expected T1 + T2 commits are on the branch.
-
-## Output format
+Codex R2 returned **PASS** on the T2 R1 fix earlier in this session — verbatim:
 
 ```
 ## Findings
-
-### Critical (blocks T2 completion)
-<numbered list or "None">
-
-### Important (should fix before T2 completion)
-<numbered list or "None">
-
+### Critical (blocks T2 completion)  None
+### Important (should fix before T2 completion)  None
 ### Minor / Notes
-<terse>
+- Round-1 finding is fixed cleanly. The three URL tests capture `url` and `init`, then assert
+  URL via `.toContain(...)`, method via `expect(init.method).toBe('GET')`, and signal identity
+  via `expect(init.signal).toBe(ctrl.signal)`: `frontend/src/tests/dashboards.test.ts:25-29`, `:37-41`, `:49-53`.
+- Mock-call indexing matches the existing project pattern at `frontend/src/tests/runGroups.test.ts:21`.
+- Spec §13 coverage is now satisfied for URL + method + signal-threading per
+  `docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md:1623-1625`; nothing missing.
+- `git diff 0043f3a..6c8dfb0 --stat` shows only `frontend/src/tests/dashboards.test.ts` changed (27 lines).
+- Test count remains exactly 8 in `frontend/src/tests/dashboards.test.ts`.
+- The `as RequestInit` cast is acceptable; consistent with nearby test conventions; no type-safety concern.
+- Response-shape tests and constants tests are untouched by the R1 diff.
+- Commit `6c8dfb0` includes `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 
 ## Verdict
 PASS  (T2 ready to mark complete)
-  -- or --
-REVISE  (specific issues above must be addressed)
 ```
 
-Be specific. Cite file:line references. Read-only.
-PROMPT
-```
+No further codex round is pending for T2. The handoff exists only because the strict-review-no-shortcuts memory requires explicit user OK before marking the task complete and dispatching T3.
 
 ---
 
