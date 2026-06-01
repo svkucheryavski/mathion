@@ -98,9 +98,9 @@ describe('RunProgressTab', () => {
     vi.stubGlobal('fetch', mockFetch(200, body));
     mountTab();
     await settle();
-    // Table renders but no sequence columns; students show
-    expect(host.querySelector('tbody')).toBeTruthy();
-    expect(host.textContent).toContain('Alice');
+    // Per spec §13 line 1635: placeholder renders; table is NOT rendered
+    expect(host.textContent).toContain('No sequences in this run.');
+    expect(host.querySelector('table.progress-grid')).toBeNull();
   });
 
   // T5 – Coverage mode cells
@@ -112,6 +112,9 @@ describe('RunProgressTab', () => {
     expect(cells.length).toBeGreaterThan(0);
     expect(host.textContent).toContain('2/4');
     expect(host.textContent).toContain('4/4');
+    // Per spec §13 line 1636: inline --cell-bg style set per ratio
+    const cellWithStyle = host.querySelector('td.cell') as HTMLElement;
+    expect(cellWithStyle.getAttribute('style')).toMatch(/--cell-bg:\s*hsl\(/);
   });
 
   // T6 – Quiz mode cells
@@ -234,12 +237,17 @@ describe('RunProgressTab', () => {
     // Default asc: Anna first
     const rows = host.querySelectorAll('tbody tr:not(.empty-row)');
     expect(rows[0].textContent).toContain('Anna');
+    // Default sort is 'name' asc — Student header aria-sort should be 'ascending'
+    const studentHeader = host.querySelector('th.sticky-name') as HTMLElement;
+    expect(studentHeader.getAttribute('aria-sort')).toBe('ascending');
     // Click Student header to toggle to desc
     const studentBtn = Array.from(host.querySelectorAll('thead button')).find((b) => b.textContent?.includes('Student')) as HTMLElement | undefined;
     studentBtn!.click();
     flushSync();
     const rowsDesc = host.querySelectorAll('tbody tr:not(.empty-row)');
     expect(rowsDesc[0].textContent).toContain('Zed');
+    // After toggle aria-sort should be 'descending'
+    expect(studentHeader.getAttribute('aria-sort')).toBe('descending');
   });
 
   // T12 – Sort by group
@@ -266,11 +274,16 @@ describe('RunProgressTab', () => {
     const rows = host.querySelectorAll('tbody tr');
     // AGroup first (Bob)
     expect(rows[0].textContent).toContain('Bob');
+    // After first click to 'group' key → aria-sort should be 'ascending'
+    const groupHeader = host.querySelector('th.sticky-group') as HTMLElement;
+    expect(groupHeader.getAttribute('aria-sort')).toBe('ascending');
     // Toggle to desc
     groupBtn!.click();
     flushSync();
     const rowsDesc = host.querySelectorAll('tbody tr');
     expect(rowsDesc[0].textContent).toContain('Alice');
+    // After second click → aria-sort should be 'descending'
+    expect(groupHeader.getAttribute('aria-sort')).toBe('descending');
   });
 
   // T13 – Sort by sequence column

@@ -107,7 +107,8 @@
     }
     if (key === 'group') {
       const cmp = (a.group_name ?? '').localeCompare(b.group_name ?? '');
-      return dir === 'asc' ? cmp : -cmp;
+      const primary = dir === 'asc' ? cmp : -cmp;
+      return primary !== 0 ? primary : tiebreakByName(a, b);
     }
     // seq:<id>
     const seqId = parseInt(key.slice(4), 10);
@@ -308,14 +309,19 @@
       <button class="csv-button" onclick={handleDownloadCSV} data-action="download-csv">Download CSV</button>
     </div>
 
+    {#if data.sequences.length === 0}
+      <div class="empty">No sequences in this run.</div>
+    {:else}
     <div class="table-scroll">
       <table class="progress-grid">
         <thead>
           <tr class="block-row">
-            <th class="sticky-name" scope="col" rowspan="2">
+            <th class="sticky-name" scope="col" rowspan="2"
+                aria-sort={sortKey === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
               <button onclick={() => toggleSort('name')}>Student {#if sortKey === 'name'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
             </th>
-            <th class="sticky-group" scope="col" rowspan="2">
+            <th class="sticky-group" scope="col" rowspan="2"
+                aria-sort={sortKey === 'group' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
               <button onclick={() => toggleSort('group')}>Group {#if sortKey === 'group'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
             </th>
             {#each blockGroupedSequences as bg (bg.block_id)}
@@ -367,6 +373,7 @@
         </tbody>
       </table>
     </div>
+    {/if}
 
     {#if panelOpen && panelTarget}
       <div class="panel-placeholder" data-panel-kind="progress"
