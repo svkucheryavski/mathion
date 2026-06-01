@@ -1107,7 +1107,7 @@ If `--surface-muted` already exists, do not duplicate it.
 
 - [ ] **Step 2: Create `StatusBadge.svelte`**
 
-Per spec §6.6:
+Per spec §6.6 (markup + CSS values byte-aligned to spec lines 1374-1396; `cssKey` uses `$derived` for Svelte 5 prop-change reactivity — spec example writes a bare `const` for doc brevity but runtime reactivity requires the rune):
 
 ```svelte
 <!-- frontend/src/components/ui/StatusBadge.svelte -->
@@ -1122,27 +1122,28 @@ Per spec §6.6:
 
 <span
   class="status-badge"
-  style:--badge-bg={`var(--status-${cssKey}-bg)`}
-  style:--badge-fg={`var(--status-${cssKey}-fg)`}
+  data-status={status}
+  style="--badge-bg: var(--status-{cssKey}-bg); --badge-fg: var(--status-{cssKey}-fg);"
 >
-  <span class="status-icon" aria-hidden="true">{STATUS_ICON[status]}</span>
-  <span class="status-label">{STATUS_LABEL[status]}</span>
+  <span class="icon" aria-hidden="true">{STATUS_ICON[status]}</span>
+  <span class="label">{STATUS_LABEL[status]}</span>
 </span>
 
 <style>
   .status-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.4em;
-    padding: 0.2em 0.6em;
-    border-radius: 999px;
-    font-size: 0.85em;
-    line-height: 1.2;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 2px;
     background-color: var(--badge-bg);
     color: var(--badge-fg);
+    font-size: 0.875rem;
+    font-weight: 500;
+    white-space: nowrap;
   }
-  .status-icon {
-    font-weight: 700;
+  .status-badge .icon {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols', sans-serif;
   }
 </style>
 ```
@@ -1180,11 +1181,15 @@ const ALL_STATUSES: MpGroupStatus[] = [
 
 describe('StatusBadge', () => {
   for (const status of ALL_STATUSES) {
-    it(`renders label "${STATUS_LABEL[status]}" + icon "${STATUS_ICON[status]}" for ${status}`, () => {
+    it(`renders label "${STATUS_LABEL[status]}" + icon "${STATUS_ICON[status]}" + data-status for ${status}`, () => {
       mountBadge(status);
       const badge = host.querySelector('.status-badge') as HTMLElement;
+      // (a) Content
       expect(badge.textContent?.trim()).toContain(STATUS_LABEL[status]);
       expect(badge.textContent?.trim()).toContain(STATUS_ICON[status]);
+      // (b) data-status attribute (spec §6.6 test list)
+      expect(badge.getAttribute('data-status')).toBe(status);
+      // (c) Inline style references the correct CSS variables
       const inlineStyle = badge.getAttribute('style') ?? '';
       const cssKey = status.replace(/_/g, '-');
       expect(inlineStyle).toContain(`--badge-bg: var(--status-${cssKey}-bg)`);
