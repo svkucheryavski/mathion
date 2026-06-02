@@ -84,7 +84,7 @@
     // mp:<id>
     const mpId = parseInt((sortKey as string).slice(3), 10);
     const mp = data?.mini_projects.find((m) => m.id === mpId);
-    if (!mp) return tiebreakByGroupName(a, b);
+    if (!mp) return 0;  // STALE: MP absent → no-op until user re-clicks (spec §6.4 line 1082)
 
     const aEntry = mp.groups.find((g) => g.group_id === a.group_id);
     const bEntry = mp.groups.find((g) => g.group_id === b.group_id);

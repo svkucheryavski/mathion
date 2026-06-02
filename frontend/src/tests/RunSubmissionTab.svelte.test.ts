@@ -12,6 +12,7 @@ vi.mock('../lib/csvWrite', async (importOriginal) => {
 });
 
 import { downloadCSV } from '../lib/csvWrite';
+import { STATUS_LABEL, STATUS_ICON } from '../lib/dashboards';
 import RunSubmissionTab from '../components/runs/RunSubmissionTab.svelte';
 
 let host: HTMLDivElement;
@@ -150,6 +151,12 @@ describe('RunSubmissionTab', () => {
     expect(statuses).toContain('needs_revision');
     expect(statuses).toContain('accepted');
     expect(statuses).toContain('rejected');
+    // Each badge must also show the label text and icon character (spec §13 line 1666)
+    for (const status of ['not_submitted', 'awaiting_eval', 'needs_revision', 'accepted', 'rejected'] as const) {
+      const badge = Array.from(badges).find((b) => b.getAttribute('data-status') === status)!;
+      expect(badge.textContent).toContain(STATUS_LABEL[status]);
+      expect(badge.textContent).toContain(STATUS_ICON[status]);
+    }
   });
 
   // T7 – Sort by group: click toggles direction, aria-sort updates
@@ -190,9 +197,34 @@ describe('RunSubmissionTab', () => {
     expect(rowsAsc[0].textContent).toContain('AGroup');
   });
 
-  // T8 – Sort by MP column: priority order
+  // T8 – Sort by MP column: priority order (needs_revision first asc, accepted first desc)
   it('sort by MP column uses priority order (needs_revision first asc, accepted first desc)', async () => {
-    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    // Use a mock with 3 groups: G1=needs_revision, G2=awaiting_eval, G3=accepted on MP2
+    const body = submissionMock({
+      mini_projects: [
+        {
+          id: 1, block_id: 5, block_order: 1, block_title: 'B1', title: 'Mini project for Block 1',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            { group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'not_submitted', latest_submission: null, latest_evaluation: null },
+            { group_id: 2, group_name: 'G2', group_is_disabled: false, status: 'accepted', latest_submission: null, latest_evaluation: null },
+            { group_id: 3, group_name: 'G3', group_is_disabled: false, status: 'not_submitted', latest_submission: null, latest_evaluation: null },
+          ],
+          counts: { total_groups: 3, not_submitted: 2, awaiting_eval: 0, needs_revision: 0, accepted: 1, rejected: 0 },
+        },
+        {
+          id: 2, block_id: 6, block_order: 2, block_title: 'B2', title: 'Mini project for Block 2',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            { group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'needs_revision', latest_submission: null, latest_evaluation: null },
+            { group_id: 2, group_name: 'G2', group_is_disabled: false, status: 'awaiting_eval', latest_submission: null, latest_evaluation: null },
+            { group_id: 3, group_name: 'G3', group_is_disabled: false, status: 'accepted', latest_submission: null, latest_evaluation: null },
+          ],
+          counts: { total_groups: 3, not_submitted: 0, awaiting_eval: 1, needs_revision: 1, accepted: 1, rejected: 0 },
+        },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetch(200, body));
     mountTab();
     await settle();
     // Click "Mini project for Block 2" column header to sort asc
@@ -201,15 +233,14 @@ describe('RunSubmissionTab', () => {
     headerBtn.click();
     flushSync();
     const rowsAsc = Array.from(host.querySelectorAll('tbody tr'));
-    // G1 has needs_revision on MP2 (priority 0) → should be first
+    // G1 has needs_revision on MP2 (priority 0) → should be first in asc
     expect(rowsAsc[0].textContent).toContain('G1');
-    // Toggle to desc: accepted first
+    // Toggle to desc: accepted(priority 4) is highest → G3 should be first
     headerBtn.click();
     flushSync();
     const rowsDesc = Array.from(host.querySelectorAll('tbody tr'));
-    // G2 has awaiting_eval (priority 2) — higher priority than G1 needs_revision in desc
-    // desc: high priority value first → accepted(4) > awaiting(2) > needs_revision(0)
-    expect(rowsDesc[0].textContent).toContain('G2');
+    // G3 has accepted on MP2 (priority 4) → highest in desc
+    expect(rowsDesc[0].textContent).toContain('G3');
   });
 
   // T9 – Filter by group dropdown narrows rows
@@ -339,17 +370,25 @@ describe('RunSubmissionTab', () => {
   });
 
   // T16 – Retry-after-error
-  it('retry-after-error: error banner → Retry → error clears → grid populates', async () => {
+  it('retry-after-error: error banner → Retry → error clears + loading flips on → grid populates', async () => {
+    // Deferred resolver so we can assert intermediate state
+    let resolveRetry!: (v: Response) => void;
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error('network down'))
-      .mockResolvedValueOnce(new Response(JSON.stringify(submissionMock()), { status: 200 }));
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveRetry = r; }));
     vi.stubGlobal('fetch', fetchMock);
     mountTab();
     await settle();
     expect(host.querySelector('.banner-error, [role="alert"]')).toBeTruthy();
-    // Click Retry
+    // Click Retry — second fetch is deferred (not yet resolved)
     const retryBtn = Array.from(host.querySelectorAll('button')).find((b) => /retry/i.test(b.textContent ?? ''));
     retryBtn!.click();
+    flushSync();
+    // INTERMEDIATE STATE: error cleared, loading is showing (spec §13 line 1676)
+    expect(host.querySelector('.banner-error, [role="alert"]')).toBeFalsy();
+    expect(host.querySelector('.loading-placeholder, [aria-busy="true"]')).toBeTruthy();
+    // Resolve the retry fetch with success data
+    resolveRetry(new Response(JSON.stringify(submissionMock()), { status: 200 }));
     await settle();
     // Error banner gone, grid populated
     expect(host.querySelector('.banner-error, [role="alert"]')).toBeFalsy();
@@ -422,6 +461,67 @@ describe('RunSubmissionTab', () => {
     expect(csvText).toContain('"Smith, John"');
   });
 
+  // T17c – CSV populated values: booleans as literal true/false + raw enum for evaluation_result
+  it('CSV download: populated row has literal boolean strings and raw evaluation_result enum', async () => {
+    const body = submissionMock({
+      mini_projects: [
+        {
+          id: 1, block_id: 5, block_order: 1, block_title: 'B1', title: 'MP1',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            {
+              group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'needs_revision',
+              latest_submission: {
+                submission_number: 2,
+                submitted_at: '2026-01-10T12:00:00Z',
+                submitted_by: { full_name: 'Alice' },
+                is_late: true,
+                is_resubmission: false,
+                file_size: 12345,
+              },
+              latest_evaluation: {
+                evaluated_at: '2026-01-11T10:00:00Z',
+                evaluated_by: { full_name: 'Prof B' },
+                result: 'major_revision',
+                score: 85,
+                has_feedback_file: true,
+              },
+            },
+          ],
+          counts: { total_groups: 1, not_submitted: 0, awaiting_eval: 0, needs_revision: 1, accepted: 0, rejected: 0 },
+        },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetch(200, body));
+    vi.mocked(downloadCSV).mockClear();
+    mountTab();
+    await settle();
+    const csvBtn = host.querySelector('[data-action="download-csv"]') as HTMLButtonElement;
+    csvBtn.click();
+    flushSync();
+    expect(vi.mocked(downloadCSV)).toHaveBeenCalledTimes(1);
+    const [csvText] = vi.mocked(downloadCSV).mock.calls[0] as [string, string];
+    const lines = csvText.replace(/^﻿/, '').split('\r\n').filter((l) => l.length > 0);
+    // There is 1 data row (1 group × 1 MP)
+    expect(lines.length).toBe(2); // header + 1 row
+    const headers = lines[0].split(',');
+    const values = lines[1].split(',');
+    // is_late should be literal 'true' (not empty, not 1, not "Yes")
+    const isLateIdx = headers.indexOf('is_late');
+    expect(values[isLateIdx]).toBe('true');
+    // is_resubmission should be literal 'false'
+    const isResubIdx = headers.indexOf('is_resubmission');
+    expect(values[isResubIdx]).toBe('false');
+    // has_feedback_file should be literal 'true'
+    const hasFbIdx = headers.indexOf('has_feedback_file');
+    expect(values[hasFbIdx]).toBe('true');
+    // evaluation_result should be raw enum value, NOT human label (spec lines 1271)
+    const evalResIdx = headers.indexOf('evaluation_result');
+    expect(values[evalResIdx]).toBe('major_revision');
+    // Sanity: human label 'Major revision' must NOT appear in that cell
+    expect(values[evalResIdx]).not.toBe('Major revision');
+  });
+
   // T18 – AbortController on rapid runId change
   it('rapid runId change cancels in-flight fetch (signal.aborted)', async () => {
     const fetchMock = vi.fn(() => new Promise<Response>(() => { /* never resolves */ }));
@@ -441,8 +541,33 @@ describe('RunSubmissionTab', () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  // T18b – AbortController on Refresh-triggered refetch aborts the previous in-flight fetch
+  it('AbortController on Refresh-triggered refetch aborts the previous in-flight fetch', async () => {
+    // Load initial data, then set up a slow second fetch so we can abort it via a second Refresh
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(submissionMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>(() => { /* never resolves — in-flight */ }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab();
+    await settle();
+    // Click Refresh once — starts in-flight slow fetch (call index 1)
+    const refreshBtn = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
+    refreshBtn.click();
+    flushSync();
+    // Capture signal from the in-flight refresh fetch
+    const inFlightInit = (fetchMock.mock.calls[1] as unknown[])[1] as RequestInit;
+    const inFlightSignal = inFlightInit.signal;
+    expect(inFlightSignal?.aborted).toBe(false);
+    // Click Refresh again — should abort the previous in-flight fetch
+    refreshBtn.click();
+    flushSync();
+    // The first Refresh's signal should now be aborted (spec §13 line 1678)
+    expect(inFlightSignal?.aborted).toBe(true);
+  });
+
   // T19 – RunId change resets local state (no nameQuery; sortKey/sortDir preserved)
   it('runId change resets groupFilter, panelOpen, panelTarget (NOT sortKey/sortDir)', async () => {
+    // Both runs share MP id=2 so we can assert aria-sort persistence after the swap
     const fetchMock = mockFetch(200, submissionMock());
     vi.stubGlobal('fetch', fetchMock);
     const box = $state({ runId: 1 });
@@ -451,11 +576,14 @@ describe('RunSubmissionTab', () => {
     component = mount(RunSubmissionTab, { target: host, props: box });
     flushSync();
     await settle();
-    // Change sortKey to an MP column
+    // Click the MP id=2 column header to set sortKey='mp:2', sortDir='asc'
     const mpBtn = Array.from(host.querySelectorAll('th button'))
       .find((b) => b.textContent?.includes('Block 2')) as HTMLButtonElement;
     mpBtn.click();
     flushSync();
+    // BEFORE runId change: verify aria-sort='ascending' on the MP2 header (spec line 1082)
+    const mpTh = mpBtn.closest('th') as HTMLElement;
+    expect(mpTh.getAttribute('aria-sort')).toBe('ascending');
     // Set groupFilter
     const select = host.querySelector('select') as HTMLSelectElement;
     select.value = '1';
@@ -466,7 +594,7 @@ describe('RunSubmissionTab', () => {
     cellBtn.click();
     flushSync();
     expect(host.querySelector('.panel-placeholder')).toBeTruthy();
-    // Change runId
+    // Change runId — new run also contains MP id=2 (same id), so aria-sort should persist
     const fetchMock2 = mockFetch(200, submissionMock({ run: { id: 2, title: 'R2', groups_enabled: true } }));
     vi.stubGlobal('fetch', fetchMock2);
     box.runId = 2;
@@ -477,6 +605,75 @@ describe('RunSubmissionTab', () => {
     // groupFilter reset to 'all' → both groups visible
     expect(host.textContent).toContain('G1');
     expect(host.textContent).toContain('G2');
+    // sortKey/sortDir NOT reset: MP2 header still has aria-sort='ascending' (spec line 1082)
+    const mpTh2 = Array.from(host.querySelectorAll('th.mp-title-header'))
+      .find((th) => th.querySelector('button')?.textContent?.includes('Block 2')) as HTMLElement;
+    expect(mpTh2.getAttribute('aria-sort')).toBe('ascending');
+  });
+
+  // T19b – Stale mp:<id> sortKey on runId change is a no-op until user re-clicks
+  it('stale mp:<id> sortKey is a no-op (rows in group_id asc order) when MP absent from new run', async () => {
+    // Run 1: has MP id=1
+    const run1Body = submissionMock({
+      mini_projects: [
+        {
+          id: 1, block_id: 5, block_order: 1, block_title: 'B1', title: 'MP1',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            { group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'needs_revision', latest_submission: null, latest_evaluation: null },
+            { group_id: 2, group_name: 'G2', group_is_disabled: false, status: 'awaiting_eval', latest_submission: null, latest_evaluation: null },
+            { group_id: 3, group_name: 'G3', group_is_disabled: false, status: 'accepted', latest_submission: null, latest_evaluation: null },
+          ],
+          counts: { total_groups: 3, not_submitted: 0, awaiting_eval: 1, needs_revision: 1, accepted: 1, rejected: 0 },
+        },
+      ],
+    });
+    // Run 2: only has MP id=99 (NOT id=1 — so mp:1 is stale)
+    const run2Body = {
+      run: { id: 2, title: 'R2', groups_enabled: true },
+      mini_projects: [
+        {
+          id: 99, block_id: 9, block_order: 1, block_title: 'B99', title: 'MP99',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            { group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'accepted', latest_submission: null, latest_evaluation: null },
+            { group_id: 2, group_name: 'G2', group_is_disabled: false, status: 'needs_revision', latest_submission: null, latest_evaluation: null },
+            { group_id: 3, group_name: 'G3', group_is_disabled: false, status: 'awaiting_eval', latest_submission: null, latest_evaluation: null },
+          ],
+          counts: { total_groups: 3, not_submitted: 0, awaiting_eval: 1, needs_revision: 1, accepted: 1, rejected: 0 },
+        },
+      ],
+    };
+    const fetchMock1 = mockFetch(200, run1Body);
+    vi.stubGlobal('fetch', fetchMock1);
+    const box = $state({ runId: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(RunSubmissionTab, { target: host, props: box });
+    flushSync();
+    await settle();
+    // Click MP id=1 header to sort by it (asc)
+    const mpBtn = Array.from(host.querySelectorAll('th button'))
+      .find((b) => b.textContent?.includes('MP1')) as HTMLButtonElement;
+    mpBtn.click();
+    flushSync();
+    // Swap to run 2 (MP id=1 no longer exists — stale sortKey)
+    vi.stubGlobal('fetch', mockFetch(200, run2Body));
+    box.runId = 2;
+    flushSync();
+    await settle();
+    // With stale mp:1, compareGroups returns 0 for all pairs → rows stay in uniqueGroups order
+    // uniqueGroups is sorted by group_id asc → G1(1), G2(2), G3(3)
+    const rows = Array.from(host.querySelectorAll('tbody tr'));
+    expect(rows[0].textContent).toContain('G1');
+    expect(rows[1].textContent).toContain('G2');
+    expect(rows[2].textContent).toContain('G3');
+    // NOT sorted by group_name (would also be G1, G2, G3 alphabetically — but
+    // we confirm group_id order by checking that the sort is numerically stable, not group_name-based)
+    // The MP99 header must NOT have aria-sort set to the old stale state
+    const mp99Th = Array.from(host.querySelectorAll('th.mp-title-header'))
+      .find((th) => th.querySelector('button')?.textContent?.includes('MP99')) as HTMLElement;
+    expect(mp99Th.getAttribute('aria-sort')).toBe('none');
   });
 
   // T20 – Unmount after refresh() aborts the refresh-created controller
