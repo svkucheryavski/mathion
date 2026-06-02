@@ -1,14 +1,16 @@
-"""Layered seed for the teacher dashboards smoke walkthrough.
+"""Combined seed for the teacher dashboards smoke walkthrough.
 
-Depends on Slice A's seed (`backend/scripts/seed_teaching_smoke.py`).
-Re-running this script is safe (idempotent).
+First invokes Slice A's `seed_teaching_smoke.seed()` (drops-and-recreates the
+base course/version/Intro block/2 runs), then layers dashboard entities on top.
+The combined script is the full rebuild entry point and is idempotent across
+reruns.
 
 Usage:
     backend/.venv/bin/python -m scripts.seed_teaching_dashboards_smoke
 """
 import os
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import NoResultFound
 
 from mathion.database import SessionLocal
@@ -21,7 +23,7 @@ from mathion.api.helpers import (
     submission_storage_dir, build_submission_filename, build_feedback_filename,
 )
 from mathion.markdown import render_markdown
-from scripts.seed_teaching_smoke import get_or_create_user
+from scripts.seed_teaching_smoke import get_or_create_user, seed as seed_slice_a
 
 
 def _get_or_create_group(db, run_id: int, name: str, is_disabled: bool) -> "Group":
@@ -236,10 +238,42 @@ def _get_or_create_evaluation(
 
 
 def seed() -> None:
+    # Pre-cleanup: Slice A's seed deletes runs via ORM cascade through
+    # Run.groups (cascade="all, delete-orphan"), but Submission.group_id is
+    # DB-level ondelete="RESTRICT" (models.py:306). On rerun the dashboards
+    # seed's Submissions would block Slice A's Group deletion. Wipe the
+    # dashboards-owned MiniProjects first — DB-level CASCADE clears
+    # Submissions + Evaluations — so Slice A's cascade can proceed cleanly.
+    cleanup_db = SessionLocal()
+    try:
+        existing = cleanup_db.execute(
+            select(Course).where(Course.slug == "teaching-smoke-101")
+        ).scalar_one_or_none()
+        if existing is not None:
+            run_ids = [
+                r.id
+                for v in existing.versions
+                for r in cleanup_db.execute(
+                    select(Run).where(Run.version_id == v.id)
+                ).scalars()
+            ]
+            if run_ids:
+                cleanup_db.execute(
+                    delete(MiniProject).where(MiniProject.run_id.in_(run_ids))
+                )
+                cleanup_db.commit()
+    finally:
+        cleanup_db.close()
+
+    # Slice A's seed opens its own SessionLocal, commits, and closes
+    # (drops-and-recreates teaching-smoke-101 every run); the dashboards
+    # seed then re-acquires Slice A's entities below in a fresh session.
+    seed_slice_a()
+
     db = SessionLocal()
     try:
         # ------------------------------------------------------------------ #
-        # Step 0: re-acquire Slice A's entities
+        # Step 0: re-acquire Slice A's entities (in a fresh session)
         # ------------------------------------------------------------------ #
         try:
             course = db.execute(
@@ -247,8 +281,9 @@ def seed() -> None:
             ).scalar_one()
         except NoResultFound:
             raise RuntimeError(
-                "teaching-smoke-101 course not found — Slice A "
-                "seed_teaching_smoke.seed() must run successfully before this script."
+                "teaching-smoke-101 course not found after Slice A "
+                "seed_teaching_smoke.seed() ran — Slice A's seed may have "
+                "failed silently or its contract has drifted."
             )
         version = course.versions[0]
         intro_block = next(b for b in version.blocks if b.slug == "intro")
