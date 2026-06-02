@@ -349,23 +349,28 @@ describe('RunProgressTab', () => {
     expect(host.textContent).toContain('1/2');
   });
 
-  // T15 – Cell click opens side panel
-  it('cell click: opens side panel placeholder with correct target shape', async () => {
-    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+  // T15 – Cell click opens side panel (real DashboardSidePanel)
+  it('cell click: opens DashboardSidePanel (role=dialog) with progress target', async () => {
+    // First fetch: progress dashboard; subsequent fetch: getSequenceItemState drilldown
+    const drilldownBody = {
+      sequence: { sequence_id: 10, sequence_title: 'S1', sequence_order: 1, block_id: 5, block_title: 'B1' },
+      student: { user_id: 100, full_name: 'Alice', email: 'a@x' },
+      items: [{ item_id: 1, item_order: 1, item_title: 'Item 1', item_type: 'static_page', is_covered: true, last_score: null, last_visited_at: null }],
+    };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressMock()), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValue(new Response(JSON.stringify(drilldownBody), { status: 200, headers: { 'Content-Type': 'application/json' } })));
     mountTab();
     await settle();
     const cellBtn = host.querySelector('.cell-btn') as HTMLButtonElement;
     expect(cellBtn).toBeTruthy();
     cellBtn.click();
     flushSync();
-    const panel = host.querySelector('.panel-placeholder');
+    await settle();
+    // Real panel is mounted — check for dialog role
+    const panel = host.querySelector('[role="dialog"]');
     expect(panel).toBeTruthy();
-    expect(panel!.getAttribute('data-panel-kind')).toBe('progress');
-    const parsed = JSON.parse(panel!.getAttribute('data-panel-target')!);
-    expect(parsed.kind).toBe('progress');
-    expect(parsed.runId).toBe(1);
-    expect(typeof parsed.user_id).toBe('number');
-    expect(typeof parsed.sequence_id).toBe('number');
+    expect(panel!.getAttribute('aria-label')).toBe('Item-level breakdown');
   });
 
   // T16 – Disabled user
@@ -508,8 +513,14 @@ describe('RunProgressTab', () => {
 
   // T24 – RunId change resets local state
   it('runId change resets groupFilter, nameQuery, panelOpen, panelTarget', async () => {
-    const fetchMock = mockFetch(200, progressMock());
-    vi.stubGlobal('fetch', fetchMock);
+    const drilldownBody = {
+      sequence: { sequence_id: 10, sequence_title: 'S1', sequence_order: 1, block_id: 5, block_title: 'B1' },
+      student: { user_id: 100, full_name: 'Alice', email: 'a@x' },
+      items: [],
+    };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressMock()), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValue(new Response(JSON.stringify(drilldownBody), { status: 200, headers: { 'Content-Type': 'application/json' } })));
     const box = $state({ runId: 1 });
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -520,7 +531,8 @@ describe('RunProgressTab', () => {
     const cellBtn = host.querySelector('.cell-btn') as HTMLButtonElement;
     cellBtn.click();
     flushSync();
-    expect(host.querySelector('.panel-placeholder')).toBeTruthy();
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeTruthy();
     // Set groupFilter
     const select = host.querySelector('select[aria-label="Filter by group"]') as HTMLSelectElement;
     select.value = '1';
@@ -538,7 +550,7 @@ describe('RunProgressTab', () => {
     flushSync();
     await settle();
     // State should be reset: no panel, no filter applied, no search query
-    expect(host.querySelector('.panel-placeholder')).toBeFalsy();
+    expect(host.querySelector('[role="dialog"]')).toBeFalsy();
     // groupFilter reset to 'all' — both students visible again
     expect(host.textContent).toContain('Alice');
     expect(host.textContent).toContain('Bob');

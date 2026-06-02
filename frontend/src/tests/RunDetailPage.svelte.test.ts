@@ -334,7 +334,8 @@ describe('RunDetailPage — Assets tab integration', () => {
     } as unknown as Response);
     await settle();
     const tabs = target.querySelectorAll('button[role="tab"]');
-    expect(tabs.length).toBe(6);
+    // 6 original + 2 new dashboard tabs (Progress, Submission)
+    expect(tabs.length).toBe(8);
     expect(
       Array.from(tabs).find((b) => b.textContent?.trim() === 'Assets'),
     ).toBeTruthy();

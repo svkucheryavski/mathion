@@ -1,13 +1,9 @@
 <script lang="ts">
-  import { getProgressDashboard, getSequenceItemState,
+  import { getProgressDashboard,
            type DashboardProgressResponse } from '../../lib/dashboards';
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
-
-  // STATUS_* kept for symmetry with §6.4 import patterns — remove if linter complains
-  // import { STATUS_LABEL, STATUS_ICON, STATUS_PRIORITY } from '../../lib/dashboards';
-  // Accessing getSequenceItemState to silence unused-import warnings in T7 integration
-  void getSequenceItemState;
+  import DashboardSidePanel from './DashboardSidePanel.svelte';
 
   let { runId }: { runId: number } = $props();
 
@@ -376,11 +372,10 @@
     {/if}
 
     {#if panelOpen && panelTarget}
-      <div class="panel-placeholder" data-panel-kind="progress"
-           data-panel-target={JSON.stringify({ kind: 'progress', runId, ...panelTarget })}>
-        {JSON.stringify({ kind: 'progress', runId, ...panelTarget })}
-        <button onclick={closePanel} aria-label="Close panel">✕</button>
-      </div>
+      <DashboardSidePanel
+        target={{ kind: 'progress', runId, ...panelTarget }}
+        onClose={closePanel}
+      />
     {/if}
   {/if}
 </div>

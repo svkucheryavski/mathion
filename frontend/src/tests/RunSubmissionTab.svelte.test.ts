@@ -271,8 +271,8 @@ describe('RunSubmissionTab', () => {
     expect(host.textContent).not.toContain('0 rejected');
   });
 
-  // T11 – Cell click: opens side panel with submission target shape
-  it('cell click: opens side panel placeholder with correct submission target shape', async () => {
+  // T11 – Cell click: opens DashboardSidePanel (submission variant)
+  it('cell click: opens DashboardSidePanel (role=dialog) with submission target', async () => {
     vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
     mountTab();
     await settle();
@@ -280,15 +280,13 @@ describe('RunSubmissionTab', () => {
     expect(cellBtn).toBeTruthy();
     cellBtn.click();
     flushSync();
-    const panel = host.querySelector('.panel-placeholder');
+    // Real panel mounted for submission variant (no fetch needed — data in props)
+    const panel = host.querySelector('[role="dialog"]');
     expect(panel).toBeTruthy();
-    expect(panel!.getAttribute('data-panel-kind')).toBe('submission');
-    const parsed = JSON.parse(panel!.getAttribute('data-panel-target')!);
-    expect(parsed.kind).toBe('submission');
-    expect(typeof parsed.mp).toBe('object');
-    expect(typeof parsed.entry).toBe('object');
-    expect(typeof parsed.mp.id).toBe('number');
-    expect(typeof parsed.entry.group_id).toBe('number');
+    expect(panel!.getAttribute('aria-label')).toBe('Submission details');
+    // mp.title and group_name from submissionMock should appear in the panel
+    expect(panel!.textContent).toContain('Mini project for Block 1');
+    expect(panel!.textContent).toContain('G1');
   });
 
   // T12 – Disabled group rendering
@@ -593,7 +591,7 @@ describe('RunSubmissionTab', () => {
     const cellBtn = host.querySelector('.status-cell-btn') as HTMLButtonElement;
     cellBtn.click();
     flushSync();
-    expect(host.querySelector('.panel-placeholder')).toBeTruthy();
+    expect(host.querySelector('[role="dialog"]')).toBeTruthy();
     // Change runId — new run also contains MP id=2 (same id), so aria-sort should persist
     const fetchMock2 = mockFetch(200, submissionMock({ run: { id: 2, title: 'R2', groups_enabled: true } }));
     vi.stubGlobal('fetch', fetchMock2);
@@ -601,7 +599,7 @@ describe('RunSubmissionTab', () => {
     flushSync();
     await settle();
     // Panel closed, groupFilter reset
-    expect(host.querySelector('.panel-placeholder')).toBeFalsy();
+    expect(host.querySelector('[role="dialog"]')).toBeFalsy();
     // groupFilter reset to 'all' → both groups visible
     expect(host.textContent).toContain('G1');
     expect(host.textContent).toContain('G2');

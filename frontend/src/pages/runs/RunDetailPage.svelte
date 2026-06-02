@@ -16,6 +16,8 @@
   import RosterImportModal from '../../components/runs/RosterImportModal.svelte';
   import RunMiniProjectsTab from '../../components/runs/RunMiniProjectsTab.svelte';
   import RunAssetsTab from '../../components/runs/RunAssetsTab.svelte';
+  import RunProgressTab from '../../components/runs/RunProgressTab.svelte';
+  import RunSubmissionTab from '../../components/runs/RunSubmissionTab.svelte';
   import { listBlocks } from '../../lib/blocks';
   import { listMiniProjects } from '../../lib/miniProjects';
   import { listRunAssets } from '../../lib/runAssets';
@@ -24,7 +26,7 @@
     BlockResponse, MiniProjectResponse, RunAssetResponse,
   } from '../../lib/types';
 
-  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets';
+  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets' | 'progress' | 'submission';
 
   let { courseSlug, runId }: { courseSlug: string; runId: string } = $props();
 
@@ -363,6 +365,8 @@
     <button role="tab" aria-selected={activeTab === 'roster'} onclick={() => (activeTab = 'roster')}>Roster</button>
     <button role="tab" aria-selected={activeTab === 'mini-projects'} onclick={() => (activeTab = 'mini-projects')}>Mini-projects</button>
     <button role="tab" aria-selected={activeTab === 'assets'} onclick={() => (activeTab = 'assets')}>Assets</button>
+    <button role="tab" aria-selected={activeTab === 'progress'} onclick={() => (activeTab = 'progress')}>Progress</button>
+    <button role="tab" aria-selected={activeTab === 'submission'} onclick={() => (activeTab = 'submission')}>Submission</button>
   </div>
 
   <section class="tab-body">
@@ -440,6 +444,10 @@
         onEditMiniProject={(mp) => { pendingEditTarget = mp; activeTab = 'mini-projects'; }}
         onReloadRun={reloadRun}
       />
+    {:else if activeTab === 'progress'}
+      <RunProgressTab runId={run.id} />
+    {:else if activeTab === 'submission'}
+      <RunSubmissionTab runId={run.id} />
     {/if}
   </section>
 {/if}

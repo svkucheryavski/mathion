@@ -5,6 +5,7 @@
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
+  import DashboardSidePanel from './DashboardSidePanel.svelte';
 
   // STATUS_ICON kept to satisfy import; used indirectly via StatusBadge
   void STATUS_ICON;
@@ -276,11 +277,10 @@
         </div>
 
         {#if panelOpen && panelTarget}
-          <div class="panel-placeholder" data-panel-kind="submission"
-               data-panel-target={JSON.stringify({ kind: 'submission', ...panelTarget })}>
-            {JSON.stringify({ kind: 'submission', ...panelTarget })}
-            <button onclick={closePanel}>Close</button>
-          </div>
+          <DashboardSidePanel
+            target={{ kind: 'submission', ...panelTarget }}
+            onClose={closePanel}
+          />
         {/if}
       {/if}
     {/if}
@@ -372,12 +372,5 @@
     padding: 1rem;
   }
 
-  .panel-placeholder {
-    margin-top: 1rem;
-    padding: 0.5rem;
-    background: var(--surface-muted, #f3f4f6);
-    border: 1px dashed var(--muted, #6b7280);
-    font-size: 0.8em;
-    word-break: break-all;
-  }
+
 </style>
