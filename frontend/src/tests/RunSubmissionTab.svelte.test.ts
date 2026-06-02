@@ -629,6 +629,11 @@ describe('RunSubmissionTab', () => {
       ],
     });
     // Run 2: only has MP id=99 (NOT id=1 — so mp:1 is stale)
+    // Group names are intentionally NOT in group_id-asc alphabetical order:
+    //   id=1 → 'A', id=2 → 'C', id=3 → 'B'
+    // So group_id-asc order produces A, C, B; group_name-asc order would produce A, B, C.
+    // This makes the test distinguish the fixed behavior (return 0 → stable group_id order → A, C, B)
+    // from the original bug (tiebreakByGroupName → A, B, C).
     const run2Body = {
       run: { id: 2, title: 'R2', groups_enabled: true },
       mini_projects: [
@@ -636,9 +641,9 @@ describe('RunSubmissionTab', () => {
           id: 99, block_id: 9, block_order: 1, block_title: 'B99', title: 'MP99',
           is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
           groups: [
-            { group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'accepted', latest_submission: null, latest_evaluation: null },
-            { group_id: 2, group_name: 'G2', group_is_disabled: false, status: 'needs_revision', latest_submission: null, latest_evaluation: null },
-            { group_id: 3, group_name: 'G3', group_is_disabled: false, status: 'awaiting_eval', latest_submission: null, latest_evaluation: null },
+            { group_id: 1, group_name: 'A', group_is_disabled: false, status: 'accepted', latest_submission: null, latest_evaluation: null },
+            { group_id: 2, group_name: 'C', group_is_disabled: false, status: 'needs_revision', latest_submission: null, latest_evaluation: null },
+            { group_id: 3, group_name: 'B', group_is_disabled: false, status: 'awaiting_eval', latest_submission: null, latest_evaluation: null },
           ],
           counts: { total_groups: 3, not_submitted: 0, awaiting_eval: 1, needs_revision: 1, accepted: 1, rejected: 0 },
         },
@@ -663,13 +668,12 @@ describe('RunSubmissionTab', () => {
     flushSync();
     await settle();
     // With stale mp:1, compareGroups returns 0 for all pairs → rows stay in uniqueGroups order
-    // uniqueGroups is sorted by group_id asc → G1(1), G2(2), G3(3)
+    // uniqueGroups is sorted by group_id asc → id=1('A'), id=2('C'), id=3('B') → visible: A, C, B
+    // Under the original bug (tiebreakByGroupName), visible order would be A, B, C — caught by assertion below.
     const rows = Array.from(host.querySelectorAll('tbody tr'));
-    expect(rows[0].textContent).toContain('G1');
-    expect(rows[1].textContent).toContain('G2');
-    expect(rows[2].textContent).toContain('G3');
-    // NOT sorted by group_name (would also be G1, G2, G3 alphabetically — but
-    // we confirm group_id order by checking that the sort is numerically stable, not group_name-based)
+    expect(rows[0].textContent).toContain('A');
+    expect(rows[1].textContent).toContain('C');
+    expect(rows[2].textContent).toContain('B');
     // The MP99 header must NOT have aria-sort set to the old stale state
     const mp99Th = Array.from(host.querySelectorAll('th.mp-title-header'))
       .find((th) => th.querySelector('button')?.textContent?.includes('MP99')) as HTMLElement;
