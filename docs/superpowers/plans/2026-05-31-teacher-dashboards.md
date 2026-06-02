@@ -1634,7 +1634,7 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
 
 ## Task 7: Frontend — `DashboardSidePanel.svelte` + `RunDetailPage` tab registration
 
-**Spec:** §6.5 (side panel — discriminated union target, focus management, fetch + abort, download links), §6.8 (RunDetailPage tab registration). §13 `DashboardSidePanel.svelte.test.ts` block.
+**Spec:** §6.5 (side panel — discriminated union target, focus management, fetch + abort, download links), §6.2 (RunDetailPage tab registration). §13 `DashboardSidePanel.svelte.test.ts` block.
 
 **Files:**
 - Create: `frontend/src/components/runs/DashboardSidePanel.svelte`
@@ -1647,14 +1647,22 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
 
 ```svelte
 <!-- frontend/src/components/runs/DashboardSidePanel.svelte -->
+<!--
+  Slide-in side drawer (NOT centered modal). Width: min(640px, 90vw).
+  Pattern: peek-and-back-to-list, not focused-edit. Deliberate divergence
+  from the existing modal pattern; see spec §6.5 line 1304.
+-->
 <script lang="ts">
-  import { onMount } from 'svelte';
   import {
     getSequenceItemState,
     type SequenceItemStateResponse,
     type DashboardMpRow,
     type DashboardMpGroupEntry,
   } from '../../lib/dashboards';
+  import FocusTrap from '../ui/FocusTrap.svelte';
+  import StatusBadge from '../ui/StatusBadge.svelte';
+  import { formatLocalWithTz } from '../../lib/datetime';
+  import { formatFileSize } from '../../lib/format';
 
   type ProgressTarget = {
     kind: 'progress';
@@ -1670,10 +1678,6 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
   export type PanelTarget = ProgressTarget | SubmissionTarget;
 
   let { target, onClose }: { target: PanelTarget; onClose: () => void } = $props();
-
-  // Capture the previously-focused element so we can restore on close.
-  let previousFocus: HTMLElement | null = null;
-  let panelEl: HTMLDivElement | undefined = $state();
 
   // Progress fetch state — only relevant when target.kind === 'progress'.
   let data = $state<SequenceItemStateResponse | null>(null);
@@ -1694,11 +1698,9 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        if (err.status === 404) {
-          error = 'Item details unavailable. The dashboard may be out of date — Refresh.';
-        } else {
-          error = String(err?.message ?? err);
-        }
+        // Spec §6.5 line 1322: "Fetch error (incl. 404)" → uniform message
+        // for ALL fetch errors (404 not split from other errors).
+        error = 'Item details unavailable. The dashboard may be out of date — Refresh.';
         loading = false;
       });
     return () => ctl.abort();
@@ -1707,85 +1709,104 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
   // Unmount-only cleanup for any in-flight panel fetch (mirrors the tab pattern).
   $effect(() => () => abortCtl?.abort());
 
-  onMount(() => {
-    previousFocus = document.activeElement as HTMLElement | null;
-    panelEl?.focus();
-  });
-
+  // Escape handled via svelte:window per spec §6.5 line 1300 (matches the
+  // RosterImportModal.svelte:111-116 pattern). FocusTrap handles Tab/Shift+Tab
+  // cycling + previousFocus restore on unmount.
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
-      close();
+      onClose();
     }
-    // Simple focus trap — tab cycling can be added later; for v1 just keep
-    // focus within the panel via tabindex/sentinels in the template.
-  }
-
-  function close() {
-    onClose();
-    previousFocus?.focus();
   }
 </script>
 
-<div class="panel-backdrop" onclick={close} role="presentation"></div>
-<div
-  class="dashboard-side-panel"
-  role="dialog"
-  aria-modal="true"
-  aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
-  tabindex="-1"
-  bind:this={panelEl}
-  onkeydown={handleKeydown}
->
-  <button class="panel-close" onclick={close} aria-label="Close panel">×</button>
+<svelte:window onkeydown={handleKeydown} />
 
-  {#if target.kind === 'progress'}
-    {#if loading}
-      <p>Loading…</p>
-    {:else if error}
-      <p class="banner-error" role="alert">{error}</p>
-    {:else if data}
+<div class="panel-backdrop" onclick={onClose} role="presentation"></div>
+<FocusTrap>
+  <div
+    class="dashboard-side-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
+  >
+    <button class="panel-close" onclick={onClose} aria-label="Close panel">×</button>
+
+    {#if target.kind === 'progress'}
+      {#if loading}
+        <p>Loading…</p>
+      {:else if error}
+        <p class="banner-error" role="alert">{error}</p>
+      {:else if data}
+        <header>
+          <p class="student-line">{data.student.full_name ?? data.student.email}</p>
+          <h3>{data.sequence.block_title} — {data.sequence.sequence_title}</h3>
+        </header>
+        {#if data.items.length === 0}
+          <p>No items in this sequence.</p>
+        {:else}
+          <ol class="item-list">
+            {#each data.items as it (it.item_id)}
+              <li>
+                <span class="item-covered">{it.is_covered ? '✓' : '○'}</span>
+                <span class="item-title">{it.item_title}</span>
+                <span class="item-type">{it.item_type}</span>
+                {#if it.last_score}
+                  <span class="item-score">{it.last_score.correct}/{it.last_score.total}</span>
+                {/if}
+              </li>
+            {/each}
+          </ol>
+        {/if}
+      {/if}
+    {:else}
+      <!-- submission variant: no fetch, render from passed-in target.entry -->
       <header>
-        <h3>{data.sequence.block_title} — {data.sequence.sequence_title}</h3>
-        <p>{data.student.full_name ?? data.student.email}</p>
+        <h3>{target.mp.title}</h3>
+        <p class="block-subtitle">{target.mp.block_title}</p>
+        <p class="group-line">{target.entry.group_name}</p>
       </header>
-      {#if data.items.length === 0}
-        <p>No items in this sequence.</p>
+
+      <StatusBadge status={target.entry.status} />
+
+      {#if target.entry.status === 'not_submitted'}
+        <!-- Spec §6.5 line 1352: replaces Submission + Evaluation blocks entirely. -->
+        <p>Not submitted yet.</p>
       {:else}
-        <ol class="item-list">
-          {#each data.items as it (it.item_id)}
-            <li>
-              <span class="item-covered">{it.is_covered ? '✓' : '○'}</span>
-              <span class="item-title">{it.item_title}</span>
-              <span class="item-type">{it.item_type}</span>
-              {#if it.quiz}
-                <span class="item-score">{it.quiz.last_score_correct}/{it.quiz.last_score_total}</span>
-              {/if}
-            </li>
-          {/each}
-        </ol>
+        <!-- Submission block — spec §6.5 lines 1335-1342 -->
+        {#if target.entry.latest_submission}
+          {@const sub = target.entry.latest_submission}
+          <section class="submission-block">
+            <h4>Submission</h4>
+            <p>Number: {sub.submission_number}</p>
+            <p>Submitted at: {sub.submitted_at ? formatLocalWithTz(sub.submitted_at) : '—'}</p>
+            <p>Submitted by: {sub.submitted_by?.full_name ?? sub.submitted_by?.user_id ?? '—'}</p>
+            <p>Late: {sub.is_late ? 'Yes' : 'No'}</p>
+            <p>Resubmission: {sub.is_resubmission ? 'Yes' : 'No'}</p>
+            <p>File size: {formatFileSize(sub.file_size)}</p>
+            <a class="download-link" href={`/api/submissions/${sub.id}/file`} download>Download submission</a>
+          </section>
+        {/if}
+
+        <!-- Spec §6.5 line 1353: omit Evaluation block when awaiting_eval. -->
+        {#if target.entry.status !== 'awaiting_eval' && target.entry.latest_evaluation}
+          {@const evalu = target.entry.latest_evaluation}
+          <section class="evaluation-block">
+            <h4>Evaluation</h4>
+            <p>Evaluated at: {evalu.evaluated_at ? formatLocalWithTz(evalu.evaluated_at) : '—'}</p>
+            <p>Evaluated by: {evalu.evaluated_by?.full_name ?? evalu.evaluated_by?.user_id ?? '—'}</p>
+            <p>Result: {evalu.result}</p>
+            <p>Score: {evalu.score ?? '—'}</p>
+            <p>Feedback: {evalu.feedback_text ?? '—'}</p>
+            {#if evalu.has_feedback_file}
+              <a class="download-link" href={`/api/evaluations/${evalu.id}/feedback-file`} download>Download feedback file</a>
+            {/if}
+          </section>
+        {/if}
       {/if}
     {/if}
-  {:else}
-    <!-- submission variant: no fetch, use entry directly -->
-    <header>
-      <h3>{target.mp.title}</h3>
-      <p>{target.entry.group_name}</p>
-    </header>
-    {#if target.entry.status === 'not_submitted'}
-      <p>Not submitted yet.</p>
-    {:else}
-      <!-- Render submission + evaluation details from target.entry.
-           The exact fields surfaced depend on what /dashboard/mini-projects
-           includes per group entry (latest submission + evaluation summary).
-           For unsubmitted/incomplete states the spec's intent is graceful
-           degradation. Download links use the verified URL patterns:
-             /api/submissions/{sid}/file
-             /api/evaluations/{eid}/feedback-file -->
-      <!-- ... see spec §6.5 layout for the full template ... -->
-    {/if}
-  {/if}
-</div>
+  </div>
+</FocusTrap>
 
 <style>
   .panel-backdrop {
@@ -1793,7 +1814,7 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
   }
   .dashboard-side-panel {
     position: fixed; top: 0; right: 0; bottom: 0;
-    width: min(480px, 90vw);
+    width: min(640px, 90vw);
     background: var(--bg, #fff); padding: 1.5rem;
     overflow-y: auto; z-index: 101;
     box-shadow: -2px 0 8px rgba(0,0,0,0.15);
@@ -1802,7 +1823,15 @@ git commit -m "feat(frontend): add RunSubmissionTab status grid + tests (dashboa
 </style>
 ```
 
-The submission-variant template body (download links + submission/evaluation detail fields) should be expanded per spec §6.5 — include the `/api/submissions/{sid}/file` and `/api/evaluations/{eid}/feedback-file` `<a download>` links when the corresponding IDs are present in `target.entry`.
+Notes on alignment with spec §6.5:
+- Focus management via `<FocusTrap>` wrapper (Tab/Shift+Tab cycle + previousFocus restore on unmount). Escape handled via `<svelte:window onkeydown>` per spec line 1300.
+- Width `min(640px, 90vw)` per spec line 1304.
+- 404 NOT split from other errors — uniform message per spec line 1322 ("Fetch error (incl. 404)").
+- Progress header order: student name first, then block/seq (spec lines 1311–1312).
+- Submission header includes `mp.block_title` (spec line 1330).
+- Progress items use `it.last_score: { correct, total } | null` per the actual `SequenceItemState` type at `frontend/src/lib/dashboards.ts:130-140` — NOT a `quiz` sub-object.
+- `formatLocalWithTz` from `lib/datetime.ts` and `formatFileSize` from `lib/format.ts` per spec line 1360.
+- Submission template renders three branches: `not_submitted` → "Not submitted yet." (replaces both blocks); `awaiting_eval` → Submission block only (Evaluation omitted); other statuses → both blocks.
 
 - [ ] **Step 2: Wire the real `<DashboardSidePanel>` into both tabs**
 
@@ -1832,13 +1861,35 @@ Add the `import DashboardSidePanel from './DashboardSidePanel.svelte';` at the t
 
 - [ ] **Step 3: Register the new tabs in `RunDetailPage.svelte`**
 
-Open `frontend/src/pages/runs/RunDetailPage.svelte`. Locate the `ActiveTab` type union and extend it:
+Open `frontend/src/pages/runs/RunDetailPage.svelte`. Locate the `ActiveTab` type union and extend it per spec §6.2 lines 602–605:
 
 ```ts
-type ActiveTab = 'overview' | 'teachers' | 'groups' | 'students' | 'mini-projects' | 'assets' | 'progress' | 'submission';
+type ActiveTab =
+  | 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets'
+  | 'progress' | 'submission';
 ```
 
-Locate the tab-buttons row (where the existing 6 tabs are registered) and add two new buttons in the order: Progress (7th), Submission (8th). Locate the tab-content branch (the `{#if activeTab === '...'}` chain) and add two new branches that mount `RunProgressTab` and `RunSubmissionTab` respectively, passing `runId={run.id}` (and any other props per the existing tabs' pattern). Per Slice A, `course` is threaded into tabs for admin-gating — neither dashboard tab uses it (read-only views with same auth for admin + teacher), but pass it for consistency: `course={course}` if existing tabs receive it.
+(Use the existing slug for the roster/students tab — whatever the current ActiveTab literal is. The plan's prior literal `'students'` may differ from the actual code; preserve what's there and append `'progress' | 'submission'`.)
+
+Locate the tab-buttons row and add two new buttons after the existing `assets` tab per spec §6.2 lines 610–613:
+
+```svelte
+<button role="tab" aria-selected={activeTab === 'progress'}
+        onclick={() => (activeTab = 'progress')}>Progress</button>
+<button role="tab" aria-selected={activeTab === 'submission'}
+        onclick={() => (activeTab = 'submission')}>Submission</button>
+```
+
+Locate the tab-content branch (`{#if activeTab === '...'}` chain) and add two new branches per spec §6.2 lines 619–622:
+
+```svelte
+{:else if activeTab === 'progress'}
+  <RunProgressTab runId={run.id} />
+{:else if activeTab === 'submission'}
+  <RunSubmissionTab runId={run.id} />
+```
+
+**Do NOT pass `course={course}` to either dashboard tab.** Spec §6.2 line 625 explicitly: "`course` is intentionally NOT passed; see §4 fixed-decisions row." The dashboards are read-only views with the same auth for admin + teacher — no admin-gating needed. This is a deliberate departure from Slice A's tab-prop-threading convention.
 
 - [ ] **Step 4: Create `frontend/src/tests/DashboardSidePanel.svelte.test.ts`**
 
@@ -1847,14 +1898,16 @@ Per spec §13 lines ~1661-1674. Tests:
 - Progress variant: renders items list (mock fetch).
 - Progress variant: empty items list ("No items in this sequence.").
 - Progress variant: fetch race — new target before previous fetch returns; assert old fetch aborted.
-- Progress variant: 404 from drilldown shows "Item details unavailable. The dashboard may be out of date — Refresh."
+- Progress variant: 404 from drilldown shows "Item details unavailable. The dashboard may be out of date — Refresh." (Same message asserted for non-404 fetch errors per spec §6.5 line 1322 — uniform error message.)
 - Submission variant: renders submission + evaluation details from passed-in `entry`.
-- Submission variant: `not_submitted` status renders "Not submitted yet."
+- Submission variant: `not_submitted` status renders "Not submitted yet." (and Submission + Evaluation blocks are absent).
+- Submission variant: `awaiting_eval` status renders Submission block but omits Evaluation block (spec §6.5 line 1353).
 - Submission variant: download links use the verified URL patterns (`/api/submissions/{sid}/file`, `/api/evaluations/{eid}/feedback-file`).
 - Escape closes panel.
 - Backdrop click closes panel.
 - Close button closes panel.
-- Focus return on close (panel's `previousFocus`).
+- Focus trap behavior (Tab/Shift+Tab cycle) — `<FocusTrap>` keeps focus within the panel (verify via dispatching `Tab` on the last focusable element and asserting focus moves to the first).
+- Focus return on close — `<FocusTrap>` restores focus to the previously-focused element on unmount.
 
 Use the same `mount`/`unmount`/`flushSync`/`tick` patterns from T4-T6. Example shape:
 
