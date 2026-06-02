@@ -82,7 +82,10 @@
     aria-modal="true"
     aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
   >
-    <button class="panel-close" onclick={onClose} aria-label="Close panel">×</button>
+    <button class="panel-close" onclick={onClose} aria-label="Close panel">
+      <span aria-hidden="true">✕</span>
+      Close
+    </button>
 
     {#if target.kind === 'progress'}
       {#if loading}

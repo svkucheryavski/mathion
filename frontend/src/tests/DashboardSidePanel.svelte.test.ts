@@ -128,38 +128,35 @@ describe('DashboardSidePanel', () => {
     expect(host.textContent).toContain('No items in this sequence.');
   });
 
-  // 3. Progress variant: fetch race — assert old signal aborted
-  it('progress variant: fetch race — first signal aborted when target changes', async () => {
-    // Slow fetch for target A that never resolves
+  // 3. Progress variant: fetch race — assert old signal aborted on target prop change
+  it('progress variant: fetch race — first signal aborted when target prop changes', async () => {
+    // Slow fetch that never resolves; capture signals from each call
     const signals: AbortSignal[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, opts: RequestInit) => {
       signals.push(opts.signal as AbortSignal);
       return new Promise<Response>(() => { /* never resolves */ });
     }));
 
-    // Mount with target A
-    const targetA = makeProgressTarget({ user_id: 100 });
+    // Mount with target A via $state box (same pattern as RunProgressTab T23)
+    const box = $state({ target: makeProgressTarget({ user_id: 100 }), onClose: vi.fn() });
     host = document.createElement('div');
     document.body.appendChild(host);
-    const onClose = vi.fn();
-    component = mount(DashboardSidePanel, {
-      target: host,
-      props: { target: targetA, onClose },
-    });
+    component = mount(DashboardSidePanel, { target: host, props: box });
     flushSync();
 
-    // Capture signal from first fetch
+    // First fetch should have fired; capture its signal
     expect(signals.length).toBe(1);
-    const firstSignal = signals[0];
-    expect(firstSignal?.aborted).toBe(false);
+    const firstSignal = signals[0]!;
+    expect(firstSignal.aborted).toBe(false);
 
-    // Change props to target B — this re-mounts or triggers a new effect
-    // Use a fresh mount to simulate target change (remount pattern)
-    unmount(component);
-    component = null;
+    // Change target to B (different user_id) — $effect tracks user_id, should abort+restart
+    box.target = makeProgressTarget({ user_id: 101 });
+    flushSync();
+    await tick();
 
-    // The unmount triggers cleanup → first signal should now be aborted
-    expect(firstSignal?.aborted).toBe(true);
+    // First signal must be aborted; a second fetch must have started
+    expect(firstSignal.aborted).toBe(true);
+    expect(signals.length).toBeGreaterThanOrEqual(2);
   });
 
   // 4. Progress variant: 404 → uniform error message
@@ -263,8 +260,8 @@ describe('DashboardSidePanel', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  // 13. Focus trap Tab cycle
-  it('focus trap: Tab on last focusable element wraps to first', async () => {
+  // 13. Focus trap Tab/Shift+Tab cycle
+  it('focus trap: Tab (last→first) and Shift+Tab (first→last) cycle per spec §13', async () => {
     const entry = makeEntry();
     mountPanel({ target: { kind: 'submission', mp: makeMp(), entry } });
     await settle();
@@ -280,14 +277,19 @@ describe('DashboardSidePanel', () => {
     const first = focusables[0]!;
     const last = focusables[focusables.length - 1]!;
 
-    // Focus the last element
+    // Tab from last → first
     last.focus();
     expect(document.activeElement).toBe(last);
-
-    // Dispatch Tab key on document (FocusTrap listens on document via capture)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     flushSync();
     expect(document.activeElement).toBe(first);
+
+    // Shift+Tab from first → last
+    first.focus();
+    expect(document.activeElement).toBe(first);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    flushSync();
+    expect(document.activeElement).toBe(last);
   });
 
   // 14. Focus return on close
