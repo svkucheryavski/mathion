@@ -438,7 +438,7 @@ def seed() -> None:
         # (nothing to insert)
 
         # MP2/A: 1 Submission, no Evaluation → awaiting_eval
-        sub_mp2_a = _get_or_create_submission(
+        _get_or_create_submission(
             db,
             mini_project_id=mp2.id,
             group_id=group_a.id,
@@ -449,7 +449,7 @@ def seed() -> None:
         )
 
         # MP2/C: 1 Submission, no Evaluation → awaiting_eval
-        sub_mp2_c = _get_or_create_submission(
+        _get_or_create_submission(
             db,
             mini_project_id=mp2.id,
             group_id=group_c.id,
@@ -498,7 +498,7 @@ def seed() -> None:
         )
 
         # MP3/C: 1 Submission, no Evaluation → awaiting_eval
-        sub_mp3_c = _get_or_create_submission(
+        _get_or_create_submission(
             db,
             mini_project_id=mp3.id,
             group_id=group_c.id,
@@ -566,7 +566,7 @@ def seed() -> None:
         )
 
         # MP5/A: 1 Submission, no Evaluation → awaiting_eval
-        sub_mp5_a = _get_or_create_submission(
+        _get_or_create_submission(
             db,
             mini_project_id=mp5.id,
             group_id=group_a.id,
@@ -577,7 +577,7 @@ def seed() -> None:
         )
 
         # MP5/B: 2 Submissions + 1 Evaluation on #2 result="accepted" → accepted
-        sub_mp5_b1 = _get_or_create_submission(
+        _get_or_create_submission(
             db,
             mini_project_id=mp5.id,
             group_id=group_b.id,
