@@ -492,6 +492,50 @@ describe('RunProgressTab', () => {
     expect(anchor.download).toMatch(/^progress-My_Run_2026_Test-\d{4}-\d{2}-\d{2}\.csv$/);
   });
 
+  // T22b – CSV download: percent columns (2 per sequence) formatted to one decimal
+  it('CSV body emits coverage_pct + quiz_pct (2 cols per seq, one decimal, empty when undefined)', async () => {
+    const body = progressMock({
+      students: [
+        { user_id: 1, full_name: 'Alice', email: 'a@x', group_id: null, group_name: null, user_is_disabled: false, group_is_disabled: false,
+          coverage: [{ sequence_id: 10, covered: 2, total: 4 }],
+          quizzes: [{ sequence_id: 10, correct: 1, total: 2 }] },
+        { user_id: 2, full_name: 'Bob', email: 'b@x', group_id: null, group_name: null, user_is_disabled: false, group_is_disabled: false,
+          coverage: [{ sequence_id: 10, covered: 0, total: 4 }],
+          quizzes: [{ sequence_id: 10, correct: null, total: null }] },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetch(200, body));
+    let capturedCsv = '';
+    vi.stubGlobal('Blob', class {
+      size: number;
+      type: string;
+      constructor(parts: string[], opts?: { type?: string }) {
+        capturedCsv = parts.join('');
+        this.size = capturedCsv.length;
+        this.type = opts?.type ?? '';
+      }
+    } as unknown as typeof Blob);
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:mock'), revokeObjectURL: vi.fn() });
+    vi.spyOn(document.body, 'appendChild').mockImplementation((el) => {
+      if ((el as HTMLElement).tagName === 'A') (el as HTMLAnchorElement).click();
+      return el;
+    });
+    vi.spyOn(document.body, 'removeChild').mockImplementation((el) => el);
+    mountTab();
+    await settle();
+    (host.querySelector('[data-action="download-csv"]') as HTMLButtonElement).click();
+    flushSync();
+    // Header row: only coverage_pct + quiz_pct per sequence (no _covered/_total/_correct cols)
+    expect(capturedCsv).toContain('coverage_pct');
+    expect(capturedCsv).toContain('quiz_pct');
+    expect(capturedCsv).not.toContain('coverage_covered');
+    expect(capturedCsv).not.toContain('quiz_correct');
+    // Alice: 2/4 covered → 50.0, 1/2 correct → 50.0
+    expect(capturedCsv).toMatch(/Alice.*50\.0.*50\.0/);
+    // Bob: 0/4 covered → 0.0, quiz total null → empty (no quiz_pct emitted between the trailing commas)
+    expect(capturedCsv).toMatch(/Bob.*0\.0,(\r\n|,|$)/);
+  });
+
   // T23 – AbortController: rapid runId change cancels first fetch
   it('rapid runId change cancels in-flight fetch (signal.aborted)', async () => {
     const fetchMock = vi.fn(() => new Promise<Response>(() => { /* never resolves */ }));

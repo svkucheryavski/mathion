@@ -239,6 +239,11 @@
     panelTarget = null;
   }
 
+  function pct(numerator: number | null | undefined, denominator: number | null | undefined): string {
+    if (numerator == null || denominator == null || denominator === 0) return '';
+    return ((numerator / denominator) * 100).toFixed(1);
+  }
+
   function handleDownloadCSV(): void {
     if (!data) return;
     type Row = { student: DashboardProgressResponse['students'][number] };
@@ -250,10 +255,8 @@
       ...data.sequences.flatMap((seq, i) => {
         const prefix = `${seq.block_title} — ${seq.sequence_title}`;
         return [
-          { header: `${prefix}: coverage_covered`, value: (r: Row) => r.student.coverage[i]?.covered ?? '' },
-          { header: `${prefix}: coverage_total`, value: (r: Row) => r.student.coverage[i]?.total ?? '' },
-          { header: `${prefix}: quiz_correct`, value: (r: Row) => r.student.quizzes[i]?.correct ?? '' },
-          { header: `${prefix}: quiz_total`, value: (r: Row) => r.student.quizzes[i]?.total ?? '' },
+          { header: `${prefix}: coverage_pct`, value: (r: Row) => pct(r.student.coverage[i]?.covered, r.student.coverage[i]?.total) },
+          { header: `${prefix}: quiz_pct`, value: (r: Row) => pct(r.student.quizzes[i]?.correct, r.student.quizzes[i]?.total) },
         ];
       }),
     ];

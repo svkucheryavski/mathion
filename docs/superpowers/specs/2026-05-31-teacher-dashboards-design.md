@@ -1006,12 +1006,15 @@ Button at top right. On click, generate a CSV with these columns and trigger dow
 
 ```
 student_email, student_name, group_name,
-"<Block A> — <Seq 1>: coverage_covered", "<Block A> — <Seq 1>: coverage_total",
-"<Block A> — <Seq 1>: quiz_correct",    "<Block A> — <Seq 1>: quiz_total",
+"<Block A> — <Seq 1>: coverage_pct", "<Block A> — <Seq 1>: quiz_pct",
 ... (repeat per sequence in order)
 ```
 
-One row per student (after filters apply — the export reflects what the user sees, not the entire dataset). For each sequence: 4 columns. CSV header text uses the same labels.
+One row per student (after filters apply — the export reflects what the user sees, not the entire dataset). For each sequence: 2 percent columns (NOT raw counts). CSV header text uses the same labels.
+
+**Percent format**: bare numeric value with one decimal (e.g., `75.0`), NO `%` suffix — sortable/analyzable in Excel + pandas; the column-header `_pct` indicates the unit. Empty string when the percentage is undefined:
+- `coverage_pct`: `covered / total * 100` formatted to one decimal, OR empty when `total` is 0 (the sequence has no items).
+- `quiz_pct`: `correct / total * 100` formatted to one decimal, OR empty when `total` is `null` / 0 (sequence has no quiz items) OR `correct` is `null` (student has not attempted any quiz item — matches the UI "—" rendering).
 
 CSV is built via `lib/csvWrite.ts` `toCSV(...)` (see §6.7 for the contract — RFC 4180 quoting, UTF-8 BOM, CRLF, formula-injection guard).
 
