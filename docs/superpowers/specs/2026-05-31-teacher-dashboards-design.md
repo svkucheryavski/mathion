@@ -1565,7 +1565,7 @@ No DB schema changes. No Alembic migration.
 
 ### CSV generation
 
-- Computed client-side in `csvWrite.ts`. For 200 students × 20 sequences × 4 columns ≈ 16,000 cells. Generation <100ms in browser. Download is local Blob URL with explicit BOM for Excel compatibility.
+- Computed client-side in `csvWrite.ts`. For 200 students × 20 sequences × 2 percent columns ≈ 8,000 cells (plus 3 student-identity columns). Generation <100ms in browser. Download is local Blob URL with explicit BOM for Excel compatibility.
 
 ---
 
