@@ -1,6 +1,8 @@
 import io
 from sqlalchemy import select
 
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO
+
 
 def _make_published_mp(admin_client, db, seed_run_with_groups):
     from mathion.models import Block, Run
@@ -12,8 +14,8 @@ def _make_published_mp(admin_client, db, seed_run_with_groups):
         json={
             "block_id": block.id,
             "assignment_md": "Report.",
-            "hard_deadline": "2026-06-01T23:59:00Z",
-            "resubmission_deadline": "2026-06-15T23:59:00Z",
+            "hard_deadline": NEAR_DEADLINE_ISO,
+            "resubmission_deadline": FAR_DEADLINE_ISO,
         },
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")

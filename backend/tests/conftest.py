@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient as BaseTestClient
 from sqlalchemy import create_engine, event
@@ -9,6 +11,16 @@ from mathion.database import Base, get_db
 from mathion.main import app
 from mathion.models_auth import User
 from mathion.auth import request_pin, verify_pin
+
+
+# Module-level test-date helpers. Replace hardcoded YYYY-MM-DD strings that
+# rot once today crosses them (MP publish requires hard_deadline > now;
+# run publish requires end_date >= deadlines). Ordering:
+#   NEAR_DEADLINE_ISO  <  FAR_DEADLINE_ISO  <  RUN_END_DATE  <  RUN_END_DATE_FAR
+NEAR_DEADLINE_ISO = f"{(date.today() + timedelta(days=60)).isoformat()}T23:59:00Z"
+FAR_DEADLINE_ISO = f"{(date.today() + timedelta(days=120)).isoformat()}T23:59:00Z"
+RUN_END_DATE = (date.today() + timedelta(days=180)).isoformat()
+RUN_END_DATE_FAR = (date.today() + timedelta(days=365)).isoformat()
 
 
 class CSRFTestClient(BaseTestClient):
@@ -211,7 +223,7 @@ def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
         course, _ = seed_publishable_version()
         run_resp = admin_client.post(
             f"/api/courses/{course['id']}/runs",
-            json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31", "groups_enabled": True},
+            json={"title": "R", "start_date": "2026-01-01", "end_date": RUN_END_DATE_FAR, "groups_enabled": True},
         )
         assert run_resp.status_code == 201
         run = run_resp.json()

@@ -1,6 +1,8 @@
 import io
 from sqlalchemy import select
 
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO
+
 
 def _setup(admin_client, student_client_for, db, seed_run_with_groups):
     from mathion.models import Block, Run
@@ -10,8 +12,8 @@ def _setup(admin_client, student_client_for, db, seed_run_with_groups):
     mp = admin_client.post(
         f"/api/runs/{run['id']}/mini-projects",
         json={"block_id": block.id, "assignment_md": "x",
-              "hard_deadline": "2026-06-01T23:59:00Z",
-              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+              "hard_deadline": NEAR_DEADLINE_ISO,
+              "resubmission_deadline": FAR_DEADLINE_ISO},
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     student = student_client_for("alice@example.com")

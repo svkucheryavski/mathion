@@ -1,9 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from mathion.models import Block, Group, MiniProject, Run, Submission
 from mathion.models_auth import User
+
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO, RUN_END_DATE_FAR
 
 
 def test_create_mini_project(admin_client, db, seed_run_with_groups):
@@ -18,8 +20,8 @@ def test_create_mini_project(admin_client, db, seed_run_with_groups):
         json={
             "block_id": block.id,
             "assignment_md": "Write a report about descriptive statistics.",
-            "hard_deadline": "2026-06-01T23:59:00Z",
-            "resubmission_deadline": "2026-06-15T23:59:00Z",
+            "hard_deadline": NEAR_DEADLINE_ISO,
+            "resubmission_deadline": FAR_DEADLINE_ISO,
         },
     )
     assert response.status_code == 201
@@ -38,8 +40,8 @@ def _create_mp(admin_client, db, seed_run_with_groups, **overrides):
     payload = {
         "block_id": block.id,
         "assignment_md": "Write a report.",
-        "hard_deadline": "2026-06-01T23:59:00Z",
-        "resubmission_deadline": "2026-06-15T23:59:00Z",
+        "hard_deadline": NEAR_DEADLINE_ISO,
+        "resubmission_deadline": FAR_DEADLINE_ISO,
     }
     payload.update(overrides)
     mp = admin_client.post(f"/api/runs/{run['id']}/mini-projects", json=payload).json()
@@ -50,7 +52,7 @@ def test_duplicate_block_409(admin_client, db, seed_run_with_groups):
     run, mp = _create_mp(admin_client, db, seed_run_with_groups)
     response = admin_client.post(
         f"/api/runs/{run['id']}/mini-projects",
-        json={"block_id": mp["block_id"], "assignment_md": "x", "hard_deadline": "2026-06-01T23:59:00Z", "resubmission_deadline": "2026-06-15T23:59:00Z"},
+        json={"block_id": mp["block_id"], "assignment_md": "x", "hard_deadline": NEAR_DEADLINE_ISO, "resubmission_deadline": FAR_DEADLINE_ISO},
     )
     assert response.status_code == 409
 
@@ -59,12 +61,12 @@ def test_create_requires_groups_enabled(admin_client, db, seed_publishable_versi
     course, _ = seed_publishable_version()
     run = admin_client.post(
         f"/api/courses/{course['id']}/runs",
-        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-12-31", "groups_enabled": False},
+        json={"title": "R", "start_date": "2026-01-01", "end_date": RUN_END_DATE_FAR, "groups_enabled": False},
     ).json()
     block = db.execute(select(Block).where(Block.version_id == run["version_id"])).scalars().first()
     response = admin_client.post(
         f"/api/runs/{run['id']}/mini-projects",
-        json={"block_id": block.id, "assignment_md": "x", "hard_deadline": "2026-06-01T23:59:00Z", "resubmission_deadline": "2026-06-15T23:59:00Z"},
+        json={"block_id": block.id, "assignment_md": "x", "hard_deadline": NEAR_DEADLINE_ISO, "resubmission_deadline": FAR_DEADLINE_ISO},
     )
     assert response.status_code == 409
 
@@ -124,7 +126,7 @@ def test_patch_locked_deadline_can_only_extend(admin_client, db, seed_run_with_g
     db.commit()
     response = admin_client.patch(
         f"/api/mini-projects/{mp['id']}",
-        json={"hard_deadline": "2026-05-01T23:59:00Z"},
+        json={"hard_deadline": f"{(date.today() + timedelta(days=30)).isoformat()}T23:59:00Z"},
     )
     assert response.status_code == 409
     assert "hard_deadline" in response.json()["detail"]

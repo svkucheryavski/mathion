@@ -4,6 +4,8 @@ from sqlalchemy import select
 
 from mathion.models import Block, Run
 
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO
+
 
 def test_create_run_pins_to_newest_published_version(admin_client, seed_publishable_version):
     course, version = seed_publishable_version()
@@ -213,8 +215,8 @@ def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
     mp = admin_client.post(
         f"/api/runs/{run['id']}/mini-projects",
         json={"block_id": block.id, "assignment_md": "x",
-              "hard_deadline": "2026-06-01T23:59:00Z",
-              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+              "hard_deadline": NEAR_DEADLINE_ISO,
+              "resubmission_deadline": FAR_DEADLINE_ISO},
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     response = admin_client.delete(f"/api/runs/{run['id']}?force=true")
@@ -231,8 +233,8 @@ def test_lower_end_date_blocked_by_submissions(admin_client, student_client_for,
     mp = admin_client.post(
         f"/api/runs/{run['id']}/mini-projects",
         json={"block_id": block.id, "assignment_md": "x",
-              "hard_deadline": "2026-06-01T23:59:00Z",
-              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+              "hard_deadline": NEAR_DEADLINE_ISO,
+              "resubmission_deadline": FAR_DEADLINE_ISO},
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     alice = student_client_for("alice@example.com")
@@ -255,8 +257,8 @@ def test_delete_run_with_submissions_no_force(admin_client, student_client_for, 
     mp = admin_client.post(
         f"/api/runs/{run['id']}/mini-projects",
         json={"block_id": block.id, "assignment_md": "x",
-              "hard_deadline": "2026-06-01T23:59:00Z",
-              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+              "hard_deadline": NEAR_DEADLINE_ISO,
+              "resubmission_deadline": FAR_DEADLINE_ISO},
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     alice = student_client_for("alice@example.com")

@@ -4,13 +4,15 @@ from sqlalchemy import select
 
 from mathion.models import Block, Run
 
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO, RUN_END_DATE
+
 
 def _make_run(admin_client, seed_publishable_version, groups_enabled=True):
     course, _ = seed_publishable_version()
     return admin_client.post(
         f"/api/courses/{course['id']}/runs",
         json={
-            "title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
+            "title": "R", "start_date": "2026-01-01", "end_date": RUN_END_DATE,
             "groups_enabled": groups_enabled,
         },
     ).json()
@@ -122,8 +124,8 @@ def test_delete_group_with_submissions_409(admin_client, student_client_for, db,
         json={
             "block_id": block.id,
             "assignment_md": "x",
-            "hard_deadline": "2026-06-01T23:59:00Z",
-            "resubmission_deadline": "2026-06-15T23:59:00Z",
+            "hard_deadline": NEAR_DEADLINE_ISO,
+            "resubmission_deadline": FAR_DEADLINE_ISO,
         },
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
