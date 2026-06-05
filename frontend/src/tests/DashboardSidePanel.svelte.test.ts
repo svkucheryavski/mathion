@@ -880,4 +880,45 @@ describe('DashboardSidePanel', () => {
     vi.useRealTimers();
   });
 
+  // T33: after POST, [Edit] uses stateLatestEvaluation.id for PATCH (refetch never resolves)
+  it('T33: POST → state.latestEvaluation; [Edit] + Save → PATCH /api/evaluations/{newId}', async () => {
+    const created = { id: 42, submission_id: 100, result: 'accepted', score: 80, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    const patched = { id: 42, submission_id: 100, result: 'accepted', score: 95, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:05:00Z', evaluated_by: 1 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(patched), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onRefetch = vi.fn(() => new Promise<void>(() => {}));
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100, latest_evaluation: null }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '80';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    expect(editBtn).toBeTruthy();
+    editBtn.click();
+    await settle();
+    const scoreInput2 = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput2.value = '95';
+    scoreInput2.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form2 = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form2.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/evaluations/42');
+    expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+  });
+
 });
