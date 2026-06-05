@@ -165,7 +165,8 @@
           serverError = 'Upload timed out. Try again.';
           return;
         }
-        // user-cancel falls through to generic error below (handled in 5g).
+        // user-cancel: silent revert
+        return;
       }
       if (e instanceof ApiError) {
         serverError = e.displayMessage;

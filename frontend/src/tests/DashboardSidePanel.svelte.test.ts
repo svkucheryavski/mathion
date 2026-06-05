@@ -921,4 +921,42 @@ describe('DashboardSidePanel', () => {
     expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
   });
 
+  // T36: user-cancel during submit → no banner, form values preserved, Save re-enabled
+  it('T36: user-cancel during submit → no banner, form values preserved', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init.signal!.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    flushSync();
+    await tick(); await tick();
+    flushSync();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    const cancelBtn = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    cancelBtn.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(host.querySelector('[role="alert"].form-error')).toBeNull();
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(false);
+    expect(select.value).toBe('accepted');
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
 });
