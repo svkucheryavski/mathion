@@ -43,6 +43,9 @@
     onRefetch?: () => void;
   } = $props();
 
+  const canWrite = $derived(isAdmin || isTeacher);
+  let editing = $state(false);
+
   // Progress fetch state — only relevant when target.kind === 'progress'.
   let data = $state<SequenceItemStateResponse | null>(null);
   let loading = $state(false);
@@ -87,14 +90,15 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="panel-backdrop" onclick={onClose} role="presentation"></div>
-<FocusTrap>
+<FocusTrap autofocusSelector='select[name="evaluation-result"]'>
   <div
     class="dashboard-side-panel"
     role="dialog"
     aria-modal="true"
     aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
+    data-can-write={target.kind === 'submission' && canWrite ? 'true' : undefined}
   >
-    <button class="panel-close" onclick={onClose} aria-label="Close panel">
+    <button class="panel-close" onclick={onClose} aria-label="Close panel" data-side-panel-close>
       <span aria-hidden="true">✕</span>
       Close
     </button>
@@ -136,28 +140,43 @@
 
       <StatusBadge status={target.entry.status} />
 
-      {#if target.entry.status === 'not_submitted'}
-        <!-- Spec §6.5 line 1352: replaces Submission + Evaluation blocks entirely. -->
+      {#if target.entry.latest_submission == null}
         <p>Not submitted yet.</p>
       {:else}
-        <!-- Submission block — spec §6.5 lines 1335-1342 -->
-        {#if target.entry.latest_submission}
-          {@const sub = target.entry.latest_submission}
-          <section class="submission-block">
-            <h4>Submission</h4>
-            <p>Number: {sub.submission_number}</p>
-            <p>Submitted at: {sub.submitted_at ? formatLocalWithTz(sub.submitted_at) : '—'}</p>
-            <p>Submitted by: {sub.submitted_by?.full_name ?? sub.submitted_by?.user_id ?? '—'}</p>
-            <p>Late: {sub.is_late ? 'Yes' : 'No'}</p>
-            <p>Resubmission: {sub.is_resubmission ? 'Yes' : 'No'}</p>
-            <p>File size: {formatFileSize(sub.file_size)}</p>
-            <a class="download-link" href={`/api/submissions/${sub.id}/file`} download>Download submission</a>
-          </section>
-        {/if}
+        {@const sub = target.entry.latest_submission}
+        <section class="submission-block">
+          <h4>Submission</h4>
+          <p>Number: {sub.submission_number}</p>
+          <p>Submitted at: {sub.submitted_at ? formatLocalWithTz(sub.submitted_at) : '—'}</p>
+          <p>Submitted by: {sub.submitted_by?.full_name ?? sub.submitted_by?.user_id ?? '—'}</p>
+          <p>Late: {sub.is_late ? 'Yes' : 'No'}</p>
+          <p>Resubmission: {sub.is_resubmission ? 'Yes' : 'No'}</p>
+          <p>File size: {formatFileSize(sub.file_size)}</p>
+          <a class="download-link" href={`/api/submissions/${sub.id}/file`} download>Download submission</a>
+        </section>
 
-        <!-- Spec §6.5 line 1353: omit Evaluation block when awaiting_eval. -->
-        {#if target.entry.status !== 'awaiting_eval' && target.entry.latest_evaluation}
+        {#if sub.is_resubmission}
+          <div role="status" class="banner-info">
+            Auto-accepted on resubmission. No manual evaluation needed.
+          </div>
+          {#if target.entry.latest_evaluation}
+            {@const evalu = target.entry.latest_evaluation}
+            <!-- Occurrence (a): auto-accept eval block. NEVER replaced — always reads dashboard shape. -->
+            <section class="evaluation-block">
+              <h4>Evaluation</h4>
+              <p>Evaluated at: {evalu.evaluated_at ? formatLocalWithTz(evalu.evaluated_at) : '—'}</p>
+              <p>Evaluated by: {evalu.evaluated_by?.full_name ?? evalu.evaluated_by?.user_id ?? '—'}</p>
+              <p>Result: {evalu.result}</p>
+              <p>Score: {evalu.score ?? '—'}</p>
+              <p>Feedback: {evalu.feedback_text ?? '—'}</p>
+              {#if evalu.has_feedback_file}
+                <a class="download-link" href={`/api/evaluations/${evalu.id}/feedback-file`} download>Download feedback file</a>
+              {/if}
+            </section>
+          {/if}
+        {:else if target.entry.latest_evaluation}
           {@const evalu = target.entry.latest_evaluation}
+          <!-- Occurrence (b): Branch B. REPLACED in T5.SETUP.2 with {@const evalu = effectiveEvaluation}. -->
           <section class="evaluation-block">
             <h4>Evaluation</h4>
             <p>Evaluated at: {evalu.evaluated_at ? formatLocalWithTz(evalu.evaluated_at) : '—'}</p>
@@ -169,6 +188,36 @@
               <a class="download-link" href={`/api/evaluations/${evalu.id}/feedback-file`} download>Download feedback file</a>
             {/if}
           </section>
+          {#if canWrite && !editing}
+            <button type="button" data-test="edit-evaluation" onclick={() => (editing = true)}>Edit evaluation</button>
+          {/if}
+          {#if canWrite && editing}
+            <h4>Edit evaluation</h4>
+            <form aria-label="Write evaluation" onsubmit={(e) => e.preventDefault()}>
+              <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
+              <select id="evaluation-result" name="evaluation-result" aria-required="true" aria-describedby="evaluation-result-helper">
+                <option value="">Select…</option>
+                <option value="rejected">Rejected</option>
+                <option value="major_revision">Major revision</option>
+                <option value="minor_revision">Minor revision</option>
+                <option value="accepted">Accepted</option>
+              </select>
+            </form>
+          {/if}
+        {:else if canWrite}
+          <h4>New evaluation</h4>
+          <form aria-label="Write evaluation" onsubmit={(e) => e.preventDefault()}>
+            <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
+            <select id="evaluation-result" name="evaluation-result" aria-required="true" aria-describedby="evaluation-result-helper">
+              <option value="">Select…</option>
+              <option value="rejected">Rejected</option>
+              <option value="major_revision">Major revision</option>
+              <option value="minor_revision">Minor revision</option>
+              <option value="accepted">Accepted</option>
+            </select>
+          </form>
+        {:else}
+          <p>Awaiting evaluation</p>
         {/if}
       {/if}
     {/if}
@@ -187,4 +236,16 @@
     box-shadow: -2px 0 8px rgba(0,0,0,0.15);
   }
   .panel-close { float: right; font-size: 1.5em; background: none; border: none; cursor: pointer; }
+  .banner-info {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    background: #e0f2f8;
+    color: #044d6c;
+    border-left: 4px solid #0a7ea4;
+    margin-bottom: 1rem;
+  }
+  .helper-text {
+    color: var(--text-muted, #666);
+    font-size: 0.85em;
+  }
 </style>

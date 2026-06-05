@@ -22,14 +22,28 @@ function mockFetch(status: number, body: unknown) {
 interface MountPanelOpts {
   target: PanelTarget;
   onClose?: () => void;
+  isAdmin?: boolean;
+  isTeacher?: boolean;
+  onRefetch?: () => void;
 }
 
-function mountPanel({ target, onClose = vi.fn() }: MountPanelOpts) {
+function mountPanel(opts: MountPanelOpts) {
+  const onClose = opts.onClose ?? vi.fn();
+  const onRefetch = opts.onRefetch ?? vi.fn();
   host = document.createElement('div');
   document.body.appendChild(host);
-  component = mount(DashboardSidePanel, { target: host, props: { target, onClose } });
+  component = mount(DashboardSidePanel, {
+    target: host,
+    props: {
+      target: opts.target,
+      onClose,
+      isAdmin: opts.isAdmin ?? false,
+      isTeacher: opts.isTeacher ?? false,
+      onRefetch,
+    },
+  });
   flushSync();
-  return { host, onClose: onClose as ReturnType<typeof vi.fn> };
+  return { host, onClose: onClose as ReturnType<typeof vi.fn>, onRefetch: onRefetch as ReturnType<typeof vi.fn> };
 }
 
 async function settle() {
@@ -105,6 +119,28 @@ function makeEntry(overrides: Partial<DashboardMpGroupEntry> = {}): DashboardMpG
     },
     ...overrides,
   };
+}
+
+function submissionTarget(opts: {
+  is_resubmission?: boolean;
+  latest_evaluation?: DashboardMpGroupEntry['latest_evaluation'];
+  status?: DashboardMpGroupEntry['status'];
+  submissionId?: number;
+} = {}) {
+  const entry = makeEntry({
+    status: opts.status ?? 'awaiting_eval',
+    latest_submission: {
+      id: opts.submissionId ?? 100,
+      submission_number: opts.is_resubmission ? 2 : 1,
+      submitted_at: '2026-06-04T10:00:00Z',
+      submitted_by: { user_id: 5, full_name: 'Alice' },
+      is_late: false,
+      is_resubmission: opts.is_resubmission ?? false,
+      file_size: 12345,
+    },
+    latest_evaluation: opts.latest_evaluation ?? null,
+  });
+  return { kind: 'submission' as const, mp: makeMp(), entry };
 }
 
 describe('DashboardSidePanel', () => {
@@ -312,6 +348,61 @@ describe('DashboardSidePanel', () => {
     expect(focusSpy).toHaveBeenCalled();
 
     document.body.removeChild(trigger);
+  });
+
+  // T15: form mount + focus on result <select>
+  it('T15: shows form when canWrite + no eval + not auto-accept; focus on result <select>', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeTruthy();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    expect(document.activeElement).toBe(select);
+  });
+
+  // T18: form DOM-absent when canWrite=false
+  it('T18: form DOM-absent when canWrite=false', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+    });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T19a: auto-accept banner + no eval, no form, no eval block
+  it('T19a: auto-accept banner when is_resubmission + no eval; no form, no eval block', async () => {
+    mountPanel({
+      target: submissionTarget({ is_resubmission: true, latest_evaluation: null }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('.banner-info')).toBeTruthy();
+    expect(host.textContent).toContain('Auto-accepted on resubmission');
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('section.evaluation-block')).toBeNull();
+  });
+
+  // T19b: auto-accept + eval present → banner + read-only eval block, no form, no [Edit]
+  it('T19b: auto-accept + eval present → banner + read-only eval block, no form, no [Edit]', async () => {
+    mountPanel({
+      target: submissionTarget({
+        is_resubmission: true,
+        latest_evaluation: {
+          id: 99, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: { user_id: 1, full_name: 'AutoAccept' },
+          result: 'accepted', score: null, feedback_text: null, has_feedback_file: false,
+        },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('.banner-info')).toBeTruthy();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.textContent).toContain('accepted');
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('[data-test="edit-evaluation"]')).toBeNull();
   });
 
 });

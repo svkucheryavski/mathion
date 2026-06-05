@@ -386,6 +386,9 @@
       <DashboardSidePanel
         target={{ kind: 'progress', runId, ...panelTarget }}
         onClose={closePanel}
+        {isAdmin}
+        {isTeacher}
+        onRefetch={() => {}}
       />
     {/if}
   {/if}
