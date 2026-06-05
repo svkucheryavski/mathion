@@ -29,7 +29,19 @@
   };
   export type PanelTarget = ProgressTarget | SubmissionTarget;
 
-  let { target, onClose }: { target: PanelTarget; onClose: () => void } = $props();
+  let {
+    target,
+    onClose,
+    isAdmin = false,
+    isTeacher = false,
+    onRefetch = () => {},
+  }: {
+    target: PanelTarget;
+    onClose: () => void;
+    isAdmin?: boolean;
+    isTeacher?: boolean;
+    onRefetch?: () => void;
+  } = $props();
 
   // Progress fetch state — only relevant when target.kind === 'progress'.
   let data = $state<SequenceItemStateResponse | null>(null);
