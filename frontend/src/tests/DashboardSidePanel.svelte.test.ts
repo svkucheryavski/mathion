@@ -1031,4 +1031,38 @@ describe('DashboardSidePanel', () => {
     expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('Needs work');
   });
 
+  // T25: result-lock — disabled non-accepted options + verbatim text + Save guarded
+  it('T25: result-lock — non-accepted options disabled + verbatim helper text + fetch not called', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({
+        status: 'accepted',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'accepted', score: 85, feedback_text: null, has_feedback_file: false },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const opts = host.querySelectorAll('select[name="evaluation-result"] option');
+    const optMap = new Map<string, HTMLOptionElement>();
+    opts.forEach((o) => optMap.set((o as HTMLOptionElement).value, o as HTMLOptionElement));
+    expect(optMap.get('rejected')?.disabled).toBe(true);
+    expect(optMap.get('major_revision')?.disabled).toBe(true);
+    expect(optMap.get('minor_revision')?.disabled).toBe(true);
+    expect(optMap.get('accepted')?.disabled).toBe(false);
+    expect(host.textContent).toContain('Cannot change to a non-accepted result without a feedback file. Create a new evaluation instead.');
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'rejected';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
 });

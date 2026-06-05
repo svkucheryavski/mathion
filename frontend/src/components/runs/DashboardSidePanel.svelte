@@ -60,6 +60,7 @@
   let formSubmitAttempted = $state(false);
 
   const existingHasFeedbackFile = $derived(effectiveEvaluation?.has_feedback_file ?? false);
+  const resultLocked = $derived(editing && effectiveEvaluation != null && !effectiveEvaluation.has_feedback_file);
 
   const SUBMIT_TIMEOUT_MS = 60_000;
 
@@ -385,15 +386,20 @@
               <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
               <select id="evaluation-result" name="evaluation-result"
                       aria-required="true"
-                      aria-describedby={errors.result ? 'evaluation-result-helper evaluation-result-error' : 'evaluation-result-helper'}
+                      aria-describedby={[
+                        'evaluation-result-helper',
+                        errors.result ? 'evaluation-result-error' : null,
+                        resultLocked ? 'evaluation-result-lock' : null,
+                      ].filter(Boolean).join(' ')}
                       bind:value={formResult}>
                 <option value="">Select…</option>
-                <option value="rejected">Rejected</option>
-                <option value="major_revision">Major revision</option>
-                <option value="minor_revision">Minor revision</option>
+                <option value="rejected" disabled={resultLocked}>Rejected</option>
+                <option value="major_revision" disabled={resultLocked}>Major revision</option>
+                <option value="minor_revision" disabled={resultLocked}>Minor revision</option>
                 <option value="accepted">Accepted</option>
               </select>
               {#if errors.result}<span id="evaluation-result-error" role="alert">{errors.result}</span>{/if}
+              {#if resultLocked}<span id="evaluation-result-lock" class="helper-text">Cannot change to a non-accepted result without a feedback file. Create a new evaluation instead.</span>{/if}
 
               <label for="evaluation-score">Score <span class="helper-text">(optional, 0–100)</span></label>
               <input id="evaluation-score" name="evaluation-score" type="number" min="0" max="100" step="1"
@@ -445,15 +451,20 @@
               <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
               <select id="evaluation-result" name="evaluation-result"
                       aria-required="true"
-                      aria-describedby={errors.result ? 'evaluation-result-helper evaluation-result-error' : 'evaluation-result-helper'}
+                      aria-describedby={[
+                        'evaluation-result-helper',
+                        errors.result ? 'evaluation-result-error' : null,
+                        resultLocked ? 'evaluation-result-lock' : null,
+                      ].filter(Boolean).join(' ')}
                       bind:value={formResult}>
                 <option value="">Select…</option>
-                <option value="rejected">Rejected</option>
-                <option value="major_revision">Major revision</option>
-                <option value="minor_revision">Minor revision</option>
+                <option value="rejected" disabled={resultLocked}>Rejected</option>
+                <option value="major_revision" disabled={resultLocked}>Major revision</option>
+                <option value="minor_revision" disabled={resultLocked}>Minor revision</option>
                 <option value="accepted">Accepted</option>
               </select>
               {#if errors.result}<span id="evaluation-result-error" role="alert">{errors.result}</span>{/if}
+              {#if resultLocked}<span id="evaluation-result-lock" class="helper-text">Cannot change to a non-accepted result without a feedback file. Create a new evaluation instead.</span>{/if}
 
               <label for="evaluation-score">Score <span class="helper-text">(optional, 0–100)</span></label>
               <input id="evaluation-score" name="evaluation-score" type="number" min="0" max="100" step="1"
