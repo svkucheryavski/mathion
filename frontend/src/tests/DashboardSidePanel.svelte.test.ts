@@ -1160,4 +1160,92 @@ describe('DashboardSidePanel', () => {
     expect(document.activeElement).toBe(select);
   });
 
+  // T28b: dirty create + Escape → InlineConfirm + focus on confirm button
+  it('T28b: dirty create + Escape → InlineConfirm; focus on confirm button', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'unsaved';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(document.activeElement).toBe(confirmBtn);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // T28c: dirty + backdrop click → InlineConfirm + focus on confirm button
+  it('T28c: dirty + backdrop click → InlineConfirm; focus on confirm button', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'unsaved';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const backdrop = host.querySelector('.panel-backdrop') as HTMLElement;
+    backdrop.click();
+    await settle();
+    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(document.activeElement).toBe(confirmBtn);
+  });
+
+  // T28d: dirty + × Close button → InlineConfirm + focus on confirm button
+  it('T28d: dirty + × Close → InlineConfirm; focus on confirm button', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'unsaved';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const closeBtn = host.querySelector('[data-side-panel-close]') as HTMLButtonElement;
+    closeBtn.click();
+    await settle();
+    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(document.activeElement).toBe(confirmBtn);
+  });
+
+  // T28e: during submit, Escape is a no-op
+  it('T28e: during submit, Escape → no InlineConfirm, no onClose', async () => {
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init.signal!.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    const cancelBtn = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    cancelBtn.click();
+    await settle();
+  });
+
 });

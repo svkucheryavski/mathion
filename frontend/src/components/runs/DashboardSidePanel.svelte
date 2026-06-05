@@ -12,6 +12,8 @@
     type DashboardMpGroupEntry,
   } from '../../lib/dashboards';
   import FocusTrap from '../ui/FocusTrap.svelte';
+  import InlineConfirm from '../ui/InlineConfirm.svelte';
+  import DirtyGuard from '../editor/DirtyGuard.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatLocalWithTz } from '../../lib/datetime';
   import { formatFileSize } from '../../lib/format';
@@ -100,6 +102,34 @@
       tick().then(() => {
         const sel = document.querySelector('select[name="evaluation-result"]') as HTMLSelectElement | null;
         sel?.focus();
+      });
+    }
+  });
+
+  const isDirty = $derived.by(() => {
+    if (prefillSnapshot) {
+      return (
+        formResult !== prefillSnapshot.result ||
+        formScore !== prefillSnapshot.score ||
+        formFeedbackText !== prefillSnapshot.feedback_text ||
+        formFeedbackFile !== null
+      );
+    }
+    return (
+      formResult !== '' ||
+      formScore !== null ||
+      formFeedbackText !== '' ||
+      formFeedbackFile !== null
+    );
+  });
+
+  let confirmDiscard = $state(false);
+
+  $effect(() => {
+    if (confirmDiscard) {
+      tick().then(() => {
+        const btn = document.querySelector('.inline-confirm button') as HTMLButtonElement | null;
+        btn?.focus();
       });
     }
   });
@@ -200,14 +230,45 @@
     }
   }
 
-  // MINIMAL handleCancel — only handles submit-time abort. T7 step 7.3 REPLACES
-  // this with the full dirty-guard version. DO NOT EXTEND THIS HERE.
   function handleCancel() {
     if (submitting) {
       submitController?.abort('user-cancel');
       return;
     }
+    if (isDirty) {
+      confirmDiscard = true;
+      return;
+    }
     editing = false;
+    tick().then(() => {
+      const editBtn = document.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement | null;
+      editBtn?.focus();
+    });
+  }
+
+  function tryClose() {
+    if (submitting) return;
+    if (isDirty) {
+      confirmDiscard = true;
+      return;
+    }
+    onClose();
+  }
+
+  function discardAndClose() {
+    confirmDiscard = false;
+    if (editing) {
+      editing = false;
+      formResult = '';
+      formScore = null;
+      formFeedbackText = '';
+      formFeedbackFile = null;
+      fileError = null;
+      prefillSnapshot = null;
+      formSubmitAttempted = false;
+    } else {
+      onClose();
+    }
   }
 
   function handleFileChange(e: Event) {
@@ -270,14 +331,14 @@
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
-      onClose();
+      tryClose();
     }
   }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="panel-backdrop" onclick={onClose} role="presentation"></div>
+<div class="panel-backdrop" onclick={tryClose} role="presentation"></div>
 <FocusTrap autofocusSelector='select[name="evaluation-result"], [data-side-panel-close]' autofocusPriorityOrder>
   <div
     class="dashboard-side-panel"
@@ -286,7 +347,7 @@
     aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
     data-can-write={target.kind === 'submission' && canWrite ? 'true' : undefined}
   >
-    <button class="panel-close" onclick={onClose} aria-label="Close panel" data-side-panel-close>
+    <button class="panel-close" onclick={tryClose} aria-label="Close panel" data-side-panel-close>
       <span aria-hidden="true">✕</span>
       Close
     </button>
@@ -521,6 +582,17 @@
         {/if}
       {/if}
     {/if}
+    {#if confirmDiscard}
+      <div class="discard-confirm">
+        <InlineConfirm
+          confirmLabel="Discard"
+          warning="Discard unsaved changes?"
+          onConfirm={discardAndClose}
+          onCancel={() => (confirmDiscard = false)}
+        />
+      </div>
+    {/if}
+    <DirtyGuard isDirty={() => isDirty && !submitting} />
   </div>
 </FocusTrap>
 
