@@ -584,4 +584,128 @@ describe('DashboardSidePanel', () => {
     expect(desc.split(/\s+/)).toContain('evaluation-result-helper');
   });
 
+  // T21: POST happy — FormData contents, URL, X-Requested-With, credentials; aria-busy on Save during submit
+  it('T21: POST happy — FormData contents, URL, X-Requested-With, credentials; aria-busy during submit', async () => {
+    const pdf = new File([new Uint8Array([0x25, 0x50])], 'fb.pdf', { type: 'application/pdf' });
+    const evalResp = { id: 7, submission_id: 100, result: 'accepted', score: 95, feedback_text: 'OK', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    let resolveFetch!: (v: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((r) => { resolveFetch = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '95';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'OK';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', { value: [pdf], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.getAttribute('aria-busy')).toBe('true');
+    expect(saveBtn.disabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/submissions/100/evaluation');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect((init.headers as Record<string, string>)['X-Requested-With']).toBe('mathion');
+    const fd = init.body as FormData;
+    expect(fd.get('result')).toBe('accepted');
+    expect(fd.get('score')).toBe('95');
+    expect(fd.get('feedback_text')).toBe('OK');
+    expect(fd.get('file')).toBe(pdf);
+    // After resolveFetch the Save success path unmounts the form (cascade
+    // transitions to read-only + [Edit]). The captured `saveBtn` is now detached
+    // so don't assert on its post-resolution state — T30 covers focus-to-Edit.
+    resolveFetch(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    await settle();
+    expect(host.querySelector('button[data-test="edit-evaluation"]')).toBeTruthy();
+  });
+
+  // T23: toast pushed with success message + kind
+  it('T23: pushToast called with success message + kind on POST success', async () => {
+    const evalResp = { id: 8, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    vi.mocked(pushToast).mockClear();
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(pushToast).toHaveBeenCalledWith('Evaluation saved; group notified', 'success');
+  });
+
+  // T26b: onRefetch invoked once on PATCH success (parallel to T26 for POST)
+  it('T26b: onRefetch invoked exactly once on PATCH success', async () => {
+    const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
+    const updatedEval = { id: 42, submission_id: 100, result: 'accepted', score: 95, feedback_text: 'Good', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(updatedEval), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const onRefetch = vi.fn();
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: initialEval,
+        submissionId: 100,
+      }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  // T26: onRefetch invoked once on POST success
+  it('T26: onRefetch invoked exactly once on POST success', async () => {
+    const evalResp = { id: 9, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    const onRefetch = vi.fn();
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+  });
+
 });

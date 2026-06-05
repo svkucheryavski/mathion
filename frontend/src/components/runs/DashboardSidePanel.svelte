@@ -121,8 +121,52 @@
   const valid = $derived(formResult !== '' && !errors.score && !errors.feedbackText && !errors.feedbackFile);
 
   async function handleSave() {
-    // 5a-5g progressively implement this; minimal stub returns early.
-    return;
+    formSubmitAttempted = true; // surfaces errors.result = 'Result is required.' if blank
+    if (!valid || submitting) return;
+    submitting = true;
+    serverError = null;
+    submitController = new AbortController();
+    timeoutHandle = setTimeout(() => submitController?.abort('timeout'), SUBMIT_TIMEOUT_MS);
+    try {
+      let result: Evaluation;
+      if (effectiveEvaluation == null) {
+        if (target.kind !== 'submission') throw new Error('handleSave called on non-submission kind');
+        result = await createEvaluation({
+          submission_id: target.entry.latest_submission!.id,
+          result: formResult as EvaluationResult,
+          score: formScore,
+          feedback_text: formFeedbackText || null,
+          feedback_file: formFeedbackFile,
+        }, { signal: submitController.signal });
+      } else {
+        result = await patchEvaluation(effectiveEvaluation.id, {
+          result: formResult as EvaluationResult,
+          score: formScore,
+          feedback_text: formFeedbackText || null,
+        }, { signal: submitController.signal });
+      }
+      stateLatestEvaluation = result;
+      editing = false;
+      pushToast('Evaluation saved; group notified', 'success');
+      onRefetch();
+      await tick();
+      const editBtn = document.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement | null;
+      editBtn?.focus();
+    } catch (e: unknown) {
+      // 5c (4xx), 5d (409), 5e (timeout), 5g (user-cancel) progressively expand.
+      if (e instanceof ApiError) {
+        // displayMessage normalizes Pydantic 422 array details to a string toast
+        // ("Please correct the highlighted fields."). frontend/src/lib/api.ts:14-19.
+        serverError = e.displayMessage;
+      } else {
+        serverError = 'Unexpected error';
+      }
+    } finally {
+      submitting = false;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      timeoutHandle = null;
+      submitController = null;
+    }
   }
 
   // MINIMAL handleCancel — only handles submit-time abort. T7 step 7.3 REPLACES
