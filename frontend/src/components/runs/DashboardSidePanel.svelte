@@ -159,6 +159,14 @@
         onRefetch();
         return;
       }
+      if ((e as { name?: string })?.name === 'AbortError') {
+        const reason = (submitController?.signal as AbortSignal & { reason?: unknown })?.reason;
+        if (reason === 'timeout') {
+          serverError = 'Upload timed out. Try again.';
+          return;
+        }
+        // user-cancel falls through to generic error below (handled in 5g).
+      }
       if (e instanceof ApiError) {
         serverError = e.displayMessage;
       } else {

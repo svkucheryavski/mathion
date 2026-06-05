@@ -843,4 +843,41 @@ describe('DashboardSidePanel', () => {
     expect(host.textContent).toContain('Other Prof');
   });
 
+  // T29: timeout → banner + Save re-enabled + values preserved
+  it('T29: timeout → "Upload timed out. Try again." banner; Save re-enabled', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init.signal!.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    flushSync();
+    await tick(); await tick();
+    flushSync();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.getAttribute('aria-busy')).toBe('true');
+    await vi.advanceTimersByTimeAsync(60_001);
+    flushSync();
+    expect(host.textContent).toContain('Upload timed out. Try again.');
+    expect(saveBtn.disabled).toBe(false);
+    expect(saveBtn.getAttribute('aria-busy')).toBe('false');
+    expect(select.value).toBe('accepted');
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
 });
