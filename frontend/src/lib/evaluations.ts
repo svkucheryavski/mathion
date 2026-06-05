@@ -1,6 +1,10 @@
 import { api, ApiError } from './api';
 import { emitUnauthorized } from './events';
 
+// MUST stay in sync with backend Settings.max_file_size (config.py:9), default 20 MB.
+// Backend value is env-overridable via MATHION_MAX_FILE_SIZE; a deploy bumping the
+// backend constant must hand-update this. Accepted drift for the write-surface
+// slice; a /api/config/limits endpoint is the principled fix (Phase 9).
 export const MAX_FEEDBACK_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
 export type EvaluationResult = 'rejected' | 'major_revision' | 'minor_revision' | 'accepted';
@@ -30,6 +34,11 @@ export interface EvaluationUpdateInput {
   feedback_text?: string | null;
 }
 
+// Wire-layer mirror of lib/runAssets.ts:uploadRunAsset — credentials: 'include'
+// (cross-port dev cookie), X-Requested-With CSRF header, network failure ->
+// ApiError(0), 401 -> emitUnauthorized + ApiError(401), non-ok -> ApiError(status,
+// detail, error_code). User-cancelled saves (AbortError) propagate as-is so
+// callers can distinguish cancel from server-unreachable.
 export async function createEvaluation(
   input: EvaluationCreateInput,
   opts?: { signal?: AbortSignal },
@@ -50,16 +59,17 @@ export async function createEvaluation(
       signal: opts?.signal,
     });
   } catch (e: unknown) {
-    if ((e as { name?: string })?.name === 'AbortError') throw e;
-    throw new ApiError(0, 'Connection error');
+    // jsdom's DOMException doesn't extend Error, so duck-type on .name.
+    if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
+    throw new ApiError(0, 'Could not reach server. Check your connection.');
   }
   if (r.status === 401) {
     emitUnauthorized(location.pathname + location.search + location.hash);
     throw new ApiError(401, 'Not authenticated');
   }
   if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new ApiError(r.status, body?.detail ?? 'Upload failed', body?.error_code);
+    const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
+    throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload.error_code);
   }
   return r.json();
 }
