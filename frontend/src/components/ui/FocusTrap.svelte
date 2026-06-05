@@ -3,9 +3,11 @@
 
   let {
     autofocusSelector = 'input, select, textarea, button',
+    autofocusPriorityOrder = false,
     children,
   }: {
     autofocusSelector?: string;
+    autofocusPriorityOrder?: boolean;
     children: Snippet;
   } = $props();
 
@@ -38,8 +40,24 @@
     previousFocus = (document.activeElement as HTMLElement) ?? null;
     document.addEventListener('keydown', onKeydown, true);
     queueMicrotask(() => {
-      const first = containerEl?.querySelector<HTMLElement>(autofocusSelector);
-      first?.focus();
+      if (!containerEl) return;
+      if (autofocusPriorityOrder) {
+        // Comma-separated selector: try each in declaration order, return the
+        // FIRST match (NOT first-in-DOM-order). Lets callers express a true
+        // fallback chain — e.g. `'select[name="x"], [data-close]'` focuses the
+        // select when present, else the close button.
+        const selectors = autofocusSelector.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+        for (const sel of selectors) {
+          const el = containerEl.querySelector<HTMLElement>(sel);
+          if (el) {
+            el.focus();
+            return;
+          }
+        }
+      } else {
+        const first = containerEl.querySelector<HTMLElement>(autofocusSelector);
+        first?.focus();
+      }
     });
     return () => {
       document.removeEventListener('keydown', onKeydown, true);

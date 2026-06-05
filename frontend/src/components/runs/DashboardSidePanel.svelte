@@ -90,7 +90,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="panel-backdrop" onclick={onClose} role="presentation"></div>
-<FocusTrap autofocusSelector='select[name="evaluation-result"]'>
+<FocusTrap autofocusSelector='select[name="evaluation-result"], [data-side-panel-close]' autofocusPriorityOrder>
   <div
     class="dashboard-side-panel"
     role="dialog"
