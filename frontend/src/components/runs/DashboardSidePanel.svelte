@@ -59,8 +59,7 @@
   // the "Result is required." inline error vs. just relying on native `disabled`.
   let formSubmitAttempted = $state(false);
 
-  // T4 stub — REPLACED in T6 step 6.3 with $derived(effectiveEvaluation?.has_feedback_file ?? false)
-  let existingHasFeedbackFile = $state(false);
+  const existingHasFeedbackFile = $derived(effectiveEvaluation?.has_feedback_file ?? false);
 
   const SUBMIT_TIMEOUT_MS = 60_000;
 
@@ -83,6 +82,25 @@
 
   $effect(() => {
     if (effectiveEvaluation != null) raceTransition = false;
+  });
+
+  $effect(() => {
+    if (editing && effectiveEvaluation) {
+      formResult = effectiveEvaluation.result as EvaluationResult;
+      formScore = effectiveEvaluation.score;
+      formFeedbackText = effectiveEvaluation.feedback_text ?? '';
+      formFeedbackFile = null;
+      fileError = null;
+      prefillSnapshot = {
+        result: effectiveEvaluation.result as EvaluationResult,
+        score: effectiveEvaluation.score,
+        feedback_text: effectiveEvaluation.feedback_text ?? '',
+      };
+      tick().then(() => {
+        const sel = document.querySelector('select[name="evaluation-result"]') as HTMLSelectElement | null;
+        sel?.focus();
+      });
+    }
   });
 
   const feedbackCharCount = $derived(formFeedbackText.length);

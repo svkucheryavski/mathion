@@ -990,4 +990,45 @@ describe('DashboardSidePanel', () => {
     expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
   });
 
+  // T17: Edit pre-fills with existing values (null and non-null variants)
+  it('T17: [Edit] expands pre-filled form; null score → empty input, null text → empty textarea', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'rejected',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'rejected', score: null, feedback_text: null, has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    expect(select.value).toBe('rejected');
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    expect(scoreInput.value).toBe('');
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+  });
+
+  // T17 non-null variant: pre-fill round-trips full values from existing eval
+  it('T17 non-null: [Edit] pre-fills select/score/textarea with existing values', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    expect((host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement).value).toBe('major_revision');
+    expect((host.querySelector('input[name="evaluation-score"]') as HTMLInputElement).value).toBe('60');
+    expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('Needs work');
+  });
+
 });
