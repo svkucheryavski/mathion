@@ -1248,4 +1248,26 @@ describe('DashboardSidePanel', () => {
     await settle();
   });
 
+  // T30c: focus moves to [Edit] after Cancel-in-edit (clean, no prompt)
+  it('T30c: Cancel in clean edit-mode → focus moves to [Edit]', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const cancelBtn = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    cancelBtn.click();
+    await settle();
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+    const editBtnAfter = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    expect(document.activeElement).toBe(editBtnAfter);
+  });
+
 });
