@@ -15,7 +15,10 @@
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatLocalWithTz } from '../../lib/datetime';
   import { formatFileSize } from '../../lib/format';
-  import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult } from '../../lib/evaluations';
+  import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
+  import { ApiError } from '../../lib/api';
+  import { pushToast } from '../../stores/toasts.svelte';
+  import { tick } from 'svelte';
 
   type ProgressTarget = {
     kind: 'progress';
@@ -59,6 +62,29 @@
   // T4 stub — REPLACED in T6 step 6.3 with $derived(effectiveEvaluation?.has_feedback_file ?? false)
   let existingHasFeedbackFile = $state(false);
 
+  const SUBMIT_TIMEOUT_MS = 60_000;
+
+  let stateLatestEvaluation = $state<Evaluation | null>(null);
+  let submitting = $state(false);
+  let serverError = $state<string | null>(null);
+  let submitController: AbortController | null = null;
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  let raceTransition = $state(false);
+
+  // Captured when Edit is clicked (T6 wires the $effect). Used by T7's dirty-guard
+  // to compare current form values against the pre-fill baseline so a clean
+  // just-opened edit is NOT dirty. `null` means create-mode (no pre-fill).
+  let prefillSnapshot = $state<{ result: EvaluationResult | ''; score: number | null; feedback_text: string } | null>(null);
+
+  const effectiveEvaluation = $derived.by(() => {
+    if (target.kind !== 'submission') return null;
+    return stateLatestEvaluation ?? target.entry.latest_evaluation;
+  });
+
+  $effect(() => {
+    if (effectiveEvaluation != null) raceTransition = false;
+  });
+
   const feedbackCharCount = $derived(formFeedbackText.length);
   const counterApproaching = $derived(feedbackCharCount >= 900);
 
@@ -93,6 +119,21 @@
   // `valid` deliberately ignores `errors.result` (which only surfaces post-attempt
   // for UX) — the native `disabled` covers it pre-attempt.
   const valid = $derived(formResult !== '' && !errors.score && !errors.feedbackText && !errors.feedbackFile);
+
+  async function handleSave() {
+    // 5a-5g progressively implement this; minimal stub returns early.
+    return;
+  }
+
+  // MINIMAL handleCancel — only handles submit-time abort. T7 step 7.3 REPLACES
+  // this with the full dirty-guard version. DO NOT EXTEND THIS HERE.
+  function handleCancel() {
+    if (submitting) {
+      submitController?.abort('user-cancel');
+      return;
+    }
+    editing = false;
+  }
 
   function handleFileChange(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -246,13 +287,13 @@
               {/if}
             </section>
           {/if}
-        {:else if target.entry.latest_evaluation}
-          {@const evalu = target.entry.latest_evaluation}
-          <!-- Occurrence (b): Branch B. REPLACED in T5.SETUP.2 with {@const evalu = effectiveEvaluation}. -->
+        {:else if effectiveEvaluation}
+          {@const evalu = effectiveEvaluation}
+          <!-- Occurrence (b): Branch B. -->
           <section class="evaluation-block">
             <h4>Evaluation</h4>
-            <p>Evaluated at: {evalu.evaluated_at ? formatLocalWithTz(evalu.evaluated_at) : '—'}</p>
-            <p>Evaluated by: {evalu.evaluated_by?.full_name ?? evalu.evaluated_by?.user_id ?? '—'}</p>
+            <p>Evaluated at: {target.entry.latest_evaluation ? (target.entry.latest_evaluation.evaluated_at ? formatLocalWithTz(target.entry.latest_evaluation.evaluated_at) : '—') : 'Just now'}</p>
+            <p>Evaluated by: {target.entry.latest_evaluation ? (target.entry.latest_evaluation.evaluated_by?.full_name ?? target.entry.latest_evaluation.evaluated_by?.user_id ?? '—') : 'You'}</p>
             <p>Result: {evalu.result}</p>
             <p>Score: {evalu.score ?? '—'}</p>
             <p>Feedback: {evalu.feedback_text ?? '—'}</p>
@@ -265,7 +306,8 @@
           {/if}
           {#if canWrite && editing}
             <h4>Edit evaluation</h4>
-            <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; /* handleSave wired in T5 */ }}>
+            {#if serverError}<div role="alert" class="form-error">{serverError}</div>{/if}
+            <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; handleSave(); }}>
               <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
               <select id="evaluation-result" name="evaluation-result"
                       aria-required="true"
@@ -316,13 +358,16 @@
               <span class="helper-text">PDF only, max 20 MB.</span>
               {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
 
-              <button type="submit" disabled={!valid}>Save</button>
-              <!-- Cancel button is rendered in T5/T7 — not in T4 -->
+              <button type="submit" disabled={!valid || submitting} aria-busy={submitting}>Save</button>
+              {#if editing || submitting}
+                <button type="button" data-test="cancel-button" onclick={handleCancel}>{submitting ? 'Cancel upload' : 'Cancel'}</button>
+              {/if}
             </form>
           {/if}
-        {:else if canWrite}
+        {:else if canWrite && !raceTransition}
           <h4>New evaluation</h4>
-          <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; /* handleSave wired in T5 */ }}>
+          {#if serverError}<div role="alert" class="form-error">{serverError}</div>{/if}
+          <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; handleSave(); }}>
               <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
               <select id="evaluation-result" name="evaluation-result"
                       aria-required="true"
@@ -373,8 +418,10 @@
               <span class="helper-text">PDF only, max 20 MB.</span>
               {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
 
-              <button type="submit" disabled={!valid}>Save</button>
-              <!-- Cancel button is rendered in T5/T7 — not in T4 -->
+              <button type="submit" disabled={!valid || submitting} aria-busy={submitting}>Save</button>
+              {#if editing || submitting}
+                <button type="button" data-test="cancel-button" onclick={handleCancel}>{submitting ? 'Cancel upload' : 'Cancel'}</button>
+              {/if}
           </form>
         {:else}
           <p>Awaiting evaluation</p>
@@ -402,6 +449,14 @@
     background: #e0f2f8;
     color: #044d6c;
     border-left: 4px solid #0a7ea4;
+    margin-bottom: 1rem;
+  }
+  .form-error {
+    background: #fdecea;
+    color: #611a15;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    border-left: 4px solid #c53030;
     margin-bottom: 1rem;
   }
   .helper-text {

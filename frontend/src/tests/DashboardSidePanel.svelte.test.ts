@@ -5,6 +5,13 @@ import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
 import type { PanelTarget } from '../components/runs/DashboardSidePanel.svelte';
 import type { DashboardMpRow, DashboardMpGroupEntry } from '../lib/dashboards';
 
+vi.mock('../stores/toasts.svelte', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../stores/toasts.svelte')>();
+  return { ...actual, pushToast: vi.fn() };
+});
+
+import { pushToast } from '../stores/toasts.svelte';
+
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 
@@ -53,6 +60,7 @@ async function settle() {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.mocked(pushToast).mockClear();
 });
 
 afterEach(() => {
