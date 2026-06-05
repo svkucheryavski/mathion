@@ -783,4 +783,64 @@ describe('DashboardSidePanel', () => {
     expect(saveBtn.disabled).toBe(false);
   });
 
+  // T31: 409 → onRefetch + form transitions to read-only (form gone)
+  it('T31: 409 → onRefetch called + form removed from DOM', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Already evaluated' }), { status: 409, headers: { 'Content-Type': 'application/json' } })));
+    const onRefetch = vi.fn();
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T31b: 409 race where refetch populates the winning eval → read-only block renders
+  it('T31b: 409 → onRefetch populates target.entry.latest_evaluation → read-only with winning eval', async () => {
+    const winningEval = {
+      id: 77, evaluated_at: '2026-06-04T11:50:00Z',
+      evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'OK', has_feedback_file: false,
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Already evaluated' }), { status: 409, headers: { 'Content-Type': 'application/json' } }),
+    ));
+    const startTarget = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    // Wrap target in $state so we can mutate it from inside onRefetch (simulating
+    // RunSubmissionTab's selectedIds-derived rebind after a refresh).
+    const wrappedTarget = $state({ ...startTarget, entry: { ...startTarget.entry } });
+    const onRefetch = vi.fn(() => {
+      wrappedTarget.entry = { ...wrappedTarget.entry, latest_evaluation: winningEval, status: 'accepted' };
+    });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(DashboardSidePanel, {
+      target: host,
+      props: { target: wrappedTarget, onClose: vi.fn(), isAdmin: true, isTeacher: false, onRefetch },
+    });
+    flushSync();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.textContent).toContain('88');
+    expect(host.textContent).toContain('Other Prof');
+  });
+
 });

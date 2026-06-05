@@ -153,10 +153,13 @@
       const editBtn = document.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement | null;
       editBtn?.focus();
     } catch (e: unknown) {
-      // 5c (4xx), 5d (409), 5e (timeout), 5g (user-cancel) progressively expand.
+      if (e instanceof ApiError && e.status === 409) {
+        raceTransition = true;
+        editing = false;
+        onRefetch();
+        return;
+      }
       if (e instanceof ApiError) {
-        // displayMessage normalizes Pydantic 422 array details to a string toast
-        // ("Please correct the highlighted fields."). frontend/src/lib/api.ts:14-19.
         serverError = e.displayMessage;
       } else {
         serverError = 'Unexpected error';
