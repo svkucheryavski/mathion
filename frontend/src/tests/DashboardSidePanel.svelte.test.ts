@@ -619,7 +619,7 @@ describe('DashboardSidePanel', () => {
     expect(saveBtn.getAttribute('aria-busy')).toBe('true');
     expect(saveBtn.disabled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/submissions/100/evaluation');
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('include');

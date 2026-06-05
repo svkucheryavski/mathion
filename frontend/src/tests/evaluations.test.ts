@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiError } from '../lib/api';
 import { createEvaluation, patchEvaluation, MAX_FEEDBACK_FILE_SIZE_BYTES } from '../lib/evaluations';
 import * as events from '../lib/events';
 

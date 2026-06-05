@@ -61,9 +61,6 @@
   // the "Result is required." inline error vs. just relying on native `disabled`.
   let formSubmitAttempted = $state(false);
 
-  const existingHasFeedbackFile = $derived(effectiveEvaluation?.has_feedback_file ?? false);
-  const resultLocked = $derived(editing && effectiveEvaluation != null && !effectiveEvaluation.has_feedback_file);
-
   const SUBMIT_TIMEOUT_MS = 60_000;
 
   let stateLatestEvaluation = $state<Evaluation | null>(null);
@@ -82,6 +79,9 @@
     if (target.kind !== 'submission') return null;
     return stateLatestEvaluation ?? target.entry.latest_evaluation;
   });
+
+  const existingHasFeedbackFile = $derived(effectiveEvaluation?.has_feedback_file ?? false);
+  const resultLocked = $derived(editing && effectiveEvaluation != null && !effectiveEvaluation.has_feedback_file);
 
   $effect(() => {
     if (effectiveEvaluation != null) raceTransition = false;
@@ -499,7 +499,7 @@
                 <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
                 <span class="helper-text">PDF only, max 20 MB.</span>
                 {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
-              {:else if effectiveEvaluation?.has_feedback_file}
+              {:else if existingHasFeedbackFile}
                 <p class="helper-text">Existing feedback file uploaded — replace not supported (Phase 9)</p>
               {/if}
 
@@ -568,7 +568,7 @@
                 <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
                 <span class="helper-text">PDF only, max 20 MB.</span>
                 {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
-              {:else if effectiveEvaluation?.has_feedback_file}
+              {:else if existingHasFeedbackFile}
                 <p class="helper-text">Existing feedback file uploaded — replace not supported (Phase 9)</p>
               {/if}
 
