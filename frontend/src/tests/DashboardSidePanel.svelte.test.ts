@@ -959,4 +959,35 @@ describe('DashboardSidePanel', () => {
     vi.useRealTimers();
   });
 
+  // T16: read-only block + [Edit] when canWrite + eval present
+  it('T16: read-only block + [Edit] when canWrite + eval present', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.querySelector('button[data-test="edit-evaluation"]')).toBeTruthy();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T34: canWrite=false + eval → read-only, no [Edit]
+  it('T34: canWrite=false + eval → read-only block, no [Edit]', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'accepted',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'accepted', score: 95, feedback_text: 'Good', has_feedback_file: true },
+      }),
+    });
+    await settle();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.querySelector('button[data-test="edit-evaluation"]')).toBeNull();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
 });
