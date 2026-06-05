@@ -755,4 +755,32 @@ describe('DashboardSidePanel', () => {
     expect('file' in body).toBe(false);
   });
 
+  // T24: 4xx error → banner role=alert; form values preserved; Save re-enabled
+  it('T24: 4xx error banner + form values preserved + Save re-enabled', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Bad request' }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '75';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const banner = host.querySelector('[role="alert"].form-error') as HTMLElement;
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain('Bad request');
+    expect(select.value).toBe('accepted');
+    expect(scoreInput.value).toBe('75');
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(false);
+  });
+
 });
