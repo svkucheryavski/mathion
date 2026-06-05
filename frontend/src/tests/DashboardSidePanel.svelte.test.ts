@@ -1065,4 +1065,38 @@ describe('DashboardSidePanel', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // T38: file picker hidden in edit
+  it('T38: file picker hidden in edit', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  // T39: "Replace not supported (Phase 9)" placeholder in edit
+  it('T39: "Existing feedback file uploaded — replace not supported (Phase 9)" placeholder in edit', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    expect(host.textContent).toContain('Existing feedback file uploaded — replace not supported (Phase 9)');
+  });
+
 });

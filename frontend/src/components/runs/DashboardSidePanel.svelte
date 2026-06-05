@@ -428,15 +428,19 @@
               <span class="sr-only" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
               {#if errors.feedbackText}<span id="evaluation-feedback-error" role="alert">{errors.feedbackText}</span>{/if}
 
-              <label for="evaluation-file">
-                Feedback PDF
-                {#if formResult !== 'accepted' && formResult !== ''}
-                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
-                {/if}
-              </label>
-              <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
-              <span class="helper-text">PDF only, max 20 MB.</span>
-              {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
+              {#if !editing}
+                <label for="evaluation-file">
+                  Feedback PDF
+                  {#if formResult !== 'accepted' && formResult !== ''}
+                    <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
+                  {/if}
+                </label>
+                <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
+                <span class="helper-text">PDF only, max 20 MB.</span>
+                {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
+              {:else if effectiveEvaluation?.has_feedback_file}
+                <p class="helper-text">Existing feedback file uploaded — replace not supported (Phase 9)</p>
+              {/if}
 
               <button type="submit" disabled={!valid || submitting} aria-busy={submitting}>Save</button>
               {#if editing || submitting}
@@ -493,15 +497,19 @@
               <span class="sr-only" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
               {#if errors.feedbackText}<span id="evaluation-feedback-error" role="alert">{errors.feedbackText}</span>{/if}
 
-              <label for="evaluation-file">
-                Feedback PDF
-                {#if formResult !== 'accepted' && formResult !== ''}
-                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
-                {/if}
-              </label>
-              <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
-              <span class="helper-text">PDF only, max 20 MB.</span>
-              {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
+              {#if !editing}
+                <label for="evaluation-file">
+                  Feedback PDF
+                  {#if formResult !== 'accepted' && formResult !== ''}
+                    <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
+                  {/if}
+                </label>
+                <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
+                <span class="helper-text">PDF only, max 20 MB.</span>
+                {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
+              {:else if effectiveEvaluation?.has_feedback_file}
+                <p class="helper-text">Existing feedback file uploaded — replace not supported (Phase 9)</p>
+              {/if}
 
               <button type="submit" disabled={!valid || submitting} aria-busy={submitting}>Save</button>
               {#if editing || submitting}
