@@ -708,4 +708,51 @@ describe('DashboardSidePanel', () => {
     expect(onRefetch).toHaveBeenCalledTimes(1);
   });
 
+  // T22: PATCH happy — JSON body, no file key, URL
+  it('T22: PATCH happy — JSON body, no file key, URL /api/evaluations/{eid}', async () => {
+    const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
+    const updatedEval = { id: 42, submission_id: 100, result: 'accepted', score: 90, feedback_text: 'OK now', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(updatedEval), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: initialEval,
+        submissionId: 100,
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '90';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'OK now';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/evaluations/42');
+    expect(init.method).toBe('PATCH');
+    // api.patch routes through request() which wraps headers via new Headers(...).
+    // Read with Headers.get(), not bracket access on a plain object.
+    const headers = new Headers(init.headers as HeadersInit);
+    expect(headers.get('Content-Type')).toBe('application/json');
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ result: 'accepted', score: 90, feedback_text: 'OK now' });
+    expect('file' in body).toBe(false);
+  });
+
 });
