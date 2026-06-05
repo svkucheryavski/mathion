@@ -1099,4 +1099,65 @@ describe('DashboardSidePanel', () => {
     expect(host.textContent).toContain('Existing feedback file uploaded — replace not supported (Phase 9)');
   });
 
+  // T37: Cancel button DOM-absent in clean create
+  it('T37: Cancel button is DOM-absent in clean create (no edit + no submit)', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('button[data-test="cancel-button"]')).toBeNull();
+  });
+
+  // T28: clean create + Escape → close without prompt
+  it('T28: clean create + Escape → onClose (no InlineConfirm)', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+  });
+
+  // T30: focus moves to [Edit] after successful Save
+  it('T30: focus moves to [Edit] after successful Save', async () => {
+    const evalResp = { id: 8, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    expect(document.activeElement).toBe(editBtn);
+  });
+
+  // T30b: focus moves to result <select> after [Edit] click
+  it('T30b: focus moves to result <select> after [Edit] click', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    expect(document.activeElement).toBe(select);
+  });
+
 });
