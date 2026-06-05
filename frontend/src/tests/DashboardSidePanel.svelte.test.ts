@@ -405,4 +405,175 @@ describe('DashboardSidePanel', () => {
     expect(host.querySelector('[data-test="edit-evaluation"]')).toBeNull();
   });
 
+  // T20: validation blocks fetch (incl. score=0)
+  it('T20: validation blocks fetch + score=0 valid; clearing error re-enables Save', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    flushSync();
+    expect(fetchMock).not.toHaveBeenCalled();
+    // After first submit attempt with blank result, the verbatim spec error appears.
+    expect(host.textContent).toContain('Result is required.');
+    select.value = 'major_revision';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Result is required.');
+    expect(saveBtn.disabled).toBe(true);
+    expect(host.textContent).toContain('Feedback is required when the result is not Accepted.');
+    expect(host.textContent).toContain('PDF file required for non-accepted results.');
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '101';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '0';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '-1';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '10.5';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'Needs work';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(saveBtn.disabled).toBe(true);
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(saveBtn.disabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // T27: file extension / empty / size / MIME
+  it('T27: file extension/empty/size/MIME validation', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement;
+    let f = new File(['x'], 'note.txt', { type: 'text/plain' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Only PDF files accepted.');
+    f = new File([], 'empty.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('File appears empty.');
+    const big = new Uint8Array(21 * 1024 * 1024);
+    f = new File([big], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('File exceeds 20 MB limit.');
+    f = new File([new Uint8Array([0x50])], 'fake.pdf', { type: 'application/msword' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Only PDF files accepted.');
+    f = new File([new Uint8Array([0x25, 0x50])], 'ok.pdf', { type: '' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Only PDF files accepted.');
+    f = new File([new Uint8Array([0x25, 0x50])], 'ok2.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Only PDF files accepted.');
+  });
+
+  // T32: char counter — aria-live region updates only ≥900
+  it('T32: char counter aria-live updates only when crossing 900 chars', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    const live = host.querySelector('[data-test="feedback-counter-live"]') as HTMLElement;
+    const visible = host.querySelector('[data-test="feedback-counter-visible"]') as HTMLElement;
+    expect(live).toBeTruthy();
+    expect(visible).toBeTruthy();
+    textarea.value = 'abcde';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(visible.textContent).toContain('5');
+    expect(live.textContent).toBe('');
+    textarea.value = 'a'.repeat(899);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(visible.textContent).toContain('899');
+    expect(live.textContent).toBe('');
+    textarea.value = 'a'.repeat(900);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(visible.textContent).toContain('900');
+    expect(visible.textContent).toContain('approaching');
+    expect(host.querySelector('[data-test="feedback-counter-visible"] strong')).toBeTruthy();
+    // aria-live emits the CONSTANT 'Approaching limit' (NOT the running count) so
+    // SR announces ONCE on the empty→constant transition at 900.
+    expect(live.textContent).toBe('Approaching limit');
+    // Typing past 900 must NOT mutate the live content (no re-announce).
+    textarea.value = 'a'.repeat(950);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(live.textContent).toBe('Approaching limit');
+    // Dropping back below 900 clears the live region (no announcement on emptying).
+    textarea.value = 'a'.repeat(800);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(live.textContent).toBe('');
+  });
+
+  // T35: "Awaiting evaluation" placeholder
+  it('T35: "Awaiting evaluation" placeholder when canWrite=false + no resubmission + no eval', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'awaiting_eval',
+        is_resubmission: false,
+        latest_evaluation: null,
+      }),
+    });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('.banner-info')).toBeNull();
+    expect(host.textContent).toContain('Awaiting evaluation');
+  });
+
+  // T40: visible "(required)" + aria-describedby
+  it('T40: result <select> has visible "(required)" helper text + aria-describedby', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const helper = host.querySelector('#evaluation-result-helper') as HTMLElement;
+    expect(helper).toBeTruthy();
+    expect(helper.textContent).toContain('(required)');
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    const desc = select.getAttribute('aria-describedby') ?? '';
+    expect(desc.split(/\s+/)).toContain('evaluation-result-helper');
+  });
+
 });

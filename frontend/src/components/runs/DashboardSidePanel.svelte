@@ -15,6 +15,7 @@
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatLocalWithTz } from '../../lib/datetime';
   import { formatFileSize } from '../../lib/format';
+  import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult } from '../../lib/evaluations';
 
   type ProgressTarget = {
     kind: 'progress';
@@ -45,6 +46,77 @@
 
   const canWrite = $derived(isAdmin || isTeacher);
   let editing = $state(false);
+
+  let formResult = $state<EvaluationResult | ''>('');
+  let formScore = $state<number | null>(null);
+  let formFeedbackText = $state('');
+  let formFeedbackFile = $state<File | null>(null);
+  let fileError = $state<string | null>(null);
+  // Set true on first submit attempt; controls whether `errors.result` surfaces
+  // the "Result is required." inline error vs. just relying on native `disabled`.
+  let formSubmitAttempted = $state(false);
+
+  // T4 stub — REPLACED in T6 step 6.3 with $derived(effectiveEvaluation?.has_feedback_file ?? false)
+  let existingHasFeedbackFile = $state(false);
+
+  const feedbackCharCount = $derived(formFeedbackText.length);
+  const counterApproaching = $derived(feedbackCharCount >= 900);
+
+  // aria-live region emits a CONSTANT string when over threshold so SRs announce
+  // ONCE (on the empty→constant transition at 900), NOT on every keystroke after.
+  // Going below 900 makes the live region empty again (no announcement on empty).
+  const announcedCounter = $derived(counterApproaching ? 'Approaching limit' : '');
+
+  const errors = $derived.by(() => {
+    const e: { result?: string; score?: string; feedbackText?: string; feedbackFile?: string } = {};
+    if (formResult === '' && formSubmitAttempted) {
+      e.result = 'Result is required.';
+    }
+    if (formScore !== null && !Number.isNaN(formScore)) {
+      if (!Number.isInteger(formScore) || formScore < 0 || formScore > 100) {
+        e.score = 'Score must be a whole number between 0 and 100.';
+      }
+    }
+    const requiresFeedback = formResult !== '' && formResult !== 'accepted';
+    if (requiresFeedback) {
+      if (formFeedbackText.trim() === '') {
+        e.feedbackText = 'Feedback is required when the result is not Accepted.';
+      }
+      if (!formFeedbackFile && !existingHasFeedbackFile) {
+        e.feedbackFile = 'PDF file required for non-accepted results.';
+      }
+    }
+    if (fileError) e.feedbackFile = fileError;
+    return e;
+  });
+
+  // `valid` deliberately ignores `errors.result` (which only surfaces post-attempt
+  // for UX) — the native `disabled` covers it pre-attempt.
+  const valid = $derived(formResult !== '' && !errors.score && !errors.feedbackText && !errors.feedbackFile);
+
+  function handleFileChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    fileError = null;
+    if (!file) { formFeedbackFile = null; return; }
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      fileError = 'Only PDF files accepted.';
+      formFeedbackFile = null; return;
+    }
+    if (file.type !== '' && file.type !== 'application/pdf') {
+      fileError = 'Only PDF files accepted.';
+      formFeedbackFile = null; return;
+    }
+    if (file.size === 0) {
+      fileError = 'File appears empty.';
+      formFeedbackFile = null; return;
+    }
+    if (file.size > MAX_FEEDBACK_FILE_SIZE_BYTES) {
+      fileError = 'File exceeds 20 MB limit.';
+      formFeedbackFile = null; return;
+    }
+    formFeedbackFile = file;
+  }
 
   // Progress fetch state — only relevant when target.kind === 'progress'.
   let data = $state<SequenceItemStateResponse | null>(null);
@@ -193,28 +265,116 @@
           {/if}
           {#if canWrite && editing}
             <h4>Edit evaluation</h4>
-            <form aria-label="Write evaluation" onsubmit={(e) => e.preventDefault()}>
+            <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; /* handleSave wired in T5 */ }}>
               <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
-              <select id="evaluation-result" name="evaluation-result" aria-required="true" aria-describedby="evaluation-result-helper">
+              <select id="evaluation-result" name="evaluation-result"
+                      aria-required="true"
+                      aria-describedby={errors.result ? 'evaluation-result-helper evaluation-result-error' : 'evaluation-result-helper'}
+                      bind:value={formResult}>
                 <option value="">Select…</option>
                 <option value="rejected">Rejected</option>
                 <option value="major_revision">Major revision</option>
                 <option value="minor_revision">Minor revision</option>
                 <option value="accepted">Accepted</option>
               </select>
+              {#if errors.result}<span id="evaluation-result-error" role="alert">{errors.result}</span>{/if}
+
+              <label for="evaluation-score">Score <span class="helper-text">(optional, 0–100)</span></label>
+              <input id="evaluation-score" name="evaluation-score" type="number" min="0" max="100" step="1"
+                     value={formScore ?? ''}
+                     oninput={(e) => {
+                       const v = (e.currentTarget as HTMLInputElement).value;
+                       formScore = v === '' ? null : Number(v);
+                     }}
+                     aria-describedby={errors.score ? 'evaluation-score-error' : undefined} />
+              {#if errors.score}<span id="evaluation-score-error" role="alert">{errors.score}</span>{/if}
+
+              <label for="evaluation-feedback">
+                Feedback text
+                {#if formResult !== 'accepted' && formResult !== ''}
+                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
+                {:else}
+                  <span class="helper-text">(optional)</span>
+                {/if}
+              </label>
+              <textarea id="evaluation-feedback" name="evaluation-feedback" maxlength="1000"
+                        bind:value={formFeedbackText}
+                        aria-describedby={errors.feedbackText ? 'evaluation-feedback-count evaluation-feedback-error' : 'evaluation-feedback-count'}></textarea>
+              <span id="evaluation-feedback-count" data-test="feedback-counter-visible">
+                {feedbackCharCount} / 1000{#if counterApproaching}<strong> — approaching limit</strong>{/if}
+              </span>
+              <span class="sr-only" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
+              {#if errors.feedbackText}<span id="evaluation-feedback-error" role="alert">{errors.feedbackText}</span>{/if}
+
+              <label for="evaluation-file">
+                Feedback PDF
+                {#if formResult !== 'accepted' && formResult !== ''}
+                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
+                {/if}
+              </label>
+              <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
+              <span class="helper-text">PDF only, max 20 MB.</span>
+              {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
+
+              <button type="submit" disabled={!valid}>Save</button>
+              <!-- Cancel button is rendered in T5/T7 — not in T4 -->
             </form>
           {/if}
         {:else if canWrite}
           <h4>New evaluation</h4>
-          <form aria-label="Write evaluation" onsubmit={(e) => e.preventDefault()}>
-            <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
-            <select id="evaluation-result" name="evaluation-result" aria-required="true" aria-describedby="evaluation-result-helper">
-              <option value="">Select…</option>
-              <option value="rejected">Rejected</option>
-              <option value="major_revision">Major revision</option>
-              <option value="minor_revision">Minor revision</option>
-              <option value="accepted">Accepted</option>
-            </select>
+          <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; /* handleSave wired in T5 */ }}>
+              <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
+              <select id="evaluation-result" name="evaluation-result"
+                      aria-required="true"
+                      aria-describedby={errors.result ? 'evaluation-result-helper evaluation-result-error' : 'evaluation-result-helper'}
+                      bind:value={formResult}>
+                <option value="">Select…</option>
+                <option value="rejected">Rejected</option>
+                <option value="major_revision">Major revision</option>
+                <option value="minor_revision">Minor revision</option>
+                <option value="accepted">Accepted</option>
+              </select>
+              {#if errors.result}<span id="evaluation-result-error" role="alert">{errors.result}</span>{/if}
+
+              <label for="evaluation-score">Score <span class="helper-text">(optional, 0–100)</span></label>
+              <input id="evaluation-score" name="evaluation-score" type="number" min="0" max="100" step="1"
+                     value={formScore ?? ''}
+                     oninput={(e) => {
+                       const v = (e.currentTarget as HTMLInputElement).value;
+                       formScore = v === '' ? null : Number(v);
+                     }}
+                     aria-describedby={errors.score ? 'evaluation-score-error' : undefined} />
+              {#if errors.score}<span id="evaluation-score-error" role="alert">{errors.score}</span>{/if}
+
+              <label for="evaluation-feedback">
+                Feedback text
+                {#if formResult !== 'accepted' && formResult !== ''}
+                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
+                {:else}
+                  <span class="helper-text">(optional)</span>
+                {/if}
+              </label>
+              <textarea id="evaluation-feedback" name="evaluation-feedback" maxlength="1000"
+                        bind:value={formFeedbackText}
+                        aria-describedby={errors.feedbackText ? 'evaluation-feedback-count evaluation-feedback-error' : 'evaluation-feedback-count'}></textarea>
+              <span id="evaluation-feedback-count" data-test="feedback-counter-visible">
+                {feedbackCharCount} / 1000{#if counterApproaching}<strong> — approaching limit</strong>{/if}
+              </span>
+              <span class="sr-only" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
+              {#if errors.feedbackText}<span id="evaluation-feedback-error" role="alert">{errors.feedbackText}</span>{/if}
+
+              <label for="evaluation-file">
+                Feedback PDF
+                {#if formResult !== 'accepted' && formResult !== ''}
+                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
+                {/if}
+              </label>
+              <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
+              <span class="helper-text">PDF only, max 20 MB.</span>
+              {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
+
+              <button type="submit" disabled={!valid}>Save</button>
+              <!-- Cancel button is rendered in T5/T7 — not in T4 -->
           </form>
         {:else}
           <p>Awaiting evaluation</p>
@@ -247,5 +407,12 @@
   .helper-text {
     color: var(--text-muted, #666);
     font-size: 0.85em;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
   }
 </style>
