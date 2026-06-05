@@ -5,7 +5,15 @@
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
 
-  let { runId }: { runId: number } = $props();
+  let {
+    runId,
+    isAdmin = false,
+    isTeacher = false,
+  }: {
+    runId: number;
+    isAdmin?: boolean;
+    isTeacher?: boolean;
+  } = $props();
 
   let data = $state<DashboardProgressResponse | null>(null);
   let loading = $state(true);

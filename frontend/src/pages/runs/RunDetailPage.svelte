@@ -7,6 +7,7 @@
   import { runStatus } from '../../lib/runStatus';
   import { navigate } from '../../lib/router.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { session } from '../../stores/session.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
   import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
   import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
@@ -48,6 +49,10 @@
   let loadError = $state<ApiError | null>(null);
 
   let activeTab = $state<ActiveTab>('overview');
+  const isAdmin = $derived(course?.is_admin === true);
+  const isThisRunTeacher = $derived(
+    session.user != null && (teachers ?? []).some((t) => t.user_id === session.user!.id),
+  );
   let rosterPrefilter = $state<'unassigned' | null>(null);
   let showImportModal = $state(false);
 
@@ -445,9 +450,9 @@
         onReloadRun={reloadRun}
       />
     {:else if activeTab === 'progress'}
-      <RunProgressTab runId={run.id} />
+      <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
     {:else if activeTab === 'submission'}
-      <RunSubmissionTab runId={run.id} />
+      <RunSubmissionTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
     {/if}
   </section>
 {/if}

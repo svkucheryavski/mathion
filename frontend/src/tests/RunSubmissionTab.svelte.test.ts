@@ -678,6 +678,105 @@ describe('RunSubmissionTab', () => {
     expect(mp99Th.getAttribute('aria-sort')).toBe('none');
   });
 
+  // TS1 – panelTarget updates after refresh()
+  it('TS1: selectedIds-derived panelTarget updates after refresh()', async () => {
+    const v1 = submissionMock({
+      mini_projects: [
+        {
+          id: 1, block_id: 5, block_order: 1, block_title: 'B1', title: 'MP1',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            {
+              group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'awaiting_eval',
+              latest_submission: { id: 50, submission_number: 1, submitted_at: '2026-06-01T10:00:00Z', submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false, file_size: 1024 },
+              latest_evaluation: null,
+            },
+          ],
+          counts: { total_groups: 1, not_submitted: 0, awaiting_eval: 1, needs_revision: 0, accepted: 0, rejected: 0 },
+        },
+      ],
+    });
+    const v2 = submissionMock({
+      mini_projects: [
+        {
+          id: 1, block_id: 5, block_order: 1, block_title: 'B1', title: 'MP1',
+          is_published: true, first_submitted_at: null, soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+          groups: [
+            {
+              group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'accepted',
+              latest_submission: { id: 50, submission_number: 1, submitted_at: '2026-06-01T10:00:00Z', submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false, file_size: 1024 },
+              latest_evaluation: {
+                id: 42, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' },
+                result: 'accepted', score: 90, feedback_text: 'Good', has_feedback_file: true,
+              },
+            },
+          ],
+          counts: { total_groups: 1, not_submitted: 0, awaiting_eval: 0, needs_revision: 0, accepted: 1, rejected: 0 },
+        },
+      ],
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(v1), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(v2), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab(1);
+    await settle();
+    const cellBtn = host.querySelector('.status-cell-btn') as HTMLButtonElement;
+    cellBtn.click();
+    flushSync();
+    let panel = host.querySelector('[role="dialog"]') as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(panel.textContent).not.toContain('90');
+    const refreshBtn = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
+    refreshBtn.click();
+    await settle();
+    panel = host.querySelector('[role="dialog"]') as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(panel.textContent).toContain('90');
+    expect(panel.textContent).toContain('Good');
+  });
+
+  // TS2 – row-gone after refresh auto-closes the panel
+  it('TS2: row-gone after refresh auto-closes the panel', async () => {
+    const v1 = submissionMock();
+    const v2 = submissionMock({ mini_projects: [] });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(v1), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(v2), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab(1);
+    await settle();
+    const cellBtn = host.querySelector('.status-cell-btn') as HTMLButtonElement;
+    cellBtn.click();
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')).toBeTruthy();
+    const refreshBtn = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
+    refreshBtn.click();
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  // TS3 – runId change resets selectedIds
+  it('TS3: runId change resets selectedIds (panel closes)', async () => {
+    const fetchMock = mockFetch(200, submissionMock());
+    vi.stubGlobal('fetch', fetchMock);
+    const box = $state({ runId: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(RunSubmissionTab, { target: host, props: box });
+    flushSync();
+    await settle();
+    const cellBtn = host.querySelector('.status-cell-btn') as HTMLButtonElement;
+    cellBtn.click();
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')).toBeTruthy();
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock({ run: { id: 2, title: 'R2', groups_enabled: true } })));
+    box.runId = 2;
+    flushSync();
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   // T20 – Unmount after refresh() aborts the refresh-created controller
   it('unmount after refresh() aborts the refresh-created controller', async () => {
     let resolveRefresh!: (v: Response) => void;
