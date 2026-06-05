@@ -394,6 +394,9 @@ describe('RunDetailPage — isThisRunTeacher derivation', () => {
       if (url.includes('/courses/by-slug/')) return jres({ ...courseFixture, is_admin: false });
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
       if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      // /dashboard/mini-projects MUST come before /mini-projects so the dashboard
+      // endpoint returns a { run, mini_projects } shape (lib/dashboards.ts:123-161)
+      // not the bare array expected by lib/miniProjects.ts:5 listMiniProjects.
       if (url.includes('/dashboard/mini-projects')) return jres({ run: { id: 10, title: 'R', groups_enabled: true }, mini_projects: [] });
       if (url.includes('/mini-projects')) return jres([]);
       if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
