@@ -196,6 +196,16 @@
       }
       stateLatestEvaluation = result;
       editing = false;
+      // Reset form/dirty state so a subsequent × Close / Escape doesn't trip the
+      // dirty-guard against stale post-save form values. Re-opening [Edit] will
+      // re-prefill from stateLatestEvaluation via T6's $effect.
+      formResult = '';
+      formScore = null;
+      formFeedbackText = '';
+      formFeedbackFile = null;
+      fileError = null;
+      prefillSnapshot = null;
+      formSubmitAttempted = false;
       pushToast('Evaluation saved; group notified', 'success');
       onRefetch();
       await tick();

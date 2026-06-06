@@ -1270,4 +1270,32 @@ describe('DashboardSidePanel', () => {
     expect(document.activeElement).toBe(editBtnAfter);
   });
 
+  // T8FIX: post-save × Close should NOT raise InlineConfirm — formState/prefillSnapshot
+  // must be cleared in handleSave success path so isDirty is false.
+  it('T8FIX: post-save × Close → no InlineConfirm + onClose called (form state cleared)', async () => {
+    const evalResp = { id: 9, submission_id: 100, result: 'accepted', score: 80, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '80';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const closeBtn = host.querySelector('[data-side-panel-close]') as HTMLButtonElement;
+    closeBtn.click();
+    await settle();
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
 });
