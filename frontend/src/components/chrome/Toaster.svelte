@@ -3,7 +3,7 @@
   import Toast from './Toast.svelte';
 </script>
 
-<div class="toaster" aria-live="polite">
+<div class="toaster">
   {#each toasts.list as t (t.id)}
     <Toast toast={t} />
   {/each}
