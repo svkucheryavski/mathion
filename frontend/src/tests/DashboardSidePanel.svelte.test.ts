@@ -5,6 +5,13 @@ import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
 import type { PanelTarget } from '../components/runs/DashboardSidePanel.svelte';
 import type { DashboardMpRow, DashboardMpGroupEntry } from '../lib/dashboards';
 
+vi.mock('../stores/toasts.svelte', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../stores/toasts.svelte')>();
+  return { ...actual, pushToast: vi.fn() };
+});
+
+import { pushToast } from '../stores/toasts.svelte';
+
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 
@@ -22,14 +29,28 @@ function mockFetch(status: number, body: unknown) {
 interface MountPanelOpts {
   target: PanelTarget;
   onClose?: () => void;
+  isAdmin?: boolean;
+  isTeacher?: boolean;
+  onRefetch?: () => void;
 }
 
-function mountPanel({ target, onClose = vi.fn() }: MountPanelOpts) {
+function mountPanel(opts: MountPanelOpts) {
+  const onClose = opts.onClose ?? vi.fn();
+  const onRefetch = opts.onRefetch ?? vi.fn();
   host = document.createElement('div');
   document.body.appendChild(host);
-  component = mount(DashboardSidePanel, { target: host, props: { target, onClose } });
+  component = mount(DashboardSidePanel, {
+    target: host,
+    props: {
+      target: opts.target,
+      onClose,
+      isAdmin: opts.isAdmin ?? false,
+      isTeacher: opts.isTeacher ?? false,
+      onRefetch,
+    },
+  });
   flushSync();
-  return { host, onClose: onClose as ReturnType<typeof vi.fn> };
+  return { host, onClose: onClose as ReturnType<typeof vi.fn>, onRefetch: onRefetch as ReturnType<typeof vi.fn> };
 }
 
 async function settle() {
@@ -39,6 +60,7 @@ async function settle() {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.mocked(pushToast).mockClear();
 });
 
 afterEach(() => {
@@ -105,6 +127,28 @@ function makeEntry(overrides: Partial<DashboardMpGroupEntry> = {}): DashboardMpG
     },
     ...overrides,
   };
+}
+
+function submissionTarget(opts: {
+  is_resubmission?: boolean;
+  latest_evaluation?: DashboardMpGroupEntry['latest_evaluation'];
+  status?: DashboardMpGroupEntry['status'];
+  submissionId?: number;
+} = {}) {
+  const entry = makeEntry({
+    status: opts.status ?? 'awaiting_eval',
+    latest_submission: {
+      id: opts.submissionId ?? 100,
+      submission_number: opts.is_resubmission ? 2 : 1,
+      submitted_at: '2026-06-04T10:00:00Z',
+      submitted_by: { user_id: 5, full_name: 'Alice' },
+      is_late: false,
+      is_resubmission: opts.is_resubmission ?? false,
+      file_size: 12345,
+    },
+    latest_evaluation: opts.latest_evaluation ?? null,
+  });
+  return { kind: 'submission' as const, mp: makeMp(), entry };
 }
 
 describe('DashboardSidePanel', () => {
@@ -312,6 +356,946 @@ describe('DashboardSidePanel', () => {
     expect(focusSpy).toHaveBeenCalled();
 
     document.body.removeChild(trigger);
+  });
+
+  // T15: form mount + focus on result <select>
+  it('T15: shows form when canWrite + no eval + not auto-accept; focus on result <select>', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeTruthy();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    expect(document.activeElement).toBe(select);
+  });
+
+  // T18: form DOM-absent when canWrite=false
+  it('T18: form DOM-absent when canWrite=false', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+    });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T19a: auto-accept banner + no eval, no form, no eval block
+  it('T19a: auto-accept banner when is_resubmission + no eval; no form, no eval block', async () => {
+    mountPanel({
+      target: submissionTarget({ is_resubmission: true, latest_evaluation: null }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('.banner-info')).toBeTruthy();
+    expect(host.textContent).toContain('Auto-accepted on resubmission');
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('section.evaluation-block')).toBeNull();
+  });
+
+  // T19b: auto-accept + eval present → banner + read-only eval block, no form, no [Edit]
+  it('T19b: auto-accept + eval present → banner + read-only eval block, no form, no [Edit]', async () => {
+    mountPanel({
+      target: submissionTarget({
+        is_resubmission: true,
+        latest_evaluation: {
+          id: 99, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: { user_id: 1, full_name: 'AutoAccept' },
+          result: 'accepted', score: null, feedback_text: null, has_feedback_file: false,
+        },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('.banner-info')).toBeTruthy();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.textContent).toContain('accepted');
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('[data-test="edit-evaluation"]')).toBeNull();
+  });
+
+  // T20: validation blocks fetch (incl. score=0)
+  it('T20: validation blocks fetch + score=0 valid; clearing error re-enables Save', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    flushSync();
+    expect(fetchMock).not.toHaveBeenCalled();
+    // After first submit attempt with blank result, the verbatim spec error appears.
+    expect(host.textContent).toContain('Result is required.');
+    select.value = 'major_revision';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Result is required.');
+    expect(saveBtn.disabled).toBe(true);
+    expect(host.textContent).toContain('Feedback is required when the result is not Accepted.');
+    expect(host.textContent).toContain('PDF file required for non-accepted results.');
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '101';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '0';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '-1';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '10.5';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Score must be a whole number between 0 and 100.');
+    scoreInput.value = '';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'Needs work';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(saveBtn.disabled).toBe(true);
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(saveBtn.disabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // T27: file extension / empty / size / MIME
+  it('T27: file extension/empty/size/MIME validation', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement;
+    let f = new File(['x'], 'note.txt', { type: 'text/plain' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Only PDF files accepted.');
+    f = new File([], 'empty.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('File appears empty.');
+    const big = new Uint8Array(21 * 1024 * 1024);
+    f = new File([big], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('File exceeds 20 MB limit.');
+    f = new File([new Uint8Array([0x50])], 'fake.pdf', { type: 'application/msword' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('Only PDF files accepted.');
+    f = new File([new Uint8Array([0x25, 0x50])], 'ok.pdf', { type: '' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Only PDF files accepted.');
+    f = new File([new Uint8Array([0x25, 0x50])], 'ok2.pdf', { type: 'application/pdf' });
+    Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('Only PDF files accepted.');
+  });
+
+  // T32: char counter — aria-live region updates only ≥900
+  it('T32: char counter aria-live updates only when crossing 900 chars', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    const live = host.querySelector('[data-test="feedback-counter-live"]') as HTMLElement;
+    const visible = host.querySelector('[data-test="feedback-counter-visible"]') as HTMLElement;
+    expect(live).toBeTruthy();
+    expect(visible).toBeTruthy();
+    textarea.value = 'abcde';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(visible.textContent).toContain('5');
+    expect(live.textContent).toBe('');
+    textarea.value = 'a'.repeat(899);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(visible.textContent).toContain('899');
+    expect(live.textContent).toBe('');
+    textarea.value = 'a'.repeat(900);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(visible.textContent).toContain('900');
+    expect(visible.textContent).toContain('approaching');
+    expect(host.querySelector('[data-test="feedback-counter-visible"] strong')).toBeTruthy();
+    // aria-live emits the CONSTANT 'Approaching limit' (NOT the running count) so
+    // SR announces ONCE on the empty→constant transition at 900.
+    expect(live.textContent).toBe('Approaching limit');
+    // Typing past 900 must NOT mutate the live content (no re-announce).
+    textarea.value = 'a'.repeat(950);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(live.textContent).toBe('Approaching limit');
+    // Dropping back below 900 clears the live region (no announcement on emptying).
+    textarea.value = 'a'.repeat(800);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(live.textContent).toBe('');
+  });
+
+  // T35: "Awaiting evaluation" placeholder
+  it('T35: "Awaiting evaluation" placeholder when canWrite=false + no resubmission + no eval', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'awaiting_eval',
+        is_resubmission: false,
+        latest_evaluation: null,
+      }),
+    });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('.banner-info')).toBeNull();
+    expect(host.textContent).toContain('Awaiting evaluation');
+  });
+
+  // T40: visible "(required)" + aria-describedby
+  it('T40: result <select> has visible "(required)" helper text + aria-describedby', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const helper = host.querySelector('#evaluation-result-helper') as HTMLElement;
+    expect(helper).toBeTruthy();
+    expect(helper.textContent).toContain('(required)');
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    const desc = select.getAttribute('aria-describedby') ?? '';
+    expect(desc.split(/\s+/)).toContain('evaluation-result-helper');
+  });
+
+  // T21: POST happy — FormData contents, URL, X-Requested-With, credentials; aria-busy on Save during submit
+  it('T21: POST happy — FormData contents, URL, X-Requested-With, credentials; aria-busy during submit', async () => {
+    const pdf = new File([new Uint8Array([0x25, 0x50])], 'fb.pdf', { type: 'application/pdf' });
+    const evalResp = { id: 7, submission_id: 100, result: 'accepted', score: 95, feedback_text: 'OK', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    let resolveFetch!: (v: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((r) => { resolveFetch = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '95';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'OK';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', { value: [pdf], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.getAttribute('aria-busy')).toBe('true');
+    expect(saveBtn.disabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/submissions/100/evaluation');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect((init.headers as Record<string, string>)['X-Requested-With']).toBe('mathion');
+    const fd = init.body as FormData;
+    expect(fd.get('result')).toBe('accepted');
+    expect(fd.get('score')).toBe('95');
+    expect(fd.get('feedback_text')).toBe('OK');
+    expect(fd.get('file')).toBe(pdf);
+    // After resolveFetch the Save success path unmounts the form (cascade
+    // transitions to read-only + [Edit]). The captured `saveBtn` is now detached
+    // so don't assert on its post-resolution state — T30 covers focus-to-Edit.
+    resolveFetch(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    await settle();
+    expect(host.querySelector('button[data-test="edit-evaluation"]')).toBeTruthy();
+  });
+
+  // T23: toast pushed with success message + kind
+  it('T23: pushToast called with success message + kind on POST success', async () => {
+    const evalResp = { id: 8, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    vi.mocked(pushToast).mockClear();
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(pushToast).toHaveBeenCalledWith('Evaluation saved; group notified', 'success');
+  });
+
+  // T26b: onRefetch invoked once on PATCH success (parallel to T26 for POST)
+  it('T26b: onRefetch invoked exactly once on PATCH success', async () => {
+    const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
+    const updatedEval = { id: 42, submission_id: 100, result: 'accepted', score: 95, feedback_text: 'Good', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(updatedEval), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const onRefetch = vi.fn();
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: initialEval,
+        submissionId: 100,
+      }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  // T26: onRefetch invoked once on POST success
+  it('T26: onRefetch invoked exactly once on POST success', async () => {
+    const evalResp = { id: 9, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    const onRefetch = vi.fn();
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  // T22: PATCH happy — JSON body, no file key, URL
+  it('T22: PATCH happy — JSON body, no file key, URL /api/evaluations/{eid}', async () => {
+    const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
+    const updatedEval = { id: 42, submission_id: 100, result: 'accepted', score: 90, feedback_text: 'OK now', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(updatedEval), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: initialEval,
+        submissionId: 100,
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '90';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'OK now';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/evaluations/42');
+    expect(init.method).toBe('PATCH');
+    // api.patch routes through request() which wraps headers via new Headers(...).
+    // Read with Headers.get(), not bracket access on a plain object.
+    const headers = new Headers(init.headers as HeadersInit);
+    expect(headers.get('Content-Type')).toBe('application/json');
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ result: 'accepted', score: 90, feedback_text: 'OK now' });
+    expect('file' in body).toBe(false);
+  });
+
+  // T24: 4xx error → banner role=alert; form values preserved; Save re-enabled
+  it('T24: 4xx error banner + form values preserved + Save re-enabled', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Bad request' }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '75';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const banner = host.querySelector('[role="alert"].form-error') as HTMLElement;
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain('Bad request');
+    expect(select.value).toBe('accepted');
+    expect(scoreInput.value).toBe('75');
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(false);
+  });
+
+  // T31: 409 → onRefetch + form transitions to read-only (form gone)
+  it('T31: 409 → onRefetch called + form removed from DOM', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Already evaluated' }), { status: 409, headers: { 'Content-Type': 'application/json' } })));
+    const onRefetch = vi.fn();
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T31b: 409 race where refetch populates the winning eval → read-only block renders
+  it('T31b: 409 → onRefetch populates target.entry.latest_evaluation → read-only with winning eval', async () => {
+    const winningEval = {
+      id: 77, evaluated_at: '2026-06-04T11:50:00Z',
+      evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'OK', has_feedback_file: false,
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Already evaluated' }), { status: 409, headers: { 'Content-Type': 'application/json' } }),
+    ));
+    const startTarget = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    // Wrap target in $state so we can mutate it from inside onRefetch (simulating
+    // RunSubmissionTab's selectedIds-derived rebind after a refresh).
+    const wrappedTarget = $state({ ...startTarget, entry: { ...startTarget.entry } });
+    const onRefetch = vi.fn(() => {
+      wrappedTarget.entry = { ...wrappedTarget.entry, latest_evaluation: winningEval, status: 'accepted' };
+    });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(DashboardSidePanel, {
+      target: host,
+      props: { target: wrappedTarget, onClose: vi.fn(), isAdmin: true, isTeacher: false, onRefetch },
+    });
+    flushSync();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.textContent).toContain('88');
+    expect(host.textContent).toContain('Other Prof');
+  });
+
+  // T29: timeout → banner + Save re-enabled + values preserved
+  it('T29: timeout → "Upload timed out. Try again." banner; Save re-enabled', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init.signal!.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    flushSync();
+    await tick(); await tick();
+    flushSync();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.getAttribute('aria-busy')).toBe('true');
+    await vi.advanceTimersByTimeAsync(60_001);
+    flushSync();
+    expect(host.textContent).toContain('Upload timed out. Try again.');
+    expect(saveBtn.disabled).toBe(false);
+    expect(saveBtn.getAttribute('aria-busy')).toBe('false');
+    expect(select.value).toBe('accepted');
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // T33: after POST, [Edit] uses stateLatestEvaluation.id for PATCH (refetch never resolves)
+  it('T33: POST → state.latestEvaluation; [Edit] + Save → PATCH /api/evaluations/{newId}', async () => {
+    const created = { id: 42, submission_id: 100, result: 'accepted', score: 80, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    const patched = { id: 42, submission_id: 100, result: 'accepted', score: 95, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:05:00Z', evaluated_by: 1 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(patched), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onRefetch = vi.fn(() => new Promise<void>(() => {}));
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100, latest_evaluation: null }),
+      isAdmin: true,
+      onRefetch,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '80';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    expect(editBtn).toBeTruthy();
+    editBtn.click();
+    await settle();
+    const scoreInput2 = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput2.value = '95';
+    scoreInput2.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form2 = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form2.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/evaluations/42');
+    expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+  });
+
+  // T36: user-cancel during submit → no banner, form values preserved, Save re-enabled
+  it('T36: user-cancel during submit → no banner, form values preserved', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init.signal!.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    flushSync();
+    await tick(); await tick();
+    flushSync();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    const cancelBtn = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    cancelBtn.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(host.querySelector('[role="alert"].form-error')).toBeNull();
+    const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(false);
+    expect(select.value).toBe('accepted');
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // T16: read-only block + [Edit] when canWrite + eval present
+  it('T16: read-only block + [Edit] when canWrite + eval present', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.querySelector('button[data-test="edit-evaluation"]')).toBeTruthy();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T34: canWrite=false + eval → read-only, no [Edit]
+  it('T34: canWrite=false + eval → read-only block, no [Edit]', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'accepted',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'accepted', score: 95, feedback_text: 'Good', has_feedback_file: true },
+      }),
+    });
+    await settle();
+    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
+    expect(host.querySelector('button[data-test="edit-evaluation"]')).toBeNull();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+  });
+
+  // T17: Edit pre-fills with existing values (null and non-null variants)
+  it('T17: [Edit] expands pre-filled form; null score → empty input, null text → empty textarea', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'rejected',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'rejected', score: null, feedback_text: null, has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    expect(select.value).toBe('rejected');
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    expect(scoreInput.value).toBe('');
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('');
+  });
+
+  // T17 non-null variant: pre-fill round-trips full values from existing eval
+  it('T17 non-null: [Edit] pre-fills select/score/textarea with existing values', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    expect((host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement).value).toBe('major_revision');
+    expect((host.querySelector('input[name="evaluation-score"]') as HTMLInputElement).value).toBe('60');
+    expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('Needs work');
+  });
+
+  // T25: result-lock — disabled non-accepted options + verbatim text + Save guarded
+  it('T25: result-lock — non-accepted options disabled + verbatim helper text + fetch not called', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({
+      target: submissionTarget({
+        status: 'accepted',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'accepted', score: 85, feedback_text: null, has_feedback_file: false },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const opts = host.querySelectorAll('select[name="evaluation-result"] option');
+    const optMap = new Map<string, HTMLOptionElement>();
+    opts.forEach((o) => optMap.set((o as HTMLOptionElement).value, o as HTMLOptionElement));
+    expect(optMap.get('rejected')?.disabled).toBe(true);
+    expect(optMap.get('major_revision')?.disabled).toBe(true);
+    expect(optMap.get('minor_revision')?.disabled).toBe(true);
+    expect(optMap.get('accepted')?.disabled).toBe(false);
+    expect(host.textContent).toContain('Cannot change to a non-accepted result without a feedback file. Create a new evaluation instead.');
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'rejected';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // T38: file picker hidden in edit
+  it('T38: file picker hidden in edit', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  // T39: "Replace not supported (Phase 9)" placeholder in edit
+  it('T39: "Existing feedback file uploaded — replace not supported (Phase 9)" placeholder in edit', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    expect(host.textContent).toContain('Existing feedback file uploaded — replace not supported (Phase 9)');
+  });
+
+  // T37: Cancel button DOM-absent in clean create
+  it('T37: Cancel button is DOM-absent in clean create (no edit + no submit)', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    expect(host.querySelector('button[data-test="cancel-button"]')).toBeNull();
+  });
+
+  // T28: clean create + Escape → close without prompt
+  it('T28: clean create + Escape → onClose (no InlineConfirm)', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+  });
+
+  // T30: focus moves to [Edit] after successful Save
+  it('T30: focus moves to [Edit] after successful Save', async () => {
+    const evalResp = { id: 8, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    expect(document.activeElement).toBe(editBtn);
+  });
+
+  // T30b: focus moves to result <select> after [Edit] click
+  it('T30b: focus moves to result <select> after [Edit] click', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    expect(document.activeElement).toBe(select);
+  });
+
+  // T28b: dirty create + Escape → InlineConfirm + focus on confirm button
+  it('T28b: dirty create + Escape → InlineConfirm; focus on confirm button', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'unsaved';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(document.activeElement).toBe(confirmBtn);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // T28c: dirty + backdrop click → InlineConfirm + focus on confirm button
+  it('T28c: dirty + backdrop click → InlineConfirm; focus on confirm button', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'unsaved';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const backdrop = host.querySelector('.panel-backdrop') as HTMLElement;
+    backdrop.click();
+    await settle();
+    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(document.activeElement).toBe(confirmBtn);
+  });
+
+  // T28d: dirty + × Close button → InlineConfirm + focus on confirm button
+  it('T28d: dirty + × Close → InlineConfirm; focus on confirm button', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+    textarea.value = 'unsaved';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const closeBtn = host.querySelector('[data-side-panel-close]') as HTMLButtonElement;
+    closeBtn.click();
+    await settle();
+    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(document.activeElement).toBe(confirmBtn);
+  });
+
+  // T28e: during submit, Escape is a no-op
+  it('T28e: during submit, Escape → no InlineConfirm, no onClose', async () => {
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init.signal!.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval' }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    const cancelBtn = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    cancelBtn.click();
+    await settle();
+  });
+
+  // T30c: focus moves to [Edit] after Cancel-in-edit (clean, no prompt)
+  it('T30c: Cancel in clean edit-mode → focus moves to [Edit]', async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        is_resubmission: false,
+        latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    const editBtn = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    editBtn.click();
+    await settle();
+    const cancelBtn = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    cancelBtn.click();
+    await settle();
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+    const editBtnAfter = host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement;
+    expect(document.activeElement).toBe(editBtnAfter);
+  });
+
+  // T8FIX: post-save × Close should NOT raise InlineConfirm — formState/prefillSnapshot
+  // must be cleared in handleSave success path so isDirty is false.
+  it('T8FIX: post-save × Close → no InlineConfirm + onClose called (form state cleared)', async () => {
+    const evalResp = { id: 9, submission_id: 100, result: 'accepted', score: 80, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    select.value = 'accepted';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const scoreInput = host.querySelector('input[name="evaluation-score"]') as HTMLInputElement;
+    scoreInput.value = '80';
+    scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const closeBtn = host.querySelector('[data-side-panel-close]') as HTMLButtonElement;
+    closeBtn.click();
+    await settle();
+    expect(host.querySelector('.inline-confirm')).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
 });

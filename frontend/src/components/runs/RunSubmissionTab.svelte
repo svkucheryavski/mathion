@@ -10,7 +10,17 @@
   // STATUS_ICON kept to satisfy import; used indirectly via StatusBadge
   void STATUS_ICON;
 
-  let { runId }: { runId: number } = $props();
+  let {
+    runId,
+    isAdmin = false,
+    isTeacher = false,
+  }: {
+    runId: number;
+    isAdmin?: boolean;
+    isTeacher?: boolean;
+  } = $props();
+
+  const canWrite = $derived(isAdmin || isTeacher);
 
   let data = $state<DashboardMiniProjectsResponse | null>(null);
   let loading = $state(true);
@@ -23,8 +33,14 @@
 
   let groupFilter = $state<number | 'all'>('all');
 
-  let panelOpen = $state(false);
-  let panelTarget = $state<{ mp: DashboardMpRow; entry: DashboardMpGroupEntry } | null>(null);
+  let selectedIds = $state<{ mpId: number; groupId: number } | null>(null);
+
+  const panelTarget = $derived.by(() => {
+    if (selectedIds == null || data == null) return null;
+    const mp = data.mini_projects.find((m) => m.id === selectedIds!.mpId);
+    const entry = mp?.groups.find((g) => g.group_id === selectedIds!.groupId);
+    return mp && entry ? { kind: 'submission' as const, mp, entry } : null;
+  });
 
   let abortCtl: AbortController | null = null;
 
@@ -36,8 +52,7 @@
     // Reset on runId change — same rationale as §6.3 (a stale groupFilter from the
     // previous run can silently empty the new run's grid).
     groupFilter = 'all';
-    panelOpen = false;
-    panelTarget = null;
+    selectedIds = null;
     loading = true;
     error = null;
     getMiniProjectsDashboard(runId, { signal: ctl.signal })
@@ -112,13 +127,11 @@
   }
 
   function openPanel(mp: DashboardMpRow, entry: DashboardMpGroupEntry): void {
-    panelTarget = { mp, entry };
-    panelOpen = true;
+    selectedIds = { mpId: mp.id, groupId: entry.group_id };
   }
 
   function closePanel(): void {
-    panelOpen = false;
-    panelTarget = null;
+    selectedIds = null;
   }
 
   function formatCountsLine(counts: DashboardMpRow['counts']): string {
@@ -189,7 +202,7 @@
   });
 </script>
 
-<div class="tab-container">
+<div class="tab-container" data-test="run-submission-tab" data-can-write={canWrite ? 'true' : 'false'}>
   {#if error}
     <div class="banner banner-error" role="alert">
       {error} <button onclick={refresh}>Retry</button>
@@ -276,10 +289,13 @@
           </table>
         </div>
 
-        {#if panelOpen && panelTarget}
+        {#if panelTarget}
           <DashboardSidePanel
-            target={{ kind: 'submission', ...panelTarget }}
+            target={panelTarget}
             onClose={closePanel}
+            {isAdmin}
+            {isTeacher}
+            onRefetch={refresh}
           />
         {/if}
       {/if}

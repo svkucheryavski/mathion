@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
+import { session } from '../stores/session.svelte';
 
 const fetchSpy = vi.fn();
 
@@ -339,6 +340,83 @@ describe('RunDetailPage — Assets tab integration', () => {
     expect(
       Array.from(tabs).find((b) => b.textContent?.trim() === 'Assets'),
     ).toBeTruthy();
+    unmount(cmp);
+  });
+});
+
+describe('RunDetailPage — isThisRunTeacher derivation', () => {
+  beforeEach(() => {
+    session.user = null;
+    session.loading = false;
+  });
+
+  it('TD1: derives canWrite=true on RunSubmissionTab when session.user.id is in teachers list', async () => {
+    session.user = {
+      id: 5, email: 'teach@x', full_name: 'T', is_superuser: false, is_disabled: false,
+      photo_url: null, has_course_admin: false, has_run_teacher: true,
+    };
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres({ ...courseFixture, is_admin: false });
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      // /dashboard/mini-projects MUST come before /mini-projects so the dashboard
+      // endpoint returns a { run, mini_projects } shape (lib/dashboards.ts:123-161)
+      // not the bare array expected by lib/miniProjects.ts:5 listMiniProjects.
+      if (url.includes('/dashboard/mini-projects')) return jres({ run: { id: 10, title: 'R', groups_enabled: true }, mini_projects: [] });
+      if (url.includes('/mini-projects')) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([{ id: 1, run_id: 10, user_id: 5, user_email: 'teach@x', user_full_name: 'T', created_at: '2026-01-01' }]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const submTab = Array.from(target.querySelectorAll('button[role="tab"]'))
+      .find((b) => b.textContent?.trim() === 'Submission') as HTMLButtonElement;
+    submTab.click();
+    flushSync();
+    await settle();
+    const tabContainer = target.querySelector('[data-test="run-submission-tab"]') as HTMLElement;
+    expect(tabContainer?.getAttribute('data-can-write')).toBe('true');
+    unmount(cmp);
+  });
+
+  it('TD1-neg: canWrite=false when teachers list does not contain session.user.id (and is_admin=false)', async () => {
+    session.user = {
+      id: 5, email: 'student@x', full_name: 'S', is_superuser: false, is_disabled: false,
+      photo_url: null, has_course_admin: false, has_run_teacher: false,
+    };
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres({ ...courseFixture, is_admin: false });
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture());
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      // /dashboard/mini-projects MUST come before /mini-projects so the dashboard
+      // endpoint returns a { run, mini_projects } shape (lib/dashboards.ts:123-161)
+      // not the bare array expected by lib/miniProjects.ts:5 listMiniProjects.
+      if (url.includes('/dashboard/mini-projects')) return jres({ run: { id: 10, title: 'R', groups_enabled: true }, mini_projects: [] });
+      if (url.includes('/mini-projects')) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([{ id: 1, run_id: 10, user_id: 99, user_email: 'other@x', user_full_name: 'Other', created_at: '2026-01-01' }]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const submTab = Array.from(target.querySelectorAll('button[role="tab"]'))
+      .find((b) => b.textContent?.trim() === 'Submission') as HTMLButtonElement;
+    submTab.click();
+    flushSync();
+    await settle();
+    const tabContainer = target.querySelector('[data-test="run-submission-tab"]') as HTMLElement;
+    expect(tabContainer?.getAttribute('data-can-write')).toBe('false');
     unmount(cmp);
   });
 });
