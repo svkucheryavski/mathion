@@ -29,7 +29,7 @@ from mathion.models import (
     RunTeacher,
     Submission,
 )
-from mathion.models_auth import NotificationLogEntry, User
+from mathion.models_auth import User
 from mathion.schemas import RunCreate, RunResponse, RunUpdate
 
 router = APIRouter(tags=["runs"])
@@ -213,23 +213,6 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
 
     run.is_published = True
     db.flush()
-
-    # Lazy-load course slug for notification payload
-    course_slug = run.version.course.slug
-
-    students = db.execute(
-        select(RunStudent).where(RunStudent.run_id == run_id)
-    ).scalars().all()
-    for rs in students:
-        db.add(NotificationLogEntry(
-            user_id=rs.user_id,
-            kind="run_published",
-            payload={
-                "run_id": run.id,
-                "course_slug": course_slug,
-                "title": run.title,
-            },
-        ))
 
     db.commit()
     db.refresh(run)

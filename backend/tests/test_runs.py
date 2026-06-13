@@ -176,19 +176,6 @@ def test_patch_groups_enabled_after_publish_409(admin_client, seed_publishable_v
     assert response.status_code == 409
 
 
-def test_publish_writes_run_published_notification_per_student(admin_client, db, seed_publishable_version):
-    from mathion.models_auth import NotificationLogEntry
-    course, _ = seed_publishable_version()
-    run = admin_client.post(f"/api/courses/{course['id']}/runs",
-        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
-    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "t@example.com"})
-    admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "a@example.com"})
-    admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "b@example.com"})
-    admin_client.post(f"/api/runs/{run['id']}/publish")
-    rows = db.query(NotificationLogEntry).filter_by(kind="run_published").all()
-    assert len(rows) == 2
-
-
 def test_teacher_cannot_publish(teacher_client, admin_client, db, teacher_user, seed_publishable_version):
     from mathion.models import RunTeacher
     course, _ = seed_publishable_version()
