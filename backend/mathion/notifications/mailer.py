@@ -56,3 +56,28 @@ class FileMailer(Mailer):
         tmp = path.with_suffix(".eml.tmp")
         tmp.write_bytes(bytes(msg))
         tmp.rename(path)
+
+
+class SMTPMailer(Mailer):
+    def __init__(self, host, port, username, password):
+        self.host, self.port = host, port
+        self.username, self.password = username, password
+        self._smtp: smtplib.SMTP | None = None
+
+    @contextmanager
+    def session(self):
+        self._smtp = smtplib.SMTP(self.host, self.port, timeout=30)
+        try:
+            self._smtp.starttls()
+            self._smtp.login(self.username, self.password)
+            yield
+        finally:
+            try:
+                self._smtp.quit()
+            except Exception:
+                pass
+            self._smtp = None
+
+    def send(self, msg):
+        assert self._smtp is not None, "SMTPMailer.send called outside session()"
+        self._smtp.send_message(msg)

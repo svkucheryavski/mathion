@@ -1,8 +1,10 @@
+import smtplib
 from email.message import EmailMessage
 from pathlib import Path
+from unittest.mock import patch
 import pytest
 
-from mathion.notifications.mailer import MemoryMailer, FileMailer
+from mathion.notifications.mailer import MemoryMailer, FileMailer, SMTPMailer
 
 
 def test_memory_mailer_send_appends():
@@ -96,3 +98,50 @@ def test_filemailer_uuid_disambiguates_same_timestamp(tmp_path):
         fm.send(_make_msg("run_enrolled"))
         fm.send(_make_msg("run_enrolled"))
     assert len(list(tmp_path.glob("*.eml"))) == 2
+
+
+def test_smtp_session_opens_connection_starttls_auth():
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        mock_conn = MockSMTP.return_value
+        sm = SMTPMailer("host", 587, "user", "pw")
+        with sm.session():
+            pass
+        MockSMTP.assert_called_once_with("host", 587, timeout=30)
+        mock_conn.starttls.assert_called_once()
+        mock_conn.login.assert_called_once_with("user", "pw")
+        mock_conn.quit.assert_called_once()
+
+
+def test_smtp_send_without_session_raises():
+    sm = SMTPMailer("host", 587, "user", "pw")
+    msg = EmailMessage()
+    msg["Subject"] = "x"
+    with pytest.raises(AssertionError):
+        sm.send(msg)
+
+
+def test_smtp_reuses_connection_across_sends():
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        mock_conn = MockSMTP.return_value
+        sm = SMTPMailer("host", 587, "user", "pw")
+        with sm.session():
+            for _ in range(5):
+                msg = EmailMessage()
+                msg["Subject"] = "x"
+                sm.send(msg)
+        assert MockSMTP.call_count == 1
+        assert mock_conn.send_message.call_count == 5
+
+
+def test_smtp_propagates_recipients_refused():
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        mock_conn = MockSMTP.return_value
+        mock_conn.send_message.side_effect = smtplib.SMTPRecipientsRefused(
+            {"x@x": (550, b"no such user")}
+        )
+        sm = SMTPMailer("host", 587, "user", "pw")
+        with sm.session():
+            with pytest.raises(smtplib.SMTPRecipientsRefused):
+                msg = EmailMessage()
+                msg["Subject"] = "x"
+                sm.send(msg)
