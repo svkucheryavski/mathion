@@ -1,12 +1,17 @@
 def _make_run(admin_client, seed_publishable_version, groups_enabled=False):
     course, _ = seed_publishable_version()
-    return admin_client.post(
+    run = admin_client.post(
         f"/api/courses/{course['id']}/runs",
         json={
             "title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
             "groups_enabled": groups_enabled,
         },
     ).json()
+    # Publish so the add-student gate (§8) is satisfied.
+    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+    pub = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert pub.status_code == 200, pub.json()
+    return run
 
 
 def test_add_student_creates_user_and_enrollment(admin_client, db, seed_publishable_version):
@@ -97,8 +102,12 @@ def test_remove_student_keeps_enrollment_if_other_run_exists(admin_client, db, s
     course, _ = seed_publishable_version()
     run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R1", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
+    admin_client.post(f"/api/runs/{run1['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run1['id']}/publish")
     run2 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R2", "start_date": "2026-07-01", "end_date": "2026-12-01"}).json()
+    admin_client.post(f"/api/runs/{run2['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run2['id']}/publish")
     s = admin_client.post(
         f"/api/runs/{run1['id']}/students", json={"email": "x@example.com"}
     ).json()
@@ -134,10 +143,16 @@ def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db, s
     course, _ = seed_publishable_version()
     run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R1", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
+    admin_client.post(f"/api/runs/{run1['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run1['id']}/publish")
     run2 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R2", "start_date": "2026-07-01", "end_date": "2026-12-01"}).json()
+    admin_client.post(f"/api/runs/{run2['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run2['id']}/publish")
     run3 = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R3", "start_date": "2027-01-01", "end_date": "2027-06-01"}).json()
+    admin_client.post(f"/api/runs/{run3['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run3['id']}/publish")
     s = admin_client.post(f"/api/runs/{run1['id']}/students",
         json={"email": "x@example.com"}).json()
     admin_client.post(f"/api/runs/{run2['id']}/students", json={"email": "x@example.com"})
@@ -211,6 +226,12 @@ def test_batch_savepoint_rolls_back_auto_group_on_failure(admin_client, db, seed
     run = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
               "groups_enabled": True}).json()
+
+    # Publish run first (§8 gate); then disable the version so enroll_user_in_run
+    # will raise 403 on the per-row path.
+    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+    pub = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert pub.status_code == 200, pub.json()
 
     # Disable the version so enroll_user_in_run will raise 403.
     admin_client.post(f"/api/versions/{version['id']}/disable")

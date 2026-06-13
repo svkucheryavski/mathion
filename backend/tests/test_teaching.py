@@ -704,15 +704,18 @@ class TestTeachingRunsEndpoint:
             json={"title": "R", "start_date": "2026-01-01",
                   "end_date": "2026-12-31", "groups_enabled": True},
         ).json()
-        # Add students via admin
+        # Add teacher and publish before adding students (§8 gate).
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
+        pub = admin_client.post(f"/api/runs/{run['id']}/publish")
+        assert pub.status_code == 200, pub.json()
+        # Add students via admin (run is now published).
         admin_client.post(f"/api/runs/{run['id']}/students",
                           json={"email": "s1@x"})
         admin_client.post(f"/api/runs/{run['id']}/students",
                           json={"email": "s2@x"})
         admin_client.post(f"/api/runs/{run['id']}/students",
                           json={"email": "s3@x"})
-        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
-        db.commit()
         r = teacher_client.get("/api/teaching/runs")
         assert r.json()[0]["student_count"] == 3
 

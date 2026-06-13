@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -29,6 +30,8 @@ from mathion.schemas import (
 
 logger = logging.getLogger(__name__)
 
+RUN_UNPUBLISHED_ERROR_CODE = "run_unpublished"
+
 router = APIRouter(tags=["run_roster"])
 
 
@@ -40,11 +43,24 @@ def _to_response(rs: RunStudent) -> dict:
     }
 
 
-@router.post("/api/runs/{run_id}/students", status_code=201, response_model=RunStudentResponse)
+@router.post(
+    "/api/runs/{run_id}/students",
+    status_code=201,
+    response_model=RunStudentResponse,
+    responses={409: {
+        "description": "Run is not published",
+        "content": {"application/json": {"example": {
+            "detail": "Cannot add students to an unpublished run",
+            "error_code": "run_unpublished"}}}}})
 def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
+    if not run.is_published:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Cannot add students to an unpublished run",
+                     "error_code": RUN_UNPUBLISHED_ERROR_CODE})
     if data.group_id is not None:
         g = db.get(Group, data.group_id)
         if g is None or g.run_id != run_id:
@@ -116,7 +132,11 @@ def remove_student(run_id: int, user_id: int, db: Session = Depends(get_db),
     "/api/runs/{run_id}/students/batch",
     status_code=207,
     response_model=RunStudentBatchResponse,
-)
+    responses={409: {
+        "description": "Run is not published",
+        "content": {"application/json": {"example": {
+            "detail": "Cannot add students to an unpublished run",
+            "error_code": "run_unpublished"}}}}})
 def add_students_batch(
     run_id: int,
     data: RunStudentBatchRequest,
@@ -125,6 +145,11 @@ def add_students_batch(
 ):
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
+    if not run.is_published:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Cannot add students to an unpublished run",
+                     "error_code": RUN_UNPUBLISHED_ERROR_CODE})
     results = []
 
     for row in data.rows:

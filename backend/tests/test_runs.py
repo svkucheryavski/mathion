@@ -113,13 +113,17 @@ def test_publish_run_with_teacher_succeeds(admin_client, seed_publishable_versio
     assert response.json()["is_published"] is True
 
 
-def test_publish_with_groups_enabled_unassigned_student_409(admin_client, seed_publishable_version):
+def test_publish_with_groups_enabled_unassigned_student_409(admin_client, db, seed_publishable_version):
+    from mathion.models import RunStudent
+    from mathion.models_auth import User
     course, _ = seed_publishable_version()
     run = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
               "groups_enabled": True}).json()
     admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "t@example.com"})
-    admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "s@example.com"})
+    # Insert unassigned student directly via ORM (API gate blocks add to unpublished run).
+    u = User(email="s@example.com"); db.add(u); db.flush()
+    db.add(RunStudent(run_id=run["id"], user_id=u.id, group_id=None)); db.commit()
     response = admin_client.post(f"/api/runs/{run['id']}/publish")
     assert response.status_code == 409
 

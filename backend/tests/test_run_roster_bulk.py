@@ -3,13 +3,18 @@
 
 def _make_run(admin_client, seed_publishable_version, groups_enabled=True, slug="stats", name="Stats"):
     course, _ = seed_publishable_version(slug=slug, name=name)
-    return admin_client.post(
+    run = admin_client.post(
         f"/api/courses/{course['id']}/runs",
         json={
             "title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
             "groups_enabled": groups_enabled,
         },
     ).json()
+    # Publish so the add-student gate (§8) is satisfied.
+    admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
+    pub = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert pub.status_code == 200, pub.json()
+    return run
 
 
 def _add_student(admin_client, run_id, email, group_id=None):
@@ -77,10 +82,14 @@ def test_bulk_delete_happy_path_with_enrollment_cascade(admin_client, db, seed_p
         f"/api/courses/{course['id']}/runs",
         json={"title": "R1", "start_date": "2026-01-01", "end_date": "2026-06-01"},
     ).json()
+    admin_client.post(f"/api/runs/{run1['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run1['id']}/publish")
     run2 = admin_client.post(
         f"/api/courses/{course['id']}/runs",
         json={"title": "R2", "start_date": "2026-07-01", "end_date": "2026-12-01"},
     ).json()
+    admin_client.post(f"/api/runs/{run2['id']}/teachers", json={"email": "teach@example.com"})
+    admin_client.post(f"/api/runs/{run2['id']}/publish")
 
     a = _add_student(admin_client, run1["id"], "a@example.com")
     b = _add_student(admin_client, run1["id"], "b@example.com")

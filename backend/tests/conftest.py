@@ -230,9 +230,10 @@ def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
         admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"})
         ga = admin_client.post(f"/api/runs/{run['id']}/groups", json={"name": "Group A"}).json()
         gb = admin_client.post(f"/api/runs/{run['id']}/groups", json={"name": "Group B"}).json()
-        admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "alice@example.com", "group_id": ga["id"]})
-        admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "bob@example.com", "group_id": gb["id"]})
+        # Publish before adding students (gate requires is_published=True)
         pub = admin_client.post(f"/api/runs/{run['id']}/publish")
         assert pub.status_code == 200
+        admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "alice@example.com", "group_id": ga["id"]})
+        admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "bob@example.com", "group_id": gb["id"]})
         return run, ga, gb
     return _factory
