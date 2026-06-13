@@ -7,7 +7,7 @@ from sqlalchemy import select, delete
 
 from mathion.api.helpers import enroll_user_in_run
 from mathion.models_auth import NotificationLogEntry, User
-from mathion.models import Run, RunStudent, Group
+from mathion.models import Run, Group
 
 
 # ---------------------------------------------------------------------------
