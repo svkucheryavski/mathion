@@ -32,12 +32,12 @@ def acquire_singleton_lock(settings):
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+        except BlockingIOError:
             raise RuntimeError(
-                f"Another Mathion dispatcher process holds the lock at "
-                f"{lock_path}. Set MATHION_DISPATCHER_LOCK_PATH per-process or "
-                f"run uvicorn with a single worker."
-            ) from exc
+                f"Another Mathion dispatcher process holds {lock_path}. "
+                "Mathion does not support multi-worker dispatchers yet. "
+                "Run with --workers 1 or stop the other process."
+            )
         success = True
         return fd
     finally:
