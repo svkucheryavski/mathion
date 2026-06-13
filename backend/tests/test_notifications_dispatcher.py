@@ -260,6 +260,21 @@ def test_permanent_failure_smtp_550(db, seeded_run):
     assert not entry.error.startswith("max attempts:")
 
 
+def test_permanent_failure_smtp_recipients_refused(db, seeded_run):
+    """Spec §12 line 1149: SMTPRecipientsRefused with a 5xx recipient code → permanent."""
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="run_enrolled",
+        payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    refused = smtplib.SMTPRecipientsRefused({"x@example.com": (550, b"no such user")})
+    tick(db, _RaisingMailer(refused), now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.retry_count == 1
+    assert entry.next_attempt_at is None
+    assert entry.error is not None
+    assert not entry.error.startswith("max attempts:")
+
+
 def test_smtp_auth_error_redacted(db, seeded_run, caplog):
     entry = NotificationLogEntry(
         user_id=seeded_run["student_user"].id, kind="run_enrolled",
