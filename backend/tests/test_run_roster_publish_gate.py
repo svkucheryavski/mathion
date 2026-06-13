@@ -102,11 +102,13 @@ def test_constant_parity():
 
 def test_openapi_documents_409(client):
     schema = client.get("/openapi.json").json()
-    path = schema["paths"]["/api/runs/{run_id}/students"]["post"]
-    assert "409" in path["responses"]
-    assert (path["responses"]["409"]["content"]["application/json"]["example"]
-            == {"detail": "Cannot add students to an unpublished run",
-                "error_code": "run_unpublished"})
+    expected_example = {"detail": "Cannot add students to an unpublished run",
+                        "error_code": "run_unpublished"}
+    for url in ("/api/runs/{run_id}/students", "/api/runs/{run_id}/students/batch"):
+        path = schema["paths"][url]["post"]
+        assert "409" in path["responses"], f"{url} missing 409 response"
+        assert (path["responses"]["409"]["content"]["application/json"]["example"]
+                == expected_example), f"{url} 409 example mismatch"
 
 
 def test_patch_group_move_still_works_on_draft(admin_client, seeded_draft_run_with_student):
