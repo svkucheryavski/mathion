@@ -27,7 +27,7 @@
     BlockResponse, MiniProjectResponse, RunAssetResponse,
   } from '../../lib/types';
 
-  type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets' | 'progress' | 'submission';
+  export type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets' | 'progress' | 'submission';
 
   let { courseSlug, runId }: { courseSlug: string; runId: string } = $props();
 
