@@ -23,6 +23,7 @@
   let text = $state('');
   let parsed = $state<CsvParseResult | null>(null);
   let parseTimer: ReturnType<typeof setTimeout> | null = null;
+  let submitError = $state<string | null>(null);
 
   type Stage = 'paste' | 'result';
   let stage = $state<Stage>('paste');
@@ -39,6 +40,7 @@
 
   function onTextInput(event: Event) {
     text = (event.currentTarget as HTMLTextAreaElement).value;
+    submitError = null;
     if (parseTimer) clearTimeout(parseTimer);
     parseTimer = setTimeout(() => {
       parsed = parseCsv(text, existingGroups.map((g) => g.name), existingRoster.map((r) => r.user_email));
@@ -67,11 +69,13 @@
       resultRows = response.results;
       stage = 'result';
     } catch (e) {
-      // Top-of-modal banner via local state.
+      // Surface submit-step errors via the separate submitError slot (above
+      // .modal-actions), NOT via parsed.error (which is the client-side CSV
+      // parse-error channel). This keeps the two error surfaces distinct per spec.
       if (e instanceof ApiError) {
-        parsed = { ok: false, error: e.displayMessage };
+        submitError = e.displayMessage;
       } else {
-        parsed = { ok: false, error: 'Import failed — please retry.' };
+        submitError = 'Import failed — please retry.';
       }
     } finally {
       submitting = false;
@@ -167,6 +171,10 @@
           </footer>
         {:else if parsed && !parsed.ok}
           <p class="error">{parsed.error}</p>
+        {/if}
+
+        {#if submitError}
+          <p class="error" role="alert">{submitError}</p>
         {/if}
 
         <div class="modal-actions">
