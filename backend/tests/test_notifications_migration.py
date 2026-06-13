@@ -33,23 +33,45 @@ def setup_db():
     yield
 
 
-def _make_alembic_cfg(db_url: str) -> Config:
-    cfg = Config(ALEMBIC_INI)
-    # set_main_option is vestigial here — env.py:28 unconditionally overwrites
-    # `sqlalchemy.url` with `settings.database_url` for BOTH online and offline
-    # migration paths. The monkeypatch in each test is what redirects the
-    # migration to the tmp DB.
-    return cfg
+@pytest.fixture
+def make_engine():
+    """Factory that creates engines and disposes them at test teardown.
+
+    SQLite on-disk engines hold a file handle; tmp_path cleanup is session-scoped,
+    so without explicit dispose the handles accumulate across tests in this module.
+    """
+    engines = []
+    def _factory(url: str):
+        eng = create_engine(url)
+        engines.append(eng)
+        return eng
+    yield _factory
+    for eng in engines:
+        eng.dispose()
 
 
-def test_upgrade_backfills_sent_at(tmp_path, monkeypatch):
+def _make_alembic_cfg() -> Config:
+    """Construct an Alembic Config that respects the test-monkeypatched DB URL.
+
+    env.py imports `settings` at module-load time (`from mathion.config import settings`)
+    and on every `command.upgrade()` re-executes `config.set_main_option("sqlalchemy.url",
+    settings.database_url)` (env.py:28 inside the `run_migrations_online` flow). Because
+    env.py holds a *reference* to the singleton `Settings()` instance and our tests
+    monkeypatch the `database_url` attribute on that same object, env.py picks up the
+    patched URL on every upgrade/downgrade call. We do NOT need (and must not) call
+    set_main_option here — env.py overrides anything we'd set.
+    """
+    return Config(ALEMBIC_INI)
+
+
+def test_upgrade_backfills_sent_at(tmp_path, monkeypatch, make_engine):
     db_url = f"sqlite:///{tmp_path}/migration_test.db"
     monkeypatch.setattr(_config_mod.settings, "database_url", db_url)
 
-    cfg = _make_alembic_cfg(db_url)
+    cfg = _make_alembic_cfg()
     command.upgrade(cfg, PRIOR_REV)
 
-    tmp_engine = create_engine(db_url)
+    tmp_engine = make_engine(db_url)
     with tmp_engine.begin() as conn:
         conn.execute(text("INSERT INTO notification_log (user_id, kind, payload, created_at, sent_at) "
                           "VALUES (1, 'evaluation_received', '{}', CURRENT_TIMESTAMP, NULL)"))
@@ -61,14 +83,14 @@ def test_upgrade_backfills_sent_at(tmp_path, monkeypatch):
         assert row.sent_at is not None
 
 
-def test_upgrade_new_rows_default_correctly(tmp_path, monkeypatch):
+def test_upgrade_new_rows_default_correctly(tmp_path, monkeypatch, make_engine):
     db_url = f"sqlite:///{tmp_path}/defaults_test.db"
     monkeypatch.setattr(_config_mod.settings, "database_url", db_url)
 
-    cfg = _make_alembic_cfg(db_url)
+    cfg = _make_alembic_cfg()
     command.upgrade(cfg, THIS_REV)
 
-    tmp_engine = create_engine(db_url)
+    tmp_engine = make_engine(db_url)
     with tmp_engine.begin() as conn:
         conn.execute(text("INSERT INTO notification_log (user_id, kind, payload, created_at) "
                           "VALUES (1, 'run_enrolled', '{}', CURRENT_TIMESTAMP)"))
@@ -78,15 +100,15 @@ def test_upgrade_new_rows_default_correctly(tmp_path, monkeypatch):
         assert row.error is None
 
 
-def test_downgrade_drops_columns(tmp_path, monkeypatch):
+def test_downgrade_drops_columns(tmp_path, monkeypatch, make_engine):
     db_url = f"sqlite:///{tmp_path}/downgrade_test.db"
     monkeypatch.setattr(_config_mod.settings, "database_url", db_url)
 
-    cfg = _make_alembic_cfg(db_url)
+    cfg = _make_alembic_cfg()
     command.upgrade(cfg, THIS_REV)
     command.downgrade(cfg, PRIOR_REV)
 
-    tmp_engine = create_engine(db_url)
+    tmp_engine = make_engine(db_url)
     with tmp_engine.begin() as conn:
         cols = {r[1] for r in conn.execute(text("PRAGMA table_info(notification_log)"))}
         assert "retry_count" not in cols
@@ -94,13 +116,13 @@ def test_downgrade_drops_columns(tmp_path, monkeypatch):
         assert "error" not in cols
 
 
-def test_downgrade_preserves_backfill(tmp_path, monkeypatch):
+def test_downgrade_preserves_backfill(tmp_path, monkeypatch, make_engine):
     db_url = f"sqlite:///{tmp_path}/preserve_test.db"
     monkeypatch.setattr(_config_mod.settings, "database_url", db_url)
 
-    cfg = _make_alembic_cfg(db_url)
+    cfg = _make_alembic_cfg()
     command.upgrade(cfg, PRIOR_REV)
-    tmp_engine = create_engine(db_url)
+    tmp_engine = make_engine(db_url)
     with tmp_engine.begin() as conn:
         conn.execute(text("INSERT INTO notification_log (user_id, kind, payload, created_at, sent_at) "
                           "VALUES (1, 'evaluation_received', '{}', CURRENT_TIMESTAMP, NULL)"))
@@ -121,7 +143,7 @@ def test_migration_uses_batch_alter_table():
 
 
 @pytest.mark.skip(reason="re-enabled in T11 once tick + MemoryMailer land")
-def test_dispatcher_filters_backfilled_rows(tmp_path, monkeypatch):
+def test_dispatcher_filters_backfilled_rows(tmp_path, monkeypatch, make_engine):
     """Safety net test: backfilled rows have sent_at IS NOT NULL after upgrade
     and the dispatcher's `sent_at.is_(None)` clause excludes them. This makes
     the SQLite naive-vs-aware timestamp asymmetry benign per §3 note."""
@@ -131,9 +153,9 @@ def test_dispatcher_filters_backfilled_rows(tmp_path, monkeypatch):
     db_url = f"sqlite:///{tmp_path}/dispatch_test.db"
     monkeypatch.setattr(_config_mod.settings, "database_url", db_url)
 
-    cfg = _make_alembic_cfg(db_url)
+    cfg = _make_alembic_cfg()
     command.upgrade(cfg, PRIOR_REV)
-    tmp_engine = create_engine(db_url)
+    tmp_engine = make_engine(db_url)
     with tmp_engine.begin() as conn:
         conn.execute(text("INSERT INTO notification_log (user_id, kind, payload, created_at, sent_at) "
                           "VALUES (1, 'run_enrolled', '{}', CURRENT_TIMESTAMP, NULL)"))
