@@ -198,16 +198,15 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
         rs = RunStudent(run_id=run.id, user_id=user.id, group_id=group_id)
         db.add(rs)
         db.flush()
-
-    db.add(NotificationLogEntry(
-        user_id=user.id,
-        kind="run_enrolled",
-        payload={
-            "run_id": run.id,
-            "course_slug": version.course.slug,
-            "title": run.title,
-        },
-    ))
+        db.add(NotificationLogEntry(
+            user_id=user.id,
+            kind="run_enrolled",
+            payload={
+                "run_id": run.id,
+                "course_slug": version.course.slug,
+                "title": run.title,
+            },
+        ))
     return rs
 
 
