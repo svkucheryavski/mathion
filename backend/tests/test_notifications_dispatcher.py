@@ -1,4 +1,6 @@
 import pytest
+import smtplib
+import logging
 from datetime import datetime, timezone
 from sqlalchemy import text
 
@@ -204,3 +206,111 @@ def test_tick_backoff_boundary_inclusive(db, seeded_run):
     db.add(entry); db.commit()
     mailer = MemoryMailer()
     assert tick(db, mailer, now=now) == 1
+
+
+# ---------------------------------------------------------------------------
+# T12 — error-path tests for tick() dispatcher
+# ---------------------------------------------------------------------------
+
+
+class _RaisingMailer(MemoryMailer):
+    def __init__(self, exc): super().__init__(); self.exc = exc
+    def send(self, msg): raise self.exc
+
+
+def test_transient_failure_1st_retry(db, seeded_run):
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="run_enrolled",
+        payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    now = datetime.now(timezone.utc)
+    tick(db, _RaisingMailer(ConnectionRefusedError("nope")), now=now)
+    db.refresh(entry)
+    assert entry.retry_count == 1
+    # SQLite strips tzinfo on readback; compare using naive reference
+    expected = (now + timedelta(seconds=300)).replace(tzinfo=None)
+    assert entry.next_attempt_at == expected
+    assert entry.error is None
+
+
+def test_transient_exhausted_attempts(db, seeded_run):
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="run_enrolled",
+        payload={"run_id": seeded_run["run"].id},
+        retry_count=4)
+    db.add(entry); db.commit()
+    tick(db, _RaisingMailer(ConnectionRefusedError("nope")), now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.retry_count == 5
+    assert entry.next_attempt_at is None
+    assert entry.error and entry.error.startswith("max attempts:")
+
+
+def test_permanent_failure_smtp_550(db, seeded_run):
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="run_enrolled",
+        payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    tick(db, _RaisingMailer(smtplib.SMTPResponseException(550, "no mailbox")),
+         now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.retry_count == 1
+    assert entry.next_attempt_at is None
+    assert entry.error and "no mailbox" in entry.error
+    assert not entry.error.startswith("max attempts:")
+
+
+def test_smtp_auth_error_redacted(db, seeded_run, caplog):
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="run_enrolled",
+        payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    sensitive = smtplib.SMTPAuthenticationError(
+        535, b"535 5.7.8 Authentication credentials invalid for user@example.com")
+    caplog.set_level(logging.WARNING, logger="mathion.notifications")
+    tick(db, _RaisingMailer(sensitive), now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.error == "SMTP authentication failed (see operator logs)"
+    assert "user@example.com" not in (entry.error or "")
+    # Full exception is in the logs for the operator
+    has_full_exc = any(
+        r.exc_info and r.exc_info[1] is sensitive for r in caplog.records
+    )
+    assert has_full_exc
+
+
+def test_per_row_containment(db, seeded_run):
+    # Insert 3 rows: first OK, middle raises, third OK.
+    e1 = NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                              payload={"run_id": seeded_run["run"].id})
+    e2 = NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                              payload={"run_id": seeded_run["run"].id})
+    e3 = NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                              payload={"run_id": seeded_run["run"].id})
+    db.add_all([e1, e2, e3]); db.commit()
+
+    class _SometimesFail(MemoryMailer):
+        def __init__(self): super().__init__(); self.calls = 0
+        def send(self, msg):
+            self.calls += 1
+            if self.calls == 2:
+                raise ConnectionRefusedError("boom")
+            self.sent.append(msg)
+
+    tick(db, _SometimesFail(), now=datetime.now(timezone.utc))
+    db.refresh(e1); db.refresh(e2); db.refresh(e3)
+    assert e1.sent_at is not None
+    assert e2.sent_at is None and e2.retry_count == 1
+    assert e3.sent_at is not None
+
+
+def test_render_failure_classifies_permanent(db, seeded_run):
+    # Drop a required payload key to force a permanent exception during render
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="evaluation_received",
+        payload={"run_id": seeded_run["run"].id})  # missing mini_project_id
+    db.add(entry); db.commit()
+    tick(db, MemoryMailer(), now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.error is not None
+    assert entry.next_attempt_at is None
