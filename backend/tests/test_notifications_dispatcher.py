@@ -69,6 +69,16 @@ def test_build_render_context_missing_user_raises(db, seeded_run):
         _build_render_context(db, entry)
 
 
+def test_build_render_context_missing_run_id_key_raises_keyerror(db, seeded_user):
+    entry = NotificationLogEntry(
+        user_id=seeded_user.id, kind="run_enrolled",
+        payload={},  # no run_id key at all
+    )
+    db.add(entry); db.flush()
+    with pytest.raises(KeyError, match="payload missing run_id"):
+        _build_render_context(db, entry)
+
+
 @pytest.mark.skip(reason="seeded_run_with_eval fixture deferred — covered by T11/T12 integration tests")
 def test_build_render_context_evaluation_received_loads_mp_sub(db, seeded_run_with_eval):
     user = seeded_run_with_eval["student_user"]

@@ -19,32 +19,39 @@ logger = logging.getLogger("mathion.notifications")
 
 def _build_render_context(db, row: NotificationLogEntry) -> RenderContext:
     payload = row.payload or {}
+    if "run_id" not in payload:
+        raise KeyError(f"payload missing run_id for kind={row.kind!r}")
 
-    run_id = payload.get("run_id")
-    if run_id is None:
-        raise LookupError(f"referent missing: payload run_id absent for row id={row.id}")
+    # (1) Run — eager-load the version+course chain so the @property doesn't fan out.
     run = db.execute(
         select(Run)
-        .where(Run.id == run_id)
         .options(joinedload(Run.version).joinedload(CourseVersion.course))
-    ).scalars().first()
+        .where(Run.id == payload["run_id"])
+    ).scalar_one_or_none()
     if run is None:
-        raise LookupError(f"referent missing: run id={run_id}")
+        raise LookupError(f"referent missing: run:{payload['run_id']}")
 
+    # (2) User — the recipient.
     user = db.get(User, row.user_id)
     if user is None:
-        raise LookupError(f"referent missing: user id={row.user_id}")
+        raise LookupError(f"referent missing: user:{row.user_id}")
 
+    # (3) MiniProject if present in payload.
     mp = None
     if "mini_project_id" in payload:
-        mp = db.get(MiniProject, payload["mini_project_id"])
+        mp = db.execute(
+            select(MiniProject)
+            .options(joinedload(MiniProject.block))
+            .where(MiniProject.id == payload["mini_project_id"])
+        ).scalar_one_or_none()
         if mp is None:
-            raise LookupError(f"referent missing: mp id={payload['mini_project_id']}")
+            raise LookupError(f"referent missing: mini_project:{payload['mini_project_id']}")
 
+    # (4) Submission if present in payload.
     sub = None
     if "submission_id" in payload:
         sub = db.get(Submission, payload["submission_id"])
         if sub is None:
-            raise LookupError(f"referent missing: submission id={payload['submission_id']}")
+            raise LookupError(f"referent missing: submission:{payload['submission_id']}")
 
     return RenderContext(user=user, run=run, base_url=settings.base_url, mp=mp, sub=sub)
