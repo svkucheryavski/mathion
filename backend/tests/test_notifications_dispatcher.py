@@ -329,3 +329,47 @@ def test_render_failure_classifies_permanent(db, seeded_run):
     db.refresh(entry)
     assert entry.error is not None
     assert entry.next_attempt_at is None
+
+
+# ---------------------------------------------------------------------------
+# T13 — session-acquire wedge tests
+# ---------------------------------------------------------------------------
+
+
+class _WedgedMailer(MemoryMailer):
+    def __init__(self, exc):
+        super().__init__()
+        self.exc = exc
+
+    def session(self):
+        class _CM:
+            def __init__(self, exc): self.exc = exc
+            def __enter__(self): raise self.exc
+            def __exit__(self, *a): return False
+        return _CM(self.exc)
+
+
+def test_session_acquire_wedge_no_row_state_change(db, seeded_run, caplog):
+    entry = NotificationLogEntry(
+        user_id=seeded_run["student_user"].id, kind="run_enrolled",
+        payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    caplog.set_level(logging.WARNING, logger="mathion.notifications")
+    rc = tick(db, _WedgedMailer(ConnectionRefusedError("smtp down")),
+              now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert rc == 0
+    assert entry.retry_count == 0
+    assert entry.sent_at is None
+    assert entry.error is None
+    assert any("failed to acquire mailer session" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_session_acquire_wedge_zero_rows_returns_0_no_log(db, caplog):
+    caplog.set_level(logging.WARNING, logger="mathion.notifications")
+    rc = tick(db, _WedgedMailer(ConnectionRefusedError("smtp down")),
+              now=datetime.now(timezone.utc))
+    assert rc == 0
+    # No wedge log when there are no rows to wedge on
+    assert not any("failed to acquire" in r.getMessage() for r in caplog.records)
