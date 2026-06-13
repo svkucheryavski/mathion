@@ -336,7 +336,7 @@ describe('RosterImportModal submit', () => {
 
   it('Non-ApiError rejection surfaces a generic banner (no silent swallow)', async () => {
     const refetch = vi.fn().mockRejectedValue(new TypeError('network down'));
-    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch });
+    const { target, cmp, onClose } = mountModal({ onRefetchBeforeSubmit: refetch });
     await settle();
     const ta = target.querySelector('textarea') as HTMLTextAreaElement;
     ta.value = 'a@x.com';
@@ -346,7 +346,9 @@ describe('RosterImportModal submit', () => {
     (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
     vi.useRealTimers();
     await settle();
+    // Generic error message should be visible; non-ApiError is re-thrown (not silent swallow).
     expect(target.querySelector('p.error')?.textContent).toMatch(/Import failed/);
+    expect(onClose).not.toHaveBeenCalled();
     unmount(cmp);
   });
 

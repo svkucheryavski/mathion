@@ -54,6 +54,7 @@
 
   async function onImport() {
     if (!parsed || !parsed.ok || parsed.validCount === 0 || submitting) return;
+    submitError = null;
     // Snapshot parsed BEFORE the first await so a concurrent textarea edit
     // during in-flight submit can't mutate which rows we submit.
     const snapshot = parsed;
@@ -74,9 +75,10 @@
       // parse-error channel). This keeps the two error surfaces distinct per spec.
       if (e instanceof ApiError) {
         submitError = e.displayMessage;
-      } else {
-        submitError = 'Import failed — please retry.';
+        return;
       }
+      submitError = 'Import failed — please retry.';
+      throw e;
     } finally {
       submitting = false;
     }
