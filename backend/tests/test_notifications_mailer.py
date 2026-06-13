@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-from mathion.notifications.mailer import MemoryMailer, FileMailer, SMTPMailer
+from mathion.notifications.mailer import MemoryMailer, FileMailer, SMTPMailer, build_mailer_from_settings
 
 
 def test_memory_mailer_send_appends():
@@ -145,9 +145,6 @@ def test_smtp_propagates_recipients_refused():
                 msg = EmailMessage()
                 msg["Subject"] = "x"
                 sm.send(msg)
-
-
-from mathion.notifications.mailer import build_mailer_from_settings
 
 
 def _settings(**kwargs):

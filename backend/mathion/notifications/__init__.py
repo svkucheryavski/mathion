@@ -1,1 +1,9 @@
 from .mailer import Mailer, MemoryMailer, FileMailer, SMTPMailer, build_mailer_from_settings
+
+__all__ = [
+    "Mailer",
+    "MemoryMailer",
+    "FileMailer",
+    "SMTPMailer",
+    "build_mailer_from_settings",
+]
