@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from mathion.notifications.templates import (
-    TEMPLATES, RenderContext, render, _name, _run_url,
+    TEMPLATES, RenderContext, render, _name, _run_url, _build_email_message,
 )
 
 
@@ -80,3 +80,28 @@ def test_templates_dict_has_4_keys():
         "evaluation_received", "run_enrolled",
         "run_teacher_assigned", "mini_project_published",
     }
+
+
+def test_build_email_message_raises_on_missing_email():
+    user_no_email = SimpleNamespace(full_name="X", email="")
+    ctx = _ctx()
+    ctx.user = user_no_email
+    with pytest.raises(ValueError, match="recipient has no email"):
+        _build_email_message("subj", "body", ctx, kind="run_enrolled")
+
+
+def test_build_email_message_sets_headers():
+    ctx = _ctx()
+    msg = _build_email_message("Hi", "Body text", ctx, kind="run_enrolled")
+    assert msg["To"] == "alice@example.com"
+    assert msg["Subject"] == "Hi"
+    assert msg["X-Mathion-Kind"] == "run_enrolled"
+    assert "Body text" in msg.get_content()
+
+
+def test_build_email_message_set_content_uses_utf8():
+    ctx = _ctx()
+    msg = _build_email_message("Hi", "héllo wörld", ctx, kind="run_enrolled")
+    # set_content(..., charset="utf-8") writes a 7bit-friendly representation;
+    # round-tripping via get_content() should decode the unicode losslessly.
+    assert "héllo wörld" in msg.get_content()

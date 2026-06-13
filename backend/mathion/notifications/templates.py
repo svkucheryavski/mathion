@@ -86,10 +86,12 @@ def render(kind, ctx):
 
 
 def _build_email_message(subject, body, ctx, *, kind: str) -> EmailMessage:
+    if not ctx.user.email:
+        raise ValueError("recipient has no email")  # → permanent
     msg = EmailMessage()
     msg["From"] = settings.email_from
     msg["To"] = ctx.user.email
-    msg["Subject"] = subject
-    msg["X-Mathion-Kind"] = kind
-    msg.set_content(body)
+    msg["Subject"] = subject  # EmailMessage default policy raises ValueError on CR/LF → permanent
+    msg["X-Mathion-Kind"] = kind  # FileMailer reads this to name the .eml file
+    msg.set_content(body, charset="utf-8")
     return msg
