@@ -402,6 +402,9 @@
     {:else if activeTab === 'roster'}
       <RunRosterTab
         runId={runIdInt!}
+        runIsPublished={run.is_published}
+        {courseSlug}
+        onNavigateToTab={(t) => (activeTab = t)}
         {students}
         {groups}
         groupsEnabled={run.groups_enabled}

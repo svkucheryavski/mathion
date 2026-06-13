@@ -7,10 +7,12 @@
     updateRunStudent,
     bulkMoveRunStudents,
     bulkDeleteRunStudents,
+    RUN_UNPUBLISHED_ERROR_CODE,
   } from '../../lib/runRoster';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { GroupResponse, RunStudentResponse, BulkRosterErrorCode } from '../../lib/types';
+  import type { ActiveTab } from '../../pages/runs/RunDetailPage.svelte';
 
   type BulkOpKind = 'move' | 'delete';
   type BulkRowErrorMeta = { error_code?: BulkRosterErrorCode | null; detail?: string | null };
@@ -30,6 +32,9 @@
 
   let {
     runId,
+    runIsPublished,
+    courseSlug: _courseSlug,
+    onNavigateToTab,
     students,
     groups,
     groupsEnabled,
@@ -40,6 +45,9 @@
     onOpenImport,
   }: {
     runId: number;
+    runIsPublished: boolean;
+    courseSlug: string;
+    onNavigateToTab: (tab: ActiveTab) => void;
     students: RunStudentResponse[];
     groups: GroupResponse[];
     groupsEnabled: boolean;
@@ -284,6 +292,7 @@
 
   async function submitAdd(event: SubmitEvent) {
     event.preventDefault();
+    if (!runIsPublished) return;
     addError = null;
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
@@ -299,7 +308,13 @@
       newGroupId = '__unassigned';
       await onRefetchRosterData();
     } catch (e) {
-      if (e instanceof ApiError) addError = e.displayMessage;
+      if (e instanceof ApiError) {
+        if (e.status === 409 && e.errorCode === RUN_UNPUBLISHED_ERROR_CODE) {
+          addError = e.displayMessage;
+        } else {
+          addError = e.displayMessage;
+        }
+      }
     }
   }
 
@@ -359,6 +374,13 @@
 </script>
 
 <section class="roster-tab">
+  {#if !runIsPublished}
+    <div id="roster-draft-publish-hint" class="banner" role="status">
+      Publish this run before adding students.
+      <button onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+    </div>
+  {/if}
+
   <header class="roster-toolbar">
     <input
       name="roster-search"
@@ -373,13 +395,13 @@
         <button data-action="clear-prefilter" aria-label="Clear filter" onclick={onPrefilterClear}>×</button>
       </span>
     {/if}
-    <button data-action="open-import" onclick={onOpenImport}>Import roster</button>
+    <button data-action="open-import" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={onOpenImport}>Import roster</button>
   </header>
 
   {#if students.length === 0}
     <p class="empty">
       No students yet. Add one below or
-      <button data-action="open-import-link" onclick={onOpenImport}>Import roster from CSV</button>.
+      <button data-action="open-import-link" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={onOpenImport}>Import roster from CSV</button>.
     </p>
   {/if}
 
@@ -573,12 +595,20 @@
     {:else}
       —
     {/if}
-    <button data-action="add-student" type="submit" disabled={!newEmail.trim()}>Add</button>
+    <button data-action="add-student" type="submit" disabled={!runIsPublished || !newEmail.trim()} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined}>Add</button>
   </form>
   {#if addError}<p class="error">{addError}</p>{/if}
 </section>
 
 <style>
+  .banner {
+    margin: 0.5rem 0;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface-muted, #f4f4f4);
+    border-left: 3px solid var(--accent, #888);
+    border-radius: 2px;
+  }
+
   .roster-tab { display: flex; flex-direction: column; gap: 12px; }
   .roster-toolbar { display: flex; gap: 8px; align-items: center; }
   .prefilter-pill {
