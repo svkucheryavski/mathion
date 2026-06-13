@@ -1,5 +1,6 @@
-import asyncio, logging, smtplib
+import asyncio, fcntl, logging, smtplib
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError, PendingRollbackError, NoResultFound
@@ -15,6 +16,33 @@ from .templates import render, _build_email_message, RenderContext
 
 
 logger = logging.getLogger("mathion.notifications")
+
+
+def acquire_singleton_lock(settings):
+    """Fail loud if another process holds the lock.
+
+    Returns the open fd; caller releases it explicitly (more reliable than
+    atexit, which may not fire on SIGKILL/OOM — kernel cleanup releases the
+    flock there). The try/finally + success flag guards against fd leaks if
+    fcntl.flock raises ANY exception other than BlockingIOError (e.g. OSError
+    from stale NFS, EBADF, EINTR on uncommon kernels)."""
+    lock_path = Path(settings.dispatcher_lock_path)
+    fd = open(lock_path, "w")
+    success = False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                f"Another Mathion dispatcher process holds the lock at "
+                f"{lock_path}. Set MATHION_DISPATCHER_LOCK_PATH per-process or "
+                f"run uvicorn with a single worker."
+            ) from exc
+        success = True
+        return fd
+    finally:
+        if not success:
+            fd.close()
 
 
 BATCH_SIZE = 20                                # inlined (was env var in rev 1)
