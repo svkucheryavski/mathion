@@ -142,7 +142,6 @@ def test_migration_uses_batch_alter_table():
     assert "with op.batch_alter_table" in source
 
 
-@pytest.mark.skip(reason="re-enabled in T11 once tick + MemoryMailer land")
 def test_dispatcher_filters_backfilled_rows(tmp_path, monkeypatch, make_engine):
     """Safety net test: backfilled rows have sent_at IS NOT NULL after upgrade
     and the dispatcher's `sent_at.is_(None)` clause excludes them. This makes
