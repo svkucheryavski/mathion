@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
@@ -22,12 +23,14 @@ from mathion.models import (
     Block,
     CourseVersion,
     Evaluation,
+    Group,
     MiniProject,
     Run,
     RunAssetReference,
+    RunStudent,
     Submission,
 )
-from mathion.models_auth import User
+from mathion.models_auth import NotificationLogEntry, User
 from mathion.schemas import MiniProjectCreate, MiniProjectResponse, MiniProjectUpdate
 
 
@@ -290,7 +293,37 @@ def publish_mini_project(
     if violations:
         raise HTTPException(status_code=409, detail="; ".join(violations))
 
+    mp_id = mp.id  # capture before reassignment for refactor-safety
+    try:
+        mp = db.execute(
+            select(MiniProject)
+            .where(MiniProject.id == mp_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one()
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="MiniProject not found")
+
+    was_published = mp.is_published
     mp.is_published = True
-    db.commit()
+
+    if not was_published:
+        roster = db.execute(
+            select(RunStudent)
+            .where(RunStudent.run_id == mp.run_id)
+            .where(
+                (RunStudent.group_id.is_(None)) |
+                (~RunStudent.group_id.in_(
+                    select(Group.id).where(Group.run_id == mp.run_id, Group.is_disabled.is_(True))))
+            )
+        ).scalars().all()
+
+        for rs in roster:
+            db.add(NotificationLogEntry(
+                user_id=rs.user_id, kind="mini_project_published",
+                payload={"run_id": mp.run_id, "mini_project_id": mp.id},
+            ))
+
+    db.commit()  # SINGLE commit for the publish flip + all notification inserts
     db.refresh(mp)
     return _serialize_mini_project(db, mp)
