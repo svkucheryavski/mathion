@@ -1,6 +1,8 @@
 from email.message import EmailMessage
+from pathlib import Path
+import pytest
 
-from mathion.notifications.mailer import MemoryMailer
+from mathion.notifications.mailer import MemoryMailer, FileMailer
 
 
 def test_memory_mailer_send_appends():
@@ -18,3 +20,79 @@ def test_memory_mailer_session_is_noop():
     with m.session():
         pass  # should not raise
     assert m.sent == []
+
+
+def _make_msg(kind: str | None) -> EmailMessage:
+    msg = EmailMessage()
+    msg["Subject"] = "Test"
+    msg["To"] = "a@example.com"
+    msg["From"] = "noreply@mathion.local"
+    msg.set_content("hi")
+    if kind is not None:
+        msg["X-Mathion-Kind"] = kind
+    return msg
+
+
+def test_filemailer_creates_outbox(tmp_path):
+    fm = FileMailer(tmp_path / "outbox")
+    assert (tmp_path / "outbox").is_dir()
+
+
+def test_filemailer_rejects_non_dir(tmp_path):
+    (tmp_path / "file_not_dir").write_text("oops")
+    with pytest.raises(RuntimeError):
+        FileMailer(tmp_path / "file_not_dir")
+
+
+def test_filemailer_send_writes_eml(tmp_path):
+    fm = FileMailer(tmp_path)
+    msg = _make_msg("run_enrolled")
+    with fm.session():
+        fm.send(msg)
+    files = list(tmp_path.glob("*.eml"))
+    assert len(files) == 1
+    assert "run_enrolled" in files[0].name
+
+
+def test_filemailer_traversal_kind_maps_to_unknown(tmp_path):
+    fm = FileMailer(tmp_path)
+    with fm.session():
+        fm.send(_make_msg("../../tmp/evil"))
+    files = list(tmp_path.glob("*.eml"))
+    assert len(files) == 1
+    assert (tmp_path.parent / "tmp" / "evil").exists() is False
+
+
+@pytest.mark.parametrize("kind", ["/etc/passwd", "foo\\bar"])
+def test_filemailer_slash_backslash_kind_unknown(tmp_path, kind):
+    fm = FileMailer(tmp_path)
+    with fm.session():
+        fm.send(_make_msg(kind))
+    files = list(tmp_path.glob("*.eml"))
+    assert len(files) == 1
+    assert "unknown" in files[0].name
+
+
+def test_filemailer_missing_header_maps_to_unknown(tmp_path):
+    fm = FileMailer(tmp_path)
+    with fm.session():
+        fm.send(_make_msg(None))
+    files = list(tmp_path.glob("*.eml"))
+    assert len(files) == 1
+    assert "unknown" in files[0].name
+
+
+def test_filemailer_atomic_rename(tmp_path):
+    fm = FileMailer(tmp_path)
+    with fm.session():
+        fm.send(_make_msg("run_enrolled"))
+    # No .tmp leftover after rename
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_filemailer_uuid_disambiguates_same_timestamp(tmp_path):
+    fm = FileMailer(tmp_path)
+    with fm.session():
+        fm.send(_make_msg("run_enrolled"))
+        fm.send(_make_msg("run_enrolled"))
+    assert len(list(tmp_path.glob("*.eml"))) == 2
