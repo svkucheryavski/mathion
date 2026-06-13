@@ -61,3 +61,5 @@ export async function bulkDeleteRunStudents(
     `/api/runs/${runId}/students/bulk-delete`, { user_ids: userIds },
   );
 }
+
+export const RUN_UNPUBLISHED_ERROR_CODE = 'run_unpublished';
