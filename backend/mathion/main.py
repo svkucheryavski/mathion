@@ -32,21 +32,21 @@ from mathion.notifications import (
     run_forever,
     acquire_singleton_lock,
     SHUTDOWN_TIMEOUT_SECONDS,
+    build_mailer_from_settings,
 )
 
 
 @asynccontextmanager
 async def lifespan(app):
+    app.state.settings = settings
     app.state.shutdown = asyncio.Event()
-    app.state.mailer = None
+    app.state.mailer = build_mailer_from_settings(settings)
     app.state.lock_fd = None
-    task = None
-
-    if settings.email_mode != "disabled":
+    if app.state.mailer is not None:
         app.state.lock_fd = acquire_singleton_lock(settings)
-        from mathion.notifications.mailer import build_mailer_from_settings
-        app.state.mailer = build_mailer_from_settings(settings)
         task = asyncio.create_task(run_forever(app))
+    else:
+        task = None
 
     try:
         yield

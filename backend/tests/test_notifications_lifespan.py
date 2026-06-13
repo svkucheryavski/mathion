@@ -75,7 +75,7 @@ async def test_lifespan_shutdown_with_inflight_tick(db, seeded_run, tmp_path, mo
 
     # Patch the mailer factory to return a slow MemoryMailer
     monkeypatch.setattr(
-        "mathion.notifications.mailer.build_mailer_from_settings",
+        "mathion.main.build_mailer_from_settings",
         lambda s: _SlowMailer())
 
     import mathion.main
@@ -88,7 +88,11 @@ async def test_lifespan_shutdown_with_inflight_tick(db, seeded_run, tmp_path, mo
                 break
             await asyncio.sleep(0.1)
         # Trigger shutdown — lifespan __aexit__ will set shutdown event + drain
-    # After exit, no "Task was destroyed but it is pending"
+    # After exit: cleanup pollution for other tests
+    live_app.state.mailer = None
+    live_app.state.shutdown = None
+    live_app.state.lock_fd = None
+    # No "Task was destroyed but it is pending"
     leaked = [r for r in caplog.records
               if "Task was destroyed but it is pending" in r.getMessage()]
     assert not leaked, "asyncio leaked a pending task at shutdown"
