@@ -145,3 +145,43 @@ def test_smtp_propagates_recipients_refused():
                 msg = EmailMessage()
                 msg["Subject"] = "x"
                 sm.send(msg)
+
+
+from mathion.notifications.mailer import build_mailer_from_settings
+
+
+def _settings(**kwargs):
+    """Minimal settings stub with the fields the factory reads."""
+    from types import SimpleNamespace
+    defaults = dict(email_mode="disabled", smtp_host="", smtp_port=587,
+                    smtp_username="", smtp_password="", email_outbox="/tmp/x")
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def test_factory_disabled_returns_none():
+    assert build_mailer_from_settings(_settings(email_mode="disabled")) is None
+
+
+def test_factory_memory():
+    assert isinstance(build_mailer_from_settings(_settings(email_mode="memory")), MemoryMailer)
+
+
+def test_factory_file(tmp_path):
+    s = _settings(email_mode="file", email_outbox=str(tmp_path / "ob"))
+    assert isinstance(build_mailer_from_settings(s), FileMailer)
+
+
+def test_factory_smtp_missing_config_raises():
+    with pytest.raises(RuntimeError):
+        build_mailer_from_settings(_settings(email_mode="smtp"))
+
+
+def test_factory_smtp_full_config():
+    s = _settings(email_mode="smtp", smtp_host="h", smtp_username="u", smtp_password="p")
+    assert isinstance(build_mailer_from_settings(s), SMTPMailer)
+
+
+def test_factory_unknown_mode_raises():
+    with pytest.raises(RuntimeError):
+        build_mailer_from_settings(_settings(email_mode="bogus"))

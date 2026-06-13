@@ -81,3 +81,19 @@ class SMTPMailer(Mailer):
     def send(self, msg):
         assert self._smtp is not None, "SMTPMailer.send called outside session()"
         self._smtp.send_message(msg)
+
+
+def build_mailer_from_settings(s) -> Mailer | None:
+    if s.email_mode == 'disabled':
+        return None
+    if s.email_mode == 'smtp':
+        if not s.smtp_host or not s.smtp_username or not s.smtp_password:
+            raise RuntimeError(
+                "MATHION_SMTP_HOST, MATHION_SMTP_USERNAME, and MATHION_SMTP_PASSWORD "
+                "required when MATHION_EMAIL_MODE=smtp")
+        return SMTPMailer(s.smtp_host, s.smtp_port, s.smtp_username, s.smtp_password)
+    if s.email_mode == 'file':
+        return FileMailer(Path(s.email_outbox))
+    if s.email_mode == 'memory':
+        return MemoryMailer()
+    raise RuntimeError(f"Unknown MATHION_EMAIL_MODE={s.email_mode!r}")
