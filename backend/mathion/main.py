@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -26,8 +28,45 @@ from mathion.api.submissions import router as submissions_router
 from mathion.api.teaching import router as teaching_router
 from mathion.api.versions import router as versions_router
 from mathion.config import settings
+from mathion.notifications import (
+    run_forever,
+    acquire_singleton_lock,
+    SHUTDOWN_TIMEOUT_SECONDS,
+)
 
-app = FastAPI(title="Mathion", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app):
+    app.state.shutdown = asyncio.Event()
+    app.state.mailer = None
+    app.state.lock_fd = None
+    task = None
+
+    if settings.email_mode != "disabled":
+        app.state.lock_fd = acquire_singleton_lock(settings)
+        from mathion.notifications.mailer import build_mailer_from_settings
+        app.state.mailer = build_mailer_from_settings(settings)
+        task = asyncio.create_task(run_forever(app))
+
+    try:
+        yield
+    finally:
+        app.state.shutdown.set()
+        if task is not None:
+            try:
+                await asyncio.wait_for(task, timeout=SHUTDOWN_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=5)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+        if app.state.lock_fd is not None:
+            app.state.lock_fd.close()
+            app.state.lock_fd = None
+
+
+app = FastAPI(title="Mathion", version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(auth_router)
 app.include_router(courses_router)

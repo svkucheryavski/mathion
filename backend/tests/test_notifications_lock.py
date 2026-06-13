@@ -3,6 +3,7 @@ import fcntl
 import unittest.mock
 
 import pytest
+from fastapi.testclient import TestClient
 
 from mathion.config import settings
 from mathion.notifications.dispatcher import acquire_singleton_lock
@@ -65,3 +66,34 @@ def test_non_blocking_error_closes_fd(tmp_path, monkeypatch):
     with pytest.raises(OSError, match="simulated EBADF"):
         acquire_singleton_lock(settings)
     captured["close_spy"].assert_called_once()
+
+
+def test_lifespan_refuses_when_lock_held(tmp_path, monkeypatch):
+    # Re-import from the live module in case test_main_spa.py reloaded it.
+    import mathion.config
+    import mathion.main
+    live_settings = mathion.config.settings
+    live_app = mathion.main.app
+    monkeypatch.setattr(live_settings, "dispatcher_lock_path", str(tmp_path / "dispatcher.lock"))
+    monkeypatch.setattr(live_settings, "email_mode", "memory")
+    fd = acquire_singleton_lock(live_settings)
+    try:
+        with pytest.raises(RuntimeError, match="Another Mathion dispatcher"):
+            with TestClient(live_app):
+                pass
+    finally:
+        fd.close()
+
+
+def test_lifespan_disabled_mode_no_lock(tmp_path, monkeypatch):
+    import mathion.config
+    import mathion.main
+    live_settings = mathion.config.settings
+    live_app = mathion.main.app
+    monkeypatch.setattr(live_settings, "dispatcher_lock_path", str(tmp_path / "dispatcher.lock"))
+    monkeypatch.setattr(live_settings, "email_mode", "disabled")
+    with TestClient(live_app):
+        pass
+    assert not (tmp_path / "dispatcher.lock").exists()
+    assert live_app.state.lock_fd is None
+    assert live_app.state.mailer is None
