@@ -657,4 +657,18 @@
   .row-error {
     box-shadow: inset 4px 0 0 0 var(--danger, #c00);
   }
+
+  .linklike {
+    background: none;
+    border: 0;
+    padding: 0;
+    margin-left: 0.5rem;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+  }
+  .linklike:hover {
+    text-decoration: none;
+  }
 </style>
