@@ -308,13 +308,11 @@
       newGroupId = '__unassigned';
       await onRefetchRosterData();
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 409 && e.errorCode === RUN_UNPUBLISHED_ERROR_CODE) {
-          addError = e.displayMessage;
-        } else {
-          addError = e.displayMessage;
-        }
+      if (e instanceof ApiError && e.status === 409 && e.errorCode === RUN_UNPUBLISHED_ERROR_CODE) {
+        addError = typeof e.detail === 'string' ? e.detail : 'Run is no longer published.';
+        return;
       }
+      throw e;
     }
   }
 
@@ -375,9 +373,19 @@
 
 <section class="roster-tab">
   {#if !runIsPublished}
-    <div id="roster-draft-publish-hint" class="banner" role="status">
-      Publish this run before adding students.
-      <button onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+    <div
+      id="roster-draft-publish-hint"
+      class="banner"
+      role="status"
+      data-action="draft-publish-hint"
+    >
+      Publish this run before adding students. You can still move or remove students already on the roster.
+      <button
+        type="button"
+        class="linklike"
+        data-action="nav-overview-publish-roster"
+        onclick={() => onNavigateToTab('overview')}
+      >Publish on Overview</button>
     </div>
   {/if}
 
@@ -597,7 +605,7 @@
     {/if}
     <button data-action="add-student" type="submit" disabled={!runIsPublished || !newEmail.trim()} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined}>Add</button>
   </form>
-  {#if addError}<p class="error">{addError}</p>{/if}
+  {#if addError}<p class="error" role="alert">{addError}</p>{/if}
 </section>
 
 <style>
