@@ -199,3 +199,26 @@ def tick(db, mailer, *, now: datetime) -> int:
         except Exception:
             logger.exception("notifications: session close raised (ignored)")
     return processed
+
+
+SHUTDOWN_TIMEOUT_SECONDS = 30
+TICK_SLEEP_SECONDS = 30
+
+
+async def run_forever(app):
+    """Lifespan-launched loop. Wraps the sync tick() in asyncio.to_thread so
+    smtplib does not block the FastAPI event loop."""
+    shutdown: asyncio.Event = app.state.shutdown
+    while not shutdown.is_set():
+        try:
+            def _do_tick():
+                with SessionLocal() as db:
+                    return tick(db, app.state.mailer,
+                                now=datetime.now(timezone.utc))
+            await asyncio.to_thread(_do_tick)
+        except Exception:
+            logger.exception("dispatcher tick failed; continuing")
+        try:
+            await asyncio.wait_for(shutdown.wait(), timeout=TICK_SLEEP_SECONDS)
+        except asyncio.TimeoutError:
+            pass
