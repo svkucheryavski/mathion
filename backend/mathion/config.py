@@ -66,7 +66,7 @@ class Settings(BaseSettings):
         # ports like `:bad` or out-of-range integers (urlparse keeps these
         # in netloc and the port property re-parses on access).
         try:
-            _ = parsed.port
+            _ = parsed.port  # accessing .port triggers ValueError for malformed/out-of-range values
         except ValueError as exc:
             raise ValueError(f"MATHION_BASE_URL has invalid port: {v!r}") from exc
         # Reject path-prefix URLs. `MATHION_BASE_URL=http://example.com/admin`
