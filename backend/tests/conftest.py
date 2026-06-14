@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import os
 
 import pytest
 from fastapi.testclient import TestClient as BaseTestClient
@@ -6,11 +7,24 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+# ---- MUST RUN BEFORE any mathion.* import — Settings() in config.py:29
+# is constructed at import time and snapshots MATHION_EMAIL_MODE.
+os.environ.setdefault("MATHION_EMAIL_MODE", "disabled")
+
+# ---- Safe now: mathion imports relocated below the env-set.
 from mathion.config import settings
 from mathion.database import Base, get_db
 from mathion.main import app
 from mathion.models_auth import User
 from mathion.auth import request_pin, verify_pin
+
+
+def pytest_configure(config):
+    assert settings.email_mode == "disabled", (
+        f"Test conftest race: settings.email_mode is {settings.email_mode!r} but "
+        "the disable_dispatcher_loop recipe expects 'disabled'. Some plugin "
+        "imported mathion.config before the os.environ.setdefault block."
+    )
 
 
 # Module-level test-date helpers. Replace hardcoded YYYY-MM-DD strings that
