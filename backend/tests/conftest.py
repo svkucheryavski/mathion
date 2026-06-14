@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 # is constructed at import time and snapshots MATHION_EMAIL_MODE.
 os.environ.setdefault("MATHION_EMAIL_MODE", "disabled")
 
-# ---- Safe now: mathion imports relocated below the env-set.
+# ---- mathion.* imports follow after the env-set is applied.
 from mathion.config import settings
 from mathion.database import Base, get_db
 from mathion.main import app
@@ -22,8 +22,9 @@ from mathion.auth import request_pin, verify_pin
 def pytest_configure(config):
     assert settings.email_mode == "disabled", (
         f"Test conftest race: settings.email_mode is {settings.email_mode!r} but "
-        "the disable_dispatcher_loop recipe expects 'disabled'. Some plugin "
-        "imported mathion.config before the os.environ.setdefault block."
+        "the disable_dispatcher_loop recipe expects 'disabled'. A pyproject.toml "
+        "plugin or parent conftest imported mathion.config before this conftest's "
+        "os.environ.setdefault could run."
     )
 
 
