@@ -78,7 +78,7 @@
         return;
       }
       submitError = 'Import failed — please retry.';
-      throw e;
+      console.error(e);
     } finally {
       submitting = false;
     }
