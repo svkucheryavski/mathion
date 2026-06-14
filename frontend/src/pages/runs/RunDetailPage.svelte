@@ -216,18 +216,17 @@
         hint: unassigned === 0 ? undefined : `${unassigned} students unassigned.`,
       });
     }
-    // Group sizes
+    // Group sizes — matches api/runs.py publish-gate (oversized-only).
+    // Zero groups and empty groups are OK; teachers may add groups + students post-publish.
     if (!run.groups_enabled) {
-      checks.push({ id: 'sizes', label: 'All groups have 1–10 students', state: 'na' });
-    } else if (groups.length === 0) {
-      checks.push({ id: 'sizes', label: 'All groups have 1–10 students', state: 'violated', hint: 'No groups defined.' });
+      checks.push({ id: 'sizes', label: 'No oversized groups (≤10 students each)', state: 'na' });
     } else {
-      const bad = groups.filter((g: GroupResponse) => g.student_count < 1 || g.student_count > 10);
+      const oversized = groups.filter((g: GroupResponse) => g.student_count > 10);
       checks.push({
         id: 'sizes',
-        label: 'All groups have 1–10 students',
-        state: bad.length === 0 ? 'ok' : 'violated',
-        hint: bad.length === 0 ? undefined : bad.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', '),
+        label: 'No oversized groups (≤10 students each)',
+        state: oversized.length === 0 ? 'ok' : 'violated',
+        hint: oversized.length === 0 ? undefined : oversized.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', '),
       });
     }
     const violated = checks.find((c) => c.state === 'violated');

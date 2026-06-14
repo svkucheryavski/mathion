@@ -69,14 +69,14 @@ describe('RunOverviewTab checklist + settings + danger zone', () => {
         checks: [
           { id: 'teacher', label: 'At least one teacher', state: 'ok' },
           { id: 'assigned', label: 'All students assigned to a group', state: 'na' },
-          { id: 'sizes', label: 'All groups have 1–10 students', state: 'na' },
+          { id: 'sizes', label: 'No oversized groups (≤10 students each)', state: 'na' },
         ],
         firstViolation: null,
       },
     });
     await settle();
     expect(target.textContent).toContain('At least one teacher');
-    expect(target.textContent).toContain('All groups have 1–10 students');
+    expect(target.textContent).toContain('No oversized groups (≤10 students each)');
     unmount(cmp);
   });
 
@@ -87,7 +87,7 @@ describe('RunOverviewTab checklist + settings + danger zone', () => {
         checks: [
           { id: 'teacher', label: 'At least one teacher', state: 'ok' },
           { id: 'assigned', label: 'All students assigned to a group', state: 'violated', hint: '3 students unassigned.' },
-          { id: 'sizes', label: 'All groups have 1–10 students', state: 'ok' },
+          { id: 'sizes', label: 'No oversized groups (≤10 students each)', state: 'ok' },
         ],
         firstViolation: '3 students unassigned.',
       },

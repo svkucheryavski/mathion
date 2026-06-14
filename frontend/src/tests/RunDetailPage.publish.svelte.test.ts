@@ -227,6 +227,50 @@ describe('disabled-version banner copy', () => {
   });
 });
 
+describe('readiness sizes check — API-parity (oversized-only gate)', () => {
+  it('groups_enabled + 0 groups → sizes state ok (rolling-enrollment: publish then build)', async () => {
+    const { target, cmp } = setup({
+      run: { groups_enabled: true },
+      teachers: [{ user_id: 1, user_email: 't@x.com' }],
+      groups: [],
+    });
+    await settle();
+    // Publish button must be enabled — zero groups is not a violation.
+    const btn = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+    unmount(cmp);
+  });
+
+  it('groups_enabled + 1 empty group (count 0) → sizes state ok', async () => {
+    const { target, cmp } = setup({
+      run: { groups_enabled: true },
+      teachers: [{ user_id: 1, user_email: 't@x.com' }],
+      groups: [{ id: 1, run_id: 10, name: 'Alpha', student_count: 0 }],
+    });
+    await settle();
+    // An empty group is allowed — only oversized groups block publishing.
+    const btn = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+    unmount(cmp);
+  });
+
+  it('groups_enabled + 1 group with 11 students → sizes violated, Publish disabled', async () => {
+    const { target, cmp } = setup({
+      run: { groups_enabled: true },
+      teachers: [{ user_id: 1, user_email: 't@x.com' }],
+      groups: [{ id: 1, run_id: 10, name: 'Alpha', student_count: 11 }],
+    });
+    await settle();
+    const btn = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toContain('Alpha (11)');
+    unmount(cmp);
+  });
+});
+
 describe('breadcrumb fix for teachers', () => {
   it('teacher sees Teaching root, no /courses link', async () => {
     const { target, cmp } = setup({ course: { is_admin: false } });
