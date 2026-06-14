@@ -1,7 +1,7 @@
 """Bulk roster operation tests — POST /students/bulk-delete and bulk-move."""
 
 
-def _make_run(admin_client, seed_publishable_version, groups_enabled=True, slug="stats", name="Stats"):
+def _make_published_run(admin_client, seed_publishable_version, groups_enabled=True, slug="stats", name="Stats"):
     course, _ = seed_publishable_version(slug=slug, name=name)
     run = admin_client.post(
         f"/api/courses/{course['id']}/runs",
@@ -31,7 +31,7 @@ def _make_group(admin_client, run_id, name):
 # ---- bulk-delete -----------------------------------------------------------
 
 def test_bulk_delete_requires_admin_or_teacher(admin_client, auth_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     response = auth_client.post(
         f"/api/runs/{run['id']}/students/bulk-delete", json={"user_ids": [1]}
     )
@@ -46,7 +46,7 @@ def test_bulk_delete_returns_404_for_missing_run(admin_client):
 
 
 def test_bulk_delete_rejects_empty_and_oversize_lists(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     r1 = admin_client.post(f"/api/runs/{run['id']}/students/bulk-delete", json={"user_ids": []})
     assert r1.status_code == 422
     r2 = admin_client.post(
@@ -57,7 +57,7 @@ def test_bulk_delete_rejects_empty_and_oversize_lists(admin_client, seed_publish
 
 
 def test_bulk_delete_rejects_duplicates(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     response = admin_client.post(
         f"/api/runs/{run['id']}/students/bulk-delete",
         json={"user_ids": [1, 1, 2]},
@@ -123,7 +123,7 @@ def test_bulk_delete_happy_path_with_enrollment_cascade(admin_client, db, seed_p
 
 def test_bulk_delete_mixed_results(admin_client, seed_publishable_version):
     """Some user_ids are in the run, some aren't — per-row results reflect both."""
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     a = _add_student(admin_client, run["id"], "a@example.com")
     b = _add_student(admin_client, run["id"], "b@example.com")
     response = admin_client.post(
@@ -139,7 +139,7 @@ def test_bulk_delete_mixed_results(admin_client, seed_publishable_version):
 
 
 def test_bulk_delete_returns_207_even_when_all_succeed(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     a = _add_student(admin_client, run["id"], "a@example.com")
     response = admin_client.post(
         f"/api/runs/{run['id']}/students/bulk-delete",
@@ -151,7 +151,7 @@ def test_bulk_delete_returns_207_even_when_all_succeed(admin_client, seed_publis
 # ---- bulk-move pre-flight --------------------------------------------------
 
 def test_bulk_move_requires_admin_or_teacher(admin_client, auth_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     response = auth_client.post(
         f"/api/runs/{run['id']}/students/bulk-move",
         json={"user_ids": [1], "group_id": 1},
@@ -168,8 +168,8 @@ def test_bulk_move_returns_404_for_missing_run(admin_client):
 
 
 def test_bulk_move_returns_400_when_group_belongs_to_other_run(admin_client, seed_publishable_version):
-    run1 = _make_run(admin_client, seed_publishable_version, slug="mv1", name="MV1")
-    run2 = _make_run(admin_client, seed_publishable_version, slug="mv2", name="MV2")
+    run1 = _make_published_run(admin_client, seed_publishable_version, slug="mv1", name="MV1")
+    run2 = _make_published_run(admin_client, seed_publishable_version, slug="mv2", name="MV2")
     g_other = _make_group(admin_client, run2["id"], "Group X")
     a = _add_student(admin_client, run1["id"], "a@example.com")
 
@@ -182,7 +182,7 @@ def test_bulk_move_returns_400_when_group_belongs_to_other_run(admin_client, see
 
 
 def test_bulk_move_returns_409_for_disabled_group(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "Group A")
     a = _add_student(admin_client, run["id"], "a@example.com")
     # Disable the group.
@@ -201,7 +201,7 @@ def test_bulk_move_returns_409_for_disabled_group(admin_client, seed_publishable
 def test_bulk_move_happy_path(admin_client, db, seed_publishable_version):
     from mathion.models import RunStudent
 
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     src = _make_group(admin_client, run["id"], "Source")
     dst = _make_group(admin_client, run["id"], "Dest")
     s1 = _add_student(admin_client, run["id"], "s1@example.com", group_id=src["id"])
@@ -228,7 +228,7 @@ def test_bulk_move_happy_path(admin_client, db, seed_publishable_version):
 
 
 def test_bulk_move_already_in_target_is_noop(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     s = _add_student(admin_client, run["id"], "s@example.com", group_id=g["id"])
 
@@ -245,7 +245,7 @@ def test_bulk_move_already_in_target_is_noop(admin_client, seed_publishable_vers
 def test_bulk_move_unassign_with_null_group(admin_client, db, seed_publishable_version):
     from mathion.models import RunStudent
 
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     s = _add_student(admin_client, run["id"], "s@example.com", group_id=g["id"])
 
@@ -263,7 +263,7 @@ def test_bulk_move_unassign_with_null_group(admin_client, db, seed_publishable_v
 
 
 def test_bulk_move_unassigns_already_unassigned_student_as_noop(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     s = _add_student(admin_client, run["id"], "s@example.com")  # no group
 
     response = admin_client.post(
@@ -275,7 +275,7 @@ def test_bulk_move_unassigns_already_unassigned_student_as_noop(admin_client, se
 
 
 def test_bulk_move_user_not_in_run_returns_per_row_error(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
 
     response = admin_client.post(
@@ -293,7 +293,7 @@ def test_bulk_move_capacity_fills_mid_loop(admin_client, db, seed_publishable_ve
     from mathion.models import RunStudent
     from mathion.models_auth import User
 
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     src = _make_group(admin_client, run["id"], "Source")
     dst = _make_group(admin_client, run["id"], "Dest")
     # Pre-fill dst with 8 students.
@@ -341,7 +341,7 @@ def test_bulk_move_noop_plus_fill_mix(admin_client, db, seed_publishable_version
     from mathion.models import RunStudent
     from mathion.models_auth import User
 
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     b = _make_group(admin_client, run["id"], "B")
     c = _make_group(admin_client, run["id"], "C")
 
@@ -392,7 +392,7 @@ def test_bulk_move_noop_plus_fill_mix(admin_client, db, seed_publishable_version
 
 def test_bulk_move_mixed_results(admin_client, seed_publishable_version):
     """One success, one not-in-run, one already-in-target."""
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     a = _add_student(admin_client, run["id"], "a@example.com")  # ungrouped
     b = _add_student(admin_client, run["id"], "b@example.com", group_id=g["id"])  # already in G
@@ -414,7 +414,7 @@ def test_bulk_move_mixed_results(admin_client, seed_publishable_version):
 # ---- bulk-move auth + 422 (endpoint-level) ---------------------------------
 
 def test_bulk_move_rejects_empty_and_oversize_lists(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     r1 = admin_client.post(
         f"/api/runs/{run['id']}/students/bulk-move",
@@ -429,7 +429,7 @@ def test_bulk_move_rejects_empty_and_oversize_lists(admin_client, seed_publishab
 
 
 def test_bulk_move_rejects_duplicates(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     response = admin_client.post(
         f"/api/runs/{run['id']}/students/bulk-move",
@@ -440,7 +440,7 @@ def test_bulk_move_rejects_duplicates(admin_client, seed_publishable_version):
 
 
 def test_bulk_move_returns_207_even_when_all_succeed(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     a = _add_student(admin_client, run["id"], "a@example.com")
     response = admin_client.post(
@@ -454,7 +454,7 @@ def test_bulk_move_returns_207_even_when_all_succeed(admin_client, seed_publisha
 
 def test_bulk_delete_error_rows_carry_stable_error_code(admin_client, seed_publishable_version):
     """Frontend can switch on error_code without parsing free-form detail strings."""
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     a = _add_student(admin_client, run["id"], "a@example.com")
     response = admin_client.post(
         f"/api/runs/{run['id']}/students/bulk-delete",
@@ -469,7 +469,7 @@ def test_bulk_delete_error_rows_carry_stable_error_code(admin_client, seed_publi
 
 
 def test_bulk_delete_returns_summary(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     a = _add_student(admin_client, run["id"], "a@example.com")
     b = _add_student(admin_client, run["id"], "b@example.com")
     response = admin_client.post(
@@ -484,7 +484,7 @@ def test_bulk_move_error_codes_distinguish_capacity_vs_not_in_run(
     admin_client, seed_publishable_version
 ):
     """Capacity-reached and not-in-run are different errors; frontend should distinguish."""
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     full = _make_group(admin_client, run["id"], "Full")
     # Fill Full to 10.
     for i in range(10):
@@ -505,7 +505,7 @@ def test_bulk_move_error_codes_distinguish_capacity_vs_not_in_run(
 
 
 def test_bulk_move_success_rows_have_null_error_code(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     a = _add_student(admin_client, run["id"], "a@example.com")
     response = admin_client.post(
@@ -518,7 +518,7 @@ def test_bulk_move_success_rows_have_null_error_code(admin_client, seed_publisha
 
 
 def test_bulk_move_returns_summary(admin_client, seed_publishable_version):
-    run = _make_run(admin_client, seed_publishable_version)
+    run = _make_published_run(admin_client, seed_publishable_version)
     g = _make_group(admin_client, run["id"], "G")
     a = _add_student(admin_client, run["id"], "a@example.com")
     b = _add_student(admin_client, run["id"], "b@example.com")

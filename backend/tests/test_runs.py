@@ -113,17 +113,24 @@ def test_publish_run_with_teacher_succeeds(admin_client, seed_publishable_versio
     assert response.json()["is_published"] is True
 
 
-def test_publish_with_groups_enabled_unassigned_student_409(admin_client, db, seed_publishable_version):
-    from mathion.models import RunStudent
-    from mathion.models_auth import User
+def test_publish_with_groups_enabled_unassigned_student_409(admin_client, seed_publishable_version):
     course, _ = seed_publishable_version()
     run = admin_client.post(f"/api/courses/{course['id']}/runs",
         json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01",
               "groups_enabled": True}).json()
     admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "t@example.com"})
-    # Insert unassigned student directly via ORM (API gate blocks add to unpublished run).
-    u = User(email="s@example.com"); db.add(u); db.flush()
-    db.add(RunStudent(run_id=run["id"], user_id=u.id, group_id=None)); db.commit()
+    # Publish (no students yet → groups-enabled gate is vacuously satisfied)
+    first_publish = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert first_publish.status_code == 200
+    # Add an unassigned student via the API (gate allows group_id=None on add)
+    add_resp = admin_client.post(
+        f"/api/runs/{run['id']}/students", json={"email": "s@example.com"}
+    )
+    assert add_resp.status_code == 201
+    # Unpublish so we can retry the publish-with-unassigned scenario
+    unpub = admin_client.post(f"/api/runs/{run['id']}/unpublish")
+    assert unpub.status_code == 200
+    # Now republish should 409 because there's an unassigned student in a groups-enabled run
     response = admin_client.post(f"/api/runs/{run['id']}/publish")
     assert response.status_code == 409
 
