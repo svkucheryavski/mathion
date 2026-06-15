@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from mathion.notifications.templates import (
-    TEMPLATES, RenderContext, render, _name, _run_url, _build_email_message,
+    TEMPLATES, RenderContext, render, _name, _student_url, _staff_url, _build_email_message,
 )
 
 
@@ -31,9 +31,16 @@ def test_name_falls_back_to_email():
     assert _name(user) == "b@x"
 
 
-def test_run_url_no_query():
+def test_student_url_no_query():
     ctx = _ctx()
-    url = _run_url(ctx)
+    url = _student_url(ctx)
+    assert url == "http://localhost:8000/courses/calc-101"
+    assert "?" not in url and "#" not in url
+
+
+def test_staff_url_no_query():
+    ctx = _ctx()
+    url = _staff_url(ctx)
     assert url == "http://localhost:8000/courses/calc-101/runs/42"
     assert "?" not in url and "#" not in url
 
@@ -45,21 +52,18 @@ def test_course_slug_property_derives_live():
     assert ctx.course_slug == "new-slug"
 
 
-def test_run_url_handles_trailing_slash_already_stripped():
-    ctx = _ctx(base_url="http://localhost:8000")
-    assert _run_url(ctx) == "http://localhost:8000/courses/calc-101/runs/42"
-
-
-@pytest.mark.parametrize("kind", [
-    "evaluation_received", "run_enrolled",
-    "run_teacher_assigned", "mini_project_published",
+@pytest.mark.parametrize("kind,expected_url", [
+    ("evaluation_received",   "http://localhost:8000/courses/calc-101"),
+    ("run_enrolled",          "http://localhost:8000/courses/calc-101"),
+    ("run_teacher_assigned",  "http://localhost:8000/courses/calc-101/runs/42"),
+    ("mini_project_published", "http://localhost:8000/courses/calc-101"),
 ])
-def test_each_kind_renders(kind):
+def test_each_kind_renders(kind, expected_url):
     ctx = _ctx()
     with patch("mathion.api.mini_projects.mini_project_title", return_value="Block 3 Project"):
         subject, body = render(kind, ctx)
         assert "Alice" in body
-        assert "http://localhost:8000/courses/calc-101/runs/42" in body
+        assert expected_url in body
         assert subject and not subject.endswith("\n")
 
 

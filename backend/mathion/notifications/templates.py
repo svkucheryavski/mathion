@@ -25,7 +25,13 @@ def _name(u) -> str:
     return u.full_name or u.email
 
 
-def _run_url(ctx) -> str:
+def _student_url(ctx) -> str:
+    """Student-facing URL — lands on the course view they can access."""
+    return f"{ctx.base_url}/courses/{ctx.course_slug}"
+
+
+def _staff_url(ctx) -> str:
+    """Teacher/admin-facing URL — lands on the run detail page."""
     return f"{ctx.base_url}/courses/{ctx.course_slug}/runs/{ctx.run.id}"
 
 
@@ -35,7 +41,7 @@ def _evaluation_received(ctx):
     body = (
         f"Hi {_name(ctx.user)},\n\n"
         f'Your submission to "{mini_project_title(ctx.mp.block)}" has been evaluated.\n\n'
-        f"View it: {_run_url(ctx)}\n\n"
+        f"View it: {_student_url(ctx)}\n\n"
         "— Mathion\n")
     return subject, body
 
@@ -45,7 +51,7 @@ def _run_enrolled(ctx):
     body = (
         f"Hi {_name(ctx.user)},\n\n"
         f'You\'ve been enrolled in "{ctx.run.title}".\n\n'
-        f"Open it: {_run_url(ctx)}\n\n"
+        f"Open it: {_student_url(ctx)}\n\n"
         "— Mathion\n")
     return subject, body
 
@@ -55,7 +61,7 @@ def _run_teacher_assigned(ctx):
     body = (
         f"Hi {_name(ctx.user)},\n\n"
         f'You\'ve been assigned as a teacher on "{ctx.run.title}".\n\n'
-        f"Open it: {_run_url(ctx)}\n\n"
+        f"Open it: {_staff_url(ctx)}\n\n"
         "— Mathion\n")
     return subject, body
 
@@ -66,7 +72,7 @@ def _mini_project_published(ctx):
     body = (
         f"Hi {_name(ctx.user)},\n\n"
         f'A new mini-project "{mini_project_title(ctx.mp.block)}" is available in "{ctx.run.title}".\n\n'
-        f"Open it: {_run_url(ctx)}\n\n"
+        f"Open it: {_student_url(ctx)}\n\n"
         "— Mathion\n")
     return subject, body
 
