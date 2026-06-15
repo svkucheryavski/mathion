@@ -78,13 +78,13 @@ function draftMp(overrides: Partial<MiniProjectResponse> = {}): MiniProjectRespo
     title: 'Mini project for Block 1',
     assignment_md: 'orig text',
     assignment_html: '<p>orig text</p>',
-    soft_deadline: '2026-06-01T10:00:00Z',
-    hard_deadline: '2026-06-15T10:00:00Z',
-    resubmission_deadline: '2026-06-20T10:00:00Z',
+    soft_deadline: '2027-06-01T10:00:00Z',
+    hard_deadline: '2027-06-15T10:00:00Z',
+    resubmission_deadline: '2027-06-20T10:00:00Z',
     is_published: false,
     first_submitted_at: null,
-    created_at: '2026-05-01T00:00:00Z',
-    updated_at: '2026-05-01T00:00:00Z',
+    created_at: '2027-05-01T00:00:00Z',
+    updated_at: '2027-05-01T00:00:00Z',
     ...overrides,
   };
 }
@@ -99,7 +99,7 @@ function defaultProps(overrides: Partial<Record<string, unknown>> = {}): Record<
     currentBlock: blocks[0],
     runIsPublished: true,
     versionIsDisabled: false,
-    runEndDate: '2026-06-30',
+    runEndDate: '2027-06-30',
     course: baseCourse,
     onClose: vi.fn(),
     onSaved: vi.fn().mockResolvedValue(undefined),
@@ -308,16 +308,16 @@ describe('MiniProjectModal publish — preconditions', () => {
       target,
       props: defaultProps({
         initial: draftMp({
-          hard_deadline: '2026-07-15T10:00:00Z',
-          resubmission_deadline: '2026-07-20T10:00:00Z',
+          hard_deadline: '2027-07-15T10:00:00Z',
+          resubmission_deadline: '2027-07-20T10:00:00Z',
         }),
-        runEndDate: '2026-06-30',
+        runEndDate: '2027-06-30',
       }) as ModalProps,
     });
     await settle();
     (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
     await settle();
-    expect(target.textContent).toContain('Hard deadline must be before run end (2026-06-30)');
+    expect(target.textContent).toContain('Hard deadline must be before run end (2027-06-30)');
   });
 
   it('resub_iso > runEndDate end-of-day UTC: bullet with substituted runEndDate', async () => {
@@ -329,16 +329,16 @@ describe('MiniProjectModal publish — preconditions', () => {
       props: defaultProps({
         initial: draftMp({
           // hard within run end, but resub past it
-          hard_deadline: '2026-06-15T10:00:00Z',
-          resubmission_deadline: '2026-07-15T10:00:00Z',
+          hard_deadline: '2027-06-15T10:00:00Z',
+          resubmission_deadline: '2027-07-15T10:00:00Z',
         }),
-        runEndDate: '2026-06-30',
+        runEndDate: '2027-06-30',
       }) as ModalProps,
     });
     await settle();
     (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
     await settle();
-    expect(target.textContent).toContain('Resubmission deadline must be before run end (2026-06-30)');
+    expect(target.textContent).toContain('Resubmission deadline must be before run end (2027-06-30)');
   });
 
   it('Save-validation preflight: soft > hard inverted → publish bullet "Soft deadline must be before hard deadline"', async () => {
@@ -349,8 +349,8 @@ describe('MiniProjectModal publish — preconditions', () => {
       target,
       props: defaultProps({
         initial: draftMp({
-          soft_deadline: '2026-06-20T10:00:00Z',
-          hard_deadline: '2026-06-15T10:00:00Z',
+          soft_deadline: '2027-06-20T10:00:00Z',
+          hard_deadline: '2027-06-15T10:00:00Z',
         }),
       }) as ModalProps,
     });
@@ -369,8 +369,8 @@ describe('MiniProjectModal publish — preconditions', () => {
       target,
       props: defaultProps({
         initial: draftMp({
-          hard_deadline: '2026-06-20T10:00:00Z',
-          resubmission_deadline: '2026-06-15T10:00:00Z',
+          hard_deadline: '2027-06-20T10:00:00Z',
+          resubmission_deadline: '2027-06-15T10:00:00Z',
         }),
       }) as ModalProps,
     });
