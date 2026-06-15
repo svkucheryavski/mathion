@@ -79,10 +79,10 @@ class Settings(BaseSettings):
                 f"MATHION_BASE_URL must not include a path; got path={parsed.path!r}. "
                 "If reverse-proxy path-prefix support is needed, see a follow-up slice.")
         # Reject query string and fragment. Both break URL construction in
-        # `_run_url` (which appends `/courses/.../runs/...` — concatenating
-        # onto `http://example.com?x=y` produces `http://example.com?x=y/courses/...`
-        # which routes the path INTO the query string). No legitimate use
-        # for either in a base URL.
+        # the notification URL helpers (`_student_url`/`_staff_url`, which
+        # append `/courses/...` — concatenating onto `http://example.com?x=y`
+        # produces `http://example.com?x=y/courses/...` which routes the path
+        # INTO the query string). No legitimate use for either in a base URL.
         if parsed.query:
             raise ValueError(f"MATHION_BASE_URL must not include a query string: {v!r}")
         if parsed.fragment:
