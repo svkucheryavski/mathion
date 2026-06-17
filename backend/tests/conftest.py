@@ -227,6 +227,46 @@ def student_client_for(client, db):
 
 
 @pytest.fixture
+def seed_run_with_published_mp(admin_client, db, seed_run_with_groups):
+    """Factory: returns (run, group_a, group_b, mini_project). Promoted from
+    test_submissions.py per C26 (rev 2). The underlying run already has two
+    groups with alice/bob assigned, so submission paths work without extra
+    setup.
+
+    Optional overrides (kwargs):
+        assignment_md: defaults to "Report."
+        hard_deadline: ISO string, defaults to NEAR_DEADLINE_ISO
+        resubmission_deadline: ISO string, defaults to FAR_DEADLINE_ISO
+        publish: bool, defaults to True (POSTs /publish after create)
+    """
+    from sqlalchemy import select
+
+    def _factory(**overrides):
+        from mathion.models import Block, Run
+        run, ga, gb = seed_run_with_groups()
+        run_obj = db.get(Run, run["id"])
+        block = db.execute(
+            select(Block).where(Block.version_id == run_obj.version_id)
+        ).scalars().first()
+        mp = admin_client.post(
+            f"/api/runs/{run['id']}/mini-projects",
+            json={
+                "block_id": block.id,
+                "assignment_md": overrides.get("assignment_md", "Report."),
+                "hard_deadline": overrides.get("hard_deadline", NEAR_DEADLINE_ISO),
+                "resubmission_deadline": overrides.get(
+                    "resubmission_deadline", FAR_DEADLINE_ISO
+                ),
+            },
+        ).json()
+        if overrides.get("publish", True):
+            admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+        return run, ga, gb, mp
+
+    return _factory
+
+
+@pytest.fixture
 def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
     """Create a published run with groups_enabled, two groups each with one student.
 

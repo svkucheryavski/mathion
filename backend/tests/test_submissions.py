@@ -1,29 +1,9 @@
 import io
 from sqlalchemy import select
 
-from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO
 
-
-def _make_published_mp(admin_client, db, seed_run_with_groups):
-    from mathion.models import Block, Run
-    run, ga, gb = seed_run_with_groups()
-    run_obj = db.get(Run, run["id"])
-    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
-    mp = admin_client.post(
-        f"/api/runs/{run['id']}/mini-projects",
-        json={
-            "block_id": block.id,
-            "assignment_md": "Report.",
-            "hard_deadline": NEAR_DEADLINE_ISO,
-            "resubmission_deadline": FAR_DEADLINE_ISO,
-        },
-    ).json()
-    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
-    return run, ga, gb, mp
-
-
-def test_initial_submission(admin_client, student_client_for, db, seed_run_with_groups):
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+def test_initial_submission(student_client_for, seed_run_with_published_mp):
+    run, ga, _, mp = seed_run_with_published_mp()
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
@@ -37,8 +17,8 @@ def test_initial_submission(admin_client, student_client_for, db, seed_run_with_
     assert body["group_id"] == ga["id"]
 
 
-def test_submit_blocks_non_group_member(admin_client, student_client_for, db, seed_run_with_groups):
-    run, _, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+def test_submit_blocks_non_group_member(student_client_for, db, seed_run_with_published_mp):
+    run, _, _, mp = seed_run_with_published_mp()
     # Add another user not in any group
     from mathion.models_auth import User
     db.add(User(email="outsider@example.com", full_name="O"))
@@ -51,9 +31,9 @@ def test_submit_blocks_non_group_member(admin_client, student_client_for, db, se
     assert response.status_code == 403
 
 
-def test_submit_enrolled_but_no_group(admin_client, student_client_for, db, seed_run_with_groups):
+def test_submit_enrolled_but_no_group(student_client_for, db, seed_run_with_published_mp):
     """Enrolled student with no group assignment cannot submit."""
-    run, _, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    run, _, _, mp = seed_run_with_published_mp()
     from mathion.models import RunStudent
     from mathion.models_auth import User
     user = User(email="lonely@example.com", full_name="L")
@@ -92,8 +72,8 @@ def test_submit_blocked_after_hard_deadline(admin_client, student_client_for, db
     assert response.status_code == 409
 
 
-def test_submit_to_disabled_group(admin_client, student_client_for, db, seed_run_with_groups):
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+def test_submit_to_disabled_group(admin_client, student_client_for, seed_run_with_published_mp):
+    run, ga, _, mp = seed_run_with_published_mp()
     # Disable group A
     admin_client.patch(f"/api/groups/{ga['id']}", json={"is_disabled": True})
     student = student_client_for("alice@example.com")
@@ -104,8 +84,8 @@ def test_submit_to_disabled_group(admin_client, student_client_for, db, seed_run
     assert response.status_code == 409
 
 
-def test_pending_evaluation_blocks_resubmit(admin_client, student_client_for, db, seed_run_with_groups):
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+def test_pending_evaluation_blocks_resubmit(student_client_for, seed_run_with_published_mp):
+    run, ga, _, mp = seed_run_with_published_mp()
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
@@ -118,9 +98,9 @@ def test_pending_evaluation_blocks_resubmit(admin_client, student_client_for, db
     assert response.status_code == 409
 
 
-def test_first_submitted_at_set(admin_client, student_client_for, db, seed_run_with_groups):
+def test_first_submitted_at_set(student_client_for, db, seed_run_with_published_mp):
     from mathion.models import MiniProject
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    run, ga, _, mp = seed_run_with_published_mp()
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
@@ -131,8 +111,8 @@ def test_first_submitted_at_set(admin_client, student_client_for, db, seed_run_w
     assert mp_obj.first_submitted_at is not None
 
 
-def test_lock_blocks_assignment_md_edit(admin_client, student_client_for, db, seed_run_with_groups):
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+def test_lock_blocks_assignment_md_edit(admin_client, student_client_for, seed_run_with_published_mp):
+    run, ga, _, mp = seed_run_with_published_mp()
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
@@ -142,9 +122,9 @@ def test_lock_blocks_assignment_md_edit(admin_client, student_client_for, db, se
     assert response.status_code == 409
 
 
-def _make_submitted(admin_client, student_client_for, db, seed_run_with_groups):
+def _make_submitted(student_client_for, seed_run_with_published_mp):
     """Create published mp, submit a PDF as alice. Returns (run, ga, mp, sub)."""
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    run, ga, _, mp = seed_run_with_published_mp()
     student = student_client_for("alice@example.com")
     sub = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
@@ -153,8 +133,8 @@ def _make_submitted(admin_client, student_client_for, db, seed_run_with_groups):
     return run, ga, mp, sub
 
 
-def test_resubmission_auto_accepts(admin_client, student_client_for, db, seed_run_with_groups):
-    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+def test_resubmission_auto_accepts(admin_client, student_client_for, db, seed_run_with_published_mp):
+    _, _, _, sub = _make_submitted(student_client_for, seed_run_with_published_mp)
     # Teacher requests minor revision
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
@@ -176,8 +156,8 @@ def test_resubmission_auto_accepts(admin_client, student_client_for, db, seed_ru
     assert ev.result == "accepted"
 
 
-def test_rejected_resets_to_initial(admin_client, student_client_for, db, seed_run_with_groups):
-    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+def test_rejected_resets_to_initial(admin_client, student_client_for, seed_run_with_published_mp):
+    _, _, _, sub = _make_submitted(student_client_for, seed_run_with_published_mp)
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "rejected", "feedback_text": "wrong file"},
@@ -192,8 +172,8 @@ def test_rejected_resets_to_initial(admin_client, student_client_for, db, seed_r
     assert response.json()["is_resubmission"] is False  # fresh initial
 
 
-def test_accepted_blocks_resubmit(admin_client, student_client_for, db, seed_run_with_groups):
-    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+def test_accepted_blocks_resubmit(admin_client, student_client_for, seed_run_with_published_mp):
+    _, _, _, sub = _make_submitted(student_client_for, seed_run_with_published_mp)
     admin_client.post(f"/api/submissions/{sub['id']}/evaluation", data={"result": "accepted"})
     student = student_client_for("alice@example.com")
     response = student.post(
@@ -203,10 +183,10 @@ def test_accepted_blocks_resubmit(admin_client, student_client_for, db, seed_run
     assert response.status_code == 409
 
 
-def test_submit_disallowed_extension(admin_client, student_client_for, db, seed_run_with_groups):
+def test_submit_disallowed_extension(student_client_for, seed_run_with_published_mp):
     """Uploading a file with a disallowed extension returns a clear error
     (distinct from the 'must be a PDF' message used for allowed-but-wrong types)."""
-    run, ga, _, mp = _make_published_mp(admin_client, db, seed_run_with_groups)
+    run, ga, _, mp = seed_run_with_published_mp()
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
