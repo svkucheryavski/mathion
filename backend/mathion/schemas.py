@@ -633,6 +633,85 @@ class StudentMiniProjectListItem(BaseModel):
     ]
 
 
+# Task B3: detail response shape for
+# GET /api/courses/{slug}/blocks/{block_slug}/mini-project. See
+# `backend/mathion/api/student_mini_projects.py` for the synthesizer +
+# the 7-step `can_submit` ladder that mirrors POST /submissions.
+#
+# `*_full_name` fields are pre-composed by the endpoint via `_display_name`
+# (full_name → email local-part fallback) — NEVER null. `@computed_field`
+# isn't an option because the source `User` row isn't on these models.
+
+
+class StudentGroupMember(BaseModel):
+    user_id: int
+    full_name: str
+    is_me: bool
+
+
+class StudentGroupSummary(BaseModel):
+    id: int
+    name: str
+    is_disabled: bool
+    members: list[StudentGroupMember]
+
+
+class StudentSubmissionHistoryEvaluation(BaseModel):
+    eval_id: int
+    result: Literal["rejected", "major_revision", "minor_revision", "accepted"]
+    score: int | None
+    feedback_text: str | None
+    has_feedback_file: bool
+    evaluated_by_full_name: str
+    evaluated_at: datetime
+
+
+class StudentSubmissionHistoryEntry(BaseModel):
+    submission_id: int
+    submission_number: int
+    filename: str
+    submitted_by_full_name: str
+    submitter_is_me: bool
+    submitted_at: datetime
+    file_size: int
+    is_late: bool
+    is_resubmission: bool
+    evaluation: StudentSubmissionHistoryEvaluation | None
+
+
+class StudentMiniProjectDetail(BaseModel):
+    mp_id: int
+    run_id: int
+    block_id: int
+    block_slug: str
+    block_title: str
+    assignment_html: str
+    soft_deadline: datetime | None
+    hard_deadline: datetime | None
+    resubmission_deadline: datetime | None
+    group: StudentGroupSummary | None
+    submission_history: list[StudentSubmissionHistoryEntry]
+    latest_status: Literal[
+        "pending_group_assignment",
+        "not_submitted",
+        "awaiting_evaluation",
+        "rejected",
+        "major_revision",
+        "minor_revision",
+        "accepted",
+    ]
+    can_submit: bool
+    can_submit_reason_if_not: Literal[
+        "mp_not_visible",
+        "pending_group_assignment",
+        "group_disabled",
+        "already_accepted",
+        "awaiting_evaluation",
+        "hard_deadline_passed",
+        "resubmission_deadline_passed",
+    ] | None
+
+
 # ============================================================================
 # Phase 7b: Submissions
 # ============================================================================

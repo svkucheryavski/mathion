@@ -1,18 +1,25 @@
 """Student-facing mini-project discovery + detail endpoints.
 
-Router is included in `mathion.main`. The detail endpoint lands in B3;
-this module currently exposes the list endpoint added in B2.
+Router is included in `mathion.main`. Exposes:
+- GET /api/courses/{slug}/mini-projects (B2 list)
+- GET /api/courses/{slug}/blocks/{block_slug}/mini-project (B3 detail)
 """
 
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from mathion.api.helpers import get_submitter_group
+from mathion.api.helpers import (
+    get_submitter_group,
+    mini_project_visible_to_student,
+    to_utc_aware,
+)
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import (
@@ -20,13 +27,21 @@ from mathion.models import (
     Course,
     CourseVersion,
     Evaluation,
+    Group,
     MiniProject,
     Run,
     RunStudent,
     Submission,
 )
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import StudentMiniProjectListItem
+from mathion.schemas import (
+    StudentGroupMember,
+    StudentGroupSummary,
+    StudentMiniProjectDetail,
+    StudentMiniProjectListItem,
+    StudentSubmissionHistoryEntry,
+    StudentSubmissionHistoryEvaluation,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["student-mini-projects"])
@@ -171,3 +186,256 @@ def list_student_mini_projects(
     ).scalars().all()
 
     return [_serialize_list_item(db, mp, group) for mp in mps]
+
+
+# ============================================================================
+# Task B3: detail endpoint
+# ============================================================================
+
+
+def _display_name(user: User) -> str:
+    """Return a user-facing display name.
+
+    Falls back to the email LOCAL part (chars before '@') when full_name is
+    None / blank. The detail endpoint pre-composes every `*_full_name`
+    field via this helper so the response model never contains nulls in
+    those slots (and `@computed_field` isn't an option — the source
+    `User` row isn't on the response model).
+    """
+    name = (user.full_name or "").strip()
+    if name:
+        return name
+    return user.email.split("@", 1)[0]
+
+
+def _resolve_block(db: Session, run: Run, block_slug: str) -> Block:
+    """Resolve `block_slug` against the run's version_id (IDOR-safe).
+
+    Per spec §4.2: the lookup is scoped to `run.version_id` so a block
+    slug that exists on a DIFFERENT version of the same course (or any
+    other version) cannot be reached. Mismatch → 404.
+    """
+    block = db.execute(
+        select(Block).where(
+            Block.version_id == run.version_id,
+            Block.slug == block_slug,
+        )
+    ).scalar_one_or_none()
+    if block is None:
+        raise HTTPException(status_code=404, detail="Block not found")
+    return block
+
+
+def _compute_can_submit(
+    *,
+    run: Run,
+    mp: MiniProject,
+    group: Group | None,
+    latest_result: str | None,
+    has_any_submission: bool,
+    now: datetime | None = None,
+) -> tuple[bool, str | None]:
+    """7-step `can_submit` ladder per spec §3.2.
+
+    Mirrors POST /submissions enforcement at
+    `backend/mathion/api/submissions.py:53-104` exactly; ORDER MATTERS.
+    Each step short-circuits with the matching reason code.
+
+    `now` is injected for testability; defaults to UTC-aware `datetime.now`.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    # 1. visibility (run.is_published AND mp.is_published)
+    if not mini_project_visible_to_student(run, mp):
+        return False, "mp_not_visible"
+    # 2. group required
+    if group is None:
+        return False, "pending_group_assignment"
+    # 3. group not disabled
+    if group.is_disabled:
+        return False, "group_disabled"
+    # 4. already accepted is terminal
+    if latest_result == "accepted":
+        return False, "already_accepted"
+    # 5. pending evaluation: a prior submission exists but no eval yet
+    if latest_result is None and has_any_submission:
+        return False, "awaiting_evaluation"
+    # 6. initial-submission path (no prior eval OR last eval=rejected)
+    if latest_result in (None, "rejected"):
+        hard_aware = to_utc_aware(mp.hard_deadline)
+        if hard_aware is not None and now > hard_aware:
+            return False, "hard_deadline_passed"
+        return True, None
+    # 7. resubmission path (last eval = major/minor revision)
+    if latest_result in ("major_revision", "minor_revision"):
+        resub_aware = to_utc_aware(mp.resubmission_deadline)
+        if resub_aware is not None and now > resub_aware:
+            return False, "resubmission_deadline_passed"
+        return True, None
+    # Defensive fallback: unexpected result string.
+    return False, "mp_not_visible"
+
+
+def _serialize_member(db: Session, rs: RunStudent, me_id: int) -> StudentGroupMember:
+    user = db.get(User, rs.user_id)
+    return StudentGroupMember(
+        user_id=user.id,
+        full_name=_display_name(user),
+        is_me=(user.id == me_id),
+    )
+
+
+def _serialize_group(
+    db: Session, run: Run, group: Group, me_id: int,
+) -> StudentGroupSummary:
+    members = db.execute(
+        select(RunStudent).where(
+            RunStudent.run_id == run.id,
+            RunStudent.group_id == group.id,
+        )
+    ).scalars().all()
+    return StudentGroupSummary(
+        id=group.id,
+        name=group.name,
+        is_disabled=group.is_disabled,
+        members=[_serialize_member(db, rs, me_id) for rs in members],
+    )
+
+
+def _serialize_history_entry(
+    db: Session,
+    sub: Submission,
+    ev: Evaluation | None,
+    me_id: int,
+) -> StudentSubmissionHistoryEntry:
+    submitter = db.get(User, sub.submitted_by)
+    eval_payload: StudentSubmissionHistoryEvaluation | None = None
+    if ev is not None:
+        evaluator = db.get(User, ev.evaluated_by)
+        eval_payload = StudentSubmissionHistoryEvaluation(
+            eval_id=ev.id,
+            result=ev.result,
+            score=ev.score,
+            feedback_text=ev.feedback_text,
+            has_feedback_file=ev.feedback_file is not None,
+            evaluated_by_full_name=_display_name(evaluator),
+            evaluated_at=ev.evaluated_at,
+        )
+    return StudentSubmissionHistoryEntry(
+        submission_id=sub.id,
+        submission_number=sub.submission_number,
+        filename=os.path.basename(sub.file_path),
+        submitted_by_full_name=_display_name(submitter),
+        submitter_is_me=(sub.submitted_by == me_id),
+        submitted_at=sub.submitted_at,
+        file_size=sub.file_size,
+        is_late=sub.is_late,
+        is_resubmission=sub.is_resubmission,
+        evaluation=eval_payload,
+    )
+
+
+@router.get(
+    "/api/courses/{slug}/blocks/{block_slug}/mini-project",
+    response_model=StudentMiniProjectDetail,
+)
+def get_student_mini_project_detail(
+    slug: str,
+    block_slug: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudentMiniProjectDetail:
+    """Per spec §3.2: detail endpoint synthesizes the MP assignment, group
+    context (with `is_disabled` UI cue), submission history (DESC by
+    submission_number), `latest_status`, and `can_submit` + reason code in
+    one round-trip.
+
+    Read ordering (spec §3.2 step list) avoids partial-update races:
+    1. Resolve run (§4.1).
+    2. Resolve block (§4.2, version-scoped to prevent IDOR).
+    3. Load MP for (run, block); 404 if missing or not visible.
+    4. Resolve student's group (may be None).
+    5. If group: load members, submissions DESC, evaluations.
+    6. Compute can_submit per ladder.
+    7. Reuse `_derive_latest_status` from B2.
+    8. Return.
+
+    Errors: 401 (no session, via dependency), 403 (no active run, via
+    resolver), 404 (course/block/MP missing or unpublished).
+    """
+    run = _resolve_student_run(db, user, slug)
+    block = _resolve_block(db, run, block_slug)
+
+    mp = db.execute(
+        select(MiniProject).where(
+            MiniProject.run_id == run.id,
+            MiniProject.block_id == block.id,
+        )
+    ).scalar_one_or_none()
+    if mp is None or not mini_project_visible_to_student(run, mp):
+        raise HTTPException(status_code=404, detail="Mini-project not found")
+
+    group = get_submitter_group(db, run.id, user.id)
+
+    submissions: list[Submission] = []
+    eval_by_sub: dict[int, Evaluation] = {}
+    if group is not None:
+        submissions = db.execute(
+            select(Submission)
+            .where(
+                Submission.mini_project_id == mp.id,
+                Submission.group_id == group.id,
+            )
+            .order_by(Submission.submission_number.desc())
+        ).scalars().all()
+        if submissions:
+            sub_ids = [s.id for s in submissions]
+            evals = db.execute(
+                select(Evaluation).where(Evaluation.submission_id.in_(sub_ids))
+            ).scalars().all()
+            eval_by_sub = {ev.submission_id: ev for ev in evals}
+
+    # `latest_result` drives the can_submit ladder. `submissions` is DESC,
+    # so submissions[0] is the newest. `has_any_submission` is needed to
+    # distinguish "no prior submission" from "submission pending eval"
+    # in ladder step 5.
+    latest_result: str | None = None
+    has_any_submission = bool(submissions)
+    if has_any_submission:
+        latest_ev = eval_by_sub.get(submissions[0].id)
+        if latest_ev is not None:
+            latest_result = latest_ev.result
+
+    can_submit, reason = _compute_can_submit(
+        run=run, mp=mp, group=group,
+        latest_result=latest_result,
+        has_any_submission=has_any_submission,
+    )
+    latest_status = _derive_latest_status(db, mp, group)
+
+    group_summary: StudentGroupSummary | None = None
+    if group is not None:
+        group_summary = _serialize_group(db, run, group, user.id)
+
+    history = [
+        _serialize_history_entry(db, sub, eval_by_sub.get(sub.id), user.id)
+        for sub in submissions
+    ]
+
+    return StudentMiniProjectDetail(
+        mp_id=mp.id,
+        run_id=run.id,
+        block_id=block.id,
+        block_slug=block.slug,
+        block_title=block.title,
+        assignment_html=mp.assignment_html,
+        soft_deadline=mp.soft_deadline,
+        hard_deadline=mp.hard_deadline,
+        resubmission_deadline=mp.resubmission_deadline,
+        group=group_summary,
+        submission_history=history,
+        latest_status=latest_status,
+        can_submit=can_submit,
+        can_submit_reason_if_not=reason,
+    )

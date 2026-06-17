@@ -394,3 +394,478 @@ def test_list_cross_course_isolation(
     returned_y = {item["mp_id"] for item in resp_y.json()}
     assert returned_y == {y_mp_id}
     assert not (returned_y & x_mp_ids)
+
+
+# ============================================================================
+# Task B3: GET /api/courses/{slug}/blocks/{block_slug}/mini-project — detail
+# ============================================================================
+#
+# Covers: response shape, full_name fallback, group-summary surfaces
+# `is_disabled`, submission_history DESC by submission_number, the 7-step
+# `can_submit` ladder (one test per reason code), the IDOR cross-version
+# block-slug guard (§4.2), and the 401/403/404 boundary.
+
+
+def _detail_url(course_slug: str, block_slug: str) -> str:
+    return f"/api/courses/{course_slug}/blocks/{block_slug}/mini-project"
+
+
+def test_detail_200_grouped_can_submit_true(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """Grouped student with no prior submission + hard_deadline in the
+    future → 200, group populated, can_submit=True, reason=None."""
+    run_dict, ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mp_id"] == mp["id"]
+    assert body["run_id"] == run_dict["id"]
+    assert body["block_slug"] == "b"
+    assert body["block_title"] == "B"
+    assert body["assignment_html"]  # rendered HTML present
+    assert body["group"] is not None
+    assert body["group"]["id"] == ga["id"]
+    assert body["group"]["name"] == "Group A"
+    assert body["group"]["is_disabled"] is False
+    member_ids = {m["user_id"] for m in body["group"]["members"]}
+    alice = _get_user_by_email(db, "alice@example.com")
+    assert alice.id in member_ids
+    me_flags = {m["user_id"]: m["is_me"] for m in body["group"]["members"]}
+    assert me_flags[alice.id] is True
+    assert body["submission_history"] == []
+    assert body["latest_status"] == "not_submitted"
+    assert body["can_submit"] is True
+    assert body["can_submit_reason_if_not"] is None
+
+
+def test_detail_200_ungrouped_pending_group_assignment(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """Ungrouped student → 200, group=None, can_submit=False,
+    reason='pending_group_assignment'."""
+    run_dict, _ga, _gb, _mp = seed_run_with_published_mp()
+    admin_client.post(
+        f"/api/runs/{run_dict['id']}/students",
+        json={"email": "charlie@example.com"},
+    )
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("charlie@example.com")
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["group"] is None
+    assert body["latest_status"] == "pending_group_assignment"
+    assert body["can_submit"] is False
+    assert body["can_submit_reason_if_not"] == "pending_group_assignment"
+
+
+def test_detail_group_disabled_blocks_submit(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """Group.is_disabled=True → can_submit=False, reason='group_disabled'."""
+    from mathion.models import Group
+    run_dict, ga, _gb, _mp = seed_run_with_published_mp()
+    group_a = db.get(Group, ga["id"])
+    group_a.is_disabled = True
+    db.commit()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["group"]["is_disabled"] is True
+    assert body["can_submit"] is False
+    assert body["can_submit_reason_if_not"] == "group_disabled"
+
+
+def test_detail_already_accepted_blocks_submit(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """Latest evaluation result='accepted' → can_submit=False,
+    reason='already_accepted'."""
+    import io
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    sub = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "accepted"},
+    )
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["latest_status"] == "accepted"
+    assert body["can_submit"] is False
+    assert body["can_submit_reason_if_not"] == "already_accepted"
+
+
+def test_detail_awaiting_evaluation_blocks_submit(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """Submission exists but no eval yet → can_submit=False,
+    reason='awaiting_evaluation'."""
+    import io
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["latest_status"] == "awaiting_evaluation"
+    assert body["can_submit"] is False
+    assert body["can_submit_reason_if_not"] == "awaiting_evaluation"
+
+
+def test_detail_hard_deadline_passed_blocks_initial(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """No prior submission AND hard_deadline in the past → can_submit=False,
+    reason='hard_deadline_passed'.
+
+    Manually rewind mp.hard_deadline (the publish gate forbids past deadlines
+    at publish time, but post-publish a previously valid hard_deadline may
+    pass). Using direct ORM update keeps the test in the ladder-step scope.
+    """
+    from datetime import datetime, timezone, timedelta
+    from mathion.models import MiniProject
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    mp_obj = db.get(MiniProject, mp["id"])
+    mp_obj.hard_deadline = datetime.now(timezone.utc) - timedelta(days=1)
+    db.commit()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["can_submit"] is False
+    assert body["can_submit_reason_if_not"] == "hard_deadline_passed"
+
+
+def test_detail_resubmission_deadline_passed_blocks_resub(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """Latest result in major/minor_revision AND resubmission_deadline past
+    → can_submit=False, reason='resubmission_deadline_passed'."""
+    import io
+    from datetime import datetime, timezone, timedelta
+    from mathion.models import MiniProject
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    sub = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "major_revision", "feedback_text": "Redo"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    mp_obj = db.get(MiniProject, mp["id"])
+    # CK ck_mini_project_hard_le_resubmission requires hard <= resub, so
+    # rewind hard first then resub. Both lie in the past; the ladder only
+    # consults `resubmission_deadline` because latest_result is a revision.
+    mp_obj.hard_deadline = datetime.now(timezone.utc) - timedelta(days=2)
+    mp_obj.resubmission_deadline = datetime.now(timezone.utc) - timedelta(days=1)
+    db.commit()
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["latest_status"] == "major_revision"
+    assert body["can_submit"] is False
+    assert body["can_submit_reason_if_not"] == "resubmission_deadline_passed"
+
+
+def test_detail_rejected_allows_fresh_initial_submission(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """Latest result='rejected' → can_submit=True (resets to initial path;
+    `submissions.py:88` treats rejected as a fresh initial)."""
+    import io
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    sub = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "rejected", "feedback_text": "No"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["latest_status"] == "rejected"
+    assert body["can_submit"] is True
+    assert body["can_submit_reason_if_not"] is None
+
+
+def test_detail_mp_not_visible_ladder_unit(
+    db, seed_run_with_published_mp,
+):
+    """Ladder step #1 (`mp_not_visible`) can't be exercised end-to-end
+    because the prior visibility check 404s before the ladder runs. Hit
+    the helper directly for coverage of the branch.
+    """
+    from mathion.api.student_mini_projects import _compute_can_submit
+    from mathion.models import MiniProject, Run
+
+    run_dict, _ga, _gb, mp_dict = seed_run_with_published_mp()
+    run = db.get(Run, run_dict["id"])
+    mp = db.get(MiniProject, mp_dict["id"])
+    mp.is_published = False  # would 404 from HTTP, but ladder still sees it
+    db.commit()
+
+    can, reason = _compute_can_submit(
+        run=run, mp=mp, group=None,
+        latest_result=None, has_any_submission=False,
+    )
+    assert can is False
+    assert reason == "mp_not_visible"
+
+
+def test_detail_full_name_fallback_to_email_local_part(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """Member with `full_name=None` → display falls back to email LOCAL
+    part (no '@domain'). Applies to group members, submitter, and
+    evaluator uniformly."""
+    import io
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    # Clear alice's full_name to trigger fallback.
+    alice = _get_user_by_email(db, "alice@example.com")
+    alice.full_name = None
+    db.commit()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    # Submit so the submitter_full_name field is also exercised.
+    sub = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    # Also clear evaluator full_name to test that branch.
+    admin = _get_user_by_email(db, "admin@example.com")
+    admin.full_name = None
+    db.commit()
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "rejected", "feedback_text": "No"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    alice_member = next(
+        m for m in body["group"]["members"] if m["user_id"] == alice.id
+    )
+    assert alice_member["full_name"] == "alice"
+    entry = body["submission_history"][0]
+    assert entry["submitted_by_full_name"] == "alice"
+    assert entry["evaluation"]["evaluated_by_full_name"] == "admin"
+
+
+def test_detail_history_desc_by_submission_number(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """Two submissions (after a major_revision cycle) → history sorted
+    DESC by submission_number; evaluation reflects each row's state."""
+    import io
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    sub1 = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    admin_client.post(
+        f"/api/submissions/{sub1['id']}/evaluation",
+        data={"result": "major_revision", "feedback_text": "Redo"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    sub2 = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [e["submission_number"] for e in body["submission_history"]] == [2, 1]
+    # Newest first; entry index 0 is sub2 (auto-accepted on resubmission).
+    assert body["submission_history"][0]["submission_id"] == sub2["id"]
+    assert body["submission_history"][0]["is_resubmission"] is True
+    assert body["submission_history"][0]["evaluation"]["result"] == "accepted"
+    # Older entry: sub1 with the major_revision eval.
+    assert body["submission_history"][1]["submission_id"] == sub1["id"]
+    assert body["submission_history"][1]["evaluation"]["result"] == "major_revision"
+    # Latest status reflects newest = accepted.
+    assert body["latest_status"] == "accepted"
+
+
+def test_detail_404_when_block_slug_missing_on_version(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """Block slug doesn't exist on the run's version → 404."""
+    run_dict, _ga, _gb, _mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(_detail_url(course.slug, "no-such-block"))
+    assert resp.status_code == 404
+
+
+def test_detail_404_when_mp_not_published(
+    admin_client, student_client_for, db, seed_run_with_groups,
+):
+    """Block exists, run is published, but the MP is_published=False → 404."""
+    run_dict, _ga, _gb = seed_run_with_groups()
+    from mathion.models import Block, Run
+    run_obj = db.get(Run, run_dict["id"])
+    block = db.execute(
+        select(Block).where(Block.version_id == run_obj.version_id)
+    ).scalars().first()
+    # Create MP but DO NOT publish.
+    admin_client.post(
+        f"/api/runs/{run_dict['id']}/mini-projects",
+        json={
+            "block_id": block.id,
+            "assignment_md": "Draft.",
+            "hard_deadline": NEAR_DEADLINE_ISO,
+            "resubmission_deadline": FAR_DEADLINE_ISO,
+        },
+    )
+    course = _get_course_for_run(db, run_obj)
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(_detail_url(course.slug, block.slug))
+    assert resp.status_code == 404
+
+
+def test_detail_404_when_mp_missing_for_block(
+    admin_client, student_client_for, db, seed_run_with_groups,
+):
+    """Block exists on the version but no MP row for (run, block) → 404."""
+    from mathion.models import Block as _Block, Run as _Run
+    run_dict, _ga, _gb = seed_run_with_groups()
+    run_obj = db.get(_Run, run_dict["id"])
+    # Add a 2nd block with no MP attached.
+    new_block = _Block(
+        version_id=run_obj.version_id, title="NoMP", slug="no-mp", order=2,
+    )
+    db.add(new_block); db.commit(); db.refresh(new_block)
+    course = _get_course_for_run(db, run_obj)
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(_detail_url(course.slug, "no-mp"))
+    assert resp.status_code == 404
+
+
+def test_detail_401_when_no_session(client, db, seed_run_with_published_mp):
+    """No session cookie → 401."""
+    run_dict, _, _, _ = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    resp = client.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 401
+
+
+def test_detail_403_when_no_active_run(
+    student_client_for, db, seed_published_course_version_with_enrollment_only,
+):
+    """Enrolled on a version but no RunStudent → 403 from resolver
+    (mirrors list endpoint)."""
+    student, course = seed_published_course_version_with_enrollment_only()
+    sc = student_client_for(student.email)
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 403
+
+
+def test_detail_idor_cross_version_block_slug_returns_404(
+    admin_client, student_client_for, db, seed_run_with_published_mp,
+):
+    """§4.2 IDOR: two versions of the SAME course, each with a block at
+    slug 'b' and a published MP. Student on run_a hitting `/blocks/b/` must
+    resolve `_resolve_block` against `run_a.version_id` — so the block id
+    landed on belongs to version_a, NOT version_b. We assert success
+    (200) AND that block_id matches version_a's block. The cross-version
+    IDOR vector is closed because the version-scoped query returns
+    exactly the right row, never version_b's.
+
+    To make the IDOR vector concrete: we then create a SECOND course
+    where the block slug 'b' also exists, and verify the student (on
+    course-x) gets 404 when navigating to that other course's block.
+    """
+    from mathion.models import Block, CourseVersion, Run
+
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+
+    # Sanity: student detail call lands on version_a's block.
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    run_a = db.get(Run, run_dict["id"])
+    version_a_block = db.execute(
+        select(Block).where(
+            Block.version_id == run_a.version_id, Block.slug == "b",
+        )
+    ).scalar_one()
+    assert body["block_id"] == version_a_block.id
+    assert body["mp_id"] == mp["id"]
+
+    # Now create a 2nd, DISTINCT CourseVersion (same course) with its own
+    # block 'b' + MP. The student has NO enrollment on this course-y, so
+    # hitting `_detail_url(course_y.slug, "b")` must 404 at the resolver
+    # (enrollment check), proving the slug 'b' on version_b is unreachable
+    # from a student on version_a's run.
+    course_y, _v_y = admin_client.post(
+        "/api/courses",
+        json={"slug": "other-course", "name": "Other", "description": ""},
+    ), None
+    course_y_id = course_y.json()["id"]
+    version_y = admin_client.post(
+        f"/api/courses/{course_y_id}/versions", json={"info_md": ""}
+    ).json()
+    block_y = Block(
+        version_id=version_y["id"], title="B", slug="b", order=1,
+    )
+    db.add(block_y); db.commit(); db.refresh(block_y)
+    # Sanity: a NEW block with slug 'b' exists on version_y, distinct from
+    # version_a_block.id.
+    assert block_y.id != version_a_block.id
+
+    # Student on course-x hits /api/courses/other-course/blocks/b/mini-project
+    # → 404 at the enrollment gate (no enrollment on course-y), proving
+    # cross-course / cross-version block slug doesn't leak.
+    resp_y = sc.get(_detail_url("other-course", "b"))
+    assert resp_y.status_code == 404
+
+
+def test_detail_filename_is_safe_basename(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """`filename` field exposes only the basename of Submission.file_path
+    (no directory components)."""
+    import io
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+    sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    resp = sc.get(_detail_url(course.slug, "b"))
+    assert resp.status_code == 200, resp.text
+    entry = resp.json()["submission_history"][0]
+    assert "/" not in entry["filename"]
+    assert "\\" not in entry["filename"]
+    assert entry["filename"].endswith(".pdf")
