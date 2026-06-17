@@ -11,9 +11,13 @@ from sqlalchemy.orm import Session
 from mathion.assets import sanitize_filename
 from mathion.config import settings
 from mathion.database import Base
+from mathion.models import CourseVersion, Run, RunStudent
 
 if TYPE_CHECKING:
     from mathion.models_auth import User
+
+
+STUDENT_ALREADY_ACTIVE_ERROR_CODE = "student_already_active_in_course"
 
 
 _NON_SLUG = re.compile(r"[^a-z0-9]+")
@@ -538,3 +542,48 @@ def has_run_pinned_to_version(db: Session, user: "User", version_id: int) -> boo
             Run.version_id == version_id,
         ))
     ))
+
+
+def find_student_active_conflicts(
+    db: Session,
+    user_id: int,
+    *,
+    course_id: int,
+    exclude_run_id: int,
+) -> list[tuple[int, str]]:
+    """Return [(conflicting_run_id, conflicting_run_title), ...] for OTHER
+    published runs of the same course where the user is an active RunStudent.
+    BOTH course_id and exclude_run_id are required keyword args."""
+    rows = db.execute(
+        select(RunStudent.run_id, Run.title)
+        .join(Run, Run.id == RunStudent.run_id)
+        .join(CourseVersion, CourseVersion.id == Run.version_id)
+        .where(
+            RunStudent.user_id == user_id,
+            CourseVersion.course_id == course_id,
+            Run.is_published == True,
+            Run.id != exclude_run_id,
+        )
+    ).all()
+    return [(row[0], row[1]) for row in rows]
+
+
+def make_already_active_409_body(
+    conflicts: list[dict], *, summary_override: str | None = None
+) -> dict:
+    """Build the JSONResponse content for the 409. Top-level `error_code` so
+    ApiError in frontend/src/lib/api.ts:46 picks it up."""
+    if summary_override is not None:
+        detail = summary_override
+    elif conflicts:
+        c = conflicts[0]
+        detail = (
+            f"Student is already active in run \"{c['run_title']}\" of the same course."
+        )
+    else:
+        detail = "Student is already active in another run of the same course."
+    return {
+        "detail": detail,
+        "error_code": STUDENT_ALREADY_ACTIVE_ERROR_CODE,
+        "conflicts": conflicts,
+    }
