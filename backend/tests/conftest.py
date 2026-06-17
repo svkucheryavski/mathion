@@ -271,7 +271,14 @@ def seed_two_published_runs_same_course(db, seed_publishable_version):
     """Factory: returns (run_a, run_b, student) as ORM objects. Both runs are
     published, share the same course/version, and `student` is an active
     RunStudent on BOTH (legacy duplicate scenario). Used by the constraint
-    helper + add_student endpoint tests.
+    helper + add_student endpoint tests, plus the student-MP resolver D6
+    test (which also requires `run_b.start_date > run_a.start_date` so the
+    defensive pick deterministically lands on `run_b`).
+
+    A StudentEnrollment row is also created so resolvers that gate on
+    `StudentEnrollment.is_active` (e.g. `_resolve_student_run`) treat the
+    student as enrolled. The existing A4-A6 constraint tests do not
+    inspect StudentEnrollment, so the extra row is harmless to them.
 
     Inline run/user creation (no admin_client API hops) — published-run gate
     is irrelevant to this fixture's purpose, so set is_published=True directly.
@@ -280,6 +287,7 @@ def seed_two_published_runs_same_course(db, seed_publishable_version):
 
     def _factory():
         from mathion.models import Run, RunStudent
+        from mathion.models_auth import StudentEnrollment
         course, version = seed_publishable_version()
         run_a = Run(
             version_id=version["id"],
@@ -302,6 +310,9 @@ def seed_two_published_runs_same_course(db, seed_publishable_version):
         db.flush()
         db.add(RunStudent(run_id=run_a.id, user_id=student.id))
         db.add(RunStudent(run_id=run_b.id, user_id=student.id))
+        db.add(StudentEnrollment(
+            user_id=student.id, version_id=version["id"], is_active=True,
+        ))
         db.commit()
         db.refresh(run_a)
         db.refresh(run_b)
@@ -376,4 +387,74 @@ def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
         admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "alice@example.com", "group_id": ga["id"]})
         admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "bob@example.com", "group_id": gb["id"]})
         return run, ga, gb
+    return _factory
+
+
+@pytest.fixture
+def make_user(db):
+    """Factory: create a User with an auto-generated email. Used by tests that
+    need a bare user with no enrollments / no run membership.
+
+    Usage: `student = make_user()` or `student = make_user(email="x@y")`.
+    """
+    counter = {"n": 0}
+
+    def _factory(email: str | None = None, full_name: str = "Test User") -> User:
+        counter["n"] += 1
+        if email is None:
+            email = f"user{counter['n']}@example.com"
+        u = User(email=email, full_name=full_name)
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+        return u
+
+    return _factory
+
+
+@pytest.fixture
+def seed_published_course(db, seed_publishable_version):
+    """Factory: returns a Course ORM object with a published, non-disabled
+    CourseVersion but NO StudentEnrollment for any user. Used by student MP
+    resolver tests for the 404 'not enrolled in this course' branch.
+    """
+    from sqlalchemy import select as _select
+    from mathion.models import Course
+
+    def _factory(slug: str = "lonely-course", name: str = "Lonely"):
+        course_dict, _version_dict = seed_publishable_version(slug=slug, name=name)
+        return db.execute(
+            _select(Course).where(Course.id == course_dict["id"])
+        ).scalar_one()
+
+    return _factory
+
+
+@pytest.fixture
+def seed_published_course_version_with_enrollment_only(db, seed_publishable_version):
+    """Factory: returns (student, course) where student has an active
+    StudentEnrollment on a published, non-disabled CourseVersion but NO
+    RunStudent row on any run of that course. Used by student MP resolver
+    tests for the 403 'no active run for this course' branch.
+    """
+    from sqlalchemy import select as _select
+    from mathion.models import Course
+    from mathion.models_auth import StudentEnrollment
+
+    def _factory(slug: str = "enroll-only", name: str = "Enroll Only",
+                 email: str = "enrolled-only@example.com"):
+        course_dict, version_dict = seed_publishable_version(slug=slug, name=name)
+        course = db.execute(
+            _select(Course).where(Course.id == course_dict["id"])
+        ).scalar_one()
+        student = User(email=email, full_name="Enrolled Only")
+        db.add(student)
+        db.flush()
+        db.add(StudentEnrollment(
+            user_id=student.id, version_id=version_dict["id"], is_active=True,
+        ))
+        db.commit()
+        db.refresh(student)
+        return student, course
+
     return _factory
