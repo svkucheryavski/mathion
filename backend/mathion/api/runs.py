@@ -2,13 +2,16 @@ import os
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
+    find_student_active_conflicts,
     get_newest_published_version,
     get_or_404,
     has_submissions,
+    make_already_active_409_body,
     require_course_admin,
     require_course_admin_for_run,
     require_run_admin_or_teacher,
@@ -210,6 +213,44 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
 
     if violations:
         raise HTTPException(status_code=409, detail="; ".join(violations))
+
+    # Active-run-per-course invariant: collect cross-run conflicts for every
+    # student on this roster and return them all in one 409 so admins can fix
+    # in one pass (vs first-conflict-wins). See plan §3.3 / G3 / G8.
+    course_id = run.version.course_id  # hoisted once to avoid per-iter lazy SELECT
+    student_rows = db.execute(
+        select(RunStudent.user_id, User.email)
+        .join(User, User.id == RunStudent.user_id)
+        .where(RunStudent.run_id == run_id)
+    ).all()
+
+    aggregate: list[dict] = []
+    for uid, user_email in student_rows:
+        conflicts = find_student_active_conflicts(
+            db, uid, course_id=course_id, exclude_run_id=run_id
+        )
+        for (rid_other, title) in conflicts:
+            aggregate.append({
+                "user_id": uid,
+                "email": user_email,
+                "run_id": rid_other,
+                "run_title": title,
+            })
+
+    if aggregate:
+        n = len({c["user_id"] for c in aggregate})
+        if n == 1:
+            summary = (
+                "1 student cannot be added — already active in another run of this course."
+            )
+        else:
+            summary = (
+                f"{n} students cannot be added — already active in other runs of this course."
+            )
+        return JSONResponse(
+            status_code=409,
+            content=make_already_active_409_body(aggregate, summary_override=summary),
+        )
 
     run.is_published = True
     db.flush()

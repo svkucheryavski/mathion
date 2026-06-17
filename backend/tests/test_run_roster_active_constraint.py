@@ -270,3 +270,188 @@ def test_batch_all_conflict_rows_zero_added(
     assert all(
         r["error_code"] == "student_already_active_in_course" for r in results
     )
+
+
+# --- publish_run aggregate tests (Task A6) -------------------------------
+#
+# POST /api/runs/{rid}/publish must load all RunStudents of `rid` and collect
+# every cross-run conflict in a single aggregate. 409 returns the full list
+# (not first-conflict-wins) so admins can fix in one pass. Detail copy is
+# explicit singular/plural based on the unique conflicting-student count.
+
+
+def _make_publishable_draft(db, version_id, *, title="Draft", admin_email="admin@example.com"):
+    """Helper: create an unpublished run on the given version, with one teacher
+    so the existing teacher-count gate passes. Returns the Run ORM object."""
+    from datetime import date as _date
+    from mathion.models import Run, RunTeacher
+
+    run = Run(
+        version_id=version_id,
+        title=title,
+        start_date=_date(2026, 1, 1),
+        end_date=_date(2026, 6, 1),
+        groups_enabled=False,
+        is_published=False,
+    )
+    db.add(run)
+    db.flush()
+    # Use the (already-existing) admin user as teacher to satisfy
+    # teacher_count > 0 without spinning up a new user. The existing
+    # admin_client fixture has already created an admin row.
+    admin = db.query(User).filter_by(email=admin_email).one()
+    db.add(RunTeacher(run_id=run.id, user_id=admin.id))
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def test_publish_run_409_with_aggregate_conflicts(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    """run_a (draft, about to publish) has 3 students. 2 are also on run_b
+    (published, same course). Publishing run_a returns 409 with both conflicts."""
+    from mathion.models import RunStudent
+
+    # seed_two_published_runs_same_course gives us a published run_b with `student`
+    # already enrolled. We turn run_a into a DRAFT to publish, and add 2 more
+    # conflicting students.
+    run_a, run_b, s1 = seed_two_published_runs_same_course()
+    # Flip run_a to draft (we want to PUBLISH it; the fixture made it published).
+    run_a.is_published = False
+    db.add(run_a)
+    db.commit()
+    db.refresh(run_a)
+
+    # s1 is already on both runs from the fixture. Add two more conflict students.
+    s2 = User(email="s2@example.com", full_name="S2")
+    s3 = User(email="s3@example.com", full_name="S3")
+    # And one non-conflicting student (only on run_a).
+    s_fresh = User(email="fresh@example.com", full_name="Fresh")
+    db.add_all([s2, s3, s_fresh])
+    db.flush()
+    db.add_all([
+        RunStudent(run_id=run_a.id, user_id=s2.id),
+        RunStudent(run_id=run_b.id, user_id=s2.id),  # s2 conflicts via run_b
+        RunStudent(run_id=run_a.id, user_id=s3.id),
+        RunStudent(run_id=run_b.id, user_id=s3.id),  # s3 conflicts via run_b
+        RunStudent(run_id=run_a.id, user_id=s_fresh.id),  # only on run_a, no conflict
+    ])
+    db.commit()
+
+    # Add a teacher to run_a so the teacher-count gate passes.
+    from mathion.models import RunTeacher
+    admin = db.query(User).filter_by(email="admin@example.com").one()
+    db.add(RunTeacher(run_id=run_a.id, user_id=admin.id))
+    db.commit()
+
+    response = admin_client.post(f"/api/runs/{run_a.id}/publish")
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error_code"] == "student_already_active_in_course"
+    # 3 conflicting users (s1, s2, s3) — s_fresh excluded.
+    assert {c["user_id"] for c in body["conflicts"]} == {s1.id, s2.id, s3.id}
+    # run_a still unpublished.
+    db.refresh(run_a)
+    assert run_a.is_published is False
+
+
+def test_publish_run_409_singular_copy_for_n_eq_1(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    """1 conflicting student → singular copy with 'another run'."""
+    run_a, _run_b, _s1 = seed_two_published_runs_same_course()
+    run_a.is_published = False
+    db.add(run_a)
+    db.commit()
+    db.refresh(run_a)
+
+    from mathion.models import RunTeacher
+    admin = db.query(User).filter_by(email="admin@example.com").one()
+    db.add(RunTeacher(run_id=run_a.id, user_id=admin.id))
+    db.commit()
+
+    response = admin_client.post(f"/api/runs/{run_a.id}/publish")
+    assert response.status_code == 409
+    body = response.json()
+    assert body["detail"] == (
+        "1 student cannot be added — already active in another run of this course."
+    )
+
+
+def test_publish_run_409_plural_copy_for_n_geq_2(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    """3 conflicting students → plural copy with 'other runs'."""
+    from mathion.models import RunStudent, RunTeacher
+
+    run_a, run_b, _s1 = seed_two_published_runs_same_course()
+    run_a.is_published = False
+    db.add(run_a)
+    db.commit()
+    db.refresh(run_a)
+
+    # Add 2 more conflicting students (total 3 with s1).
+    s2 = User(email="s2@example.com", full_name="S2")
+    s3 = User(email="s3@example.com", full_name="S3")
+    db.add_all([s2, s3])
+    db.flush()
+    db.add_all([
+        RunStudent(run_id=run_a.id, user_id=s2.id),
+        RunStudent(run_id=run_b.id, user_id=s2.id),
+        RunStudent(run_id=run_a.id, user_id=s3.id),
+        RunStudent(run_id=run_b.id, user_id=s3.id),
+    ])
+    admin = db.query(User).filter_by(email="admin@example.com").one()
+    db.add(RunTeacher(run_id=run_a.id, user_id=admin.id))
+    db.commit()
+
+    response = admin_client.post(f"/api/runs/{run_a.id}/publish")
+    assert response.status_code == 409
+    body = response.json()
+    assert body["detail"] == (
+        "3 students cannot be added — already active in other runs of this course."
+    )
+
+
+def test_publish_run_200_when_no_conflicts(
+    admin_client, db, seed_publishable_version
+):
+    """Happy path: draft run with non-conflicting students publishes cleanly."""
+    from mathion.models import RunStudent
+
+    _course, version = seed_publishable_version()
+    run = _make_publishable_draft(db, version["id"], title="Clean")
+    # Add a student not enrolled anywhere else.
+    s = User(email="clean@example.com", full_name="Clean")
+    db.add(s)
+    db.flush()
+    db.add(RunStudent(run_id=run.id, user_id=s.id))
+    db.commit()
+
+    response = admin_client.post(f"/api/runs/{run.id}/publish")
+    assert response.status_code == 200
+    db.refresh(run)
+    assert run.is_published is True
+
+
+def test_publish_run_self_skip(
+    admin_client, db, seed_publishable_version
+):
+    """exclude_run_id=run_id ensures the run being published isn't counted
+    against itself. Student is only on run_a's roster (a draft). Publishing
+    run_a must succeed — the helper must NOT treat run_a as a conflict source."""
+    from mathion.models import RunStudent
+
+    _course, version = seed_publishable_version()
+    run = _make_publishable_draft(db, version["id"], title="Self")
+    s = User(email="self@example.com", full_name="Self")
+    db.add(s)
+    db.flush()
+    db.add(RunStudent(run_id=run.id, user_id=s.id))
+    db.commit()
+
+    response = admin_client.post(f"/api/runs/{run.id}/publish")
+    assert response.status_code == 200
+    db.refresh(run)
+    assert run.is_published is True
