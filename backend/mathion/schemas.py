@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
@@ -480,6 +482,7 @@ class RunStudentBatchResultRow(BaseModel):
     status: Literal["added", "error"]
     group_id: int | None = None
     detail: str | None = None
+    error_code: BulkRosterErrorCode | None = None
 
 
 class RunStudentBatchResponse(BaseModel):
@@ -501,6 +504,7 @@ BulkRosterErrorCode = Literal[
     "not_in_run",        # user is not enrolled in this run
     "capacity_reached",  # target group is at the 10-student cap
     "internal_error",    # unexpected exception during per-row processing
+    "student_already_active_in_course",  # student has an active enrollment in another run of the same course
 ]
 
 
