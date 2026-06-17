@@ -61,6 +61,7 @@ def _resolve_student_run(db: Session, user: User, course_slug: str) -> Run:
         .join(RunStudent, RunStudent.run_id == Run.id)
         .where(
             CourseVersion.course_id == course.id,
+            CourseVersion.is_disabled == False,  # noqa: E712 — SQL boolean comparison
             Run.is_published == True,  # noqa: E712
             RunStudent.user_id == user.id,
         )
