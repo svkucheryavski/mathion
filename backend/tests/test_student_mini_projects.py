@@ -18,6 +18,8 @@ from mathion.api.student_mini_projects import _resolve_student_run
 from mathion.models import Course, CourseVersion, Run
 from mathion.models_auth import User
 
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO, RUN_END_DATE_FAR
+
 
 def _get_user_by_email(db, email: str) -> User:
     return db.execute(select(User).where(User.email == email)).scalar_one()
@@ -181,3 +183,214 @@ def test_resolve_defensive_pick_most_recent_when_two_active_runs(
 
     assert result.id == run_b.id  # newer wins
     assert any("multiple active" in rec.message.lower() for rec in caplog.records)
+
+
+# ============================================================================
+# Task B2: GET /api/courses/{slug}/mini-projects — list endpoint
+# ============================================================================
+#
+# These tests drive the HTTP-level contract: the 7-value `latest_status` enum,
+# sort order (block.order ASC), error codes, and cross-course isolation (C28).
+
+
+def test_list_200_empty_when_no_mps(
+    admin_client, student_client_for, db, seed_publishable_version
+):
+    """Student on a published run with NO mini-projects → 200 + []."""
+    course, _version = seed_publishable_version()
+    run = admin_client.post(
+        f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01",
+              "end_date": RUN_END_DATE_FAR, "groups_enabled": False},
+    ).json()
+    admin_client.post(
+        f"/api/runs/{run['id']}/teachers", json={"email": "teach@example.com"}
+    )
+    pub = admin_client.post(f"/api/runs/{run['id']}/publish")
+    assert pub.status_code == 200, pub.text
+    add = admin_client.post(
+        f"/api/runs/{run['id']}/students",
+        json={"email": "alice@example.com"},
+    )
+    assert add.status_code == 201, add.text
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(f"/api/courses/{course['slug']}/mini-projects")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_returns_pending_group_assignment_when_no_group(
+    admin_client, student_client_for, db, seed_run_with_published_mp
+):
+    """Student is RunStudent with group_id=None → latest_status = 'pending_group_assignment'.
+
+    `seed_run_with_published_mp` puts alice in group A and bob in group B; we
+    enroll a 3rd student (charlie) with no group_id so the no-group branch fires.
+    """
+    run, _ga, _gb, mp = seed_run_with_published_mp()
+    admin_client.post(
+        f"/api/runs/{run['id']}/students",
+        json={"email": "charlie@example.com"},
+    )
+    course = _get_course_for_run(db, db.get(Run, run["id"]))
+    sc = student_client_for("charlie@example.com")
+    resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    item = body[0]
+    assert item["mp_id"] == mp["id"]
+    assert item["latest_status"] == "pending_group_assignment"
+    # Deadlines reflected (from the fixture).
+    assert item["hard_deadline"] is not None
+    assert item["resubmission_deadline"] is not None
+    # Block fields populated from the fixture's single block.
+    assert item["block_slug"] == "b"
+    assert item["block_order"] == 1
+    assert item["block_title"] == "B"
+
+
+def test_list_returns_not_submitted_when_grouped_no_submission(
+    student_client_for, db, seed_run_with_published_mp
+):
+    """Grouped student with no submission yet → 'not_submitted'."""
+    _run, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, _run["id"]))
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["mp_id"] == mp["id"]
+    assert body[0]["latest_status"] == "not_submitted"
+
+
+def test_list_returns_awaiting_evaluation_when_submission_no_eval(
+    student_client_for, db, seed_run_with_published_mp
+):
+    """Submission exists but no Evaluation row → 'awaiting_evaluation'."""
+    import io
+    _run, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, _run["id"]))
+    sc = student_client_for("alice@example.com")
+    sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["latest_status"] == "awaiting_evaluation"
+
+
+@pytest.mark.parametrize(
+    "result_value", ["rejected", "major_revision", "minor_revision", "accepted"]
+)
+def test_list_returns_eval_result_status(
+    result_value, admin_client, student_client_for, db, seed_run_with_published_mp
+):
+    """All 4 Evaluation.result values propagate verbatim as `latest_status`."""
+    import io
+    _run, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, _run["id"]))
+    sc = student_client_for("alice@example.com")
+    sub = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    ).json()
+    payload = {"result": result_value}
+    files = None
+    if result_value != "accepted":
+        payload["feedback_text"] = "Feedback"
+        files = {"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")}
+    admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data=payload,
+        files=files,
+    )
+
+    resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["latest_status"] == result_value
+
+
+def test_list_sorted_by_block_order_asc(
+    admin_client, student_client_for, db, seed_run_with_published_mp
+):
+    """Two MPs on different blocks → returned in Block.order ASC."""
+    from mathion.models import Block as _Block, Run as _Run
+    _run, _ga, _gb, mp1 = seed_run_with_published_mp()
+    run_obj = db.get(_Run, _run["id"])
+    # Create a second Block with a HIGHER order, then a second MP on it.
+    block2 = _Block(
+        version_id=run_obj.version_id, title="B2", slug="b2", order=2,
+    )
+    db.add(block2)
+    db.commit()
+    db.refresh(block2)
+    mp2 = admin_client.post(
+        f"/api/runs/{_run['id']}/mini-projects",
+        json={
+            "block_id": block2.id,
+            "assignment_md": "Second mp",
+            "hard_deadline": NEAR_DEADLINE_ISO,
+            "resubmission_deadline": FAR_DEADLINE_ISO,
+        },
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp2['id']}/publish")
+
+    course = _get_course_for_run(db, run_obj)
+    sc = student_client_for("alice@example.com")
+    resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [item["mp_id"] for item in body] == [mp1["id"], mp2["id"]]
+    assert [item["block_order"] for item in body] == [1, 2]
+
+
+def test_list_401_when_no_session(client, db, seed_run_with_published_mp):
+    """No session cookie → 401."""
+    run, _, _, _ = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run["id"]))
+    resp = client.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 401
+
+
+def test_list_403_when_no_active_run(
+    student_client_for, db, seed_published_course_version_with_enrollment_only
+):
+    """Enrolled on a version but no RunStudent → 403."""
+    student, course = seed_published_course_version_with_enrollment_only()
+    sc = student_client_for(student.email)
+    resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
+    assert resp.status_code == 403
+
+
+def test_list_404_when_course_slug_missing(auth_client):
+    """Random slug → 404 even for an authed user."""
+    resp = auth_client.get("/api/courses/no-such-course/mini-projects")
+    assert resp.status_code == 404
+
+
+def test_list_cross_course_isolation(
+    student_client_for, db, seed_student_in_two_courses
+):
+    """C28: student on Course X AND Course Y; query X → only X's MPs returned."""
+    course_x, course_y, x_mp_ids, y_mp_id, student = seed_student_in_two_courses()
+    sc = student_client_for(student.email)
+
+    resp_x = sc.get(f"/api/courses/{course_x.slug}/mini-projects")
+    assert resp_x.status_code == 200
+    returned_x = {item["mp_id"] for item in resp_x.json()}
+    assert returned_x == x_mp_ids
+    assert y_mp_id not in returned_x
+
+    # Sanity: querying Y returns only Y's MP, not X's.
+    resp_y = sc.get(f"/api/courses/{course_y.slug}/mini-projects")
+    assert resp_y.status_code == 200
+    returned_y = {item["mp_id"] for item in resp_y.json()}
+    assert returned_y == {y_mp_id}
+    assert not (returned_y & x_mp_ids)

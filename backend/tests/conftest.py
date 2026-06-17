@@ -431,6 +431,114 @@ def seed_published_course(db, seed_publishable_version):
 
 
 @pytest.fixture
+def seed_student_in_two_courses(admin_client, db):
+    """Factory: returns (course_x, course_y, mp_ids_in_x, mp_id_in_y, student).
+
+    Builds two distinct courses (X and Y), each with its own published version,
+    published run with groups, and a published mini-project. The student is an
+    active StudentEnrollment + RunStudent (assigned to Group A) on BOTH courses.
+    Used by the C28 cross-course isolation test to assert that the list endpoint
+    on course X only returns X's MPs, never Y's.
+
+    A4 invariant note: one-active-RunStudent-per-course is enforced PER COURSE,
+    so a student on two DIFFERENT courses is legal — the fixture exploits this
+    deliberately.
+    """
+    from sqlalchemy import select as _select
+    from mathion.models import Course
+
+    def _factory():
+        from mathion.models import Block, Run
+
+        def _build_one(slug: str, name: str):
+            course = admin_client.post(
+                "/api/courses", json={"slug": slug, "name": name, "description": ""}
+            ).json()
+            version = admin_client.post(
+                f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            ).json()
+            from mathion.models import Block as _Block, Sequence as _Seq, Item as _Item
+            b1 = _Block(version_id=version["id"], title="B1", slug="b1", order=1)
+            db.add(b1); db.flush()
+            seq = _Seq(block_id=b1.id, title="S", slug="s", order=1)
+            db.add(seq); db.flush()
+            db.add(_Item(sequence_id=seq.id, title="I", slug="i", order=1,
+                         type="static_page", content_md="x", content_html="<p>x</p>"))
+            db.commit()
+            admin_client.post(f"/api/versions/{version['id']}/publish")
+            run = admin_client.post(
+                f"/api/courses/{course['id']}/runs",
+                json={
+                    "title": "R",
+                    "start_date": "2026-01-01",
+                    "end_date": RUN_END_DATE_FAR,
+                    "groups_enabled": True,
+                },
+            ).json()
+            ga = admin_client.post(
+                f"/api/runs/{run['id']}/groups", json={"name": "Group A"}
+            ).json()
+            admin_client.post(
+                f"/api/runs/{run['id']}/teachers",
+                json={"email": f"teach-{slug}@example.com"},
+            )
+            admin_client.post(f"/api/runs/{run['id']}/publish")
+            mp = admin_client.post(
+                f"/api/runs/{run['id']}/mini-projects",
+                json={
+                    "block_id": b1.id,
+                    "assignment_md": f"{slug} mp",
+                    "hard_deadline": NEAR_DEADLINE_ISO,
+                    "resubmission_deadline": FAR_DEADLINE_ISO,
+                },
+            ).json()
+            admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+            return db.execute(
+                _select(Course).where(Course.id == course["id"])
+            ).scalar_one(), run["id"], ga["id"], mp["id"]
+
+        course_x, run_x_id, ga_x_id, mp_x_id = _build_one("course-x", "Course X")
+        course_y, run_y_id, ga_y_id, mp_y_id = _build_one("course-y", "Course Y")
+
+        # Add a SECOND published MP on course_x to make ordering vs isolation
+        # easier to assert (block_order=2 lives on a fresh block).
+        from mathion.models import Block as _Block2
+        b2 = _Block2(
+            version_id=db.execute(
+                _select(Run).where(Run.id == run_x_id)
+            ).scalar_one().version_id,
+            title="B2", slug="b2", order=2,
+        )
+        db.add(b2); db.commit(); db.refresh(b2)
+        mp_x2 = admin_client.post(
+            f"/api/runs/{run_x_id}/mini-projects",
+            json={
+                "block_id": b2.id,
+                "assignment_md": "course-x mp2",
+                "hard_deadline": NEAR_DEADLINE_ISO,
+                "resubmission_deadline": FAR_DEADLINE_ISO,
+            },
+        ).json()
+        admin_client.post(f"/api/mini-projects/{mp_x2['id']}/publish")
+
+        # Enroll a single student on BOTH courses and assign to Group A on each.
+        admin_client.post(
+            f"/api/runs/{run_x_id}/students",
+            json={"email": "two-course@example.com", "group_id": ga_x_id},
+        )
+        admin_client.post(
+            f"/api/runs/{run_y_id}/students",
+            json={"email": "two-course@example.com", "group_id": ga_y_id},
+        )
+        student = db.execute(
+            _select(User).where(User.email == "two-course@example.com")
+        ).scalar_one()
+        return course_x, course_y, {mp_x_id, mp_x2["id"]}, mp_y_id, student
+
+    return _factory
+
+
+@pytest.fixture
 def seed_published_course_version_with_enrollment_only(db, seed_publishable_version):
     """Factory: returns (student, course) where student has an active
     StudentEnrollment on a published, non-disabled CourseVersion but NO

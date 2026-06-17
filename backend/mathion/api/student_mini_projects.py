@@ -1,20 +1,32 @@
 """Student-facing mini-project discovery + detail endpoints.
 
-The router is created here but is intentionally not yet included in
-`mathion.main` — the read-side endpoints are added in subsequent tasks
-(B2/B3) and the router is wired into the app in B4.
+Router is included in `mathion.main`. The detail endpoint lands in B3;
+this module currently exposes the list endpoint added in B2.
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mathion.models import Course, CourseVersion, Run, RunStudent
+from mathion.api.helpers import get_submitter_group
+from mathion.database import get_db
+from mathion.dependencies import get_current_user
+from mathion.models import (
+    Block,
+    Course,
+    CourseVersion,
+    Evaluation,
+    MiniProject,
+    Run,
+    RunStudent,
+    Submission,
+)
 from mathion.models_auth import StudentEnrollment, User
+from mathion.schemas import StudentMiniProjectListItem
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["student-mini-projects"])
@@ -78,3 +90,83 @@ def _resolve_student_run(db: Session, user: User, course_slug: str) -> Run:
             user.id, course_slug,
         )
     return runs[0]
+
+
+def _derive_latest_status(db: Session, mp: MiniProject, group) -> str:
+    """Per spec §3.1 derivation rules.
+
+    - No group on the run → 'pending_group_assignment'.
+    - No Submission rows for (mp, group) → 'not_submitted'.
+    - Latest Submission has no Evaluation → 'awaiting_evaluation'.
+    - Otherwise the Evaluation.result value verbatim:
+      'rejected' | 'major_revision' | 'minor_revision' | 'accepted'.
+    """
+    if group is None:
+        return "pending_group_assignment"
+    latest_sub = db.execute(
+        select(Submission)
+        .where(
+            Submission.mini_project_id == mp.id,
+            Submission.group_id == group.id,
+        )
+        .order_by(Submission.submission_number.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest_sub is None:
+        return "not_submitted"
+    eval_row = db.execute(
+        select(Evaluation).where(Evaluation.submission_id == latest_sub.id)
+    ).scalar_one_or_none()
+    if eval_row is None:
+        return "awaiting_evaluation"
+    return eval_row.result
+
+
+def _serialize_list_item(
+    db: Session, run: Run, mp: MiniProject, user: User
+) -> StudentMiniProjectListItem:
+    group = get_submitter_group(db, run.id, user.id)
+    status = _derive_latest_status(db, mp, group)
+    return StudentMiniProjectListItem(
+        mp_id=mp.id,
+        block_id=mp.block.id,
+        block_slug=mp.block.slug,
+        block_order=mp.block.order,
+        block_title=mp.block.title,
+        hard_deadline=mp.hard_deadline,
+        soft_deadline=mp.soft_deadline,
+        resubmission_deadline=mp.resubmission_deadline,
+        latest_status=status,
+    )
+
+
+@router.get(
+    "/api/courses/{slug}/mini-projects",
+    response_model=list[StudentMiniProjectListItem],
+)
+def list_student_mini_projects(
+    slug: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[StudentMiniProjectListItem]:
+    """Per spec §3.1: list one row per published MP for the student's active
+    run on this course, sorted by `Block.order` ASC, each with a derived
+    `latest_status` from the 7-value enum.
+
+    Errors mirror `_resolve_student_run`: 401 (no session, via dependency),
+    404 (course slug missing or no active enrollment), 403 (enrolled but no
+    RunStudent on any published run of this course).
+    """
+    run = _resolve_student_run(db, user, slug)
+
+    mps = db.execute(
+        select(MiniProject)
+        .join(Block, Block.id == MiniProject.block_id)
+        .where(
+            MiniProject.run_id == run.id,
+            MiniProject.is_published == True,  # noqa: E712 — SQL boolean comparison
+        )
+        .order_by(Block.order.asc())
+    ).scalars().all()
+
+    return [_serialize_list_item(db, run, mp, user) for mp in mps]

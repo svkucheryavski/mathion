@@ -609,6 +609,30 @@ class MiniProjectResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# Student-facing mini-projects (see backend/mathion/api/student_mini_projects.py).
+# `latest_status` is derived per spec §3.1: from group presence + the most recent
+# submission's evaluation result. The 7-value Literal enforces the contract at
+# the response boundary.
+class StudentMiniProjectListItem(BaseModel):
+    mp_id: int
+    block_id: int
+    block_slug: str
+    block_order: int
+    block_title: str
+    hard_deadline: datetime | None
+    soft_deadline: datetime | None
+    resubmission_deadline: datetime | None
+    latest_status: Literal[
+        "pending_group_assignment",
+        "not_submitted",
+        "awaiting_evaluation",
+        "rejected",
+        "major_revision",
+        "minor_revision",
+        "accepted",
+    ]
+
+
 # ============================================================================
 # Phase 7b: Submissions
 # ============================================================================
