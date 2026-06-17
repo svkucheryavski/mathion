@@ -267,6 +267,91 @@ def seed_run_with_published_mp(admin_client, db, seed_run_with_groups):
 
 
 @pytest.fixture
+def seed_two_published_runs_same_course(db, seed_publishable_version):
+    """Factory: returns (run_a, run_b, student) as ORM objects. Both runs are
+    published, share the same course/version, and `student` is an active
+    RunStudent on BOTH (legacy duplicate scenario). Used by the constraint
+    helper + add_student endpoint tests.
+
+    Inline run/user creation (no admin_client API hops) — published-run gate
+    is irrelevant to this fixture's purpose, so set is_published=True directly.
+    """
+    from datetime import date as _date
+
+    def _factory():
+        from mathion.models import Run, RunStudent
+        course, version = seed_publishable_version()
+        run_a = Run(
+            version_id=version["id"],
+            title="Spring 26",
+            start_date=_date(2026, 1, 1),
+            end_date=_date(2026, 6, 1),
+            is_published=True,
+        )
+        run_b = Run(
+            version_id=version["id"],
+            title="Summer 26",
+            start_date=_date(2026, 6, 1),
+            end_date=_date(2026, 12, 1),
+            is_published=True,
+        )
+        db.add_all([run_a, run_b])
+        db.flush()
+        student = User(email="s@example.com", full_name="Sam")
+        db.add(student)
+        db.flush()
+        db.add(RunStudent(run_id=run_a.id, user_id=student.id))
+        db.add(RunStudent(run_id=run_b.id, user_id=student.id))
+        db.commit()
+        db.refresh(run_a)
+        db.refresh(run_b)
+        db.refresh(student)
+        return run_a, run_b, student
+
+    return _factory
+
+
+@pytest.fixture
+def seed_run_and_draft_run_same_course(db, seed_publishable_version):
+    """Factory: returns (published_run, draft_run, student) as ORM objects.
+    Both runs share the same course/version. `student` is an active RunStudent
+    on the DRAFT (is_published=False) run only. Used to verify that the
+    constraint helper excludes unpublished runs from the conflict set."""
+    from datetime import date as _date
+
+    def _factory():
+        from mathion.models import Run, RunStudent
+        course, version = seed_publishable_version()
+        published_run = Run(
+            version_id=version["id"],
+            title="Spring 26",
+            start_date=_date(2026, 1, 1),
+            end_date=_date(2026, 6, 1),
+            is_published=True,
+        )
+        draft_run = Run(
+            version_id=version["id"],
+            title="Summer 26 (draft)",
+            start_date=_date(2026, 6, 1),
+            end_date=_date(2026, 12, 1),
+            is_published=False,
+        )
+        db.add_all([published_run, draft_run])
+        db.flush()
+        student = User(email="s@example.com", full_name="Sam")
+        db.add(student)
+        db.flush()
+        db.add(RunStudent(run_id=draft_run.id, user_id=student.id))
+        db.commit()
+        db.refresh(published_run)
+        db.refresh(draft_run)
+        db.refresh(student)
+        return published_run, draft_run, student
+
+    return _factory
+
+
+@pytest.fixture
 def seed_run_with_groups(admin_client, seed_publishable_version, asset_tmpdir):
     """Create a published run with groups_enabled, two groups each with one student.
 

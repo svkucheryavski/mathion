@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
     enroll_user_in_run,
+    find_student_active_conflicts,
     get_or_404,
     get_or_create_user,
+    make_already_active_409_body,
     remove_run_student,
     require_run_admin_or_teacher,
 )
@@ -67,6 +69,40 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
             raise HTTPException(status_code=400, detail="Group not in this run")
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot add students to disabled group")
+
+    # L2/M6: check runs AFTER input-validation, BEFORE side effects.
+    # Resolve user only — do NOT create. If user doesn't exist, no conflict
+    # possible (no RunStudent row to compare against).
+    existing_user = db.execute(
+        select(User).where(User.email == data.email)
+    ).scalar_one_or_none()
+    if existing_user is not None:
+        conflicts = find_student_active_conflicts(
+            db,
+            existing_user.id,
+            course_id=run.version.course_id,
+            exclude_run_id=run.id,
+        )
+        if conflicts:
+            conflict_dicts = [
+                {
+                    "user_id": existing_user.id,
+                    "email": existing_user.email,
+                    "run_id": rid_other,
+                    "run_title": title,
+                }
+                for (rid_other, title) in conflicts
+            ]
+            detail = (
+                f"{data.email} is already active in run "
+                f"\"{conflict_dicts[0]['run_title']}\" of the same course."
+            )
+            return JSONResponse(
+                status_code=409,
+                content=make_already_active_409_body(
+                    conflict_dicts, summary_override=detail
+                ),
+            )
 
     target = get_or_create_user(db, data.email)
     rs = enroll_user_in_run(db, target, run, data.group_id)

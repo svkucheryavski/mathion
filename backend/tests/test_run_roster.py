@@ -98,6 +98,7 @@ def test_remove_student_deactivates_enrollment_when_no_other_run(admin_client, d
 
 
 def test_remove_student_keeps_enrollment_if_other_run_exists(admin_client, db, seed_publishable_version):
+    from mathion.models import RunStudent
     from mathion.models_auth import StudentEnrollment
     course, _ = seed_publishable_version()
     run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
@@ -111,9 +112,10 @@ def test_remove_student_keeps_enrollment_if_other_run_exists(admin_client, db, s
     s = admin_client.post(
         f"/api/runs/{run1['id']}/students", json={"email": "x@example.com"}
     ).json()
-    admin_client.post(
-        f"/api/runs/{run2['id']}/students", json={"email": "x@example.com"}
-    )
+    # Simulate a legacy duplicate (predates the one-active-per-course invariant)
+    # by inserting the second RunStudent row directly; the API would now 409.
+    db.add(RunStudent(run_id=run2["id"], user_id=s["user_id"]))
+    db.commit()
     admin_client.delete(f"/api/runs/{run1['id']}/students/{s['user_id']}")
     enrollment = db.query(StudentEnrollment).filter_by(
         user_id=s["user_id"], version_id=run1["version_id"]
@@ -138,7 +140,11 @@ def test_unrelated_user_cannot_add_student(auth_client, admin_client, seed_publi
 
 def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db, seed_publishable_version):
     """Regression: scalar_one_or_none would raise MultipleResultsFound when the
-    user is in 2+ other runs on the same course. We use first()+limit(1)."""
+    user is in 2+ other runs on the same course. We use first()+limit(1).
+
+    The two sibling RunStudent rows are seeded directly (legacy duplicates from
+    before the one-active-per-course invariant; the API would now 409)."""
+    from mathion.models import RunStudent
     from mathion.models_auth import StudentEnrollment
     course, _ = seed_publishable_version()
     run1 = admin_client.post(f"/api/courses/{course['id']}/runs",
@@ -155,8 +161,9 @@ def test_remove_student_keeps_enrollment_with_two_other_runs(admin_client, db, s
     admin_client.post(f"/api/runs/{run3['id']}/publish")
     s = admin_client.post(f"/api/runs/{run1['id']}/students",
         json={"email": "x@example.com"}).json()
-    admin_client.post(f"/api/runs/{run2['id']}/students", json={"email": "x@example.com"})
-    admin_client.post(f"/api/runs/{run3['id']}/students", json={"email": "x@example.com"})
+    db.add(RunStudent(run_id=run2["id"], user_id=s["user_id"]))
+    db.add(RunStudent(run_id=run3["id"], user_id=s["user_id"]))
+    db.commit()
 
     # Remove from run1 — must not crash, must keep enrollment active.
     response = admin_client.delete(f"/api/runs/{run1['id']}/students/{s['user_id']}")

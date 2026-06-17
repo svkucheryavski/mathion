@@ -1,50 +1,40 @@
-"""Tests for find_student_active_conflicts + make_already_active_409_body helpers.
-
-The `find_*` tests depend on conftest fixtures that land in Tasks A3/A4:
-- `seed_run_with_published_mp` (Task A3)
-- `seed_two_published_runs_same_course` (Task A4)
-- `seed_run_and_draft_run_same_course` (Task A4)
-
-Those tests are skipped here and unskipped once the fixtures are added.
-The constant test + the two pure-logic `make_body` tests run now.
-"""
-
-import pytest
+"""Tests for find_student_active_conflicts + make_already_active_409_body helpers."""
 
 from mathion.api.helpers import (
     STUDENT_ALREADY_ACTIVE_ERROR_CODE,
     find_student_active_conflicts,
     make_already_active_409_body,
 )
+from mathion.models import Run
+from mathion.models_auth import User
 
 
 def test_constant_value():
     assert STUDENT_ALREADY_ACTIVE_ERROR_CODE == "student_already_active_in_course"
 
 
-@pytest.mark.skip(reason="awaits A3 conftest fixture seed_run_with_published_mp")
-def test_find_returns_empty_when_no_conflicts(db_session, seed_run_with_published_mp):
-    run = seed_run_with_published_mp["run"]
-    student = seed_run_with_published_mp["student"]
+def test_find_returns_empty_when_no_conflicts(db, seed_run_with_published_mp):
+    # 4-tuple factory: (run_dict, ga, gb, mp). Resolve ORM Run + the alice
+    # student seeded by the underlying seed_run_with_groups call.
+    run_dict, _ga, _gb, _mp = seed_run_with_published_mp()
+    run = db.get(Run, run_dict["id"])
+    alice = db.query(User).filter_by(email="alice@example.com").one()
     result = find_student_active_conflicts(
-        db_session,
-        student.id,
+        db,
+        alice.id,
         course_id=run.version.course_id,
         exclude_run_id=run.id,
     )
+    # Alice is on this run only (the one we're excluding) → no conflicts.
     assert result == []
 
 
-@pytest.mark.skip(reason="awaits A4 conftest fixture seed_two_published_runs_same_course")
 def test_find_returns_other_runs_when_conflict(
-    db_session, seed_two_published_runs_same_course
+    db, seed_two_published_runs_same_course
 ):
-    fixture = seed_two_published_runs_same_course
-    student = fixture["student"]
-    run_a = fixture["run_a"]
-    run_b = fixture["run_b"]
+    run_a, run_b, student = seed_two_published_runs_same_course()
     result = find_student_active_conflicts(
-        db_session,
+        db,
         student.id,
         course_id=run_a.version.course_id,
         exclude_run_id=run_a.id,
@@ -52,19 +42,17 @@ def test_find_returns_other_runs_when_conflict(
     assert result == [(run_b.id, run_b.title)]
 
 
-@pytest.mark.skip(reason="awaits A4 conftest fixture seed_run_and_draft_run_same_course")
 def test_find_excludes_unpublished_runs(
-    db_session, seed_run_and_draft_run_same_course
+    db, seed_run_and_draft_run_same_course
 ):
-    fixture = seed_run_and_draft_run_same_course
-    student = fixture["student"]
-    published_run = fixture["published_run"]
+    published_run, _draft_run, student = seed_run_and_draft_run_same_course()
     result = find_student_active_conflicts(
-        db_session,
+        db,
         student.id,
         course_id=published_run.version.course_id,
         exclude_run_id=published_run.id,
     )
+    # Student is on the draft run only → excluded from the conflict set.
     assert result == []
 
 

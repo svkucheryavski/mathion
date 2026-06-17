@@ -91,11 +91,17 @@ def test_bulk_delete_happy_path_with_enrollment_cascade(admin_client, db, seed_p
     admin_client.post(f"/api/runs/{run2['id']}/teachers", json={"email": "teach@example.com"})
     admin_client.post(f"/api/runs/{run2['id']}/publish")
 
+    from mathion.models import RunStudent
+
     a = _add_student(admin_client, run1["id"], "a@example.com")
     b = _add_student(admin_client, run1["id"], "b@example.com")
     c = _add_student(admin_client, run1["id"], "c@example.com")
-    # c also enrolled on run2 (sibling run on the same course).
-    _add_student(admin_client, run2["id"], "c@example.com")
+    # c also enrolled on run2 (sibling run on the same course). Direct insert
+    # because the new one-active-per-course invariant would 409 the API call;
+    # legacy duplicates from before the invariant still need to be handled by
+    # remove_student's cross-run enrollment-cascade check.
+    db.add(RunStudent(run_id=run2["id"], user_id=c["user_id"]))
+    db.commit()
 
     response = admin_client.post(
         f"/api/runs/{run1['id']}/students/bulk-delete",
