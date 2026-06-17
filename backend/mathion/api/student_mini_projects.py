@@ -10,7 +10,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from mathion.api.helpers import get_submitter_group
 from mathion.database import get_db
@@ -123,9 +123,8 @@ def _derive_latest_status(db: Session, mp: MiniProject, group) -> str:
 
 
 def _serialize_list_item(
-    db: Session, run: Run, mp: MiniProject, user: User
+    db: Session, mp: MiniProject, group
 ) -> StudentMiniProjectListItem:
-    group = get_submitter_group(db, run.id, user.id)
     status = _derive_latest_status(db, mp, group)
     return StudentMiniProjectListItem(
         mp_id=mp.id,
@@ -158,9 +157,11 @@ def list_student_mini_projects(
     RunStudent on any published run of this course).
     """
     run = _resolve_student_run(db, user, slug)
+    group = get_submitter_group(db, run.id, user.id)
 
     mps = db.execute(
         select(MiniProject)
+        .options(joinedload(MiniProject.block))
         .join(Block, Block.id == MiniProject.block_id)
         .where(
             MiniProject.run_id == run.id,
@@ -169,4 +170,4 @@ def list_student_mini_projects(
         .order_by(Block.order.asc())
     ).scalars().all()
 
-    return [_serialize_list_item(db, run, mp, user) for mp in mps]
+    return [_serialize_list_item(db, mp, group) for mp in mps]
