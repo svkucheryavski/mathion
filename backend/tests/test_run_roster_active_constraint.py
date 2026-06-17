@@ -183,3 +183,90 @@ def test_add_student_201_creates_new_user_when_no_existing_user(
         select(func.count(User.id)).where(User.email == new_email)
     )
     assert after == 1
+
+
+# --- batch endpoint tests (Task A5) --------------------------------------
+#
+# POST /api/runs/{rid}/students/batch must apply the same constraint per row,
+# returning a per-row "error" with error_code="student_already_active_in_course"
+# while letting other rows succeed. M5 mandates the check fires IMMEDIATELY
+# after get_or_create_user and BEFORE any mutation of target.full_name, group
+# lookup/creation, or enroll_user_in_run.
+
+
+def test_batch_partial_success_with_one_conflict_row(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    run_a, _run_b, student_on_b = seed_two_published_runs_same_course()
+    fresh_email = "fresh@example.com"
+    new_email = "new-user@example.com"
+    response = admin_client.post(
+        f"/api/runs/{run_a.id}/students/batch",
+        json={
+            "rows": [
+                {"email": fresh_email},
+                {"email": student_on_b.email},
+                {"email": new_email},
+            ]
+        },
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert results[0]["status"] == "added"
+    assert results[1]["status"] == "error"
+    assert results[1]["error_code"] == "student_already_active_in_course"
+    assert results[2]["status"] == "added"
+
+
+def test_batch_conflict_does_not_overwrite_full_name(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    """M5: rejected rows MUST NOT mutate target.full_name."""
+    run_a, _run_b, student = seed_two_published_runs_same_course()
+    original_name = student.full_name  # set to "Sam" by the fixture
+    response = admin_client.post(
+        f"/api/runs/{run_a.id}/students/batch",
+        json={"rows": [{"email": student.email, "name": "Other Name"}]},
+    )
+    assert response.status_code == 207
+    assert response.json()["results"][0]["status"] == "error"
+    db.refresh(student)
+    assert student.full_name == original_name  # unchanged
+
+
+def test_batch_all_conflict_rows_zero_added(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    """All three rows target users already active on another published run of
+    the same course → 0 added, 3 error rows with the constraint error_code."""
+    from mathion.models import RunStudent
+
+    run_a, run_b, student_one = seed_two_published_runs_same_course()
+    # Two more conflicting users: active on run_b (same course as run_a).
+    student_two = User(email="two@example.com", full_name="Two")
+    student_three = User(email="three@example.com", full_name="Three")
+    db.add_all([student_two, student_three])
+    db.flush()
+    db.add_all([
+        RunStudent(run_id=run_b.id, user_id=student_two.id),
+        RunStudent(run_id=run_b.id, user_id=student_three.id),
+    ])
+    db.commit()
+
+    response = admin_client.post(
+        f"/api/runs/{run_a.id}/students/batch",
+        json={
+            "rows": [
+                {"email": student_one.email},
+                {"email": student_two.email},
+                {"email": student_three.email},
+            ]
+        },
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert len(results) == 3
+    assert all(r["status"] == "error" for r in results)
+    assert all(
+        r["error_code"] == "student_already_active_in_course" for r in results
+    )

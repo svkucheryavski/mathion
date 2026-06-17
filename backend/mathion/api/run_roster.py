@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import (
+    STUDENT_ALREADY_ACTIVE_ERROR_CODE,
     enroll_user_in_run,
     find_student_active_conflicts,
     get_or_404,
@@ -187,11 +188,28 @@ def add_students_batch(
             content={"detail": "Cannot add students to an unpublished run",
                      "error_code": RUN_UNPUBLISHED_ERROR_CODE})
     results = []
+    course_id = run.version.course_id
 
     for row in data.rows:
         # User creation happens at the outer transaction; safe to keep even if
         # the per-row enrollment later fails.
         target = get_or_create_user(db, row.email)
+
+        # M5: enforce one-active-RunStudent-per-course invariant. Check fires
+        # IMMEDIATELY after get_or_create_user and BEFORE any side effects
+        # (full_name mutation, Group lookup/creation, enroll_user_in_run) so
+        # rejected rows don't mutate target user state or create orphan groups.
+        conflicts = find_student_active_conflicts(
+            db, target.id, course_id=course_id, exclude_run_id=run.id
+        )
+        if conflicts:
+            results.append({
+                "email": row.email,
+                "status": "error",
+                "detail": f"Already active in '{conflicts[0][1]}'",
+                "error_code": STUDENT_ALREADY_ACTIVE_ERROR_CODE,
+            })
+            continue
 
         sp = db.begin_nested()
         try:
