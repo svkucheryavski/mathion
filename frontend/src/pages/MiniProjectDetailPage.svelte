@@ -59,6 +59,11 @@
     //   silent on AbortError, let auth-bounce propagate via emitUnauthorized.
     // - fetchDetail: page body. Hard error → fetchError full-page banner.
     void loadCourse(startedCourseSlug).catch((e: unknown) => {
+      // Drop stale toast: navigation past this fetch (slug change or unmount).
+      // Without this guard, same-course block navigation attaches a second
+      // .catch to the shared in-flight promise → duplicate toasts on failure.
+      if (controller.signal.aborted) return;
+      if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
       if (e instanceof DOMException && e.name === 'AbortError') return;
       if (e instanceof ApiError && e.status === 401) return; // auth bounce
       pushToast("Couldn't load course details.", 'error');
