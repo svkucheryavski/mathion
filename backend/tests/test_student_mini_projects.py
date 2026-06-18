@@ -788,6 +788,109 @@ def test_detail_403_when_no_active_run(
     assert resp.status_code == 403
 
 
+def test_resolve_block_returns_version_scoped_block(
+    db, seed_publishable_version,
+):
+    """§4.2 IDOR (direct unit test): `_resolve_block` must filter by
+    `run.version_id`. Same-course two-version setup where BOTH versions
+    have a block at slug 'b'. Calling the resolver with a run on
+    version_a must return version_a's block, NOT version_b's, even
+    though the slug matches both.
+
+    Complements the HTTP-level IDOR test below (which short-circuits at
+    the enrollment gate): this one exercises the resolver in isolation,
+    so removing `Block.version_id == run.version_id` from `_resolve_block`
+    would make it fail.
+
+    A4 note: A4 forbids two active RunStudent rows on the same course; it
+    does NOT forbid a course having two versions, nor a Run on each. We
+    seed no RunStudent, so this setup is legal.
+    """
+    from datetime import date as _date
+
+    from mathion.api.student_mini_projects import _resolve_block
+    from mathion.models import Block, CourseVersion, Run
+
+    # version_a — created by the fixture; already has a Block slug="b".
+    course_dict, version_a_dict = seed_publishable_version(
+        slug="idor-direct", name="IDOR Direct",
+    )
+    version_a = db.get(CourseVersion, version_a_dict["id"])
+    block_a = db.execute(
+        select(Block).where(
+            Block.version_id == version_a.id, Block.slug == "b",
+        )
+    ).scalar_one()
+
+    # version_b — same course, distinct row, with its OWN Block at slug "b".
+    version_b = CourseVersion(
+        course_id=course_dict["id"], info_md="", state="published",
+    )
+    db.add(version_b); db.flush()
+    block_b = Block(
+        version_id=version_b.id, title="B's block", slug="b", order=1,
+    )
+    db.add(block_b); db.flush()
+
+    # A run on version_a — minimal, doesn't need to be published.
+    run_a = Run(
+        version_id=version_a.id,
+        title="R",
+        start_date=_date(2026, 1, 1),
+        end_date=_date(2026, 6, 1),
+    )
+    db.add(run_a); db.commit()
+
+    # Sanity: the two blocks share a slug but have different ids.
+    assert block_a.id != block_b.id
+
+    # Direct call to the resolver — must pick version_a's block.
+    result = _resolve_block(db, run_a, "b")
+    assert result.id == block_a.id
+    assert result.id != block_b.id
+
+
+def test_resolve_block_raises_404_when_slug_missing_on_version(
+    db, seed_publishable_version,
+):
+    """§4.2 complement: when the slug exists ONLY on a different version
+    of the same course, `_resolve_block` must 404 — NOT return the
+    cross-version block. Pins the `version_id` filter behavior.
+    """
+    from datetime import date as _date
+
+    from mathion.api.student_mini_projects import _resolve_block
+    from mathion.models import Block, CourseVersion, Run
+
+    # version_a — fixture-created; its block has slug "b", NOT "only-on-b".
+    course_dict, version_a_dict = seed_publishable_version(
+        slug="idor-404", name="IDOR 404",
+    )
+    version_a = db.get(CourseVersion, version_a_dict["id"])
+
+    # version_b — same course, with a Block at the target slug "only-on-b".
+    version_b = CourseVersion(
+        course_id=course_dict["id"], info_md="", state="published",
+    )
+    db.add(version_b); db.flush()
+    db.add(Block(
+        version_id=version_b.id, title="Only on B", slug="only-on-b", order=1,
+    ))
+    db.flush()
+
+    run_a = Run(
+        version_id=version_a.id,
+        title="R",
+        start_date=_date(2026, 1, 1),
+        end_date=_date(2026, 6, 1),
+    )
+    db.add(run_a); db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        _resolve_block(db, run_a, "only-on-b")
+    assert exc_info.value.status_code == 404
+
+
 def test_detail_idor_cross_version_block_slug_returns_404(
     admin_client, student_client_for, db, seed_run_with_published_mp,
 ):
