@@ -441,6 +441,19 @@ export type MiniProjectRowStatus = 'draft' | 'published' | 'locked';
 // StudentMiniProjectDetail). Field names are snake_case to match the wire
 // format; Pydantic `datetime | None` maps to TS `string | null` (ISO).
 
+// LatestStatus — the 7-value union for student-facing mini-project status
+// (list + detail). Defined here as the canonical wire-shape type so types.ts
+// has no upstream deps; studentMiniProjects.ts re-imports it for
+// LATEST_STATUS_META (label + class + glyph) consumed by StatusPill.svelte.
+export type LatestStatus =
+  | 'pending_group_assignment'
+  | 'not_submitted'
+  | 'awaiting_evaluation'
+  | 'rejected'
+  | 'major_revision'
+  | 'minor_revision'
+  | 'accepted';
+
 export type StudentMiniProjectListItem = {
   mp_id: number;
   block_id: number;
@@ -450,14 +463,7 @@ export type StudentMiniProjectListItem = {
   hard_deadline: string | null;        // ISO datetime
   soft_deadline: string | null;
   resubmission_deadline: string | null;
-  latest_status:
-    | 'pending_group_assignment'
-    | 'not_submitted'
-    | 'awaiting_evaluation'
-    | 'rejected'
-    | 'major_revision'
-    | 'minor_revision'
-    | 'accepted';
+  latest_status: LatestStatus;
 };
 
 export type StudentGroupMember = {
@@ -508,14 +514,7 @@ export type StudentMiniProjectDetail = {
   resubmission_deadline: string | null;
   group: StudentGroupSummary | null;
   submission_history: StudentSubmissionHistoryEntry[];
-  latest_status:
-    | 'pending_group_assignment'
-    | 'not_submitted'
-    | 'awaiting_evaluation'
-    | 'rejected'
-    | 'major_revision'
-    | 'minor_revision'
-    | 'accepted';
+  latest_status: LatestStatus;
   can_submit: boolean;
   can_submit_reason_if_not:
     | 'mp_not_visible'

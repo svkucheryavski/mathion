@@ -14,7 +14,11 @@
 
 import { api, ApiError } from './api';
 import { emitUnauthorized } from './events';
-import type { StudentMiniProjectListItem, StudentMiniProjectDetail } from './types';
+import type { StudentMiniProjectListItem, StudentMiniProjectDetail, LatestStatus } from './types';
+
+// Re-export so consumers (StatusPill.svelte and neighbors) can import the
+// type alongside LATEST_STATUS_META from a single module.
+export type { LatestStatus };
 
 export const REASON_LABELS = {
   mp_not_visible: 'This mini-project is no longer available.',
@@ -27,6 +31,20 @@ export const REASON_LABELS = {
 } as const;
 
 export type CanSubmitReason = keyof typeof REASON_LABELS;
+
+// LATEST_STATUS_META — single source of truth for pill label + CSS class +
+// leading non-color glyph token (spec §5 + C14 colorblind signal). Consumed
+// by StatusPill.svelte (D1) and any other UI that surfaces latest_status
+// (e.g. D2 MiniProjectLink). Keep keys in sync with the LatestStatus union.
+export const LATEST_STATUS_META = {
+  pending_group_assignment: { label: 'Pending group', cls: 'pill-neutral', token: '…' },
+  not_submitted: { label: 'Not yet submitted', cls: 'pill-neutral', token: '·' },
+  awaiting_evaluation: { label: 'Awaiting evaluation', cls: 'pill-info', token: '~' },
+  rejected: { label: 'Rejected', cls: 'pill-danger', token: '×' },
+  major_revision: { label: 'Needs revision (major)', cls: 'pill-warning', token: '!' },
+  minor_revision: { label: 'Needs revision (minor)', cls: 'pill-warning', token: '!' },
+  accepted: { label: 'Accepted', cls: 'pill-success', token: '✓' },
+} as const satisfies Record<LatestStatus, { label: string; cls: string; token: string }>;
 
 // Fetches the course-level MP list. 403 means "you're enrolled but no active
 // published run yet" and is the ONLY status this swallow swallows — see §7
