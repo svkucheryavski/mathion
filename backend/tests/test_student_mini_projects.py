@@ -972,3 +972,69 @@ def test_detail_filename_is_safe_basename(
     assert "/" not in entry["filename"]
     assert "\\" not in entry["filename"]
     assert entry["filename"].endswith(".pdf")
+
+
+def test_detail_latest_status_snapshot_consistent_with_history(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """Spec §3.2 invariant: `latest_status` and
+    `submission_history[0].evaluation` are derived from the SAME in-request
+    snapshot. A response must never show `latest_status='accepted'` while
+    `submission_history[0].evaluation is None` (which would happen if
+    status used a fresher DB read than history).
+
+    This test simulates the race by performing two fetches, mutating the
+    DB directly between them. Each fetch must show internal consistency:
+    - phase 1 (no eval): status='awaiting_evaluation' AND history[0].evaluation None.
+    - phase 2 (eval committed via ORM): status=eval.result AND
+      history[0].evaluation populated. Neither field can lead the other.
+    """
+    import io
+    from mathion.models import Evaluation, Submission
+
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+
+    # One submission, NO evaluation yet.
+    sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+
+    # Phase 1: both fields must reflect the no-eval state together.
+    resp1 = sc.get(_detail_url(course.slug, "b"))
+    assert resp1.status_code == 200, resp1.text
+    body1 = resp1.json()
+    assert body1["latest_status"] == "awaiting_evaluation"
+    assert body1["submission_history"][0]["evaluation"] is None
+    # And the can_submit ladder must agree with the snapshot too.
+    assert body1["can_submit"] is False
+    assert body1["can_submit_reason_if_not"] == "awaiting_evaluation"
+
+    # Inject an Evaluation directly via ORM (bypass the eval endpoint to
+    # keep the test focused on read-side consistency). The fixture seeds
+    # an admin superuser at admin@example.com — use it as `evaluated_by`.
+    sub = db.execute(
+        select(Submission).where(Submission.mini_project_id == mp["id"])
+    ).scalar_one()
+    admin = _get_user_by_email(db, "admin@example.com")
+    ev = Evaluation(
+        submission_id=sub.id,
+        evaluated_by=admin.id,
+        result="accepted",
+        feedback_text="ok",
+    )
+    db.add(ev); db.commit()
+
+    # Phase 2: both fields must reflect the evaluated state together.
+    resp2 = sc.get(_detail_url(course.slug, "b"))
+    assert resp2.status_code == 200, resp2.text
+    body2 = resp2.json()
+    assert body2["latest_status"] == "accepted"
+    history_eval = body2["submission_history"][0]["evaluation"]
+    assert history_eval is not None
+    assert history_eval["result"] == "accepted"
+    # Ladder must agree too: accepted is terminal.
+    assert body2["can_submit"] is False
+    assert body2["can_submit_reason_if_not"] == "already_accepted"

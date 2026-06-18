@@ -115,6 +115,13 @@ def _derive_latest_status(db: Session, mp: MiniProject, group) -> str:
     - Latest Submission has no Evaluation → 'awaiting_evaluation'.
     - Otherwise the Evaluation.result value verbatim:
       'rejected' | 'major_revision' | 'minor_revision' | 'accepted'.
+
+    Used by the B2 list endpoint, which loads many MPs in a loop and does
+    NOT precompute submissions/evaluations per MP. The B3 detail endpoint
+    uses `_derive_latest_status_from_snapshot` instead so its
+    `latest_status` cannot disagree with `submission_history` (a teacher
+    evaluating mid-request would otherwise produce a self-contradictory
+    response).
     """
     if group is None:
         return "pending_group_assignment"
@@ -132,6 +139,36 @@ def _derive_latest_status(db: Session, mp: MiniProject, group) -> str:
     eval_row = db.execute(
         select(Evaluation).where(Evaluation.submission_id == latest_sub.id)
     ).scalar_one_or_none()
+    if eval_row is None:
+        return "awaiting_evaluation"
+    return eval_row.result
+
+
+def _derive_latest_status_from_snapshot(
+    group: Group | None,
+    submissions: list[Submission],
+    evaluations_by_sub_id: dict[int, Evaluation],
+) -> str:
+    """Snapshot-based variant of `_derive_latest_status` used by the B3
+    detail endpoint.
+
+    Derives `latest_status` from the ALREADY-LOADED `submissions` list and
+    `evaluations_by_sub_id` map rather than re-querying. Pins
+    `latest_status` and `submission_history` to a single read-consistency
+    boundary — so a teacher evaluating between the history-batch query
+    and the status derivation can no longer produce a self-contradictory
+    response (e.g. `latest_status='accepted'` while
+    `submission_history[0].evaluation` is null).
+
+    `submissions` MUST be ordered DESC by submission_number (caller's
+    contract); `submissions[0]` is treated as the latest.
+    """
+    if group is None:
+        return "pending_group_assignment"
+    if not submissions:
+        return "not_submitted"
+    latest = submissions[0]
+    eval_row = evaluations_by_sub_id.get(latest.id)
     if eval_row is None:
         return "awaiting_evaluation"
     return eval_row.result
@@ -287,14 +324,18 @@ def _serialize_member(db: Session, rs: RunStudent, me_id: int) -> StudentGroupMe
 
 
 def _serialize_group(
-    db: Session, run: Run, group: Group, me_id: int,
+    db: Session,
+    group: Group,
+    members: list[RunStudent],
+    me_id: int,
 ) -> StudentGroupSummary:
-    members = db.execute(
-        select(RunStudent).where(
-            RunStudent.run_id == run.id,
-            RunStudent.group_id == group.id,
-        )
-    ).scalars().all()
+    """Build the group summary from an already-loaded `members` list.
+
+    Members are loaded at step 5 of the §3.2 8-step read ordering
+    (alongside submissions + evaluations) so the whole grouped-state
+    snapshot lands inside a single read-consistency window before
+    can_submit / latest_status derivation.
+    """
     return StudentGroupSummary(
         id=group.id,
         name=group.name,
@@ -356,9 +397,13 @@ def get_student_mini_project_detail(
     2. Resolve block (§4.2, version-scoped to prevent IDOR).
     3. Load MP for (run, block); 404 if missing or not visible.
     4. Resolve student's group (may be None).
-    5. If group: load members, submissions DESC, evaluations.
+    5. If group: load members, submissions DESC, evaluations — together,
+       so the grouped-state snapshot lands inside one read-consistency
+       window before derivation.
     6. Compute can_submit per ladder.
-    7. Reuse `_derive_latest_status` from B2.
+    7. Derive `latest_status` from the SAME snapshot (via
+       `_derive_latest_status_from_snapshot`) so it can't disagree with
+       `submission_history` if a teacher evaluates mid-request.
     8. Return.
 
     Errors: 401 (no session, via dependency), 403 (no active run, via
@@ -378,9 +423,20 @@ def get_student_mini_project_detail(
 
     group = get_submitter_group(db, run.id, user.id)
 
+    # Step 5: load members + submissions DESC + evaluations TOGETHER, before
+    # any derivation, so the whole grouped-state snapshot is taken inside
+    # one read-consistency window. Members go in the same step (even
+    # though they don't affect the can_submit ladder) to match spec §3.2.
+    members: list[RunStudent] = []
     submissions: list[Submission] = []
     eval_by_sub: dict[int, Evaluation] = {}
     if group is not None:
+        members = db.execute(
+            select(RunStudent).where(
+                RunStudent.run_id == run.id,
+                RunStudent.group_id == group.id,
+            )
+        ).scalars().all()
         submissions = db.execute(
             select(Submission)
             .where(
@@ -412,11 +468,16 @@ def get_student_mini_project_detail(
         latest_result=latest_result,
         has_any_submission=has_any_submission,
     )
-    latest_status = _derive_latest_status(db, mp, group)
+    # Snapshot-based status derivation: reuse the already-loaded
+    # `submissions` + `eval_by_sub` so latest_status cannot disagree with
+    # submission_history within the same response.
+    latest_status = _derive_latest_status_from_snapshot(
+        group, submissions, eval_by_sub,
+    )
 
     group_summary: StudentGroupSummary | None = None
     if group is not None:
-        group_summary = _serialize_group(db, run, group, user.id)
+        group_summary = _serialize_group(db, group, members, user.id)
 
     history = [
         _serialize_history_entry(db, sub, eval_by_sub.get(sub.id), user.id)
