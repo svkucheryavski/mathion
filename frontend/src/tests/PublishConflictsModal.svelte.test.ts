@@ -38,7 +38,7 @@ describe('PublishConflictsModal', () => {
     });
     flushSync();
     const heading = target.querySelector('h2');
-    expect(heading?.textContent).toContain("1 student can't be added");
+    expect(heading?.textContent?.trim()).toBe("1 student can't be added");
     // Body contains the email and the run_title wrapped in <strong>
     const body = target.querySelector('.modal')?.textContent ?? '';
     expect(body).toContain('a@example.com');
@@ -62,7 +62,7 @@ describe('PublishConflictsModal', () => {
     });
     flushSync();
     const heading = target.querySelector('h2');
-    expect(heading?.textContent).toContain("3 students can't be added");
+    expect(heading?.textContent?.trim()).toBe("3 students can't be added");
     // run_title rendered exactly once as <strong> (single-group layout).
     const strongs = target.querySelectorAll('.modal-body strong');
     expect(strongs.length).toBe(1);
@@ -91,7 +91,7 @@ describe('PublishConflictsModal', () => {
     });
     flushSync();
     const heading = target.querySelector('h2');
-    expect(heading?.textContent).toContain("3 students can't be added");
+    expect(heading?.textContent?.trim()).toBe("3 students can't be added");
     // THREE distinct groups (one per run_id) — NOT two (would mean grouping by title).
     const strongs = target.querySelectorAll('.modal-body strong');
     expect(strongs.length).toBe(3);
@@ -117,7 +117,7 @@ describe('PublishConflictsModal', () => {
     });
     flushSync();
     const heading = target.querySelector('h2');
-    expect(heading?.textContent).toContain("1 student can't be added");
+    expect(heading?.textContent?.trim()).toBe("1 student can't be added");
     expect(heading?.textContent).not.toContain('2 students');
     // Grouped-list form: 2 distinct run groups, each containing the email once.
     const strongs = target.querySelectorAll('.modal-body strong');

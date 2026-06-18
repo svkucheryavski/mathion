@@ -64,7 +64,6 @@
       <div class="modal" role="dialog" aria-modal="true" aria-label="Cannot publish run">
         <header>
           <h2>{headingText}</h2>
-          <button type="button" aria-label="Close" onclick={onClose}>×</button>
         </header>
 
         <div class="modal-body">
@@ -112,7 +111,6 @@
   .modal { background: var(--surface, white); border-radius: var(--radius, 8px); padding: var(--space-4, 24px); min-width: 360px; max-width: 90vw; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); }
   header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3, 16px); }
   header h2 { margin: 0; }
-  header button { background: transparent; border: 0; font-size: 1.5em; cursor: pointer; padding: 0 8px; }
   .modal-body p { margin: 0 0 var(--space-2, 8px); }
   .modal-body .group-heading { margin-top: var(--space-3, 16px); }
   .modal-body ul { margin: 0 0 var(--space-2, 8px); padding-left: var(--space-4, 24px); }
