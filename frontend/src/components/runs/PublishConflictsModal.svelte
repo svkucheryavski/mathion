@@ -109,7 +109,7 @@
 <style>
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
   .modal { background: var(--surface, white); border-radius: var(--radius, 8px); padding: var(--space-4, 24px); min-width: 360px; max-width: 90vw; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); }
-  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3, 16px); }
+  header { margin-bottom: var(--space-3, 16px); }
   header h2 { margin: 0; }
   .modal-body p { margin: 0 0 var(--space-2, 8px); }
   .modal-body .group-heading { margin-top: var(--space-3, 16px); }
