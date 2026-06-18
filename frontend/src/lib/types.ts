@@ -328,12 +328,25 @@ export type RunStudentBatchResultRow = {
   status: 'added' | 'error';
   group_id?: number | null;
   detail?: string | null;
+  error_code?: BulkRosterErrorCode | null;
 };
 
 export type BulkRosterErrorCode =
   | 'not_in_run'
   | 'capacity_reached'
-  | 'internal_error';
+  | 'internal_error'
+  | 'student_already_active_in_course';
+
+// PublishConflict — uniform 409 body shape returned by add_student, batch
+// roster upload, and publish_run when a student already has an active
+// enrollment in another run of the same course. A single typed handler
+// covers all three paths.
+export type PublishConflict = {
+  user_id: number;
+  email: string;
+  run_id: number;
+  run_title: string;
+};
 
 export type BulkOpSummary = { total: number; ok: number; error: number };
 
@@ -420,6 +433,100 @@ export type RunAssetResponse = {
 };
 
 export type MiniProjectRowStatus = 'draft' | 'published' | 'locked';
+
+// ---- Mini-projects (student) ----
+// Mirrors backend Pydantic schemas in backend/mathion/schemas.py
+// (StudentMiniProjectListItem, StudentGroupMember, StudentGroupSummary,
+// StudentSubmissionHistoryEvaluation, StudentSubmissionHistoryEntry,
+// StudentMiniProjectDetail). Field names are snake_case to match the wire
+// format; Pydantic `datetime | None` maps to TS `string | null` (ISO).
+
+export type StudentMiniProjectListItem = {
+  mp_id: number;
+  block_id: number;
+  block_slug: string;
+  block_order: number;
+  block_title: string;
+  hard_deadline: string | null;        // ISO datetime
+  soft_deadline: string | null;
+  resubmission_deadline: string | null;
+  latest_status:
+    | 'pending_group_assignment'
+    | 'not_submitted'
+    | 'awaiting_evaluation'
+    | 'rejected'
+    | 'major_revision'
+    | 'minor_revision'
+    | 'accepted';
+};
+
+export type StudentGroupMember = {
+  user_id: number;
+  full_name: string;
+  is_me: boolean;
+};
+
+export type StudentGroupSummary = {
+  id: number;
+  name: string;
+  is_disabled: boolean;
+  members: StudentGroupMember[];
+};
+
+export type StudentSubmissionHistoryEvaluation = {
+  eval_id: number;
+  result: 'rejected' | 'major_revision' | 'minor_revision' | 'accepted';
+  score: number | null;
+  feedback_text: string | null;
+  has_feedback_file: boolean;
+  evaluated_by_full_name: string;
+  evaluated_at: string;  // ISO datetime
+};
+
+export type StudentSubmissionHistoryEntry = {
+  submission_id: number;
+  submission_number: number;
+  filename: string;
+  submitted_by_full_name: string;
+  submitter_is_me: boolean;
+  submitted_at: string;
+  file_size: number;
+  is_late: boolean;
+  is_resubmission: boolean;
+  evaluation: StudentSubmissionHistoryEvaluation | null;
+};
+
+export type StudentMiniProjectDetail = {
+  mp_id: number;
+  run_id: number;
+  block_id: number;
+  block_slug: string;
+  block_title: string;
+  assignment_html: string;
+  soft_deadline: string | null;
+  hard_deadline: string | null;
+  resubmission_deadline: string | null;
+  group: StudentGroupSummary | null;
+  submission_history: StudentSubmissionHistoryEntry[];
+  latest_status:
+    | 'pending_group_assignment'
+    | 'not_submitted'
+    | 'awaiting_evaluation'
+    | 'rejected'
+    | 'major_revision'
+    | 'minor_revision'
+    | 'accepted';
+  can_submit: boolean;
+  can_submit_reason_if_not:
+    | 'mp_not_visible'
+    | 'pending_group_assignment'
+    | 'group_disabled'
+    | 'already_accepted'
+    | 'awaiting_evaluation'
+    | 'hard_deadline_passed'
+    | 'resubmission_deadline_passed'
+    | null;
+};
 
 // ---- Exhaustiveness helper ----
 export function assertNever(x: never): never {
