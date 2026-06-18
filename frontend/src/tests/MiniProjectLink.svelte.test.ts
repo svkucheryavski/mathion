@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import MiniProjectLink from '../components/course/MiniProjectLink.svelte';
 import type { StudentMiniProjectListItem } from '../lib/types';
+import { LATEST_STATUS_META, type LatestStatus } from '../lib/studentMiniProjects';
 
 // Per the codebase memory rule: component tests use mount/unmount/flushSync
 // from `svelte`, NOT @testing-library/svelte.
@@ -59,6 +60,36 @@ describe('MiniProjectLink', () => {
     expect(pill!.classList.contains('pill-warning')).toBe(true);
     expect(pill!.textContent).toContain('Needs revision (major)');
   });
+
+  const ALL_STATUSES: LatestStatus[] = [
+    'pending_group_assignment',
+    'not_submitted',
+    'awaiting_evaluation',
+    'rejected',
+    'major_revision',
+    'minor_revision',
+    'accepted',
+  ];
+
+  it.each(ALL_STATUSES)(
+    'embeds StatusPill with correct meta for status %s (spec §8: all 7 statuses)',
+    (status) => {
+      component = mount(MiniProjectLink, {
+        target,
+        props: { courseSlug: 'c', item: { ...BASE_ITEM, latest_status: status } },
+      });
+      flushSync();
+
+      const pill = target.querySelector('a.row-mp .pill');
+      expect(pill).not.toBeNull();
+      const meta = LATEST_STATUS_META[status];
+      expect(pill!.classList.contains(meta.cls)).toBe(true);
+      expect(pill!.textContent).toContain(meta.label);
+      const tokenEl = pill!.querySelector('.pill-token');
+      expect(tokenEl).not.toBeNull();
+      expect(tokenEl!.textContent).toBe(meta.token);
+    },
+  );
 
   it('sets aria-label on <a> as "Mini-project: {title}, Status: {label}" (sole AT status announcement)', () => {
     component = mount(MiniProjectLink, {
