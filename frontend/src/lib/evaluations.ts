@@ -68,8 +68,16 @@ export async function createEvaluation(
     throw new ApiError(401, 'Not authenticated');
   }
   if (!r.ok) {
-    const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
-    throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload.error_code);
+    let parsedBody: unknown = undefined;
+    try {
+      parsedBody = await r.json();
+    } catch {
+      // Non-JSON response (HTML error page, truncated payload) — body stays
+      // undefined. Mirrors lib/api.ts non-2xx handling.
+    }
+    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? 'Upload failed';
+    const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
+    throw new ApiError(r.status, detail, errorCode, parsedBody);
   }
   return r.json();
 }

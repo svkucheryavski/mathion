@@ -6,6 +6,13 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly detail: string | ValidationErrorDetail[],
     public readonly errorCode?: string,
+    // Raw parsed JSON body from the non-2xx response (when the response had a
+    // JSON content-type and parsed cleanly). Carries extra structured fields
+    // like `conflicts` for 409 publish flows so callers can narrow at the
+    // access site under strict TS. Stays `undefined` when the body wasn't JSON
+    // (HTML error page, truncated payload) so callers can branch on presence
+    // without distinguishing parse-failure from empty-body.
+    public readonly body?: unknown,
   ) {
     super(typeof detail === 'string' ? detail : 'Validation error');
     this.name = 'ApiError';
@@ -42,8 +49,17 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
     throw new ApiError(401, 'Not authenticated');
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.detail ?? res.statusText, body.error_code);
+    let parsedBody: unknown = undefined;
+    try {
+      parsedBody = await res.json();
+    } catch {
+      // Non-JSON response (HTML error page, truncated payload) — body stays
+      // undefined so callers can branch on presence without distinguishing
+      // parse-failure from empty-body.
+    }
+    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? res.statusText;
+    const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
+    throw new ApiError(res.status, detail, errorCode, parsedBody);
   }
   return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
 }

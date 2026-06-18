@@ -113,4 +113,58 @@ describe('lib/api', () => {
       errorCode: 'capacity_reached',
     });
   });
+
+  describe('ApiError.body', () => {
+    it('exposes parsed JSON body on non-2xx', () => {
+      const err = new ApiError(409, 'X', 'err_x', { conflicts: [{ run_id: 1 }] });
+      expect(err.body).toEqual({ conflicts: [{ run_id: 1 }] });
+    });
+
+    it('exposes body = undefined when constructed without body', () => {
+      const err = new ApiError(0, 'network');
+      expect(err.body).toBeUndefined();
+    });
+
+    it('api.post() throws ApiError with body populated from response JSON', async () => {
+      const conflictPayload = {
+        detail: 'Conflict',
+        error_code: 'capacity_reached',
+        conflicts: [{ run_id: 1 }, { run_id: 2 }],
+      };
+      fetchSpy.mockResolvedValueOnce(
+        new Response(JSON.stringify(conflictPayload), {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      let thrown: unknown;
+      try {
+        await api.post('/api/foo', { a: 1 });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(ApiError);
+      expect((thrown as ApiError).body).toEqual(conflictPayload);
+      expect((thrown as ApiError).status).toBe(409);
+      expect((thrown as ApiError).errorCode).toBe('capacity_reached');
+    });
+
+    it('api.post() throws ApiError with body=undefined when response is not JSON', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        new Response('<html>500</html>', {
+          status: 500,
+          headers: { 'content-type': 'text/html' },
+        }),
+      );
+      let thrown: unknown;
+      try {
+        await api.post('/api/foo', { a: 1 });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(ApiError);
+      expect((thrown as ApiError).body).toBeUndefined();
+      expect((thrown as ApiError).status).toBe(500);
+    });
+  });
 });

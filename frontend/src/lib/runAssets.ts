@@ -51,8 +51,16 @@ export async function uploadRunAsset(
     throw new ApiError(401, 'Not authenticated');
   }
   if (!r.ok) {
-    const payload = await r.json().catch(() => ({ detail: 'Upload failed' }));
-    throw new ApiError(r.status, payload.detail ?? 'Upload failed', payload.error_code);
+    let parsedBody: unknown = undefined;
+    try {
+      parsedBody = await r.json();
+    } catch {
+      // Non-JSON response (HTML error page, truncated payload) — body stays
+      // undefined. Mirrors lib/api.ts non-2xx handling.
+    }
+    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? 'Upload failed';
+    const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
+    throw new ApiError(r.status, detail, errorCode, parsedBody);
   }
   return r.json();
 }
@@ -89,8 +97,16 @@ export async function replaceRunAsset(
     throw new ApiError(401, 'Not authenticated');
   }
   if (!r.ok) {
-    const payload = await r.json().catch(() => ({ detail: 'Replace failed' }));
-    throw new ApiError(r.status, payload.detail ?? 'Replace failed', payload.error_code);
+    let parsedBody: unknown = undefined;
+    try {
+      parsedBody = await r.json();
+    } catch {
+      // Non-JSON response (HTML error page, truncated payload) — body stays
+      // undefined. Mirrors lib/api.ts non-2xx handling.
+    }
+    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? 'Replace failed';
+    const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
+    throw new ApiError(r.status, detail, errorCode, parsedBody);
   }
   return r.json();
 }

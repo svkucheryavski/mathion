@@ -62,8 +62,16 @@ export async function uploadAsset(
     throw new ApiError(401, 'Not authenticated');
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.detail ?? res.statusText, body.error_code);
+    let parsedBody: unknown = undefined;
+    try {
+      parsedBody = await res.json();
+    } catch {
+      // Non-JSON response (HTML error page, truncated payload) — body stays
+      // undefined. Mirrors lib/api.ts non-2xx handling.
+    }
+    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? res.statusText;
+    const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
+    throw new ApiError(res.status, detail, errorCode, parsedBody);
   }
   return res.json() as Promise<AssetResponse>;
 }
