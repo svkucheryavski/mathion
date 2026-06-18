@@ -1038,3 +1038,60 @@ def test_detail_latest_status_snapshot_consistent_with_history(
     # Ladder must agree too: accepted is terminal.
     assert body2["can_submit"] is False
     assert body2["can_submit_reason_if_not"] == "already_accepted"
+
+
+def test_detail_endpoint_does_not_call_legacy_derive_latest_status(
+    student_client_for, db, seed_run_with_published_mp,
+):
+    """Regression (codex follow-up to the §3.2 snapshot fix): the detail
+    endpoint MUST derive `latest_status` from the already-loaded
+    submissions + evaluations snapshot, not via a fresh DB query through
+    the legacy `_derive_latest_status` helper.
+
+    The sibling consistency test (`..._snapshot_consistent_with_history`)
+    asserts the invariant across two complete requests, but the buggy
+    pre-fix implementation could satisfy it whenever no evaluation lands
+    between the history query and the legacy derivation — so it doesn't
+    deterministically catch the regression.
+
+    Here we patch the legacy db-querying helper with a `side_effect` that
+    raises if it's invoked. On the pre-fix implementation the detail
+    endpoint called the legacy helper → AssertionError → test fails. On
+    the snapshot-based implementation only the list endpoint uses the
+    legacy helper (out of scope for this detail-endpoint test) → test
+    passes.
+
+    Setup MUST include a group AND at least one submission so the
+    endpoint actually reaches the status-derivation step. With
+    `group is None` the snapshot variant returns
+    `'pending_group_assignment'` immediately, the legacy helper is
+    unreachable in both implementations, and the test would pass on both
+    — defeating the regression net.
+    """
+    import io
+    from unittest.mock import patch
+
+    run_dict, _ga, _gb, mp = seed_run_with_published_mp()
+    course = _get_course_for_run(db, db.get(Run, run_dict["id"]))
+    sc = student_client_for("alice@example.com")
+
+    # One submission, no evaluation — alice has a group via the fixture,
+    # so the endpoint reaches the status-derivation step.
+    sub_resp = sc.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+    )
+    assert sub_resp.status_code in (200, 201), sub_resp.text
+
+    with patch(
+        "mathion.api.student_mini_projects._derive_latest_status",
+        side_effect=AssertionError(
+            "detail endpoint must not call the legacy db-querying helper"
+        ),
+    ):
+        resp = sc.get(_detail_url(course.slug, "b"))
+
+    assert resp.status_code == 200, resp.text
+    # Sanity: the snapshot path produced the expected status for a single
+    # submission with no evaluation.
+    assert resp.json()["latest_status"] == "awaiting_evaluation"
