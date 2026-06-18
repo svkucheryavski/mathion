@@ -1,8 +1,19 @@
 <script lang="ts">
-  import type { BlockContent, VersionState } from '../../lib/types';
+  import type { BlockContent, VersionState, StudentMiniProjectListItem } from '../../lib/types';
   import SequenceLink from './SequenceLink.svelte';
+  import MiniProjectLink from './MiniProjectLink.svelte';
 
-  let { courseSlug, block, state: vstate }: { courseSlug: string; block: BlockContent; state: VersionState } = $props();
+  let {
+    courseSlug,
+    block,
+    state: vstate,
+    mpByBlockId,
+  }: {
+    courseSlug: string;
+    block: BlockContent;
+    state: VersionState;
+    mpByBlockId?: Record<string, StudentMiniProjectListItem>;
+  } = $props();
 
   let expanded = $state(true);
 </script>
@@ -20,6 +31,9 @@
       {#each block.sequences as s (s.id)}
         <li><SequenceLink {courseSlug} sequence={s} state={vstate} /></li>
       {/each}
+      {#if mpByBlockId?.[String(block.id)]}
+        <li><MiniProjectLink {courseSlug} item={mpByBlockId[String(block.id)]} /></li>
+      {/if}
     </ul>
   {/if}
 </section>
