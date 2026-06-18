@@ -14,7 +14,6 @@
   //
   // Spec: docs/superpowers/specs/2026-06-15-mp-in-blocks-design.md §6.
 
-  import { onMount } from 'svelte';
   import { ApiError } from '../lib/api';
   import {
     fetchDetail,
@@ -37,34 +36,44 @@
   let fetchError: ApiError | null = $state(null);
   let isLoading = $state(true);
 
-  onMount(() => {
-    // Slug captured at effect start — used as a stale-write guard so a rapid
-    // route change mid-fetch can't overwrite a newer page's state. Mirrors
-    // the `if (inflight?.slug !== startedSlug)` pattern at
+  // Prop-reactive load: `$effect` re-runs whenever `courseSlug` or `blockSlug`
+  // changes (router preserves the component instance across same-page route
+  // changes — onMount would only fire once and miss the new slugs). Plan
+  // line 1541 mandates `$effect` for this initial-load wiring.
+  $effect(() => {
+    // Snapshot BOTH slugs at effect start — stale-write guard for any
+    // in-flight response that lands after a navigation. Mirrors
     // stores/currentCourse.svelte.ts:53.
-    const startedSlug = courseSlug;
+    const startedCourseSlug = courseSlug;
+    const startedBlockSlug = blockSlug;
     const controller = new AbortController();
+
+    // Reset loading flag on every run so a navigation between MP pages
+    // shows the loading state again.
+    isLoading = true;
+    data = null;
+    fetchError = null;
 
     // Fire both fetches in parallel; they're independent.
     // - loadCourse: breadcrumb context only. Non-fatal — toast on hard errors,
     //   silent on AbortError, let auth-bounce propagate via emitUnauthorized.
     // - fetchDetail: page body. Hard error → fetchError full-page banner.
-    void loadCourse(courseSlug).catch((e: unknown) => {
+    void loadCourse(startedCourseSlug).catch((e: unknown) => {
       if (e instanceof DOMException && e.name === 'AbortError') return;
       if (e instanceof ApiError && e.status === 401) return; // auth bounce
-      pushToast("Couldn't load course details.", 'info');
+      pushToast("Couldn't load course details.", 'error');
     });
 
-    fetchDetail(courseSlug, blockSlug)
+    fetchDetail(startedCourseSlug, startedBlockSlug)
       .then((res) => {
-        // Stale-write guard: drop if the page has remounted for a different
-        // slug while this fetch was in flight.
-        if (startedSlug !== courseSlug) return;
+        // Stale-write guard: drop if the page's props changed mid-fetch.
+        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
         if (controller.signal.aborted) return;
         data = res;
       })
       .catch((e: unknown) => {
         if (controller.signal.aborted) return;
+        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
         if (e instanceof DOMException && e.name === 'AbortError') return;
         if (e instanceof ApiError) {
           if (e.status === 401) return; // emitUnauthorized handled by api.ts
@@ -77,6 +86,7 @@
       })
       .finally(() => {
         if (controller.signal.aborted) return;
+        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
         isLoading = false;
       });
 
@@ -104,16 +114,20 @@
   // Deadline summary text. Resubmission deadline takes prominence when the
   // student is in a revision state. Hard deadline shows relative-days
   // (forward/passed). Soft deadline appears inline in parentheses.
-  function daysBetween(target: Date, now: Date): number {
-    const ms = target.getTime() - now.getTime();
-    return Math.round(ms / 86_400_000);
-  }
-
+  //
+  // IMPORTANT: branch on the RAW millisecond diff sign BEFORE rounding —
+  // `Math.round(-1h / 24h)` is `-0` which compares `>= 0` and would
+  // mislabel a deadline 1 hour ago as "0 days remaining" instead of
+  // "passed 0 days ago".
   function formatRelativeDeadline(iso: string): string {
     const formatted = formatLocalWithTz(iso);
-    const days = daysBetween(new Date(iso), new Date());
-    if (days >= 0) return `${formatted} — ${days} day${days === 1 ? '' : 's'} remaining`;
-    const passed = -days;
+    const diffMs = new Date(iso).getTime() - Date.now();
+    const dayMs = 86_400_000;
+    if (diffMs >= 0) {
+      const days = Math.round(diffMs / dayMs);
+      return `${formatted} — ${days} day${days === 1 ? '' : 's'} remaining`;
+    }
+    const passed = Math.round(-diffMs / dayMs);
     return `${formatted} — passed ${passed} day${passed === 1 ? '' : 's'} ago`;
   }
 

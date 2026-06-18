@@ -145,10 +145,10 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
 
     expect(target.querySelector('section.history')).toBeNull();
     const group = target.querySelector('section.group-block');
-    expect(group).not.toBeNull();
-    expect(group!.textContent).toContain('Team Alpha');
-    expect(group!.textContent).toContain('Alice Student (you)');
-    expect(group!.textContent).toContain('Bob Other');
+    if (!group) throw new Error('expected section.group-block to be present');
+    expect(group.textContent).toContain('Team Alpha');
+    expect(group.textContent).toContain('Alice Student (you)');
+    expect(group.textContent).toContain('Bob Other');
     expect(target.querySelector('[data-testid="fetch-error-banner"]')).toBeNull();
     expect(target.querySelector('[data-testid="assignment-html"]')).not.toBeNull();
   });
@@ -164,8 +164,8 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
     await mountPage();
 
     const pill = target.querySelector('header .pill');
-    expect(pill).not.toBeNull();
-    expect(pill!.textContent).toContain('Awaiting evaluation');
+    if (!pill) throw new Error('expected header .pill to be present');
+    expect(pill.textContent).toContain('Awaiting evaluation');
 
     const entries = target.querySelectorAll('section.history section.history-entry');
     expect(entries.length).toBe(1);
@@ -196,13 +196,13 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
     await mountPage();
 
     const pill = target.querySelector('header .pill');
-    expect(pill!.textContent).toContain('Accepted');
+    expect(pill?.textContent).toContain('Accepted');
 
     const entries = target.querySelectorAll('section.history section.history-entry');
     expect(entries.length).toBe(2);
     // First rendered = newest = submission #2; second rendered = #1.
-    expect(entries[0].querySelector('h3')!.textContent).toContain('Submission #2');
-    expect(entries[1].querySelector('h3')!.textContent).toContain('Submission #1');
+    expect(entries[0].querySelector('h3')?.textContent).toContain('Submission #2');
+    expect(entries[1].querySelector('h3')?.textContent).toContain('Submission #1');
   });
 
   it('scenario 4 — rejected: 1 entry with eval block visible showing "Rejected" + pill "Rejected"', async () => {
@@ -218,7 +218,7 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
     await mountPage();
 
     const pill = target.querySelector('header .pill');
-    expect(pill!.textContent).toContain('Rejected');
+    expect(pill?.textContent).toContain('Rejected');
 
     const entries = target.querySelectorAll('section.history section.history-entry');
     expect(entries.length).toBe(1);
@@ -241,7 +241,7 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
     await mountPage();
 
     const pill = target.querySelector('header .pill');
-    expect(pill!.textContent).toContain('Needs revision (minor)');
+    expect(pill?.textContent).toContain('Needs revision (minor)');
 
     const entries = target.querySelectorAll('section.history section.history-entry');
     expect(entries.length).toBe(1);
@@ -260,12 +260,12 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
     await mountPage();
 
     const group = target.querySelector('section.group-block');
-    expect(group).not.toBeNull();
+    if (!group) throw new Error('expected section.group-block to be present');
     // D4 friendly banner copy.
-    expect(group!.textContent).toMatch(/not yet assigned to a group/i);
+    expect(group.textContent).toMatch(/not yet assigned to a group/i);
     // No member list — heuristic: no "(you)" marker, no "Team Alpha".
-    expect(group!.textContent).not.toContain('Team Alpha');
-    expect(group!.textContent).not.toContain('(you)');
+    expect(group.textContent).not.toContain('Team Alpha');
+    expect(group.textContent).not.toContain('(you)');
     // History absent.
     expect(target.querySelector('section.history')).toBeNull();
   });
@@ -278,17 +278,24 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
       submission_history: [entry],
       latest_status: 'awaiting_evaluation',
+      // `awaiting_evaluation` mandates can_submit=false with matching reason
+      // (spec §3.2 lines 358-362). Without these overrides we'd inherit
+      // can_submit=true from makeDetail() — an unreachable state in
+      // production that D6 tests will share.
+      can_submit: false,
+      can_submit_reason_if_not: 'awaiting_evaluation',
     }));
     await mountPage();
 
     const entryEl = target.querySelector('section.history-entry');
-    expect(entryEl).not.toBeNull();
+    if (!entryEl) throw new Error('expected section.history-entry to be present');
     // D15: pill must NOT be inside the <h3>.
-    expect(entryEl!.querySelector('h3 .pill')).toBeNull();
+    expect(entryEl.querySelector('h3 .pill')).toBeNull();
     // Pill MUST exist as a sibling within the header row.
-    const headerRow = entryEl!.querySelector('.history-entry-header');
-    expect(headerRow).not.toBeNull();
-    expect(headerRow!.querySelector('.pill')).not.toBeNull();
-    expect(headerRow!.querySelector('.pill')!.textContent).toContain('Late');
+    const headerRow = entryEl.querySelector('.history-entry-header');
+    if (!headerRow) throw new Error('expected .history-entry-header to be present');
+    const latePill = headerRow.querySelector('.pill');
+    if (!latePill) throw new Error('expected Late .pill in header row');
+    expect(latePill.textContent).toContain('Late');
   });
 });
