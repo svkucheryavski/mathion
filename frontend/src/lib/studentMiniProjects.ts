@@ -69,11 +69,14 @@ export function fetchDetail(
   );
 }
 
-// POST the picked PDF as the next submission for this MP. Mirrors
-// lib/evaluations.ts:createEvaluation — raw fetch (FormData body), manual
-// 401 emit + ApiError construction, all non-2xx surface as ApiError so the
-// detail page state machine can branch on 409 (state changed) vs other 4xx
-// vs 5xx/network.
+// POST the picked PDF as the next submission for this MP.
+//
+// Mirrors the non-2xx + 401 branches of lib/evaluations.ts:createEvaluation
+// — raw fetch (FormData body), manual 401 emit + ApiError construction, all
+// non-2xx surface as ApiError so the detail page state machine can branch on
+// 409 (state changed) vs other 4xx vs 5xx. Network errors (TypeError from
+// raw fetch, DOMException AbortError) propagate naturally per spec F17 —
+// the caller's catch distinguishes ApiError vs the rest.
 export async function submit(mpId: number, file: File): Promise<void> {
   const fd = new FormData();
   fd.append('file', file);

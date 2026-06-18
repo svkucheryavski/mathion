@@ -105,7 +105,7 @@ describe('fetchListSwallow403', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates 500 (F16: no swallow)', async () => {
+  it('propagates 500 instead of swallowing', async () => {
     fetchMock.mockResolvedValue(nonJsonResp(500, 'Internal Server Error'));
     await expect(fetchListSwallow403('algebra-101')).rejects.toBeInstanceOf(ApiError);
     await expect(fetchListSwallow403('algebra-101')).rejects.toMatchObject({ status: 500 });
