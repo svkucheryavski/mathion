@@ -53,7 +53,7 @@
       <p class="empty">This course has no published blocks yet.</p>
     {:else}
       {#each currentCourse.value.blocks as b (b.id)}
-        <BlockGroup {courseSlug} block={b} state={currentCourse.value.state} />
+        <BlockGroup {courseSlug} block={b} state={currentCourse.value.state} mpByBlockId={currentCourse.value.miniProjectsByBlockId} />
       {/each}
     {/if}
   {/if}
