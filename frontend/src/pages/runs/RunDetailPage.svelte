@@ -19,12 +19,13 @@
   import RunAssetsTab from '../../components/runs/RunAssetsTab.svelte';
   import RunProgressTab from '../../components/runs/RunProgressTab.svelte';
   import RunSubmissionTab from '../../components/runs/RunSubmissionTab.svelte';
+  import PublishConflictsModal from '../../components/runs/PublishConflictsModal.svelte';
   import { listBlocks } from '../../lib/blocks';
   import { listMiniProjects } from '../../lib/miniProjects';
   import { listRunAssets } from '../../lib/runAssets';
   import type {
     Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse,
-    BlockResponse, MiniProjectResponse, RunAssetResponse,
+    BlockResponse, MiniProjectResponse, RunAssetResponse, PublishConflict,
   } from '../../lib/types';
 
   export type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets' | 'progress' | 'submission';
@@ -166,6 +167,8 @@
     activeTab = 'overview';
     rosterPrefilter = null;
     showImportModal = false;
+    publishModalOpen = false;
+    publishConflicts = [];
   });
 
   function gotoTab(tab: ActiveTab, prefilter?: 'unassigned' | null) {
@@ -239,6 +242,8 @@
     : (readiness.firstViolation ?? ''));
 
   let unpublishConfirmOpen = $state(false);
+  let publishConflicts: PublishConflict[] = $state([]);
+  let publishModalOpen = $state(false);
 
   async function doPublish() {
     if (runIdInt === null) return;
@@ -249,7 +254,18 @@
       run = r;
     } catch (e) {
       if (myToken !== loadToken) return;
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      if (e instanceof ApiError && e.errorCode === 'student_already_active_in_course') {
+        const raw = (e.body as { conflicts?: unknown } | undefined)?.conflicts;
+        const conflicts: PublishConflict[] = Array.isArray(raw) ? (raw as PublishConflict[]) : [];
+        if (conflicts.length === 0) {
+          pushToast(e.displayMessage, 'error');
+          return;
+        }
+        publishConflicts = conflicts;
+        publishModalOpen = true;
+      } else if (e instanceof ApiError) {
+        pushToast(e.displayMessage, 'error');
+      }
     }
   }
 
@@ -458,6 +474,12 @@
     {/if}
   </section>
 {/if}
+
+<PublishConflictsModal
+  open={publishModalOpen}
+  conflicts={publishConflicts}
+  onClose={() => { publishModalOpen = false; publishConflicts = []; }}
+/>
 
 <style>
   .run-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 16px); padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
