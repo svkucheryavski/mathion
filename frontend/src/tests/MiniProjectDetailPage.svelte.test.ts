@@ -79,14 +79,19 @@ afterEach(() => {
   if (component) { unmount(component); component = null; }
   if (target.parentNode) target.parentNode.removeChild(target);
   __test__setSlots(null);
-  // Spec line 980 — restore the original `visibilityState` descriptor so
-  // subsequent suites see jsdom's default behavior, not our override.
+  // Spec line 980 — restore the original `visibilityState` to avoid leaking
+  // state across tests. Per-test setup writes via
+  // `Object.defineProperty(document, 'visibilityState', ...)`, which creates
+  // an OWN property on the `document` instance — restoring the prototype
+  // descriptor alone would leave that own property intact. So defensively
+  // do BOTH:
+  //  1. Delete the per-test own-property override on the `document` instance
+  //     (the actual leak source).
+  //  2. Restore the original `Document.prototype` descriptor (in case any
+  //     test ever mutates the prototype).
+  delete (document as unknown as { visibilityState?: unknown }).visibilityState;
   if (ORIG_VISIBILITY_DESCRIPTOR) {
     Object.defineProperty(Document.prototype, 'visibilityState', ORIG_VISIBILITY_DESCRIPTOR);
-  } else {
-    // jsdom didn't expose a descriptor on Document.prototype — just drop our
-    // override from the instance so the prototype getter (if any) takes over.
-    delete (document as unknown as { visibilityState?: unknown }).visibilityState;
   }
 });
 
@@ -437,7 +442,13 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     // Banner is present with the spec-mandated copy.
     const banner = target.querySelector('[data-testid="mp-submit-error"]');
     if (!banner) throw new Error('expected 409 banner');
-    expect(banner.textContent).toContain('Submission state changed — refreshing.');
+    // Byte-exact equality — copy drift would otherwise sneak through a
+    // substring match. The banner copy lives in a <p> child; query it
+    // directly so an incidental Retry button (none on 409, but defensive)
+    // can't bleed into the comparison.
+    const bannerP = banner.querySelector('p');
+    if (!bannerP) throw new Error('expected <p> inside 409 banner');
+    expect(bannerP.textContent?.trim()).toBe('Submission state changed — refreshing.');
 
     // Now resolve the pending refetch — state drops back to 'idle' and the
     // banner disappears.
@@ -595,6 +606,30 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
 
     await mountPage();
     await pickFile(makePdf());
+    // pickFile() mutates input.files but NOT input.value — without an
+    // explicit pre-submit sentinel write the post-submit `input.value === ''`
+    // assertion is vacuous (the field was already empty). Set a sentinel
+    // BEFORE clicking submit so the post-assertion can ONLY pass if the
+    // production reset (`fileInputEl.value = ''` in the 201-success branch)
+    // actually fires.
+    const fileInputForSentinel = target.querySelector<HTMLInputElement>(
+      'input[type="file"][data-testid="mp-file-input"]',
+    );
+    if (!fileInputForSentinel) throw new Error('expected file input before submit');
+    try {
+      fileInputForSentinel.value = 'sentinel-before-submit.pdf';
+    } catch {
+      // Some jsdom builds expose `value` as a getter-only property unless
+      // redefined; fall through to defineProperty in that case.
+      Object.defineProperty(fileInputForSentinel, 'value', {
+        configurable: true,
+        writable: true,
+        value: 'sentinel-before-submit.pdf',
+      });
+    }
+    // Sanity-check the sentinel landed — otherwise the post-assertion below
+    // would still be vacuous against a silently-rejected write.
+    expect(fileInputForSentinel.value).toBe('sentinel-before-submit.pdf');
     clickSubmit();
     await settle();
 
@@ -602,6 +637,8 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
     const input = target.querySelector<HTMLInputElement>('input[type="file"][data-testid="mp-file-input"]');
     if (!input) throw new Error('expected file input present after success + can_submit=true refetch');
     // Native input value cleared so the user can re-pick the SAME filename.
+    // Meaningful only because we set a sentinel before submit — this can
+    // ONLY pass if the production fileInputEl.value = '' reset actually ran.
     expect(input.value).toBe('');
     // The submit button is disabled in 'success' state (canSubmitClick excludes
     // both 'submitting' and 'success').
@@ -721,7 +758,13 @@ describe('MiniProjectDetailPage (D6 — misc)', () => {
 
     const banner = target.querySelector('[data-testid="fetch-error-banner"]');
     if (!banner) throw new Error('expected full-page fetch-error banner after 403');
-    expect(banner.textContent).toContain('This mini-project is no longer accessible. The run may have been closed.');
+    // The full-page banner renders <h1>, <p>{copy}</p>, and a "Back to course"
+    // button. Query the <p> so the byte-exact comparison only sees the copy.
+    const bannerP = banner.querySelector('p');
+    if (!bannerP) throw new Error('expected <p> inside 403 fetch-error banner');
+    expect(bannerP.textContent?.trim()).toBe(
+      'This mini-project is no longer accessible. The run may have been closed.',
+    );
   });
 
   it('D6.17 visibility refetch 404 — full-page banner copy', async () => {
@@ -736,7 +779,13 @@ describe('MiniProjectDetailPage (D6 — misc)', () => {
 
     const banner = target.querySelector('[data-testid="fetch-error-banner"]');
     if (!banner) throw new Error('expected full-page fetch-error banner after 404');
-    expect(banner.textContent).toContain("This mini-project doesn't exist or has been unpublished.");
+    // The full-page banner renders <h1>, <p>{copy}</p>, and a "Back to course"
+    // button. Query the <p> so the byte-exact comparison only sees the copy.
+    const bannerP = banner.querySelector('p');
+    if (!bannerP) throw new Error('expected <p> inside 404 fetch-error banner');
+    expect(bannerP.textContent?.trim()).toBe(
+      "This mini-project doesn't exist or has been unpublished.",
+    );
   });
 
   it('D6.14 visibility — hidden dispatch no-op; visible dispatch triggers refetch', async () => {
