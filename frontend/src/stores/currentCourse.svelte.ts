@@ -16,9 +16,9 @@ type CourseSnapshot = {
   version: VersionContent['version'];
   blocks: BlockContent[];
   state: VersionState;
-  // E1 will populate this from fetchListSwallow403; D6 forward-ports the
-  // type slot so MiniProjectDetailPage's write-back compiles. Empty map for
-  // now — the detail page's F6 guard checks `item` presence before mutating.
+  // Populated by loadCourse from fetchListSwallow403. The detail page's F6
+  // guard checks `item` presence before mutating, so an empty map (e.g.,
+  // 403-swallow case) is safe.
   miniProjectsByBlockId: Record<string, StudentMiniProjectListItem>;
 };
 
