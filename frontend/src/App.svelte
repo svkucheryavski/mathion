@@ -10,6 +10,7 @@
   import CourseList from './pages/CourseList.svelte';
   import CourseView from './pages/CourseView.svelte';
   import SequencePlayer from './pages/SequencePlayer.svelte';
+  import MiniProjectDetailPage from './pages/MiniProjectDetailPage.svelte';
   import NotFound from './pages/NotFound.svelte';
   import VersionsPage from './pages/editor/VersionsPage.svelte';
   import VersionEditPage from './pages/editor/VersionEditPage.svelte';
@@ -23,6 +24,7 @@
     CourseList: CourseList as Component<Record<string, string>>,
     CourseView: CourseView as Component<Record<string, string>>,
     SequencePlayer: SequencePlayer as Component<Record<string, string>>,
+    MiniProjectDetailPage: MiniProjectDetailPage as Component<Record<string, string>>,
     VersionsPage: VersionsPage as Component<Record<string, string>>,
     VersionEditPage: VersionEditPage as Component<Record<string, string>>,
     ItemEditPage: ItemEditPage as Component<Record<string, string>>,

@@ -6,6 +6,7 @@ export const routes: Route[] = [
   { path: '/teaching', component: 'TeacherRunListPage', auth: true },
   { path: '/courses/:courseSlug', component: 'CourseView', auth: true },
   { path: '/courses/:courseSlug/seq/:sequenceId', component: 'SequencePlayer', auth: true },
+  { path: '/courses/:courseSlug/blocks/:blockSlug/mini-project', component: 'MiniProjectDetailPage', auth: true },
   { path: '/courses/:courseSlug/edit', component: 'VersionsPage', auth: true },
   { path: '/courses/:courseSlug/edit/v/:versionId', component: 'VersionEditPage', auth: true },
   { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId', component: 'VersionEditPage', auth: true },
