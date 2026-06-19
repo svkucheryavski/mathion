@@ -1,5 +1,5 @@
 <script lang="ts">
-  // MiniProjectDetailPage — student-facing detail page (Task D5 scope).
+  // MiniProjectDetailPage — student-facing detail page (Tasks D5 + D6).
   //
   // D5 owns: page-mount sequencing (parallel loadCourse + fetchDetail),
   // header (breadcrumb + H1 + StatusPill + deadline summary), assignment
@@ -8,9 +8,13 @@
   // (DESC, D15 Late-pill sibling-of-h3), and fetch-error full-page banner
   // (spec §6 step 7 — 403 / 404 / generic).
   //
-  // D6 will add: submit/resubmit section, state machine, visibilitychange
-  // refetch, write-back into currentCourse.miniProjectsByBlockId (with F6
-  // slug guard), and the sr-only aria-live status announcer.
+  // D6 owns: submit / resubmit section, the 4-state submit machine (C15),
+  // client-side guard rails (.pdf + MAX_FILE_SIZE), error mapping per status
+  // (400 / 401 / 403 / 409 / 503 / network), visibilitychange refetch with
+  // single-flight gate (spec §6 step 6), write-back into
+  // currentCourse.miniProjectsByBlockId guarded by the slug snapshot (F6),
+  // and the sr-only aria-live status announcer rendered OUTSIDE the
+  // {#if isLoading}/{#if data} branching for stable DOM identity (C16).
   //
   // Spec: docs/superpowers/specs/2026-06-15-mp-in-blocks-design.md §6.
 
@@ -18,7 +22,10 @@
   import {
     fetchDetail,
     rewriteExternalLinks,
+    submit,
     LATEST_STATUS_META,
+    REASON_LABELS,
+    MAX_FILE_SIZE,
   } from '../lib/studentMiniProjects';
   import type { StudentMiniProjectDetail } from '../lib/types';
   import StatusPill from '../components/course/StatusPill.svelte';
@@ -35,6 +42,63 @@
   let assignmentEl: HTMLDivElement | undefined = $state();
   let fetchError: ApiError | null = $state(null);
   let isLoading = $state(true);
+
+  // D6 — submit-flow state machine (decision C15). 4 explicit states:
+  // 'idle' (default), 'submitting' (POST in flight; controls disabled),
+  // 'error' (banner shown; file kept for retry-without-re-pick),
+  // 'success' (no banner; next file pick → 'idle').
+  type SubmitState = 'idle' | 'submitting' | 'error' | 'success';
+  let submitState: SubmitState = $state('idle');
+  let selectedFile: File | null = $state(null);
+  let submitErrorMessage: string | null = $state(null);
+  // Drives the Retry button on network/503 banners.
+  let submitErrorIsNetwork = $state(false);
+
+  // Single-flight guard shared by initial load + visibility-driven refetches.
+  // The spec mandates "skip if already fetching" (line 805) — using one flag
+  // means an in-flight visibility refetch can't race the initial mount fetch,
+  // and a focus burst can't fan out to multiple requests.
+  let refetchInFlight = false;
+
+  // Shared refetch helper — used by the initial-load $effect AND by the
+  // submit handler's success/409 paths AND by the visibilitychange listener.
+  // Stale-write guarded against slug changes and the AbortController. Sets
+  // the shared `refetchInFlight` single-flight gate so a second visibility
+  // event mid-fetch is a no-op.
+  function refetchDetail(
+    startedCourseSlug: string,
+    startedBlockSlug: string,
+    controller: AbortController,
+    options: { onLoadingDone?: boolean } = {},
+  ): Promise<void> {
+    refetchInFlight = true;
+    return fetchDetail(startedCourseSlug, startedBlockSlug)
+      .then((res) => {
+        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
+        if (controller.signal.aborted) return;
+        data = res;
+      })
+      .catch((e: unknown) => {
+        if (controller.signal.aborted) return;
+        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        if (e instanceof ApiError) {
+          if (e.status === 401) return; // emitUnauthorized handled by api.ts
+          fetchError = e;
+          return;
+        }
+        // Network / unexpected — surface as a synthetic 0 so the banner falls
+        // through to the generic copy.
+        fetchError = new ApiError(0, 'Network error');
+      })
+      .finally(() => {
+        refetchInFlight = false;
+        if (!options.onLoadingDone) return;
+        if (controller.signal.aborted) return;
+        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
+        isLoading = false;
+      });
+  }
 
   // Prop-reactive load: `$effect` re-runs whenever `courseSlug` or `blockSlug`
   // changes (router preserves the component instance across same-page route
@@ -69,33 +133,23 @@
       pushToast("Couldn't load course details.", 'error');
     });
 
-    fetchDetail(startedCourseSlug, startedBlockSlug)
-      .then((res) => {
-        // Stale-write guard: drop if the page's props changed mid-fetch.
-        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
-        if (controller.signal.aborted) return;
-        data = res;
-      })
-      .catch((e: unknown) => {
-        if (controller.signal.aborted) return;
-        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        if (e instanceof ApiError) {
-          if (e.status === 401) return; // emitUnauthorized handled by api.ts
-          fetchError = e;
-          return;
-        }
-        // Network / unexpected — surface as a synthetic 0 so the banner falls
-        // through to the generic copy.
-        fetchError = new ApiError(0, 'Network error');
-      })
-      .finally(() => {
-        if (controller.signal.aborted) return;
-        if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
-        isLoading = false;
-      });
+    void refetchDetail(startedCourseSlug, startedBlockSlug, controller, { onLoadingDone: true });
+
+    // D6 — visibilitychange refetch (spec §6 step 6). When the tab is
+    // brought back into focus, re-pull the detail so a stale page doesn't
+    // miss a teacher's just-pushed evaluation. Single-flight via
+    // `refetchInFlight` (the shared gate the initial fetch above already
+    // toggled).
+    const onVisChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (refetchInFlight) return;
+      if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
+      void refetchDetail(startedCourseSlug, startedBlockSlug, controller);
+    };
+    document.addEventListener('visibilitychange', onVisChange);
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
       controller.abort();
     };
   });
@@ -165,9 +219,162 @@
   function evaluationResultLabel(result: EvalResult): string {
     return LATEST_STATUS_META[result].label;
   }
+
+  // ---- D6 — submit flow ----
+
+  // Heading copy switches when the student is in a revision state — the
+  // existing submissions are still in history, so "Submit revision" reads
+  // more honestly than "Submit".
+  const submitHeading = $derived.by(() => {
+    if (!data) return 'Submit';
+    if (data.latest_status === 'major_revision' || data.latest_status === 'minor_revision') {
+      return 'Submit revision';
+    }
+    return 'Submit';
+  });
+
+  const canSubmitClick = $derived.by(() => {
+    return selectedFile !== null && submitState !== 'submitting';
+  });
+
+  function handleFileChange(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    const f = input.files && input.files.length > 0 ? input.files[0] : null;
+    selectedFile = f;
+    // Spec line 781: picking a new file in 'error' does NOT clear the banner
+    // or change state — the student may want to retry with the same file
+    // after seeing the error. Only the transition out of 'success' is here.
+    if (submitState === 'success') submitState = 'idle';
+  }
+
+  async function handleSubmit(): Promise<void> {
+    if (!data) return;
+    if (selectedFile === null) return;
+
+    // Client-side guard rails. Backend is the source of truth; these checks
+    // simply avoid a round-trip for the obvious cases.
+    const file = selectedFile;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      submitErrorMessage = 'Only PDF files are accepted.';
+      submitErrorIsNetwork = false;
+      submitState = 'error';
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      submitErrorMessage = 'File too large — 20 MB maximum.';
+      submitErrorIsNetwork = false;
+      submitState = 'error';
+      return;
+    }
+
+    submitState = 'submitting';
+    submitErrorMessage = null;
+    submitErrorIsNetwork = false;
+
+    const startedCourseSlug = courseSlug;
+    const startedBlockSlug = blockSlug;
+    const mpId = data.mp_id;
+
+    try {
+      await submit(mpId, file);
+    } catch (e: unknown) {
+      if (e instanceof ApiError) {
+        if (e.status === 401) {
+          // Auth bounce already emitted by the wire layer; no banner.
+          return;
+        }
+        if (e.status === 409) {
+          // Spec line 794 — race: refetch detail, transition to idle so the
+          // freshly-loaded state drives the next decision.
+          submitErrorMessage = 'Submission state changed — refreshing.';
+          submitErrorIsNetwork = false;
+          submitState = 'error';
+          // Kick a refetch; on success, drop back to idle so the banner clears.
+          const controller = new AbortController();
+          void refetchDetail(startedCourseSlug, startedBlockSlug, controller).then(() => {
+            if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
+            submitErrorMessage = null;
+            submitState = 'idle';
+          });
+          return;
+        }
+        if (e.status === 403) {
+          submitErrorMessage = 'Permission lost — refresh.';
+          submitErrorIsNetwork = false;
+          submitState = 'error';
+          return;
+        }
+        if (e.status === 400) {
+          submitErrorMessage = typeof e.detail === 'string' ? e.detail : e.displayMessage;
+          submitErrorIsNetwork = false;
+          submitState = 'error';
+          return;
+        }
+        if (e.status === 503) {
+          submitErrorMessage = "Couldn't submit — retry?";
+          submitErrorIsNetwork = true;
+          submitState = 'error';
+          return;
+        }
+        // Other 4xx/5xx — backend copy.
+        submitErrorMessage = e.displayMessage;
+        submitErrorIsNetwork = false;
+        submitState = 'error';
+        return;
+      }
+      // Non-ApiError (network / AbortError / unexpected).
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        // Page tearing down — leave state alone, the unmount cleanup handles it.
+        return;
+      }
+      submitErrorMessage = "Couldn't submit — retry?";
+      submitErrorIsNetwork = true;
+      submitState = 'error';
+      return;
+    }
+
+    // 201 — success. Refetch the detail, then write back into the course
+    // snapshot for the block-link cache (F6 slug guard).
+    submitState = 'success';
+    const controller = new AbortController();
+    await refetchDetail(startedCourseSlug, startedBlockSlug, controller);
+    if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
+    const fresh = data;
+    if (fresh !== null) {
+      // F6: only write back when the visible store still matches the course
+      // the page was mounted on; the user may have switched courses mid-flight.
+      if (currentCourse.value !== null && currentCourse.value.slug === startedCourseSlug) {
+        const item = currentCourse.value.miniProjectsByBlockId[String(fresh.block_id)];
+        if (item) item.latest_status = fresh.latest_status;
+      }
+    }
+    // Clear the selected file from state so the disabled "Submit" button
+    // doesn't snap back to enabled if can_submit re-opens later. The
+    // submit-section is hidden by data.can_submit=false in the common case
+    // (refetched state typically transitions to awaiting_evaluation).
+    selectedFile = null;
+  }
+
+  // Status label used by the sr-only aria-live region. Reads from
+  // LATEST_STATUS_META so the single source of truth is shared with the
+  // visible StatusPill. When data is null (loading), report a stable
+  // placeholder so the live region's text changes only on real state changes.
+  const statusLiveLabel = $derived.by(() => {
+    if (!data) return 'Loading';
+    return LATEST_STATUS_META[data.latest_status].label;
+  });
 </script>
 
 <div class="page">
+  <!--
+    C16 — sr-only aria-live status announcer. MUST live OUTSIDE the
+    {#if isLoading}/{#if data} branching so its DOM node identity stays
+    stable across state transitions (the AT shouldn't re-read the whole
+    region just because data flipped from loading→loaded). The text reads
+    from `statusLiveLabel`, which is a pure derived view of data.latest_status.
+  -->
+  <div class="sr-only" aria-live="polite" data-testid="sr-live">Status: {statusLiveLabel}</div>
+
   {#if isLoading}
     <p>Loading…</p>
   {:else if fetchErrorMessage !== null}
@@ -235,6 +442,49 @@
       {/if}
     </section>
 
+    <!-- D6 — submit / resubmit section. Renders ONLY when the group is
+         assigned AND can_submit has been resolved (true OR false with a
+         reason). When can_submit=false, render the reason banner only —
+         no file picker, no submit button. -->
+    {#if data.group !== null && data.can_submit !== null}
+      <section class="submit-block" data-testid="mp-submit-section">
+        {#if data.can_submit === true}
+          <h2>{submitHeading}</h2>
+          <input
+            type="file"
+            accept="application/pdf"
+            data-testid="mp-file-input"
+            disabled={submitState === 'submitting'}
+            onchange={handleFileChange}
+          />
+          <button
+            type="button"
+            data-testid="mp-submit-btn"
+            disabled={!canSubmitClick}
+            onclick={handleSubmit}
+          >
+            {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
+          </button>
+          {#if submitState === 'error' && submitErrorMessage !== null}
+            <div class="banner banner-error" data-testid="mp-submit-error">
+              <p>{submitErrorMessage}</p>
+              {#if submitErrorIsNetwork}
+                <button
+                  type="button"
+                  data-testid="mp-retry-btn"
+                  onclick={handleSubmit}
+                >Retry</button>
+              {/if}
+            </div>
+          {/if}
+        {:else if data.can_submit_reason_if_not !== null}
+          <div class="banner banner-info" data-testid="mp-cannot-submit">
+            {REASON_LABELS[data.can_submit_reason_if_not]}
+          </div>
+        {/if}
+      </section>
+    {/if}
+
     {#if data.submission_history.length > 0}
       <section class="history">
         <h2>Submission history</h2>
@@ -296,4 +546,18 @@
   .history-entry-header { display: flex; align-items: center; gap: var(--space-2); }
   .history-entry-header h3 { margin: 0; }
   .banner-error { padding: var(--space-3); border: 1px solid var(--danger, #c33); border-radius: 4px; background: var(--danger-bg, #fee); }
+  .banner-info { padding: var(--space-2); border: 1px solid var(--info, #ccd); border-radius: 4px; background: var(--info-bg, #eef); margin-top: var(--space-2); }
+  .submit-block { margin: var(--space-3) 0; padding: var(--space-2); border: 1px solid var(--border, #ddd); border-radius: 4px; }
+  /* C16 — visually-hidden but reachable by screen readers. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 </style>

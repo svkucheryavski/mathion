@@ -20,6 +20,10 @@ import type { StudentMiniProjectListItem, StudentMiniProjectDetail, LatestStatus
 // type alongside LATEST_STATUS_META from a single module.
 export type { LatestStatus };
 
+// Mirrors backend settings.max_file_size; update both together.
+// Backend rejects definitively — this is a UX guard only.
+export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
 export const REASON_LABELS = {
   mp_not_visible: 'This mini-project is no longer available.',
   pending_group_assignment: "Your teacher will assign you to a group soon. You'll be able to submit then.",

@@ -1,6 +1,12 @@
 import { api } from '../lib/api';
 import { ApiError } from '../lib/api';
-import type { BlockContent, ItemStateEntry, VersionContent, VersionState } from '../lib/types';
+import type {
+  BlockContent,
+  ItemStateEntry,
+  StudentMiniProjectListItem,
+  VersionContent,
+  VersionState,
+} from '../lib/types';
 
 type CourseSnapshot = {
   slug: string;
@@ -9,6 +15,10 @@ type CourseSnapshot = {
   version: VersionContent['version'];
   blocks: BlockContent[];
   state: VersionState;
+  // E1 will populate this from fetchListSwallow403; D6 forward-ports the
+  // type slot so MiniProjectDetailPage's write-back compiles. Empty map for
+  // now — the detail page's F6 guard checks `item` presence before mutating.
+  miniProjectsByBlockId: Record<string, StudentMiniProjectListItem>;
 };
 
 export const currentCourse = $state<{ value: CourseSnapshot | null }>({ value: null });
@@ -58,6 +68,7 @@ export function loadCourse(slug: string): Promise<void> {
         version: content.version,
         blocks: content.blocks,
         state,
+        miniProjectsByBlockId: {},
       };
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return;

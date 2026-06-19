@@ -24,6 +24,7 @@ describe('stores/currentCourse', () => {
       version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
+      miniProjectsByBlockId: {},
     });
     expect(currentCourse.value).not.toBeNull();
     clearCourse();
@@ -43,6 +44,7 @@ describe('stores/currentCourse', () => {
           '42': { is_covered: false, time_spent_seconds: 0, last_visited_at: null, last_answers: null, attempt_count: 0, score_correct: null, score_total: null },
         },
       },
+      miniProjectsByBlockId: {},
     });
     markItemCovered(42);
     expect(currentCourse.value!.state.items['42'].is_covered).toBe(true);
@@ -61,6 +63,7 @@ describe('stores/currentCourse', () => {
           '42': { is_covered: false, time_spent_seconds: 0, last_visited_at: null, last_answers: null, attempt_count: 0, score_correct: null, score_total: null },
         },
       },
+      miniProjectsByBlockId: {},
     });
     recordItemVisit(42);
     expect(currentCourse.value!.state.items['42'].last_visited_at).not.toBeNull();
@@ -74,6 +77,7 @@ describe('stores/currentCourse', () => {
       version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
+      miniProjectsByBlockId: {},
     });
     expect(() => markItemCovered(999)).not.toThrow();
   });
