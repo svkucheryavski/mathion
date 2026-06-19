@@ -1,5 +1,6 @@
 import { api } from '../lib/api';
 import { ApiError } from '../lib/api';
+import { fetchListSwallow403 } from '../lib/studentMiniProjects';
 import type {
   BlockContent,
   ItemStateEntry,
@@ -55,9 +56,10 @@ export function loadCourse(slug: string): Promise<void> {
         `/api/courses/${encodeURIComponent(startedSlug)}/my-version`,
         { signal: controller.signal },
       );
-      const [content, state] = await Promise.all([
+      const [content, state, miniProjectsByBlockId] = await Promise.all([
         api.get<VersionContent>(`/api/versions/${my.version_id}/content`, { signal: controller.signal }),
         api.get<VersionState>(`/api/versions/${my.version_id}/state`, { signal: controller.signal }),
+        fetchListSwallow403(startedSlug, controller.signal),
       ]);
       // Stale-write guard.
       if (inflight?.slug !== startedSlug) return;
@@ -68,7 +70,7 @@ export function loadCourse(slug: string): Promise<void> {
         version: content.version,
         blocks: content.blocks,
         state,
-        miniProjectsByBlockId: {},
+        miniProjectsByBlockId,
       };
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return;
