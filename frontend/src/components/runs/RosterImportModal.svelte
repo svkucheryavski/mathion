@@ -203,6 +203,9 @@
                 <td>
                   {#if r.status === 'added'}
                     <span class="badge badge-ok">added</span>
+                  {:else if r.error_code === 'student_already_active_in_course'}
+                    <span class="badge badge-error" data-result="error" title={r.detail ?? ''}>error</span>
+                    <span class="error-detail" title={r.detail ?? ''}>{r.detail}</span>
                   {:else}
                     <span class="badge badge-error" data-result="error" title={r.detail ?? ''}>error</span>
                   {/if}
@@ -247,5 +250,17 @@
   .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.85em; }
   .badge-ok { background: #e7f5ee; color: #0a6c3e; }
   .badge-error { background: #fdecea; color: #a8071a; cursor: help; }
+  .error-detail {
+    color: var(--muted, #666);
+    font-size: 0.9em;
+    margin-left: var(--space-1, 4px);
+    /* Avoid row-stretch from long run titles. Backend `detail` strings can be ~40-60 chars. */
+    display: inline-block;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
   .copy-fallback { margin-top: var(--space-2, 8px); min-height: 80px; }
 </style>
