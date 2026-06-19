@@ -52,6 +52,14 @@ import type {
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 
+// Spec line 980 — capture the original `visibilityState` descriptor ONCE at
+// file load, restore it in afterEach so tests that mutate the seam can't
+// leak state into following tests (or into the rest of the suite).
+const ORIG_VISIBILITY_DESCRIPTOR = Object.getOwnPropertyDescriptor(
+  Document.prototype,
+  'visibilityState',
+);
+
 beforeEach(() => {
   vi.mocked(fetchDetail).mockReset();
   vi.mocked(submit).mockReset();
@@ -71,6 +79,15 @@ afterEach(() => {
   if (component) { unmount(component); component = null; }
   if (target.parentNode) target.parentNode.removeChild(target);
   __test__setSlots(null);
+  // Spec line 980 — restore the original `visibilityState` descriptor so
+  // subsequent suites see jsdom's default behavior, not our override.
+  if (ORIG_VISIBILITY_DESCRIPTOR) {
+    Object.defineProperty(Document.prototype, 'visibilityState', ORIG_VISIBILITY_DESCRIPTOR);
+  } else {
+    // jsdom didn't expose a descriptor on Document.prototype — just drop our
+    // override from the instance so the prototype getter (if any) takes over.
+    delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+  }
 });
 
 async function settle() {
@@ -359,11 +376,12 @@ function clickSubmit(): void {
 describe('MiniProjectDetailPage (D6 — submit flow)', () => {
   it('D6.1 happy 201 — submit succeeds → state success; new file pick → idle', async () => {
     const initial = makeDetail({ submission_history: [], latest_status: 'not_submitted', can_submit: true });
+    // Keep can_submit=true on refetch so the submit section stays mounted —
+    // we need the file input to exercise "pick a new file → state → idle".
     const refetched = makeDetail({
       submission_history: [makeEntry({ submission_number: 1 })],
-      latest_status: 'awaiting_evaluation',
-      can_submit: false,
-      can_submit_reason_if_not: 'awaiting_evaluation',
+      latest_status: 'rejected',
+      can_submit: true,
     });
     vi.mocked(fetchDetail).mockResolvedValueOnce(initial).mockResolvedValueOnce(refetched);
     vi.mocked(submit).mockResolvedValue(undefined);
@@ -375,33 +393,60 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
 
     expect(vi.mocked(submit)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(fetchDetail)).toHaveBeenCalledTimes(2);
-    // State observable: pill flipped to "Awaiting evaluation" via refetch.
+    // State observable: pill flipped to "Rejected" via refetch.
     const pill = target.querySelector('header .pill');
-    expect(pill?.textContent).toContain('Awaiting evaluation');
+    expect(pill?.textContent).toContain('Rejected');
     // Banner: none on success.
     expect(target.querySelector('.banner-error')).toBeNull();
+    // In 'success' state with no file selected, button is disabled.
+    const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    if (!btn) throw new Error('expected submit button present');
+    expect(btn.disabled).toBe(true);
+
+    // Pick a new file → handleFileChange transitions 'success' → 'idle'.
+    // The button must become ENABLED again (state=idle + selectedFile!=null).
+    await pickFile(makePdf('again.pdf'));
+    const btn2 = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    if (!btn2) throw new Error('expected submit button present after next pick');
+    expect(btn2.disabled).toBe(false);
   });
 
-  it('D6.2 409 — banner copy + detail refetched', async () => {
+  it('D6.2 409 — banner copy literal + detail refetched', async () => {
     const initial = makeDetail({ latest_status: 'not_submitted', can_submit: true });
     // Refetched still permits submission so the submit-section stays mounted
     // and we can assert the banner copy after the race-recovery refetch.
     const refetched = makeDetail({ latest_status: 'rejected', can_submit: true });
-    vi.mocked(fetchDetail).mockResolvedValueOnce(initial).mockResolvedValueOnce(refetched);
+
+    // First call resolves immediately for the initial mount. Second call —
+    // the 409-recovery refetch — is HELD pending so the banner is observable
+    // in its post-set / pre-resolve window.
+    let resolveRefetch: (v: StudentMiniProjectDetail) => void = () => {};
+    vi.mocked(fetchDetail)
+      .mockResolvedValueOnce(initial)
+      .mockReturnValueOnce(new Promise<StudentMiniProjectDetail>((res) => { resolveRefetch = res; }));
     vi.mocked(submit).mockRejectedValue(new ApiError(409, 'state changed'));
 
     await mountPage();
     await pickFile(makePdf());
     clickSubmit();
+    // Drain the rejection microtask + the synchronous 409-branch state writes,
+    // but DO NOT let the pending refetch resolve yet — the banner is set in
+    // the 409 path BEFORE awaiting the refetch.
     await settle();
 
-    // We assert the fetchDetail call count first — the 409 path MUST refetch.
+    // Banner is present with the spec-mandated copy.
+    const banner = target.querySelector('[data-testid="mp-submit-error"]');
+    if (!banner) throw new Error('expected 409 banner');
+    expect(banner.textContent).toContain('Submission state changed — refreshing.');
+
+    // Now resolve the pending refetch — state drops back to 'idle' and the
+    // banner disappears.
+    resolveRefetch(refetched);
+    await settle();
+
     expect(vi.mocked(fetchDetail)).toHaveBeenCalledTimes(2);
-    // The banner copy was set before the refetch resolved; after the refetch
-    // (which still keeps can_submit=true) the state machine drops to 'idle',
-    // so the banner is no longer rendered. The observable post-condition is
-    // the refetch + state recovery, asserted by the call count above and the
-    // submit button being enabled again below.
+    // Banner cleared.
+    expect(target.querySelector('[data-testid="mp-submit-error"]')).toBeNull();
     const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
     if (!btn) throw new Error('expected submit button present');
     // After 409 recovery: state → 'idle', file still selected → button enabled.
@@ -533,13 +578,17 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
     expect(input.disabled).toBe(false);
   });
 
-  it('D6.10 success — file cleared (input value empty)', async () => {
+  it('D6.10 success — file cleared (input value empty) AND submit button disabled', async () => {
+    // Both initial AND refetched return can_submit=true so the submit section
+    // stays mounted. This is the realistic "test the success → idle transition
+    // and the file-cleared invariant" scenario the spec calls out — when
+    // can_submit flips to false, the input is removed by the {#if} and the
+    // file-cleared check is trivially satisfied.
     const initial = makeDetail({ latest_status: 'not_submitted', can_submit: true });
     const refetched = makeDetail({
       submission_history: [makeEntry({ submission_number: 1 })],
-      latest_status: 'awaiting_evaluation',
-      can_submit: false,
-      can_submit_reason_if_not: 'awaiting_evaluation',
+      latest_status: 'rejected',
+      can_submit: true,
     });
     vi.mocked(fetchDetail).mockResolvedValueOnce(initial).mockResolvedValueOnce(refetched);
     vi.mocked(submit).mockResolvedValue(undefined);
@@ -549,10 +598,16 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
     clickSubmit();
     await settle();
 
-    // After success + refetch, can_submit=false so file input is GONE from the
-    // DOM (no submit section rendered). That's the cleanest "file cleared"
-    // signal — there is no input to hold the file.
-    expect(target.querySelector('input[type="file"][data-testid="mp-file-input"]')).toBeNull();
+    // Section is still rendered (can_submit=true).
+    const input = target.querySelector<HTMLInputElement>('input[type="file"][data-testid="mp-file-input"]');
+    if (!input) throw new Error('expected file input present after success + can_submit=true refetch');
+    // Native input value cleared so the user can re-pick the SAME filename.
+    expect(input.value).toBe('');
+    // The submit button is disabled in 'success' state (canSubmitClick excludes
+    // both 'submitting' and 'success').
+    const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    if (!btn) throw new Error('expected submit button present');
+    expect(btn.disabled).toBe(true);
   });
 });
 
@@ -650,6 +705,38 @@ describe('MiniProjectDetailPage (D6 — misc)', () => {
     // Store still on course-b; the item's latest_status must be unchanged.
     expect(currentCourse.value?.slug).toBe('course-b');
     expect(currentCourse.value?.miniProjectsByBlockId['33'].latest_status).toBe('not_submitted');
+  });
+
+  it('D6.16 visibility refetch 403 — full-page banner copy', async () => {
+    // Initial mount succeeds.
+    vi.mocked(fetchDetail).mockResolvedValueOnce(makeDetail({ latest_status: 'not_submitted', can_submit: true }));
+    await mountPage();
+    expect(target.querySelector('[data-testid="fetch-error-banner"]')).toBeNull();
+
+    // Visibility refetch — now the detail endpoint returns 403.
+    vi.mocked(fetchDetail).mockRejectedValueOnce(new ApiError(403, 'forbidden'));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+
+    const banner = target.querySelector('[data-testid="fetch-error-banner"]');
+    if (!banner) throw new Error('expected full-page fetch-error banner after 403');
+    expect(banner.textContent).toContain('This mini-project is no longer accessible. The run may have been closed.');
+  });
+
+  it('D6.17 visibility refetch 404 — full-page banner copy', async () => {
+    vi.mocked(fetchDetail).mockResolvedValueOnce(makeDetail({ latest_status: 'not_submitted', can_submit: true }));
+    await mountPage();
+    expect(target.querySelector('[data-testid="fetch-error-banner"]')).toBeNull();
+
+    vi.mocked(fetchDetail).mockRejectedValueOnce(new ApiError(404, 'gone'));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+
+    const banner = target.querySelector('[data-testid="fetch-error-banner"]');
+    if (!banner) throw new Error('expected full-page fetch-error banner after 404');
+    expect(banner.textContent).toContain("This mini-project doesn't exist or has been unpublished.");
   });
 
   it('D6.14 visibility — hidden dispatch no-op; visible dispatch triggers refetch', async () => {

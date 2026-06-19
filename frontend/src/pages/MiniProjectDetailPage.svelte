@@ -40,6 +40,10 @@
   let data: StudentMiniProjectDetail | null = $state(null);
   // N4 — `$state()` with no arg per RunTeachersTab.svelte:20 precedent.
   let assignmentEl: HTMLDivElement | undefined = $state();
+  // Bound to the native <input type="file"> so the success path can reset
+  // its value — browsers ignore re-picking an identical filename when the
+  // input's stored value isn't cleared.
+  let fileInputEl: HTMLInputElement | undefined = $state();
   let fetchError: ApiError | null = $state(null);
   let isLoading = $state(true);
 
@@ -60,11 +64,18 @@
   // and a focus burst can't fan out to multiple requests.
   let refetchInFlight = false;
 
+  // Monotonic sequence number — guards the data / fetchError writes inside
+  // refetchDetail so an older response can't overwrite a newer one when
+  // post-submit + visibility refetches interleave. Plain `let` (not $state):
+  // pure internal bookkeeping, never read from reactive scope.
+  let lastRefetchId = 0;
+
   // Shared refetch helper — used by the initial-load $effect AND by the
   // submit handler's success/409 paths AND by the visibilitychange listener.
   // Stale-write guarded against slug changes and the AbortController. Sets
   // the shared `refetchInFlight` single-flight gate so a second visibility
-  // event mid-fetch is a no-op.
+  // event mid-fetch is a no-op. Writes are gated by `lastRefetchId` so an
+  // older overlapping refetch can never clobber a newer one's result.
   function refetchDetail(
     startedCourseSlug: string,
     startedBlockSlug: string,
@@ -72,13 +83,16 @@
     options: { onLoadingDone?: boolean } = {},
   ): Promise<void> {
     refetchInFlight = true;
+    const id = ++lastRefetchId;
     return fetchDetail(startedCourseSlug, startedBlockSlug)
       .then((res) => {
+        if (id !== lastRefetchId) return;
         if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
         if (controller.signal.aborted) return;
         data = res;
       })
       .catch((e: unknown) => {
+        if (id !== lastRefetchId) return;
         if (controller.signal.aborted) return;
         if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
         if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -92,7 +106,10 @@
         fetchError = new ApiError(0, 'Network error');
       })
       .finally(() => {
-        refetchInFlight = false;
+        // Only the LATEST refetch may reopen the single-flight gate. If a
+        // newer refetch has started, leave `refetchInFlight=true` — that
+        // newer call will clear it in its own `.finally`.
+        if (id === lastRefetchId) refetchInFlight = false;
         if (!options.onLoadingDone) return;
         if (controller.signal.aborted) return;
         if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
@@ -233,8 +250,11 @@
     return 'Submit';
   });
 
+  // Click-eligibility: only enable in {idle, error}. Excluding 'success'
+  // blocks the double-submit window between state-set and the next user
+  // file pick (which transitions back to 'idle' via handleFileChange).
   const canSubmitClick = $derived.by(() => {
-    return selectedFile !== null && submitState !== 'submitting';
+    return selectedFile !== null && (submitState === 'idle' || submitState === 'error');
   });
 
   function handleFileChange(e: Event): void {
@@ -333,9 +353,16 @@
       return;
     }
 
-    // 201 — success. Refetch the detail, then write back into the course
-    // snapshot for the block-link cache (F6 slug guard).
-    submitState = 'success';
+    // 201 — success. Order matters here:
+    //  1. Refetch the detail FIRST (state stays 'submitting' → button stays
+    //     disabled while the network call is in flight).
+    //  2. Write-back into the course snapshot for the block-link cache.
+    //  3. Clear selectedFile + native input value so the same file can be
+    //     re-picked after success.
+    //  4. Flip submitState → 'success' LAST — only after everything has
+    //     quiesced. canSubmitClick keeps the button disabled in 'success',
+    //     so the user can't double-submit during the window before they
+    //     pick a new file (which transitions back to 'idle').
     const controller = new AbortController();
     await refetchDetail(startedCourseSlug, startedBlockSlug, controller);
     if (startedCourseSlug !== courseSlug || startedBlockSlug !== blockSlug) return;
@@ -348,11 +375,12 @@
         if (item) item.latest_status = fresh.latest_status;
       }
     }
-    // Clear the selected file from state so the disabled "Submit" button
-    // doesn't snap back to enabled if can_submit re-opens later. The
-    // submit-section is hidden by data.can_submit=false in the common case
-    // (refetched state typically transitions to awaiting_evaluation).
+    // Clear the selected file from state AND clear the native input's stored
+    // value. Without the native reset, the browser refuses to re-fire `change`
+    // when the user re-picks an identical filename.
     selectedFile = null;
+    if (fileInputEl) fileInputEl.value = '';
+    submitState = 'success';
   }
 
   // Status label used by the sr-only aria-live region. Reads from
@@ -456,6 +484,7 @@
             data-testid="mp-file-input"
             disabled={submitState === 'submitting'}
             onchange={handleFileChange}
+            bind:this={fileInputEl}
           />
           <button
             type="button"
