@@ -1591,82 +1591,237 @@ The external-link rewrite tests use `data-testid="assignment-html"` per M1, and 
 
 ## Phase E — Frontend integration with course view + admin publish flow + roster import
 
+**Pre-flight (read before dispatching E1)**:
+
+- Phase D added the `miniProjectsByBlockId` slot to `CourseSnapshot` (`currentCourse.svelte.ts:21`) — E1 *populates* it from `fetchListSwallow403`; do NOT re-declare the field.
+- Phase D added `mpByBlockId` (optional) and `courseSlug` (required) props to `BlockGroup`, and D3 already wires the `<MiniProjectLink>` render. E2 is a one-line prop pass-through.
+- Phase D4 declares `<PublishConflictsModal>` with `open: boolean` as a **plain (non-bindable) prop** plus an `onClose: () => void` callback. **Do NOT use `bind:open` — Svelte 5 strict mode throws on `bind:` to a non-`$bindable()` prop.** Pass `open={publishModalOpen}` and `onClose={...}`.
+- Spec §8 lines 994–997 (RosterImportModal test plan) is internally inconsistent: it describes a thrown `ApiError`, but the actual contract is HTTP 200 with per-row `error_code` and `detail`. E4 follows the actual per-row contract.
+- Commit messages mirror Phase D style: `feat(frontend): <task scope>` / `fix(frontend): <task scope>` — see `13a7769`, `4509352`, `9568507` for examples. Test-only or review-fix commits use `fix(frontend): ...`.
+- E3 and E4 are independent of each other and can dispatch in parallel after E1 + E2 land. E3 imports `PublishConflict` from `types.ts` (Phase C2 added the type around line 344); E4 uses the pre-existing `error_code` field on `RunStudentBatchResultRow` (Phase A1 added it around line 331).
+
 ### Task E1: Extend `currentCourse` store with `miniProjectsByBlockId`
 
 **Files:**
-- Modify: `frontend/src/stores/currentCourse.svelte.ts:36-73` (3-element Promise.all + new snapshot field)
+- Modify: `frontend/src/stores/currentCourse.svelte.ts:46-84` (`loadCourse` body — extend `Promise.all` from 2 → 3 elements; populate `miniProjectsByBlockId` from the new tuple slot).
+- Modify: `frontend/src/tests/currentCourse.test.ts` (currently exercises only `__test__setSlots` / mutators — E1 adds the first `loadCourse` network-flow tests in this file).
 
-**Spec refs:** §7 + C9 changelog + F16 5xx behavior.
+**Spec refs:** §7 + C9 changelog + F16 5xx behavior + F17 abort propagation.
 
-- [ ] Write failing test extending the store's existing tests: snapshot has `miniProjectsByBlockId` after load; `loadCourse` triggers `fetchListSwallow403`; stale-write guard works with 3 elements.
+**Mock surface**: use the URL-routed global `fetch` stub pattern from `tests/RunDetailPage.publish.svelte.test.ts:48` (the `setup()` helper) — it routes responses by URL match, exactly what Test 2 needs. Do NOT use `vi.spyOn(api, 'get')` — three concurrent `api.get` calls share one spy, making order-of-resolution tests fragile. For deferred ordering use a local typed deferred helper (NOT `Promise.withResolvers()` — not in TypeScript's ES2022 lib types in this project, would fail `svelte-check`):
+```typescript
+type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void };
+function defer<T>(): Deferred<T> {
+  let resolve!: (v: T) => void; let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((r, j) => { resolve = r; reject = j; });
+  return { promise, resolve, reject };
+}
+```
 
-- [ ] Modify `loadCourse` to call `Promise.all([content, state, fetchListSwallow403(slug, controller.signal)])` and write `miniProjectsByBlockId` into the snapshot.
+**Tick discipline**: after the awaited `my-version` call resolves, the 3-element `Promise.all` settles on a later microtask. Use the 12-tick `settle()` helper (see `tests/RunDetailPage.svelte.test.ts:84`). `await Promise.resolve()` once or twice will race.
 
-- [ ] Run tests + commit.
+- [ ] **Test 1 (happy path)**: stub `my-version` + `content` + `state` + `/api/courses/{slug}/mini-projects` (each returning a non-empty fixture). After `await loadCourse(slug)`, assert:
+  - `currentCourse.value.miniProjectsByBlockId` **deeply equals the fetched map** (NOT `{}` — a `toBeDefined()` / "field exists" check passes vacuously against the current `{}` initialization and proves nothing).
+  - The fetch stub recorded exactly one call to `/api/courses/{slug}/mini-projects` with the URL-encoded slug.
+
+- [ ] **Test 2 (3-element stale-write guard with abort assertion)**: use the local `defer<T>()` helper (above) for each response. Fire `loadCourse('A')` (don't await yet). Resolve A's `/my-version` FIRST — this lets `loadCourse` advance past the sequential await and start the 3-element `Promise.all` (content + state + mini-projects for slug A). **Use the 12-tick `settle()` helper (NOT a bare `await Promise.resolve()`)** — `api.get()` internally chains `await fetch(...)` → `await response.json()` → return parsed body, so the queued `Promise.all` requires several microtasks before its 3 fan-out fetches actually fire. After `await settle()`, verify via the fetch stub that A's mini-projects request HAS fired AND capture its `RequestInit.signal` (the fetch stub receives `init.signal` from `api.get` at `api.ts:44`; precedent for capturing signal: `RunSubmissionTab.svelte.test.ts:533-539` — `(fetchMock.mock.calls[N][1] as RequestInit).signal`). If the mini-projects call has NOT yet been recorded, poll: re-`await settle()` once and re-check (this guards against jsdom microtask reordering). The store does NOT expose its `AbortController` — capturing via the fetch stub's `init.signal` is the only viable seam; do NOT add a production-code test seam. NOW fire `loadCourse('B')` — this aborts A's controller and replaces the in-flight slot. Resolve all 4 of B's responses (`/my-version` first, then content + state + mini-projects in any order). `await` the B promise; assert `currentCourse.value.slug === 'B'`. Assert `capturedSignal.aborted === true` (proves the new mini-projects fetch received the same controller and the controller was aborted before B fired — locks F17). Finally resolve A's remaining responses late and await A's promise; assert `currentCourse.value.slug === 'B'` still (A's late resolution must NOT overwrite).
+
+- [ ] **Test 3 (F16 5xx propagates and leaves snapshot null)**: stub `my-version` + `content` + `state` returning 200; stub `mini-projects` returning HTTP 500. Assert `await expect(loadCourse(slug)).rejects.toBeInstanceOf(ApiError)` AND `currentCourse.value === null` (no partial snapshot write — the stale-guard at line 63 never runs because `Promise.all` rejects before reaching it).
+
+- [ ] **Test 4 (F16 403 → empty map, load succeeds)**: all four endpoints OK except `mini-projects` returns 403. Assert `loadCourse(slug)` resolves successfully AND `currentCourse.value.miniProjectsByBlockId` deeply equals `{}` (the wire-module's 403 swallow surfaces as an empty map at the store level). **Also assert the fetch stub recorded exactly one call to `/api/courses/{slug}/mini-projects`** — without this URL-call assertion, the test passes vacuously against the current 2-element implementation (which hardcodes `miniProjectsByBlockId: {}` at line 71 and never fires the request). The call-count assertion locks the F16/Phase C3 contract end-to-end.
+
+- [ ] **Run tests** — all 4 must FAIL (production still uses 2-element Promise.all). Then add the production change:
+  - Import: `import { fetchListSwallow403 } from '../lib/studentMiniProjects';`
+  - Extend the `Promise.all` at line 58 to 3 elements (the third tuple slot is the fetched map):
+    ```typescript
+    const [content, state, miniProjectsByBlockId] = await Promise.all([
+      api.get<VersionContent>(`/api/versions/${my.version_id}/content`, { signal: controller.signal }),
+      api.get<VersionState>(`/api/versions/${my.version_id}/state`, { signal: controller.signal }),
+      fetchListSwallow403(startedSlug, controller.signal),
+    ]);
+    ```
+  - Replace `miniProjectsByBlockId: {}` at line 71 with `miniProjectsByBlockId,`.
+  - Keep the stale-guard at line 63 unchanged (`if (inflight?.slug !== startedSlug) return;`) — it still fires once after all 3 promises settle.
+  - Keep the AbortError filter at line 74 unchanged.
+
+- [ ] Run all 4 new tests + the full suite + `npx svelte-check` + commit (`feat(frontend): currentCourse hydrates mini-projects per block (E1)`).
 
 ---
 
 ### Task E2: `CourseView.svelte` — pass `mpByBlockId` down to `BlockGroup`
 
 **Files:**
-- Modify: `frontend/src/pages/CourseView.svelte` (~+5 lines)
+- Modify: `frontend/src/pages/CourseView.svelte:56` (add ONE prop on the `<BlockGroup>` invocation).
+- Create: `frontend/src/tests/CourseView.svelte.test.ts` (no test file exists today — E2 establishes the baseline with one focused integration test).
 
-- [ ] Pass `mpByBlockId={currentCourse.value?.miniProjectsByBlockId}` and `courseSlug={currentCourse.value?.slug}` down to each `<BlockGroup>`.
+**Pre-flight**: line 56 already passes `{courseSlug}` (shorthand for the page's own `$props()` slug). Do **NOT** add a second `courseSlug` attribute — Svelte rejects duplicate attributes. The `currentCourse.value.slug` and the URL `courseSlug` are equal inside the `{#if currentCourse.value}` narrow (lines 44–58) because the store's stale-write guard ensures the snapshot's slug matches the requested slug. No optional chaining is needed inside the narrow.
 
-- [ ] Run existing CourseView tests (must remain green).
+- [ ] **Write the focused test** (file does not exist; create it with the standard `mount`/`unmount`/`flushSync` boilerplate from `tests/MiniProjectDetailPage.svelte.test.ts`). **Test-harness gotcha**: mounting `CourseView` immediately triggers its `$effect` (CourseView.svelte:14) calling the real `loadCourse(courseSlug)`, which keeps the page in `loading` state until that promise settles AND its `.finally(() => { loading = false; })` chain advances — `__test__setSlots` alone does NOT bypass the loading path. Resolution: `vi.mock('../stores/currentCourse.svelte', async (importOriginal) => { const real = await importOriginal<typeof import('../stores/currentCourse.svelte')>(); return { ...real, loadCourse: vi.fn().mockResolvedValue(undefined) }; });` — note the bare `'../stores/currentCourse.svelte'` specifier (NO `.ts` extension) to match every existing import site (`main.ts:7`, `MiniProjectDetailPage.svelte.test.ts:22`, `CourseView.svelte:3`). Replaces `loadCourse` with a resolved no-op while preserving the real `currentCourse` proxy, `__test__setSlots`, and other exports. Fixture: drive the store via `__test__setSlots` BEFORE mount with one block (id `42`, slug `intro`) and one mp item in `miniProjectsByBlockId` keyed by `'42'`. Mount `CourseView` with `courseSlug="course-x"`. **After mount, `await settle(); flushSync();`** — `loadCourse(...).catch(...).finally(() => { loading = false; })` is a multi-tick chain; bare `await Promise.resolve()` leaves `loading` true (page renders the loading branch with no `<a>`). Use the 12-tick `settle()` helper from `tests/RunDetailPage.svelte.test.ts:84` (copy the function definition into this new test file). Then assert the rendered DOM contains an `<a href="/courses/course-x/blocks/intro/mini-project">` link carrying the mp title.
 
-- [ ] Commit.
+- [ ] **Modify** `<BlockGroup ... />` at line 56 — add exactly ONE prop (`mpByBlockId`) using the narrowed snapshot field; do NOT touch `{courseSlug}`:
+  ```svelte
+  <BlockGroup {courseSlug} block={b} state={currentCourse.value.state} mpByBlockId={currentCourse.value.miniProjectsByBlockId} />
+  ```
+
+- [ ] Run the new CourseView test + the full suite + `npx svelte-check` + commit (`feat(frontend): CourseView passes mpByBlockId to BlockGroup (E2)`).
 
 ---
 
 ### Task E3: `RunDetailPage.svelte` — wire `PublishConflictsModal` into `doPublish`
 
 **Files:**
-- Modify: `frontend/src/pages/runs/RunDetailPage.svelte:243-254` (replace error path inside `doPublish`)
-- Modify: `frontend/src/tests/RunDetailPage.svelte.test.ts` if it exists (+ ~3 tests for publish 409 flow)
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte` — script imports + `$state` declarations + run-id-change reset `$effect` + `doPublish` catch body (lines 243–254 today) + page-level modal mount in the template.
+- Modify: `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` — **publish tests live in the `.publish` sibling file**, NOT the generic `RunDetailPage.svelte.test.ts`. Add the 6 new cases listed below.
 
-**Spec refs:** §2 RunDetailPage entry + §3.3 modal section (H3/I1/J2/K3 narrowing + open guard + toast kind).
+**Spec refs:** §2 RunDetailPage entry + §3.3 modal section (H3/I1/J2/K3 narrowing pattern + K3 toast kind + J2/G9 open-guard).
 
-- [ ] Write failing tests: 409 with conflicts opens modal; 409 with empty/missing conflicts (malformed body) toasts `pushToast(e.displayMessage, 'error')` and does NOT open modal; non-409 takes existing toast path.
+**Pre-flight**:
+- The existing `doPublish` (lines 243–254) already has a stale-token guard pattern (`const myToken = loadToken;` at line 245 + `if (myToken !== loadToken) return;` at line 248 in the success path and line 251 in the catch path). The new error branch MUST preserve this guard — without it, a stale 409 from run A could open the modal AFTER the user has navigated to run B.
+- The existing publish-test fetch-stub helper is `setup()` at `RunDetailPage.publish.svelte.test.ts:48` (NOT `mockHappyPath` — that's in the sibling `RunDetailPage.svelte.test.ts`). The current `setup()` likely lacks a `POST /api/runs/{id}/publish` handler. Add per-test stubs returning `jres(body, status)` with the desired 200 / 409-body / 500 shape; `ApiError` is constructed automatically by `api.ts:62` from the parsed JSON body, so tests do NOT need to `new ApiError(...)` manually — they shape the response.
+- The publish test file does NOT currently mock the toasts module — add this. At module top: `vi.mock('../stores/toasts.svelte', () => ({ pushToast: vi.fn() }));`. In test imports: `import { pushToast } from '../stores/toasts.svelte';`. In `beforeEach`: `vi.mocked(pushToast).mockClear();` (idiomatic — `Mock` type is not currently imported in this file; use `vi.mocked()` instead of casting). Tests 2/3/4 assert `vi.mocked(pushToast)` was called with the right args; Test 1 asserts `vi.mocked(pushToast)` was NOT called.
+- The existing `setup()` helper defaults `teachers: []`, which leaves the Publish button DISABLED (readiness check fails — `publishBlocked` is true when there's no teacher). Every E3 test that clicks the Publish button MUST supply at least one teacher: `setup({ teachers: [{ user_id: 1, user_email: 't@x.com' }] })` (the canonical shape used by existing tests at `RunDetailPage.publish.svelte.test.ts:95,104,131,162,183` — note the field is `user_id` and `user_email`, NOT `id`/`email`; `teachers?: unknown[]` would also accept `{ id: 1 }` at the TS level but it would fail the backend-shape readiness validation). Without this, the click is a no-op against a disabled button and the test passes vacuously (or with an unexpected failure that's hard to diagnose).
+- Modal-open assertion uses the EXISTING aria seam: `[role="dialog"][aria-label="Cannot publish run"]` (declared on a `<div>` at `PublishConflictsModal.svelte:64` — NOT a `<dialog>` element, so DO NOT prefix the CSS selector with `dialog`). No new `data-testid` is needed.
+- The course fixture must have `is_admin: true` so the Publish button is rendered (gated at `RunDetailPage.svelte:330`). See the existing fixture pattern in `RunDetailPage.svelte.test.ts:24`.
+- Focus return on modal close is handled automatically by the shared `FocusTrap` inside `PublishConflictsModal` (captures previously-focused element on mount, restores on unmount). No focus-return code in `RunDetailPage` and no focus-return assertion in tests.
 
-- [ ] Import `PublishConflictsModal` + `PublishConflict` type. Replace the existing `pushToast(e.displayMessage)` error path with the narrowing + open-guard pattern from spec §3.3:
+- [ ] **Test 1 (happy modal open)**: stub `POST /api/runs/{id}/publish` returning HTTP 409 with body `{detail: "Cannot publish: 2 students already active", error_code: "student_already_active_in_course", conflicts: [{user_id: 1, ...}, {user_id: 2, ...}]}`. Click the Publish button. After `settle()`, assert `document.querySelector('[role="dialog"][aria-label="Cannot publish run"]')` is non-null AND `pushToast` was NOT called.
 
-```typescript
-if (e instanceof ApiError && e.errorCode === 'student_already_active_in_course') {
-  const conflicts = (e.body as { conflicts?: PublishConflict[] } | undefined)?.conflicts ?? [];
-  if (conflicts.length === 0) {
-    pushToast(e.displayMessage, 'error');
-    return;
+- [ ] **Test 2 (empty conflicts → toast)**: same stub but body `{detail: "...", error_code: "student_already_active_in_course", conflicts: []}`. Click Publish + settle. Assert `pushToast` called once with the displayMessage and kind `'error'`. Modal NOT mounted.
+
+- [ ] **Test 3 (missing conflicts field → toast)**: same stub but body `{detail: "...", error_code: "student_already_active_in_course"}` (no `conflicts` key at all). Click Publish + settle. Assert toast called, modal NOT mounted.
+
+- [ ] **Test 4 (different error_code → toast, modal not mounted)**: stub 409 body with `error_code: "capacity_reached"` (a valid `BulkRosterErrorCode` union member from `types.ts:334-338` — `"some_other_code"` is NOT in the union and would fail `svelte-check`). This exercises the actual regression case — the branch is on `errorCode`, not status. Click Publish + settle. Assert toast called, modal NOT mounted. This is the correct branch-boundary test, not the misleading "non-409" framing.
+
+- [ ] **Test 5 (close hides modal; re-publish shows fresh conflicts)**: drive Test 1's flow to open the modal with conflicts including user_id 1 (email `a@example.com`). Invoke the `onClose` callback (or click the modal's Close button). After settle, assert `document.querySelector('[role="dialog"][aria-label="Cannot publish run"]')` is null (modal unmounted). Re-fire `doPublish` against a SECOND 409 stub with conflicts including user_id 99 (email `z@example.com`). After settle, assert the dialog is re-mounted AND the rendered modal body's `textContent` includes `z@example.com` AND does NOT include `a@example.com`. **What this proves**: the close hides the modal AND the re-publish surfaces fresh conflicts in the rendered DOM. Note: this does NOT *directly* prove `onClose` clears `publishConflicts` — the second 409 branch reassigns `publishConflicts = conflicts`, so a non-clearing onClose would also produce identical DOM. The `publishConflicts = []` clear on close is defensive (avoids stale hidden state if any future code path reads it before the next assignment) and the test is acceptable as a behavioral regression guard for the visible flow.
+
+- [ ] **Test 6 (run-id change closes open modal)**: `runIdInt` is `$derived` from the `runId` STRING prop, so the test must mutate `runId` (NOT `runIdInt` directly) on a reactive `$state` props object. Use this pattern (precedent exists in the test suite):
+  ```typescript
+  const props = $state({ courseSlug: 'algebra', runId: '10' });
+  const target = document.createElement('div');
+  const component = mount(RunDetailPage, { target, props });
+  // ... drive Test 1's flow to open the modal at runId='10' ...
+  // BEFORE the next line: re-assign the fetch stub to handle runId='11'
+  // routes — the existing setup()'s fetchSpy uses `url.match(/\/api\/runs\/10$/)`
+  // (or similar narrow regex), so a bare `props.runId = '11'` will hit
+  // `Promise.reject(new Error('unexpected ' + url))` at the catch-all branch.
+  // Either widen the regex via `fetchSpy.mockImplementation(...)` OR call
+  // `setup({ run: { id: 11, ... }, ... })` again to refresh the stub.
+  props.runId = '11';
+  flushSync();
+  // ... settle ...
+  ```
+  After settle, assert `document.querySelector('[role="dialog"][aria-label="Cannot publish run"]')` is null (the run-change `$effect` reset both state vars). Do **NOT** use the unmount + remount pattern — a fresh mount initializes state to closed by default, producing a false-positive pass that doesn't exercise the reset effect at all.
+
+- [ ] **Production change — script section additions** (canonical: place `$state` declarations alongside the existing `$state` cluster right after `let unpublishConfirmOpen = $state(false);` at line 241, AND extend the existing `void runIdInt` reset `$effect` at lines 164–169 with the two new lines — keep all per-run resets in one place):
+  ```typescript
+  // top-of-script imports:
+  import PublishConflictsModal from '../../components/runs/PublishConflictsModal.svelte';
+  import type { PublishConflict } from '../../lib/types';
+
+  // near line 241, alongside other $state in this page:
+  let publishConflicts: PublishConflict[] = $state([]);
+  let publishModalOpen = $state(false);
+
+  // extend the EXISTING per-run reset $effect at lines 164–169 (which
+  // already resets activeTab, rosterPrefilter, showImportModal). Add
+  // the two new lines INSIDE that existing effect body:
+  $effect(() => {
+    void runIdInt;
+    activeTab = 'overview';            // existing line
+    rosterPrefilter = null;            // existing line
+    showImportModal = false;           // existing line
+    publishModalOpen = false;          // NEW — added by this task
+    publishConflicts = [];             // NEW — added by this task
+  });
+  ```
+  Acceptable alternative: add a SEPARATE `$effect` for the two new resets (single-responsibility). Both compile. The canonical form above is preferred because it co-locates all per-run resets and avoids a second `void runIdInt` tracker.
+
+- [ ] **Production change — replace the `doPublish` catch body** (lines 250–253 today) with the H3/I1/J2/K3 narrowing + preserved load-token guard + runtime `Array.isArray` check:
+  ```typescript
+  } catch (e) {
+    if (myToken !== loadToken) return;
+    if (e instanceof ApiError && e.errorCode === 'student_already_active_in_course') {
+      const raw = (e.body as { conflicts?: unknown } | undefined)?.conflicts;
+      const conflicts: PublishConflict[] = Array.isArray(raw) ? (raw as PublishConflict[]) : [];
+      if (conflicts.length === 0) {
+        pushToast(e.displayMessage, 'error');
+        return;
+      }
+      publishConflicts = conflicts;
+      publishModalOpen = true;
+    } else if (e instanceof ApiError) {
+      pushToast(e.displayMessage, 'error');
+    }
   }
-  // open modal with conflicts
-  publishConflicts = conflicts;
-  modalOpen = true;
-} else {
-  pushToast(e.displayMessage, 'error');
-}
-```
+  ```
+  The `Array.isArray` check is a deliberate refinement over the spec §3.3 pattern: an unsafe TypeScript cast accepts runtime values like `conflicts: "string"` or `conflicts: {...}`, which would then crash the modal's `.map(...)` render. Falling back to `[]` routes malformed bodies through the toast path. **Known limitation**: `Array.isArray` validates only the outer container, NOT element shapes — `conflicts: [null]` or `conflicts: [{}]` still passes through and would surface as missing-field renders inside the modal. Element-level validation is out of scope for this task (the backend contract guarantees per-element shape; this refinement only protects against truly malformed top-level responses).
 
-- [ ] Mount `<PublishConflictsModal bind:open={modalOpen} conflicts={publishConflicts} onClose={() => modalOpen = false} />` somewhere in the page.
+- [ ] **Production change — mount the modal IMMEDIATELY AFTER the outer `{/if}` at `RunDetailPage.svelte` line 460, before the `<style>` block** (the page's entire template body sits inside a `{#if runIdInt === null} ... {:else if loadError} ... {:else if course === null} ... {:else} ... {/if}` chain; mounting INSIDE any branch would unmount the modal during a transient `loadError = null → ApiError` flip caused by a concurrent reload). Place at top-level of the markup, outside the load-state chain:
+  ```svelte
+  {/if}
 
-- [ ] Run tests + svelte-check + commit.
+  <PublishConflictsModal
+    open={publishModalOpen}
+    conflicts={publishConflicts}
+    onClose={() => { publishModalOpen = false; publishConflicts = []; }}
+  />
+
+  <style>
+  ```
+  Note: `open={...}` is a plain prop pass-through. NOT `bind:open` — the modal's `open` is NOT `$bindable()`. Closing the modal also clears `publishConflicts` as defensive cleanup (avoids retaining stale hidden data if any future code path reads it before the next assignment).
+
+- [ ] Run all 6 new tests + the full existing publish suite (must remain green) + `npx svelte-check` + commit (`feat(frontend): RunDetailPage wires PublishConflictsModal (E3)`).
 
 ---
 
 ### Task E4: Extend `RosterImportModal` for `student_already_active_in_course` error code
 
 **Files:**
-- Modify: `frontend/src/components/runs/RosterImportModal.svelte` (handle new error code)
-- Modify or Create: `frontend/src/tests/RosterImportModal.svelte.test.ts` (+ ~2 tests)
+- Modify: `frontend/src/components/runs/RosterImportModal.svelte:199-211` (result-row error cell — render `detail` as inline visible text for the matching `error_code` only; preserve generic tooltip behavior for all other codes).
+- Create: `frontend/src/tests/RosterImportModal.already-active.svelte.test.ts` (sibling-file pattern alongside `scaffold/submit/unpublished` — do NOT bloat one of the existing files).
 
 **Spec refs:** §2 RosterImportModal entry + F15 changelog.
 
-- [ ] Read the existing modal to find the error-row rendering path.
+**Pre-flight**:
+- The result row currently renders `<span class="badge badge-error" data-result="error" title={r.detail ?? ''}>error</span>` at line 207. For all error codes, the backend `detail` is only visible on hover (title attribute). For `student_already_active_in_course` specifically, the detail must also surface as inline visible text so admins can see the conflicting run name at a glance without hovering.
+- The backend `detail` string is `Already active in '<run_title>'` — STRAIGHT ASCII single quotes (U+0027) around `run_title`, NOT curly quotes (U+2018/U+2019). Test assertion must match byte-exact.
+- §8 lines 994–997 describes a thrown `ApiError` for this case — that's stale spec text. The actual contract is a successful HTTP 200 batch response with per-row `status: 'error'` + `error_code: 'student_already_active_in_course'` + `detail: <string>`. E4 follows the actual per-row contract.
+- The `error_code` field is already typed on `RunStudentBatchResultRow` (Phase A1 added the discriminator; types.ts:326–338). No type-level work needed.
 
-- [ ] Write tests: when a result row has `error_code === 'student_already_active_in_course'`, the row's `detail` text renders verbatim with the "Already active in 'X'" copy from the backend.
+- [ ] **Test 1 (matching code → inline visible)**: result row with `status: 'error'`, `error_code: 'student_already_active_in_course'`, `detail: "Already active in 'Spring 2025'"`. Query the `.error-detail` span (added in the production change below) and assert its `.textContent?.trim()` equals `Already active in 'Spring 2025'` byte-exact (use `.toBe(...)`, NOT `.toContain(...)`). Do NOT assert against the parent `<td>`'s `textContent` — that would also include the badge text `"error"`, producing the collision string `errorAlready active in 'Spring 2025'`. Also assert the `<span class="badge badge-error">` is still present in the row as a visual indicator.
 
-- [ ] Implement (probably just a typed case clause in an existing switch or a small UI tweak).
+- [ ] **Test 2 (other codes → tooltip preserved)**: result row with `status: 'error'`, `error_code: 'capacity_reached'` (a valid `BulkRosterErrorCode` union member from `types.ts:334-338` — `'some_other_code'` is NOT in the union and would fail `svelte-check`), `detail: "something else"`. Assert the row renders the badge with `title="something else"` AND the inline visible text is NOT present (no `.error-detail` element).
 
-- [ ] Run tests + commit.
+- [ ] **Test 3 (copy-failed preserves detail)**: trigger the existing `data-action="copy-failed"` flow with a row carrying `error_code: 'student_already_active_in_course'`. Assert `copyFallbackText` (the fallback `<textarea>` content at line 224) still contains the detail string — no regression in the copy-failed pipeline.
+
+- [ ] **Production change — replace lines 204–208** in `RosterImportModal.svelte`:
+  ```svelte
+  {#if r.status === 'added'}
+    <span class="badge badge-ok">added</span>
+  {:else if r.error_code === 'student_already_active_in_course'}
+    <span class="badge badge-error" data-result="error" title={r.detail ?? ''}>error</span>
+    <span class="error-detail" title={r.detail ?? ''}>{r.detail}</span>
+  {:else}
+    <span class="badge badge-error" data-result="error" title={r.detail ?? ''}>error</span>
+  {/if}
+  ```
+  Add one CSS rule alongside the existing `.badge-error` rule:
+  ```css
+  .error-detail {
+    color: var(--muted, #666);
+    font-size: 0.9em;
+    margin-left: var(--space-1, 4px);
+    /* Avoid row-stretch from long run titles. Backend `detail` strings can be ~40-60 chars. */
+    display: inline-block;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  ```
+
+- [ ] Run the new test file + all 3 existing `RosterImportModal.*.svelte.test.ts` files (must remain green) + `npx svelte-check` + commit (`feat(frontend): RosterImportModal inline-renders already-active detail (E4)`).
 
 ---
 
