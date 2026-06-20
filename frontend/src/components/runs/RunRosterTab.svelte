@@ -7,7 +7,6 @@
     updateRunStudent,
     bulkMoveRunStudents,
     bulkDeleteRunStudents,
-    RUN_UNPUBLISHED_ERROR_CODE,
   } from '../../lib/runRoster';
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
@@ -308,11 +307,15 @@
       newGroupId = '__unassigned';
       await onRefetchRosterData();
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409 && e.errorCode === RUN_UNPUBLISHED_ERROR_CODE) {
-        addError = typeof e.detail === 'string' ? e.detail : 'Run is no longer published.';
-        return;
+      // Surface every ApiError (4xx/5xx) inline via the backend-supplied
+      // displayMessage — covers run_unpublished, student_already_active_in_course,
+      // capacity_reached, group_disabled, and any future error_code without
+      // per-branch wiring. Non-ApiError exceptions (e.g., TypeError from a
+      // fetch network failure) are silently dropped, matching confirmDelete
+      // and onGroupChange below.
+      if (e instanceof ApiError) {
+        addError = e.displayMessage;
       }
-      throw e;
     }
   }
 
