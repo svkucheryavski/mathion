@@ -1,12 +1,8 @@
 <script lang="ts">
   import { api, ApiError } from '../lib/api';
-  import { logout } from '../lib/auth.svelte';
-  import { session } from '../stores/session.svelte';
-  import { pushToast } from '../stores/toasts.svelte';
   import type { CourseListItem } from '../lib/types';
   import CourseCard from '../components/course/CourseCard.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
-  import Button from '../components/ui/Button.svelte';
 
   let loading = $state(true);
   let courses = $state<CourseListItem[]>([]);
@@ -22,13 +18,7 @@
 </script>
 
 <div class="page">
-  <header>
-    <h1>Your courses</h1>
-    <div class="user">
-      {session.user?.full_name ?? session.user?.email}
-      <Button variant="ghost" onclick={() => { void logout().catch((e) => pushToast(String(e), 'error')); }}>Sign out</Button>
-    </div>
-  </header>
+  <h1>Your courses</h1>
 
   {#if loading}
     <Spinner />
@@ -47,8 +37,7 @@
 
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); }
-  .user { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+  .page h1 { margin-bottom: var(--space-4); }
   .grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .empty { color: var(--muted); padding: var(--space-6) 0; text-align: center; }
   .error { color: var(--danger); }
