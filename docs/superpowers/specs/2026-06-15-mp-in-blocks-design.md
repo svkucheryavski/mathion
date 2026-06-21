@@ -1090,3 +1090,15 @@ Rev 5 incorporates 5 review rounds (R1 5 Opus + codex, R2 4 Opus + codex, R3 3 O
 7. **F16 — 5xx behavior:** if a deployment has `/mini-projects` 502 for a minute (deploy in progress), every student loading the course view sees the page-level error. Acceptable? Or should we add a soft-retry?
 
 Rev 5 changelog F1-F20 enumerates concrete edits. Next round verifies these against actual source + flags any new gaps.
+
+## 14. Post-merge decision — `PublishConflictsModal` is defense-in-depth by design
+
+Confirmed 2026-06-21 after mp-in-blocks F2 manual smoke. `PublishConflictsModal` (E3 wiring) is **intentionally unreachable from a normal admin click flow** in the current product, and that is the correct design.
+
+**Why**: the notifications-email slice (`docs/superpowers/specs/2026-06-12-notifications-email-design.md` §8) introduced a hard application-layer gate at `backend/mathion/api/run_roster.py:62` and `:185` — `add_student` and `add_students_batch` both 409 with `error_code=run_unpublished` against draft runs. RunRosterTab and RosterImportModal disable their controls when the run is unpublished. Combined, the invariant "students can only be enrolled in a published run" is enforced at four layers (UI gate, backend single-add, backend batch, publish-time conflict check). That invariant exists to keep `run_enrolled` notification semantics clean — pre-publish enrollment would email students about content they cannot see — and is load-bearing for the dispatcher's render context (`_run_url` etc.).
+
+**What this means for `PublishConflictsModal`**: in the current "publish-first → enroll" workflow, no normal admin click can reach a publish-time conflict (the only way to get students into a draft is to bypass the UI — API automation, direct SQL, or a future SIS-import / copy-roster-from-previous-run feature). E3's wiring stays as the defensive guard for those paths. The 6 frontend tests at `frontend/src/tests/RunDetailPage.publish.svelte.test.ts` are the authoritative verification of E3 correctness; the F2 smoke gap is expected, not a defect.
+
+**Trade-off considered**: lifting the gate to allow draft rosters would require either (a) deferring `run_enrolled` until publish and bulk-firing at publish-click (which makes Publish do two semantically distinct things — go-live AND broadcast — with no undo), or (b) introducing a per-`RunStudent` pending state with its own lifecycle. Both reopen the notifications-email design and add concurrency hazards (a draft-roster student being added to another published run in parallel). Out of scope here; revisit when a real product need surfaces (bulk-prep workflows, registrar/SIS integration).
+
+**Documenting the decision** (not changing code): F2 finding #3 from the mp-in-blocks walkthrough is **closed by design**. Any future debate about the publish-first ordering should start by reading this section + notifications-email spec §8 + this slice's §3.3 narrowing pattern, then deciding whether the product is ready to absorb the cost of the alternative model.
