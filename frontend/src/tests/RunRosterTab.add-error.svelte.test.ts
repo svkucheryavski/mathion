@@ -54,17 +54,23 @@ function mountTab(propOverrides: Partial<TabProps> = {}) {
   flushSync();
 }
 
+function getTarget(): HTMLDivElement {
+  if (!target) throw new Error('target not mounted — call mountTab first');
+  return target;
+}
+
 async function clickAdd(email: string) {
-  const input = target!.querySelector('input[name="new-email"]') as HTMLInputElement;
+  const root = getTarget();
+  const input = root.querySelector('input[name="new-email"]') as HTMLInputElement;
   input.value = email;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
-  (target!.querySelector('button[data-action="add-student"]') as HTMLButtonElement).click();
+  (root.querySelector('button[data-action="add-student"]') as HTMLButtonElement).click();
   await settle();
 }
 
 function errorText(): string | null {
-  const el = target!.querySelector('p.error[role="alert"]');
+  const el = getTarget().querySelector('p.error[role="alert"]');
   return el?.textContent ?? null;
 }
 
