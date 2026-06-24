@@ -124,7 +124,7 @@
       // tracker from a previously-viewed editable item.
       if (fresh.type === 'static_page') tracker = makeDirtyTracker<StaticForm>({ title: fresh.title, content_md: fresh.content_md ?? '' });
       else if (fresh.type === 'video') tracker = makeDirtyTracker<VideoForm>({ title: fresh.title, video_url: fresh.video_url ?? '' });
-      else tracker = null;  // quiz / interactive_app — read-only, no tracker
+      else tracker = null;  // quiz → dirtiness via quizDirty (not this tracker); interactive_app → read-only
       trackerIid = iid;
       trackerVid = vid;
       quizDirty = false;

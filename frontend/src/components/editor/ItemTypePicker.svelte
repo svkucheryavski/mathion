@@ -1,9 +1,8 @@
 <script lang="ts">
   // Intentionally narrower than the backend item-type union (which also
-  // includes 'quiz' and 'interactive_app'). For the MVP an admin can only
-  // create static_page and video items; the picker exists specifically to
-  // enforce that constraint at the call site. Widen this union if the
-  // product scope expands.
+  // includes 'interactive_app'). An admin can create static_page, video, and
+  // quiz items; the picker exists specifically to enforce that constraint at
+  // the call site. Widen this union if the product scope expands.
   type ItemType = 'static_page' | 'video' | 'quiz';
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
   // prop type `value: ItemType` constrains it. The previous
