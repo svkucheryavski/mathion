@@ -14,11 +14,17 @@ const stubAssetCtx = () => ({
   remove: vi.fn().mockResolvedValue(undefined), imgSrc: () => '', renderPreview: vi.fn().mockResolvedValue({ html: '' }),
 }) as never;
 
-const q = (over: Partial<AuthoringQuestion> = {}): AuthoringQuestion => ({
-  id: 1, item_id: 4, text_md: 'Question one', text_html: '<p>Question one</p>',
-  type: 'numeric_answer', order: 1, explanation_md: null, explanation_html: null,
-  correct_numeric: 3, precision: 0, correct_text: null, ...over,
-});
+const q = (over: Partial<AuthoringQuestion> = {}): AuthoringQuestion => {
+  const base: AuthoringQuestion = {
+    id: 1, item_id: 4, text_md: 'Question one', text_html: '<p>Question one</p>',
+    type: 'numeric_answer', order: 1, explanation_md: null, explanation_html: null,
+    correct_numeric: 3, precision: 0, correct_text: null, ...over,
+  };
+  // The header snippet reads stripped text_html (spec §13). Keep text_html in sync
+  // with text_md unless a test pins text_html explicitly, so header-text assertions
+  // exercise the real (text_html) code path.
+  return over.text_html !== undefined ? base : { ...base, text_html: `<p>${base.text_md}</p>` };
+};
 
 let cleanup: (() => void) | null = null;
 beforeEach(() => vi.restoreAllMocks());

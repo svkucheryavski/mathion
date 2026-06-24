@@ -14,7 +14,7 @@
 
   // Strip tags for the header snippet (header renders from a local copy in T4;
   // for the stub we read the prop directly).
-  const snippet = $derived(question.text_md.trim().slice(0, 80));
+  const snippet = $derived(question.text_html.replace(/<[^>]*>/g, '').trim().slice(0, 80));
   const typeLabel: Record<AuthoringQuestion['type'], string> = {
     single_choice: 'Single choice', multiple_choice: 'Multiple choice',
     numeric_answer: 'Numeric', text_answer: 'Text',
