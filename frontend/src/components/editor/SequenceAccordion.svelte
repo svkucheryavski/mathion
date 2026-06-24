@@ -187,7 +187,7 @@
 
   // Inline create-item form
   let creating = $state(false);
-  let newType = $state<'static_page' | 'video'>('static_page');
+  let newType = $state<'static_page' | 'video' | 'quiz'>('static_page');
   let newTitle = $state('');
   let newContentMd = $state('');
   let newVideoUrl = $state('');
@@ -273,7 +273,9 @@
     } catch (e) {
       const known = newType === 'static_page'
         ? ['title', 'content_md', 'type']
-        : ['title', 'video_url', 'type'];
+        : newType === 'video'
+          ? ['title', 'video_url', 'type']
+          : ['title', 'type'];
       const mapped = mapCreateError(e, known);
       createErrors = mapped.fieldErrors;
       // Fall back to a generic message if mapper produced nothing — without

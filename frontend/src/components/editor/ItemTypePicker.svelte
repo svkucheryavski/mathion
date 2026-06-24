@@ -4,7 +4,7 @@
   // create static_page and video items; the picker exists specifically to
   // enforce that constraint at the call site. Widen this union if the
   // product scope expands.
-  type ItemType = 'static_page' | 'video';
+  type ItemType = 'static_page' | 'video' | 'quiz';
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
   // prop type `value: ItemType` constrains it. The previous
   // `$bindable<ItemType>('static_page')` default is dead code — every call
@@ -23,6 +23,11 @@
     <input type="radio" name="item-type" value="video" bind:group={value} />
     <span class="glyph" aria-hidden="true">▶️</span>
     <span>Video</span>
+  </label>
+  <label class:selected={value === 'quiz'}>
+    <input type="radio" name="item-type" value="quiz" bind:group={value} />
+    <span class="glyph" aria-hidden="true">❓</span>
+    <span>Quiz</span>
   </label>
 </fieldset>
 

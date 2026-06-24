@@ -14,6 +14,10 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import { safeIframeUrl } from '../../lib/safeIframeUrl';
   import { normalizeVideoUrl } from '../../lib/normalizeVideoUrl';
+  import QuizEditor from '../../components/editor/QuizEditor.svelte';
+  // Page-owned dirty flag for the quiz editor (the page `tracker` stays null for
+  // quizzes). Bound into QuizEditor; reset on item navigation (§7.1).
+  let quizDirty = $state(false);
 
   let { courseSlug, versionId, blockId, sequenceId, itemId }: {
     courseSlug: string; versionId: string; blockId: string; sequenceId: string; itemId: string;
@@ -123,6 +127,7 @@
       else tracker = null;  // quiz / interactive_app — read-only, no tracker
       trackerIid = iid;
       trackerVid = vid;
+      quizDirty = false;
     }
   }
 
@@ -211,7 +216,7 @@
   }
 
   async function deleteItem() {
-    if (tracker?.isDirty || !item || !perms?.canEditStructure) return;
+    if ((tracker?.isDirty ?? false) || quizDirty || !item || !perms?.canEditStructure) return;
     if (!confirm(`Delete item "${item.title}"? This cannot be undone.`)) return;
     // Pin the route IDs at DELETE-start so a navigation race mid-await
     // doesn't corrupt the navigate target.
@@ -321,18 +326,24 @@
           {/if}
         {/if}
       </section>
+    {:else if item.type === 'quiz'}
+      {#key item.id}
+        <QuizEditor
+          itemId={item.id}
+          {vid}
+          itemTitle={item.title}
+          version={v}
+          {perms}
+          assetContext={editAssetContext}
+          bind:quizDirty
+        />
+      {/key}
     {:else}
       <section class="readonly">
         <p><em>Not editable in this slice.</em></p>
-        {#if item.type === 'quiz'}
-          <p>{item.questions_count} question{item.questions_count === 1 ? '' : 's'}. Quiz authoring UI lands in slice 2; questions are managed via the API for now.</p>
-        {:else if item.type === 'interactive_app'}
+        {#if item.type === 'interactive_app'}
           <p>Interactive-app editing lands in slice 2.</p>
         {/if}
-        <!-- Intentionally no {:else} fallback: when a future item type is
-             added to the union (e.g. mini_project), this section silently
-             falls through to just the "Not editable" headline rather than
-             mislabeling the new type as Interactive-app. -->
       </section>
     {/if}
 
@@ -340,8 +351,8 @@
       <section class="danger">
         <Button
           variant="ghost"
-          disabled={(tracker?.isDirty ?? false) || busy}
-          title={tracker?.isDirty ? 'Save or discard changes first' : ''}
+          disabled={(tracker?.isDirty ?? false) || quizDirty || busy}
+          title={((tracker?.isDirty ?? false) || quizDirty) ? 'Save or discard changes first' : ''}
           onclick={deleteItem}
         >Delete this item</Button>
       </section>
@@ -352,7 +363,7 @@
          template-render time; DirtyGuard.onMount runs ONCE and would close over the
          stale t even after ensureLoaded reassigns tracker on iid change. Same class
          as the Task-13 closure-snapshot bug. -->
-    <DirtyGuard isDirty={() => tracker?.isDirty ?? false} />
+    <DirtyGuard isDirty={() => (tracker?.isDirty ?? false) || quizDirty} />
   {/if}
 </div>
 
