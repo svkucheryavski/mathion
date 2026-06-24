@@ -102,10 +102,12 @@ export function validateNumericAnswer(input: string): NumericValidation {
     fracDigits = allDigits.slice(pointIndex);
   }
   intDigits = intDigits.replace(/^0+(?=\d)/, '');     // canonical integer part
-  fracDigits = fracDigits.replace(/0+$/, '');         // strip fractional trailing zeros
+  const fracCount = fracDigits.length;                // §8.3 scale: expanded fractional digits, PRE-strip
+  fracDigits = fracDigits.replace(/0+$/, '');         // strip trailing zeros (canonical + sig-digit count only)
 
-  // Bounds on the expanded value (§8.3).
-  if (fracDigits.length > 10) return { ok: false, reason: 'At most 10 decimal places.' };
+  // Bounds on the expanded value (§8.3). The scale check uses the RAW expanded count;
+  // only significant-digit counting strips trailing zeros.
+  if (fracCount > 10) return { ok: false, reason: 'At most 10 decimal places.' };
   if (intDigits.replace(/^0$/, '').length > 10) {
     return { ok: false, reason: 'Magnitude must be below 10,000,000,000.' };
   }

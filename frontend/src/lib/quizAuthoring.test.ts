@@ -23,6 +23,9 @@ describe('validateNumericAnswer (§8.3)', () => {
 
   it('rejects > 10 fractional digits and |value| >= 10^10 on the expanded value', () => {
     expect(validateNumericAnswer('1.23456789012')).toMatchObject({ ok: false }); // 11 dp
+    // §8.3: scale check is PRE-strip — a trailing-zero tail does NOT rescue an 11-dp input.
+    expect(validateNumericAnswer('1.00000000000')).toMatchObject({ ok: false }); // 11 dp, all-zero tail
+    expect(validateNumericAnswer('1.23456789010')).toMatchObject({ ok: false }); // 11 dp, trailing-zero tail
     expect(validateNumericAnswer('10000000000')).toMatchObject({ ok: false });   // = 10^10
     expect(validateNumericAnswer('9999999999')).toMatchObject({ ok: true });     // 10 int digits ok
   });
@@ -53,6 +56,7 @@ import * as apiModule from './api';
 import {
   listQuestions, createQuestion, updateQuestion, deleteQuestion,
   reorderQuestions, renameItem,
+  listOptions, createOption, updateOption, deleteOption, reorderOptions,
 } from './quizAuthoring';
 
 describe('quizAuthoring wrappers', () => {
@@ -95,5 +99,36 @@ describe('quizAuthoring wrappers', () => {
     const spy = vi.spyOn(apiModule.api, 'patch').mockResolvedValue({ id: 7, title: 'T' } as never);
     await renameItem(7, 'T');
     expect(spy).toHaveBeenCalledWith('/api/items/7', { title: 'T' });
+  });
+
+  it('listOptions GETs the question options path', async () => {
+    const spy = vi.spyOn(apiModule.api, 'get').mockResolvedValue([]);
+    await listOptions(9);
+    expect(spy).toHaveBeenCalledWith('/api/questions/9/options');
+  });
+
+  it('createOption POSTs the body to the question options path', async () => {
+    const spy = vi.spyOn(apiModule.api, 'post').mockResolvedValue({} as never);
+    await createOption(9, { text: 'A', is_correct: true });
+    expect(spy).toHaveBeenCalledWith('/api/questions/9/options', { text: 'A', is_correct: true });
+  });
+
+  it('updateOption PATCHes the option path', async () => {
+    const spy = vi.spyOn(apiModule.api, 'patch').mockResolvedValue({} as never);
+    await updateOption(5, { is_correct: false });
+    expect(spy).toHaveBeenCalledWith('/api/options/5', { is_correct: false });
+  });
+
+  it('deleteOption DELETEs the option path', async () => {
+    const spy = vi.spyOn(apiModule.api, 'delete').mockResolvedValue();
+    await deleteOption(5);
+    expect(spy).toHaveBeenCalledWith('/api/options/5');
+  });
+
+  it('reorderOptions POSTs {order} to the question options reorder path', async () => {
+    const spy = vi.spyOn(apiModule.api, 'post').mockResolvedValue(undefined as never);
+    await reorderOptions(9, [{ id: 2, order: 1 }, { id: 1, order: 2 }]);
+    expect(spy).toHaveBeenCalledWith('/api/questions/9/options/reorder',
+      { order: [{ id: 2, order: 1 }, { id: 1, order: 2 }] });
   });
 });
