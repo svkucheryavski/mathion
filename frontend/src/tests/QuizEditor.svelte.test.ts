@@ -196,10 +196,10 @@ it("disables a row's structural controls while an add is in flight (questionsLoc
   await tick(); await tick(); flushSync();
 });
 
-it('title edit flips quizDirty; Save calls renameItem then force-refresh', async () => {
+it('title edit flips quizDirty; Save calls renameItem, force-refreshes, and clears quizDirty', async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
   const rename = vi.spyOn(qa, 'renameItem').mockResolvedValue({ id: 4, title: 'Renamed' });
-  vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
   const { target, props } = mountEditor();
   await tick(); await tick(); flushSync();
   setInput(target, 'quiz-title', 'Renamed');
@@ -208,6 +208,8 @@ it('title edit flips quizDirty; Save calls renameItem then force-refresh', async
   clickByText(target, 'Save title');
   await tick(); await tick(); flushSync();
   expect(rename).toHaveBeenCalledWith(4, 'Renamed');
+  expect(refresh).toHaveBeenCalledWith(10, { force: true });   // force-refresh after rename
+  expect(props.quizDirty).toBe(false);                          // baseline advanced from res.title → tracker clean
 });
 
 it('shows an error then re-loads on Retry (loadToken increments per load)', async () => {
