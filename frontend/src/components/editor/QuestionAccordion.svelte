@@ -165,15 +165,6 @@
     <button type="button" aria-label="Delete question" disabled={structureDisabled} onclick={onDelete}>🗑</button>
   </div>
 
-  {#if isChoice && optStatus === 'error'}
-    <p class="err opt-err" role="alert" data-testid="option-load-error">{optError}</p>
-    <Button variant="ghost" onclick={() => void loadOptions()}>Retry</Button>
-  {/if}
-  {#if isChoice && optStatus === 'loaded' && !expanded}
-    <!-- visually hidden: keeps option texts in the DOM for a11y + test isolation checks -->
-    <span class="opt-summary" aria-hidden="true">{options.map((o) => o.text).join(' ')}</span>
-  {/if}
-
   {#if expanded}
     <div class="body">
       <span class="readonly-type">Type: {typeLabel[question.type]} (fixed)</span>
@@ -207,7 +198,10 @@
         <!-- choice types (single_choice / multiple_choice): options list (§6) -->
         {#if optStatus === 'loading'}
           <p class="muted">Loading options…</p>
-        {:else if optStatus !== 'error'}
+        {:else if optStatus === 'error'}
+          <p class="err" role="alert" data-testid="option-load-error">{optError}</p>
+          <Button variant="ghost" onclick={() => void loadOptions()}>Retry</Button>
+        {:else}
           {#if options.length === 0}
             <p class="muted">No options yet.</p>
           {:else}
@@ -240,6 +234,4 @@
   .badge, .muted { font-size: 0.85em; color: var(--text-muted, #666); }
   .err { color: var(--danger, #c00); }
   .options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-  .opt-err { padding: var(--space-1) var(--space-2); }
-  .opt-summary { display: none; }
 </style>

@@ -181,8 +181,8 @@ it('choice question loads its own options on mount, sorted by order', async () =
   expect(list).toHaveBeenCalledWith(1);
   const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
   expect(rows).toHaveLength(2);
-  expect(rows[0].textContent).toContain('First');
-  expect(rows[1].textContent).toContain('Second');
+  expect((rows[0].querySelector('[data-testid="option-text"]') as HTMLInputElement).value).toBe('First');
+  expect((rows[1].querySelector('[data-testid="option-text"]') as HTMLInputElement).value).toBe('Second');
 });
 
 it('numeric/text questions never fetch options', async () => {
@@ -201,7 +201,7 @@ it('option-load failure → inline error + Retry; Retry re-fetches', async () =>
   expect(target.querySelector('[data-testid="option-load-error"]')).not.toBeNull();
   [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Retry')!.click();
   await tick(); await tick(); flushSync();
-  expect(target.textContent).toContain('Recovered');
+  expect((target.querySelector('[data-testid="option-text"]') as HTMLInputElement).value).toBe('Recovered');
 });
 
 it('header shows the correct-count for choice questions', async () => {

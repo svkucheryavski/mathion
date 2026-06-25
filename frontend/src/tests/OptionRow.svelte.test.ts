@@ -13,7 +13,8 @@ afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 function mountRow(over: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const props: Record<string, unknown> = $state({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const props: any = $state({
     option: opt(), index: 1, count: 1, questionType: 'single_choice', ...over,
   });
   const cmp = mount(OptionRow, { target, props });
