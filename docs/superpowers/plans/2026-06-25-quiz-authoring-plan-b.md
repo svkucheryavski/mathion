@@ -804,7 +804,7 @@ Expected: FAIL — no add form / draft trackers / locks yet.
   }
 
   async function commitText(oid: number) {
-    if (optionsLocked) return;
+    if (optionsDisabled) return;                         // §7.2 two-way lock: defer the blur-commit while question text is dirty (readonly inputs still emit blur)
     const tracker = optionTrackers.get(oid);
     const target = options.find((o) => o.id === oid);
     if (!tracker || !target || !tracker.isDirty) return;
