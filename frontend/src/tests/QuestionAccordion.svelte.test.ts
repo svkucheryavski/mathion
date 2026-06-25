@@ -333,6 +333,44 @@ it('optionsLocked serializes: a 2nd option mutation is blocked while the 1st is 
   // every option control is now disabled (optionsLocked)
   expect((rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).disabled).toBe(true);
   expect((rows[0].querySelector('[data-testid="option-text"]') as HTMLInputElement).readOnly).toBe(true);
+  // §7.2 text-side lock: while optionsLocked, MarkdownEditor is in readOnly mode
+  // → it renders a preview div, NOT a textarea (readOnly=true removes the textarea from the DOM)
+  expect(target.querySelector('textarea')).toBeNull();
   resolveDel();
   await tick(); await tick(); flushSync();
+});
+
+it('resyncOptions discards a re-fetch that resolves after a vid change (§4.1a)', async () => {
+  const initial = [opt({ id: 1, text: 'A', is_correct: true, order: 1 }), opt({ id: 2, text: 'B', is_correct: false, order: 2 })];
+  let resolveResync!: (v: AuthoringOption[]) => void;
+  vi.spyOn(qa, 'listOptions')
+    .mockResolvedValueOnce(initial)                                  // mount load
+    .mockReturnValueOnce(new Promise((r) => { resolveResync = r; })); // resync re-fetch
+  vi.spyOn(qa, 'reorderOptions').mockRejectedValue(new Error('boom'));
+  const { target, props } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  // trigger a reorder (move option 1 down) → reorderOptions rejects → resyncOptions pending
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  (rows[0].querySelector('button[aria-label="Move option down"]') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();
+  props.vid = 11;                                                   // route changed mid-resync
+  await tick(); flushSync();
+  let orderReads = 0;
+  const trap = () => ({ id: 99, question_id: 1, text: 'STALE', is_correct: false, get order() { orderReads++; return 1; } } as unknown as AuthoringOption);
+  resolveResync([trap(), trap()]);                                  // stale re-fetch for the OLD vid
+  await tick(); await tick(); flushSync();
+  expect(orderReads).toBe(0);                                       // guard fired → stale resync not applied
+});
+
+it('a dirty question text form disables add-option (§7.2 two-way lock)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
+  const create = vi.spyOn(qa, 'createOption');
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  // dirty the question's text form (edit text_md via the first MarkdownEditor textarea)
+  setVal(target.querySelector('textarea') as HTMLTextAreaElement, 'Edited question body');
+  await tick(); flushSync();
+  expect(anyDirty(target)).toBe('dirty');
+  expect(addOptionBtn(target).disabled).toBe(true);     // two-way lock: can't add while text dirty
+  expect(create).not.toHaveBeenCalled();
 });

@@ -127,10 +127,10 @@
     next[i] = updated;
     setOptions(next);
   }
-  async function resyncOptions() {                     // §6 write-back on error
+  async function resyncOptions(savedVid: number) {     // §6 write-back on error
     try {
       const list = await listOptions(question.id);
-      if (!alive) return;
+      if (!(alive && vid === savedVid)) return;
       setOptions([...list].sort((a, b) => a.order - b.order));
     } catch { /* keep the prior inline error; the loaded list stays as-is */ }
   }
@@ -162,7 +162,7 @@
   const newOptionValid = $derived(newOptionText.trim().length >= 1 && newOptionText.length <= 500);
 
   async function addOption() {
-    if (optionsLocked || !perms.canEditStructure || !newOptionValid) return;
+    if (optionsDisabled || !perms.canEditStructure || !newOptionValid) return;
     const savedVid = vid;
     const text = newOptionText.trim();
     // §8.4: the first option of an empty single_choice list is auto-correct; all
@@ -217,7 +217,7 @@
     } catch (e) {
       if (alive && vid === savedVid) {
         optMutError = e instanceof ApiError ? e.displayMessage : 'Reorder failed';
-        await resyncOptions();
+        await resyncOptions(savedVid);
       }
     } finally {
       if (alive) optionsLocked = false;
@@ -372,13 +372,13 @@
             {#if addingOption}
               <div class="add-option">
                 <label>New option
-                  <input data-testid="new-option-text" bind:value={newOptionText} maxlength="500" />
+                  <input data-testid="new-option-text" bind:value={newOptionText} maxlength="500" readonly={optionsDisabled} />
                 </label>
-                <Button onclick={() => void addOption()} disabled={optionsLocked || !newOptionValid}>Add</Button>
+                <Button onclick={() => void addOption()} disabled={optionsDisabled || !newOptionValid}>Add</Button>
                 <Button variant="ghost" onclick={() => { addingOption = false; newOptionText = ''; }}>Cancel</Button>
               </div>
             {:else}
-              <Button onclick={() => { addingOption = true; }} disabled={optionsLocked}>＋ Add option</Button>
+              <Button onclick={() => { addingOption = true; }} disabled={optionsDisabled}>＋ Add option</Button>
             {/if}
           {/if}
         {/if}
