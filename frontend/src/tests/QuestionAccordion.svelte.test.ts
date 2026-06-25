@@ -362,6 +362,25 @@ it('resyncOptions discards a re-fetch that resolves after a vid change (§4.1a)'
   expect(orderReads).toBe(0);                                       // guard fired → stale resync not applied
 });
 
+it('commitText is blocked while the question text form is dirty (§7.2 two-way lock, blur path)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
+  const update = vi.spyOn(qa, 'updateOption');
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  // dirty the option-text draft while the question is still clean (input editable)
+  const optInput = target.querySelector('[data-testid="option-text"]') as HTMLInputElement;
+  setVal(optInput, 'A edited');
+  await tick(); flushSync();
+  // now dirty the QUESTION text form (programmatic input does NOT blur the option input)
+  setVal(target.querySelector('textarea') as HTMLTextAreaElement, 'Edited body');
+  await tick(); flushSync();
+  expect(anyDirty(target)).toBe('dirty');
+  // blur the option input → commitText must defer while the question is dirty
+  optInput.dispatchEvent(new Event('blur', { bubbles: true }));
+  await tick(); await tick(); flushSync();
+  expect(update).not.toHaveBeenCalled();
+});
+
 it('a dirty question text form disables add-option (§7.2 two-way lock)', async () => {
   vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
   const create = vi.spyOn(qa, 'createOption');

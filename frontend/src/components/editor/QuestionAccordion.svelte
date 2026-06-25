@@ -225,7 +225,7 @@
   }
 
   async function commitText(oid: number) {
-    if (optionsLocked) return;
+    if (optionsDisabled) return;
     const tracker = optionTrackers.get(oid);
     const target = options.find((o) => o.id === oid);
     if (!tracker || !target || !tracker.isDirty) return;
