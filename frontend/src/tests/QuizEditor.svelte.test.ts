@@ -308,6 +308,24 @@ it('reordering a question announces via the aria-live region', async () => {
   expect(live.textContent).toMatch(/position 2 of 2/i);
 });
 
+it('adding a question focuses the new question header expand button (T8)', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
+  vi.spyOn(qa, 'createQuestion').mockResolvedValue(
+    q({ id: 42, type: 'single_choice', text_md: 'Pick one', correct_numeric: null, precision: null }),
+  );
+  vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountEditor();
+  await tick(); await tick(); flushSync();
+  openAddForm(target);
+  selectType(target, 'single_choice');
+  setInput(target, 'new-question-text', 'Pick one');
+  clickByText(target, 'Add');
+  await tick(); await tick(); await tick(); flushSync();
+  // submitAdd sets expandedId=created.id (42) → accordion renders with expanded=true
+  // and then focuses [data-q-id="42"] .expand via void tick().then(...)
+  expect(document.activeElement).toBe(target.querySelector('[data-q-id="42"] .expand'));
+});
+
 it("one question's failed option fetch isolates to its accordion (§6)", async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([
     q({ id: 1, order: 1, type: 'single_choice', text_md: 'Q1', correct_numeric: null, precision: null }),

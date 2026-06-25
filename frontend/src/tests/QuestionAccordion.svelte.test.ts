@@ -663,6 +663,34 @@ it('adding an option focuses the new option input', async () => {
   expect(document.activeElement).toBe(last);
 });
 
+it('delete-option focuses the surviving sibling at the same position (T8)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+    opt({ id: 3, text: 'C', is_correct: false, order: 3 }),
+  ]);
+  vi.spyOn(qa, 'deleteOption').mockResolvedValue(undefined as never);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  // delete the MIDDLE option B (idx=1) → survivors [A,C], min(1,1)=1 → focus lands on C (id=3)
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();
+  await tick(); await tick(); await tick(); flushSync();
+  expect((document.activeElement as HTMLElement).getAttribute('data-option-id')).toBe('3');
+});
+
+it('successful Save returns focus to the header expand button (T8)', async () => {
+  vi.spyOn(qa, 'updateQuestion').mockResolvedValue(q({ text_md: 'New body', text_html: '<p>New body</p>' }));
+  const { target } = mountAccordion(q());
+  flushSync();
+  // make a NON-key edit (text_md only → keyChanged=false → no confirmKeyChange)
+  setVal(target.querySelector('textarea') as HTMLTextAreaElement, 'New body');
+  await tick(); flushSync();
+  saveBtn(target).click();
+  await tick(); await tick(); flushSync();
+  expect(document.activeElement).toBe(target.querySelector('button.expand'));
+});
+
 it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a second guard)', async () => {
   const { ApiError } = await import('../lib/api');
   let resolveResync!: (v: AuthoringOption[]) => void;
