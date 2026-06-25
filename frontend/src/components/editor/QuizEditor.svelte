@@ -24,12 +24,26 @@
     version: AdminTreeVersion; perms: VersionPermissions; assetContext: AssetContext;
     quizDirty?: boolean;
   } = $props();
-  void version; // threaded for Plan B (max_quiz_attempts); unused in Plan A
-
   // ---- Dirty registry (own; ItemEditPage has no DIRTY_REGISTRY_KEY context) ----
   const registry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, registry);
   $effect(() => { quizDirty = registry.isAnyDirty(); });
+
+  // ---- §8.7 published answer-key confirm latch. Per question, per mount: the
+  //      Set is recreated on every mount, and {#key item.id} remounts QuizEditor
+  //      on item navigation, so the latch resets exactly when the spec requires. ----
+  const keyConfirmed = new Set<number>();
+  function confirmKeyChange(questionId: number): boolean {
+    if (version.state !== 'published') return true;       // only published is guarded
+    if (keyConfirmed.has(questionId)) return true;        // already confirmed this mount
+    const ok = confirm(
+      'This quiz is published. Changing the answer key does not re-score students who already ' +
+      'attempted — their recorded scores keep the old key. To re-grade everyone, create a new ' +
+      'version instead. Continue?',
+    );
+    if (ok) keyConfirmed.add(questionId);
+    return ok;
+  }
 
   // ---- Lifecycle guard (§4.1a) ----
   let alive = true;
@@ -246,7 +260,7 @@
               {assetContext}
               locked={questionsLocked}
               expanded={expandedId === q.id}
-              confirmKeyChange={() => true}
+              {confirmKeyChange}
               onExpandToggle={() => toggleExpand(q.id)}
               onDelete={() => void removeQuestion(q.id)}
               onMoveUp={() => void move(q.id, -1)}

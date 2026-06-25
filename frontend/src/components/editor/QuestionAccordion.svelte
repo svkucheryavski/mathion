@@ -58,6 +58,7 @@
   let textHtml = $state(question.text_html);   // header snippet; advances on Save
 
   const editable = $derived(perms.canEditTextFields);
+  const isPublished = $derived(perms.canEditTextFields && !perms.canEditStructure);  // §8.8 (published only)
   // optionsLocked must be declared before textLocked references it
   let optionsLocked = $state(false);                   // accordion-wide option lock (§7.2) — declared early for textLocked
   const textLocked = $derived(optionsLocked);          // text inputs frozen during an option mutation (§7.2)
@@ -297,6 +298,10 @@
 
   async function save() {
     if (!canSave) return;
+    const keyChanged =
+      (question.type === 'numeric_answer' && (draft.numericInput !== saved.numericInput || draft.precision !== saved.precision)) ||
+      (question.type === 'text_answer' && draft.correct_text !== saved.correct_text);
+    if (keyChanged && !confirmKeyChange(question.id)) return;   // §8.7 — abort on cancel
     const savedVid = vid;                            // capture live vid BEFORE await (§4.1a)
     const body: Record<string, unknown> = {};
     if (draft.text_md !== saved.text_md) body.text_md = draft.text_md;
@@ -359,6 +364,9 @@
   {#if expanded}
     <div class="body">
       <span class="readonly-type">Type: {typeLabel[question.type]} (fixed)</span>
+      {#if isPublished}
+        <p class="muted" data-testid="published-type-note">Type can't be changed. To replace this question, create a new version.</p>
+      {/if}
       <label>Question text
         <MarkdownEditor {assetContext} readOnly={!editable || textLocked} bind:value={draft.text_md} />
       </label>

@@ -235,6 +235,61 @@ it('a disabled version shows the whole-editor read-only notice', async () => {
   expect(target.querySelector('[data-testid="quiz-readonly"]')).not.toBeNull();
 });
 
+// ---- §8.7 published answer-key confirm tests (T7) ----
+
+const twoOptions = () => [
+  { id: 1, question_id: 1, text: 'A', is_correct: true, order: 1 },
+  { id: 2, question_id: 1, text: 'B', is_correct: false, order: 2 },
+];
+const expandFirst = async (target: HTMLElement) => {
+  (target.querySelector('button.expand') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();
+};
+
+it('§8.7: a published correctness toggle prompts once; cancel aborts the mutation', async () => {
+  const PUB = { ...VERSION, state: 'published' as const };
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, type: 'single_choice', correct_numeric: null, precision: null })]);
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(twoOptions());
+  const upd = vi.spyOn(qa, 'updateOption').mockResolvedValue({ id: 2, question_id: 1, text: 'B', is_correct: true, order: 2 });
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);   // cancel
+  const { target } = mountEditor({ version: PUB, perms: versionPermissions(PUB) });
+  await tick(); await tick(); await tick(); flushSync();
+  await expandFirst(target);
+  ([...target.querySelectorAll('input[type="radio"]')] as HTMLInputElement[])[1].click();
+  await tick(); await tick(); flushSync();
+  expect(confirmSpy).toHaveBeenCalledOnce();
+  expect(upd).not.toHaveBeenCalled();                  // cancelled → no key change
+});
+
+it('§8.7: the latch prompts at most once per question per mount', async () => {
+  const PUB = { ...VERSION, state: 'published' as const };
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, type: 'single_choice', correct_numeric: null, precision: null })]);
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(twoOptions());
+  vi.spyOn(qa, 'updateOption').mockImplementation((oid: number, body: { is_correct?: boolean }) =>
+    Promise.resolve({ id: oid, question_id: 1, text: 'x', is_correct: !!body.is_correct, order: oid }));
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const { target } = mountEditor({ version: PUB, perms: versionPermissions(PUB) });
+  await tick(); await tick(); await tick(); flushSync();
+  await expandFirst(target);
+  const radios = () => [...target.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
+  radios()[1].click(); await tick(); await tick(); await tick(); flushSync();   // prompt #1 → switch to B
+  radios()[0].click(); await tick(); await tick(); await tick(); flushSync();   // latched → no prompt
+  expect(confirmSpy).toHaveBeenCalledOnce();
+});
+
+it('§8.7: created versions never prompt', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, type: 'single_choice', correct_numeric: null, precision: null })]);
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(twoOptions());
+  vi.spyOn(qa, 'updateOption').mockResolvedValue({ id: 2, question_id: 1, text: 'B', is_correct: true, order: 2 });
+  const confirmSpy = vi.spyOn(window, 'confirm');
+  const { target } = mountEditor();                    // created (default)
+  await tick(); await tick(); await tick(); flushSync();
+  await expandFirst(target);
+  ([...target.querySelectorAll('input[type="radio"]')] as HTMLInputElement[])[1].click();
+  await tick(); await tick(); flushSync();
+  expect(confirmSpy).not.toHaveBeenCalled();
+});
+
 it("one question's failed option fetch isolates to its accordion (§6)", async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([
     q({ id: 1, order: 1, type: 'single_choice', text_md: 'Q1', correct_numeric: null, precision: null }),

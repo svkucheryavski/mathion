@@ -572,6 +572,45 @@ it('a 400 on an option mutation does NOT re-gate (§10)', async () => {
   expect(refresh).not.toHaveBeenCalled();
 });
 
+// ---- §8.7 Save-key call site + §8.8 published note (T7) ----
+
+it('§8.7: a numeric key Save calls confirmKeyChange and aborts on cancel', async () => {
+  const upd = vi.spyOn(qa, 'updateQuestion').mockResolvedValue(q());
+  const confirmKeyChange = vi.fn().mockReturnValue(false);
+  const { target } = mountAccordion(q(), { confirmKeyChange });
+  flushSync();
+  setVal(target.querySelector('[data-testid="numeric-input"]') as HTMLInputElement, '9');
+  await tick(); flushSync();
+  saveBtn(target).click();
+  await tick(); flushSync();
+  expect(confirmKeyChange).toHaveBeenCalledWith(1);
+  expect(upd).not.toHaveBeenCalled();
+});
+
+it('§8.7: a text-only Save does NOT call confirmKeyChange', async () => {
+  const upd = vi.spyOn(qa, 'updateQuestion').mockResolvedValue(q({ text_md: 'New body', text_html: '<p>New body</p>' }));
+  const confirmKeyChange = vi.fn().mockReturnValue(true);
+  const { target } = mountAccordion(q(), { confirmKeyChange });
+  flushSync();
+  setVal(target.querySelector('textarea') as HTMLTextAreaElement, 'New body');   // text_md only; numeric unchanged
+  await tick(); flushSync();
+  saveBtn(target).click();
+  await tick(); flushSync();
+  expect(confirmKeyChange).not.toHaveBeenCalled();
+  expect(upd).toHaveBeenCalled();
+});
+
+it('§8.8: a published question shows the type dead-end note; created does not', async () => {
+  const PUB = versionPermissions({ state: 'published', is_disabled: false });
+  const pub = mountAccordion(q(), { perms: PUB });
+  flushSync();
+  expect(pub.target.querySelector('[data-testid="published-type-note"]')).not.toBeNull();
+  cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  const cre = mountAccordion(q());                      // created
+  flushSync();
+  expect(cre.target.querySelector('[data-testid="published-type-note"]')).toBeNull();
+});
+
 it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a second guard)', async () => {
   const { ApiError } = await import('../lib/api');
   let resolveResync!: (v: AuthoringOption[]) => void;
