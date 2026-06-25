@@ -702,10 +702,10 @@ Expected: FAIL — no add form / draft trackers / locks yet.
     next[i] = updated;
     setOptions(next);
   }
-  async function resyncOptions() {                     // §6 write-back on error
+  async function resyncOptions(savedVid: number) {     // §6 write-back on error
     try {
       const list = await listOptions(question.id);
-      if (!alive) return;
+      if (!(alive && vid === savedVid)) return;        // §4.1a: discard a re-fetch superseded by a vid change
       setOptions([...list].sort((a, b) => a.order - b.order));
     } catch { /* keep the prior inline error; the loaded list stays as-is */ }
   }
@@ -741,7 +741,7 @@ Expected: FAIL — no add form / draft trackers / locks yet.
   const newOptionValid = $derived(newOptionText.trim().length >= 1 && newOptionText.length <= 500);
 
   async function addOption() {
-    if (optionsLocked || !perms.canEditStructure || !newOptionValid) return;
+    if (optionsDisabled || !perms.canEditStructure || !newOptionValid) return;   // §7.2 two-way lock: also blocked while text dirty
     const savedVid = vid;
     const text = newOptionText.trim();
     // §8.4: the first option of an empty single_choice list is auto-correct; all
@@ -796,7 +796,7 @@ Expected: FAIL — no add form / draft trackers / locks yet.
     } catch (e) {
       if (alive && vid === savedVid) {
         optMutError = e instanceof ApiError ? e.displayMessage : 'Reorder failed';
-        await resyncOptions();
+        await resyncOptions(savedVid);
       }
     } finally {
       if (alive) optionsLocked = false;
@@ -871,13 +871,13 @@ In the body template, add `|| textLocked` to each text field's read-only:
             {#if addingOption}
               <div class="add-option">
                 <label>New option
-                  <input data-testid="new-option-text" bind:value={newOptionText} maxlength="500" />
+                  <input data-testid="new-option-text" bind:value={newOptionText} maxlength="500" readonly={optionsDisabled} />
                 </label>
-                <Button onclick={() => void addOption()} disabled={optionsLocked || !newOptionValid}>Add</Button>
+                <Button onclick={() => void addOption()} disabled={optionsDisabled || !newOptionValid}>Add</Button>
                 <Button variant="ghost" onclick={() => { addingOption = false; newOptionText = ''; }}>Cancel</Button>
               </div>
             {:else}
-              <Button onclick={() => { addingOption = true; }} disabled={optionsLocked}>＋ Add option</Button>
+              <Button onclick={() => { addingOption = true; }} disabled={optionsDisabled}>＋ Add option</Button>
             {/if}
           {/if}
         {/if}
@@ -1164,7 +1164,7 @@ Expected: FAIL — no `confirmKeyChange` prop / `toggleCorrect` yet.
     } catch (e) {
       if (alive && vid === savedVid) {
         optMutError = e instanceof ApiError ? e.displayMessage : 'Correctness update failed';
-        await resyncOptions();                                        // 422 last-correct / partial fail → §6 revert
+        await resyncOptions(savedVid);                                // 422 last-correct / partial fail → §6 revert
       }
     } finally {
       if (alive) optionsLocked = false;                              // whole sequence in ONE finally (§7.2)
@@ -1344,7 +1344,7 @@ Expected: FAIL — the 409 case does not call `loadAdminTree` yet.
   async function afterOptionError(e: unknown, savedVid: number, fallback: string) {
     if (!(alive && vid === savedVid)) return;
     optMutError = e instanceof ApiError ? e.displayMessage : fallback;
-    await resyncOptions();                                       // §6 write-back (option-level)
+    await resyncOptions(savedVid);                               // §6 write-back (option-level)
     if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
       await loadAdminTree(vid, { force: true });                // §10 re-gate (refresh perms); 422/400 do NOT
     }
