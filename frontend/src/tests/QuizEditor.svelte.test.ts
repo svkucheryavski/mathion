@@ -224,3 +224,18 @@ it('shows an error then re-loads on Retry (loadToken increments per load)', asyn
   expect(target.textContent).toContain('Recovered');
   expect(list).toHaveBeenCalledTimes(2);
 });
+
+it('one question\'s failed option fetch isolates to its accordion (§6)', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([
+    q({ id: 1, order: 1, type: 'single_choice', text_md: 'Q1', correct_numeric: null, precision: null }),
+    q({ id: 2, order: 2, type: 'single_choice', text_md: 'Q2', correct_numeric: null, precision: null }),
+  ]);
+  vi.spyOn(qa, 'listOptions').mockImplementation((qid: number) =>
+    qid === 1 ? Promise.reject(new Error('boom'))
+      : Promise.resolve([{ id: 9, question_id: 2, text: 'ok-opt', is_correct: true, order: 1 }]));
+  const { target } = mountEditor();
+  await tick(); await tick(); await tick(); flushSync();
+  // exactly one accordion shows the option-load error; the other shows its option
+  expect(target.querySelectorAll('[data-testid="option-load-error"]')).toHaveLength(1);
+  expect(target.textContent).toContain('ok-opt');
+});

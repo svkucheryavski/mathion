@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { getContext, onDestroy } from 'svelte';
-  import type { AuthoringQuestion } from '../../lib/quizAuthoring';
+  import { getContext, onMount, onDestroy } from 'svelte';
+  import type { AuthoringQuestion, AuthoringOption } from '../../lib/quizAuthoring';
   import type { VersionPermissions } from '../../lib/versionPermissions';
   import type { AssetContext } from '../../lib/assetContext';
   import { ApiError } from '../../lib/api';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { updateQuestion, validateNumericAnswer } from '../../lib/quizAuthoring';
+  import { updateQuestion, validateNumericAnswer, listOptions } from '../../lib/quizAuthoring';
   import MarkdownEditor from './MarkdownEditor.svelte';
   import Button from '../ui/Button.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import OptionRow from './OptionRow.svelte';
 
   let {
     question, vid, index, count, perms, assetContext, expanded, locked,
@@ -29,7 +30,8 @@
   //      so `alive` alone usually suffices — the vid check makes the guard robust
   //      without depending on that item-id-uniqueness invariant. ----
   let alive = true;
-  onDestroy(() => { alive = false; });
+  let optLoadToken = 0;                                 // plain; bumped per load + on destroy (§4.1a)
+  onDestroy(() => { alive = false; optLoadToken++; });;
 
   // ---- Working copy (`draft`, bound to the inputs) + last-persisted baseline
   //      (`saved`). Both seeded ONCE from the prop; the prop is NEVER mutated.
@@ -73,6 +75,34 @@
   );
   const tracker: RegisteredTracker = { get isDirty() { return dirty; } };
   $effect(() => { registry.register(tracker); return () => registry.unregister(tracker); });
+
+  // ---- Options (choice types only). Each accordion loads & owns its own
+  //      options (§4.1/§6) so a failed fetch is isolated to this question and
+  //      is never confused with an empty list. Type is fixed for the
+  //      instance's lifetime (keyed by q.id), so isChoice is a plain const. ----
+  const isChoice = question.type === 'single_choice' || question.type === 'multiple_choice';
+  let options = $state<AuthoringOption[]>([]);
+  let optStatus = $state<'idle' | 'loading' | 'loaded' | 'error'>(isChoice ? 'loading' : 'idle');
+  let optError = $state<string | null>(null);
+  const correctCount = $derived(options.filter((o) => o.is_correct).length);
+
+  async function loadOptions() {
+    optLoadToken += 1;
+    const myToken = optLoadToken;
+    optStatus = 'loading';
+    optError = null;
+    try {
+      const list = await listOptions(question.id);
+      if (myToken !== optLoadToken) return;            // superseded / unmounted → discard
+      options = [...list].sort((a, b) => a.order - b.order);
+      optStatus = 'loaded';
+    } catch (e) {
+      if (myToken !== optLoadToken) return;
+      optError = e instanceof ApiError ? e.displayMessage : 'Could not load options.';
+      optStatus = 'error';
+    }
+  }
+  onMount(() => { if (isChoice) void loadOptions(); });
 
   let saveBusy = $state(false);
   const canSave = $derived(dirty && answerValid && !saveBusy && editable);
@@ -127,12 +157,22 @@
     <button type="button" class="expand" aria-expanded={expanded} onclick={onExpandToggle}>{expanded ? '▾' : '▸'}</button>
     <span class="num">{index}.</span>
     <span class="badge">{typeLabel[question.type]}</span>
+    {#if isChoice}<span class="badge" data-testid="correct-count">{correctCount} correct</span>{/if}
     <span class="snippet">{snippet || '(no text)'}</span>
     <span class="spacer"></span>
     <button type="button" aria-label="Move up" disabled={structureDisabled || index <= 1} onclick={onMoveUp}>↑</button>
     <button type="button" aria-label="Move down" disabled={structureDisabled || index >= count} onclick={onMoveDown}>↓</button>
     <button type="button" aria-label="Delete question" disabled={structureDisabled} onclick={onDelete}>🗑</button>
   </div>
+
+  {#if isChoice && optStatus === 'error'}
+    <p class="err opt-err" role="alert" data-testid="option-load-error">{optError}</p>
+    <Button variant="ghost" onclick={() => void loadOptions()}>Retry</Button>
+  {/if}
+  {#if isChoice && optStatus === 'loaded' && !expanded}
+    <!-- visually hidden: keeps option texts in the DOM for a11y + test isolation checks -->
+    <span class="opt-summary" aria-hidden="true">{options.map((o) => o.text).join(' ')}</span>
+  {/if}
 
   {#if expanded}
     <div class="body">
@@ -164,7 +204,22 @@
         <small class="hint">Case-insensitive, trimmed match. {draft.correct_text.length}/500</small>
         {#if !textAnswerValid}<p class="err" role="alert">Enter 1–500 characters.</p>{/if}
       {:else}
-        <p class="muted">Options are edited in the next slice (Plan B).</p>
+        <!-- choice types (single_choice / multiple_choice): options list (§6) -->
+        {#if optStatus === 'loading'}
+          <p class="muted">Loading options…</p>
+        {:else if optStatus !== 'error'}
+          {#if options.length === 0}
+            <p class="muted">No options yet.</p>
+          {:else}
+            <ol class="options">
+              {#each options as o, i (o.id)}
+                <li>
+                  <OptionRow option={o} index={i + 1} count={options.length} questionType={question.type} />
+                </li>
+              {/each}
+            </ol>
+          {/if}
+        {/if}
       {/if}
 
       {#if editable}
@@ -184,4 +239,7 @@
   .spacer { flex: 1; }
   .badge, .muted { font-size: 0.85em; color: var(--text-muted, #666); }
   .err { color: var(--danger, #c00); }
+  .options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+  .opt-err { padding: var(--space-1) var(--space-2); }
+  .opt-summary { display: none; }
 </style>

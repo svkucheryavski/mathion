@@ -1,7 +1,7 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync, tick } from 'svelte';
 import * as qa from '../lib/quizAuthoring';
-import type { AuthoringQuestion } from '../lib/quizAuthoring';
+import type { AuthoringQuestion, AuthoringOption } from '../lib/quizAuthoring';
 import { versionPermissions } from '../lib/versionPermissions';
 // The Harness injects a dirty registry via context (QuizEditor does this in
 // prod) and exposes registry.isAnyDirty() at [data-testid="any-dirty"].
@@ -164,4 +164,62 @@ it('discards a Save response that resolves after a route (vid) change (§4.1a)',
   // Guard (alive && vid === savedVid) fired → baseline NOT advanced:
   expect(target.querySelector('[data-testid="any-dirty"]')?.textContent).toBe('dirty');
   expect((target.querySelector('[data-testid="numeric-input"]') as HTMLInputElement).value).toBe('0.05');
+});
+
+// ---- Option-loading tests (T5a) ----
+
+const opt = (over: Partial<AuthoringOption> = {}): AuthoringOption => ({
+  id: 1, question_id: 1, text: 'A', is_correct: false, order: 1, ...over,
+});
+
+it('choice question loads its own options on mount, sorted by order', async () => {
+  const list = vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 2, order: 2, text: 'Second' }), opt({ id: 1, order: 1, text: 'First' }),
+  ]);
+  const { target } = mountAccordion(q({ type: 'single_choice', correct_numeric: null, precision: null }));
+  await tick(); await tick(); flushSync();
+  expect(list).toHaveBeenCalledWith(1);
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  expect(rows).toHaveLength(2);
+  expect(rows[0].textContent).toContain('First');
+  expect(rows[1].textContent).toContain('Second');
+});
+
+it('numeric/text questions never fetch options', async () => {
+  const list = vi.spyOn(qa, 'listOptions').mockResolvedValue([]);
+  mountAccordion(q());                                 // numeric (default factory)
+  await tick(); await tick(); flushSync();
+  expect(list).not.toHaveBeenCalled();
+});
+
+it('option-load failure → inline error + Retry; Retry re-fetches', async () => {
+  vi.spyOn(qa, 'listOptions')
+    .mockRejectedValueOnce(new Error('boom'))
+    .mockResolvedValueOnce([opt({ id: 5, text: 'Recovered' })]);
+  const { target } = mountAccordion(q({ type: 'multiple_choice', correct_numeric: null, precision: null }));
+  await tick(); await tick(); flushSync();
+  expect(target.querySelector('[data-testid="option-load-error"]')).not.toBeNull();
+  [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Retry')!.click();
+  await tick(); await tick(); flushSync();
+  expect(target.textContent).toContain('Recovered');
+});
+
+it('header shows the correct-count for choice questions', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, is_correct: true }), opt({ id: 2, is_correct: false }),
+  ]);
+  const { target } = mountAccordion(q({ type: 'single_choice', correct_numeric: null, precision: null }));
+  await tick(); await tick(); flushSync();
+  expect(target.querySelector('[data-testid="correct-count"]')?.textContent).toContain('1');
+});
+
+it('a late option-load response after unmount writes nothing (§4.1a onDestroy token bump)', async () => {
+  let resolveList!: (v: AuthoringOption[]) => void;
+  vi.spyOn(qa, 'listOptions').mockReturnValue(new Promise((r) => { resolveList = r; }));
+  const { target } = mountAccordion(q({ type: 'single_choice', correct_numeric: null, precision: null }));
+  await tick(); flushSync();
+  cleanup?.(); cleanup = null;                         // unmount while the fetch is pending
+  resolveList([opt({ id: 9, text: 'Late' })]);         // resolves after destroy → discarded
+  await tick(); flushSync();
+  expect(target.querySelector('[data-testid="option-row"]')).toBeNull();
 });
