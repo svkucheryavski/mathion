@@ -1088,23 +1088,28 @@ it('during a single_choice switch optionsLocked also disables delete (rev-12 rac
 });
 
 it('a thrown set-false clears optionsLocked in finally (group re-enables)', async () => {
-  vi.spyOn(qa, 'listOptions').mockResolvedValue([
-    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
-    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
-  ]);
-  vi.spyOn(qa, 'updateOption')
-    .mockResolvedValueOnce(opt({ id: 2, is_correct: true, order: 2 }))     // set-true OK
-    .mockRejectedValueOnce(new Error('boom'));                            // set-false throws
-  // resync after error:
-  vi.spyOn(qa, 'listOptions').mockResolvedValue([
-    opt({ id: 1, text: 'A', is_correct: false, order: 1 }), opt({ id: 2, text: 'B', is_correct: true, order: 2 }),
-  ]);
+  // NOTE: use ONE spy with ordered responses — a 2nd `.mockResolvedValue` on the
+  // same spy overrides the initial-load default too, which would load B as the
+  // unique-correct option and make the click a no-op (vacuous test).
+  vi.spyOn(qa, 'listOptions')
+    .mockResolvedValueOnce([
+      opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+      opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+    ])                                                                   // initial load
+    .mockResolvedValueOnce([
+      opt({ id: 1, text: 'A', is_correct: false, order: 1 }),
+      opt({ id: 2, text: 'B', is_correct: true, order: 2 }),
+    ]);                                                                  // §6 resync after the throw
+  const upd = vi.spyOn(qa, 'updateOption')
+    .mockResolvedValueOnce(opt({ id: 2, is_correct: true, order: 2 }))   // set-true OK
+    .mockRejectedValueOnce(new Error('boom'));                          // set-false throws
   const { target } = mountAccordion(choiceQ());
   await tick(); await tick(); flushSync();
-  radios(target)[1].click();
+  radios(target)[1].click();                                           // click B (false → real switch)
   await tick(); await tick(); await tick(); flushSync();
-  // optionsLocked cleared → a radio is enabled again
-  expect(radios(target).some((r) => !r.disabled)).toBe(true);
+  expect(upd).toHaveBeenCalledTimes(2);                                // entered the set-true → set-false sequence
+  expect(target.querySelector('[data-testid="option-mut-error"]')).not.toBeNull();  // inline error surfaced
+  expect(radios(target).some((r) => !r.disabled)).toBe(true);         // optionsLocked cleared in finally
 });
 ```
 
