@@ -1162,9 +1162,10 @@ Expected: FAIL — no `confirmKeyChange` prop / `toggleCorrect` yet.
           applyOption(u);
         }
       } else {                                                        // multiple_choice: optimistic single toggle
+        applyOption({ ...target, is_correct: next });                 // §8.2 optimistic local flip (pre-await; vid unchanged) — reverted by resyncOptions on 422
         const u = await updateOption(oid, { is_correct: next });
         if (!(alive && vid === savedVid)) return;
-        applyOption(u);
+        applyOption(u);                                               // confirm with the authoritative server row
       }
     } catch (e) {
       if (alive && vid === savedVid) {
