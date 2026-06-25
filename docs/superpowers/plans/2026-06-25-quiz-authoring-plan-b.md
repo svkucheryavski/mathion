@@ -1351,8 +1351,9 @@ Expected: FAIL — the 409 case does not call `loadAdminTree` yet.
     if (!(alive && vid === savedVid)) return;
     optMutError = e instanceof ApiError ? e.displayMessage : fallback;
     await resyncOptions(savedVid);                               // §6 write-back (option-level)
+    if (!(alive && vid === savedVid)) return;                   // §4.1a: re-check after the resync await
     if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
-      await loadAdminTree(vid, { force: true });                // §10 re-gate (refresh perms); 422/400 do NOT
+      await loadAdminTree(savedVid, { force: true });           // §10 re-gate on the CAPTURED version; 422/400 do NOT
     }
   }
 ```
@@ -1375,7 +1376,7 @@ Replace the `catch` bodies of `addOption` / `removeOption` / `moveOption` / `com
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(vid, { force: true });
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) saveBusy = false;
@@ -1393,13 +1394,13 @@ Each of `submitAdd` / `removeQuestion` / `move` re-runs `listQuestions` (via `lo
         addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
         if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
           await load();                                  // resync question list/order
-          await loadAdminTree(savedVid, { force: true }); // §10 re-gate
+          if (alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §10 re-gate (§4.1a: re-guard after load)
         }
       }
     } finally { if (alive) questionsLocked = false; }
 
-  // removeQuestion catch & move catch — after the existing pushToast + `await load();`, add:
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
+  // removeQuestion catch & move catch — after the existing pushToast + `await load();`, add (re-guarded after load, §4.1a):
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
 ```
 
 - [ ] **Step 9: Run the accordion + editor suites**
