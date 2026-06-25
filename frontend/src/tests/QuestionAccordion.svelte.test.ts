@@ -187,7 +187,10 @@ it('choice question loads its own options on mount, sorted by order', async () =
 
 it('numeric/text questions never fetch options', async () => {
   const list = vi.spyOn(qa, 'listOptions').mockResolvedValue([]);
-  mountAccordion(q());                                 // numeric (default factory)
+  mountAccordion(q());                                  // numeric (default factory)
+  await tick(); await tick(); flushSync();
+  cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  mountAccordion(q({ type: 'text_answer', correct_numeric: null, precision: null, correct_text: 'paris' }));
   await tick(); await tick(); flushSync();
   expect(list).not.toHaveBeenCalled();
 });
@@ -213,13 +216,19 @@ it('header shows the correct-count for choice questions', async () => {
   expect(target.querySelector('[data-testid="correct-count"]')?.textContent).toContain('1');
 });
 
-it('a late option-load response after unmount writes nothing (§4.1a onDestroy token bump)', async () => {
+it('a late option-load response after unmount is discarded (§4.1a onDestroy token bump)', async () => {
   let resolveList!: (v: AuthoringOption[]) => void;
   vi.spyOn(qa, 'listOptions').mockReturnValue(new Promise((r) => { resolveList = r; }));
-  const { target } = mountAccordion(q({ type: 'single_choice', correct_numeric: null, precision: null }));
+  mountAccordion(q({ type: 'single_choice', correct_numeric: null, precision: null }));
   await tick(); flushSync();
-  cleanup?.(); cleanup = null;                         // unmount while the fetch is pending
-  resolveList([opt({ id: 9, text: 'Late' })]);         // resolves after destroy → discarded
-  await tick(); flushSync();
-  expect(target.querySelector('[data-testid="option-row"]')).toBeNull();
+  cleanup?.(); cleanup = null;                          // unmount while the fetch is pending
+  // The late response's `order` is read ONLY if the loader proceeds past the
+  // discard guard (reaches the sort). With the onDestroy token bump,
+  // `myToken !== optLoadToken` returns first, so `order` is never accessed.
+  let orderReads = 0;
+  const trap = () => ({ id: 9, question_id: 1, text: 'Late', is_correct: false,
+    get order() { orderReads++; return 1; } } as unknown as AuthoringOption);
+  resolveList([trap(), trap()]);                        // 2 elems → sort comparator reads `order`
+  await tick(); await tick(); flushSync();
+  expect(orderReads).toBe(0);                           // guard fired → stale response never sorted/applied
 });

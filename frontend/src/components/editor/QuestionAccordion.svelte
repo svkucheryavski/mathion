@@ -31,7 +31,7 @@
   //      without depending on that item-id-uniqueness invariant. ----
   let alive = true;
   let optLoadToken = 0;                                 // plain; bumped per load + on destroy (§4.1a)
-  onDestroy(() => { alive = false; optLoadToken++; });;
+  onDestroy(() => { alive = false; optLoadToken++; });
 
   // ---- Working copy (`draft`, bound to the inputs) + last-persisted baseline
   //      (`saved`). Both seeded ONCE from the prop; the prop is NEVER mutated.
