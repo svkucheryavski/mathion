@@ -232,3 +232,107 @@ it('a late option-load response after unmount is discarded (§4.1a onDestroy tok
   await tick(); await tick(); flushSync();
   expect(orderReads).toBe(0);                           // guard fired → stale response never sorted/applied
 });
+
+// ---- Option CRUD + locks + drafts tests (T5b) ----
+
+const choiceQ = (over: Partial<AuthoringQuestion> = {}) =>
+  q({ type: 'single_choice', correct_numeric: null, precision: null, ...over });
+const addOptionBtn = (t: HTMLElement) => [...t.querySelectorAll('button')].find((b) => b.textContent?.trim() === '＋ Add option') as HTMLButtonElement;
+const anyDirty = (t: HTMLElement) => t.querySelector('[data-testid="any-dirty"]')?.textContent;
+
+it('inline add: trims, blocks whitespace-only, posts {text, is_correct}', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([]);   // empty → first option is_correct=true (§8.4)
+  const create = vi.spyOn(qa, 'createOption').mockResolvedValue(opt({ id: 3, text: 'Madrid', is_correct: true, order: 1 }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  addOptionBtn(target).click();
+  await tick(); flushSync();
+  const input = target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement;
+  setVal(input, '   ');                                 // whitespace-only → Add disabled
+  await tick(); flushSync();
+  expect(([...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Add') as HTMLButtonElement).disabled).toBe(true);
+  setVal(input, '  Madrid  ');
+  await tick(); flushSync();
+  ([...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Add') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();
+  expect(create).toHaveBeenCalledWith(1, { text: 'Madrid', is_correct: true });   // trimmed; first → correct
+});
+
+it('delete-correct-option is blocked client-side (C2)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const del = vi.spyOn(qa, 'deleteOption').mockResolvedValue(undefined as never);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  // row 0 is the only correct option → its delete is disabled
+  const delBtn0 = rows[0].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement;
+  expect(delBtn0.disabled).toBe(true);
+  delBtn0.click();
+  await tick(); flushSync();
+  expect(del).not.toHaveBeenCalled();
+});
+
+it('delete removes a non-last-correct option', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const del = vi.spyOn(qa, 'deleteOption').mockResolvedValue(undefined as never);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();
+  expect(del).toHaveBeenCalledWith(2);
+  expect(target.querySelectorAll('[data-testid="option-row"]')).toHaveLength(1);
+});
+
+it('option-text blur-commit: draft is dirty → feeds quizDirty → resets on success', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
+  const upd = vi.spyOn(qa, 'updateOption').mockResolvedValue(opt({ id: 1, text: 'Alpha', is_correct: true, order: 1 }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const input = target.querySelector('[data-testid="option-text"]') as HTMLInputElement;
+  setVal(input, 'Alpha');
+  await tick(); flushSync();
+  expect(anyDirty(target)).toBe('dirty');              // uncommitted draft feeds quizDirty (§7.1)
+  input.dispatchEvent(new Event('blur'));
+  await tick(); await tick(); flushSync();
+  expect(upd).toHaveBeenCalledWith(1, { text: 'Alpha' });
+  expect(anyDirty(target)).toBe('clean');              // baseline reset on success
+});
+
+it('an uncommitted option-text draft stays dirty across collapsing the question (§7.1)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
+  const { target, props } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  setVal(target.querySelector('[data-testid="option-text"]') as HTMLInputElement, 'Edited');
+  await tick(); flushSync();
+  expect(anyDirty(target)).toBe('dirty');
+  props.expanded = false;                              // collapse → OptionRow unmounts
+  await tick(); flushSync();
+  expect(target.querySelector('[data-testid="option-row"]')).toBeNull();
+  expect(anyDirty(target)).toBe('dirty');              // tracker lives on the accordion → survives
+});
+
+it('optionsLocked serializes: a 2nd option mutation is blocked while the 1st is in flight', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  let resolveDel!: () => void;
+  vi.spyOn(qa, 'deleteOption').mockReturnValue(new Promise((r) => { resolveDel = r as () => void; }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();  // delete pending
+  await tick(); flushSync();
+  // every option control is now disabled (optionsLocked)
+  expect((rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).disabled).toBe(true);
+  expect((rows[0].querySelector('[data-testid="option-text"]') as HTMLInputElement).readOnly).toBe(true);
+  resolveDel();
+  await tick(); await tick(); flushSync();
+});

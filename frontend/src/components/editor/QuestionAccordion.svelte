@@ -5,7 +5,11 @@
   import type { AssetContext } from '../../lib/assetContext';
   import { ApiError } from '../../lib/api';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { updateQuestion, validateNumericAnswer, listOptions } from '../../lib/quizAuthoring';
+  import { makeDirtyTracker, type DirtyTracker } from '../../lib/dirty.svelte';
+  import {
+    updateQuestion, validateNumericAnswer,
+    listOptions, createOption, updateOption, deleteOption, reorderOptions,
+  } from '../../lib/quizAuthoring';
   import MarkdownEditor from './MarkdownEditor.svelte';
   import Button from '../ui/Button.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -31,7 +35,10 @@
   //      without depending on that item-id-uniqueness invariant. ----
   let alive = true;
   let optLoadToken = 0;                                 // plain; bumped per load + on destroy (§4.1a)
-  onDestroy(() => { alive = false; optLoadToken++; });
+  onDestroy(() => {
+    alive = false; optLoadToken++;
+    for (const t of optionTrackers.values()) registry.unregister(t);
+  });
 
   // ---- Working copy (`draft`, bound to the inputs) + last-persisted baseline
   //      (`saved`). Both seeded ONCE from the prop; the prop is NEVER mutated.
@@ -49,6 +56,9 @@
   let textHtml = $state(question.text_html);   // header snippet; advances on Save
 
   const editable = $derived(perms.canEditTextFields);
+  // optionsLocked must be declared before textLocked references it
+  let optionsLocked = $state(false);                   // accordion-wide option lock (§7.2) — declared early for textLocked
+  const textLocked = $derived(optionsLocked);          // text inputs frozen during an option mutation (§7.2)
 
   // ---- Per-type answer validity ----
   const numericCheck = $derived(
@@ -86,6 +96,48 @@
   let optError = $state<string | null>(null);
   const correctCount = $derived(options.filter((o) => o.is_correct).length);
 
+  // ---- Option mutation state + accordion-wide lock (§7.2) ----
+  // optionsLocked is declared above (near editable) so textLocked can reference it
+  let optMutError = $state<string | null>(null);       // inline option-mutation error
+  // Per-option text drafts + dirty trackers live on the always-mounted accordion
+  // (§7.1) so an uncommitted draft survives collapse and feeds quizDirty. Plain
+  // Map (membership need not be reactive — OptionRow binds the tracker's $state).
+  const optionTrackers = new Map<number, DirtyTracker<{ text: string }>>();
+
+  function reconcileTrackers() {
+    const ids = new Set(options.map((o) => o.id));
+    for (const o of options) {
+      if (!optionTrackers.has(o.id)) {
+        const t = makeDirtyTracker<{ text: string }>({ text: o.text });
+        optionTrackers.set(o.id, t);
+        registry.register(t);                          // feeds quizDirty
+      }
+    }
+    for (const [id, t] of [...optionTrackers]) {
+      if (!ids.has(id)) { registry.unregister(t); optionTrackers.delete(id); }
+    }
+  }
+  // Single assignment point: reconcile trackers synchronously whenever options change.
+  function setOptions(next: AuthoringOption[]) { options = next; reconcileTrackers(); }
+
+  function applyOption(updated: AuthoringOption) {     // apply-if-current (§7.2 backstop)
+    const i = options.findIndex((o) => o.id === updated.id);
+    if (i < 0) return;                                 // option gone → ignore stale response
+    const next = [...options];
+    next[i] = updated;
+    setOptions(next);
+  }
+  async function resyncOptions() {                     // §6 write-back on error
+    try {
+      const list = await listOptions(question.id);
+      if (!alive) return;
+      setOptions([...list].sort((a, b) => a.order - b.order));
+    } catch { /* keep the prior inline error; the loaded list stays as-is */ }
+  }
+  const canDeleteOption = (o: AuthoringOption) =>
+    options.length === 1 || !(o.is_correct && correctCount === 1);   // C2 (§8.6)
+  const optionsDisabled = $derived(optionsLocked || dirty);          // effective UI lock (text↔option)
+
   async function loadOptions() {
     optLoadToken += 1;
     const myToken = optLoadToken;
@@ -94,7 +146,7 @@
     try {
       const list = await listOptions(question.id);
       if (myToken !== optLoadToken) return;            // superseded / unmounted → discard
-      options = [...list].sort((a, b) => a.order - b.order);
+      setOptions([...list].sort((a, b) => a.order - b.order));
       optStatus = 'loaded';
     } catch (e) {
       if (myToken !== optLoadToken) return;
@@ -104,8 +156,99 @@
   }
   onMount(() => { if (isChoice) void loadOptions(); });
 
+  // ---- Inline add-option (like SequenceAccordion's inline create) ----
+  let addingOption = $state(false);
+  let newOptionText = $state('');
+  const newOptionValid = $derived(newOptionText.trim().length >= 1 && newOptionText.length <= 500);
+
+  async function addOption() {
+    if (optionsLocked || !perms.canEditStructure || !newOptionValid) return;
+    const savedVid = vid;
+    const text = newOptionText.trim();
+    // §8.4: the first option of an empty single_choice list is auto-correct; all
+    // other new options (incl. every multiple_choice option) default to false.
+    const is_correct = question.type === 'single_choice' && options.length === 0;
+    optMutError = null;
+    optionsLocked = true;
+    try {
+      const created = await createOption(question.id, { text, is_correct });
+      if (!(alive && vid === savedVid)) return;
+      setOptions([...options, created].sort((a, b) => a.order - b.order));
+      addingOption = false; newOptionText = '';
+    } catch (e) {
+      if (alive && vid === savedVid) optMutError = e instanceof ApiError ? e.displayMessage : 'Add option failed';
+    } finally {
+      if (alive) optionsLocked = false;
+    }
+  }
+
+  async function removeOption(oid: number) {
+    if (optionsLocked || !perms.canEditStructure) return;
+    const target = options.find((o) => o.id === oid);
+    if (!target || !canDeleteOption(target)) return;
+    const savedVid = vid;
+    optMutError = null;
+    optionsLocked = true;
+    try {
+      await deleteOption(oid);
+      if (!(alive && vid === savedVid)) return;
+      setOptions(options.filter((o) => o.id !== oid));
+    } catch (e) {
+      if (alive && vid === savedVid) optMutError = e instanceof ApiError ? e.displayMessage : 'Delete option failed';
+    } finally {
+      if (alive) optionsLocked = false;
+    }
+  }
+
+  async function moveOption(oid: number, dir: -1 | 1) {
+    if (optionsLocked || !perms.canEditStructure) return;
+    const idx = options.findIndex((o) => o.id === oid);
+    const swap = idx + dir;
+    if (idx < 0 || swap < 0 || swap >= options.length) return;
+    const savedVid = vid;
+    const next = [...options];
+    [next[idx], next[swap]] = [next[swap], next[idx]];
+    setOptions(next.map((o, i) => ({ ...o, order: i + 1 })));
+    const order = options.map((o) => ({ id: o.id, order: o.order }));
+    optMutError = null;
+    optionsLocked = true;
+    try {
+      await reorderOptions(question.id, order);        // success: optimistic state is authoritative
+    } catch (e) {
+      if (alive && vid === savedVid) {
+        optMutError = e instanceof ApiError ? e.displayMessage : 'Reorder failed';
+        await resyncOptions();
+      }
+    } finally {
+      if (alive) optionsLocked = false;
+    }
+  }
+
+  async function commitText(oid: number) {
+    if (optionsLocked) return;
+    const tracker = optionTrackers.get(oid);
+    const target = options.find((o) => o.id === oid);
+    if (!tracker || !target || !tracker.isDirty) return;
+    const text = tracker.current.text;
+    if (text.trim().length < 1 || text.length > 500) return;   // blocked: counter already red
+    const savedVid = vid;
+    optMutError = null;
+    optionsLocked = true;
+    try {
+      const updated = await updateOption(oid, { text });
+      if (!(alive && vid === savedVid)) return;
+      applyOption(updated);
+      optionTrackers.get(oid)?.reset({ text: updated.text });  // baseline → clean
+    } catch (e) {
+      if (alive && vid === savedVid) optMutError = e instanceof ApiError ? e.displayMessage : 'Save option text failed';
+      // draft stays dirty for retry
+    } finally {
+      if (alive) optionsLocked = false;
+    }
+  }
+
   let saveBusy = $state(false);
-  const canSave = $derived(dirty && answerValid && !saveBusy && editable);
+  const canSave = $derived(dirty && answerValid && !saveBusy && editable && !optionsLocked);
 
   async function save() {
     if (!canSave) return;
@@ -169,20 +312,20 @@
     <div class="body">
       <span class="readonly-type">Type: {typeLabel[question.type]} (fixed)</span>
       <label>Question text
-        <MarkdownEditor {assetContext} readOnly={!editable} bind:value={draft.text_md} />
+        <MarkdownEditor {assetContext} readOnly={!editable || textLocked} bind:value={draft.text_md} />
       </label>
       <label>Explanation (optional)
-        <MarkdownEditor {assetContext} readOnly={!editable} bind:value={draft.explanation_md} />
+        <MarkdownEditor {assetContext} readOnly={!editable || textLocked} bind:value={draft.explanation_md} />
       </label>
 
       {#if question.type === 'numeric_answer'}
         <label>Correct value
           <input data-testid="numeric-input" bind:value={draft.numericInput}
-                 readonly={!editable} aria-required="true" aria-invalid={!numericCheck.ok} />
+                 readonly={!editable || textLocked} aria-required="true" aria-invalid={!numericCheck.ok} />
         </label>
         <label>Precision (0–10)
           <input data-testid="precision-input" type="number" min="0" max="10"
-                 readonly={!editable} bind:value={draft.precision} />
+                 readonly={!editable || textLocked} bind:value={draft.precision} />
         </label>
         <small class="hint">Accepted within {toleranceHint}</small>
         {#if numericError}<p class="err" role="alert">{numericError}</p>{/if}
@@ -190,7 +333,7 @@
       {:else if question.type === 'text_answer'}
         <label>Correct answer
           <input data-testid="text-answer-input" bind:value={draft.correct_text}
-                 readonly={!editable} maxlength="500" aria-required="true" aria-invalid={!textAnswerValid} />
+                 readonly={!editable || textLocked} maxlength="500" aria-required="true" aria-invalid={!textAnswerValid} />
         </label>
         <small class="hint">Case-insensitive, trimmed match. {draft.correct_text.length}/500</small>
         {#if !textAnswerValid}<p class="err" role="alert">Enter 1–500 characters.</p>{/if}
@@ -207,11 +350,36 @@
           {:else}
             <ol class="options">
               {#each options as o, i (o.id)}
-                <li>
-                  <OptionRow option={o} index={i + 1} count={options.length} questionType={question.type} />
-                </li>
+                {@const t = optionTrackers.get(o.id)}
+                {#if t}
+                  <li>
+                    <OptionRow
+                      option={o} index={i + 1} count={options.length} questionType={question.type}
+                      {perms} optionsLocked={optionsDisabled} canDelete={canDeleteOption(o)}
+                      bind:draft={t.current.text}
+                      onCommitText={() => void commitText(o.id)}
+                      onDelete={() => void removeOption(o.id)}
+                      onMoveUp={() => void moveOption(o.id, -1)}
+                      onMoveDown={() => void moveOption(o.id, 1)}
+                    />
+                  </li>
+                {/if}
               {/each}
             </ol>
+          {/if}
+          {#if optMutError}<p class="err" role="alert" data-testid="option-mut-error">{optMutError}</p>{/if}
+          {#if perms.canEditStructure}
+            {#if addingOption}
+              <div class="add-option">
+                <label>New option
+                  <input data-testid="new-option-text" bind:value={newOptionText} maxlength="500" />
+                </label>
+                <Button onclick={() => void addOption()} disabled={optionsLocked || !newOptionValid}>Add</Button>
+                <Button variant="ghost" onclick={() => { addingOption = false; newOptionText = ''; }}>Cancel</Button>
+              </div>
+            {:else}
+              <Button onclick={() => { addingOption = true; }} disabled={optionsLocked}>＋ Add option</Button>
+            {/if}
           {/if}
         {/if}
       {/if}
@@ -234,4 +402,5 @@
   .badge, .muted { font-size: 0.85em; color: var(--text-muted, #666); }
   .err { color: var(--danger, #c00); }
   .options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+  .add-option { display: flex; align-items: end; gap: var(--space-2); }
 </style>
