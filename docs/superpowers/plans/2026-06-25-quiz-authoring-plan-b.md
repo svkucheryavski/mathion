@@ -1692,7 +1692,7 @@ Expected: FAIL — option list is a plain `<ol>`, no live region.
 
 ```svelte
             <fieldset class="option-group" data-testid="option-group">
-              <legend>{snippet || 'Answer options'}{question.type === 'single_choice' ? ' — select the correct option' : ' — select all correct options'}</legend>
+              <legend>Answer options{question.type === 'single_choice' ? ' — select the correct option' : ' — select all correct options'}</legend>
               <ol class="options">
                 {#each options as o, i (o.id)}
                   {@const t = optionTrackers.get(o.id)}
