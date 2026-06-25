@@ -16,11 +16,12 @@
   import OptionRow from './OptionRow.svelte';
 
   let {
-    question, vid, index, count, perms, assetContext, expanded, locked,
+    question, vid, index, count, perms, assetContext, expanded, locked, confirmKeyChange,
     onExpandToggle, onDelete, onMoveUp, onMoveDown,
   }: {
     question: AuthoringQuestion; vid: number; index: number; count: number;
     perms: VersionPermissions; assetContext: AssetContext; expanded: boolean; locked: boolean;
+    confirmKeyChange: (questionId: number) => boolean;
     onExpandToggle: () => void; onDelete: () => void; onMoveUp: () => void; onMoveDown: () => void;
   } = $props();
 
@@ -247,6 +248,46 @@
     }
   }
 
+  async function toggleCorrect(oid: number, next: boolean) {
+    if (optionsLocked) return;
+    const target = options.find((o) => o.id === oid);
+    if (!target) return;
+    // §8.4 no-op: clicking the radio of the already-unique-correct single_choice option.
+    if (question.type === 'single_choice' && correctCount === 1 && target.is_correct) return;
+    if (!confirmKeyChange(question.id)) return;          // §8.7 — once, before any set-true
+    const savedVid = vid;
+    optMutError = null;
+    optionsLocked = true;
+    try {
+      if (question.type === 'single_choice') {
+        // Capture the others-to-unset BEFORE mutating (set-true doesn't change them).
+        const othersToUnset = options.filter((o) => o.is_correct && o.id !== oid).map((o) => o.id);
+        if (!target.is_correct) {
+          const u = await updateOption(oid, { is_correct: true });    // set-true FIRST (awaited)
+          if (!(alive && vid === savedVid)) return;
+          applyOption(u);
+        }
+        for (const yid of othersToUnset) {                            // then unset each other
+          const u = await updateOption(yid, { is_correct: false });
+          if (!(alive && vid === savedVid)) return;
+          applyOption(u);
+        }
+      } else {                                                        // multiple_choice: optimistic single toggle
+        applyOption({ ...target, is_correct: next });               // optimistic local flip
+        const u = await updateOption(oid, { is_correct: next });
+        if (!(alive && vid === savedVid)) return;
+        applyOption(u);                                             // confirm with server response
+      }
+    } catch (e) {
+      if (alive && vid === savedVid) {
+        optMutError = e instanceof ApiError ? e.displayMessage : 'Correctness update failed';
+        await resyncOptions(savedVid);                                // 422 last-correct / partial fail → §6 revert
+      }
+    } finally {
+      if (alive) optionsLocked = false;                              // whole sequence in ONE finally (§7.2)
+    }
+  }
+
   let saveBusy = $state(false);
   const canSave = $derived(dirty && answerValid && !saveBusy && editable && !optionsLocked);
 
@@ -357,6 +398,7 @@
                       option={o} index={i + 1} count={options.length} questionType={question.type}
                       {perms} optionsLocked={optionsDisabled} canDelete={canDeleteOption(o)}
                       bind:draft={t.current.text}
+                      onToggleCorrect={(next) => void toggleCorrect(o.id, next)}
                       onCommitText={() => void commitText(o.id)}
                       onDelete={() => void removeOption(o.id)}
                       onMoveUp={() => void moveOption(o.id, -1)}

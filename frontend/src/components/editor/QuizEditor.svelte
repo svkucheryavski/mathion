@@ -238,6 +238,7 @@
               {assetContext}
               locked={questionsLocked}
               expanded={expandedId === q.id}
+              confirmKeyChange={() => true}
               onExpandToggle={() => toggleExpand(q.id)}
               onDelete={() => void removeQuestion(q.id)}
               onMoveUp={() => void move(q.id, -1)}

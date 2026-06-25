@@ -19,6 +19,7 @@ function mountRow(over: Record<string, unknown> = {}) {
   const props: any = $state({
     option: opt(), index: 1, count: 3, questionType: 'single_choice', perms: PERMS,
     draft: opt().text, optionsLocked: false, canDelete: true,
+    onToggleCorrect: vi.fn(),
     onCommitText: vi.fn(), onDelete: vi.fn(), onMoveUp: vi.fn(), onMoveDown: vi.fn(), ...over,
   });
   const cmp = mount(OptionRow, { target, props });
@@ -79,4 +80,31 @@ it('reorder boundaries disable ↑ at top and ↓ at bottom', () => {
   flushSync();
   expect(btn(top.target, 'Move option up').disabled).toBe(true);
   expect(btn(top.target, 'Move option down').disabled).toBe(false);
+});
+
+it('single_choice renders a radio reflecting is_correct; click fires onToggleCorrect(true)', () => {
+  const onToggleCorrect = vi.fn();
+  const { target } = mountRow({ questionType: 'single_choice', option: opt({ is_correct: true }), onToggleCorrect });
+  flushSync();
+  const radio = target.querySelector('input[type="radio"]') as HTMLInputElement;
+  expect(radio.checked).toBe(true);
+  radio.click();
+  expect(onToggleCorrect).toHaveBeenCalledWith(true);
+});
+
+it('multiple_choice renders a checkbox; toggling fires onToggleCorrect(checked)', () => {
+  const onToggleCorrect = vi.fn();
+  const { target } = mountRow({ questionType: 'multiple_choice', option: opt({ is_correct: true }), onToggleCorrect });
+  flushSync();
+  const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  box.checked = false;
+  box.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(onToggleCorrect).toHaveBeenCalledWith(false);
+});
+
+it('the correctness control is disabled while optionsLocked', () => {
+  const { target } = mountRow({ questionType: 'single_choice', optionsLocked: true });
+  flushSync();
+  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(true);
 });

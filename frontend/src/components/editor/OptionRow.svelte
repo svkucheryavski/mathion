@@ -8,22 +8,30 @@
 
   let {
     option, index, count, questionType, perms, draft = $bindable(''),
-    optionsLocked, canDelete, onCommitText, onDelete, onMoveUp, onMoveDown,
+    optionsLocked, canDelete, onToggleCorrect, onCommitText, onDelete, onMoveUp, onMoveDown,
   }: {
     option: AuthoringOption; index: number; count: number; questionType: QuestionType;
     perms: VersionPermissions; draft: string; optionsLocked: boolean; canDelete: boolean;
+    onToggleCorrect: (next: boolean) => void;
     onCommitText: () => void; onDelete: () => void; onMoveUp: () => void; onMoveDown: () => void;
   } = $props();
-  void questionType;   // drives the correctness control added in T5c
 
   const textReadOnly = $derived(!perms.canEditTextFields || optionsLocked);
   const structureDisabled = $derived(optionsLocked || !perms.canEditStructure);
+  const correctnessDisabled = $derived(optionsLocked || !perms.canEditTextFields);
   // Over-length / whitespace-only counter feedback (the commit itself is blocked
   // in the accordion; here we only flag it visibly). DB String(500), min_length=1.
   const lenInvalid = $derived(draft.trim().length < 1 || draft.length > 500);
 </script>
 
 <div class="option" data-testid="option-row">
+  {#if questionType === 'single_choice'}
+    <input type="radio" name={`correct-${option.question_id}`} checked={option.is_correct}
+           disabled={correctnessDisabled} onclick={() => onToggleCorrect(true)} aria-label="Mark correct" />
+  {:else if questionType === 'multiple_choice'}
+    <input type="checkbox" checked={option.is_correct}
+           disabled={correctnessDisabled} onchange={(e) => onToggleCorrect(e.currentTarget.checked)} aria-label="Mark correct" />
+  {/if}
   <span class="opt-num">{index}.</span>
   <input class="opt-input" data-testid="option-text" bind:value={draft}
          readonly={textReadOnly} onblur={() => onCommitText()}

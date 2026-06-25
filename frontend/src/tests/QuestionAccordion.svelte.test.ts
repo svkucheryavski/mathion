@@ -25,7 +25,7 @@ function mountAccordion(question: AuthoringQuestion, over: Record<string, unknow
   document.body.appendChild(target);
   const props: Record<string, unknown> = $state({
     question, vid: 10, index: 1, count: 1, perms: PERMS, assetContext: stubAssetCtx(),
-    expanded: true, locked: false,
+    expanded: true, locked: false, confirmKeyChange: () => true,
     onExpandToggle: () => {}, onDelete: () => {}, onMoveUp: () => {}, onMoveDown: () => {}, ...over,
   });
   const cmp = mount(Harness, { target, props });
@@ -392,4 +392,104 @@ it('a dirty question text form disables add-option (§7.2 two-way lock)', async 
   expect(anyDirty(target)).toBe('dirty');
   expect(addOptionBtn(target).disabled).toBe(true);     // two-way lock: can't add while text dirty
   expect(create).not.toHaveBeenCalled();
+});
+
+// ---- Correctness state machines (T5c) ----
+
+const radios = (t: HTMLElement) => [...t.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
+const boxes = (t: HTMLElement) => [...t.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+
+it('single_choice switch sets the new option true BEFORE unsetting the old (worked example 1)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const upd = vi.spyOn(qa, 'updateOption')
+    .mockResolvedValueOnce(opt({ id: 2, text: 'B', is_correct: true, order: 2 }))
+    .mockResolvedValueOnce(opt({ id: 1, text: 'A', is_correct: false, order: 1 }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  radios(target)[1].click();                            // click B
+  await tick(); await tick(); await tick(); flushSync();
+  expect(upd).toHaveBeenCalledTimes(2);
+  expect(upd.mock.calls[0]).toEqual([2, { is_correct: true }]);    // set-true FIRST
+  expect(upd.mock.calls[1]).toEqual([1, { is_correct: false }]);   // then unset old
+});
+
+it('clicking the unique-correct radio is a no-op (no PATCH)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const upd = vi.spyOn(qa, 'updateOption').mockResolvedValue(opt());
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  radios(target)[0].click();                            // click the already-unique-correct A
+  await tick(); await tick(); flushSync();
+  expect(upd).not.toHaveBeenCalled();
+});
+
+it('single_choice 2-correct repair: clicking one radio unsets the other (leaves exactly one)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: true, order: 2 }),       // transient 2-correct
+  ]);
+  const upd = vi.spyOn(qa, 'updateOption').mockResolvedValue(opt({ id: 2, text: 'B', is_correct: false, order: 2 }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  radios(target)[0].click();                            // click A (already true) → just unset B
+  await tick(); await tick(); flushSync();
+  expect(upd).toHaveBeenCalledTimes(1);
+  expect(upd).toHaveBeenCalledWith(2, { is_correct: false });
+});
+
+it('multiple_choice unchecking the last correct → 422 → revert via listOptions (worked example 2)', async () => {
+  const { ApiError } = await import('../lib/api');
+  const server = [opt({ id: 1, text: 'C', is_correct: true, order: 1 })];
+  const relist = vi.spyOn(qa, 'listOptions').mockResolvedValue(server);  // initial load + re-fetch return C still correct
+  vi.spyOn(qa, 'updateOption').mockRejectedValue(new ApiError(422, 'At least one option must be correct'));
+  const { target } = mountAccordion(choiceQ({ type: 'multiple_choice' }));
+  await tick(); await tick(); flushSync();
+  const box = boxes(target)[0];
+  box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true }));    // uncheck the only correct
+  await tick(); await tick(); await tick(); await tick(); flushSync();
+  expect(relist).toHaveBeenCalledTimes(2);                        // initial load + §6 write-back re-fetch
+  expect(boxes(target)[0].checked).toBe(true);                   // reverted to server value
+});
+
+it('during a single_choice switch optionsLocked also disables delete (rev-12 race)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  let resolveSet!: (o: AuthoringOption) => void;
+  vi.spyOn(qa, 'updateOption').mockReturnValue(new Promise((r) => { resolveSet = r; }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  radios(target)[1].click();                            // switch in flight (set-true pending)
+  await tick(); flushSync();
+  const delOld = [...target.querySelectorAll('[data-testid="option-row"]')][0].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement;
+  expect(delOld.disabled).toBe(true);                   // old correct can't be deleted mid-switch
+  resolveSet(opt({ id: 2, is_correct: true, order: 2 }));
+  await tick(); await tick(); flushSync();
+});
+
+it('a thrown set-false clears optionsLocked in finally (group re-enables)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  vi.spyOn(qa, 'updateOption')
+    .mockResolvedValueOnce(opt({ id: 2, is_correct: true, order: 2 }))     // set-true OK
+    .mockRejectedValueOnce(new Error('boom'));                            // set-false throws
+  // resync after error:
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: false, order: 1 }), opt({ id: 2, text: 'B', is_correct: true, order: 2 }),
+  ]);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  radios(target)[1].click();
+  await tick(); await tick(); await tick(); flushSync();
+  // optionsLocked cleared → a radio is enabled again
+  expect(radios(target).some((r) => !r.disabled)).toBe(true);
 });
