@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, setContext } from 'svelte';
+  import { onMount, onDestroy, setContext, tick } from 'svelte';
   import type { AdminTreeVersion } from '../../lib/types';
   import type { VersionPermissions } from '../../lib/versionPermissions';
   import type { AssetContext } from '../../lib/assetContext';
@@ -56,6 +56,7 @@
   let loadError = $state<string | null>(null);
   let expandedId = $state<number | null>(null);
   let questionsLocked = $state(false); // serialize add/delete/reorder (§7.2)
+  let questionAnnounce = $state('');
 
   async function load() {
     loadToken += 1;
@@ -159,6 +160,9 @@
       adding = false; resetAddForm();
       expandedId = created.id;                        // open the new question for editing
       await loadAdminTree(savedVid, { force: true }); // refresh questions_count
+      void tick().then(() => {
+        if (alive) (document.querySelector(`[data-q-id="${created.id}"] .expand`) as HTMLElement | null)?.focus();
+      });
     } catch (e) {
       if (alive && vid === savedVid) {
         addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
@@ -204,6 +208,8 @@
     const next = [...questions];
     [next[idx], next[swap]] = [next[swap], next[idx]];
     questions = next.map((x, i) => ({ ...x, order: i + 1 }));
+    const newIndex = questions.findIndex((x) => x.id === qid) + 1;
+    questionAnnounce = `Question moved to position ${newIndex} of ${questions.length}`;
     const order = questions.map((x) => ({ id: x.id, order: x.order }));
     questionsLocked = true;
     try {
@@ -248,9 +254,10 @@
     {#if questions.length === 0}
       <p class="muted">No questions yet.</p>
     {:else}
+      <p class="sr-only" aria-live="polite" data-testid="question-live">{questionAnnounce}</p>
       <ol class="questions">
         {#each questions as q, i (q.id)}
-          <li>
+          <li data-q-id={q.id}>
             <QuestionAccordion
               question={q}
               {vid}
@@ -311,4 +318,5 @@
   .questions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .muted { color: var(--text-muted, #666); }
   .err { color: var(--danger, #c00); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

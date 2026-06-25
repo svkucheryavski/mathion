@@ -27,16 +27,16 @@
 <div class="option" data-testid="option-row">
   {#if questionType === 'single_choice'}
     <input type="radio" name={`correct-${option.question_id}`} checked={option.is_correct}
-           disabled={correctnessDisabled} onclick={() => onToggleCorrect(true)} aria-label="Mark correct" />
+           disabled={correctnessDisabled} onclick={() => onToggleCorrect(true)} aria-label={`Mark option ${index} correct`} />
   {:else if questionType === 'multiple_choice'}
     <input type="checkbox" checked={option.is_correct}
-           disabled={correctnessDisabled} onchange={(e) => onToggleCorrect(e.currentTarget.checked)} aria-label="Mark correct" />
+           disabled={correctnessDisabled} onchange={(e) => onToggleCorrect(e.currentTarget.checked)} aria-label={`Mark option ${index} correct`} />
   {/if}
   <span class="opt-num">{index}.</span>
-  <input class="opt-input" data-testid="option-text" bind:value={draft}
+  <input class="opt-input" data-testid="option-text" data-option-id={option.id} bind:value={draft}
          readonly={textReadOnly} onblur={() => onCommitText()}
-         aria-label="Option text" aria-invalid={lenInvalid} maxlength="500" />
-  {#if lenInvalid}<span class="len-warn" data-testid="option-len-warn">1–500 chars</span>{/if}
+         aria-label={`Option ${index} text`} aria-invalid={lenInvalid} maxlength="500" />
+  {#if lenInvalid}<span class="len-warn" role="alert" data-testid="option-len-warn">1–500 chars</span>{/if}
   {#if option.is_correct}
     <span class="correct-marker" data-testid="option-correct">✓ correct</span>
   {/if}

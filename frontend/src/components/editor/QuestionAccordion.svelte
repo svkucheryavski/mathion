@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getContext, onMount, onDestroy } from 'svelte';
+  import { getContext, onMount, onDestroy, tick } from 'svelte';
   import type { AuthoringQuestion, AuthoringOption } from '../../lib/quizAuthoring';
   import type { VersionPermissions } from '../../lib/versionPermissions';
   import type { AssetContext } from '../../lib/assetContext';
@@ -188,6 +188,8 @@
       if (!(alive && vid === savedVid)) return;
       setOptions([...options, created].sort((a, b) => a.order - b.order));
       addingOption = false; newOptionText = '';
+      await tick();
+      if (alive) (bodyEl?.querySelector(`[data-option-id="${created.id}"]`) as HTMLElement | null)?.focus();
     } catch (e) {
       await afterOptionError(e, savedVid, 'Add option failed');
     } finally {
@@ -205,7 +207,12 @@
     try {
       await deleteOption(oid);
       if (!(alive && vid === savedVid)) return;
-      setOptions(options.filter((o) => o.id !== oid));
+      const idx = options.findIndex((o) => o.id === oid);
+      const survivors = options.filter((o) => o.id !== oid);
+      setOptions(survivors);
+      const focusId = survivors[Math.min(idx, survivors.length - 1)]?.id;
+      await tick();
+      if (alive && focusId != null) (bodyEl?.querySelector(`[data-option-id="${focusId}"]`) as HTMLElement | null)?.focus();
     } catch (e) {
       await afterOptionError(e, savedVid, 'Delete option failed');
     } finally {
@@ -222,6 +229,8 @@
     const next = [...options];
     [next[idx], next[swap]] = [next[swap], next[idx]];
     setOptions(next.map((o, i) => ({ ...o, order: i + 1 })));
+    const newIndex = options.findIndex((o) => o.id === oid) + 1;
+    optionAnnounce = `Option moved to position ${newIndex} of ${options.length}`;
     const order = options.map((o) => ({ id: o.id, order: o.order }));
     optMutError = null;
     optionsLocked = true;
@@ -293,6 +302,19 @@
     }
   }
 
+  let optionAnnounce = $state('');
+  let bodyEl: HTMLElement | undefined = $state();
+  let expandBtn: HTMLButtonElement | undefined = $state();
+
+  // Focus the body's first field on expand (§10a). tick() lets the body render first.
+  $effect(() => {
+    if (expanded) {
+      void tick().then(() => {
+        if (alive) (bodyEl?.querySelector('input:not([readonly]), textarea:not([readonly]), button:not([disabled])') as HTMLElement | null)?.focus();
+      });
+    }
+  });
+
   let saveBusy = $state(false);
   const canSave = $derived(dirty && answerValid && !saveBusy && editable && !optionsLocked);
 
@@ -324,6 +346,8 @@
       };
       draft = { ...saved };                           // advance baseline → form goes clean
       textHtml = updated.text_html;
+      await tick();
+      if (alive) expandBtn?.focus();
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
@@ -350,7 +374,7 @@
 
 <div class="question" class:expanded>
   <div class="header" data-testid="question-header">
-    <button type="button" class="expand" aria-expanded={expanded} onclick={onExpandToggle}>{expanded ? '▾' : '▸'}</button>
+    <button type="button" class="expand" aria-expanded={expanded} bind:this={expandBtn} onclick={onExpandToggle}>{expanded ? '▾' : '▸'}</button>
     <span class="num">{index}.</span>
     <span class="badge">{typeLabel[question.type]}</span>
     {#if isChoice}<span class="badge" data-testid="correct-count">{correctCount} correct</span>{/if}
@@ -362,7 +386,7 @@
   </div>
 
   {#if expanded}
-    <div class="body">
+    <div class="body" bind:this={bodyEl}>
       <span class="readonly-type">Type: {typeLabel[question.type]} (fixed)</span>
       {#if isPublished}
         <p class="muted" data-testid="published-type-note">Type can't be changed. To replace this question, create a new version.</p>
@@ -404,26 +428,30 @@
           {#if options.length === 0}
             <p class="muted">No options yet.</p>
           {:else}
-            <ol class="options">
-              {#each options as o, i (o.id)}
-                {@const t = optionTrackers.get(o.id)}
-                {#if t}
-                  <li>
-                    <OptionRow
-                      option={o} index={i + 1} count={options.length} questionType={question.type}
-                      {perms} optionsLocked={optionsDisabled} canDelete={canDeleteOption(o)}
-                      bind:draft={t.current.text}
-                      onToggleCorrect={(next) => void toggleCorrect(o.id, next)}
-                      onCommitText={() => void commitText(o.id)}
-                      onDelete={() => void removeOption(o.id)}
-                      onMoveUp={() => void moveOption(o.id, -1)}
-                      onMoveDown={() => void moveOption(o.id, 1)}
-                    />
-                  </li>
-                {/if}
-              {/each}
-            </ol>
+            <fieldset class="option-group" data-testid="option-group">
+              <legend>Answer options{question.type === 'single_choice' ? ' — select the correct option' : ' — select all correct options'}</legend>
+              <ol class="options">
+                {#each options as o, i (o.id)}
+                  {@const t = optionTrackers.get(o.id)}
+                  {#if t}
+                    <li>
+                      <OptionRow
+                        option={o} index={i + 1} count={options.length} questionType={question.type}
+                        {perms} optionsLocked={optionsDisabled} canDelete={canDeleteOption(o)}
+                        bind:draft={t.current.text}
+                        onToggleCorrect={(next) => void toggleCorrect(o.id, next)}
+                        onCommitText={() => void commitText(o.id)}
+                        onDelete={() => void removeOption(o.id)}
+                        onMoveUp={() => void moveOption(o.id, -1)}
+                        onMoveDown={() => void moveOption(o.id, 1)}
+                      />
+                    </li>
+                  {/if}
+                {/each}
+              </ol>
+            </fieldset>
           {/if}
+          <p class="sr-only" aria-live="polite" data-testid="option-live">{optionAnnounce}</p>
           {#if optMutError}<p class="err" role="alert" data-testid="option-mut-error">{optMutError}</p>{/if}
           {#if perms.canEditStructure}
             {#if addingOption}
@@ -460,4 +488,7 @@
   .err { color: var(--danger, #c00); }
   .options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
   .add-option { display: flex; align-items: end; gap: var(--space-2); }
+  .option-group { border: none; margin: 0; padding: 0; }
+  .option-group legend { font-size: 0.85em; color: var(--text-muted, #666); padding: 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

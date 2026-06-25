@@ -611,6 +611,58 @@ it('§8.8: a published question shows the type dead-end note; created does not',
   expect(cre.target.querySelector('[data-testid="published-type-note"]')).toBeNull();
 });
 
+// ---- §10a a11y structure + focus tests (T8) ----
+
+it('single_choice options form a labelled radiogroup (fieldset + legend)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }), opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const fs = target.querySelector('fieldset[data-testid="option-group"]');
+  expect(fs).not.toBeNull();
+  expect(fs?.querySelector('legend')).not.toBeNull();
+  expect(fs?.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+});
+
+it('reordering an option announces via the aria-live region', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }), opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  vi.spyOn(qa, 'reorderOptions').mockResolvedValue(undefined as never);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const live = target.querySelector('[data-testid="option-live"]') as HTMLElement;
+  expect(live.getAttribute('aria-live')).toBe('polite');
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  (rows[0].querySelector('button[aria-label="Move option down"]') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();
+  expect(live.textContent).toMatch(/position 2 of 2/i);
+});
+
+it('expanding a question moves focus into the body', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, is_correct: true, order: 1 })]);
+  const { target, props } = mountAccordion(choiceQ(), { expanded: false });
+  await tick(); await tick(); flushSync();
+  props.expanded = true;                               // simulate expand
+  await tick(); await tick(); flushSync();
+  expect(target.querySelector('.body')?.contains(document.activeElement)).toBe(true);
+});
+
+it('adding an option focuses the new option input', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([]);
+  vi.spyOn(qa, 'createOption').mockResolvedValue(opt({ id: 3, text: 'Madrid', is_correct: true, order: 1 }));
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  addOptionBtn(target).click(); await tick(); flushSync();
+  setVal(target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement, 'Madrid');
+  await tick(); flushSync();
+  ([...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Add') as HTMLButtonElement).click();
+  await tick(); await tick(); await tick(); flushSync();
+  const last = [...target.querySelectorAll('[data-testid="option-text"]')].at(-1) as HTMLInputElement;
+  expect(document.activeElement).toBe(last);
+});
+
 it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a second guard)', async () => {
   const { ApiError } = await import('../lib/api');
   let resolveResync!: (v: AuthoringOption[]) => void;

@@ -290,6 +290,24 @@ it('§8.7: created versions never prompt', async () => {
   expect(confirmSpy).not.toHaveBeenCalled();
 });
 
+// ---- §10a aria-live question-order test (T8) ----
+
+it('reordering a question announces via the aria-live region', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([
+    q({ id: 1, order: 1, text_md: 'A' }), q({ id: 2, order: 2, text_md: 'B' }),
+  ]);
+  vi.spyOn(qa, 'reorderQuestions').mockResolvedValue(undefined as never);
+  vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountEditor();
+  await tick(); await tick(); flushSync();
+  const live = target.querySelector('[data-testid="question-live"]') as HTMLElement;
+  expect(live.getAttribute('aria-live')).toBe('polite');
+  const firstHeader = target.querySelector('[data-testid="question-header"]') as HTMLElement;
+  (firstHeader.querySelector('button[aria-label="Move down"]') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();
+  expect(live.textContent).toMatch(/position 2 of 2/i);
+});
+
 it("one question's failed option fetch isolates to its accordion (§6)", async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([
     q({ id: 1, order: 1, type: 'single_choice', text_md: 'Q1', correct_numeric: null, precision: null }),
