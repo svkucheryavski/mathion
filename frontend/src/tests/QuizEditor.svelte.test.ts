@@ -225,6 +225,16 @@ it('shows an error then re-loads on Retry (loadToken increments per load)', asyn
   expect(list).toHaveBeenCalledTimes(2);
 });
 
+// ---- §9 read-only notice test (T6) ----
+
+it('a disabled version shows the whole-editor read-only notice', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
+  const DIS = { ...VERSION, is_disabled: true };
+  const { target } = mountEditor({ version: DIS, perms: versionPermissions(DIS) });
+  await tick(); await tick(); flushSync();
+  expect(target.querySelector('[data-testid="quiz-readonly"]')).not.toBeNull();
+});
+
 it("one question's failed option fetch isolates to its accordion (§6)", async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([
     q({ id: 1, order: 1, type: 'single_choice', text_md: 'Q1', correct_numeric: null, precision: null }),

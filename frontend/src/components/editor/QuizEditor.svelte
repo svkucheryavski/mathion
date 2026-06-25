@@ -146,10 +146,14 @@
       expandedId = created.id;                        // open the new question for editing
       await loadAdminTree(savedVid, { force: true }); // refresh questions_count
     } catch (e) {
-      if (alive && vid === savedVid) addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
-    } finally {
-      if (alive) questionsLocked = false;
-    }
+      if (alive && vid === savedVid) {
+        addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
+          await load();                                  // resync question list/order
+          await loadAdminTree(savedVid, { force: true }); // §10 re-gate
+        }
+      }
+    } finally { if (alive) questionsLocked = false; }
   }
 
   // ---- Delete question ----
@@ -169,6 +173,7 @@
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
         await load();                                 // resync the list (token-guarded)
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) questionsLocked = false;
@@ -195,6 +200,7 @@
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
         await load();                                 // resync from server on error
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) questionsLocked = false;
@@ -204,9 +210,11 @@
   function toggleExpand(qid: number) { expandedId = expandedId === qid ? null : qid; }
   const titleReadOnly = $derived(!perms.canEditTextFields);
   const structureOff = $derived(!perms.canEditStructure);
+  const readOnlyAll = $derived(!perms.canEditTextFields && !perms.canEditStructure);  // archived/disabled (§9)
 </script>
 
 <section class="quiz-editor" aria-label="Quiz editor">
+  {#if readOnlyAll}<p class="muted" data-testid="quiz-readonly">This version is read-only — editing is disabled.</p>{/if}
   <div class="title-row">
     <label>Quiz title
       <input data-testid="quiz-title" bind:value={titleTracker.current.title} readonly={titleReadOnly} required />

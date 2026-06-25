@@ -3,6 +3,7 @@ import { mount, unmount, flushSync, tick } from 'svelte';
 import * as qa from '../lib/quizAuthoring';
 import type { AuthoringQuestion, AuthoringOption } from '../lib/quizAuthoring';
 import { versionPermissions } from '../lib/versionPermissions';
+import * as store from '../stores/currentEditorVersion.svelte';
 // The Harness injects a dirty registry via context (QuizEditor does this in
 // prod) and exposes registry.isAnyDirty() at [data-testid="any-dirty"].
 import Harness from './support/QuestionAccordionHarness.svelte';
@@ -490,8 +491,68 @@ it('a thrown set-false clears optionsLocked in finally (group re-enables)', asyn
   const { target } = mountAccordion(choiceQ());
   await tick(); await tick(); flushSync();
   radios(target)[1].click();                                           // click B (false → real switch)
-  await tick(); await tick(); await tick(); flushSync();
+  await tick(); await tick(); await tick(); await tick(); flushSync();
   expect(upd).toHaveBeenCalledTimes(2);                                // entered the set-true → set-false sequence
   expect(target.querySelector('[data-testid="option-mut-error"]')).not.toBeNull();  // inline error surfaced
   expect(radios(target).some((r) => !r.disabled)).toBe(true);         // optionsLocked cleared in finally
+});
+
+// ---- §9 gating characterization tests (T6) ----
+
+it('published: structure controls hidden, correctness + option text editable, no structural calls', async () => {
+  const PUB = versionPermissions({ state: 'published', is_disabled: false });
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }), opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const create = vi.spyOn(qa, 'createOption');
+  const del = vi.spyOn(qa, 'deleteOption');
+  const reorder = vi.spyOn(qa, 'reorderOptions');
+  const { target } = mountAccordion(choiceQ(), { perms: PUB });
+  await tick(); await tick(); flushSync();
+  expect([...target.querySelectorAll('button')].some((b) => b.textContent?.includes('Add option'))).toBe(false);
+  expect(target.querySelector('button[aria-label="Delete option"]')).toBeNull();
+  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false);     // correctness allowed
+  expect((target.querySelector('[data-testid="option-text"]') as HTMLInputElement).readOnly).toBe(false); // text editable
+  expect(create).not.toHaveBeenCalled(); expect(del).not.toHaveBeenCalled(); expect(reorder).not.toHaveBeenCalled();
+});
+
+it('archived/disabled: option area is fully read-only', async () => {
+  const OFF = versionPermissions({ state: 'created', is_disabled: true });
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
+  const { target } = mountAccordion(choiceQ(), { perms: OFF });
+  await tick(); await tick(); flushSync();
+  expect((target.querySelector('[data-testid="option-text"]') as HTMLInputElement).readOnly).toBe(true);
+  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(true);
+  expect(target.querySelector('button[aria-label="Delete option"]')).toBeNull();
+});
+
+// ---- §10 re-gate tests (T6) ----
+
+it('a 409 on an option mutation re-gates via loadAdminTree({force}) + shows an inline error (§10)', async () => {
+  const { ApiError } = await import('../lib/api');
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: false, order: 1 })]);
+  vi.spyOn(qa, 'createOption').mockRejectedValue(new ApiError(409, "Can only add options in 'created' state"));
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  addOptionBtn(target).click(); await tick(); flushSync();
+  setVal(target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement, 'X');
+  await tick(); flushSync();
+  ([...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Add') as HTMLButtonElement).click();
+  await tick(); await tick(); await tick(); flushSync();
+  expect(refresh).toHaveBeenCalledWith(10, { force: true });     // mountAccordion vid = 10
+  expect(target.querySelector('[data-testid="option-mut-error"]')).not.toBeNull();
+});
+
+it('a 422 last-correct does NOT re-gate (state unchanged, §10)', async () => {
+  const { ApiError } = await import('../lib/api');
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
+  vi.spyOn(qa, 'updateOption').mockRejectedValue(new ApiError(422, 'At least one option must be correct'));
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountAccordion(choiceQ({ type: 'multiple_choice' }));
+  await tick(); await tick(); flushSync();
+  const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  box.checked = false; box.dispatchEvent(new Event('change'));
+  await tick(); await tick(); await tick(); flushSync();
+  expect(refresh).not.toHaveBeenCalled();
 });

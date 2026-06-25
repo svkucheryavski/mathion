@@ -13,6 +13,7 @@
   import MarkdownEditor from './MarkdownEditor.svelte';
   import Button from '../ui/Button.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import OptionRow from './OptionRow.svelte';
 
   let {
@@ -139,6 +140,15 @@
     options.length === 1 || !(o.is_correct && correctCount === 1);   // C2 (§8.6)
   const optionsDisabled = $derived(optionsLocked || dirty);          // effective UI lock (text↔option)
 
+  async function afterOptionError(e: unknown, savedVid: number, fallback: string) {
+    if (!(alive && vid === savedVid)) return;
+    optMutError = e instanceof ApiError ? e.displayMessage : fallback;
+    await resyncOptions(savedVid);                               // §6 write-back (option-level)
+    if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
+      await loadAdminTree(vid, { force: true });                // §10 re-gate (refresh perms); 422/400 do NOT
+    }
+  }
+
   async function loadOptions() {
     optLoadToken += 1;
     const myToken = optLoadToken;
@@ -177,7 +187,7 @@
       setOptions([...options, created].sort((a, b) => a.order - b.order));
       addingOption = false; newOptionText = '';
     } catch (e) {
-      if (alive && vid === savedVid) optMutError = e instanceof ApiError ? e.displayMessage : 'Add option failed';
+      await afterOptionError(e, savedVid, 'Add option failed');
     } finally {
       if (alive) optionsLocked = false;
     }
@@ -195,7 +205,7 @@
       if (!(alive && vid === savedVid)) return;
       setOptions(options.filter((o) => o.id !== oid));
     } catch (e) {
-      if (alive && vid === savedVid) optMutError = e instanceof ApiError ? e.displayMessage : 'Delete option failed';
+      await afterOptionError(e, savedVid, 'Delete option failed');
     } finally {
       if (alive) optionsLocked = false;
     }
@@ -216,10 +226,7 @@
     try {
       await reorderOptions(question.id, order);        // success: optimistic state is authoritative
     } catch (e) {
-      if (alive && vid === savedVid) {
-        optMutError = e instanceof ApiError ? e.displayMessage : 'Reorder failed';
-        await resyncOptions(savedVid);
-      }
+      await afterOptionError(e, savedVid, 'Reorder failed');
     } finally {
       if (alive) optionsLocked = false;
     }
@@ -241,8 +248,7 @@
       applyOption(updated);
       optionTrackers.get(oid)?.reset({ text: updated.text });  // baseline → clean
     } catch (e) {
-      if (alive && vid === savedVid) optMutError = e instanceof ApiError ? e.displayMessage : 'Save option text failed';
-      // draft stays dirty for retry
+      await afterOptionError(e, savedVid, 'Save option text failed');
     } finally {
       if (alive) optionsLocked = false;
     }
@@ -279,10 +285,7 @@
         applyOption(u);                                             // confirm with server response
       }
     } catch (e) {
-      if (alive && vid === savedVid) {
-        optMutError = e instanceof ApiError ? e.displayMessage : 'Correctness update failed';
-        await resyncOptions(savedVid);                                // 422 last-correct / partial fail → §6 revert
-      }
+      await afterOptionError(e, savedVid, 'Correctness update failed');
     } finally {
       if (alive) optionsLocked = false;                              // whole sequence in ONE finally (§7.2)
     }
@@ -316,7 +319,10 @@
       draft = { ...saved };                           // advance baseline → form goes clean
       textHtml = updated.text_html;
     } catch (e) {
-      if (alive && vid === savedVid) pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
+      if (alive && vid === savedVid) {
+        pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(vid, { force: true });
+      }
     } finally {
       if (alive) saveBusy = false;
     }
