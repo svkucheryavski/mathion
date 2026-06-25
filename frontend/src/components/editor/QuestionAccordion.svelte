@@ -144,8 +144,9 @@
     if (!(alive && vid === savedVid)) return;
     optMutError = e instanceof ApiError ? e.displayMessage : fallback;
     await resyncOptions(savedVid);                               // §6 write-back (option-level)
+    if (!(alive && vid === savedVid)) return;                   // §4.1a: re-check after the resync await
     if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
-      await loadAdminTree(vid, { force: true });                // §10 re-gate (refresh perms); 422/400 do NOT
+      await loadAdminTree(savedVid, { force: true });           // §10 re-gate (refresh perms); act on the version the mutation targeted
     }
   }
 
@@ -321,7 +322,7 @@
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(vid, { force: true });
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) saveBusy = false;

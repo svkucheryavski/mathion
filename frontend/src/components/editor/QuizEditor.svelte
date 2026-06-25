@@ -150,7 +150,7 @@
         addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
         if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
           await load();                                  // resync question list/order
-          await loadAdminTree(savedVid, { force: true }); // §10 re-gate
+          if (alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §4.1a: re-check after load(); §10 re-gate
         }
       }
     } finally { if (alive) questionsLocked = false; }
@@ -173,7 +173,7 @@
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
         await load();                                 // resync the list (token-guarded)
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §4.1a: re-check after load()
       }
     } finally {
       if (alive) questionsLocked = false;
@@ -200,7 +200,7 @@
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
         await load();                                 // resync from server on error
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §4.1a: re-check after load()
       }
     } finally {
       if (alive) questionsLocked = false;

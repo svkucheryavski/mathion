@@ -556,3 +556,40 @@ it('a 422 last-correct does NOT re-gate (state unchanged, §10)', async () => {
   await tick(); await tick(); await tick(); flushSync();
   expect(refresh).not.toHaveBeenCalled();
 });
+
+it('a 400 on an option mutation does NOT re-gate (§10)', async () => {
+  const { ApiError } = await import('../lib/api');
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }), opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  vi.spyOn(qa, 'reorderOptions').mockRejectedValue(new ApiError(400, 'Bad request'));
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
+  (rows[0].querySelector('button[aria-label="Move option down"]') as HTMLButtonElement).click();
+  await tick(); await tick(); await tick(); flushSync();
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a second guard)', async () => {
+  const { ApiError } = await import('../lib/api');
+  let resolveResync!: (v: AuthoringOption[]) => void;
+  vi.spyOn(qa, 'listOptions')
+    .mockResolvedValueOnce([opt({ id: 1, text: 'A', is_correct: false, order: 1 })])     // initial load
+    .mockReturnValueOnce(new Promise((r) => { resolveResync = r; }));                      // resync re-fetch (deferred)
+  vi.spyOn(qa, 'createOption').mockRejectedValue(new ApiError(409, "Can only add in 'created' state"));
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target, props } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  addOptionBtn(target).click(); await tick(); flushSync();
+  setVal(target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement, 'X');
+  await tick(); flushSync();
+  ([...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Add') as HTMLButtonElement).click();
+  await tick(); await tick(); flushSync();          // createOption rejects → afterOptionError → resync pending
+  props.vid = 11;                                    // navigate away mid-resync
+  await tick(); flushSync();
+  resolveResync([opt({ id: 1, text: 'A', is_correct: false, order: 1 })]);  // resync resolves now (vid already changed)
+  await tick(); await tick(); flushSync();
+  expect(refresh).not.toHaveBeenCalled();            // second guard short-circuits the re-gate
+});
