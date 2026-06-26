@@ -325,18 +325,22 @@ it('optionsLocked serializes: a 2nd option mutation is blocked while the 1st is 
     opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
   ]);
   let resolveDel!: () => void;
-  vi.spyOn(qa, 'deleteOption').mockReturnValue(new Promise((r) => { resolveDel = r as () => void; }));
+  const del = vi.spyOn(qa, 'deleteOption').mockReturnValue(new Promise((r) => { resolveDel = r as () => void; }));
   const { target } = mountAccordion(choiceQ());
   await tick(); await tick(); flushSync();
   const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
   (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();  // delete pending
   await tick(); flushSync();
-  // every option control is now disabled (optionsLocked)
-  expect((rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).disabled).toBe(true);
+  // During flight: text input is read-only (textReadOnly includes the mutex) and MarkdownEditor hides textarea
   expect((rows[0].querySelector('[data-testid="option-text"]') as HTMLInputElement).readOnly).toBe(true);
   // §7.2 text-side lock: while optionsLocked, MarkdownEditor is in readOnly mode
   // → it renders a preview div, NOT a textarea (readOnly=true removes the textarea from the DOM)
   expect(target.querySelector('textarea')).toBeNull();
+  // handler guard: the delete button is not natively disabled during flight (no blur), but the
+  // accordion's removeOption guard (if (optionsLocked) return) blocks a second call
+  (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();  // second click → no-op
+  await tick(); flushSync();
+  expect(del).toHaveBeenCalledTimes(1);   // guard blocked the second call
   resolveDel();
   await tick(); await tick(); flushSync();
 });
@@ -452,27 +456,35 @@ it('multiple_choice unchecking the last correct → 422 → revert via listOptio
   const { target } = mountAccordion(choiceQ({ type: 'multiple_choice' }));
   await tick(); await tick(); flushSync();
   const box = boxes(target)[0];
-  box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true }));    // uncheck the only correct
+  // controlled input: onclick fires, e.preventDefault() stops DOM toggle, onToggleCorrect(!true=false) called
+  // optimistic flip sets is_correct=false; updateOption rejects 422; afterOptionError re-syncs → reverts to true
+  box.click();
   await tick(); await tick(); await tick(); await tick(); flushSync();
   expect(relist).toHaveBeenCalledTimes(2);                        // initial load + §6 write-back re-fetch
   expect(boxes(target)[0].checked).toBe(true);                   // reverted to server value
 });
 
-it('during a single_choice switch optionsLocked also disables delete (rev-12 race)', async () => {
+it('during a single_choice switch the handler guard blocks a second toggle while first is in flight', async () => {
   vi.spyOn(qa, 'listOptions').mockResolvedValue([
     opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
     opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
   ]);
   let resolveSet!: (o: AuthoringOption) => void;
-  vi.spyOn(qa, 'updateOption').mockReturnValue(new Promise((r) => { resolveSet = r; }));
+  const upd = vi.spyOn(qa, 'updateOption').mockReturnValue(new Promise((r) => { resolveSet = r; }));
   const { target } = mountAccordion(choiceQ());
   await tick(); await tick(); flushSync();
   radios(target)[1].click();                            // switch in flight (set-true pending)
   await tick(); flushSync();
-  const delOld = [...target.querySelectorAll('[data-testid="option-row"]')][0].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement;
-  expect(delOld.disabled).toBe(true);                   // old correct can't be deleted mid-switch
+  // controlled input: radio is NOT natively disabled during flight (no blur), but carries aria-busy="true"
+  // and the toggleCorrect handler guard (if (optionsLocked) return) blocks re-entry
+  expect(radios(target)[1].getAttribute('aria-busy')).toBe('true');
+  radios(target)[1].click();                            // second click during flight → no-op (guard fires)
+  await tick(); flushSync();
+  expect(upd).toHaveBeenCalledTimes(1);                 // guard blocked the second call
   resolveSet(opt({ id: 2, is_correct: true, order: 2 }));
   await tick(); await tick(); flushSync();
+  // after finally: aria-busy cleared
+  expect(radios(target)[1].getAttribute('aria-busy')).toBe('false');
 });
 
 it('a thrown set-false clears optionsLocked in finally (group re-enables)', async () => {
@@ -552,7 +564,7 @@ it('a 422 last-correct does NOT re-gate (state unchanged, §10)', async () => {
   const { target } = mountAccordion(choiceQ({ type: 'multiple_choice' }));
   await tick(); await tick(); flushSync();
   const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
-  box.checked = false; box.dispatchEvent(new Event('change'));
+  box.click();   // controlled: onclick → e.preventDefault() + onToggleCorrect(!true=false)
   await tick(); await tick(); await tick(); flushSync();
   expect(refresh).not.toHaveBeenCalled();
 });
@@ -715,7 +727,7 @@ it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a seco
 
 // ---- I1: correctnessEpoch re-syncs inputs on cancel/error (fix-wave) ----
 
-it('I1: single_choice cancel re-syncs radio to state (epoch re-mounts inputs)', async () => {
+it('I1: single_choice cancel leaves radio at state (controlled input: preventDefault stops native toggle)', async () => {
   vi.spyOn(qa, 'listOptions').mockResolvedValue([
     opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
     opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
@@ -726,19 +738,19 @@ it('I1: single_choice cancel re-syncs radio to state (epoch re-mounts inputs)', 
   const PUB = versionPermissions({ state: 'published', is_disabled: false });
   const { target } = mountAccordion(choiceQ(), { perms: PUB, confirmKeyChange: cancelKeyChange });
   await tick(); await tick(); flushSync();
-  // Click B's radio → confirmKeyChange fires → returns false (cancel)
+  // Click B's radio → confirmKeyChange fires → returns false (cancel) → return;
+  // preventDefault in onclick stops the native toggle so B stays unchecked
   radios(target)[1].click();
   await tick(); flushSync();
   expect(cancelKeyChange).toHaveBeenCalled();
   expect(upd).not.toHaveBeenCalled();
-  // After cancel + epoch bump: A must be checked, B must not
   await tick(); flushSync();
   const rs = radios(target);
-  expect(rs[0].checked).toBe(true);   // A stays correct (epoch re-synced)
-  expect(rs[1].checked).toBe(false);  // B stays incorrect
+  expect(rs[0].checked).toBe(true);   // A stays correct (state-driven, no epoch needed)
+  expect(rs[1].checked).toBe(false);  // B stays incorrect (preventDefault blocked DOM toggle)
 });
 
-it('I1: multiple_choice cancel re-syncs checkbox to state (epoch re-mounts inputs)', async () => {
+it('I1: multiple_choice cancel leaves checkbox at state (controlled input: preventDefault stops native toggle)', async () => {
   vi.spyOn(qa, 'listOptions').mockResolvedValue([
     opt({ id: 1, text: 'C', is_correct: true, order: 1 }),
   ]);
@@ -748,12 +760,13 @@ it('I1: multiple_choice cancel re-syncs checkbox to state (epoch re-mounts input
   const PUB = versionPermissions({ state: 'published', is_disabled: false });
   const { target } = mountAccordion(choiceQ({ type: 'multiple_choice' }), { perms: PUB, confirmKeyChange: cancelKeyChange });
   await tick(); await tick(); flushSync();
-  // Click the checkbox (currently checked=true) → cancel
+  // Click the checkbox (currently checked=true) → controlled onclick: e.preventDefault() stops DOM toggle,
+  // onToggleCorrect(!true = false) called → confirmKeyChange returns false → return; (no state change)
   const box = boxes(target)[0];
-  box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true }));
+  box.click();
   await tick(); flushSync();
   expect(upd).not.toHaveBeenCalled();
-  // After cancel + epoch bump: checkbox must still be checked (epoch re-synced)
+  // checkbox must still be checked: state-driven (is_correct=true) + preventDefault blocked DOM toggle
   await tick(); flushSync();
   expect(boxes(target)[0].checked).toBe(true);
 });
@@ -775,8 +788,8 @@ it('I1: a SUCCESSFUL correctness toggle does NOT re-mount the inputs (no blink)'
   const after = radios(target);
   expect(after[1].checked).toBe(true);                // switch took effect…
   expect(after[0].checked).toBe(false);
-  // …and the correctness inputs were NOT re-created (same DOM nodes) — the epoch must
-  // not bump on the happy path, or every toggle blinks (regression the smoke caught).
+  // …and the correctness inputs were NOT re-created (same DOM nodes) — with {#key} gone
+  // there is no re-mount path; controlled inputs are never re-created (a successful toggle updates checked in place).
   expect(after[0]).toBe(beforeA);
   expect(after[1]).toBe(beforeB);
 });

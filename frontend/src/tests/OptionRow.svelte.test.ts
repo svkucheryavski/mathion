@@ -18,7 +18,7 @@ function mountRow(over: Record<string, unknown> = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props: any = $state({
     option: opt(), index: 1, count: 3, questionType: 'single_choice', perms: PERMS,
-    draft: opt().text, optionsLocked: false, canDelete: true,
+    draft: opt().text, optionsLocked: false, canDelete: true, mutating: false,
     onToggleCorrect: vi.fn(),
     onCommitText: vi.fn(), onDelete: vi.fn(), onMoveUp: vi.fn(), onMoveDown: vi.fn(), ...over,
   });
@@ -92,15 +92,31 @@ it('single_choice renders a radio reflecting is_correct; click fires onToggleCor
   expect(onToggleCorrect).toHaveBeenCalledWith(true);
 });
 
-it('multiple_choice renders a checkbox; toggling fires onToggleCorrect(checked)', () => {
+it('keyboard activation (Space/Enter → click event) routes through onToggleCorrect on radio', () => {
+  // jsdom fires a `click` event for keyboard Space/Enter on focused inputs — same path as mouse click.
+  // This verifies keyboard operation routes through our onclick handler (not a separate keydown path).
+  const onToggleCorrect = vi.fn();
+  const { target } = mountRow({ questionType: 'single_choice', option: opt({ is_correct: false }), onToggleCorrect });
+  flushSync();
+  const radio = target.querySelector('input[type="radio"]') as HTMLInputElement;
+  radio.focus();
+  radio.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  expect(onToggleCorrect).toHaveBeenCalledWith(true);
+  // Note: jsdom cannot distinguish keyboard vs mouse click at the event level; both produce a `click`
+  // event that our onclick handler intercepts. Manual smoke should confirm Space key on a focused
+  // radio fires onToggleCorrect (and does not scroll the page).
+});
+
+it('multiple_choice renders a checkbox; click fires onToggleCorrect(!is_correct), DOM unchanged (controlled)', () => {
   const onToggleCorrect = vi.fn();
   const { target } = mountRow({ questionType: 'multiple_choice', option: opt({ is_correct: true }), onToggleCorrect });
   flushSync();
   const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
   expect(box.checked).toBe(true);
-  box.checked = false;
-  box.dispatchEvent(new Event('change', { bubbles: true }));
-  expect(onToggleCorrect).toHaveBeenCalledWith(false);
+  // controlled input: onclick calls e.preventDefault() (cancels DOM toggle) then onToggleCorrect(!option.is_correct)
+  box.click();
+  expect(onToggleCorrect).toHaveBeenCalledWith(false);  // !true = false
+  expect(box.checked).toBe(true);   // DOM stays at state-driven value (preventDefault)
 });
 
 it('the correctness control is disabled while optionsLocked', () => {

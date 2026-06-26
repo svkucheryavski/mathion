@@ -271,7 +271,14 @@
     if (!target) return;
     // §8.4 no-op: clicking the radio of the already-unique-correct single_choice option.
     if (question.type === 'single_choice' && correctCount === 1 && target.is_correct) return;
-    if (!confirmKeyChange(question.id)) { correctnessEpoch++; return; }  // §8.7 — once, before any set-true
+    if (!confirmKeyChange(question.id)) {
+      // jsdom (and some browsers) may have unchecked the currently-correct radio as a side effect
+      // of the click, even though we call e.preventDefault() in the handler.  Spread-copy options
+      // to give Svelte new object references, causing it to re-apply checked={option.is_correct}
+      // on every OptionRow — restoring the DOM without re-creating elements (no focus loss/blink).
+      setOptions(options.map((o) => ({ ...o })));
+      return;
+    }
     const savedVid = vid;
     optMutError = null;
     optionsLocked = true;
@@ -297,13 +304,11 @@
       }
     } catch (e) {
       await afterOptionError(e, savedVid, 'Correctness update failed');
-      if (alive) correctnessEpoch++;          // re-sync the reverted control on error (single_choice has no optimistic flip); cancel path bumps separately
     } finally {
       if (alive) optionsLocked = false;                             // whole sequence in ONE finally (§7.2)
     }
   }
 
-  let correctnessEpoch = $state(0);
   let optionAnnounce = $state('');
   let bodyEl: HTMLElement | undefined = $state();
   let expandBtn: HTMLButtonElement | undefined = $state();
@@ -440,7 +445,7 @@
                       <OptionRow
                         option={o} index={i + 1} count={options.length} questionType={question.type}
                         {perms} optionsLocked={optionsDisabled} canDelete={canDeleteOption(o)}
-                        {correctnessEpoch}
+                        mutating={optionsLocked}
                         bind:draft={t.current.text}
                         onToggleCorrect={(next) => void toggleCorrect(o.id, next)}
                         onCommitText={() => void commitText(o.id)}
