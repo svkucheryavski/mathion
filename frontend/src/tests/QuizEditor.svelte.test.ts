@@ -322,8 +322,11 @@ it('adding a question focuses the new question body (first field via expand-$eff
   clickByText(target, 'Add');
   await tick(); await tick(); await tick(); flushSync();
   // submitAdd sets expandedId=created.id (42) → accordion renders with expanded=true
-  // → the expand-$effect focuses the body's first field (§10a)
-  expect(target.querySelector('[data-q-id="42"] .body')?.contains(document.activeElement)).toBe(true);
+  // → the expand-$effect focuses the body's first FIELD (§10a) — the question-text
+  // textarea, NOT the MarkdownEditor's Edit/Preview toolbar button (which renders first).
+  const active = document.activeElement as HTMLElement | null;
+  expect(target.querySelector('[data-q-id="42"] .body')?.contains(active)).toBe(true);
+  expect(active?.tagName).toBe('TEXTAREA');
 });
 
 it("one question's failed option fetch isolates to its accordion (§6)", async () => {
@@ -393,7 +396,7 @@ it('I3: delete middle question focuses a surviving sibling .expand button', asyn
   await tick(); await tick(); await tick(); flushSync();
   const focusedEl = document.activeElement as HTMLElement | null;
   expect(focusedEl?.classList.contains('expand')).toBe(true);
-  const survives = ['1', '3'];
+  // exact sibling: survivors=[A(1),C(3)], idx=1, min(1, len-1=1)=1 → C(id=3)
   const qId = focusedEl?.closest('[data-q-id]')?.getAttribute('data-q-id');
-  expect(survives).toContain(qId);
+  expect(qId).toBe('3');
 });

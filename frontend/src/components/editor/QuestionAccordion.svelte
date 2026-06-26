@@ -311,7 +311,7 @@
   $effect(() => {
     if (expanded) {
       void tick().then(() => {
-        if (alive) (bodyEl?.querySelector('input:not([readonly]), textarea:not([readonly]), button:not([disabled])') as HTMLElement | null)?.focus();
+        if (alive) (bodyEl?.querySelector('textarea:not([readonly]):not([disabled]), input:not([readonly]):not([disabled]), select:not([disabled])') as HTMLElement | null)?.focus();
       });
     }
   });
