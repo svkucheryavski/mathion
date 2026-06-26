@@ -712,3 +712,70 @@ it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a seco
   await tick(); await tick(); flushSync();
   expect(refresh).not.toHaveBeenCalled();            // second guard short-circuits the re-gate
 });
+
+// ---- I1: correctnessEpoch re-syncs inputs on cancel/error (fix-wave) ----
+
+it('I1: single_choice cancel re-syncs radio to state (epoch re-mounts inputs)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const upd = vi.spyOn(qa, 'updateOption');
+  // confirmKeyChange returns false → cancel path (simulates published cancel)
+  const cancelKeyChange = vi.fn().mockReturnValue(false);
+  const PUB = versionPermissions({ state: 'published', is_disabled: false });
+  const { target } = mountAccordion(choiceQ(), { perms: PUB, confirmKeyChange: cancelKeyChange });
+  await tick(); await tick(); flushSync();
+  // Click B's radio → confirmKeyChange fires → returns false (cancel)
+  radios(target)[1].click();
+  await tick(); flushSync();
+  expect(cancelKeyChange).toHaveBeenCalled();
+  expect(upd).not.toHaveBeenCalled();
+  // After cancel + epoch bump: A must be checked, B must not
+  await tick(); flushSync();
+  const rs = radios(target);
+  expect(rs[0].checked).toBe(true);   // A stays correct (epoch re-synced)
+  expect(rs[1].checked).toBe(false);  // B stays incorrect
+});
+
+it('I1: multiple_choice cancel re-syncs checkbox to state (epoch re-mounts inputs)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'C', is_correct: true, order: 1 }),
+  ]);
+  const upd = vi.spyOn(qa, 'updateOption');
+  // confirmKeyChange returns false → cancel path
+  const cancelKeyChange = vi.fn().mockReturnValue(false);
+  const PUB = versionPermissions({ state: 'published', is_disabled: false });
+  const { target } = mountAccordion(choiceQ({ type: 'multiple_choice' }), { perms: PUB, confirmKeyChange: cancelKeyChange });
+  await tick(); await tick(); flushSync();
+  // Click the checkbox (currently checked=true) → cancel
+  const box = boxes(target)[0];
+  box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true }));
+  await tick(); flushSync();
+  expect(upd).not.toHaveBeenCalled();
+  // After cancel + epoch bump: checkbox must still be checked (epoch re-synced)
+  await tick(); flushSync();
+  expect(boxes(target)[0].checked).toBe(true);
+});
+
+// ---- I3: delete question focuses sibling — moved to QuizEditor.svelte.test.ts ----
+
+// ---- M1: < 2 options hint (fix-wave) ----
+
+it('M1: choice question with 1 option shows few-options-warn; with 2 options it does not', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+  ]);
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  expect(target.querySelector('[data-testid="few-options-warn"]')).not.toBeNull();
+  // Clean up and mount with 2 options
+  cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  const { target: t2 } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  expect(t2.querySelector('[data-testid="few-options-warn"]')).toBeNull();
+});

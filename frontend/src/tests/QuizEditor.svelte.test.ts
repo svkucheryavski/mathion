@@ -308,7 +308,7 @@ it('reordering a question announces via the aria-live region', async () => {
   expect(live.textContent).toMatch(/position 2 of 2/i);
 });
 
-it('adding a question focuses the new question header expand button (T8)', async () => {
+it('adding a question focuses the new question body (first field via expand-$effect) (T8)', async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
   vi.spyOn(qa, 'createQuestion').mockResolvedValue(
     q({ id: 42, type: 'single_choice', text_md: 'Pick one', correct_numeric: null, precision: null }),
@@ -322,8 +322,8 @@ it('adding a question focuses the new question header expand button (T8)', async
   clickByText(target, 'Add');
   await tick(); await tick(); await tick(); flushSync();
   // submitAdd sets expandedId=created.id (42) → accordion renders with expanded=true
-  // and then focuses [data-q-id="42"] .expand via void tick().then(...)
-  expect(document.activeElement).toBe(target.querySelector('[data-q-id="42"] .expand'));
+  // → the expand-$effect focuses the body's first field (§10a)
+  expect(target.querySelector('[data-q-id="42"] .body')?.contains(document.activeElement)).toBe(true);
 });
 
 it("one question's failed option fetch isolates to its accordion (§6)", async () => {
@@ -344,4 +344,56 @@ it("one question's failed option fetch isolates to its accordion (§6)", async (
   ([...target.querySelectorAll('button.expand')] as HTMLButtonElement[])[0].click();
   await tick(); await tick(); flushSync();
   expect(target.querySelectorAll('[data-testid="option-load-error"]')).toHaveLength(1);
+});
+
+// ---- I2: saveTitle §10 re-gate — only 403/409 trigger loadAdminTree (fix-wave) ----
+
+it('I2: saveTitle 422 does NOT call loadAdminTree (§10)', async () => {
+  const { ApiError } = await import('../lib/api');
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
+  vi.spyOn(qa, 'renameItem').mockRejectedValue(new ApiError(422, 'Title too long'));
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountEditor();
+  await tick(); await tick(); flushSync();
+  setInput(target, 'quiz-title', 'x'.repeat(300));
+  clickByText(target, 'Save title');
+  await tick(); await tick(); flushSync();
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('I2: saveTitle 409 calls loadAdminTree({force:true}) (§10)', async () => {
+  const { ApiError } = await import('../lib/api');
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
+  vi.spyOn(qa, 'renameItem').mockRejectedValue(new ApiError(409, 'Conflict'));
+  const refresh = vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target } = mountEditor();
+  await tick(); await tick(); flushSync();
+  setInput(target, 'quiz-title', 'New Title');
+  clickByText(target, 'Save title');
+  await tick(); await tick(); flushSync();
+  expect(refresh).toHaveBeenCalledWith(10, { force: true });
+});
+
+// ---- I3: delete question focuses sibling expand button (fix-wave) ----
+
+it('I3: delete middle question focuses a surviving sibling .expand button', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([
+    q({ id: 1, order: 1, text_md: 'A' }),
+    q({ id: 2, order: 2, text_md: 'B' }),
+    q({ id: 3, order: 3, text_md: 'C' }),
+  ]);
+  vi.spyOn(qa, 'deleteQuestion').mockResolvedValue();
+  vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const { target } = mountEditor();
+  await tick(); await tick(); flushSync();
+  // Delete the MIDDLE question B (id=2): survivors=[A(1),C(3)], idx=1, min(1,1)=1 → focusId=3
+  const delBtns = [...target.querySelectorAll('button[aria-label="Delete question"]')] as HTMLButtonElement[];
+  delBtns[1].click();
+  await tick(); await tick(); await tick(); flushSync();
+  const focusedEl = document.activeElement as HTMLElement | null;
+  expect(focusedEl?.classList.contains('expand')).toBe(true);
+  const survives = ['1', '3'];
+  const qId = focusedEl?.closest('[data-q-id]')?.getAttribute('data-q-id');
+  expect(survives).toContain(qId);
 });

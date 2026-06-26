@@ -189,7 +189,7 @@
       setOptions([...options, created].sort((a, b) => a.order - b.order));
       addingOption = false; newOptionText = '';
       await tick();
-      if (alive) (bodyEl?.querySelector(`[data-option-id="${created.id}"]`) as HTMLElement | null)?.focus();
+      if (alive && vid === savedVid) (bodyEl?.querySelector(`[data-option-id="${created.id}"]`) as HTMLElement | null)?.focus();
     } catch (e) {
       await afterOptionError(e, savedVid, 'Add option failed');
     } finally {
@@ -212,7 +212,7 @@
       setOptions(survivors);
       const focusId = survivors[Math.min(idx, survivors.length - 1)]?.id;
       await tick();
-      if (alive && focusId != null) (bodyEl?.querySelector(`[data-option-id="${focusId}"]`) as HTMLElement | null)?.focus();
+      if (alive && vid === savedVid && focusId != null) (bodyEl?.querySelector(`[data-option-id="${focusId}"]`) as HTMLElement | null)?.focus();
     } catch (e) {
       await afterOptionError(e, savedVid, 'Delete option failed');
     } finally {
@@ -271,7 +271,7 @@
     if (!target) return;
     // §8.4 no-op: clicking the radio of the already-unique-correct single_choice option.
     if (question.type === 'single_choice' && correctCount === 1 && target.is_correct) return;
-    if (!confirmKeyChange(question.id)) return;          // §8.7 — once, before any set-true
+    if (!confirmKeyChange(question.id)) { correctnessEpoch++; return; }  // §8.7 — once, before any set-true
     const savedVid = vid;
     optMutError = null;
     optionsLocked = true;
@@ -298,10 +298,11 @@
     } catch (e) {
       await afterOptionError(e, savedVid, 'Correctness update failed');
     } finally {
-      if (alive) optionsLocked = false;                              // whole sequence in ONE finally (§7.2)
+      if (alive) { optionsLocked = false; correctnessEpoch++; }     // whole sequence in ONE finally (§7.2)
     }
   }
 
+  let correctnessEpoch = $state(0);
   let optionAnnounce = $state('');
   let bodyEl: HTMLElement | undefined = $state();
   let expandBtn: HTMLButtonElement | undefined = $state();
@@ -332,7 +333,7 @@
       body.correct_numeric = Number(numericCheck.canonical);
       body.precision = draft.precision;
     }
-    if (question.type === 'text_answer') body.correct_text = draft.correct_text;
+    if (question.type === 'text_answer') body.correct_text = draft.correct_text.trim();
     saveBusy = true;
     try {
       const updated = await updateQuestion(question.id, body);
@@ -347,7 +348,7 @@
       draft = { ...saved };                           // advance baseline → form goes clean
       textHtml = updated.text_html;
       await tick();
-      if (alive) expandBtn?.focus();
+      if (alive && vid === savedVid) expandBtn?.focus();
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
@@ -438,6 +439,7 @@
                       <OptionRow
                         option={o} index={i + 1} count={options.length} questionType={question.type}
                         {perms} optionsLocked={optionsDisabled} canDelete={canDeleteOption(o)}
+                        {correctnessEpoch}
                         bind:draft={t.current.text}
                         onToggleCorrect={(next) => void toggleCorrect(o.id, next)}
                         onCommitText={() => void commitText(o.id)}
@@ -451,6 +453,7 @@
               </ol>
             </fieldset>
           {/if}
+          {#if isChoice && optStatus === 'loaded' && options.length < 2}<p class="muted" data-testid="few-options-warn">Add at least 2 options before publishing.</p>{/if}
           <p class="sr-only" aria-live="polite" data-testid="option-live">{optionAnnounce}</p>
           {#if optMutError}<p class="err" role="alert" data-testid="option-mut-error">{optMutError}</p>{/if}
           {#if perms.canEditStructure}

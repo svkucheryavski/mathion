@@ -8,10 +8,12 @@
 
   let {
     option, index, count, questionType, perms, draft = $bindable(''),
-    optionsLocked, canDelete, onToggleCorrect, onCommitText, onDelete, onMoveUp, onMoveDown,
+    optionsLocked, canDelete, correctnessEpoch = 0,
+    onToggleCorrect, onCommitText, onDelete, onMoveUp, onMoveDown,
   }: {
     option: AuthoringOption; index: number; count: number; questionType: QuestionType;
     perms: VersionPermissions; draft: string; optionsLocked: boolean; canDelete: boolean;
+    correctnessEpoch?: number;
     onToggleCorrect: (next: boolean) => void;
     onCommitText: () => void; onDelete: () => void; onMoveUp: () => void; onMoveDown: () => void;
   } = $props();
@@ -25,13 +27,15 @@
 </script>
 
 <div class="option" data-testid="option-row">
-  {#if questionType === 'single_choice'}
-    <input type="radio" name={`correct-${option.question_id}`} checked={option.is_correct}
-           disabled={correctnessDisabled} onclick={() => onToggleCorrect(true)} aria-label={`Mark option ${index} correct`} />
-  {:else if questionType === 'multiple_choice'}
-    <input type="checkbox" checked={option.is_correct}
-           disabled={correctnessDisabled} onchange={(e) => onToggleCorrect(e.currentTarget.checked)} aria-label={`Mark option ${index} correct`} />
-  {/if}
+  {#key correctnessEpoch}
+    {#if questionType === 'single_choice'}
+      <input type="radio" name={`correct-${option.question_id}`} checked={option.is_correct}
+             disabled={correctnessDisabled} onclick={() => onToggleCorrect(true)} aria-label={`Mark option ${index} correct`} />
+    {:else if questionType === 'multiple_choice'}
+      <input type="checkbox" checked={option.is_correct}
+             disabled={correctnessDisabled} onchange={(e) => onToggleCorrect(e.currentTarget.checked)} aria-label={`Mark option ${index} correct`} />
+    {/if}
+  {/key}
   <span class="opt-num">{index}.</span>
   <input class="opt-input" data-testid="option-text" data-option-id={option.id} bind:value={draft}
          readonly={textReadOnly} onblur={() => onCommitText()}

@@ -99,7 +99,7 @@
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Rename failed', 'error');
-        await loadAdminTree(savedVid, { force: true });
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) titleBusy = false;
@@ -143,7 +143,7 @@
     if (newType === 'numeric_answer' && newNumericCheck.ok) {
       return { ...base, correct_numeric: Number(newNumericCheck.canonical), precision: newPrecision };
     }
-    if (newType === 'text_answer') return { ...base, correct_text: newAnswer };
+    if (newType === 'text_answer') return { ...base, correct_text: newAnswer.trim() };
     return base;  // single_choice / multiple_choice — options added in Plan B
   }
 
@@ -160,9 +160,6 @@
       adding = false; resetAddForm();
       expandedId = created.id;                        // open the new question for editing
       await loadAdminTree(savedVid, { force: true }); // refresh questions_count
-      void tick().then(() => {
-        if (alive) (document.querySelector(`[data-q-id="${created.id}"] .expand`) as HTMLElement | null)?.focus();
-      });
     } catch (e) {
       if (alive && vid === savedVid) {
         addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
@@ -180,13 +177,17 @@
     if (!questions.some((x) => x.id === qid)) return;
     if (!confirm('Delete this question? Its options and text are lost.')) return;
     const savedVid = vid;                            // capture live vid BEFORE await
+    const idx = questions.findIndex((x) => x.id === qid);
     questionsLocked = true;
     try {
       await deleteQuestion(qid);
       if (!(alive && vid === savedVid)) return;
       questions = questions.filter((x) => x.id !== qid);
       if (expandedId === qid) expandedId = null;
+      const focusId = questions[Math.min(idx, questions.length - 1)]?.id;
       await loadAdminTree(savedVid, { force: true });
+      await tick();
+      if (alive && vid === savedVid && focusId != null) (document.querySelector(`[data-q-id="${focusId}"] .expand`) as HTMLElement | null)?.focus();
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
