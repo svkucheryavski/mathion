@@ -758,6 +758,29 @@ it('I1: multiple_choice cancel re-syncs checkbox to state (epoch re-mounts input
   expect(boxes(target)[0].checked).toBe(true);
 });
 
+it('I1: a SUCCESSFUL correctness toggle does NOT re-mount the inputs (no blink)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+    opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  ]);
+  vi.spyOn(qa, 'updateOption').mockImplementation((id: number, body: { is_correct?: boolean }) =>
+    Promise.resolve(opt({ id, text: id === 1 ? 'A' : 'B', is_correct: body.is_correct ?? false, order: id })));
+  // editable (created) version, confirmKeyChange default → true: the switch succeeds (no cancel/error path)
+  const { target } = mountAccordion(choiceQ());
+  await tick(); await tick(); flushSync();
+  const beforeA = radios(target)[0];
+  const beforeB = radios(target)[1];
+  radios(target)[1].click();                          // switch the correct option A → B (succeeds)
+  await tick(); await tick(); flushSync();
+  const after = radios(target);
+  expect(after[1].checked).toBe(true);                // switch took effect…
+  expect(after[0].checked).toBe(false);
+  // …and the correctness inputs were NOT re-created (same DOM nodes) — the epoch must
+  // not bump on the happy path, or every toggle blinks (regression the smoke caught).
+  expect(after[0]).toBe(beforeA);
+  expect(after[1]).toBe(beforeB);
+});
+
 // ---- I3: delete question focuses sibling — moved to QuizEditor.svelte.test.ts ----
 
 // ---- M1: < 2 options hint (fix-wave) ----

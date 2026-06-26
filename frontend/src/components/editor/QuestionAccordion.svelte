@@ -297,8 +297,9 @@
       }
     } catch (e) {
       await afterOptionError(e, savedVid, 'Correctness update failed');
+      if (alive) correctnessEpoch++;          // re-sync the reverted control on error (single_choice has no optimistic flip); cancel path bumps separately
     } finally {
-      if (alive) { optionsLocked = false; correctnessEpoch++; }     // whole sequence in ONE finally (§7.2)
+      if (alive) optionsLocked = false;                             // whole sequence in ONE finally (§7.2)
     }
   }
 
