@@ -119,8 +119,20 @@ it('multiple_choice renders a checkbox; click fires onToggleCorrect(!is_correct)
   expect(box.checked).toBe(true);   // DOM stays at state-driven value (preventDefault)
 });
 
-it('the correctness control is disabled while optionsLocked', () => {
+it('the correctness control is disabled while optionsLocked (dirty-form lock, not in flight)', () => {
+  // optionsLocked prop = optionsDisabled (mutex||dirty); mutating defaults false → "dirty, not in flight".
   const { target } = mountRow({ questionType: 'single_choice', optionsLocked: true });
   flushSync();
   expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(true);
+});
+
+it('the correctness control is NOT natively disabled during an in-flight mutation (mutating=true)', () => {
+  // In flight: optionsLocked (mutex||dirty) AND mutating (raw mutex) both true.
+  // correctnessDisabled = !canEdit || (optionsLocked && !mutating) → false. The focused control
+  // must NOT be disabled mid-PATCH — disabling it blurs the control → focus drops to <body> → the
+  // page scrolls. This guards the controlled-input fix: a regression to `disabled={optionsLocked}`
+  // (dropping `&& !mutating`) would flip this to true and the focus/scroll bug returns.
+  const { target } = mountRow({ questionType: 'single_choice', optionsLocked: true, mutating: true });
+  flushSync();
+  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false);
 });

@@ -205,6 +205,27 @@ describe('MarkdownEditor — textarea drop', () => {
     expect(propsRef.refreshKey).toBe(1);
   });
 
+  it('§7.2: a drop whose upload resolves AFTER `disabled` flips true does NOT mutate value', async () => {
+    // Regression for the readOnly→disabled fix (commit 6690c9e): the textarea now stays mounted
+    // while the option-mutation two-way lock is engaged, so a late upload must be blocked by
+    // insertAtCursor's `disabled` guard. The old readOnly path unmounted the textarea, so a late
+    // insert no-op'd on `!textareaEl`; without the explicit guard this would bypass §7.2.
+    let resolveUpload!: (a: AssetItem) => void;
+    (stubCtx.upload as ReturnType<typeof vi.fn>)
+      .mockReturnValue(new Promise<AssetItem>((r) => { resolveUpload = r; }));
+    const { target, propsRef } = mountEditor({ value: 'abc', disabled: false });
+    await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const file = new File(['x'], 'late.png', { type: 'image/png' });
+    ta.dispatchEvent(makeDropEvent([file], ta));        // drop starts while unlocked → upload pending
+    await Promise.resolve(); flushSync();
+    propsRef.disabled = true;                            // §7.2 lock engages mid-upload
+    await Promise.resolve(); flushSync();
+    resolveUpload(mkAsset({ filename: 'late.png', mime_type: 'image/png' }));  // resolves while frozen
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(propsRef.value).toBe('abc');                 // insert blocked — markdown untouched
+  });
+
   it('drop on textarea with no precise offset falls back to lastOffset (= end if never focused)', async () => {
     (stubCtx.upload as ReturnType<typeof vi.fn>).mockResolvedValue(
       mkAsset({ filename: 'fb.png', mime_type: 'image/png' }),

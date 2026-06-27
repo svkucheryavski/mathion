@@ -730,7 +730,7 @@ it('a 409 whose resync resolves after a vid change does NOT re-gate (§4.1a seco
   expect(refresh).not.toHaveBeenCalled();            // second guard short-circuits the re-gate
 });
 
-// ---- I1: correctnessEpoch re-syncs inputs on cancel/error (fix-wave) ----
+// ---- I1: controlled inputs re-sync on cancel/error (preventDefault + state-driven checked) ----
 
 it('I1: single_choice cancel leaves radio at state (controlled input: preventDefault stops native toggle)', async () => {
   vi.spyOn(qa, 'listOptions').mockResolvedValue([

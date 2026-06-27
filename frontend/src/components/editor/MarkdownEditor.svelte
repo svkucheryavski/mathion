@@ -58,7 +58,13 @@
   }
 
   function insertAtCursor(text: string, atOffset?: number) {
-    if (!textareaEl) return;
+    // §7.2: while the editor is frozen (`disabled`, e.g. an in-flight option
+    // mutation flipped the two-way lock mid-upload), no programmatic insert may
+    // mutate the markdown. The old readOnly path unmounted the textarea so a
+    // late drop/sidebar upload no-op'd on `!textareaEl`; now the textarea stays
+    // mounted, so this guard is what preserves the freeze. Central here so it
+    // covers every caller (textarea drop + sidebar insert).
+    if (!textareaEl || disabled) return;
     const offset = atOffset ?? lastOffset;
     const before = value.slice(0, offset);
     const after = value.slice(offset);
