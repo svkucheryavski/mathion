@@ -54,6 +54,9 @@
   {#if item.title.trim() && item.slug.trim()}
     <span class="item-slug" aria-hidden="true">/{item.slug}</span>
   {/if}
+  {#if item.type === 'quiz'}
+    <span class="q-count" data-testid="item-question-count">{item.questions_count} {item.questions_count === 1 ? 'question' : 'questions'}</span>
+  {/if}
   <div class="actions">
     {#if canReorderUp}
       <Button
@@ -94,5 +97,7 @@
   .glyph { width: 24px; text-align: center; opacity: 0.65; }
   .item-title { font-weight: 600; flex: 1; }
   .item-slug { color: var(--muted); font-size: 0.85rem; }
+  .q-count { color: var(--muted); font-size: 0.85rem; }
+  .q-count::before { content: '· '; }
   .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 </style>
