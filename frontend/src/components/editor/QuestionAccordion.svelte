@@ -399,10 +399,10 @@
         <p class="muted" data-testid="published-type-note">Type can't be changed. To replace this question, create a new version.</p>
       {/if}
       <label>Question text
-        <MarkdownEditor {assetContext} readOnly={!editable || textLocked} bind:value={draft.text_md} />
+        <MarkdownEditor {assetContext} readOnly={!editable} disabled={textLocked} bind:value={draft.text_md} />
       </label>
       <label>Explanation (optional)
-        <MarkdownEditor {assetContext} readOnly={!editable || textLocked} bind:value={draft.explanation_md} />
+        <MarkdownEditor {assetContext} readOnly={!editable} disabled={textLocked} bind:value={draft.explanation_md} />
       </label>
 
       {#if question.type === 'numeric_answer'}

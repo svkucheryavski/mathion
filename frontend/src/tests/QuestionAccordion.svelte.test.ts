@@ -331,11 +331,16 @@ it('optionsLocked serializes: a 2nd option mutation is blocked while the 1st is 
   const rows = [...target.querySelectorAll('[data-testid="option-row"]')];
   (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();  // delete pending
   await tick(); flushSync();
-  // During flight: text input is read-only (textReadOnly includes the mutex) and MarkdownEditor hides textarea
+  // During flight: text input is read-only (textReadOnly includes the mutex)
   expect((rows[0].querySelector('[data-testid="option-text"]') as HTMLInputElement).readOnly).toBe(true);
-  // §7.2 text-side lock: while optionsLocked, MarkdownEditor is in readOnly mode
-  // → it renders a preview div, NOT a textarea (readOnly=true removes the textarea from the DOM)
-  expect(target.querySelector('textarea')).toBeNull();
+  // §7.2 text-side lock: while optionsLocked, the question-text MarkdownEditor stays mounted in
+  // edit mode but DISABLED (textLocked → MarkdownEditor `disabled`, NOT `readOnly`). Folding the
+  // transient mutex into `readOnly` would switch the editor to preview and unmount the textarea +
+  // AssetSidebar on every toggle, refetching assets and scrolling the page — so the textarea must
+  // remain in the DOM, disabled.
+  const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+  expect(ta).not.toBeNull();
+  expect(ta.disabled).toBe(true);
   // handler guard: the delete button is not natively disabled during flight (no blur), but the
   // accordion's removeOption guard (if (optionsLocked) return) blocks a second call
   (rows[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();  // second click → no-op
