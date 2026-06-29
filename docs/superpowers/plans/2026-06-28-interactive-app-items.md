@@ -820,14 +820,27 @@ with:
 
 - [ ] **Step 4: Edit `SequenceAccordion.svelte` — template**
 
-Add the App URL field after the video `{:else if}` block (after line 353, before `{#if createGlobalError}`):
+The type-discriminant chain currently ends like this (line 353's `{/if}` closes the `{#if newType === 'static_page'} … {:else if newType === 'video'}` chain; line 354's `createGlobalError` and line 355's Create button follow, OUTSIDE the chain):
 
 ```svelte
+                {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
+              </div>
+            {/if}
+            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
+```
+
+Insert the App URL field as a NEW `{:else if}` in that chain — between the video block's closing `</div>` (line 352) and the chain-closing `{/if}` (line 353), so it stays INSIDE the `{#if newType …}` chain:
+
+```svelte
+                {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
+              </div>
             {:else if newType === 'interactive_app'}
               <div class="field">
                 <input type="url" placeholder="App URL (https://…)" bind:value={newScriptUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.script_url) createErrors = { ...createErrors, script_url: '' }; }} />
                 {#if createErrors.script_url}<small class="field-err">{createErrors.script_url}</small>{/if}
               </div>
+            {/if}
+            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
 ```
 
 Add `createScriptUrlInvalid` to the Create button's `disabled` and a tooltip. Replace the Create button (line 355):
@@ -911,13 +924,16 @@ const appItem: AdminTreeItem = {
   content_md: null, content_html: null, video_url: null,
   script_url: 'https://example.com/app', questions_count: 0,
 };
-function seedTree(version: AdminTreeVersion, item: AdminTreeItem = appItem) {
+function buildTree(version: AdminTreeVersion, item: AdminTreeItem = appItem) {
   const seq: AdminTreeSequence = { id: 2, block_id: 3, title: 'Seq', slug: 'seq', order: 1, items: [item] };
   const block: AdminTreeBlock = {
     id: 3, version_id: version.id, title: 'Block', slug: 'block', order: 1, info: '', info_html: '',
     sequences: [seq],
   };
-  currentEditorVersion.value = { course: { id: 1, name: 'C', slug: 'c' }, version, blocks: [block] };
+  return { course: { id: 1, name: 'C', slug: 'c' }, version, blocks: [block] };
+}
+function seedTree(version: AdminTreeVersion, item: AdminTreeItem = appItem) {
+  currentEditorVersion.value = buildTree(version, item);
 }
 
 let cleanup: (() => void) | null = null;
@@ -932,6 +948,7 @@ afterEach(() => {
   (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
   currentEditorVersion.value = null;
   vi.restoreAllMocks();
+  vi.useRealTimers();   // defensive: the debounce test enables fake timers
 });
 
 async function mountPage() {
@@ -970,6 +987,15 @@ it('PATCHes script_url on save', async () => {
   const target = await mountPage();
   const u = urlInput(target);
   u.value = 'https://example.com/changed'; u.dispatchEvent(new Event('input')); flushSync();
+  // save() PATCHes, then force-refetches the admin tree. Route the GET to a
+  // VALID AdminTree (containing the saved item) so the post-save re-render
+  // doesn't deref `tree.version.id` on the `{}` default mock and crash settle()
+  // before the assertion. The PATCH itself can return the default {}.
+  fetchSpy.mockImplementation((input: RequestInfo | URL) =>
+    String(input).includes('/admin-tree')
+      ? jres(buildTree(makeVersion(), { ...appItem, script_url: 'https://example.com/changed' }))
+      : jres({}),
+  );
   saveBtn(target).click();
   await settle();
   const patch = fetchSpy.mock.calls.find(
@@ -990,6 +1016,21 @@ it('renders a read-only preview (not a blank box) on a disabled version', async 
   const target = await mountPage();
   expect(urlInput(target)).toBeNull();                    // no edit form
   expect(target.querySelector('iframe')).not.toBeNull();  // read-only InteractiveFrame
+});
+
+it('shows a live preview iframe after a valid URL is typed (debounced 500ms)', async () => {
+  // Covers the debounced scriptPreviewUrl $effect (a distinct code path from the
+  // non-debounced readonly preview). Fake timers control the 500ms setTimeout;
+  // enabled BEFORE mount so the mount-time debounce is fully controlled (afterEach
+  // restores real timers). settle()'s microtask drain is unaffected by fake timers.
+  vi.useFakeTimers();
+  seedTree(makeVersion());
+  const target = await mountPage();
+  const u = urlInput(target);
+  u.value = 'https://example.com/changed'; u.dispatchEvent(new Event('input')); flushSync();
+  vi.advanceTimersByTime(500); flushSync();
+  // jsdom page protocol is http:, so the https:// URL survives the mixed-content guard.
+  expect(target.querySelector('iframe')?.getAttribute('src')).toBe('https://example.com/changed');
 });
 ```
 
@@ -1088,7 +1129,7 @@ In `save()`, add a `sentScriptUrl` declaration beside `sentVideoUrl` (after line
     let sentScriptUrl: string | undefined;
 ```
 
-Add the body-build arm after the video `else if` block closes (after line 164, the `}` that ends the `else if (savedItemType === 'video')`):
+Add the body-build arm by REPLACING line 164 (the lone `    }` that closes the `else if (savedItemType === 'video')` block) with the block below — it re-closes the video arm with its leading `}` and opens the interactive_app arm, so do not leave the original `}` in place (inserting *after* line 164 would leave a dangling `}`):
 
 ```ts
     } else if (savedItemType === 'interactive_app') {
@@ -1197,7 +1238,7 @@ Insert the `interactive_app` arm as a NEW `{:else if}` in that chain — between
       </section>
 ```
 
-Replace the final `{:else}` note (lines 341-347):
+Replace the final `{:else}` note (lines 341-348, ending at the chain-closing `{/if}`):
 
 ```svelte
     {:else}
@@ -1223,15 +1264,15 @@ with (the branch is now unreachable for all four `AdminTreeItem` types — keep 
 - [ ] **Step 8: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run src/tests/ItemEditPage.interactive.svelte.test.ts`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
-- [ ] **Step 9: Type-check, run the editor regression set, commit**
+- [ ] **Step 9: Type-check, run the new test, commit**
 
 Run: `cd frontend && npx svelte-check --tsconfig ./tsconfig.json`
 Expected: 0 errors.
 
-Run: `cd frontend && npx vitest run src/tests/ItemEditPage.refreshKey.svelte.test.ts src/tests/ItemEditPage.interactive.svelte.test.ts`
-Expected: PASS (no regression in the existing ItemEditPage test).
+Run: `cd frontend && npx vitest run src/tests/ItemEditPage.interactive.svelte.test.ts`
+Expected: PASS (6 tests). (The existing `ItemEditPage.refreshKey.svelte.test.ts` drives a standalone simulation harness, not `ItemEditPage.svelte`, so it does not exercise these edits — the whole-file regression is covered by Task 8's full-suite run.)
 
 ```bash
 git add frontend/src/pages/editor/ItemEditPage.svelte frontend/src/tests/ItemEditPage.interactive.svelte.test.ts
@@ -1249,12 +1290,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Run the entire frontend test suite**
 
 Run: `cd frontend && npm test`
-Expected: all tests pass (the pre-existing suite was 1095 green at the last merge; this adds ~19 new tests across Tasks 1-7 — expect ~1114, zero failures). The one known pre-existing TZ-pinned file is npm-test-only and unaffected.
+Expected: all tests pass (the pre-existing suite was 1095 green at the last merge; this adds **24 new tests** — T1=5, T2=3, T3=4, T4=1, T5=+1, T6=4, T7=6 — so expect **~1119**, zero failures). The one known pre-existing TZ-pinned file is npm-test-only and unaffected.
 
 - [ ] **Step 2: Final type-check**
 
 Run: `cd frontend && npx svelte-check --tsconfig ./tsconfig.json`
-Expected: 0 errors, 0 warnings beyond the pre-existing `state_referenced_locally` once-seed reads.
+Expected: 0 errors. The baseline emits ~33 pre-existing warnings (`state_referenced_locally` once-seed reads + unrelated a11y warnings in `Input.svelte`/`FormRow.svelte`/`BlockGroup.svelte`); confirm this work adds **no NEW** warnings (the prescribed code introduces none).
 
 - [ ] **Step 3: Manual smoke (human-run, deferred to branch finish)**
 
