@@ -164,7 +164,10 @@ afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 function mountFrame(props: { src: string; title: string }) {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(InteractiveFrame, { target, props: $state(props) });
+  // $state() must initialize a variable — it cannot appear as a call argument
+  // (`props: $state(props)` is a Svelte compile error in runes mode).
+  const sprops = $state(props);
+  const cmp = mount(InteractiveFrame, { target, props: sprops });
   cleanup = () => unmount(cmp);
   flushSync();
   return target.querySelector('iframe') as HTMLIFrameElement;
@@ -273,6 +276,13 @@ function jres(body: unknown, status = 200) {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
 }
+// 12 microtask drains is enough ONLY because lib/api is already module-warm:
+// this file statically imports `__test__setSlots` from currentCourse.svelte,
+// which statically imports lib/api — so the tracker's `await import('./api')`
+// resolves synchronously-ish (already-evaluated module) and the fetch+json
+// settle within 12 microtasks. Do NOT remove the currentCourse import to
+// "clean up"; against a COLD lib/api this loop drains 0 POSTs (the first
+// dynamic import needs a macrotask), and bumping the count would not help.
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 const appItem = (over: Partial<IAItem> = {}): IAItem => ({
@@ -295,7 +305,9 @@ afterEach(() => {
 function mountItem(props: { item: IAItem; isCovered: boolean }) {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(InteractiveAppItem, { target, props: $state(props) });
+  // $state() must initialize a variable, not be a call argument (runes rule).
+  const sprops = $state(props);
+  const cmp = mount(InteractiveAppItem, { target, props: sprops });
   cleanup = () => unmount(cmp);
   flushSync();
   return target;
@@ -456,7 +468,8 @@ it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedIte
   const state: VersionState = { version_id: 1, items: {} };
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(ItemRouter, { target, props: $state({ item, state }) });
+  const props = $state({ item, state });   // $state() must initialize a variable (runes rule)
+  const cmp = mount(ItemRouter, { target, props });
   cleanup = () => unmount(cmp);
   flushSync();
   expect(target.querySelector('iframe')).not.toBeNull();
