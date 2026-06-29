@@ -1,7 +1,8 @@
 // Validate a user-entered URL before passing it to an <iframe src>. Rejects
 // empty/null, non-http(s) schemes (javascript:, data:, ftp:, file:), and
-// malformed URLs the URL constructor refuses. Used by the video-item editor
-// preview and the disabled-version readonly preview.
+// malformed URLs the URL constructor refuses. Used directly by the video-item
+// editor preview / readonly preview, and (via lib/safeAppUrl) by the
+// interactive-app player, editor preview, and readonly preview.
 //
 // Returns the canonicalized URL string when accepted, or null when rejected.
 // Caller renders a preview only when the result is non-null.
