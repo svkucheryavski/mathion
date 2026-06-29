@@ -33,7 +33,7 @@
 
 **Interfaces:**
 - Consumes: `safeIframeUrl(value: string | null | undefined): string | null` from `./safeIframeUrl` (existing — accepts http/https, rejects empty/no-host/non-http(s)/malformed, returns canonicalized URL string).
-- Produces: `safeAppUrl(value: string | null | undefined, pageProtocol?: string): string | null` — returns `safeIframeUrl(value)`, but `null` when the accepted URL's protocol is `http:` and `pageProtocol === 'https:'`. `pageProtocol` defaults to `window.location.protocol` (a test seam). Consumed by Tasks 3, 6, 7.
+- Produces: `safeAppUrl(value: string | null | undefined, pageProtocol?: string): string | null` — returns `safeIframeUrl(value)`, but `null` when the accepted URL's protocol is `http:` and `pageProtocol === 'https:'`. `pageProtocol` defaults to `window.location.protocol` (a test seam). Consumed by Tasks 3, 5, 6.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -147,7 +147,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Test: `frontend/src/tests/InteractiveFrame.svelte.test.ts`
 
 **Interfaces:**
-- Produces: `<InteractiveFrame src={string} title={string} />` — a fixed-height (600px), full-width `<iframe>` with `sandbox="allow-scripts"`, `referrerpolicy="no-referrer"`, no `allowfullscreen`. Caller passes an already-sanitized `src`. Consumed by Tasks 3, 7.
+- Produces: `<InteractiveFrame src={string} title={string} />` — a fixed-height (600px), full-width `<iframe>` with `sandbox="allow-scripts"`, `referrerpolicy="no-referrer"`, no `allowfullscreen`. Caller passes an already-sanitized `src`. Consumed by Tasks 3, 6.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -465,7 +465,18 @@ it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedIte
     id: 5, sequence_id: 1, title: 'App', slug: 'app', order: 1,
     type: 'interactive_app', script_url: 'https://example.com/app',
   };
-  const state: VersionState = { version_id: 1, items: {} };
+  // Mark item 5 already-covered so InteractiveAppItem's auto-cover effect skips
+  // markCovered() — this keeps the routing test synchronous (no dynamic
+  // import('./api') + fetch left pending past afterEach's fetch-restore).
+  const state: VersionState = {
+    version_id: 1,
+    items: {
+      '5': {
+        is_covered: true, time_spent_seconds: 0, last_visited_at: null,
+        last_answers: null, attempt_count: 0, score_correct: null, score_total: null,
+      },
+    },
+  };
   const target = document.createElement('div');
   document.body.appendChild(target);
   const props = $state({ item, state });   // $state() must initialize a variable (runes rule)
@@ -474,6 +485,7 @@ it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedIte
   flushSync();
   expect(target.querySelector('iframe')).not.toBeNull();
   expect(target.textContent).not.toContain("isn't available");
+  expect(fetchSpy).not.toHaveBeenCalled();   // pure routing — no coverage POST
 });
 ```
 
@@ -523,14 +535,21 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Offer `interactive_app` in `ItemTypePicker`
+### Task 5: Offer + author `interactive_app` in the create flow (`ItemTypePicker` + `SequenceAccordion`)
 
 **Files:**
 - Modify: `frontend/src/components/editor/ItemTypePicker.svelte:6` (+ new radio)
+- Modify: `frontend/src/components/editor/SequenceAccordion.svelte` (sites listed below)
 - Test: `frontend/src/tests/ItemTypePicker.svelte.test.ts` (widen existing + add one test)
+- Test: `frontend/src/tests/SequenceAccordion.interactive.svelte.test.ts`
 
 **Interfaces:**
-- Produces: `type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app'`. Consumed by Task 6 (`SequenceAccordion` binds `newType`).
+- Consumes: `safeAppUrl` (Task 1); existing `mapCreateError(e, knownFields)` (keys a 422 by its last string `loc` segment against `knownFields`); existing `DIRTY_REGISTRY_KEY`, `currentEditorVersion`.
+- Produces: `type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app'`; an `interactive_app` create path that POSTs `{ title, type: 'interactive_app', script_url }` to `/api/sequences/:sid/items`, gated by `createScriptUrlInvalid`.
+
+**Why one task (not two):** the picker radio and the `SequenceAccordion` create path MUST land in a single commit. The type-safe binding direction is picker-first (a wide `$bindable` value bound to the narrower `newType` $state type-checks; the reverse does not), so the picker can't follow the create path. But committing the widened picker *alone* would ship a commit where a user can select `interactive_app` and submit a body with no `script_url` (a 422 mapped only to the global error). Doing both in one commit keeps every commit both green AND functionally coherent. The two halves are still separately RED→GREEN-tested below.
+
+#### Part A — `ItemTypePicker`
 
 - [ ] **Step 1: Update the existing test's hard-coded type and add a binding test**
 
@@ -591,33 +610,13 @@ Add a fourth radio after the quiz `<label>` (after line 30, before `</fieldset>`
 Run: `cd frontend && npx vitest run src/tests/ItemTypePicker.svelte.test.ts`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Type-check and commit**
+(No commit yet — the picker widening must land in the same commit as Part B. Leave the picker edits staged/working and continue.)
 
-Run: `cd frontend && npx svelte-check --tsconfig ./tsconfig.json`
-Expected: 0 errors.
-
-```bash
-git add frontend/src/components/editor/ItemTypePicker.svelte frontend/src/tests/ItemTypePicker.svelte.test.ts
-git commit -m "feat(frontend): offer interactive_app in ItemTypePicker
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
-```
-
----
-
-### Task 6: `SequenceAccordion` create flow for `interactive_app`
-
-**Files:**
-- Modify: `frontend/src/components/editor/SequenceAccordion.svelte` (sites listed below)
-- Test: `frontend/src/tests/SequenceAccordion.interactive.svelte.test.ts`
-
-**Interfaces:**
-- Consumes: `safeAppUrl` (Task 1); widened `ItemType` / `ItemTypePicker` (Task 5); existing `mapCreateError(e, knownFields)` (keys a 422 by its last string `loc` segment against `knownFields`); existing `DIRTY_REGISTRY_KEY`, `currentEditorVersion`.
-- Produces: an `interactive_app` create path that POSTs `{ title, type: 'interactive_app', script_url }` to `/api/sequences/:sid/items`, gated by `createScriptUrlInvalid`.
+#### Part B — `SequenceAccordion` create path
 
 **Context for the implementer (verified line refs in current `SequenceAccordion.svelte`):** `newType` state @190; `newVideoUrl` @193; `createTracker.isDirty` @208-216; `resetCreateForm` @235-243; `submitCreate` @255-291 (guard @256, body build @261-263, `known` ternary @274-278); video template field @348-353; Create button @355.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 5: Write the failing test**
 
 Create `frontend/src/tests/SequenceAccordion.interactive.svelte.test.ts`:
 
@@ -744,12 +743,12 @@ it('maps a backend 422 on script_url to an inline field error', async () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 6: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/tests/SequenceAccordion.interactive.svelte.test.ts`
 Expected: FAIL — the interactive_app radio doesn't exist / the App URL field doesn't render / no `script_url` in the POST body.
 
-- [ ] **Step 3: Edit `SequenceAccordion.svelte` — script + logic**
+- [ ] **Step 7: Edit `SequenceAccordion.svelte` — script + logic**
 
 Add the import near the other lib imports (after line 8, `mapCreateError`):
 
@@ -831,7 +830,7 @@ with:
             : ['title', 'type'];
 ```
 
-- [ ] **Step 4: Edit `SequenceAccordion.svelte` — template**
+- [ ] **Step 8: Edit `SequenceAccordion.svelte` — template**
 
 The type-discriminant chain currently ends like this (line 353's `{/if}` closes the `{#if newType === 'static_page'} … {:else if newType === 'video'}` chain; line 354's `createGlobalError` and line 355's Create button follow, OUTSIDE the chain):
 
@@ -868,29 +867,30 @@ with:
             <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || createScriptUrlInvalid} title={createScriptUrlInvalid ? 'A valid http(s) app URL is required' : ''} loading={createBusy}>Create</Button>
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 9: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run src/tests/SequenceAccordion.interactive.svelte.test.ts`
 Expected: PASS (4 tests).
 
-- [ ] **Step 6: Type-check, run the full editor suite, commit**
+- [ ] **Step 10: Type-check, run both new test files, commit BOTH files' changes together**
 
 Run: `cd frontend && npx svelte-check --tsconfig ./tsconfig.json`
 Expected: 0 errors.
 
 Run: `cd frontend && npx vitest run src/tests/ItemTypePicker.svelte.test.ts src/tests/SequenceAccordion.interactive.svelte.test.ts`
-Expected: PASS (no regression in the picker).
+Expected: PASS (2 + 4 = 6 tests).
 
 ```bash
-git add frontend/src/components/editor/SequenceAccordion.svelte frontend/src/tests/SequenceAccordion.interactive.svelte.test.ts
-git commit -m "feat(frontend): SequenceAccordion create flow for interactive_app
+git add frontend/src/components/editor/ItemTypePicker.svelte frontend/src/tests/ItemTypePicker.svelte.test.ts \
+        frontend/src/components/editor/SequenceAccordion.svelte frontend/src/tests/SequenceAccordion.interactive.svelte.test.ts
+git commit -m "feat(frontend): offer + author interactive_app in the create flow
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 7: `ItemEditPage` edit + read-only preview for `interactive_app`
+### Task 6: `ItemEditPage` edit + read-only preview for `interactive_app`
 
 **Files:**
 - Modify: `frontend/src/pages/editor/ItemEditPage.svelte` (sites listed below)
@@ -1243,7 +1243,13 @@ Insert the `interactive_app` arm as a NEW `{:else if}` in that chain — between
             <InteractiveFrame src={readonlyScriptPreviewUrl} title={item.title} />
             <p><a href={readonlyScriptPreviewUrl} target="_blank" rel="noopener noreferrer">{readonlyScriptPreviewUrl}</a></p>
           {:else if item.script_url}
-            <p><a href={item.script_url} target="_blank" rel="noopener noreferrer">{item.script_url}</a></p>
+            <!-- safeAppUrl rejected the stored URL (legacy/bad data, non-http(s),
+                 or http-on-https). Show it as PLAIN TEXT, never a clickable
+                 href — a rejected URL (e.g. javascript:) must not be a live
+                 link. This is the one spot the readonly arm deliberately does
+                 NOT mirror video (which renders item.video_url as an <a href>);
+                 it keeps the "no unsanitized interactive_app URL is ever a link" rule. -->
+            <p>App URL can't be previewed: <code>{item.script_url}</code></p>
           {:else}
             <p><em>No app URL</em></p>
           {/if}
@@ -1285,7 +1291,7 @@ Run: `cd frontend && npx svelte-check --tsconfig ./tsconfig.json`
 Expected: 0 errors.
 
 Run: `cd frontend && npx vitest run src/tests/ItemEditPage.interactive.svelte.test.ts`
-Expected: PASS (6 tests). (The existing `ItemEditPage.refreshKey.svelte.test.ts` drives a standalone simulation harness, not `ItemEditPage.svelte`, so it does not exercise these edits — the whole-file regression is covered by Task 8's full-suite run.)
+Expected: PASS (6 tests). (The existing `ItemEditPage.refreshKey.svelte.test.ts` drives a standalone simulation harness, not `ItemEditPage.svelte`, so it does not exercise these edits — the whole-file regression is covered by Task 7's full-suite run.)
 
 ```bash
 git add frontend/src/pages/editor/ItemEditPage.svelte frontend/src/tests/ItemEditPage.interactive.svelte.test.ts
@@ -1296,14 +1302,14 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Full-suite verification
+### Task 7: Full-suite verification
 
 **Files:** none (verification only).
 
 - [ ] **Step 1: Run the entire frontend test suite**
 
 Run: `cd frontend && npm test`
-Expected: all tests pass (the pre-existing suite was 1095 green at the last merge; this adds **24 new tests** — T1=5, T2=3, T3=4, T4=1, T5=+1, T6=4, T7=6 — so expect **~1119**, zero failures). The one known pre-existing TZ-pinned file is npm-test-only and unaffected.
+Expected: all tests pass (the pre-existing suite was 1095 green at the last merge; this adds **24 new tests** — T1=5, T2=3, T3=4, T4=1, T5=5 (picker +1, create +4), T6=6 — so expect **~1119**, zero failures). The one known pre-existing TZ-pinned file is npm-test-only and unaffected.
 
 - [ ] **Step 2: Final type-check**
 
