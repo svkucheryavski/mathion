@@ -3,6 +3,7 @@
   import { assertNever } from '../../lib/types';
   import PageItem from './PageItem.svelte';
   import VideoItem from './VideoItem.svelte';
+  import InteractiveAppItem from './InteractiveAppItem.svelte';
   import QuizItem from './QuizItem.svelte';
   import UnsupportedItem from './UnsupportedItem.svelte';
 
@@ -19,7 +20,7 @@
 {:else if item.type === 'mini_project'}
   <UnsupportedItem type="mini_project" />
 {:else if item.type === 'interactive_app'}
-  <UnsupportedItem type="interactive_app" />
+  <InteractiveAppItem {item} {isCovered} />
 {:else}
   {@const _x = assertNever(item)}
   {String(_x)}
