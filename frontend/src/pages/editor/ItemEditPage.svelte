@@ -9,10 +9,12 @@
   import MarkdownEditor from '../../components/editor/MarkdownEditor.svelte';
   import { courseAssetContext } from '../../lib/assetContext';
   import VideoFrame from '../../components/items/VideoFrame.svelte';
+  import InteractiveFrame from '../../components/items/InteractiveFrame.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Spinner from '../../components/ui/Spinner.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { safeIframeUrl } from '../../lib/safeIframeUrl';
+  import { safeAppUrl } from '../../lib/safeAppUrl';
   import { normalizeVideoUrl } from '../../lib/normalizeVideoUrl';
   import QuizEditor from '../../components/editor/QuizEditor.svelte';
   // Page-owned dirty flag for the quiz editor (the page `tracker` stays null for
@@ -42,15 +44,17 @@
   const item = $derived(seq?.items.find((it) => it.id === iid));
   const valid = $derived(!!tree && tree.course.slug === courseSlug && !!item && !!seq && !!block && block.version_id === vid && seq.block_id === bid && item.sequence_id === sid);
   const perms = $derived(v ? versionPermissions(v) : null);
-  const editable = $derived(item?.type === 'static_page' || item?.type === 'video');
+  const editable = $derived(item?.type === 'static_page' || item?.type === 'video' || item?.type === 'interactive_app');
 
   // Tracker form-shape: coerce nullable backend fields to '' so MarkdownEditor.value
   // (typed `string`) and the URL <input> (no null) can bind directly. On save we send
   // the string verbatim — empty string represents "no content"; backend accepts it.
   type StaticForm = { title: string; content_md: string };
   type VideoForm = { title: string; video_url: string };
+  type InteractiveAppForm = { title: string; script_url: string };
   let tracker = $state<ReturnType<typeof makeDirtyTracker<StaticForm>>
-                     | ReturnType<typeof makeDirtyTracker<VideoForm>> | null>(null);
+                     | ReturnType<typeof makeDirtyTracker<VideoForm>>
+                     | ReturnType<typeof makeDirtyTracker<InteractiveAppForm>> | null>(null);
   let trackerIid = $state<number | null>(null);
   // C-I3: trackerVid mirrors trackerIid — when the parent version (vid)
   // changes underneath us, we need to discard the stale tracker so a
@@ -75,6 +79,15 @@
       : false,
   );
 
+  // Block save unless safeAppUrl accepts the URL (empty, no-host, non-http(s),
+  // or http:// on an https:// page). Stricter than videoUrlEmpty because
+  // coverage depends on the app actually rendering.
+  const scriptUrlInvalid = $derived(
+    item?.type === 'interactive_app' && tracker
+      ? safeAppUrl((tracker.current as InteractiveAppForm).script_url) === null
+      : false,
+  );
+
   // Debounced live preview for the video editor. Re-rendering the iframe on
   // every keystroke would spam network requests and visibly thrash the player;
   // 500ms after the last edit is the sweet spot. The pipeline is
@@ -95,12 +108,32 @@
     return () => clearTimeout(handle);
   });
 
+  // Debounced live preview for the interactive-app editor. No normalizeVideoUrl
+  // (that is video-only). safeAppUrl blanks an http://-on-https:// URL, giving
+  // the admin a visible "won't work for students" signal.
+  let scriptPreviewUrl = $state<string | null>(null);
+  $effect(() => {
+    if (item?.type !== 'interactive_app' || !tracker) {
+      scriptPreviewUrl = null;
+      return;
+    }
+    const raw = (tracker.current as InteractiveAppForm).script_url;
+    const handle = setTimeout(() => {
+      scriptPreviewUrl = safeAppUrl(raw);
+    }, 500);
+    return () => clearTimeout(handle);
+  });
+
   // Readonly preview (disabled / archived versions): server value is fixed, so
   // no debounce — derive directly. Server already stored the normalized form
   // (we PATCH the normalized URL in save() below), so a re-normalize here is
   // a no-op for new data; legacy rows go through the same pipeline.
   const readonlyVideoPreviewUrl = $derived(
     item?.type === 'video' ? safeIframeUrl(normalizeVideoUrl(item.video_url ?? '')) : null,
+  );
+
+  const readonlyScriptPreviewUrl = $derived(
+    item?.type === 'interactive_app' ? safeAppUrl(item.script_url ?? '') : null,
   );
 
   async function ensureLoaded() {
@@ -124,7 +157,8 @@
       // tracker from a previously-viewed editable item.
       if (fresh.type === 'static_page') tracker = makeDirtyTracker<StaticForm>({ title: fresh.title, content_md: fresh.content_md ?? '' });
       else if (fresh.type === 'video') tracker = makeDirtyTracker<VideoForm>({ title: fresh.title, video_url: fresh.video_url ?? '' });
-      else tracker = null;  // quiz → dirtiness via quizDirty (not this tracker); interactive_app → read-only
+      else if (fresh.type === 'interactive_app') tracker = makeDirtyTracker<InteractiveAppForm>({ title: fresh.title, script_url: fresh.script_url ?? '' });
+      else tracker = null;  // quiz → dirtiness via quizDirty (not this tracker)
       trackerIid = iid;
       trackerVid = vid;
       quizDirty = false;
@@ -144,6 +178,7 @@
     const sentTitle = savedTracker.current.title;
     let sentContentMd: string | undefined;
     let sentVideoUrl: string | undefined;
+    let sentScriptUrl: string | undefined;
     const body: Record<string, unknown> = { title: sentTitle };
     if (savedItemType === 'static_page') {
       sentContentMd = (savedTracker.current as StaticForm).content_md;
@@ -161,6 +196,16 @@
         return;
       }
       body.video_url = sentVideoUrl;
+    } else if (savedItemType === 'interactive_app') {
+      sentScriptUrl = (savedTracker.current as InteractiveAppForm).script_url;
+      // Defensive: Save is also disabled in this state, but a programmatic
+      // invocation could bypass that. safeAppUrl rejects empty/no-host/
+      // non-http(s)/http-on-https — none of which can be auto-covered.
+      if (safeAppUrl(sentScriptUrl) === null) {
+        pushToast('A valid app URL is required', 'error');
+        return;
+      }
+      body.script_url = sentScriptUrl;
     }
     busy = true;
     try {
@@ -182,6 +227,8 @@
             (savedTracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: fresh.title, content_md: fresh.content_md ?? '' });
           } else if (savedItemType === 'video') {
             (savedTracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: fresh.title, video_url: fresh.video_url ?? '' });
+          } else if (savedItemType === 'interactive_app') {
+            (savedTracker as ReturnType<typeof makeDirtyTracker<InteractiveAppForm>>).reset({ title: fresh.title, script_url: fresh.script_url ?? '' });
           }
         }
         postSaveRefetchFailed = false;
@@ -194,6 +241,8 @@
           (savedTracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: sentTitle, content_md: sentContentMd ?? '' });
         } else if (savedItemType === 'video') {
           (savedTracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: sentTitle, video_url: sentVideoUrl ?? '' });
+        } else if (savedItemType === 'interactive_app') {
+          (savedTracker as ReturnType<typeof makeDirtyTracker<InteractiveAppForm>>).reset({ title: sentTitle, script_url: sentScriptUrl ?? '' });
         }
         // Banner would say "couldn't load" while the form shows the values we
         // just sent — misleading. Suppress until next successful refetch.
@@ -213,6 +262,7 @@
     if (!tracker || !item) return;
     if (item.type === 'static_page') (tracker as ReturnType<typeof makeDirtyTracker<StaticForm>>).reset({ title: item.title, content_md: item.content_md ?? '' });
     else if (item.type === 'video') (tracker as ReturnType<typeof makeDirtyTracker<VideoForm>>).reset({ title: item.title, video_url: item.video_url ?? '' });
+    else if (item.type === 'interactive_app') (tracker as ReturnType<typeof makeDirtyTracker<InteractiveAppForm>>).reset({ title: item.title, script_url: item.script_url ?? '' });
   }
 
   async function deleteItem() {
@@ -290,13 +340,21 @@
           {#if videoPreviewUrl}
             <VideoFrame src={videoPreviewUrl} title={t.current.title || 'Video preview'} />
           {/if}
+        {:else if item.type === 'interactive_app'}
+          {@const t = tracker as ReturnType<typeof makeDirtyTracker<InteractiveAppForm>>}
+          <label>App URL
+            <input type="url" bind:value={t.current.script_url} required placeholder="https://…" />
+          </label>
+          {#if scriptPreviewUrl}
+            <InteractiveFrame src={scriptPreviewUrl} title={t.current.title || 'Interactive app'} />
+          {/if}
         {/if}
         <div class="row">
           <Button
             onclick={save}
-            disabled={!tracker.isDirty || busy || videoUrlEmpty}
+            disabled={!tracker.isDirty || busy || videoUrlEmpty || scriptUrlInvalid}
             loading={busy}
-            title={videoUrlEmpty ? 'Video URL is required' : ''}
+            title={videoUrlEmpty ? 'Video URL is required' : scriptUrlInvalid ? 'A valid http(s) app URL is required' : ''}
           >Save</Button>
           <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy}>Discard</Button>
         </div>
@@ -324,6 +382,22 @@
           {:else}
             <p><em>No video URL</em></p>
           {/if}
+        {:else if item.type === 'interactive_app'}
+          <h3>{item.title}</h3>
+          {#if readonlyScriptPreviewUrl}
+            <InteractiveFrame src={readonlyScriptPreviewUrl} title={item.title} />
+            <p><a href={readonlyScriptPreviewUrl} target="_blank" rel="noopener noreferrer">{readonlyScriptPreviewUrl}</a></p>
+          {:else if item.script_url}
+            <!-- safeAppUrl rejected the stored URL (legacy/bad data, non-http(s),
+                 or http-on-https). Show it as PLAIN TEXT, never a clickable
+                 href — a rejected URL (e.g. javascript:) must not be a live
+                 link. This is the one spot the readonly arm deliberately does
+                 NOT mirror video (which renders item.video_url as an <a href>);
+                 it keeps the "no unsanitized interactive_app URL is ever a link" rule. -->
+            <p>App URL can't be previewed: <code>{item.script_url}</code></p>
+          {:else}
+            <p><em>No app URL</em></p>
+          {/if}
         {/if}
       </section>
     {:else if item.type === 'quiz'}
@@ -340,10 +414,7 @@
       {/key}
     {:else}
       <section class="readonly">
-        <p><em>Not editable in this slice.</em></p>
-        {#if item.type === 'interactive_app'}
-          <p>Interactive-app editing lands in slice 2.</p>
-        {/if}
+        <p><em>Not editable.</em></p>
       </section>
     {/if}
 
