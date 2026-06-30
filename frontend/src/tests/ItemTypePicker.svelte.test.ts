@@ -8,7 +8,7 @@ afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 it('offers a quiz radio and binds it', () => {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const props: { value: 'static_page' | 'video' | 'quiz' } = $state({ value: 'static_page' });
+  const props: { value: 'static_page' | 'video' | 'quiz' | 'interactive_app' } = $state({ value: 'static_page' });
   const cmp = mount(ItemTypePicker, { target, props });
   cleanup = () => unmount(cmp);
   const quiz = target.querySelector('input[value="quiz"]') as HTMLInputElement;
@@ -16,4 +16,17 @@ it('offers a quiz radio and binds it', () => {
   quiz.click();
   flushSync();
   expect(props.value).toBe('quiz');
+});
+
+it('offers an interactive_app radio and binds it', () => {
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const props: { value: 'static_page' | 'video' | 'quiz' | 'interactive_app' } = $state({ value: 'static_page' });
+  const cmp = mount(ItemTypePicker, { target, props });
+  cleanup = () => unmount(cmp);
+  const radio = target.querySelector('input[value="interactive_app"]') as HTMLInputElement;
+  expect(radio).not.toBeNull();
+  radio.click();
+  flushSync();
+  expect(props.value).toBe('interactive_app');
 });

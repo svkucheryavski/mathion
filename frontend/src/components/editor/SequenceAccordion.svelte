@@ -6,6 +6,7 @@
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { safeAppUrl } from '../../lib/safeAppUrl';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
@@ -187,10 +188,11 @@
 
   // Inline create-item form
   let creating = $state(false);
-  let newType = $state<'static_page' | 'video' | 'quiz'>('static_page');
+  let newType = $state<'static_page' | 'video' | 'quiz' | 'interactive_app'>('static_page');
   let newTitle = $state('');
   let newContentMd = $state('');
   let newVideoUrl = $state('');
+  let newScriptUrl = $state('');
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
@@ -210,10 +212,19 @@
       return creating && (
         newTitle.trim() !== '' ||
         (newType === 'static_page' && newContentMd.trim() !== '' && newContentMd !== `# ${newTitle}\n`) ||
-        (newType === 'video' && newVideoUrl.trim() !== '')
+        (newType === 'video' && newVideoUrl.trim() !== '') ||
+        (newType === 'interactive_app' && newScriptUrl.trim() !== '')
       );
     },
   };
+
+  // Create is gated on a renderable URL (a deliberate divergence from video):
+  // auto-coverage makes a stored-but-unrenderable URL an uncoverable required
+  // item, and there is no publish-time preflight to catch it later. safeAppUrl
+  // also rejects http:// on an https:// page (mixed content).
+  const createScriptUrlInvalid = $derived(
+    newType === 'interactive_app' && safeAppUrl(newScriptUrl) === null,
+  );
 
   $effect(() => {
     if (!creating) return;
@@ -237,6 +248,7 @@
     newTitle = '';
     newContentMd = '';
     newVideoUrl = '';
+    newScriptUrl = '';
     contentMdTouched = false;
     createErrors = {};
     createGlobalError = null;
@@ -254,6 +266,10 @@
 
   async function submitCreate() {
     if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim()) return;
+    if (newType === 'interactive_app' && safeAppUrl(newScriptUrl) === null) {
+      createErrors = { ...createErrors, script_url: 'A valid http(s) app URL is required' };
+      return;
+    }
     const savedVid = vid;
     const savedBid = block.id;
     const savedSid = seq.id;
@@ -261,6 +277,7 @@
     const body: Record<string, unknown> = { title: newTitle, type: newType };
     if (newType === 'static_page') body.content_md = newContentMd;
     if (newType === 'video') body.video_url = newVideoUrl;
+    if (newType === 'interactive_app') body.script_url = newScriptUrl;
     createErrors = {};
     createGlobalError = null;
     createBusy = true;
@@ -275,7 +292,9 @@
         ? ['title', 'content_md', 'type']
         : newType === 'video'
           ? ['title', 'video_url', 'type']
-          : ['title', 'type'];
+          : newType === 'interactive_app'
+            ? ['title', 'script_url', 'type']
+            : ['title', 'type'];
       const mapped = mapCreateError(e, known);
       createErrors = mapped.fieldErrors;
       // Fall back to a generic message if mapper produced nothing — without
@@ -350,9 +369,14 @@
                 <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
                 {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
               </div>
+            {:else if newType === 'interactive_app'}
+              <div class="field">
+                <input type="url" placeholder="App URL (https://…)" bind:value={newScriptUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.script_url) createErrors = { ...createErrors, script_url: '' }; }} />
+                {#if createErrors.script_url}<small class="field-err">{createErrors.script_url}</small>{/if}
+              </div>
             {/if}
             {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
+            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim() || createScriptUrlInvalid} title={createScriptUrlInvalid ? 'A valid http(s) app URL is required' : ''} loading={createBusy}>Create</Button>
           </form>
         {/if}
 

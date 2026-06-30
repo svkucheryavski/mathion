@@ -1,9 +1,9 @@
 <script lang="ts">
-  // Intentionally narrower than the backend item-type union (which also
-  // includes 'interactive_app'). An admin can create static_page, video, and
-  // quiz items; the picker exists specifically to enforce that constraint at
-  // the call site. Widen this union if the product scope expands.
-  type ItemType = 'static_page' | 'video' | 'quiz';
+  // Authorable item types offered by the create picker: static_page, video,
+  // quiz, and interactive_app. Narrower than the full backend item-type union,
+  // which also includes 'mini_project' (not authored via this picker). Widen
+  // this union if the product scope expands.
+  type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
   // prop type `value: ItemType` constrains it. The previous
   // `$bindable<ItemType>('static_page')` default is dead code — every call
@@ -27,6 +27,11 @@
     <input type="radio" name="item-type" value="quiz" bind:group={value} />
     <span class="glyph" aria-hidden="true">❓</span>
     <span>Quiz</span>
+  </label>
+  <label class:selected={value === 'interactive_app'}>
+    <input type="radio" name="item-type" value="interactive_app" bind:group={value} />
+    <span class="glyph" aria-hidden="true">🧩</span>
+    <span>Interactive app</span>
   </label>
 </fieldset>
 
