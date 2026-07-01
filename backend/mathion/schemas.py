@@ -101,7 +101,7 @@ class ItemCreate(BaseModel):
     video_url: str | None = None
     script_url: str | None = None
 
-    @field_validator("video_url", "script_url", mode="before")
+    @field_validator("video_url", mode="before")
     @classmethod
     def validate_url(cls, v: str | None) -> str | None:
         if v is not None and not v.startswith(("http://", "https://")):
@@ -114,8 +114,10 @@ class ItemCreate(BaseModel):
             raise ValueError("content_md is required for static_page items")
         if self.type == "video" and not self.video_url:
             raise ValueError("video_url is required for video items")
-        if self.type == "interactive_app" and not self.script_url:
-            raise ValueError("script_url is required for interactive_app items")
+        if self.type == "interactive_app" and self.script_url is not None:
+            raise ValueError(
+                "script_url must not be set on create — upload the .js file and attach it via PATCH"
+            )
         return self
 
 
@@ -137,7 +139,7 @@ class ItemUpdate(BaseModel):
     video_url: str | None = None
     script_url: str | None = None
 
-    @field_validator("video_url", "script_url", mode="before")
+    @field_validator("video_url", mode="before")
     @classmethod
     def validate_url(cls, v: str | None) -> str | None:
         if v is not None and not v.startswith(("http://", "https://")):

@@ -48,11 +48,11 @@ def test_create_quiz(db):
 
 def test_create_interactive_app(db):
     seq = _make_sequence(db)
-    item = Item(sequence_id=seq.id, title="Simulation", slug="simulation", order=1, type="interactive_app", script_url="https://example.com/app.js")
+    item = Item(sequence_id=seq.id, title="Simulation", slug="simulation", order=1, type="interactive_app", script_url="app.js")
     db.add(item)
     db.commit()
     db.refresh(item)
-    assert item.script_url == "https://example.com/app.js"
+    assert item.script_url == "app.js"
 
 
 def _setup_sequence(admin_client):
@@ -184,15 +184,6 @@ def test_api_patch_video_nullify_video_url_returns_422(admin_client):
     assert resp.status_code == 422
 
 
-def test_api_patch_interactive_app_nullify_script_url_returns_422(admin_client):
-    """Patching an interactive_app item to set script_url=None must return 422."""
-    seq, version = _setup_sequence(admin_client)
-    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "App", "type": "interactive_app", "script_url": "https://example.com/app.js",
-    }).json()
-    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": None})
-    assert resp.status_code == 422
-
 
 def test_api_create_item_invalid_video_url(admin_client):
     """Creating a video item with an invalid URL must return 422."""
@@ -203,13 +194,27 @@ def test_api_create_item_invalid_video_url(admin_client):
     assert resp.status_code == 422
 
 
-def test_api_create_item_invalid_script_url(admin_client):
-    """Creating an interactive_app item with an invalid URL must return 422."""
+def test_api_create_interactive_app_without_script_url(admin_client):
+    """interactive_app is created empty; the app is attached later via PATCH."""
     seq, version = _setup_sequence(admin_client)
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
-        "title": "App", "type": "interactive_app", "script_url": "not-a-url",
+        "title": "App", "type": "interactive_app",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["type"] == "interactive_app"
+    assert resp.json()["script_url"] is None
+
+
+def test_api_create_interactive_app_with_script_url_rejected(admin_client):
+    """Attach is PATCH-only: a create-body script_url is rejected (422)."""
+    seq, version = _setup_sequence(admin_client)
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App", "type": "interactive_app", "script_url": "app.js",
     })
     assert resp.status_code == 422
+    # Pin the create-rejection reason, not the incidental URL-format 422 that the
+    # pre-Step-3 code produces — this is what makes the test RED-first for the inversion.
+    assert "must not be set on create" in resp.text
 
 
 def test_api_create_item_derives_slug_from_title(admin_client):
