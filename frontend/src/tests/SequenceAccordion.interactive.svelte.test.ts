@@ -67,42 +67,13 @@ function openCreateAsApp(target: HTMLElement) {
 const createBtn = (t: HTMLElement) =>
   [...t.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Create') as HTMLButtonElement;
 
-it('shows the required App URL field when interactive_app is selected', () => {
-  const target = mountAccordion();
-  openCreateAsApp(target);
-  const input = target.querySelector('input[type="url"]') as HTMLInputElement;
-  expect(input).not.toBeNull();
-  expect(input.required).toBe(true);
-});
-
-it('disables Create and issues no POST while the App URL is empty/invalid', async () => {
-  const target = mountAccordion();
-  openCreateAsApp(target);
-  const title = target.querySelector('input[placeholder="Title"]') as HTMLInputElement;
-  title.value = 'My app'; title.dispatchEvent(new Event('input')); flushSync();
-  expect(createBtn(target).disabled).toBe(true);   // empty URL → safeAppUrl('') === null
-  createBtn(target).click();
-  await settle();
-  expect(fetchSpy).not.toHaveBeenCalled();
-
-  // Non-empty but invalid (rejected by safeAppUrl via safeIframeUrl — a distinct
-  // path from the empty-string guard) must ALSO disable Create and block the POST.
-  const url = target.querySelector('input[type="url"]') as HTMLInputElement;
-  url.value = 'javascript:alert(1)'; url.dispatchEvent(new Event('input')); flushSync();
-  expect(createBtn(target).disabled).toBe(true);   // safeAppUrl('javascript:…') === null
-  createBtn(target).click();
-  await settle();
-  expect(fetchSpy).not.toHaveBeenCalled();
-});
-
-it('POSTs script_url when title + a valid URL are present', async () => {
+it('creates an interactive_app with only title + type — no script_url, no URL field', async () => {
   fetchSpy.mockImplementation(() => jres({ id: 99 }));
   const target = mountAccordion();
   openCreateAsApp(target);
+  expect(target.querySelector('input[type="url"]')).toBeNull();   // App-URL field removed
   const title = target.querySelector('input[placeholder="Title"]') as HTMLInputElement;
   title.value = 'My app'; title.dispatchEvent(new Event('input')); flushSync();
-  const url = target.querySelector('input[type="url"]') as HTMLInputElement;
-  url.value = 'https://example.com/app'; url.dispatchEvent(new Event('input')); flushSync();
   createBtn(target).click();
   await settle();
   const post = fetchSpy.mock.calls.find(
@@ -110,25 +81,12 @@ it('POSTs script_url when title + a valid URL are present', async () => {
   )!;
   expect(post).toBeTruthy();
   const body = JSON.parse((post[1] as RequestInit).body as string);
-  expect(body).toMatchObject({ type: 'interactive_app', title: 'My app', script_url: 'https://example.com/app' });
+  expect(body).toEqual({ title: 'My app', type: 'interactive_app' });   // no script_url key at all
 });
 
-it('maps a backend 422 on script_url to an inline field error', async () => {
-  fetchSpy.mockImplementation(() => jres(
-    { detail: [{ loc: ['body', 'script_url'], msg: 'must be http(s)', type: 'value_error' }] }, 422,
-  ));
+it('the type picker still offers interactive_app', () => {
   const target = mountAccordion();
-  openCreateAsApp(target);
-  const title = target.querySelector('input[placeholder="Title"]') as HTMLInputElement;
-  title.value = 'My app'; title.dispatchEvent(new Event('input')); flushSync();
-  const url = target.querySelector('input[type="url"]') as HTMLInputElement;
-  url.value = 'https://example.com/app'; url.dispatchEvent(new Event('input')); flushSync();
-  createBtn(target).click();
-  await settle();
-  // The 422 on script_url must map to the INLINE field error (<small class="field-err">),
-  // not the global form error (<p class="form-err">). Pin that distinction: a regression
-  // dropping script_url from the `known` list would route the message to .form-err and
-  // this assertion pair would catch it.
-  expect(target.querySelector('.field-err')?.textContent).toContain('must be http(s)');
-  expect(target.querySelector('.form-err')).toBeNull();
+  const newBtn = [...target.querySelectorAll('button')].find((b) => b.textContent?.includes('New item'))!;
+  newBtn.click(); flushSync();
+  expect(target.querySelector('input[value="interactive_app"]')).not.toBeNull();
 });
