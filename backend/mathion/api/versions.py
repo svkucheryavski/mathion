@@ -269,6 +269,12 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
         .where(Block.version_id == version_id)
     ).scalars().all()
     for item in items_to_render:
+        if item.type == "interactive_app":
+            # No content_md; its script AssetReference is maintained by the
+            # item endpoint (sync_script_reference), not the markdown sync.
+            # Running sync_asset_references here would delete-then-rebuild-
+            # nothing and wipe that reference.
+            continue
         item.content_html = render_with_assets(db, version_id, item.content_md)
         sync_asset_references(db, version_id, [item.content_md], {"item_id": item.id})
 

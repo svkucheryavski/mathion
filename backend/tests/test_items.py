@@ -580,6 +580,18 @@ def test_api_patch_interactive_app_replace_repoints_reference(admin_client):
     assert admin_client.delete(f"/api/assets/{bid}").status_code == 409
 
 
+def test_interactive_app_reference_survives_publish(admin_client):
+    """The script AssetReference must not be wiped by the publish re-render loop."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"])
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+    pub = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert pub.status_code == 200, pub.text
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert next(a for a in assets if a["filename"] == fn)["is_referenced"] is True
+
+
 def test_upload_empty_asset_rejected(admin_client):
     """Direct-API guard: an empty (or whitespace-only) upload is rejected (400)."""
     seq, version = _setup_sequence(admin_client)
