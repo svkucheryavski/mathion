@@ -5,11 +5,9 @@ import InteractiveFrame from '../components/items/InteractiveFrame.svelte';
 let cleanup: (() => void) | null = null;
 afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 
-function mountFrame(props: { src: string; title: string }) {
+function mountFrame(props: { scriptSource: string; title: string }) {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  // $state() must initialize a variable — it cannot appear as a call argument
-  // (`props: $state(props)` is a Svelte compile error in runes mode).
   const sprops = $state(props);
   const cmp = mount(InteractiveFrame, { target, props: sprops });
   cleanup = () => unmount(cmp);
@@ -17,19 +15,24 @@ function mountFrame(props: { src: string; title: string }) {
   return target.querySelector('iframe') as HTMLIFrameElement;
 }
 
-it('renders the sanitized src and title', () => {
-  const f = mountFrame({ src: 'https://example.com/app', title: 'My app' });
-  expect(f.getAttribute('src')).toBe('https://example.com/app');
+it('inlines the source into a srcdoc with #app-root and the CSP', () => {
+  const f = mountFrame({ scriptSource: "console.log('hi')", title: 'My app' });
+  const doc = f.getAttribute('srcdoc') ?? '';
+  expect(doc).toContain('id="app-root"');
+  expect(doc).toContain("console.log('hi')");
+  expect(doc).toContain("connect-src 'none'");
   expect(f.getAttribute('title')).toBe('My app');
+  expect(f.hasAttribute('src')).toBe(false);   // never a URL
+  expect(f.parentElement?.classList.contains('frame')).toBe(true);  // fixed-height (600px) wrapper present; exact px is manual-smoke (jsdom has no layout)
 });
 
 it('sandbox is exactly allow-scripts (no allow-same-origin)', () => {
-  const f = mountFrame({ src: 'https://example.com/app', title: 'My app' });
+  const f = mountFrame({ scriptSource: 'x', title: 't' });
   expect(f.getAttribute('sandbox')).toBe('allow-scripts');
 });
 
 it('sets referrerpolicy=no-referrer and omits allowfullscreen', () => {
-  const f = mountFrame({ src: 'https://example.com/app', title: 'My app' });
+  const f = mountFrame({ scriptSource: 'x', title: 't' });
   expect(f.getAttribute('referrerpolicy')).toBe('no-referrer');
   expect(f.hasAttribute('allowfullscreen')).toBe(false);
 });
