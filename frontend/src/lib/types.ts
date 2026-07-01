@@ -92,7 +92,7 @@ export type MiniProjectItem = ItemBase & {
 
 export type InteractiveAppItem = ItemBase & {
   type: 'interactive_app';
-  script_url: string;
+  script_url: string | null;
 };
 
 // ---- Questions: discriminated union ----

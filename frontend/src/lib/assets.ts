@@ -76,6 +76,38 @@ export async function uploadAsset(
   return res.json() as Promise<AssetResponse>;
 }
 
+// Fetch an asset's raw text via a credentialed same-origin GET. Used to inline
+// an interactive-app's JS SOURCE into the sandboxed InteractiveFrame srcdoc
+// (upload-model spec §4/§7). Cannot use api.get — that always does res.json();
+// this needs res.text(). The session cookie is SameSite=Lax and this GET is
+// same-origin from the authenticated main document, so the cookie attaches and
+// the /assets auth gate holds (no CSRF header needed for GET). On 401 mirror
+// api.ts:request → emitUnauthorized with the full location.
+export async function fetchAssetSource(
+  versionId: number,
+  filename: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  let res: Response;
+  try {
+    // encodeURIComponent is defensive: the endpoint only ever stores sanitized
+    // filenames (`[a-z0-9.-]`, so it is a no-op for real data), but it keeps the
+    // client from depending on that server invariant if a write path ever loosens.
+    res = await fetch(`/assets/${versionId}/${encodeURIComponent(filename)}`, { credentials: 'include', signal });
+  } catch (e: unknown) {
+    if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
+    throw new ApiError(0, 'Could not reach server. Check your connection.');
+  }
+  if (res.status === 401) {
+    emitUnauthorized(location.pathname + location.search + location.hash);
+    throw new ApiError(401, 'Not authenticated');
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, res.statusText);
+  }
+  return res.text();
+}
+
 export function listAssets(versionId: number): Promise<AssetResponse[]> {
   return api.get<AssetResponse[]>(`/api/versions/${versionId}/assets`);
 }
