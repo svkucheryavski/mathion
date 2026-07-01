@@ -48,6 +48,8 @@ def upload_asset(
             status_code=400,
             detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
         )
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     # Check total version size
     current_total = db.scalar(

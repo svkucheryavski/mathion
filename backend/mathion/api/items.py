@@ -1,9 +1,11 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, slugify, sync_asset_references
+from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, slugify, sync_asset_references, sync_script_reference
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
@@ -196,15 +198,28 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
     # — and even in production it is more conservative to explicitly
     # rollback before any post-flush 422 so the partially-applied state
     # never has a chance to be observed.
+    if item.type == "interactive_app" and "script_url" in updates:
+        filename = updates["script_url"]
+        if filename is not None and (
+            not re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.js", filename) or ".." in filename
+        ):
+            db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail="script_url must be the filename of an uploaded .js asset",
+            )
+        try:
+            sync_script_reference(db, version.id, item.id, filename)
+        except HTTPException:
+            db.rollback()
+            raise
+
     if item.type == "static_page" and item.content_md is None:
         db.rollback()
         raise HTTPException(status_code=422, detail="content_md cannot be null for static_page items")
     if item.type == "video" and item.video_url is None:
         db.rollback()
         raise HTTPException(status_code=422, detail="video_url cannot be null for video items")
-    if item.type == "interactive_app" and item.script_url is None:
-        db.rollback()
-        raise HTTPException(status_code=422, detail="script_url cannot be null for interactive_app items")
 
     db.commit()
     db.refresh(item)

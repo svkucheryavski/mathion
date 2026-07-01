@@ -499,3 +499,97 @@ def test_api_update_item_invariant_422_rolls_back_flushed_slug(admin_client, db)
     fresh = db.get(Item, item["id"])
     assert fresh.slug == original_slug
     assert fresh.title == original_title
+
+
+# ---------------------------------------------------------------------------
+# interactive_app attach / replace / clear (Task 2)
+# ---------------------------------------------------------------------------
+
+def _upload_js(admin_client, version_id, name="app.js", body=b"//app\ndocument.getElementById('app-root');"):
+    resp = admin_client.post(
+        f"/api/versions/{version_id}/assets",
+        files={"file": (name, body, "application/javascript")},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["filename"]
+
+
+def _make_interactive_app(admin_client, seq):
+    return admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App", "type": "interactive_app",
+    }).json()
+
+
+def test_api_patch_interactive_app_attach_valid_filename(admin_client):
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"])
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+    assert resp.status_code == 200
+    assert resp.json()["script_url"] == fn
+    # AssetReference created → asset now referenced → force-free delete is blocked.
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert next(a for a in assets if a["filename"] == fn)["is_referenced"] is True
+
+
+def test_api_patch_interactive_app_url_or_traversal_rejected(admin_client):
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    _upload_js(admin_client, version["id"])
+    for bad in ["https://example.com/app.js", "../app.js", "..%2fapp.js", "app.txt"]:
+        resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": bad})
+        assert resp.status_code == 422, f"{bad!r} should be rejected"
+
+
+def test_api_patch_interactive_app_missing_asset_rejected(admin_client):
+    """A valid .js filename with no matching uploaded asset is rejected by the
+    reference helper (distinct from the endpoint's filename-format rejection)."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": "missing.js"})
+    assert resp.status_code == 422
+    assert "No uploaded asset named" in resp.text
+
+
+def test_api_patch_interactive_app_clear_script_url_allowed(admin_client):
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"])
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+    # Clear → allowed, reference dropped, asset becomes force-free deletable.
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": None})
+    assert resp.status_code == 200
+    assert resp.json()["script_url"] is None
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert next(a for a in assets if a["filename"] == fn)["is_referenced"] is False
+
+
+def test_api_patch_interactive_app_replace_repoints_reference(admin_client):
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    a = _upload_js(admin_client, version["id"], name="a.js")
+    b = _upload_js(admin_client, version["id"], name="b.js")
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": a})
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": b})
+    assets = {x["filename"]: x for x in admin_client.get(f"/api/versions/{version['id']}/assets").json()}
+    assert assets["a.js"]["is_referenced"] is False   # superseded → now free
+    assert assets["b.js"]["is_referenced"] is True
+    # The superseded asset is force-free deletable; the current one is protected.
+    aid = assets["a.js"]["id"]; bid = assets["b.js"]["id"]
+    assert admin_client.delete(f"/api/assets/{aid}").status_code == 204
+    assert admin_client.delete(f"/api/assets/{bid}").status_code == 409
+
+
+def test_upload_empty_asset_rejected(admin_client):
+    """Direct-API guard: an empty (or whitespace-only) upload is rejected (400)."""
+    seq, version = _setup_sequence(admin_client)
+    resp = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("empty.js", b"", "application/javascript")},
+    )
+    assert resp.status_code == 400
+    resp2 = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("blank.js", b"   \n\t", "application/javascript")},
+    )
+    assert resp2.status_code == 400

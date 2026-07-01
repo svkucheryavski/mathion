@@ -365,6 +365,40 @@ def sync_asset_references(
         db.add(AssetReference(asset_id=aid, **owner))
 
 
+def sync_script_reference(
+    db: Session,
+    version_id: int,
+    item_id: int,
+    filename: str | None,
+) -> None:
+    """Maintain the single AssetReference for an interactive_app item's script.
+
+    Deletes any existing reference for the item, then (when `filename` is given)
+    points a fresh reference at the matching Asset in this version. Repoint-on-
+    replace and clear-on-remove both fall out of delete-then-optional-add. This
+    is the interactive_app counterpart to the markdown-driven
+    `sync_asset_references` — kept separate because an interactive_app item has
+    no content_md to extract filenames from.
+
+    Raises 422 when `filename` names an asset that doesn't exist in the version.
+    """
+    from sqlalchemy import delete as sa_delete
+    from mathion.models import Asset, AssetReference
+
+    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
+    if filename is None:
+        return
+    asset_id = db.scalar(
+        select(Asset.id).where(Asset.version_id == version_id, Asset.filename == filename)
+    )
+    if asset_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No uploaded asset named '{filename}' in this version",
+        )
+    db.add(AssetReference(asset_id=asset_id, item_id=item_id))
+
+
 def build_submission_filename(block_order: int, group_name: str, submission_number: int) -> str:
     """Build sanitized filename for a submission PDF.
 
