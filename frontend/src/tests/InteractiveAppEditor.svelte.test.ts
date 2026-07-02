@@ -171,3 +171,49 @@ it('Remove PATCHes script_url:null and refreshes', async () => {
   expect(patch).toHaveBeenCalledWith('/api/items/7', { script_url: null });
   expect(load).toHaveBeenCalledWith(1, { force: true });
 });
+
+it('does not crash when item transiently becomes undefined (parent teardown window)', async () => {
+  // Regression: ItemEditPage's `item` is a $derived(seq?.items.find(...)) that
+  // flips through `undefined` during the create→navigate tree rebuild. The parent
+  // stops rendering us, but Svelte 5 re-runs our already-mounted $effect once with
+  // the changed prop BEFORE teardown — the effect must not deref a missing item.
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const sprops = $state<{ item: AdminTreeItem | undefined; versionId: number; editable: boolean }>(
+    { item: item(), versionId: 1, editable: true },
+  );
+  const cmp = mount(InteractiveAppEditor, { target, props: sprops });
+  cleanup = () => unmount(cmp);
+  await settle();
+  expect(() => { sprops.item = undefined; flushSync(); }).not.toThrow();
+});
+
+it('deletes the orphaned asset when linking (PATCH) fails after a successful upload', async () => {
+  const upload = vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue({ id: 5, version_id: 1, filename: 'new.js', file_size: 3, mime_type: 'application/javascript', uploaded_at: '', uploaded_by: 1, is_referenced: false });
+  vi.spyOn(apiModule.api, 'patch').mockRejectedValue(new apiModule.ApiError(500, 'boom'));
+  const del = vi.spyOn(assetsModule, 'deleteAsset').mockResolvedValue(undefined as never);
+  const load = vi.spyOn(editorStore, 'loadAdminTree').mockResolvedValue('ok' as never);
+  vi.spyOn(toasts, 'pushToast').mockImplementation(() => {});
+  const target = mountEditor({ item: item({ script_url: null }), versionId: 1, editable: true });
+  await settle();
+  chooseFile(target, new File(["getElementById('app-root')"], 'new.js', { type: 'application/javascript' }));
+  await waitUntil(() => del.mock.calls.length > 0);
+  expect(upload).toHaveBeenCalledOnce();
+  expect(del).toHaveBeenCalledWith(5);       // orphan cleaned up
+  expect(load).not.toHaveBeenCalled();        // link failed → no tree refresh
+  expect(target.querySelector('.form-err')).not.toBeNull();  // error surfaced
+});
+
+it('does NOT delete the asset when the PATCH succeeded but the tree refresh failed', async () => {
+  vi.spyOn(assetsModule, 'uploadAsset').mockResolvedValue({ id: 6, version_id: 1, filename: 'ok.js', file_size: 3, mime_type: 'application/javascript', uploaded_at: '', uploaded_by: 1, is_referenced: false });
+  const patch = vi.spyOn(apiModule.api, 'patch').mockResolvedValue({} as never);
+  const del = vi.spyOn(assetsModule, 'deleteAsset').mockResolvedValue(undefined as never);
+  const load = vi.spyOn(editorStore, 'loadAdminTree').mockRejectedValue(new apiModule.ApiError(500, 'refresh down'));
+  vi.spyOn(toasts, 'pushToast').mockImplementation(() => {});
+  const target = mountEditor({ item: item({ script_url: null }), versionId: 1, editable: true });
+  await settle();
+  chooseFile(target, new File(["getElementById('app-root')"], 'ok.js', { type: 'application/javascript' }));
+  await waitUntil(() => load.mock.calls.length > 0);
+  expect(patch).toHaveBeenCalledWith('/api/items/7', { script_url: 'ok.js' });
+  expect(del).not.toHaveBeenCalled();         // linked asset kept
+});
