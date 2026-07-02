@@ -217,6 +217,18 @@ def test_api_create_interactive_app_with_script_url_rejected(admin_client):
     assert "must not be set on create" in resp.text
 
 
+def test_api_create_interactive_app_with_content_md_rejected(admin_client):
+    """interactive_app has no markdown surface: a create-body content_md is
+    rejected (422). This keeps its only asset refs the uploaded script, so the
+    script-asset GC can never touch a markdown-referenced asset."""
+    seq, version = _setup_sequence(admin_client)
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App", "type": "interactive_app", "content_md": "![x](pic.png)",
+    })
+    assert resp.status_code == 422
+    assert "content_md must not be set on interactive_app" in resp.text
+
+
 def test_api_create_video_with_script_url_rejected(admin_client):
     """script_url is not valid on create for any type, including video."""
     seq, version = _setup_sequence(admin_client)
@@ -588,33 +600,133 @@ def test_api_patch_video_script_url_rejected(admin_client):
     assert found["script_url"] is None
 
 
+def test_api_patch_interactive_app_content_md_rejected(admin_client):
+    """Patching content_md onto an interactive_app item is rejected (422) and not
+    persisted — this is the guard that keeps the script-asset GC from ever seeing
+    markdown asset references on an interactive_app item."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"content_md": "![x](pic.png)"})
+    assert resp.status_code == 422
+    assert "content_md cannot be set on interactive_app" in resp.text
+    items = admin_client.get(f"/api/sequences/{seq['id']}/items").json()
+    assert next(i for i in items if i["id"] == item["id"])["content_md"] is None
+
+
+def test_api_patch_interactive_app_content_md_null_rejected(admin_client):
+    """Even content_md=null is rejected on interactive_app: the guard is on key
+    PRESENCE, not value. Otherwise the key would reach _process_content_md, whose
+    sync_asset_references deletes ALL of the item's AssetReferences — wiping the
+    attached script's reference."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"], name="keep.js")
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"content_md": None})
+    assert resp.status_code == 422
+    assert "content_md cannot be set on interactive_app" in resp.text
+    # The script reference must survive (sync_asset_references would have wiped it).
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert next(a for a in assets if a["filename"] == fn)["is_referenced"] is True
+
+
 def test_api_patch_interactive_app_clear_script_url_allowed(admin_client):
     seq, version = _setup_sequence(admin_client)
     item = _make_interactive_app(admin_client, seq)
     fn = _upload_js(admin_client, version["id"])
     admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
-    # Clear → allowed, reference dropped, asset becomes force-free deletable.
+    # Clear → allowed; the backing script asset (no reuse path) is GC'd.
     resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": None})
     assert resp.status_code == 200
     assert resp.json()["script_url"] is None
     assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
-    assert next(a for a in assets if a["filename"] == fn)["is_referenced"] is False
+    assert all(a["filename"] != fn for a in assets)
 
 
-def test_api_patch_interactive_app_replace_repoints_reference(admin_client):
+def test_api_patch_interactive_app_clear_deletes_backing_asset(admin_client, asset_tmpdir):
+    """Clearing an interactive_app script deletes the backing JS asset (row +
+    file): it has no reuse path (upload is the only way to attach one), so a
+    lingering orphan only wastes quota and blocks re-uploading the same name."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"], name="demo.js")
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+    filepath = asset_tmpdir / "courses" / str(version["id"]) / fn
+    assert filepath.is_file()
+
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": None})
+    assert resp.status_code == 200
+
+    # Row gone, file gone, and the same name can be re-uploaded (the 409 bug).
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert all(a["filename"] != fn for a in assets)
+    assert not filepath.exists()
+    reup = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": (fn, b"//v2\ndocument.getElementById('app-root');", "application/javascript")},
+    )
+    assert reup.status_code == 201, reup.text
+
+
+def test_api_patch_interactive_app_shared_asset_kept_until_last_ref(admin_client):
+    """A JS asset referenced by two items is kept until the LAST reference is
+    cleared (ref_count == 0 guard), then deleted."""
+    seq, version = _setup_sequence(admin_client)
+    item1 = _make_interactive_app(admin_client, seq)
+    item2 = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App Two", "type": "interactive_app",
+    }).json()
+    fn = _upload_js(admin_client, version["id"], name="shared.js")
+    admin_client.patch(f"/api/items/{item1['id']}", json={"script_url": fn})
+    admin_client.patch(f"/api/items/{item2['id']}", json={"script_url": fn})
+
+    # Clear item1 → still referenced by item2 → asset kept.
+    admin_client.patch(f"/api/items/{item1['id']}", json={"script_url": None})
+    assets = {a["filename"]: a for a in admin_client.get(f"/api/versions/{version['id']}/assets").json()}
+    assert fn in assets and assets[fn]["is_referenced"] is True
+
+    # Clear item2 → last reference gone → asset deleted.
+    admin_client.patch(f"/api/items/{item2['id']}", json={"script_url": None})
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert all(a["filename"] != fn for a in assets)
+
+
+def test_api_patch_interactive_app_replace_repoints_reference(admin_client, asset_tmpdir):
     seq, version = _setup_sequence(admin_client)
     item = _make_interactive_app(admin_client, seq)
     a = _upload_js(admin_client, version["id"], name="a.js")
     b = _upload_js(admin_client, version["id"], name="b.js")
+    a_path = asset_tmpdir / "courses" / str(version["id"]) / a
     admin_client.patch(f"/api/items/{item['id']}", json={"script_url": a})
     admin_client.patch(f"/api/items/{item['id']}", json={"script_url": b})
     assets = {x["filename"]: x for x in admin_client.get(f"/api/versions/{version['id']}/assets").json()}
-    assert assets["a.js"]["is_referenced"] is False   # superseded → now free
+    assert "a.js" not in assets                        # superseded → GC'd (no reuse path)
+    assert not a_path.exists()                          # …and its file removed from disk
     assert assets["b.js"]["is_referenced"] is True
-    # The superseded asset is force-free deletable; the current one is protected.
-    aid = assets["a.js"]["id"]; bid = assets["b.js"]["id"]
-    assert admin_client.delete(f"/api/assets/{aid}").status_code == 204
+    # The current asset is still reference-protected from a force-free delete.
+    bid = assets["b.js"]["id"]
     assert admin_client.delete(f"/api/assets/{bid}").status_code == 409
+
+
+def test_api_patch_interactive_app_missing_asset_preserves_existing_script(admin_client, asset_tmpdir):
+    """A 422 (repoint to a non-existent asset) rolls back cleanly: the currently
+    attached script's asset + reference + file survive un-GC'd, and script_url
+    still points at the old file."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"], name="keep.js")
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+    filepath = asset_tmpdir / "courses" / str(version["id"]) / fn
+
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": "missing.js"})
+    assert resp.status_code == 422
+
+    assets = {a["filename"]: a for a in admin_client.get(f"/api/versions/{version['id']}/assets").json()}
+    assert fn in assets and assets[fn]["is_referenced"] is True
+    assert filepath.is_file()
+    items = admin_client.get(f"/api/sequences/{seq['id']}/items").json()
+    assert next(i for i in items if i["id"] == item["id"])["script_url"] == fn
 
 
 def test_interactive_app_reference_survives_publish(admin_client):

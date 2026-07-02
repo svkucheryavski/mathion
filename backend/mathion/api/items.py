@@ -1,3 +1,4 @@
+import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -160,6 +161,19 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
             detail="script_url can only be set on interactive_app items",
         )
 
+    # interactive_app has no markdown surface. Reject content_md by KEY PRESENCE
+    # (not value): even content_md=null would otherwise reach _process_content_md,
+    # whose sync_asset_references deletes ALL of the item's AssetReferences —
+    # wiping the attached script's reference. Forbidding the key outright keeps an
+    # interactive_app item's only asset reference its uploaded script, so the
+    # script-asset GC in sync_script_reference can never wipe/delete a
+    # markdown-referenced asset.
+    if item.type == "interactive_app" and "content_md" in updates:
+        raise HTTPException(
+            status_code=422,
+            detail="content_md cannot be set on interactive_app items",
+        )
+
     for field, value in updates.items():
         setattr(item, field, value)
 
@@ -204,6 +218,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
     # — and even in production it is more conservative to explicitly
     # rollback before any post-flush 422 so the partially-applied state
     # never has a chance to be observed.
+    removed_script_files: list[str] = []
     if item.type == "interactive_app" and "script_url" in updates:
         filename = updates["script_url"]
         if filename is not None and (
@@ -215,7 +230,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
                 detail="script_url must be the filename of an uploaded .js asset",
             )
         try:
-            sync_script_reference(db, version.id, item.id, filename)
+            removed_script_files = sync_script_reference(db, version.id, item.id, filename)
         except HTTPException:
             db.rollback()
             raise
@@ -229,6 +244,15 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
 
     db.commit()
     db.refresh(item)
+    # Unlink GC'd interactive_app script files after the DB commit — best-effort,
+    # mirroring delete_asset (a leftover file is harmless; a row without its file
+    # is worse). The rows were deleted inside the committed transaction above.
+    for path in removed_script_files:
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
     return item
 
 

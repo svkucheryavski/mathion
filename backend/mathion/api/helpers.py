@@ -370,8 +370,9 @@ def sync_script_reference(
     version_id: int,
     item_id: int,
     filename: str | None,
-) -> None:
-    """Maintain the single AssetReference for an interactive_app item's script.
+) -> list[str]:
+    """Maintain the single AssetReference for an interactive_app item's script,
+    and garbage-collect the backing JS asset once it is no longer referenced.
 
     Deletes any existing reference for the item, then (when `filename` is given)
     points a fresh reference at the matching Asset in this version. Repoint-on-
@@ -380,23 +381,62 @@ def sync_script_reference(
     `sync_asset_references` — kept separate because an interactive_app item has
     no content_md to extract filenames from.
 
+    Unlike `sync_asset_references`, which leaves an unreferenced asset in place
+    so it can be re-referenced from the asset sidebar, an interactive_app script
+    asset has NO reuse path — upload is the only way to attach one — so a script
+    asset that loses its last reference here is deleted: the row now, the file
+    after the caller commits. Deletion is guarded on ref_count == 0, so an asset
+    still referenced by another item/question/info page is never removed.
+
+    Returns the filesystem paths of any asset FILES whose rows were deleted, for
+    the caller to unlink AFTER commit (best-effort — same rule as delete_asset:
+    a leftover file is harmless; a row pointing at a missing file is worse).
+
     Raises 422 when `filename` names an asset that doesn't exist in the version.
     """
-    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import delete as sa_delete, func
+    from mathion.api.assets import _asset_dir
     from mathion.models import Asset, AssetReference
 
-    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
-    if filename is None:
-        return
-    asset_id = db.scalar(
-        select(Asset.id).where(Asset.version_id == version_id, Asset.filename == filename)
+    # Capture the asset(s) this item's script currently references before the
+    # reference rows are dropped, so any that become unreferenced can be GC'd.
+    prev_asset_ids = set(
+        db.scalars(select(AssetReference.asset_id).where(AssetReference.item_id == item_id)).all()
     )
-    if asset_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"No uploaded asset named '{filename}' in this version",
+
+    db.execute(sa_delete(AssetReference).where(AssetReference.item_id == item_id))
+
+    new_asset_id: int | None = None
+    if filename is not None:
+        new_asset_id = db.scalar(
+            select(Asset.id).where(Asset.version_id == version_id, Asset.filename == filename)
         )
-    db.add(AssetReference(asset_id=asset_id, item_id=item_id))
+        if new_asset_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"No uploaded asset named '{filename}' in this version",
+            )
+        db.add(AssetReference(asset_id=new_asset_id, item_id=item_id))
+
+    # GC previously-referenced script assets that are now unreferenced (and are
+    # not the asset we just re-pointed at). db.scalar autoflushes the pending
+    # AssetReference insert, so the count reflects the new reference.
+    removed_files: list[str] = []
+    for aid in prev_asset_ids:
+        if aid == new_asset_id:
+            continue
+        still_referenced = db.scalar(
+            select(func.count()).where(AssetReference.asset_id == aid)
+        )
+        if still_referenced:
+            continue
+        asset = db.get(Asset, aid)
+        if asset is None:
+            continue
+        removed_files.append(os.path.join(_asset_dir(asset.version_id), asset.filename))
+        db.delete(asset)
+
+    return removed_files
 
 
 def build_submission_filename(block_order: int, group_name: str, submission_number: int) -> str:

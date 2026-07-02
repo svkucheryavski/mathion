@@ -114,6 +114,11 @@ class ItemCreate(BaseModel):
             raise ValueError("content_md is required for static_page items")
         if self.type == "video" and not self.video_url:
             raise ValueError("video_url is required for video items")
+        if self.type == "interactive_app" and self.content_md is not None:
+            # interactive_app has no markdown surface; forbidding content_md keeps
+            # its only asset references the uploaded script, so the script-asset GC
+            # in sync_script_reference can never delete a markdown-referenced asset.
+            raise ValueError("content_md must not be set on interactive_app items")
         if self.script_url is not None:
             raise ValueError(
                 "script_url must not be set on create — upload the .js file and attach it via PATCH"
