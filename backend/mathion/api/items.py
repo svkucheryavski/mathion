@@ -154,6 +154,12 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
                 )
             updates["slug"] = new_slug
 
+    if "script_url" in updates and item.type != "interactive_app" and updates["script_url"] is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="script_url can only be set on interactive_app items",
+        )
+
     for field, value in updates.items():
         setattr(item, field, value)
 

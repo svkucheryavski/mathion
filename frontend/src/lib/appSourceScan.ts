@@ -9,7 +9,7 @@ export function scanAppSource(source: string): string[] {
     warnings.push('Looks like an ES module — must be a single classic/IIFE bundle.');
   }
   if (!source.includes('app-root')) {
-    warnings.push("Doesn't reference `#app-root` — make sure your app mounts into it.");
+    warnings.push("Doesn't reference #app-root — make sure your app mounts into it.");
   }
   if (/\bfetch\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|\bimport\(|https?:\/\//.test(source)) {
     warnings.push('Network requests (fetch, XHR, WebSocket, EventSource, beacons) and external/CDN scripts are blocked by the CSP — the app must be self-contained.');

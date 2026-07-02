@@ -217,6 +217,28 @@ def test_api_create_interactive_app_with_script_url_rejected(admin_client):
     assert "must not be set on create" in resp.text
 
 
+def test_api_create_video_with_script_url_rejected(admin_client):
+    """script_url is not valid on create for any type, including video."""
+    seq, version = _setup_sequence(admin_client)
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Lecture", "type": "video", "video_url": "https://youtube.com/watch?v=abc",
+        "script_url": "app.js",
+    })
+    assert resp.status_code == 422
+    assert "must not be set on create" in resp.text
+
+
+def test_api_create_static_page_with_script_url_rejected(admin_client):
+    """script_url is not valid on create for any type, including static_page."""
+    seq, version = _setup_sequence(admin_client)
+    resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "type": "static_page", "content_md": "# Hello",
+        "script_url": "app.js",
+    })
+    assert resp.status_code == 422
+    assert "must not be set on create" in resp.text
+
+
 def test_api_create_item_derives_slug_from_title(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
@@ -549,6 +571,21 @@ def test_api_patch_interactive_app_missing_asset_rejected(admin_client):
     resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": "missing.js"})
     assert resp.status_code == 422
     assert "No uploaded asset named" in resp.text
+
+
+def test_api_patch_video_script_url_rejected(admin_client):
+    """Patching a video item to set script_url must return 422; value must not persist."""
+    seq, version = _setup_sequence(admin_client)
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Lecture", "type": "video", "video_url": "https://youtube.com/watch?v=abc",
+    }).json()
+    resp = admin_client.patch(f"/api/items/{item['id']}", json={"script_url": "app.js"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "script_url can only be set on interactive_app items"
+    # Verify the bogus value was NOT persisted.
+    items = admin_client.get(f"/api/sequences/{seq['id']}/items").json()
+    found = next(i for i in items if i["id"] == item["id"])
+    assert found["script_url"] is None
 
 
 def test_api_patch_interactive_app_clear_script_url_allowed(admin_client):

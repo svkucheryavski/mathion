@@ -114,7 +114,7 @@ class ItemCreate(BaseModel):
             raise ValueError("content_md is required for static_page items")
         if self.type == "video" and not self.video_url:
             raise ValueError("video_url is required for video items")
-        if self.type == "interactive_app" and self.script_url is not None:
+        if self.script_url is not None:
             raise ValueError(
                 "script_url must not be set on create — upload the .js file and attach it via PATCH"
             )
