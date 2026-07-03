@@ -37,6 +37,20 @@ export const STATUS_PRIORITY: Record<MpGroupStatus, number> = {
   accepted: 4,
 };
 
+// Maps an evaluation result to the grid status badge. Mirrors backend
+// _derive_status (dashboard.py:229-241) for the case where a submission
+// EXISTS (a thread entry always has a submission, so 'not_submitted' is
+// unreachable here). Param is `string` because ThreadEvaluation.result is
+// `string`; unknown values fall through to awaiting_eval (backend's defensive
+// default).
+export function resultToStatus(result: string | null): MpGroupStatus {
+  if (result === null) return 'awaiting_eval';
+  if (result === 'major_revision' || result === 'minor_revision') return 'needs_revision';
+  if (result === 'accepted') return 'accepted';
+  if (result === 'rejected') return 'rejected';
+  return 'awaiting_eval';
+}
+
 // ---- Progress dashboard ----
 
 export interface DashboardSequence {
@@ -73,29 +87,39 @@ export interface DashboardProgressResponse {
 
 // ---- Mini-projects dashboard ----
 
+export interface ThreadSubmissionBase {
+  id: number;
+  submission_number: number;
+  submitted_at: string | null;
+  submitted_by: { user_id: number; full_name: string | null } | null;
+  is_late: boolean;
+  is_resubmission: boolean;
+  file_size: number;
+}
+
+export interface ThreadEvaluation {
+  id: number;
+  evaluated_at: string | null;
+  evaluated_by: { user_id: number; full_name: string | null } | null;
+  result: string;
+  score: number | null;
+  feedback_text: string | null;
+  has_feedback_file: boolean;
+}
+
+export type ThreadSubmission = ThreadSubmissionBase & { evaluation: ThreadEvaluation | null };
+
+export interface SubmissionThreadResponse {
+  submissions: ThreadSubmission[];
+}
+
 export interface DashboardMpGroupEntry {
   group_id: number;
   group_name: string;
   group_is_disabled: boolean;
   status: MpGroupStatus;
-  latest_submission: {
-    id: number;
-    submission_number: number;
-    submitted_at: string | null;
-    submitted_by: { user_id: number; full_name: string | null } | null;
-    is_late: boolean;
-    is_resubmission: boolean;
-    file_size: number;
-  } | null;
-  latest_evaluation: {
-    id: number;
-    evaluated_at: string | null;
-    evaluated_by: { user_id: number; full_name: string | null } | null;
-    result: string;
-    score: number | null;
-    feedback_text: string | null;
-    has_feedback_file: boolean;
-  } | null;
+  latest_submission: ThreadSubmissionBase | null;
+  latest_evaluation: ThreadEvaluation | null;
 }
 
 export interface DashboardMpRow {
@@ -169,6 +193,18 @@ export async function getSequenceItemState(
 ): Promise<SequenceItemStateResponse> {
   return api.get<SequenceItemStateResponse>(
     `/api/runs/${runId}/students/${userId}/sequences/${sequenceId}/items`,
+    opts,
+  );
+}
+
+export async function getSubmissionThread(
+  runId: number,
+  mpId: number,
+  groupId: number,
+  opts?: { signal?: AbortSignal },
+): Promise<SubmissionThreadResponse> {
+  return api.get<SubmissionThreadResponse>(
+    `/api/runs/${runId}/dashboard/mini-projects/${mpId}/groups/${groupId}/submissions`,
     opts,
   );
 }

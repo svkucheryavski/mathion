@@ -4,6 +4,8 @@ import {
   getProgressDashboard,
   getMiniProjectsDashboard,
   getSequenceItemState,
+  getSubmissionThread,
+  resultToStatus,
   STATUS_LABEL,
   STATUS_PRIORITY,
 } from '../lib/dashboards';
@@ -145,5 +147,28 @@ describe('exported constants', () => {
   it('STATUS_PRIORITY puts needs_revision first', () => {
     expect(STATUS_PRIORITY.needs_revision).toBeLessThan(STATUS_PRIORITY.accepted);
     expect(STATUS_PRIORITY.needs_revision).toBeLessThan(STATUS_PRIORITY.not_submitted);
+  });
+});
+
+describe('resultToStatus (mirrors backend _derive_status)', () => {
+  it('null → awaiting_eval', () => expect(resultToStatus(null)).toBe('awaiting_eval'));
+  it('major_revision → needs_revision', () => expect(resultToStatus('major_revision')).toBe('needs_revision'));
+  it('minor_revision → needs_revision', () => expect(resultToStatus('minor_revision')).toBe('needs_revision'));
+  it('accepted → accepted', () => expect(resultToStatus('accepted')).toBe('accepted'));
+  it('rejected → rejected', () => expect(resultToStatus('rejected')).toBe('rejected'));
+  it('unknown → awaiting_eval (defensive)', () => expect(resultToStatus('weird')).toBe('awaiting_eval'));
+});
+
+describe('getSubmissionThread wire', () => {
+  it('fetches correct URL with signal', async () => {
+    const f = mockFetch(200, { submissions: [] });
+    vi.stubGlobal('fetch', f);
+    const ctrl = new AbortController();
+    await getSubmissionThread(5, 12, 99, { signal: ctrl.signal });
+    const url = (f.mock.calls as unknown[][])[0][0] as string;
+    const init = (f.mock.calls as unknown[][])[0][1] as RequestInit;
+    expect(url).toContain('/api/runs/5/dashboard/mini-projects/12/groups/99/submissions');
+    expect(init.method).toBe('GET');
+    expect(init.signal).toBe(ctrl.signal);
   });
 });
