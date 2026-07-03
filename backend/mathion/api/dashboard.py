@@ -430,6 +430,7 @@ def get_submission_thread(
     submissions = []
     for sub, sub_by_id, sub_by_name in sub_rows:
         entry = _serialize_submission(sub, sub_by_id, sub_by_name)
+        assert entry is not None  # sub is a live row from the query, never None
         ev_tuple = eval_by_sub.get(sub.id)
         if ev_tuple is not None:
             ev, ev_by_id, ev_by_name = ev_tuple
