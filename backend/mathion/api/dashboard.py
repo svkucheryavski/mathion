@@ -379,6 +379,68 @@ def get_mini_projects(
     }
 
 
+@router.get("/api/runs/{run_id}/dashboard/mini-projects/{mp_id}/groups/{group_id}/submissions")
+def get_submission_thread(
+    run_id: int,
+    mp_id: int,
+    group_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Full submission history (newest-first) for one group x mini-project.
+
+    Staff-only review surface. All 404s use detail="Resource not found" to
+    prevent enumeration (matches the item-drilldown convention). Reuses the
+    grid serializers so the thread shape matches the dashboard cell exactly.
+    """
+    run = get_or_404(db, Run, run_id, detail="Resource not found")
+    require_run_admin_or_teacher(db, user, run)
+
+    mp = get_or_404(db, MiniProject, mp_id, detail="Resource not found")
+    if mp.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    group = get_or_404(db, Group, group_id, detail="Resource not found")
+    if group.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    # 1. All submissions for (mp, group), newest-first, + submitter name (OUTER).
+    sub_rows = db.execute(
+        select(Submission, User.id, User.full_name)
+        .outerjoin(User, User.id == Submission.submitted_by)
+        .where(
+            Submission.mini_project_id == mp_id,
+            Submission.group_id == group_id,
+        )
+        .order_by(Submission.submission_number.desc())
+    ).all()
+
+    # 2. Evaluations for those submissions, indexed by submission_id, + evaluator name (OUTER).
+    submission_ids = [sub.id for sub, _, _ in sub_rows]
+    eval_by_sub: dict[int, tuple] = {}
+    if submission_ids:
+        eval_rows = db.execute(
+            select(Evaluation, User.id, User.full_name)
+            .outerjoin(User, User.id == Evaluation.evaluated_by)
+            .where(Evaluation.submission_id.in_(submission_ids))
+        ).all()
+        for ev, ev_by_id, ev_by_name in eval_rows:
+            eval_by_sub[ev.submission_id] = (ev, ev_by_id, ev_by_name)
+
+    # 3. Stitch: each submission with its nested evaluation (or None).
+    submissions = []
+    for sub, sub_by_id, sub_by_name in sub_rows:
+        entry = _serialize_submission(sub, sub_by_id, sub_by_name)
+        ev_tuple = eval_by_sub.get(sub.id)
+        if ev_tuple is not None:
+            ev, ev_by_id, ev_by_name = ev_tuple
+            entry["evaluation"] = _serialize_evaluation(ev, ev_by_id, ev_by_name)
+        else:
+            entry["evaluation"] = None
+        submissions.append(entry)
+
+    return {"submissions": submissions}
+
+
 # ============================================================================
 # Teacher Dashboards (T1): per-(student, sequence) item drilldown
 # Spec: docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md §5.1
