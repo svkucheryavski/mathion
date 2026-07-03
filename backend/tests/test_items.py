@@ -729,6 +729,68 @@ def test_api_patch_interactive_app_missing_asset_preserves_existing_script(admin
     assert next(i for i in items if i["id"] == item["id"])["script_url"] == fn
 
 
+def test_api_delete_interactive_app_item_gcs_backing_asset(admin_client, asset_tmpdir):
+    """Deleting an interactive_app item GCs its backing JS asset (row + file), so
+    the same filename can be re-uploaded — item-owned lifecycle, same as Remove."""
+    seq, version = _setup_sequence(admin_client)
+    item = _make_interactive_app(admin_client, seq)
+    fn = _upload_js(admin_client, version["id"], name="demo.js")
+    admin_client.patch(f"/api/items/{item['id']}", json={"script_url": fn})
+    filepath = asset_tmpdir / "courses" / str(version["id"]) / fn
+    assert filepath.is_file()
+
+    resp = admin_client.delete(f"/api/items/{item['id']}")
+    assert resp.status_code == 204
+
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert all(a["filename"] != fn for a in assets)
+    assert not filepath.exists()
+    reup = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": (fn, b"//v2\ndocument.getElementById('app-root');", "application/javascript")},
+    )
+    assert reup.status_code == 201, reup.text
+
+
+def test_api_delete_static_page_item_keeps_markdown_asset(admin_client):
+    """Deleting a NON-interactive item must NOT GC its assets: markdown assets
+    stay (reusable) — the delete-time GC is scoped to interactive_app scripts."""
+    seq, version = _setup_sequence(admin_client)
+    up = admin_client.post(f"/api/versions/{version['id']}/assets",
+        files={"file": ("pic.png", b"\x89PNG\r\n\x1a\n fake", "image/png")})
+    assert up.status_code == 201, up.text
+    item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Page", "type": "static_page", "content_md": "![x](pic.png)",
+    }).json()
+
+    assert admin_client.delete(f"/api/items/{item['id']}").status_code == 204
+
+    # Asset persists for reuse; only its reference goes away with the item.
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert any(a["filename"] == "pic.png" for a in assets)
+
+
+def test_api_delete_interactive_app_shared_asset_kept(admin_client):
+    """Deleting one of two interactive_app items sharing a JS asset keeps the
+    asset (ref_count guard) — only when the last item goes is it GC'd."""
+    seq, version = _setup_sequence(admin_client)
+    item1 = _make_interactive_app(admin_client, seq)
+    item2 = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "App Two", "type": "interactive_app",
+    }).json()
+    fn = _upload_js(admin_client, version["id"], name="shared.js")
+    admin_client.patch(f"/api/items/{item1['id']}", json={"script_url": fn})
+    admin_client.patch(f"/api/items/{item2['id']}", json={"script_url": fn})
+
+    assert admin_client.delete(f"/api/items/{item1['id']}").status_code == 204
+    assets = {a["filename"]: a for a in admin_client.get(f"/api/versions/{version['id']}/assets").json()}
+    assert fn in assets and assets[fn]["is_referenced"] is True
+
+    assert admin_client.delete(f"/api/items/{item2['id']}").status_code == 204
+    assets = admin_client.get(f"/api/versions/{version['id']}/assets").json()
+    assert all(a["filename"] != fn for a in assets)
+
+
 def test_interactive_app_reference_survives_publish(admin_client):
     """The script AssetReference must not be wiped by the publish re-render loop."""
     seq, version = _setup_sequence(admin_client)

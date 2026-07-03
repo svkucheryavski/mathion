@@ -265,8 +265,22 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete items in 'created' state")
+    # interactive_app JS is item-owned: clear the script reference and GC the
+    # now-unreferenced backing asset (row now, file after commit) before deleting
+    # the item, so its filename is freed for re-upload. Reuses the same
+    # ref_count==0-guarded path as Remove/Replace. Non-interactive items keep
+    # their (reusable) markdown assets — only the reference cascades away.
+    removed_script_files: list[str] = []
+    if item.type == "interactive_app":
+        removed_script_files = sync_script_reference(db, version.id, item.id, None)
     db.delete(item)
     db.commit()
+    for path in removed_script_files:
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 @router.post("/api/sequences/{sequence_id}/items/reorder")
