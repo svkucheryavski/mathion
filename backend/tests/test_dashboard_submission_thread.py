@@ -8,13 +8,14 @@ from mathion.models import (
     Block, Evaluation, Group, Item, MiniProject, RunStudent, RunTeacher, Sequence, Submission,
 )
 from mathion.models_auth import User
+from tests.conftest import RUN_END_DATE_FAR
 
 THREAD_URL = "/api/runs/{run}/dashboard/mini-projects/{mp}/groups/{group}/submissions"
 
 
 def _publish_run(admin_client, course_id, groups_enabled=True):
     r = admin_client.post(f"/api/courses/{course_id}/runs", json={
-        "title": "Run A", "start_date": "2026-01-01", "end_date": "2026-12-31",
+        "title": "Run A", "start_date": "2026-01-01", "end_date": RUN_END_DATE_FAR,
         "groups_enabled": groups_enabled,
     }).json()
     admin_client.post(f"/api/runs/{r['id']}/teachers", json={"email": "t@example.com"})
@@ -170,3 +171,6 @@ def test_thread_404_nonexistent_ids_are_probe_safe(admin_client, db):
     r = admin_client.get(THREAD_URL.format(run=ctx["run"]["id"], mp=999999, group=ctx["g1"].id))
     assert r.status_code == 404
     assert r.json()["detail"] == "Resource not found"
+    r2 = admin_client.get(THREAD_URL.format(run=ctx["run"]["id"], mp=ctx["mp"].id, group=999999))
+    assert r2.status_code == 404
+    assert r2.json()["detail"] == "Resource not found"
