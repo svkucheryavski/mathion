@@ -328,7 +328,14 @@ heading (e.g. "Previous submissions") above the collapsed entries.
    to gate) would retrigger the effect on every `onRefetch()`; reading only the
    primitives means the `$derived` ids recompute to strict-equal values (runes `$derived`
    uses strict equality by default), which don't propagate downstream, so the effect
-   fires **once per cell**. When the ids change (cell switch), the effect
+   fires **once per cell**. **Refinement (carried into the plan):** also key the effect
+   on the cell's own `latest_submission?.id` and `latest_evaluation?.id` — both derived
+   as primitive `$derived` (null when not a submission target) — so that an external grid
+   **Refresh** that lands a new submission or a **concurrent evaluation for the same
+   cell** (the §8 thread-wins / race scenario) refetches the thread and surfaces the new
+   state instead of freezing on the stale optimistic newest. These ids are strict-equal
+   across a no-op refresh, so the once-per-cell property still holds when nothing changed.
+   When the ids change (cell switch), the effect
    **resets the `thread` `$state` to `null`** (mirroring the progress branch's
    `data = null` at `DashboardSidePanel.svelte:322`) so the new cell shows its own
    optimistic newest, not the prior cell's `thread[0]`. The post-write thread refetch is
@@ -388,7 +395,7 @@ click submission cell
   → panel opens; if latest_submission == null → "Not submitted yet." (no thread, no fetch)
   → else newest = optimistic({...latest_submission, evaluation: latest_evaluation});
     newest renders instantly from cell entry
-  → getSubmissionThread(runId, mpId, groupId)   [effect keyed on mpId/groupId primitives]
+  → getSubmissionThread(runId, mpId, groupId)   [effect keyed on runId/mpId/groupId + cell sub/eval id primitives]
       → { submissions: [newest, …, oldest] }
   → newest = thread[0] (authoritative); render newest panel-side (+ write form),
     thread.slice(1) via SubmissionThreadEntry (collapsed, read-only)
