@@ -167,7 +167,7 @@ describe('getSubmissionThread wire', () => {
     await getSubmissionThread(5, 12, 99, { signal: ctrl.signal });
     const url = (f.mock.calls as unknown[][])[0][0] as string;
     const init = (f.mock.calls as unknown[][])[0][1] as RequestInit;
-    expect(url).toContain('/api/runs/5/dashboard/mini-projects/12/groups/99/submissions');
+    expect(url).toBe('/api/runs/5/dashboard/mini-projects/12/groups/99/submissions');
     expect(init.method).toBe('GET');
     expect(init.signal).toBe(ctrl.signal);
   });
