@@ -1343,4 +1343,236 @@ describe('DashboardSidePanel', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('thread: renders historical entries collapsed under "Previous submissions"', async () => {
+    const t = submissionTarget({ status: 'accepted', submissionId: 100 });
+    const thread = {
+      submissions: [
+        { ...t.entry.latest_submission!, evaluation: t.entry.latest_evaluation },
+        { id: 55, submission_number: 1, submitted_at: '2026-06-01T09:00:00Z',
+          submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false,
+          file_size: 500,
+          evaluation: { id: 7, evaluated_at: '2026-06-01T12:00:00Z', evaluated_by: { user_id: 3, full_name: 'Prof' },
+            result: 'rejected', score: 10, feedback_text: 'Redo', has_feedback_file: false } },
+      ],
+    };
+    vi.stubGlobal('fetch', routedFetch({ thread }));
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    expect(host.querySelector('[data-test="thread-history"]')).toBeTruthy();
+    expect(host.textContent).toContain('Previous submissions');
+    const toggles = host.querySelectorAll('[data-test="thread-entry-toggle"]');
+    expect(toggles).toHaveLength(1); // only the ONE older entry (newest is panel-rendered)
+    // collapsed: detail hidden until clicked
+    expect(host.textContent).not.toContain('Redo');
+    (toggles[0] as HTMLButtonElement).click();
+    flushSync();
+    expect(host.textContent).toContain('Redo');
+  });
+
+  it('thread: single-entry thread renders no historical region', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    vi.stubGlobal('fetch', routedFetch({ thread: echoThread(t) }));
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    expect(host.querySelector('[data-test="thread-history"]')).toBeNull();
+    expect(host.textContent).not.toContain('Previous submissions');
+  });
+
+  it('thread: error state shows retry; retry re-fetches', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    let calls = 0;
+    const failing = vi.fn((url: string, init?: RequestInit) => {
+      const u = String(url); const m = (init?.method ?? 'GET').toUpperCase();
+      if (m === 'GET' && u.endsWith('/submissions')) {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new TypeError('network down'));
+        return Promise.resolve(new Response(JSON.stringify(echoThread(t)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    });
+    vi.stubGlobal('fetch', failing);
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    expect(host.querySelector('[data-test="thread-error"]')).toBeTruthy();
+    (host.querySelector('[data-test="thread-retry"]') as HTMLButtonElement).click();
+    await settle();
+    expect(host.querySelector('[data-test="thread-error"]')).toBeNull();
+    expect(calls).toBe(2);
+  });
+
+  it('thread wins: create posts to thread[0].id, not the stale cell submission id', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    // Group resubmitted after the grid loaded: thread newest id 200 (no eval yet).
+    const thread = { submissions: [
+      // is_resubmission MUST be false: a true value renders the auto-accept banner
+      // (DashboardSidePanel `{#if sub.is_resubmission}` at ~:417) instead of the write form,
+      // so the create form would be absent and the submit dispatch would find nothing to submit.
+      { id: 200, submission_number: 3, submitted_at: '2026-06-05T10:00:00Z',
+        submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false,
+        file_size: 999, evaluation: null },
+    ] };
+    const fetchMock = routedFetch({ thread, evalResponse: { status: 201, body: { id: 9, submission_id: 200, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-05T11:00:00Z', evaluated_by: 1 } } });
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    // fill + submit the create form (result = accepted needs no feedback file)
+    const sel = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    sel.value = 'accepted'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const posted = evalCalls(fetchMock).find(([, i]) => (i.method ?? '').toUpperCase() === 'POST')!;
+    expect(posted[0]).toBe('/api/submissions/200/evaluation'); // thread[0].id, not 100
+  });
+
+  it('write success refetches the thread and calls onRefetch', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const fetchMock = routedFetch({ thread: echoThread(t), evalResponse: { status: 201, body: { id: 9, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-05T11:00:00Z', evaluated_by: 1 } } });
+    vi.stubGlobal('fetch', fetchMock);
+    const { onRefetch } = mountPanel({ target: t, isAdmin: true });
+    await settle();
+    const threadGetsBefore = fetchMock.mock.calls.filter(([u, i]) => ((i as RequestInit)?.method ?? 'GET') === 'GET' && String(u).endsWith('/submissions')).length;
+    const sel = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    sel.value = 'accepted'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const threadGetsAfter = fetchMock.mock.calls.filter(([u, i]) => ((i as RequestInit)?.method ?? 'GET') === 'GET' && String(u).endsWith('/submissions')).length;
+    expect(threadGetsAfter).toBe(threadGetsBefore + 1); // post-write refetch
+    expect(onRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('not_submitted: no thread fetch, no history, no write form', async () => {
+    const entry = makeEntry({ status: 'not_submitted', latest_submission: null, latest_evaluation: null });
+    const t = { kind: 'submission' as const, runId: 1, mp: makeMp(), entry };
+    const fetchMock = routedFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    expect(host.textContent).toContain('Not submitted yet.');
+    expect(host.querySelector('[data-test="thread-history"]')).toBeNull();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    const threadGets = fetchMock.mock.calls.filter(([u, i]) => ((i as RequestInit)?.method ?? 'GET') === 'GET' && String(u).endsWith('/submissions'));
+    expect(threadGets).toHaveLength(0);
+  });
+
+  it('thread: an expanded historical entry survives a write (real grid-reload onRefetch)', async () => {
+    // This MUST drive a data-mutating onRefetch — the production regression only fires
+    // when onRefetch changes the cell's evaluation id (null→N), which makes the thread
+    // effect refire. A no-op onRefetch (mountPanel's default) never triggers the refire,
+    // so it would pass even against the broken code. We mount via a $state box (same
+    // pattern as the progress-race test at :176) and mutate the target in onRefetch,
+    // mirroring RunSubmissionTab.refresh().
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const thread = { submissions: [
+      { ...t.entry.latest_submission!, is_resubmission: false, evaluation: null }, // newest: write form
+      { id: 55, submission_number: 1, submitted_at: '2026-06-01T09:00:00Z',
+        submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false,
+        file_size: 500,
+        evaluation: { id: 7, evaluated_at: '2026-06-01T12:00:00Z', evaluated_by: { user_id: 3, full_name: 'Prof' },
+          result: 'rejected', score: 10, feedback_text: 'Redo', has_feedback_file: false } },
+    ] };
+    vi.stubGlobal('fetch', routedFetch({ thread, evalResponse: { status: 201, body: { id: 9, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-05T11:00:00Z', evaluated_by: 1 } } }));
+    const box = $state<{ target: PanelTarget; onClose: () => void; isAdmin: boolean; isTeacher: boolean; onRefetch: () => void }>({
+      target: t,
+      onClose: vi.fn(),
+      isAdmin: true,
+      isTeacher: false,
+      onRefetch: () => {
+        // grid reload lands the just-created evaluation on THIS cell → cell eval id null→9,
+        // which makes submissionLatestEvalId change and the thread effect refire.
+        box.target = { ...t, entry: { ...t.entry, status: 'accepted', latest_evaluation: {
+          id: 9, evaluated_at: '2026-06-05T11:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' },
+          result: 'accepted', score: null, feedback_text: null, has_feedback_file: false } } };
+      },
+    });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(DashboardSidePanel, { target: host, props: box });
+    flushSync();
+    await settle();
+    // expand the single historical entry
+    (host.querySelector('[data-test="thread-entry-toggle"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(host.textContent).toContain('Redo');
+    // write an evaluation on the newest submission → onRefetch mutates the cell eval id → effect refires
+    const sel = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    sel.value = 'accepted'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    await settle(); // POST → onRefetch mutates target → effect refires → thread refetch (two awaited hops)
+    // expandedById is keyed by submission id and is NEVER reset by the effect → entry 55 stays open
+    expect(host.textContent).toContain('Redo');
+  });
+
+  it('thread: a cell switch aborts the in-flight thread fetch and does not render the stale thread', async () => {
+    // Mirrors the progress-race test (:176) for the submission/thread variant.
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, opts: RequestInit) => {
+      signals.push(opts.signal as AbortSignal);
+      return new Promise<Response>(() => { /* never resolves */ });
+    }));
+    const a = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const b: PanelTarget = { kind: 'submission', runId: 1, mp: makeMp(), entry: makeEntry({
+      group_id: 8, group_name: 'G8', status: 'awaiting_eval', latest_evaluation: null,
+      latest_submission: { id: 200, submission_number: 1, submitted_at: '2026-06-05T10:00:00Z',
+        submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false, file_size: 999 },
+    }) };
+    const box = $state<{ target: PanelTarget; onClose: () => void; isAdmin: boolean; isTeacher: boolean; onRefetch: () => void }>({
+      target: a, onClose: vi.fn(), isAdmin: true, isTeacher: false, onRefetch: vi.fn(),
+    });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(DashboardSidePanel, { target: host, props: box });
+    flushSync();
+    expect(signals.length).toBe(1);
+    const first = signals[0]!;
+    expect(first.aborted).toBe(false);
+    box.target = b; // switch to a different group (cell switch)
+    flushSync();
+    await tick();
+    expect(first.aborted).toBe(true);                 // in-flight fetch for cell A aborted
+    expect(signals.length).toBeGreaterThanOrEqual(2); // a fresh fetch started for cell B
+  });
+
+  it('thread: shows the loading indicator (newest still rendered) while the thread is in flight', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => { /* never resolves */ })));
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    expect(host.querySelector('[data-test="thread-loading"]')).toBeTruthy();
+    // the newest entry renders optimistically from the cell even while the thread is pending
+    expect(host.textContent).toContain('Submission');
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeTruthy();
+  });
+
+  it('thread: a 4xx (ApiError) also shows the retry error state', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    let calls = 0;
+    const stub = vi.fn((url: string, init?: RequestInit) => {
+      const u = String(url); const m = (init?.method ?? 'GET').toUpperCase();
+      if (m === 'GET' && u.endsWith('/submissions')) {
+        calls += 1;
+        if (calls === 1) {
+          // non-2xx → api.get throws ApiError (not a raw TypeError) → the catch-all must still show the error state
+          return Promise.resolve(new Response(JSON.stringify({ detail: 'Resource not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }));
+        }
+        return Promise.resolve(new Response(JSON.stringify(echoThread(t)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    });
+    vi.stubGlobal('fetch', stub);
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    expect(host.querySelector('[data-test="thread-error"]')).toBeTruthy();
+    (host.querySelector('[data-test="thread-retry"]') as HTMLButtonElement).click();
+    await settle();
+    expect(host.querySelector('[data-test="thread-error"]')).toBeNull();
+    expect(calls).toBe(2);
+  });
+
 });
