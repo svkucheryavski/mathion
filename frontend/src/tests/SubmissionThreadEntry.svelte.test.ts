@@ -57,9 +57,11 @@ describe('SubmissionThreadEntry', () => {
 
   it('expanded + null evaluation: shows "Awaiting evaluation" and awaiting badge', () => {
     mountEntry(makeSubmission({ evaluation: null }), true);
-    expect(host.textContent).toContain('Awaiting evaluation');
-    // Unique guard: the null-eval path must render NO evaluation section
-    // (the textContent check alone is satisfied by the summary badge label).
+    // Positive guard: the placeholder <p> renders (unique selector, so this is
+    // NOT satisfied by the summary StatusBadge's own 'Awaiting evaluation' label).
+    const placeholder = host.querySelector('[data-test="awaiting-evaluation-placeholder"]');
+    expect(placeholder?.textContent).toContain('Awaiting evaluation');
+    // Negative guard: the null-eval path must render NO evaluation section.
     expect(host.querySelector('section.evaluation-block')).toBeNull();
     const badge = host.querySelector('.status-badge') as HTMLElement;
     expect(badge.getAttribute('data-status')).toBe('awaiting_eval');

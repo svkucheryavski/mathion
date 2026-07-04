@@ -65,7 +65,7 @@
         {/if}
       </section>
     {:else}
-      <p>Awaiting evaluation</p>
+      <p data-test="awaiting-evaluation-placeholder">Awaiting evaluation</p>
     {/if}
   {/if}
 </div>
