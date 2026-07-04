@@ -39,7 +39,7 @@
     if (selectedIds == null || data == null) return null;
     const mp = data.mini_projects.find((m) => m.id === selectedIds!.mpId);
     const entry = mp?.groups.find((g) => g.group_id === selectedIds!.groupId);
-    return mp && entry ? { kind: 'submission' as const, mp, entry } : null;
+    return mp && entry ? { kind: 'submission' as const, runId, mp, entry } : null;
   });
 
   let abortCtl: AbortController | null = null;

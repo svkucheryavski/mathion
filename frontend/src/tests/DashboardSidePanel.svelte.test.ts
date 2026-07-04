@@ -26,6 +26,60 @@ function mockFetch(status: number, body: unknown) {
   );
 }
 
+// Routes fetch by URL+method: thread GET → `thread`; evaluation POST/PATCH → `evalResponse`.
+function routedFetch(opts: { thread?: unknown; evalResponse?: { status: number; body: unknown } } = {}) {
+  const threadBody = opts.thread ?? { submissions: [] };
+  return vi.fn((url: string, init?: RequestInit) => {
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const u = String(url);
+    if (method === 'GET' && u.includes('/groups/') && u.endsWith('/submissions')) {
+      return Promise.resolve(new Response(JSON.stringify(threadBody), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
+    }
+    const er = opts.evalResponse ?? { status: 201, body: {} };
+    return Promise.resolve(new Response(JSON.stringify(er.body), {
+      status: er.status, headers: { 'Content-Type': 'application/json' },
+    }));
+  });
+}
+
+// Serves thread GETs from `threads` in order (last entry sticks); eval POST/PATCH from `evalResponse`.
+// Use when the thread body must DIFFER across fetches (mount vs post-write/409 refetch).
+function sequencedThreadFetch(threads: unknown[], evalResponse?: { status: number; body: unknown }) {
+  let i = 0;
+  return vi.fn((url: string, init?: RequestInit) => {
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const u = String(url);
+    if (method === 'GET' && u.includes('/groups/') && u.endsWith('/submissions')) {
+      const t = threads[Math.min(i, threads.length - 1)] ?? { submissions: [] };
+      i += 1;
+      return Promise.resolve(new Response(JSON.stringify(t), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
+    }
+    const er = evalResponse ?? { status: 201, body: {} };
+    return Promise.resolve(new Response(JSON.stringify(er.body), {
+      status: er.status, headers: { 'Content-Type': 'application/json' },
+    }));
+  });
+}
+
+// Thread body whose single entry mirrors a submission target's cell entry.
+function echoThread(target: { entry: DashboardMpGroupEntry }) {
+  const s = target.entry.latest_submission!;
+  return { submissions: [{ ...s, evaluation: target.entry.latest_evaluation }] };
+}
+
+// Eval-endpoint calls only (thread GETs are filtered out). The `u` slot is elided
+// with a leading comma — `noUnusedParameters` is on, so a named-but-unused `u` fails.
+function evalCalls(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls.filter(([, i]) => {
+    const method = ((i as RequestInit | undefined)?.method ?? 'GET').toUpperCase();
+    return method === 'POST' || method === 'PATCH';
+  }) as [string, RequestInit][];
+}
+
 interface MountPanelOpts {
   target: PanelTarget;
   onClose?: () => void;
@@ -61,6 +115,7 @@ async function settle() {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.mocked(pushToast).mockClear();
+  vi.stubGlobal('fetch', routedFetch()); // default: empty thread; tests needing a body/eval override this
 });
 
 afterEach(() => {
@@ -148,7 +203,7 @@ function submissionTarget(opts: {
     },
     latest_evaluation: opts.latest_evaluation ?? null,
   });
-  return { kind: 'submission' as const, mp: makeMp(), entry };
+  return { kind: 'submission' as const, runId: 1, mp: makeMp(), entry };
 }
 
 describe('DashboardSidePanel', () => {
@@ -223,7 +278,7 @@ describe('DashboardSidePanel', () => {
   it('submission variant: renders mp title, group, submission, and evaluation details', async () => {
     const mp = makeMp();
     const entry = makeEntry();
-    mountPanel({ target: { kind: 'submission', mp, entry } });
+    mountPanel({ target: { kind: 'submission', runId: 1, mp, entry } });
     expect(host.textContent).toContain('MP Alpha');
     expect(host.textContent).toContain('Block X');
     expect(host.textContent).toContain('G7');
@@ -242,7 +297,7 @@ describe('DashboardSidePanel', () => {
   // 7. Submission variant: not_submitted
   it('submission variant: not_submitted renders "Not submitted yet." without Submission/Evaluation headings', async () => {
     const entry = makeEntry({ status: 'not_submitted', latest_submission: null, latest_evaluation: null });
-    mountPanel({ target: { kind: 'submission', mp: makeMp(), entry } });
+    mountPanel({ target: { kind: 'submission', runId: 1, mp: makeMp(), entry } });
     expect(host.textContent).toContain('Not submitted yet.');
     // Should NOT have Submission or Evaluation section headings
     const h4s = Array.from(host.querySelectorAll('h4')).map((h) => h.textContent?.trim());
@@ -256,7 +311,7 @@ describe('DashboardSidePanel', () => {
       status: 'awaiting_eval',
       latest_evaluation: null,
     });
-    mountPanel({ target: { kind: 'submission', mp: makeMp(), entry } });
+    mountPanel({ target: { kind: 'submission', runId: 1, mp: makeMp(), entry } });
     const h4s = Array.from(host.querySelectorAll('h4')).map((h) => h.textContent?.trim());
     expect(h4s).toContain('Submission');
     expect(h4s).not.toContain('Evaluation');
@@ -265,7 +320,7 @@ describe('DashboardSidePanel', () => {
   // 9. Submission variant: download links
   it('submission variant: download links use verified URL patterns', async () => {
     const entry = makeEntry(); // has_feedback_file=true, submission.id=42, evaluation.id=99
-    mountPanel({ target: { kind: 'submission', mp: makeMp(), entry } });
+    mountPanel({ target: { kind: 'submission', runId: 1, mp: makeMp(), entry } });
     const submissionLink = host.querySelector('a[href="/api/submissions/42/file"]');
     expect(submissionLink).toBeTruthy();
     const feedbackLink = host.querySelector('a[href="/api/evaluations/99/feedback-file"]');
@@ -307,7 +362,7 @@ describe('DashboardSidePanel', () => {
   // 13. Focus trap Tab/Shift+Tab cycle
   it('focus trap: Tab (last→first) and Shift+Tab (first→last) cycle per spec §13', async () => {
     const entry = makeEntry();
-    mountPanel({ target: { kind: 'submission', mp: makeMp(), entry } });
+    mountPanel({ target: { kind: 'submission', runId: 1, mp: makeMp(), entry } });
     await settle();
 
     // FocusTrap's container div wraps the panel div; collect all focusables from host
@@ -415,7 +470,7 @@ describe('DashboardSidePanel', () => {
 
   // T20: validation blocks fetch (incl. score=0)
   it('T20: validation blocks fetch + score=0 valid; clearing error re-enables Save', async () => {
-    const fetchMock = vi.fn();
+    const fetchMock = routedFetch();
     vi.stubGlobal('fetch', fetchMock);
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval' }),
@@ -428,7 +483,7 @@ describe('DashboardSidePanel', () => {
     expect(saveBtn.disabled).toBe(true);
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     flushSync();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(evalCalls(fetchMock)).toHaveLength(0);
     // After first submit attempt with blank result, the verbatim spec error appears.
     expect(host.textContent).toContain('Result is required.');
     select.value = 'major_revision';
@@ -467,7 +522,7 @@ describe('DashboardSidePanel', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
     expect(saveBtn.disabled).toBe(false);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(evalCalls(fetchMock)).toHaveLength(0);
   });
 
   // T27: file extension / empty / size / MIME
@@ -618,8 +673,8 @@ describe('DashboardSidePanel', () => {
     const saveBtn = host.querySelector('button[type="submit"]') as HTMLButtonElement;
     expect(saveBtn.getAttribute('aria-busy')).toBe('true');
     expect(saveBtn.disabled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(evalCalls(fetchMock)).toHaveLength(1);
+    const [url, init] = evalCalls(fetchMock)[0];
     expect(url).toBe('/api/submissions/100/evaluation');
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('include');
@@ -640,7 +695,7 @@ describe('DashboardSidePanel', () => {
   // T23: toast pushed with success message + kind
   it('T23: pushToast called with success message + kind on POST success', async () => {
     const evalResp = { id: 8, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 201, body: evalResp } }));
     vi.mocked(pushToast).mockClear();
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
@@ -661,7 +716,7 @@ describe('DashboardSidePanel', () => {
   it('T26b: onRefetch invoked exactly once on PATCH success', async () => {
     const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
     const updatedEval = { id: 42, submission_id: 100, result: 'accepted', score: 95, feedback_text: 'Good', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(updatedEval), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 200, body: updatedEval } }));
     const onRefetch = vi.fn();
     mountPanel({
       target: submissionTarget({
@@ -690,7 +745,7 @@ describe('DashboardSidePanel', () => {
   // T26: onRefetch invoked once on POST success
   it('T26: onRefetch invoked exactly once on POST success', async () => {
     const evalResp = { id: 9, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 201, body: evalResp } }));
     const onRefetch = vi.fn();
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
@@ -712,7 +767,7 @@ describe('DashboardSidePanel', () => {
   it('T22: PATCH happy — JSON body, no file key, URL /api/evaluations/{eid}', async () => {
     const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
     const updatedEval = { id: 42, submission_id: 100, result: 'accepted', score: 90, feedback_text: 'OK now', has_feedback_file: true, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(updatedEval), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchMock = routedFetch({ evalResponse: { status: 200, body: updatedEval } });
     vi.stubGlobal('fetch', fetchMock);
     mountPanel({
       target: submissionTarget({
@@ -742,8 +797,9 @@ describe('DashboardSidePanel', () => {
     const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const calls = evalCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    const [url, init] = calls[0];
     expect(url).toBe('/api/evaluations/42');
     expect(init.method).toBe('PATCH');
     // api.patch routes through request() which wraps headers via new Headers(...).
@@ -757,7 +813,7 @@ describe('DashboardSidePanel', () => {
 
   // T24: 4xx error → banner role=alert; form values preserved; Save re-enabled
   it('T24: 4xx error banner + form values preserved + Save re-enabled', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Bad request' }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 400, body: { detail: 'Bad request' } } }));
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
       isAdmin: true,
@@ -785,7 +841,7 @@ describe('DashboardSidePanel', () => {
 
   // T31: 409 → onRefetch + form transitions to read-only (form gone)
   it('T31: 409 → onRefetch called + form removed from DOM', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Already evaluated' }), { status: 409, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 409, body: { detail: 'Already evaluated' } } }));
     const onRefetch = vi.fn();
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
@@ -804,43 +860,31 @@ describe('DashboardSidePanel', () => {
     expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
   });
 
-  // T31b: 409 race where refetch populates the winning eval → read-only block renders
-  it('T31b: 409 → onRefetch populates target.entry.latest_evaluation → read-only with winning eval', async () => {
-    const winningEval = {
-      id: 77, evaluated_at: '2026-06-04T11:50:00Z',
-      evaluated_by: { user_id: 9, full_name: 'Other Prof' },
-      result: 'accepted', score: 88, feedback_text: 'OK', has_feedback_file: false,
-    };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ detail: 'Already evaluated' }), { status: 409, headers: { 'Content-Type': 'application/json' } }),
+  // T31b: 409 race — the winning eval now arrives via the post-409 thread refetch (Step 11(3)),
+  // NOT via onRefetch mutating the cell. Use a sequenced thread: awaiting at mount (form shows),
+  // winning after the 409.
+  it('T31b: 409 → post-409 thread refetch surfaces the winning eval read-only', async () => {
+    const start = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const winning = { submissions: [{ ...start.entry.latest_submission!, evaluation: {
+      id: 77, evaluated_at: '2026-06-05T12:00:00Z', evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'Winner', has_feedback_file: false } }] };
+    vi.stubGlobal('fetch', sequencedThreadFetch(
+      [echoThread(start), winning],
+      { status: 409, body: { detail: 'Already evaluated' } },
     ));
-    const startTarget = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
-    // Wrap target in $state so we can mutate it from inside onRefetch (simulating
-    // RunSubmissionTab's selectedIds-derived rebind after a refresh).
-    const wrappedTarget = $state({ ...startTarget, entry: { ...startTarget.entry } });
-    const onRefetch = vi.fn(() => {
-      wrappedTarget.entry = { ...wrappedTarget.entry, latest_evaluation: winningEval, status: 'accepted' };
-    });
-    host = document.createElement('div');
-    document.body.appendChild(host);
-    component = mount(DashboardSidePanel, {
-      target: host,
-      props: { target: wrappedTarget, onClose: vi.fn(), isAdmin: true, isTeacher: false, onRefetch },
-    });
-    flushSync();
+    const { onRefetch } = mountPanel({ target: start, isAdmin: true });
     await settle();
-    const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
-    select.value = 'accepted';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    // fill result + submit → POST returns 409 → 409 branch calls onRefetch + refetches thread → winning eval
+    const sel = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    sel.value = 'accepted'; sel.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
-    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
+    await settle(); // POST → 409 branch → onRefetch + thread refetch → winning eval renders (two awaited hops)
+    expect(host.textContent).toContain('88');          // winning score, from the post-409 thread refetch
+    expect(host.textContent).toContain('Other Prof');  // winning evaluator
     expect(onRefetch).toHaveBeenCalledTimes(1);
-    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
-    expect(host.querySelector('section.evaluation-block')).toBeTruthy();
-    expect(host.textContent).toContain('88');
-    expect(host.textContent).toContain('Other Prof');
   });
 
   // T29: timeout → banner + Save re-enabled + values preserved
@@ -882,11 +926,10 @@ describe('DashboardSidePanel', () => {
 
   // T33: after POST, [Edit] uses stateLatestEvaluation.id for PATCH (refetch never resolves)
   it('T33: POST → state.latestEvaluation; [Edit] + Save → PATCH /api/evaluations/{newId}', async () => {
+    // POST returns id 42; default empty thread → post-write clear (Step 12) does NOT fire
+    // (res.submissions.length === 0), so effectiveEvaluation stays the flat POST eval → PATCH targets 42.
     const created = { id: 42, submission_id: 100, result: 'accepted', score: 80, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    const patched = { id: 42, submission_id: 100, result: 'accepted', score: 95, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:05:00Z', evaluated_by: 1 };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(patched), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchMock = routedFetch({ evalResponse: { status: 201, body: created } });
     vi.stubGlobal('fetch', fetchMock);
     const onRefetch = vi.fn(() => new Promise<void>(() => {}));
     mountPanel({
@@ -917,8 +960,10 @@ describe('DashboardSidePanel', () => {
     const form2 = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
     form2.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/evaluations/42');
-    expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+    const calls = evalCalls(fetchMock);
+    const patch = calls.find(([, i]) => (i.method ?? '').toUpperCase() === 'PATCH')!;
+    expect(patch[0]).toBe('/api/evaluations/42');
+    expect(patch[1].method).toBe('PATCH');
   });
 
   // T36: user-cancel during submit → no banner, form values preserved, Save re-enabled
@@ -1033,7 +1078,7 @@ describe('DashboardSidePanel', () => {
 
   // T25: result-lock — disabled non-accepted options + verbatim text + Save guarded
   it('T25: result-lock — non-accepted options disabled + verbatim helper text + fetch not called', async () => {
-    const fetchMock = vi.fn();
+    const fetchMock = routedFetch();
     vi.stubGlobal('fetch', fetchMock);
     mountPanel({
       target: submissionTarget({
@@ -1062,7 +1107,7 @@ describe('DashboardSidePanel', () => {
     const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(evalCalls(fetchMock)).toHaveLength(0);
   });
 
   // T38: file picker hidden in edit
@@ -1125,7 +1170,7 @@ describe('DashboardSidePanel', () => {
   // T30: focus moves to [Edit] after successful Save
   it('T30: focus moves to [Edit] after successful Save', async () => {
     const evalResp = { id: 8, submission_id: 100, result: 'accepted', score: null, feedback_text: null, has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 201, body: evalResp } }));
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
       isAdmin: true,
@@ -1274,7 +1319,7 @@ describe('DashboardSidePanel', () => {
   // must be cleared in handleSave success path so isDirty is false.
   it('T8FIX: post-save × Close → no InlineConfirm + onClose called (form state cleared)', async () => {
     const evalResp = { id: 9, submission_id: 100, result: 'accepted', score: 80, feedback_text: '', has_feedback_file: false, evaluated_at: '2026-06-04T12:00:00Z', evaluated_by: 1 };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(evalResp), { status: 201, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 201, body: evalResp } }));
     const { onClose } = mountPanel({
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
       isAdmin: true,

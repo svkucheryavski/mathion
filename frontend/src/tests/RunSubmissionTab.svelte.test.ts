@@ -24,6 +24,23 @@ function mockFetch(status: number, body: unknown) {
   ));
 }
 
+// Serves dashboard GETs and thread GETs from independent ordered lists (last entry sticks).
+function routedTabFetch(dashboards: unknown[], threads: unknown[]) {
+  let di = 0, ti = 0;
+  return vi.fn((url: string, init?: RequestInit) => {
+    const u = String(url);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    if (method === 'GET' && u.includes('/groups/') && u.endsWith('/submissions')) {
+      const t = threads[Math.min(ti, threads.length - 1)] ?? { submissions: [] };
+      ti += 1;
+      return Promise.resolve(new Response(JSON.stringify(t), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    const d = dashboards[Math.min(di, dashboards.length - 1)];
+    di += 1;
+    return Promise.resolve(new Response(JSON.stringify(d), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  });
+}
+
 function mountTab(runId = 1) {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -715,10 +732,14 @@ describe('RunSubmissionTab', () => {
         },
       ],
     });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(v1), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(v2), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
+    // submissionMock's return type is dominated by its default (latest_submission: null),
+    // so the static type here is `null` even though the runtime value is the override's real
+    // submission object; cast to read the runtime shape without changing behaviour.
+    const g1v1 = v1.mini_projects[0].groups[0] as unknown as { latest_submission: Record<string, unknown>; latest_evaluation: unknown };
+    const g1v2 = v2.mini_projects[0].groups[0] as unknown as { latest_submission: Record<string, unknown>; latest_evaluation: unknown };
+    const openThread = { submissions: [{ ...g1v1.latest_submission, evaluation: null }] };
+    const refreshedThread = { submissions: [{ ...g1v2.latest_submission, evaluation: g1v2.latest_evaluation }] };
+    vi.stubGlobal('fetch', routedTabFetch([v1, v2], [openThread, refreshedThread]));
     mountTab(1);
     await settle();
     const cellBtn = host.querySelector('.status-cell-btn') as HTMLButtonElement;
@@ -730,6 +751,7 @@ describe('RunSubmissionTab', () => {
     const refreshBtn = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
     refreshBtn.click();
     await settle();
+    await settle(); // dashboard resolve → effect refire → thread GET#2 resolve → render
     panel = host.querySelector('[role="dialog"]') as HTMLElement;
     expect(panel).toBeTruthy();
     expect(panel.textContent).toContain('90');

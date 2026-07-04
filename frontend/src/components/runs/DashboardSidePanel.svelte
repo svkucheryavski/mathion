@@ -7,10 +7,13 @@
 <script lang="ts">
   import {
     getSequenceItemState,
+    getSubmissionThread,
     type SequenceItemStateResponse,
     type DashboardMpRow,
     type DashboardMpGroupEntry,
+    type ThreadSubmission,
   } from '../../lib/dashboards';
+  import SubmissionThreadEntry from './SubmissionThreadEntry.svelte';
   import FocusTrap from '../ui/FocusTrap.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import DirtyGuard from '../editor/DirtyGuard.svelte';
@@ -30,6 +33,7 @@
   };
   type SubmissionTarget = {
     kind: 'submission';
+    runId: number;
     mp: DashboardMpRow;
     entry: DashboardMpGroupEntry;
   };
@@ -75,10 +79,89 @@
   // just-opened edit is NOT dirty. `null` means create-mode (no pre-fill).
   let prefillSnapshot = $state<{ result: EvaluationResult | ''; score: number | null; feedback_text: string } | null>(null);
 
+  // --- Submission thread (Slice B) ---
+  let threadState = $state<ThreadSubmission[] | null>(null);
+  let threadLoading = $state(false);
+  let threadError = $state(false);
+  let threadCtl: AbortController | null = null;
+  let expandedById = $state<Record<number, boolean>>({});
+
+  // Gated primitive ids — the fetch effect reads ONLY primitive $derived (these three
+  // plus the sub/eval-id primitives declared below), never `target` inline, so it fires
+  // once per (cell + cell sub/eval-id state): the ids recompute to strict-equal values
+  // across an onRefetch()-driven `target` object swap, so a no-op refresh propagates
+  // nothing. null when not a submission target or nothing submitted yet.
+  const submissionRunId = $derived(
+    target.kind === 'submission' && target.entry.latest_submission != null ? target.runId : null,
+  );
+  const submissionMpId = $derived(
+    target.kind === 'submission' && target.entry.latest_submission != null ? target.mp.id : null,
+  );
+  const submissionGroupId = $derived(
+    target.kind === 'submission' && target.entry.latest_submission != null ? target.entry.group_id : null,
+  );
+  // Also key the fetch effect on the cell's latest submission/evaluation ids so an
+  // EXTERNAL grid refresh (onRefetch reassigns `data` → a new cell entry with a
+  // changed submission or evaluation) re-fetches the thread — spec §8: "surfaced on
+  // the next thread refetch / manual grid refresh". Primitive values → no refire when
+  // the ids are unchanged (a no-op grid refresh does not refetch). After a create
+  // write the cell's evaluation id changes null→N via onRefetch, so the effect DOES
+  // refire and fetches once more on top of Step 11's manual refetch; this is benign
+  // (loadThread aborts the prior in-flight request, so the two serialize) and is the
+  // same mechanism that surfaces a concurrent external evaluation.
+  const submissionLatestSubId = $derived(
+    target.kind === 'submission' ? (target.entry.latest_submission?.id ?? null) : null,
+  );
+  const submissionLatestEvalId = $derived(
+    target.kind === 'submission' ? (target.entry.latest_evaluation?.id ?? null) : null,
+  );
+
+  // The authoritative newest entry. Once the thread resolves, thread[0] wins
+  // (may differ from the cell entry if the group resubmitted). Before that (or
+  // defensively if the thread resolves empty) fall back to the cell entry.
+  const newest = $derived.by<ThreadSubmission | null>(() => {
+    if (target.kind !== 'submission' || target.entry.latest_submission == null) return null;
+    if (threadState != null && threadState.length > 0) return threadState[0];
+    return { ...target.entry.latest_submission, evaluation: target.entry.latest_evaluation };
+  });
+
   const effectiveEvaluation = $derived.by(() => {
     if (target.kind !== 'submission') return null;
-    return stateLatestEvaluation ?? target.entry.latest_evaluation;
+    return stateLatestEvaluation ?? newest?.evaluation ?? null;
   });
+
+  function loadThread(runId: number, mpId: number, groupId: number) {
+    threadCtl?.abort();
+    const ctl = new AbortController();
+    threadCtl = ctl;
+    threadLoading = true; threadError = false; threadState = null;
+    getSubmissionThread(runId, mpId, groupId, { signal: ctl.signal })
+      .then((res) => {
+        if (ctl.signal.aborted) return;
+        threadState = res.submissions;
+        threadLoading = false;
+        // Post-write bridge (stateLatestEvaluation) is now superseded by the
+        // nested thread evaluation; drop it so the newest render matches every
+        // other entry — but not mid-edit (would reset the in-progress form).
+        if (!editing && res.submissions.length > 0 && res.submissions[0].evaluation != null) {
+          stateLatestEvaluation = null;
+        }
+      })
+      .catch((err: unknown) => {
+        if (ctl.signal.aborted || (err as { name?: string })?.name === 'AbortError') return;
+        threadError = true; threadLoading = false;
+      });
+  }
+
+  function retryThread() {
+    if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
+      loadThread(submissionRunId, submissionMpId, submissionGroupId);
+    }
+  }
+
+  function toggleThreadEntry(id: number) {
+    expandedById = { ...expandedById, [id]: !expandedById[id] };
+  }
 
   const existingHasFeedbackFile = $derived(effectiveEvaluation?.has_feedback_file ?? false);
   const resultLocked = $derived(editing && effectiveEvaluation != null && !effectiveEvaluation.has_feedback_file);
@@ -179,9 +262,9 @@
     try {
       let result: Evaluation;
       if (effectiveEvaluation == null) {
-        if (target.kind !== 'submission') throw new Error('handleSave called on non-submission kind');
+        if (target.kind !== 'submission' || newest == null) throw new Error('handleSave called with no submission');
         result = await createEvaluation({
-          submission_id: target.entry.latest_submission!.id,
+          submission_id: newest.id,
           result: formResult as EvaluationResult,
           score: formScore,
           feedback_text: formFeedbackText || null,
@@ -208,6 +291,9 @@
       formSubmitAttempted = false;
       pushToast('Evaluation saved; group notified', 'success');
       onRefetch();
+      if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
+        loadThread(submissionRunId, submissionMpId, submissionGroupId);
+      }
       await tick();
       const editBtn = document.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement | null;
       editBtn?.focus();
@@ -216,6 +302,9 @@
         raceTransition = true;
         editing = false;
         onRefetch();
+        if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
+          loadThread(submissionRunId, submissionMpId, submissionGroupId);
+        }
         return;
       }
       if ((e as { name?: string })?.name === 'AbortError') {
@@ -332,6 +421,36 @@
     return () => ctl.abort();
   });
 
+  // Thread fetch — keyed on the gated primitive ids only (see their comment).
+  // Fires once per (cell + cell-submission/eval-id state): on a genuine cell switch
+  // AND when an external grid refresh lands a new submission/evaluation for the same
+  // cell. `loadThread` nulls `threadState` on every fire, so a cell switch shows the
+  // new cell's own optimistic newest rather than the previous cell's thread[0].
+  //
+  // NOTE: it deliberately does NOT reset `expandedById`. That map is keyed by
+  // globally-unique submission id, so a switched-away cell's keys are inert (no other
+  // cell can carry the same submission id) — while NOT clearing it is exactly what
+  // makes a write survive the post-write refire without collapsing expanded history
+  // (spec §6.2). Clearing it here would collapse an expanded older entry every time a
+  // create write's onRefetch changes the cell's evaluation id.
+  $effect(() => {
+    const runId = submissionRunId;
+    const mpId = submissionMpId;
+    const groupId = submissionGroupId;
+    // Track the cell's submission/eval ids too, so an external grid refresh that
+    // changes either re-fetches the thread (see their declaration comment). `void`
+    // reads register the reactive dependency without using the values.
+    void submissionLatestSubId;
+    void submissionLatestEvalId;
+    threadCtl?.abort();
+    if (runId == null || mpId == null || groupId == null) {
+      threadState = null; threadLoading = false; threadError = false;
+      return;
+    }
+    loadThread(runId, mpId, groupId);
+    return () => threadCtl?.abort();
+  });
+
   // Unmount-only cleanup for any in-flight panel fetch (mirrors the tab pattern).
   $effect(() => () => abortCtl?.abort());
 
@@ -399,10 +518,10 @@
 
       <StatusBadge status={target.entry.status} />
 
-      {#if target.entry.latest_submission == null}
+      {#if newest == null}
         <p>Not submitted yet.</p>
       {:else}
-        {@const sub = target.entry.latest_submission}
+        {@const sub = newest}
         <section class="submission-block">
           <h4>Submission</h4>
           <p>Number: {sub.submission_number}</p>
@@ -418,9 +537,9 @@
           <div role="status" class="banner-info">
             Auto-accepted on resubmission. No manual evaluation needed.
           </div>
-          {#if target.entry.latest_evaluation}
-            {@const evalu = target.entry.latest_evaluation}
-            <!-- Occurrence (a): auto-accept eval block. NEVER replaced — always reads dashboard shape. -->
+          {#if sub.evaluation}
+            {@const evalu = sub.evaluation}
+            <!-- Occurrence (a): auto-accept eval block, now backed by newest.evaluation. -->
             <section class="evaluation-block">
               <h4>Evaluation</h4>
               <p>Evaluated at: {evalu.evaluated_at ? formatLocalWithTz(evalu.evaluated_at) : '—'}</p>
@@ -438,8 +557,8 @@
           <!-- Occurrence (b): Branch B. -->
           <section class="evaluation-block">
             <h4>Evaluation</h4>
-            <p>Evaluated at: {target.entry.latest_evaluation ? (target.entry.latest_evaluation.evaluated_at ? formatLocalWithTz(target.entry.latest_evaluation.evaluated_at) : '—') : 'Just now'}</p>
-            <p>Evaluated by: {target.entry.latest_evaluation ? (target.entry.latest_evaluation.evaluated_by?.full_name ?? target.entry.latest_evaluation.evaluated_by?.user_id ?? '—') : 'You'}</p>
+            <p>Evaluated at: {sub.evaluation ? (sub.evaluation.evaluated_at ? formatLocalWithTz(sub.evaluation.evaluated_at) : '—') : 'Just now'}</p>
+            <p>Evaluated by: {sub.evaluation ? (sub.evaluation.evaluated_by?.full_name ?? sub.evaluation.evaluated_by?.user_id ?? '—') : 'You'}</p>
             <p>Result: {evalu.result}</p>
             <p>Score: {evalu.score ?? '—'}</p>
             <p>Feedback: {evalu.feedback_text ?? '—'}</p>
@@ -590,6 +709,26 @@
         {:else}
           <p>Awaiting evaluation</p>
         {/if}
+
+        {#if threadLoading}
+          <p data-test="thread-loading">Loading previous submissions…</p>
+        {:else if threadError}
+          <p class="banner-error" role="alert" data-test="thread-error">
+            Couldn't load submission history.
+            <button type="button" data-test="thread-retry" onclick={retryThread}>Retry</button>
+          </p>
+        {:else if threadState && threadState.length > 1}
+          <h4>Previous submissions</h4>
+          <div data-test="thread-history">
+            {#each threadState.slice(1) as histSub (histSub.id)}
+              <SubmissionThreadEntry
+                submission={histSub}
+                expanded={!!expandedById[histSub.id]}
+                onToggle={() => toggleThreadEntry(histSub.id)}
+              />
+            {/each}
+          </div>
+        {/if}
       {/if}
     {/if}
     {#if confirmDiscard}
@@ -624,6 +763,14 @@
     background: #e0f2f8;
     color: #044d6c;
     border-left: 4px solid #0a7ea4;
+    margin-bottom: 1rem;
+  }
+  .banner-error {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    background: #fdecea;
+    color: #611a15;
+    border-left: 4px solid #c53030;
     margin-bottom: 1rem;
   }
   .form-error {
