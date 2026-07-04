@@ -8,6 +8,8 @@
   import {
     getSequenceItemState,
     getSubmissionThread,
+    resultToStatus,
+    type MpGroupStatus,
     type SequenceItemStateResponse,
     type DashboardMpRow,
     type DashboardMpGroupEntry,
@@ -127,7 +129,23 @@
 
   const effectiveEvaluation = $derived.by(() => {
     if (target.kind !== 'submission') return null;
-    return stateLatestEvaluation ?? newest?.evaluation ?? null;
+    // The post-write bridge only applies to the submission it was created for.
+    // If the thread's newest is now a DIFFERENT submission (the group resubmitted
+    // between the write and the refetch), fall through to the thread's own newest
+    // evaluation so we never render/PATCH the previous submission's evaluation
+    // against a newer one.
+    if (stateLatestEvaluation != null && stateLatestEvaluation.submission_id === newest?.id) {
+      return stateLatestEvaluation;
+    }
+    return newest?.evaluation ?? null;
+  });
+
+  const panelStatus = $derived.by<MpGroupStatus>(() => {
+    // Badge only renders for submission targets; this fallback is dead code that
+    // must still typecheck (ProgressTarget has no `entry`), so return a valid status.
+    if (target.kind !== 'submission') return 'not_submitted';
+    if (newest == null) return 'not_submitted';
+    return resultToStatus(effectiveEvaluation?.result ?? null);
   });
 
   function loadThread(runId: number, mpId: number, groupId: number) {
@@ -140,10 +158,18 @@
         if (ctl.signal.aborted) return;
         threadState = res.submissions;
         threadLoading = false;
-        // Post-write bridge (stateLatestEvaluation) is now superseded by the
-        // nested thread evaluation; drop it so the newest render matches every
-        // other entry — but not mid-edit (would reset the in-progress form).
-        if (!editing && res.submissions.length > 0 && res.submissions[0].evaluation != null) {
+        // Drop the post-write bridge once the refetch supersedes it: the newest
+        // submission now carries its own evaluation, OR the newest is a DIFFERENT
+        // submission than the bridge was created for (a concurrent resubmission
+        // landed). Never on an empty thread (keeps the create-then-edit flat eval)
+        // and never mid-edit (would reset the in-progress form).
+        const newestAfter = res.submissions.length > 0 ? res.submissions[0] : null;
+        if (
+          !editing &&
+          stateLatestEvaluation != null &&
+          newestAfter != null &&
+          (newestAfter.evaluation != null || newestAfter.id !== stateLatestEvaluation.submission_id)
+        ) {
           stateLatestEvaluation = null;
         }
       })
@@ -516,7 +542,7 @@
         <p class="group-line">{target.entry.group_name}</p>
       </header>
 
-      <StatusBadge status={target.entry.status} />
+      <StatusBadge status={panelStatus} />
 
       {#if newest == null}
         <p>Not submitted yet.</p>

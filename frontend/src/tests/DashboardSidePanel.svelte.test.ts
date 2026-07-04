@@ -1575,4 +1575,77 @@ describe('DashboardSidePanel', () => {
     expect(calls).toBe(2);
   });
 
+  // FIX #1: the post-write bridge (stateLatestEvaluation) carries the OLD submission's
+  // evaluation. If a reject/revision→resubmit race lands a NEWER unevaluated submission
+  // as thread[0] between the write's POST and the immediate refetch, the bridge must be
+  // dropped — never attached/PATCHed against the newer submission.
+  it('FIX #1: post-write refetch landing a newer unevaluated submission drops the stale bridge (no PATCH of old eval)', async () => {
+    const start = submissionTarget({ status: 'awaiting_eval', submissionId: 100, latest_evaluation: null });
+    // thread #1 (mount): echoes the cell → newest submission 100, no eval → create form for 100.
+    // thread #2 (post-write refetch): a NEWER unevaluated submission 200 landed (resubmission race).
+    const newerUneval = { submissions: [
+      { id: 200, submission_number: 3, submitted_at: '2026-06-06T10:00:00Z',
+        submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false,
+        file_size: 777, evaluation: null },
+    ] };
+    // The create POST for submission 100 returns an eval carrying submission_id 100.
+    const createdForOld = { id: 42, submission_id: 100, result: 'accepted', score: 77,
+      feedback_text: 'OLD-EVAL-FEEDBACK', has_feedback_file: false,
+      evaluated_at: '2026-06-06T09:00:00Z', evaluated_by: 1 };
+    const fetchMock = sequencedThreadFetch(
+      [echoThread(start), newerUneval],
+      { status: 201, body: createdForOld },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    mountPanel({ target: start, isAdmin: true });
+    await settle();
+    // write an eval on the currently-newest submission (100) — accepted needs no file
+    const sel = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    sel.value = 'accepted'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    await settle(); // POST → refetch lands the newer submission 200 (two awaited hops)
+    // The bridge (submission 100's eval) must NOT attach to submission 200: the old eval's
+    // feedback must not render under the newer submission, and a fresh create form shows.
+    expect(host.textContent).not.toContain('OLD-EVAL-FEEDBACK');
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeTruthy();
+    // A subsequent write must CREATE against the new submission (200), never PATCH the old eval (42).
+    const sel2 = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+    sel2.value = 'accepted'; sel2.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const calls = evalCalls(fetchMock);
+    const post200 = calls.find(([u, i]) => (i.method ?? '').toUpperCase() === 'POST' && String(u) === '/api/submissions/200/evaluation');
+    expect(post200).toBeTruthy();
+    expect(calls.some(([, i]) => (i.method ?? '').toUpperCase() === 'PATCH')).toBe(false);
+  });
+
+  // FIX #2: the header status badge must reflect the thread-authoritative newest, not the
+  // stale grid cell snapshot. Grid cell says needs_revision (sub 100), but the group
+  // resubmitted → thread[0] is a newer awaiting submission (eval null) → badge = awaiting_eval.
+  it('FIX #2: header badge reflects thread newest status, not the stale grid cell status', async () => {
+    const t = submissionTarget({
+      status: 'needs_revision',
+      submissionId: 100,
+      latest_evaluation: { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' },
+        result: 'major_revision', score: 40, feedback_text: 'Redo', has_feedback_file: true },
+    });
+    const thread = { submissions: [
+      { id: 200, submission_number: 3, submitted_at: '2026-06-06T10:00:00Z',
+        submitted_by: { user_id: 5, full_name: 'Alice' }, is_late: false, is_resubmission: false,
+        file_size: 777, evaluation: null },
+    ] };
+    vi.stubGlobal('fetch', routedFetch({ thread }));
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    const badge = host.querySelector('.status-badge') as HTMLElement;
+    expect(badge).toBeTruthy();
+    // thread newest (submission 200) is awaiting_eval; NOT the grid cell's needs_revision.
+    expect(badge.getAttribute('data-status')).toBe('awaiting_eval');
+  });
+
 });
