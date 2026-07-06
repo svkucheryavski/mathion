@@ -483,6 +483,42 @@ def seed() -> None:
             file_size=1024,
         )
 
+        # MP2/B: a rejected-then-resubmitted thread — #1 evaluated "rejected"
+        # (with a feedback file), then #2 a FRESH initial submission. Per the
+        # submit gate (submissions.py: latest_result == "rejected" ->
+        # is_resubmission=False), a submission after a rejection is treated as
+        # a fresh initial submission, NOT an auto-accepted resubmission, so it
+        # stays manually evaluable. #2 is left un-evaluated → the panel shows
+        # the write form on the newest entry while #1 remains an expandable
+        # read-only history entry (exercises expand-survives-write).
+        sub_mp2_b1 = _get_or_create_submission(
+            db,
+            mini_project_id=mp2.id,
+            group_id=group_b.id,
+            submission_number=1,
+            submitted_by=student3.id,
+            file_path=build_submission_filename(block_mv.order, group_b.name, 1),
+            file_size=1024,
+        )
+        _get_or_create_evaluation(
+            db,
+            submission_id=sub_mp2_b1.id,
+            evaluated_by=admin.id,
+            result="rejected",
+            score=None,
+            feedback_file=build_feedback_filename(block_mv.order, group_b.name, 1),
+        )
+        _get_or_create_submission(
+            db,
+            mini_project_id=mp2.id,
+            group_id=group_b.id,
+            submission_number=2,
+            submitted_by=student3.id,
+            file_path=build_submission_filename(block_mv.order, group_b.name, 2),
+            file_size=1024,
+            is_resubmission=False,  # fresh initial submission after a rejection
+        )
+
         # MP2/C: 1 Submission, no Evaluation → awaiting_eval
         _get_or_create_submission(
             db,
@@ -611,8 +647,13 @@ def seed() -> None:
             file_size=1024,
         )
 
-        # MP5/B: 2 Submissions + 1 Evaluation on #2 result="accepted" → accepted
-        _get_or_create_submission(
+        # MP5/B: a realistic 2-submission resubmission thread — #1 evaluated
+        # "major_revision" (needs revision, with a feedback file), then #2 the
+        # resubmission evaluated "accepted". This mirrors the real submit API:
+        # a resubmission (is_resubmission=True) is only allowed AFTER a
+        # needs-revision evaluation (submissions.py), never over a still-pending
+        # submission.
+        sub_mp5_b1 = _get_or_create_submission(
             db,
             mini_project_id=mp5.id,
             group_id=group_b.id,
@@ -622,6 +663,14 @@ def seed() -> None:
             file_size=1024,
             is_resubmission=False,
             is_late=False,
+        )
+        _get_or_create_evaluation(
+            db,
+            submission_id=sub_mp5_b1.id,
+            evaluated_by=admin.id,
+            result="major_revision",
+            score=None,
+            feedback_file=build_feedback_filename(block_cp.order, group_b.name, 1),
         )
         sub_mp5_b2 = _get_or_create_submission(
             db,
