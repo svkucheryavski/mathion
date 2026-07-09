@@ -42,6 +42,7 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
         info_md=data.info_md,
         info_html="",
         max_quiz_attempts=data.max_quiz_attempts,
+        label=data.label,
     )
     db.add(version)
     db.flush()
@@ -110,6 +111,8 @@ def update_version(
         sync_asset_references(db, version.id, [updates["info_md"]], {"info_version_id": version.id})
     if "max_quiz_attempts" in updates:
         version.max_quiz_attempts = updates["max_quiz_attempts"]
+    if "label" in updates:
+        version.label = updates["label"]
 
     bump_content_updated_at(version)
     db.commit()

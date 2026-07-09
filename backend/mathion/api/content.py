@@ -136,6 +136,7 @@ def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = 
             "is_disabled": version.is_disabled,
             "info_md": version.info_md,
             "info_html": version.info_html,
+            "label": version.label,
             "max_quiz_attempts": version.max_quiz_attempts,
             "created_at": version.created_at.isoformat(),
             "published_at": version.published_at.isoformat() if version.published_at else None,

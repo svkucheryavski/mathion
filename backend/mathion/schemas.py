@@ -28,15 +28,42 @@ class CourseResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+def _strip_label_value(v: str | None) -> str | None:
+    """Strip a label before length validation; pass None through so an explicit
+    null (VersionUpdate clear/no-op) doesn't AttributeError -> 500."""
+    return v.strip() if isinstance(v, str) else v
+
+
 class VersionCreate(BaseModel):
     info_md: str = ""
     max_quiz_attempts: int = Field(default=3, ge=1, le=10)
     copy_assets_from: int | None = None
+    label: str = Field(default="", max_length=200)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _strip_label(cls, v: str | None) -> str | None:
+        return _strip_label_value(v)
 
 
 class VersionUpdate(BaseModel):
     info_md: str | None = None
     max_quiz_attempts: int | None = Field(default=None, ge=1, le=10)
+    label: str | None = Field(default=None, max_length=200)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _strip_label(cls, v: str | None) -> str | None:
+        return _strip_label_value(v)
+
+
+class VersionDuplicateRequest(BaseModel):
+    label: str = Field(default="", max_length=200)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _strip_label(cls, v: str | None) -> str | None:
+        return _strip_label_value(v)
 
 
 class VersionRenderRequest(BaseModel):
@@ -55,6 +82,7 @@ class VersionResponse(BaseModel):
     info_md: str
     info_html: str
     max_quiz_attempts: int
+    label: str
     created_at: datetime
     published_at: datetime | None
     archived_at: datetime | None

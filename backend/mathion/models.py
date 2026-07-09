@@ -43,6 +43,7 @@ class CourseVersion(Base):
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     info_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
     info_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    label: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     max_quiz_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -395,3 +395,47 @@ def test_list_versions_ordered_newest_first(admin_client):
     v3 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "v3"}).json()
     rows = admin_client.get(f"/api/courses/{course['id']}/versions").json()
     assert [r["id"] for r in rows] == [v3["id"], v2["id"], v1["id"]]
+
+
+def test_create_version_with_label(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lbl", "name": "L", "description": ""}).json()
+    r = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "", "label": "  Spring 26  "})
+    assert r.status_code == 201
+    assert r.json()["label"] == "Spring 26"  # stripped
+
+
+def test_create_version_label_defaults_empty(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lbl2", "name": "L", "description": ""}).json()
+    r = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""})
+    assert r.status_code == 201
+    assert r.json()["label"] == ""
+
+
+def test_patch_version_label(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lbl3", "name": "L", "description": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = admin_client.patch(f"/api/versions/{v['id']}", json={"label": "Draft A"})
+    assert r.status_code == 200
+    assert r.json()["label"] == "Draft A"
+
+
+def test_patch_version_label_too_long_422(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lbl4", "name": "L", "description": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    r = admin_client.patch(f"/api/versions/{v['id']}", json={"label": "x" * 201})
+    assert r.status_code == 422
+
+
+def test_patch_version_label_null_is_noop(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lbl5", "name": "L", "description": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "", "label": "keep"}).json()
+    r = admin_client.patch(f"/api/versions/{v['id']}", json={"label": None})
+    assert r.status_code == 200
+    assert r.json()["label"] == "keep"
+
+
+def test_admin_tree_includes_label(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lbl6", "name": "L", "description": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "", "label": "Tree"}).json()
+    tree = admin_client.get(f"/api/versions/{v['id']}/admin-tree").json()
+    assert tree["version"]["label"] == "Tree"
