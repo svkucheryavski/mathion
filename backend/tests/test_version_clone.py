@@ -180,6 +180,8 @@ def test_clone_version_content_full_fidelity(admin_client, db):
     assert vid_item.video_url == "https://e.com/v"
     assert vid_item.content_md == "Notes ![x](vid.png)"      # content_md kept on video
     assert f"/assets/{new.id}/vid.png" in vid_item.content_html  # rendered against NEW version
+    assert f"/assets/{new.id}/sp.png" in items[0].content_html        # static_page rendered vs new
+    assert f"/assets/{new.id}/quiz.png" in items[2].content_html      # quiz item rendered vs new
 
     app_item = items[3]
     assert app_item.script_url == "app.js"
@@ -193,8 +195,20 @@ def test_clone_version_content_full_fidelity(admin_client, db):
     assert [q.type for q in qs] == ["single_choice", "numeric_answer", "text_answer", "multiple_choice"]
     assert qs[1].correct_numeric == Decimal("4") and qs[1].precision == 0
     assert qs[2].correct_text == "ada"
+    assert f"/assets/{new.id}/tq.png" in qs[0].text_html              # question text rendered vs new
+    assert f"/assets/{new.id}/exp.png" in qs[0].explanation_html      # question explanation rendered vs new
+
     opts = db.query(AnswerOption).filter(AnswerOption.question_id == qs[0].id).order_by(AnswerOption.order).all()
     assert [(o.text, o.is_correct) for o in opts] == [("A", True), ("B", False)]
+
+    # question AssetReference points at the COPIED asset in `new`
+    new_tq = db.query(Asset).filter(Asset.version_id == new.id, Asset.filename == "tq.png").one()
+    q_ref_asset_ids = {r.asset_id for r in db.query(AssetReference).filter(AssetReference.question_id == qs[0].id)}
+    assert new_tq.id in q_ref_asset_ids
+
+    # multiple_choice options copied with both correct
+    mopts = db.query(AnswerOption).filter(AnswerOption.question_id == qs[3].id).order_by(AnswerOption.order).all()
+    assert [(o.text, o.is_correct) for o in mopts] == [("C", True), ("D", True)]
 
     # SOURCE untouched: its interactive_app script ref + asset survive (no GC)
     src_app = db.query(Item).filter(Item.sequence_id.in_(
@@ -202,3 +216,6 @@ def test_clone_version_content_full_fidelity(admin_client, db):
     ), Item.type == "interactive_app").one()
     assert db.query(AssetReference).filter(AssetReference.item_id == src_app.id).count() == 1
     assert db.query(Asset).filter(Asset.version_id == source.id, Asset.filename == "app.js").count() == 1
+    src_app_asset = db.query(Asset).filter(Asset.version_id == source.id, Asset.filename == "app.js").one()
+    src_ref = db.query(AssetReference).filter(AssetReference.item_id == src_app.id).one()
+    assert src_ref.asset_id == src_app_asset.id
