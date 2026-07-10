@@ -91,7 +91,10 @@
     try {
       await api.post(`/api/versions/${v.id}/${action}`);
       await load();
-      if (action === 'disable' && duplicatingId === v.id) duplicatingId = null;
+      // Close a stale duplicate form on this row after any transition. The row
+      // just changed state; a concurrent disable may have hidden the form via
+      // the render guard, and a later enable must not spuriously re-open it.
+      if (duplicatingId === v.id) duplicatingId = null;
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : `Could not ${action}`;
       pushToast(msg, 'error');
