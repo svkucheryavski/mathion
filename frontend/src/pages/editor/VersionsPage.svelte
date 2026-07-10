@@ -91,6 +91,7 @@
     try {
       await api.post(`/api/versions/${v.id}/${action}`);
       await load();
+      if (action === 'disable' && duplicatingId === v.id) duplicatingId = null;
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : `Could not ${action}`;
       pushToast(msg, 'error');
@@ -201,7 +202,7 @@
                 {/if}
               </div>
             </li>
-            {#if duplicatingId === v.id}
+            {#if !v.is_disabled && duplicatingId === v.id}
               <li class="dup-row">
                 <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
                   <label>New draft label

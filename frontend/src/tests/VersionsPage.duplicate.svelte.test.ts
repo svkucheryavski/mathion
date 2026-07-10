@@ -19,16 +19,22 @@ vi.mock('../lib/versionsPageLoader.svelte', async (importOriginal) => {
   const real = await importOriginal<typeof import('../lib/versionsPageLoader.svelte')>();
   return { ...real, loadVersionsPage: vi.fn().mockResolvedValue(undefined) };
 });
+vi.mock('../stores/toasts.svelte', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../stores/toasts.svelte')>();
+  return { ...real, pushToast: vi.fn() };
+});
 
 import { navigate } from '../lib/router.svelte';
 import { api } from '../lib/api';
 import { versionsPageState } from '../lib/versionsPageLoader.svelte';
+import { pushToast } from '../stores/toasts.svelte';
 import VersionsPage from '../pages/editor/VersionsPage.svelte';
 import type { Version } from '../lib/types';
 
 // Typed handles to the already-hoisted mock fns (used in assertions + reset).
 const navigateMock = vi.mocked(navigate);
 const postMock = vi.mocked(api.post);
+const pushToastMock = vi.mocked(pushToast);
 
 function mkVersion(over: Partial<Version> = {}): Version {
   return {
@@ -45,6 +51,7 @@ let component: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
   navigateMock.mockReset();
   postMock.mockReset();
+  pushToastMock.mockReset();
   versionsPageState.course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
   versionsPageState.versions = [];
   versionsPageState.loading = false;
@@ -105,6 +112,7 @@ describe('VersionsPage — Duplicate', () => {
     clickButtonByText(target, 'Create copy');
     await settle();
     expect(navigateMock).not.toHaveBeenCalled();
+    expect(pushToastMock).toHaveBeenCalledWith(expect.any(String), 'error');
   });
 
   it('single-open: opening a second row does not keep the first open', async () => {
@@ -132,5 +140,34 @@ describe('VersionsPage — Duplicate', () => {
     clickButtonByText(target, 'Create');
     await settle();
     expect(postMock).toHaveBeenCalledWith('/api/courses/1/versions', expect.objectContaining({ label: 'First' }));
+  });
+
+  it('clamps prefill to 200 chars when label exceeds 200', async () => {
+    const longLabel = 'x'.repeat(300);
+    versionsPageState.versions = [mkVersion({ id: 7, label: longLabel })];
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickButtonByText(target, 'Duplicate');
+    const input = target.querySelector<HTMLInputElement>('input.dup-label');
+    if (!input) throw new Error('duplicate label input missing');
+    expect(input.value.length).toBe(200);
+    expect(input.value).toBe(('Copy of ' + longLabel).slice(0, 200));
+  });
+
+  it('hides duplicate form when the row becomes disabled', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, is_disabled: false })];
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickButtonByText(target, 'Duplicate');
+    expect(target.querySelector('input.dup-label')).not.toBeNull(); // form open
+    // Simulate the row becoming disabled (e.g., after transition('disable'))
+    versionsPageState.versions = [mkVersion({ id: 7, is_disabled: true })];
+    flushSync();
+    await settle();
+    // Form must be gone
+    expect(target.querySelector('input.dup-label')).toBeNull();
+    // Confirm row rendered as disabled (Enable button present, not Duplicate)
+    const enableBtn = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Enable');
+    expect(enableBtn).toBeDefined();
   });
 });
