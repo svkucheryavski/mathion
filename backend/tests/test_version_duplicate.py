@@ -1,4 +1,3 @@
-import io
 import os
 
 from mathion.config import settings
@@ -51,6 +50,7 @@ def test_duplicate_requires_admin_403(auth_client, admin_client, db):
     _, src_v, _ = _build_full_source(admin_client, db)
     r = auth_client.post(f"/api/versions/{src_v['id']}/duplicate", json={"label": "x"})
     assert r.status_code == 403
+    assert r.json()["detail"] == "Course admin access required"
 
 
 def test_duplicate_disabled_source_403(admin_client, db):
@@ -58,6 +58,7 @@ def test_duplicate_disabled_source_403(admin_client, db):
     admin_client.post(f"/api/versions/{src_v['id']}/disable")
     r = admin_client.post(f"/api/versions/{src_v['id']}/duplicate", json={"label": "x"})
     assert r.status_code == 403
+    assert r.json()["detail"] == "Cannot duplicate a disabled version"
 
 
 def test_duplicate_missing_source_404(admin_client):
@@ -107,3 +108,28 @@ def test_duplicate_label_too_long_422(admin_client, db):
     src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     r = admin_client.post(f"/api/versions/{src['id']}/duplicate", json={"label": "x" * 201})
     assert r.status_code == 422
+
+
+def test_duplicate_abort_after_copy_rolls_back_and_cleans_dir(admin_client, db, monkeypatch):
+    _, src_v, _ = _build_full_source(admin_client, db)
+    import mathion.api.versions as versions_mod
+    from fastapi import HTTPException
+
+    def boom(*args, **kwargs):
+        raise HTTPException(status_code=500, detail="forced post-copy failure")
+
+    # clone_version_content runs AFTER copy_version_assets has written courses/{new_id},
+    # so patching it forces the abort path with assets already on disk.
+    monkeypatch.setattr(versions_mod, "clone_version_content", boom)
+
+    courses_dir = os.path.join(settings.asset_path, "courses")
+    before_dirs = set(os.listdir(courses_dir))
+    before_count = db.query(CourseVersion).count()
+
+    r = admin_client.post(f"/api/versions/{src_v['id']}/duplicate", json={"label": "x"})
+    assert r.status_code == 500
+
+    # rollback: the flushed new version was never committed
+    assert db.query(CourseVersion).count() == before_count
+    # cleanup: the copied courses/{new_id} dir was rmtree'd — no orphan left behind
+    assert set(os.listdir(courses_dir)) == before_dirs
