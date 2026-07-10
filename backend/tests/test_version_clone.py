@@ -1,12 +1,13 @@
 import io
 import os
+from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
 
-from mathion.api.version_clone import collect_referenced_filenames, copy_version_assets
+from mathion.api.version_clone import clone_version_content, collect_referenced_filenames, copy_version_assets
 from mathion.config import settings
-from mathion.models import Asset, Block, CourseVersion, Item, Question, Sequence
+from mathion.models import AnswerOption, Asset, AssetReference, Block, CourseVersion, Item, Question, Sequence
 
 
 def _mk_course_version(admin_client):
@@ -90,3 +91,114 @@ def test_collect_referenced_filenames_aggregates_all_owners(admin_client, db):
 
     names = collect_referenced_filenames(db, version)
     assert names == {"info.png", "diagram.png", "app.js", "tq.png", "exp.png"}
+
+
+def _build_full_source(admin_client, db):
+    """Course + version with all four item types (incl. a video and a quiz item
+    that BOTH carry content_md with an image ref), a quiz with all question
+    types + options, version info referencing an asset, and a block with info.
+    Returns (course, version_dict, {asset filenames}). Assets uploaded via API."""
+    course = admin_client.post("/api/courses", json={"slug": "full", "name": "F", "description": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    for name in ("logo.png", "sp.png", "vid.png", "quiz.png", "tq.png", "exp.png"):
+        admin_client.post(
+            f"/api/versions/{v['id']}/assets",
+            files={"file": (name, io.BytesIO(name.encode() * 4), "image/png")},
+        )
+    admin_client.post(
+        f"/api/versions/{v['id']}/assets",
+        files={"file": ("app.js", io.BytesIO(b"console.log(1)"), "text/javascript")},
+    )
+    version = db.get(CourseVersion, v["id"])
+    # Set info_md via ORM AFTER assets exist. Creating the version with an
+    # asset-referencing info_md would 422 (create_version renders info_md
+    # eagerly at versions.py:57). The /duplicate endpoint later renders this
+    # against the COPIED assets, so logo.png must be a real uploaded asset.
+    version.info_md = "Welcome ![logo](logo.png)"
+
+    block = Block(version_id=version.id, title="Blk", slug="blk", order=1,
+                  info="Block info", info_html="<p>Block info</p>")
+    db.add(block); db.flush()
+    seq = Sequence(block_id=block.id, title="Seq", slug="seq", order=1)
+    db.add(seq); db.flush()
+
+    sp = Item(sequence_id=seq.id, title="SP", slug="sp", order=1, type="static_page",
+              content_md="Page ![x](sp.png)", content_html="")
+    vid = Item(sequence_id=seq.id, title="Vid", slug="vid", order=2, type="video",
+               content_md="Notes ![x](vid.png)", content_html="", video_url="https://e.com/v")
+    quiz = Item(sequence_id=seq.id, title="Quiz", slug="quiz", order=3, type="quiz",
+                content_md="Intro ![x](quiz.png)", content_html="")
+    app = Item(sequence_id=seq.id, title="App", slug="app", order=4, type="interactive_app",
+               content_md=None, content_html="", script_url="app.js")
+    db.add_all([sp, vid, quiz, app]); db.flush()
+    # Establish the source interactive_app's script AssetReference (mirrors the
+    # item PATCH-attach path). Without this the source app has ZERO references,
+    # so the "source ref survives, no GC" assertion below would be vacuous.
+    from mathion.api.helpers import sync_script_reference
+    sync_script_reference(db, version.id, app.id, "app.js")
+
+    q_choice = Question(item_id=quiz.id, text_md="Pick ![t](tq.png)", text_html="",
+                        type="single_choice", order=1, explanation_md="Why ![e](exp.png)",
+                        explanation_html="")
+    q_num = Question(item_id=quiz.id, text_md="2+2?", text_html="", type="numeric_answer",
+                     order=2, correct_numeric=Decimal("4"), precision=0)
+    q_text = Question(item_id=quiz.id, text_md="Name?", text_html="", type="text_answer",
+                      order=3, correct_text="ada")
+    q_multi = Question(item_id=quiz.id, text_md="Select all", text_html="",
+                       type="multiple_choice", order=4)
+    db.add_all([q_choice, q_num, q_text, q_multi]); db.flush()
+    db.add_all([
+        AnswerOption(question_id=q_choice.id, text="A", is_correct=True, order=1),
+        AnswerOption(question_id=q_choice.id, text="B", is_correct=False, order=2),
+        AnswerOption(question_id=q_multi.id, text="C", is_correct=True, order=1),
+        AnswerOption(question_id=q_multi.id, text="D", is_correct=True, order=2),
+    ])
+    db.commit()
+    return course, v, {"logo.png", "sp.png", "vid.png", "quiz.png", "tq.png", "exp.png", "app.js"}
+
+
+def test_clone_version_content_full_fidelity(admin_client, db):
+    course, src_v, filenames = _build_full_source(admin_client, db)
+    source = db.get(CourseVersion, src_v["id"])
+
+    new = CourseVersion(course_id=course["id"], state="created", is_disabled=False,
+                        label="dup", info_md=source.info_md, info_html="",
+                        max_quiz_attempts=source.max_quiz_attempts)
+    db.add(new); db.flush()
+    copy_version_assets(db, source.id, new.id, None)
+    clone_version_content(db, source, new)
+    db.commit()
+
+    new_blocks = db.query(Block).filter(Block.version_id == new.id).all()
+    assert len(new_blocks) == 1
+    nb = new_blocks[0]
+    assert nb.title == "Blk" and nb.info_html == "<p>Block info</p>"  # verbatim block html
+    items = db.query(Item).join(Sequence).filter(Sequence.block_id == nb.id).order_by(Item.order).all()
+    assert [i.type for i in items] == ["static_page", "video", "quiz", "interactive_app"]
+
+    vid_item = items[1]
+    assert vid_item.video_url == "https://e.com/v"
+    assert vid_item.content_md == "Notes ![x](vid.png)"      # content_md kept on video
+    assert f"/assets/{new.id}/vid.png" in vid_item.content_html  # rendered against NEW version
+
+    app_item = items[3]
+    assert app_item.script_url == "app.js"
+    # the interactive_app's script AssetReference points at the NEW version's asset
+    new_app_asset = db.query(Asset).filter(Asset.version_id == new.id, Asset.filename == "app.js").one()
+    ref = db.query(AssetReference).filter(AssetReference.item_id == app_item.id).one()
+    assert ref.asset_id == new_app_asset.id
+
+    quiz_item = items[2]
+    qs = db.query(Question).filter(Question.item_id == quiz_item.id).order_by(Question.order).all()
+    assert [q.type for q in qs] == ["single_choice", "numeric_answer", "text_answer", "multiple_choice"]
+    assert qs[1].correct_numeric == Decimal("4") and qs[1].precision == 0
+    assert qs[2].correct_text == "ada"
+    opts = db.query(AnswerOption).filter(AnswerOption.question_id == qs[0].id).order_by(AnswerOption.order).all()
+    assert [(o.text, o.is_correct) for o in opts] == [("A", True), ("B", False)]
+
+    # SOURCE untouched: its interactive_app script ref + asset survive (no GC)
+    src_app = db.query(Item).filter(Item.sequence_id.in_(
+        db.query(Sequence.id).join(Block).filter(Block.version_id == source.id)
+    ), Item.type == "interactive_app").one()
+    assert db.query(AssetReference).filter(AssetReference.item_id == src_app.id).count() == 1
+    assert db.query(Asset).filter(Asset.version_id == source.id, Asset.filename == "app.js").count() == 1

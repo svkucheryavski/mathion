@@ -91,3 +91,75 @@ def collect_referenced_filenames(db: Session, source) -> set[str]:
             names |= extract_asset_filenames(q.explanation_md)
 
     return names
+
+
+def clone_version_content(db: Session, source, new) -> None:
+    """Deep-copy source's Block->Sequence->Item->Question->AnswerOption tree into
+    `new` (a freshly-flushed, asset-populated version). Renders each markdown
+    field against `new`'s assets and rebuilds AssetReference rows so every URL and
+    reference points at the new version. Assumes copy_version_assets has already
+    run for `new`. Slugs copy verbatim — uniqueness is scoped to the fresh empty
+    parents, so no collision is possible."""
+    from mathion.api.helpers import render_with_assets, sync_asset_references, sync_script_reference
+    from mathion.models import AnswerOption, Block, Item, Question, Sequence
+
+    src_blocks = db.execute(
+        select(Block).where(Block.version_id == source.id).order_by(Block.order)
+    ).scalars().all()
+    for sb in src_blocks:
+        nb = Block(version_id=new.id, title=sb.title, slug=sb.slug, order=sb.order,
+                   info=sb.info, info_html=sb.info_html)
+        db.add(nb)
+        db.flush()
+
+        src_seqs = db.execute(
+            select(Sequence).where(Sequence.block_id == sb.id).order_by(Sequence.order)
+        ).scalars().all()
+        for ss in src_seqs:
+            ns = Sequence(block_id=nb.id, title=ss.title, slug=ss.slug, order=ss.order)
+            db.add(ns)
+            db.flush()
+
+            src_items = db.execute(
+                select(Item).where(Item.sequence_id == ss.id).order_by(Item.order)
+            ).scalars().all()
+            for si in src_items:
+                ni = Item(sequence_id=ns.id, title=si.title, slug=si.slug, order=si.order,
+                          type=si.type, video_url=si.video_url,
+                          content_md=None, content_html="", script_url=None)
+                db.add(ni)
+                db.flush()
+
+                if si.type == "interactive_app":
+                    ni.script_url = si.script_url
+                    ni.content_html = ""
+                    sync_script_reference(db, new.id, ni.id, si.script_url)
+                else:
+                    ni.content_md = si.content_md
+                    ni.content_html = render_with_assets(db, new.id, si.content_md)
+                    sync_asset_references(db, new.id, [si.content_md], {"item_id": ni.id})
+
+                src_questions = db.execute(
+                    select(Question).where(Question.item_id == si.id).order_by(Question.order)
+                ).scalars().all()
+                for sq in src_questions:
+                    nq = Question(
+                        item_id=ni.id, text_md=sq.text_md,
+                        text_html=render_with_assets(db, new.id, sq.text_md),
+                        type=sq.type, order=sq.order,
+                        explanation_md=sq.explanation_md,
+                        explanation_html=render_with_assets(db, new.id, sq.explanation_md),
+                        correct_numeric=sq.correct_numeric, precision=sq.precision,
+                        correct_text=sq.correct_text,
+                    )
+                    db.add(nq)
+                    db.flush()
+                    sync_asset_references(db, new.id, [sq.text_md, sq.explanation_md], {"question_id": nq.id})
+
+                    src_options = db.execute(
+                        select(AnswerOption).where(AnswerOption.question_id == sq.id).order_by(AnswerOption.order)
+                    ).scalars().all()
+                    for so in src_options:
+                        db.add(AnswerOption(question_id=nq.id, text=so.text,
+                                            is_correct=so.is_correct, order=so.order))
+    db.flush()
