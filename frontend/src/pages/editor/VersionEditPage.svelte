@@ -295,7 +295,7 @@
     {/if}
     <header>
       <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
-      <h1>{tree.course.name} · v{v.id} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>
+      <h1>{tree.course.name} · v{v.id}{#if v.label} <span class="vlabel">{v.label}</span>{/if} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>
     </header>
 
     {#if v.is_disabled}
@@ -381,6 +381,7 @@
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
   header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .vlabel { font-weight: 400; font-size: 0.9rem; color: var(--muted); }
   .state { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; margin-left: var(--space-2); }
   .state-created { background: #ffeac0; color: #663; }
   .state-published { background: #ddf3dd; color: #265; }

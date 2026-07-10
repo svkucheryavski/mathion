@@ -26,10 +26,11 @@
 
   const perms = $derived(versionPermissions(version));
 
-  type Meta = { info_md: string; max_quiz_attempts: number };
+  type Meta = { info_md: string; max_quiz_attempts: number; label: string };
   const tracker = makeDirtyTracker<Meta>({
     info_md: version.info_md,
     max_quiz_attempts: version.max_quiz_attempts,
+    label: version.label,
   });
 
   // Defensive rebuild on vid change. Slice-2 mount model destroys this
@@ -38,7 +39,7 @@
   let trackerVid = $state(vid);
   $effect(() => {
     if (vid !== trackerVid) {
-      tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts });
+      tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts, label: version.label });
       trackerVid = vid;
     }
   });
@@ -63,20 +64,21 @@
     const savedVid = vid;
     const sentInfoMd = tracker.current.info_md;
     const sentAttempts = n;
+    const sentLabel = tracker.current.label;
     busy = true;
     try {
-      await api.patch(`/api/versions/${savedVid}`, { info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
+      await api.patch(`/api/versions/${savedVid}`, { info_md: sentInfoMd, max_quiz_attempts: sentAttempts, label: sentLabel });
       const result = await loadAdminTree(savedVid, { force: true });
       if (result === 'discarded') {
         pushToast('Saved', 'success');
       } else if (result === 'ok') {
         const fresh = currentEditorVersion.value;
         if (fresh && fresh.version.id === savedVid) {
-          tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts });
+          tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts, label: fresh.version.label });
         }
         pushToast('Saved', 'success');
       } else {
-        tracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts });
+        tracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts, label: sentLabel });
         pushToast('Saved (refresh failed — reload to see latest)', 'info');
       }
     } catch (e) {
@@ -87,13 +89,16 @@
   }
 
   function discard() {
-    tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts });
+    tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts, label: version.label });
   }
 </script>
 
 {#if perms.canEditVersionMeta}
   <section class="meta">
     <h2>Version info</h2>
+    <label>Label
+      <input class="meta-label" type="text" maxlength="200" bind:value={tracker.current.label} disabled={busy || parentBusy} />
+    </label>
     <label>Info (markdown)
       <textarea bind:value={tracker.current.info_md} rows="4" disabled={busy || parentBusy}></textarea>
     </label>
