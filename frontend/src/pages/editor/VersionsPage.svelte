@@ -32,6 +32,7 @@
   let creating = $state(false);
   let info_md = $state('');
   let max_quiz_attempts = $state<number | null>(3);
+  let newLabel = $state('');
 
   async function load() {
     await loadVersionsPage(courseSlug);
@@ -69,7 +70,7 @@
     const savedSlug = courseSlug;
     busy = true;
     try {
-      const v = await api.post<Version>(`/api/courses/${savedCourseId}/versions`, { info_md, max_quiz_attempts: n });
+      const v = await api.post<Version>(`/api/courses/${savedCourseId}/versions`, { info_md, max_quiz_attempts: n, label: newLabel });
       navigate(`/courses/${savedSlug}/edit/v/${v.id}`);
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Failed to create version';
@@ -111,6 +112,35 @@
       busy = false;
     }
   }
+
+  // Duplicate: per-row inline state. `duplicatingId` enforces a single open
+  // row; `dupLabel` is the bound input value (clamped to 200 in JS — HTML
+  // maxlength only bounds typing, not a programmatically-assigned value).
+  let duplicatingId = $state<number | null>(null);
+  let dupLabel = $state('');
+
+  function openDuplicate(v: Version) {
+    duplicatingId = v.id;
+    dupLabel = ('Copy of ' + (v.label || 'v' + v.id)).slice(0, 200);
+  }
+
+  async function duplicateVersion(v: Version) {
+    // Pin id + slug before the await (prop-change-mid-await guard, mirroring
+    // createVersion at lines 68-69).
+    const savedId = v.id;
+    const savedSlug = courseSlug;
+    busy = true;
+    try {
+      const nv = await api.post<Version>(`/api/versions/${savedId}/duplicate`, { label: dupLabel });
+      pushToast('Version duplicated', 'success');
+      navigate(`/courses/${savedSlug}/edit/v/${nv.id}`);
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.displayMessage : 'Failed to duplicate version';
+      pushToast(msg, 'error');
+    } finally {
+      busy = false;
+    }
+  }
 </script>
 
 <div class="page">
@@ -132,6 +162,9 @@
       </div>
       {#if creating}
         <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
+          <label>Label (optional)
+            <input class="new-label" type="text" maxlength="200" bind:value={newLabel} />
+          </label>
           <label>Info (markdown)
             <textarea bind:value={info_md} rows="3"></textarea>
           </label>
@@ -151,6 +184,7 @@
             <li class="row">
               <div>
                 <strong>v{v.id}</strong>
+                {#if v.label}<span class="vlabel">{v.label}</span>{/if}
                 <span class="badge state-{v.state}">{v.state}</span>
                 {#if v.is_disabled}<span class="badge disabled">disabled</span>{/if}
               </div>
@@ -160,12 +194,24 @@
                   <Button variant="ghost" onclick={() => transition(v, 'enable')} disabled={busy}>Enable</Button>
                 {:else}
                   <Button variant="ghost" onclick={() => transition(v, 'disable')} disabled={busy}>Disable</Button>
+                  <Button variant="ghost" onclick={() => openDuplicate(v)} disabled={busy}>Duplicate</Button>
                 {/if}
                 {#if v.state === 'created' && !v.is_disabled}
                   <Button variant="ghost" onclick={() => deleteVersion(v)} disabled={busy}>Delete</Button>
                 {/if}
               </div>
             </li>
+            {#if duplicatingId === v.id}
+              <li class="dup-row">
+                <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
+                  <label>New draft label
+                    <input class="dup-label" type="text" maxlength="200" bind:value={dupLabel} disabled={busy} />
+                  </label>
+                  <Button type="submit" disabled={busy} loading={busy}>Create copy</Button>
+                  <Button variant="ghost" onclick={() => (duplicatingId = null)} disabled={busy}>Cancel</Button>
+                </form>
+              </li>
+            {/if}
           {/each}
         </ul>
       {/if}
@@ -187,4 +233,8 @@
   .create { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: var(--space-3); }
   textarea { width: 100%; }
   .empty { color: var(--muted); }
+  .vlabel { font-size: 0.85rem; color: var(--muted); margin-left: var(--space-2); }
+  .dup-row { padding: 0 0 var(--space-2); }
+  .dup { display: flex; align-items: flex-end; gap: var(--space-2); flex-wrap: wrap; }
+  .dup input { min-width: 240px; }
 </style>
