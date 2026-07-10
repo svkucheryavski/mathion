@@ -1,3 +1,5 @@
+import os
+import shutil
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,13 +7,13 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import bump_content_updated_at, get_or_404, has_run_teacher_on_course, render_with_assets, require_course_admin, sync_asset_references
-from mathion.api.version_clone import copy_version_assets
+from mathion.api.version_clone import clone_version_content, collect_referenced_filenames, copy_version_assets
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Asset, Block, Course, CourseAdmin, CourseVersion, Item, Question, Run, RunTeacher, Sequence
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import VersionCreate, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
+from mathion.schemas import VersionCreate, VersionDuplicateRequest, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
 
 router = APIRouter(tags=["versions"])
 
@@ -60,6 +62,80 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
     db.commit()
     db.refresh(version)
     return version
+
+
+@router.post("/api/versions/{version_id}/duplicate", status_code=201, response_model=VersionResponse)
+def duplicate_version(
+    version_id: int,
+    data: VersionDuplicateRequest = VersionDuplicateRequest(),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    source = get_or_404(db, CourseVersion, version_id)
+    require_course_admin(db, user, source.course_id)
+    if source.is_disabled:
+        raise HTTPException(status_code=403, detail="Cannot duplicate a disabled version")
+
+    # 1. Quota (parity with create_version; coalesce so an empty source is 0, not None)
+    total_size = db.scalar(
+        select(func.coalesce(func.sum(Asset.file_size), 0)).where(Asset.version_id == source.id)
+    )
+    if total_size > settings.max_course_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Source assets total size ({total_size}) exceeds limit ({settings.max_course_size})",
+        )
+
+    # 2. Asset preflight — every referenced filename must have a backing Asset,
+    #    BEFORE any disk write, so render_with_assets can't 422 mid-clone.
+    referenced = collect_referenced_filenames(db, source)
+    if referenced:
+        existing = set(db.execute(
+            select(Asset.filename).where(
+                Asset.version_id == source.id,
+                Asset.filename.in_(referenced),
+            )
+        ).scalars().all())
+        missing = referenced - existing
+        if missing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Source references assets with no backing file: {', '.join(sorted(missing))}",
+            )
+
+    # 3. Insert the fresh draft; capture its id as a plain int for cleanup.
+    new = CourseVersion(
+        course_id=source.course_id,
+        state="created",
+        is_disabled=False,
+        label=data.label,
+        info_md=source.info_md,
+        info_html="",
+        max_quiz_attempts=source.max_quiz_attempts,
+    )
+    db.add(new)
+    db.flush()
+    new_id = new.id
+
+    # 4. Copy assets, render info, clone tree, commit — all under cleanup.
+    try:
+        copy_version_assets(db, source.id, new.id, user.id)
+        new.info_html = render_with_assets(db, new.id, new.info_md)
+        sync_asset_references(db, new.id, [new.info_md], {"info_version_id": new.id})
+        clone_version_content(db, source, new)
+        db.commit()
+    except Exception:
+        db.rollback()
+        shutil.rmtree(
+            os.path.join(settings.asset_path, "courses", str(new_id)),
+            ignore_errors=True,
+        )
+        raise
+
+    # 5. refresh + return OUTSIDE the try — a post-commit refresh failure must
+    #    NOT trigger the abort rmtree on an already-committed version's files.
+    db.refresh(new)
+    return new
 
 
 @router.patch("/api/versions/{version_id}", response_model=VersionResponse)
