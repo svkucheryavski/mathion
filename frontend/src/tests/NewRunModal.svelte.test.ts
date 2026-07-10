@@ -15,7 +15,7 @@ beforeEach(() => {
 
 const course: Course = { id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true } as Course;
 const versions: Version[] = [
-  { id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false } as Version,
+  { id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false, label: '' } as Version,
 ];
 
 async function settle() {
@@ -114,8 +114,8 @@ describe('NewRunModal', () => {
   });
 
   it('versionLabel selects the NEWEST published, non-disabled version (not the oldest)', async () => {
-    const oldVersion: Version = { id: 88, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false } as Version;
-    const newVersion: Version = { id: 99, course_id: 1, created_at: '2026-02-01', published_at: '2026-02-02', is_disabled: false } as Version;
+    const oldVersion: Version = { id: 88, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false, label: '' } as Version;
+    const newVersion: Version = { id: 99, course_id: 1, created_at: '2026-02-01', published_at: '2026-02-02', is_disabled: false, label: '' } as Version;
     // Backend returns versions DESC by created_at — simulate that ordering.
     const { target, cmp } = mountModal({ versions: [newVersion, oldVersion] });
     await settle();
