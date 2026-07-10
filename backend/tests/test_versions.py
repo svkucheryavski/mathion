@@ -439,3 +439,27 @@ def test_admin_tree_includes_label(admin_client):
     v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "", "label": "Tree"}).json()
     tree = admin_client.get(f"/api/versions/{v['id']}/admin-tree").json()
     assert tree["version"]["label"] == "Tree"
+
+
+def test_version_label_strip_boundary(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "lblb", "name": "L", "description": ""}).json()
+    # stripped core is exactly 200 chars -> passes (strip runs before max_length)
+    ok = admin_client.post(f"/api/courses/{course['id']}/versions",
+                           json={"info_md": "", "label": "  " + "x" * 200 + "  "})
+    assert ok.status_code == 201
+    assert ok.json()["label"] == "x" * 200
+    # stripped core is 201 chars -> 422 (would wrongly pass if max_length ran before strip)
+    bad = admin_client.post(f"/api/courses/{course['id']}/versions",
+                            json={"info_md": "", "label": "  " + "x" * 201 + "  "})
+    assert bad.status_code == 422
+
+
+def test_student_content_excludes_label(admin_client):
+    course = admin_client.post("/api/courses", json={"slug": "nolbl", "name": "N", "description": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions",
+                          json={"info_md": "", "label": "Secret"}).json()
+    pub = admin_client.post(f"/api/versions/{v['id']}/publish")
+    assert pub.status_code == 200
+    r = admin_client.get(f"/api/versions/{v['id']}/content")
+    assert r.status_code == 200
+    assert "label" not in r.json()["version"]
