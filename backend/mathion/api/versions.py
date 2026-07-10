@@ -1,5 +1,3 @@
-import os
-import shutil
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +5,7 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from mathion.api.helpers import bump_content_updated_at, get_or_404, has_run_teacher_on_course, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.version_clone import copy_version_assets
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -48,36 +47,11 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
     db.flush()
 
     if data.copy_assets_from is not None:
-        source_assets = db.execute(
-            select(Asset).where(Asset.version_id == data.copy_assets_from)
-        ).scalars().all()
-        if source_assets:
-            source_dir = os.path.join(settings.asset_path, "courses", str(data.copy_assets_from))
-            dest_dir = os.path.join(settings.asset_path, "courses", str(version.id))
-            # Preflight: every source file must exist before any state changes
-            missing = [
-                a.filename for a in source_assets
-                if not os.path.isfile(os.path.join(source_dir, a.filename))
-            ]
-            if missing:
-                db.rollback()
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Source asset files missing on disk: {', '.join(sorted(missing))}",
-                )
-            os.makedirs(dest_dir, exist_ok=True)
-            for src_asset in source_assets:
-                db.add(Asset(
-                    version_id=version.id,
-                    filename=src_asset.filename,
-                    file_size=src_asset.file_size,
-                    mime_type=src_asset.mime_type,
-                    uploaded_by=user.id,
-                ))
-                src_path = os.path.join(source_dir, src_asset.filename)
-                dst_path = os.path.join(dest_dir, src_asset.filename)
-                shutil.copy2(src_path, dst_path)
-            db.flush()
+        try:
+            copy_version_assets(db, data.copy_assets_from, version.id, user.id)
+        except HTTPException:
+            db.rollback()
+            raise
 
     # Render info_md after assets are in place so asset references resolve
     version.info_html = render_with_assets(db, version.id, data.info_md)
