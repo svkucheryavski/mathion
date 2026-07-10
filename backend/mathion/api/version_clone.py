@@ -50,3 +50,44 @@ def copy_version_assets(db: Session, src_version_id: int, dst_version_id: int, u
             os.path.join(dest_dir, src_asset.filename),
         )
     db.flush()
+
+
+def collect_referenced_filenames(db: Session, source) -> set[str]:
+    """Every asset filename referenced anywhere in a version's content: version
+    info_md, each item's content_md, each question's text_md/explanation_md, and
+    each interactive_app item's script_url (skipped when None). Used by the
+    /duplicate preflight to guarantee no render_with_assets/sync_script_reference
+    call can 422 mid-clone after files have been written."""
+    from mathion.markdown import extract_asset_filenames
+    from mathion.models import Block, Item, Question, Sequence
+
+    names: set[str] = set()
+    if source.info_md:
+        names |= extract_asset_filenames(source.info_md)
+
+    items = db.execute(
+        select(Item)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == source.id)
+    ).scalars().all()
+    for item in items:
+        if item.content_md:
+            names |= extract_asset_filenames(item.content_md)
+        if item.type == "interactive_app" and item.script_url:
+            names.add(item.script_url)
+
+    questions = db.execute(
+        select(Question)
+        .join(Item, Item.id == Question.item_id)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == source.id)
+    ).scalars().all()
+    for q in questions:
+        if q.text_md:
+            names |= extract_asset_filenames(q.text_md)
+        if q.explanation_md:
+            names |= extract_asset_filenames(q.explanation_md)
+
+    return names
