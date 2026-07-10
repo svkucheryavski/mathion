@@ -16,7 +16,7 @@ function tres(text: string, status = 200) {
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); await tick(); }
 
 function makeVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
-  return { id: 1, course_id: 1, state: 'created', is_disabled: false, info_md: '', info_html: '', max_quiz_attempts: 1, created_at: '2026-01-01T00:00:00Z', published_at: null, archived_at: null, content_updated_at: '2026-01-01T00:00:00Z', ...over };
+  return { id: 1, course_id: 1, state: 'created', is_disabled: false, info_md: '', info_html: '', max_quiz_attempts: 1, label: '', created_at: '2026-01-01T00:00:00Z', published_at: null, archived_at: null, content_updated_at: '2026-01-01T00:00:00Z', ...over };
 }
 const appItem: AdminTreeItem = { id: 7, sequence_id: 2, title: 'App', slug: 'app', order: 1, type: 'interactive_app', content_md: null, content_html: null, video_url: null, script_url: 'app.js', questions_count: 0 };
 function buildTree(version: AdminTreeVersion, item: AdminTreeItem = appItem) {

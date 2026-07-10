@@ -13,6 +13,7 @@ function makeTree(): AdminTree {
       info_md: '',
       info_html: '',
       max_quiz_attempts: 3,
+      label: '',
       created_at: '2026-05-01T00:00:00Z',
       published_at: null,
       archived_at: null,

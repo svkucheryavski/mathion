@@ -6,7 +6,7 @@ import type { AuthoringQuestion } from '../lib/quizAuthoring';
 import { versionPermissions } from '../lib/versionPermissions';
 
 const VERSION = { id: 10, course_id: 1, state: 'created', is_disabled: false, info_md: '',
-  info_html: '', max_quiz_attempts: 3, created_at: '', published_at: null, archived_at: null,
+  info_html: '', max_quiz_attempts: 3, label: '', created_at: '', published_at: null, archived_at: null,
   content_updated_at: '' } as const;
 
 const stubAssetCtx = () => ({

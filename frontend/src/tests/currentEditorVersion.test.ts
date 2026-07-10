@@ -13,6 +13,7 @@ const tree = (id: number) => ({
     info_md: '',
     info_html: '',
     max_quiz_attempts: 3,
+    label: '',
     created_at: '',
     published_at: null,
     archived_at: null,

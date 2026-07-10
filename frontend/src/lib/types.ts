@@ -212,6 +212,7 @@ export type Version = {
   info_md: string;
   info_html: string;
   max_quiz_attempts: number;
+  label: string;
   created_at: string;
   published_at: string | null;
   archived_at: string | null;
