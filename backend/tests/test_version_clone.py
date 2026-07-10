@@ -46,7 +46,7 @@ def test_copy_version_assets_copies_rows_and_files(admin_client, db):
 
 def test_copy_version_assets_missing_file_raises_500(admin_client, db):
     course, src = _mk_course_version(admin_client)
-    a = _upload(admin_client, src["id"], "gone.png", b"X")
+    _upload(admin_client, src["id"], "gone.png", b"X")
     # Delete the file on disk but keep the DB row -> preflight must catch it.
     os.remove(os.path.join(settings.asset_path, "courses", str(src["id"]), "gone.png"))
 
@@ -64,7 +64,7 @@ def test_collect_referenced_filenames_aggregates_all_owners(admin_client, db):
     v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
     version = db.get(CourseVersion, v["id"])
     # Set info_md via ORM, NOT the create API: create_version renders info_md
-    # eagerly (versions.py:82) and 422s on an asset that isn't uploaded.
+    # eagerly (render_with_assets in create_version) and 422s on an asset that isn't uploaded.
     # collect_referenced_filenames reads the raw text, so no upload is needed here.
     version.info_md = "Info ![i](info.png)"
 
@@ -112,7 +112,7 @@ def _build_full_source(admin_client, db):
     version = db.get(CourseVersion, v["id"])
     # Set info_md via ORM AFTER assets exist. Creating the version with an
     # asset-referencing info_md would 422 (create_version renders info_md
-    # eagerly at versions.py:57). The /duplicate endpoint later renders this
+    # eagerly via render_with_assets). The /duplicate endpoint later renders this
     # against the COPIED assets, so logo.png must be a real uploaded asset.
     version.info_md = "Welcome ![logo](logo.png)"
 
@@ -158,7 +158,7 @@ def _build_full_source(admin_client, db):
 
 
 def test_clone_version_content_full_fidelity(admin_client, db):
-    course, src_v, filenames = _build_full_source(admin_client, db)
+    course, src_v, _ = _build_full_source(admin_client, db)
     source = db.get(CourseVersion, src_v["id"])
 
     new = CourseVersion(course_id=course["id"], state="created", is_disabled=False,

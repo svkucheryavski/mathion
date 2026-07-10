@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -7,6 +8,9 @@ from sqlalchemy.orm import Session
 
 from mathion.config import settings
 from mathion.models import Asset
+
+if TYPE_CHECKING:
+    from mathion.models import CourseVersion
 
 
 def copy_version_assets(db: Session, src_version_id: int, dst_version_id: int, uploaded_by: int | None) -> None:
@@ -52,7 +56,7 @@ def copy_version_assets(db: Session, src_version_id: int, dst_version_id: int, u
     db.flush()
 
 
-def collect_referenced_filenames(db: Session, source) -> set[str]:
+def collect_referenced_filenames(db: Session, source: "CourseVersion") -> set[str]:
     """Every asset filename referenced anywhere in a version's content: version
     info_md, each item's content_md, each question's text_md/explanation_md, and
     each interactive_app item's script_url (skipped when None). Used by the
