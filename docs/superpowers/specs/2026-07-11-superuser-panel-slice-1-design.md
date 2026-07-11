@@ -172,6 +172,7 @@ New SPA area at `/superuser/:token`, wired into `routes.ts` / `App.svelte`. The 
 - Shell is the route component and renders the Dashboard; `AppHeader` is suppressed on `/superuser/…` paths.
 - 404 → panel-specific expired/not-found state (NOT the generic `NotFound`); 401 → panel path stashed in `sessionStorage['superuser_return_path']` (assert the token is NOT present in any `?next=`/URL) and `navigate('/login', { replace, force })`; `Login.onSubmitPin` then consumes the stashed path (precedence over `?next=`), navigates there, and clears the key.
 - Sign-out calls `logout()` then navigates to `/login` (replace), NOT back to the panel path.
+- A **stale** `superuser_return_path` from an abandoned earlier attempt does NOT misroute a plain (non-panel) login — consume-and-clear-on-read means a normal login still lands on its `?next=`/default destination.
 - Token threaded into the stats request URL; the stats call uses `skipAuthRedirect: true`.
 
 ---
