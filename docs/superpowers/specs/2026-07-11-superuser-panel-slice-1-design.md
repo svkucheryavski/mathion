@@ -99,11 +99,11 @@ Response `SuperuserStatsResponse`:
 |-------|-----------|
 | `total_users` | `count(User)` |
 | `total_courses` | `count(Course)` |
-| `storage_bytes` | `coalesce(sum(Asset.file_size),0) + coalesce(sum(RunAsset.file_size),0) + coalesce(sum(Submission.file_size),0)` — course assets + run assets + **student submission files** (`Submission.file_size`, `models.py:312`), the three registry tables with a tracked size. Excludes user photos (`photo_url` — no size column) and evaluation feedback files (`Evaluation.feedback_file` — path, no size column); both are genuinely un-summable, not merely "negligible." |
-| `active_users_24h` | `count(distinct Session.user_id)` where `last_active_at ≥ now − 24h`, **regardless of `Session.expires_at`** (a session touched in the window was non-expired when last validated). Disabled users are **not** explicitly excluded — their stale sessions are purged lazily on next validation (`auth.py:143`), so residual count is negligible. |
+| `storage_bytes` | `coalesce(sum(Asset.file_size),0) + coalesce(sum(RunAsset.file_size),0) + coalesce(sum(Submission.file_size),0)` — course assets + run assets + **student submission files** (`Submission.file_size`, `models.py:312`), the three registry tables with a tracked size. Excludes user photos (`photo_url` — no size column) and evaluation feedback files (`Evaluation.feedback_file` — path, no size column); both are genuinely un-summable, not merely "negligible." **Compute as three separate single-table scalar aggregates** (matching `api/assets.py:56` / `api/run_assets.py:55`), summed in Python — NOT one joined query (a naive `join` across the three tables would cartesian-multiply the sizes). |
+| `active_users_24h` | `count(distinct Session.user_id)` where `last_active_at ≥ now − 24h`, **regardless of `Session.expires_at`** (a session touched in the window was non-expired when last validated). Disabled users are **not** explicitly excluded — their stale sessions are purged lazily on next validation (`auth.py:143`). (This is a documented consequence, not a filter to implement — do not add an `is_disabled` join.) |
 | `active_users_7d` | as `active_users_24h` with a 7-day window. |
 
-All plain aggregate queries; no N+1. Empty DB → zeros. Time comparisons use `datetime.now(timezone.utc)` with the same SQLite naive-datetime handling as `auth.py:150-153`. Responses carry `Cache-Control: no-store` and `Referrer-Policy: no-referrer` so the in-path token is never cached or leaked via `Referer` when the browser navigates away.
+All plain aggregate queries; no N+1. Empty DB → zeros. Time comparisons use `datetime.now(timezone.utc)` with the same SQLite naive-datetime handling as `auth.py:150-153`. The `/stats` response carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer` as **defense-in-depth**, but since the token lives in the **document** URL the primary leak protection is document-level (§7): a `no-referrer` meta in `index.html` plus `Cache-Control: no-store` on the SPA `index.html` response for panel paths.
 
 ---
 
@@ -113,8 +113,8 @@ A small `argparse` shim in `backend/mathion/superuser/__main__.py` over importab
 
 | Verb | Behavior | Future CLI verb |
 |------|----------|-----------------|
-| `create-superuser <email>` | Via `create_or_promote_superuser`: create the user if absent, or promote an existing one (`is_superuser=True`). If the user exists but is **disabled**, re-enable it (`is_disabled=False`) as part of promotion — a bootstrap command's job is to yield a *usable* superuser, and disabled users cannot log in (`auth.py:37,143`). If already an enabled superuser, print "already a superuser (no change)". Idempotent. | part of `mathion install` |
-| `pin <email>` | Call `auth.request_pin(db, email)` and print the raw PIN. `request_pin` returns `None` for three distinct causes — unknown email, disabled user, or rate-limited (≥ 3/hr, `auth.py:37,50`). On `None`, do a follow-up read (query `User` by email) to disambiguate and print an actionable message: "unknown email" / "user is disabled" / "rate-limited: try again later". `request_pin` never sends email — it returns the PIN directly — so this works with `email_mode=disabled` and without `MATHION_DEBUG`. | `mathion superuserpin` |
+| `create-superuser <email>` | Via `create_or_promote_superuser`: **normalize the email (`strip().lower()`, matching `auth.py:35`)** before lookup/insert — a mixed-case/whitespace arg must not create a duplicate row against the normalized-email unique index (`models_auth.py:13`). Then create the user if absent, or promote an existing one (`is_superuser=True`). If the user exists but is **disabled**, re-enable it (`is_disabled=False`) as part of promotion — a bootstrap command's job is to yield a *usable* superuser, and disabled users cannot log in (`auth.py:37,143`). If already an enabled superuser, print "already a superuser (no change)". Idempotent. | part of `mathion install` |
+| `pin <email>` | Call `auth.request_pin(db, email)` and print the raw PIN. `request_pin` returns `None` for three distinct causes — unknown email, disabled user, or rate-limited (≥ 3/hr, `auth.py:37,50`). On `None`, do a follow-up read (query `User` by the **normalized** `strip().lower()` email) to disambiguate and print an actionable message: "unknown email" / "user is disabled" / "rate-limited: try again later — bootstrap can trip the 3/hr cap (PINs expire in 10 min); wait an hour, raise `MATHION_MAX_PIN_REQUESTS_PER_HOUR`, or clear `rate_limit_entries`". `request_pin` never sends email — it returns the PIN directly — so this works with `email_mode=disabled` and without `MATHION_DEBUG`. | `mathion superuserpin` |
 | `activate` | Replace the active panel token (single transaction) and print `{settings.base_url}/superuser/{token}`. Independent of any specific user. If **no superuser account exists yet**, still mint but warn ("no superuser accounts exist — run create-superuser first, or this URL will 404"). The printed URL reflects `MATHION_BASE_URL` (default `http://localhost:8000`); it must be set for non-local access. | `mathion superuser` |
 
 The three verbs together make the panel reachable and testable end-to-end without email configured: create/promote a superuser → mint a login PIN → mint the panel URL.
@@ -123,17 +123,24 @@ The three verbs together make the panel reachable and testable end-to-end withou
 
 ## 7. Frontend
 
-New SPA area at `/superuser/:token` (nested index = Dashboard), wired into `lib/router.svelte.ts` / `App.svelte`.
+New SPA area at `/superuser/:token`, wired into `routes.ts` / `App.svelte`. The existing router is **flat** — one component per route, no nested-router / `Outlet` concept; `App.svelte` renders a single `componentMap[route.component]` (`App.svelte:69`). So the route registers the **shell** as its component and the shell renders the dashboard itself:
 
-- **`SuperuserShell.svelte`** — panel chrome + minimal nav (only **Dashboard** now; nav grows in later slices) + a sign-out action (hits the existing logout). Reuses the app auth/session.
+- Register `{ path: '/superuser/:token', component: 'SuperuserShell', auth: false }` in `routes.ts` and add `SuperuserShell` to `App.svelte`'s `componentMap`. `auth: false` is required so App.svelte's guard (`matched.route.auth && session.user === null`, `App.svelte:53`) does not pre-empt the route and encode the token into `?next=`.
+- **`SuperuserShell.svelte`** — panel chrome + minimal nav (only **Dashboard** now; nav grows in later slices) + a sign-out action. Receives `token` as a route-param prop and **renders `SuperuserDashboard` internally**, passing `token` down. Reuses the app auth/session.
 - **`SuperuserDashboard.svelte`** — on mount fetches stats via `lib/superuser.ts`, renders five stat cards (Users, Courses, Storage via `formatFileSize`, Active 24h, Active 7d) with loading + error states. Stats are numeric — no `@html`.
-- **`lib/superuser.ts`** — typed `getSuperuserStats(token)` wrapper over the existing api client, calling `/api/superuser/${token}/stats`.
+- **`lib/superuser.ts`** — typed `getSuperuserStats(token)` wrapper over the existing api client, calling `/api/superuser/${token}/stats` with **`skipAuthRedirect: true`** so the app-wide 401 handler (the `onUnauthorized` callback in `main.ts`, fed by `emitUnauthorized` in `api.ts`) does not hijack the 401 — the dashboard handles both failure codes itself.
 
-The panel route is registered with **`auth: false`** so App.svelte's global auth route-guard does not pre-empt it (the guard would otherwise redirect to `/login` before the panel logic runs), and the stats fetch passes **`skipAuthRedirect: true`** so the app-wide 401 handler (`api.ts` → `emitUnauthorized`) does not hijack the 401 — the dashboard handles both codes itself:
+**Global header:** `App.svelte` renders `<AppHeader />` whenever `session.user && path !== '/login'` (`App.svelte:62`). Extend that condition to **also exclude `/superuser/…` paths**, so the main app header does not stack on top of the panel's own chrome/sign-out (double header + duplicate logout otherwise).
 
-**Guard handling in the SPA:**
-- **404** from the panel (bad/expired token, or non-superuser) → render NotFound (do not reveal the panel).
-- **401** (valid token, no session) → **stash the current panel path in `sessionStorage`** (NOT in a `?next=` query param — the path contains the secret token and must never enter a URL/history/Referer), then redirect to `/login`. After a successful login, `/login` checks `sessionStorage` for a stashed panel return-path and navigates there.
+**Guard handling in the SPA** (owned by `SuperuserDashboard`'s stats-fetch `catch`, branching on `ApiError.status`):
+- **404** (bad/expired token, or non-superuser) → render a **panel-specific expired/not-found state** inline ("This panel link is not valid or has expired — re-run `activate` to mint a new one"), NOT the generic `NotFound` page (whose "Back" goes to `/courses`, a dead-end for an operator). This also covers **mid-session expiry** — a refetch after the 30-min window returns 404 while the operator is already viewing the panel.
+- **401** (valid token, no session) → `sessionStorage.setItem('superuser_return_path', currentRoute.path)` **then** `navigate('/login', { replace: true, force: true })`. The panel path (which contains the token) is stashed in `sessionStorage`, **never** in a `?next=` query param. On successful login, `Login.svelte` (`onSubmitPin`) checks `sessionStorage['superuser_return_path']` **first** — consuming and removing it, taking precedence over the existing `?next=` handling — and navigates there; if absent it falls back to the current `?next=` / `defaultLandingPath` logic.
+
+**Sign-out:** the shell's sign-out does `await logout(); navigate('/login', { replace: true, force: true })` — it does **not** return to the panel path (the backend logout hook has destroyed the token, §3.3, so that path now 404s). `replace: true` keeps the now-dead token out of the current history entry.
+
+**Token-in-URL scope (accurate statement):** the token is unavoidably in the operator's own address bar and browser history — inherent to the platform §8 token-in-URL model, which this slice cannot change. The guarantee above is narrower: the token never enters the `/login` URL, any `?next=` query string, server logs of the login navigation, or (via the document referrer policy below) the `Referer` header / document cache.
+
+**Document-level token protection:** because the secret lives in the *document* URL (`/superuser/{token}`), leak protection must sit on the **document**, not the JSON API response. Add `<meta name="referrer" content="no-referrer">` to `frontend/index.html` (covers every SPA route uniformly), and have the SPA fallback (`main.py` `_spa_fallback`) attach `Cache-Control: no-store` to the `index.html` response for `/superuser/…` paths. The same headers on the `/stats` API response (§5) are defense-in-depth only — they do not protect the document URL.
 
 ---
 
@@ -143,7 +150,7 @@ The panel route is registered with **`auth: false`** so App.svelte's global auth
 - Inactivity expiry checked per request (delete + 404). No background purge — the single-row table self-limits (§3.3).
 - Manual logout deletes the active panel token only for superuser sessions (§3.3).
 - CLI: `create-superuser` idempotent (create / promote / re-enable disabled / no-op if already superuser); `pin` disambiguates the `None` return (unknown / disabled / rate-limited); `activate` replaces the prior token in a single transaction and warns if no superuser exists.
-- Stats endpoint is read-only; empty DB coalesces to zeros; responses set `Cache-Control: no-store` + `Referrer-Policy: no-referrer`.
+- Stats endpoint is read-only; empty DB coalesces to zeros; the `/stats` response sets `Cache-Control: no-store` + `Referrer-Policy: no-referrer` (defense-in-depth), while the document-level `no-referrer` meta + SPA `index.html` `no-store` (§7) are the primary token-leak protection.
 
 ---
 
@@ -155,12 +162,16 @@ The panel route is registered with **`auth: false`** so App.svelte's global auth
 - 30-min expiry: a token last-active >30 min ago is deleted and 404s; a request inside the window bumps `last_active_at` (throttled — a second request inside 5 min does not re-write); a freshly-minted token opened >30 min after `activate` 404s on first load.
 - Logout: a **superuser** logout destroys the active panel token; a **non-superuser** logout leaves it intact.
 - Stats correctness: counts; `storage_bytes` sums course + run **+ submission** files; a submission-only DB reports non-zero storage; active-window boundary users (just inside vs. just outside 24h / 7d); an expired-but-recently-active session still counts; a disabled user's residual session is not specially excluded.
-- CLI verbs: `create-superuser` creates, idempotently promotes, **re-enables a disabled** user, and no-ops an already-superuser; `pin` returns a PIN that `verify_pin` accepts and disambiguates `None` into unknown / disabled / **rate-limited** (after 3 requests); `activate` prints a URL whose token validates and supersedes a prior one, and warns when no superuser exists. Tests target the `service.py` functions against the `conftest.py` DB fixture and assert DB state (e.g. `User.is_superuser is True`, token row count == 1), not printed strings.
+- CLI verbs: `create-superuser` creates, idempotently promotes, **re-enables a disabled** user, no-ops an already-superuser, and **normalizes a mixed-case email to a single row** (no duplicate); `pin` returns a PIN that `verify_pin` accepts and disambiguates `None` into unknown / disabled / **rate-limited** (after 3 requests); `activate` prints a URL whose token validates and supersedes a prior one, and warns when no superuser exists. Tests target the `service.py` functions against the `conftest.py` DB fixture and assert DB state (e.g. `User.is_superuser is True`, token row count == 1), not printed strings.
+- Two sessions for the **same** user count **once** in `active_users_24h/7d` (the `DISTINCT` is load-bearing).
+- Response headers: the `/stats` response sets `Cache-Control: no-store` + `Referrer-Policy: no-referrer`; the SPA document response for a panel path carries the `no-referrer` policy (meta present) + `Cache-Control: no-store`.
 
 **Frontend** (mount/unmount/flushSync, Svelte 5 runes; no `@testing-library`)
 - Shell renders nav + sign-out.
 - Dashboard fetches + renders the five cards; loading + error states; storage formatted.
-- 404 → NotFound; 401 → panel path stashed in `sessionStorage` (assert the token is NOT present in any `?next=`/URL) and redirect to `/login`; after login the stashed path is consumed and navigated to.
+- Shell is the route component and renders the Dashboard; `AppHeader` is suppressed on `/superuser/…` paths.
+- 404 → panel-specific expired/not-found state (NOT the generic `NotFound`); 401 → panel path stashed in `sessionStorage['superuser_return_path']` (assert the token is NOT present in any `?next=`/URL) and `navigate('/login', { replace, force })`; `Login.onSubmitPin` then consumes the stashed path (precedence over `?next=`), navigates there, and clears the key.
+- Sign-out calls `logout()` then navigates to `/login` (replace), NOT back to the panel path.
 - Token threaded into the stats request URL; the stats call uses `skipAuthRedirect: true`.
 
 ---
@@ -170,22 +181,26 @@ The panel route is registered with **`auth: false`** so App.svelte's global auth
 **Backend**
 - `models_auth.py` — add `SuperuserPanelToken`.
 - `alembic/versions/<rev>_add_superuser_panel_token.py` — migration (`down_revision = "4e17d3637814"`).
-- `superuser/service.py` — panel-token service (`mint()`, `validate(db, token) -> User | raises`, `destroy_active(db)`) + `create_or_promote_superuser(db, email) -> User`. (No `purge_expired` — no background purge; §3.3.)
+- `superuser/__init__.py` — package marker (regular-package convention, matching `api/` and `notifications/`).
+- `superuser/service.py` — panel-token service (`mint()` = **delete-existing-then-insert in a single transaction / one commit**, `validate(db, token) -> User | raises`, `destroy_active(db)`) + `create_or_promote_superuser(db, email) -> User`. (No `purge_expired` — no background purge; §3.3.)
 - `api/superuser.py` — router: `require_superuser_panel` dependency (validates token, then resolves the session inline via `auth.validate_session` — **not** `Depends(require_superuser)`) + `GET /api/superuser/{token}/stats`.
 - `superuser/__main__.py` — interim CLI shim over `service.py` (`create-superuser`, `pin`, `activate`); opens `SessionLocal`.
+- `main.py` — wire `superuser_router` into the `include_router` block (**before** the `/api/{rest:path}` catch-all at `main.py:109`, else the endpoint silently 404s), and attach `Cache-Control: no-store` to the `_spa_fallback` `index.html` response for `/superuser/…` paths.
 - Logout hook wiring in `api/auth.py` — destroy the active token only when the logging-out session's user `is_superuser`.
 - `schemas.py` — `SuperuserStatsResponse`.
 
 **Frontend**
-- `pages/superuser/SuperuserShell.svelte`, `pages/superuser/SuperuserDashboard.svelte`.
-- `lib/superuser.ts` — typed stats wrapper.
-- Route wiring in `lib/router.svelte.ts` / `App.svelte`.
+- `pages/superuser/SuperuserShell.svelte` (route component; renders `SuperuserDashboard` internally), `pages/superuser/SuperuserDashboard.svelte`.
+- `lib/superuser.ts` — typed stats wrapper (passes `skipAuthRedirect: true`).
+- `routes.ts` + `componentMap` in `App.svelte` — register `SuperuserShell` (`auth: false`); extend `App.svelte`'s `AppHeader` condition to exclude `/superuser/…` paths.
+- `pages/Login.svelte` — consume + clear `sessionStorage['superuser_return_path']` on successful login (precedence over `?next=`).
+- `index.html` — add `<meta name="referrer" content="no-referrer">`.
 
 ---
 
 ## 11. Future Slices (explicitly deferred)
 
-- **User management** — list/search/create/disable/assign-superuser.
+- **User management** — list/search/create/disable/assign-superuser. When multiple concurrent superusers become possible here, **revisit the unbound-token ↔ any-superuser-logout coupling** (§3.3): with >1 superuser it becomes a cross-superuser self-DoS (B's logout kills A's active panel). Bind the active token to the activating operator, or only destroy it on that operator's logout.
 - **Course + admin-assignment UI** — create courses (backend endpoint exists), assign/remove `CourseAdmin`.
 - **Settings-as-data** — move SMTP / file-limits / session-durations from `.env` into DB-backed, panel-editable config (architecturally the trickiest — env override precedence, hot-reload).
 - **Setup checklist** — first-login: configure SMTP, test email delivery, create first course.
