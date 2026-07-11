@@ -32,10 +32,10 @@ What is missing (and blocks everything): **no superuser account can exist today*
 
 **In scope**
 - `SuperuserPanelToken` model + migration.
-- Panel token service (mint / validate / purge) + `require_superuser_panel` dependency.
+- Panel token service (mint / validate / destroy-active) + `require_superuser_panel` dependency.
 - `GET /api/superuser/{token}/stats` endpoint + response schema.
 - Interim `python -m mathion.superuser` command group (`create-superuser`, `pin`, `activate`).
-- Logout hook that destroys the active panel token; periodic-cleanup purge of expired tokens.
+- Logout hook (superuser sessions only) that destroys the active panel token. No background purge task — the single-row table self-limits via per-request inactivity expiry + delete-on-logout + delete-on-reactivate.
 - Frontend `/superuser/:token` area: shell + dashboard + guard handling.
 
 **Out of scope (later slices)** — user management; course/admin-assignment UI; settings-as-data (env→DB); setup checklist; the real `mathion` CLI + Docker deployment.
@@ -45,8 +45,8 @@ What is missing (and blocks everything): **no superuser account can exist today*
 ## 3. Access & Authentication Model
 
 ### 3.1 Token
-- A single active panel token at a time. Generated with `secrets.token_urlsafe(32)` (≥43 URL-safe chars). Only its **hash** is stored (same hashing scheme used for session tokens in `auth.py`); the plaintext is shown once, by the activator.
-- `activate` deletes any existing token row before inserting the new one — minting a new token invalidates the old URL.
+- A single active panel token at a time. Generated with `secrets.token_urlsafe(32)` (≥43 URL-safe chars). Only its **hash** is stored (same hashing scheme used for session tokens in `auth.py`); the plaintext is shown once, by the activator. Validation is a hashed-token DB equality lookup (as for sessions, `auth.py:131`) — not constant-time, but the 256-bit token entropy makes timing side-channels irrelevant.
+- `activate` deletes any existing token row and inserts the new one **within a single transaction** (one commit) — minting a new token invalidates the old URL. The "single active token" invariant is service-enforced, not a DB constraint; a fresh 256-bit `token_hash` makes a unique collision effectively impossible, and concurrent `activate` runs are out of scope for a single-operator CLI.
 
 ### 3.2 `require_superuser_panel` dependency (guards every panel route)
 Layered failure codes, chosen so the panel is not revealed to the wrong caller. **Checks run in this order** (so a bad token never leaks that a session/role would have mattered): (1) token → (2) session presence → (3) superuser role.
@@ -60,13 +60,17 @@ Layered failure codes, chosen so the panel is not revealed to the wrong caller. 
 
 On success, enforce the **30-minute sliding inactivity window**: if `now − last_active_at > 30 min`, delete the row and return 404; otherwise bump `last_active_at` (throttled write, mirroring the session `last_active_at` pattern in `auth.py:148`).
 
+**Wiring (critical):** the dependency MUST validate the token itself first, then resolve the current user **inline** by reusing the *service function* `auth.validate_session(db, session_token)` (reading the `session_token` cookie directly) — **not** by declaring `Depends(get_current_user)` / `Depends(require_superuser)`. FastAPI resolves declared sub-dependencies *before* the dependency body, which would fire the session/role check ahead of the token check and surface **401** (no session) / **403** (non-superuser) — leaking that the route exists and breaking the ordering above. Map "no user" → **401** and "user but not `is_superuser`" → **404** (deliberately not the existing 403). This slice's only panel endpoint is a GET (`/stats`), so the CSRF `X-Requested-With` check that `get_current_user` performs is not needed here; future mutating panel endpoints must add it explicitly.
+
+**Inactivity-window semantics:** the window is measured from `last_active_at`, seeded to `now` at mint. A token opened for the first time >30 min after `activate` is therefore already expired (deleted + 404) — the operator re-runs `activate`, a cheap local command. This is intentional: a minted-but-unused token does not stay valid indefinitely (matches platform §8's "short inactivity window"). The bump is throttled to at most once per **5 min (300 s)**, mirroring `auth.py:154`; the throttle interval (5 min) is deliberately shorter than the expiry window (30 min) so an in-use token is always bumped before it can expire. Comparisons use `datetime.now(timezone.utc)` and replicate the SQLite naive-datetime handling in `auth.py:150-153`.
+
 ### 3.3 Lifecycle
-- **Manual superuser logout** (`api/auth.py:86`) deletes the active panel token.
-- The existing periodic session-cleanup task also purges expired panel tokens.
-- The token is **not** bound to a specific user — access is "valid token **+** any authenticated superuser session," per platform §8.
+- **Manual logout** (`api/auth.py:86`) deletes the active panel token **only when the logging-out session belongs to a superuser** — resolve the user from the `session_token` first and gate on `is_superuser`, otherwise a normal user's logout would destroy the panel token.
+- **No background purge task exists** (and the notifications dispatcher `run_forever` is mailer-gated — `main.py:46` — so it does not even run on the email-less interim deployment this slice targets). Expired-token cleanup relies entirely on the per-request inactivity check (§3.2, delete + 404), delete-on-logout, and `activate`'s delete-then-insert. Because at most one token row ever exists (§4), this is sufficient — no orphan accumulation.
+- The token is **not** bound to a specific user — access is "valid token **+** any authenticated superuser session," per platform §8. Consequently any superuser's logout destroys the shared token (see the logout hook above); with a single operator this is the intended "destroyed on logout" behavior.
 
 ### 3.4 CSRF / transport
-Panel API calls reuse the existing auth cookie (`SameSite=Lax`) + `X-Requested-With` header already enforced app-wide. The token-in-URL model is per platform §8 (32-char URL-safe, hashed at rest, short inactivity window, superuser-session-gated, destroyed on logout).
+Panel API calls reuse the existing session cookie (`SameSite=Lax`). This slice's only endpoint is a GET (`/stats`), so the app-wide `X-Requested-With` CSRF check (enforced on mutating requests via `get_current_user`) does not apply; later slices adding mutating panel endpoints must enforce it explicitly (see §3.2). The token-in-URL model is per platform §8 (32-char URL-safe, hashed at rest, short inactivity window, superuser-session-gated, destroyed on logout).
 
 ---
 
@@ -81,7 +85,7 @@ New table `superuser_panel_tokens` (model in `models_auth.py`, the auth-domain m
 | `created_at` | datetime (tz) | server default now |
 | `last_active_at` | datetime (tz) | sliding 30-min inactivity window |
 
-Alembic migration adds the table (down_revision = current head). At most one row exists in practice (`activate` replaces), but no DB-level singleton constraint is imposed — the service enforces "delete-then-insert."
+Alembic migration adds the table with `down_revision = "4e17d3637814"` (the current head — `4e17d3637814_add_course_version_label.py`; confirm it is still head at implementation time). At most one row exists in practice (`activate` replaces), but no DB-level singleton constraint is imposed — the service enforces "delete-then-insert" in a single transaction (§3.1).
 
 ---
 
@@ -95,23 +99,23 @@ Response `SuperuserStatsResponse`:
 |-------|-----------|
 | `total_users` | `count(User)` |
 | `total_courses` | `count(Course)` |
-| `storage_bytes` | `coalesce(sum(Asset.file_size),0) + coalesce(sum(RunAsset.file_size),0)` (user photos excluded — negligible, not registry-tracked) |
-| `active_users_24h` | distinct `Session.user_id` with `last_active_at ≥ now − 24h` |
-| `active_users_7d` | distinct `Session.user_id` with `last_active_at ≥ now − 7d` |
+| `storage_bytes` | `coalesce(sum(Asset.file_size),0) + coalesce(sum(RunAsset.file_size),0) + coalesce(sum(Submission.file_size),0)` — course assets + run assets + **student submission files** (`Submission.file_size`, `models.py:312`), the three registry tables with a tracked size. Excludes user photos (`photo_url` — no size column) and evaluation feedback files (`Evaluation.feedback_file` — path, no size column); both are genuinely un-summable, not merely "negligible." |
+| `active_users_24h` | `count(distinct Session.user_id)` where `last_active_at ≥ now − 24h`, **regardless of `Session.expires_at`** (a session touched in the window was non-expired when last validated). Disabled users are **not** explicitly excluded — their stale sessions are purged lazily on next validation (`auth.py:143`), so residual count is negligible. |
+| `active_users_7d` | as `active_users_24h` with a 7-day window. |
 
-All plain aggregate queries; no N+1. Empty DB → zeros.
+All plain aggregate queries; no N+1. Empty DB → zeros. Time comparisons use `datetime.now(timezone.utc)` with the same SQLite naive-datetime handling as `auth.py:150-153`. Responses carry `Cache-Control: no-store` and `Referrer-Policy: no-referrer` so the in-path token is never cached or leaked via `Referer` when the browser navigates away.
 
 ---
 
 ## 6. Interim Bootstrap CLI — `python -m mathion.superuser`
 
-A small `argparse` command group in `backend/mathion/superuser/__main__.py`. Each verb is a forward-compatible stand-in for a future `mathion` CLI verb (the CLI will call the same underlying functions — zero behavior change):
+A small `argparse` shim in `backend/mathion/superuser/__main__.py` over importable business-logic functions in `backend/mathion/superuser/service.py` (e.g. `create_or_promote_superuser(db, email) -> User`, plus the token service's `mint()`). `__main__.py` opens a DB session via `mathion.database.SessionLocal` (as the seed scripts do) so it targets the configured `MATHION_DATABASE_URL`, and holds no business logic itself — this is what makes the future `mathion` CLI a zero-behavior-change wrapper over the same functions (and lets §9 test the functions directly).
 
 | Verb | Behavior | Future CLI verb |
 |------|----------|-----------------|
-| `create-superuser <email>` | Create the user if absent, or promote an existing one (`is_superuser=True`). Idempotent. Prints confirmation. | part of `mathion install` |
-| `pin <email>` | Call `auth.request_pin(db, email)` and print the raw PIN. Errors clearly if the email is unknown or rate-limited (`None`). | `mathion superuserpin` |
-| `activate` | Replace the active panel token; print `{base_url}/superuser/{token}`. Independent of any specific user. | `mathion superuser` |
+| `create-superuser <email>` | Via `create_or_promote_superuser`: create the user if absent, or promote an existing one (`is_superuser=True`). If the user exists but is **disabled**, re-enable it (`is_disabled=False`) as part of promotion — a bootstrap command's job is to yield a *usable* superuser, and disabled users cannot log in (`auth.py:37,143`). If already an enabled superuser, print "already a superuser (no change)". Idempotent. | part of `mathion install` |
+| `pin <email>` | Call `auth.request_pin(db, email)` and print the raw PIN. `request_pin` returns `None` for three distinct causes — unknown email, disabled user, or rate-limited (≥ 3/hr, `auth.py:37,50`). On `None`, do a follow-up read (query `User` by email) to disambiguate and print an actionable message: "unknown email" / "user is disabled" / "rate-limited: try again later". `request_pin` never sends email — it returns the PIN directly — so this works with `email_mode=disabled` and without `MATHION_DEBUG`. | `mathion superuserpin` |
+| `activate` | Replace the active panel token (single transaction) and print `{settings.base_url}/superuser/{token}`. Independent of any specific user. If **no superuser account exists yet**, still mint but warn ("no superuser accounts exist — run create-superuser first, or this URL will 404"). The printed URL reflects `MATHION_BASE_URL` (default `http://localhost:8000`); it must be set for non-local access. | `mathion superuser` |
 
 The three verbs together make the panel reachable and testable end-to-end without email configured: create/promote a superuser → mint a login PIN → mint the panel URL.
 
@@ -125,19 +129,21 @@ New SPA area at `/superuser/:token` (nested index = Dashboard), wired into `lib/
 - **`SuperuserDashboard.svelte`** — on mount fetches stats via `lib/superuser.ts`, renders five stat cards (Users, Courses, Storage via `formatFileSize`, Active 24h, Active 7d) with loading + error states. Stats are numeric — no `@html`.
 - **`lib/superuser.ts`** — typed `getSuperuserStats(token)` wrapper over the existing api client, calling `/api/superuser/${token}/stats`.
 
+The panel route is registered with **`auth: false`** so App.svelte's global auth route-guard does not pre-empt it (the guard would otherwise redirect to `/login` before the panel logic runs), and the stats fetch passes **`skipAuthRedirect: true`** so the app-wide 401 handler (`api.ts` → `emitUnauthorized`) does not hijack the 401 — the dashboard handles both codes itself:
+
 **Guard handling in the SPA:**
 - **404** from the panel (bad/expired token, or non-superuser) → render NotFound (do not reveal the panel).
-- **401** (valid token, no session) → redirect to Login with a return path back to the panel URL.
+- **401** (valid token, no session) → **stash the current panel path in `sessionStorage`** (NOT in a `?next=` query param — the path contains the secret token and must never enter a URL/history/Referer), then redirect to `/login`. After a successful login, `/login` checks `sessionStorage` for a stashed panel return-path and navigates there.
 
 ---
 
 ## 8. Error Handling (consolidated)
 
-- Guard failure codes as in §3.2.
-- Inactivity expiry checked per request (delete + 404); periodic cleanup also purges expired tokens.
-- Manual superuser logout deletes the active panel token.
-- CLI: `create-superuser` idempotent (create or promote); `pin` errors clearly on unknown/rate-limited email; `activate` replaces the prior token atomically.
-- Stats endpoint is read-only; empty DB coalesces to zeros.
+- Guard failure codes as in §3.2 (token→404, no-session→401, non-superuser→404; wired via `validate_session`, not `Depends(require_superuser)`).
+- Inactivity expiry checked per request (delete + 404). No background purge — the single-row table self-limits (§3.3).
+- Manual logout deletes the active panel token only for superuser sessions (§3.3).
+- CLI: `create-superuser` idempotent (create / promote / re-enable disabled / no-op if already superuser); `pin` disambiguates the `None` return (unknown / disabled / rate-limited); `activate` replaces the prior token in a single transaction and warns if no superuser exists.
+- Stats endpoint is read-only; empty DB coalesces to zeros; responses set `Cache-Control: no-store` + `Referrer-Policy: no-referrer`.
 
 ---
 
@@ -145,17 +151,17 @@ New SPA area at `/superuser/:token` (nested index = Dashboard), wired into `lib/
 
 **Backend**
 - Token: `activate` stores only the hash; wrong/absent token → 404; single-active-token replacement (old token 404s after re-activate).
-- Two-factor matrix: valid + superuser session → 200; valid + no session → 401; valid + non-superuser session → 404; bad token + superuser session → 404.
-- 30-min expiry: a token last-active >30 min ago is deleted and 404s; a request inside the window bumps `last_active_at`.
-- Logout destroys the active panel token.
-- Stats correctness: counts; `storage_bytes` sums course + run assets; active-window boundary users (just inside vs. just outside 24h / 7d).
-- CLI verbs: `create-superuser` creates and (idempotently) promotes; `pin` returns a PIN that `verify_pin` accepts; `activate` prints a URL whose token validates and supersedes a prior one.
+- Two-factor matrix: valid + superuser session → 200; valid + no session → **401**; valid + non-superuser session → **404** (explicitly not 403, guarding against a `Depends(require_superuser)` mis-wire); bad token + superuser session → 404.
+- 30-min expiry: a token last-active >30 min ago is deleted and 404s; a request inside the window bumps `last_active_at` (throttled — a second request inside 5 min does not re-write); a freshly-minted token opened >30 min after `activate` 404s on first load.
+- Logout: a **superuser** logout destroys the active panel token; a **non-superuser** logout leaves it intact.
+- Stats correctness: counts; `storage_bytes` sums course + run **+ submission** files; a submission-only DB reports non-zero storage; active-window boundary users (just inside vs. just outside 24h / 7d); an expired-but-recently-active session still counts; a disabled user's residual session is not specially excluded.
+- CLI verbs: `create-superuser` creates, idempotently promotes, **re-enables a disabled** user, and no-ops an already-superuser; `pin` returns a PIN that `verify_pin` accepts and disambiguates `None` into unknown / disabled / **rate-limited** (after 3 requests); `activate` prints a URL whose token validates and supersedes a prior one, and warns when no superuser exists. Tests target the `service.py` functions against the `conftest.py` DB fixture and assert DB state (e.g. `User.is_superuser is True`, token row count == 1), not printed strings.
 
 **Frontend** (mount/unmount/flushSync, Svelte 5 runes; no `@testing-library`)
 - Shell renders nav + sign-out.
 - Dashboard fetches + renders the five cards; loading + error states; storage formatted.
-- 404 → NotFound; 401 → redirect to Login with a return path.
-- Token threaded into the stats request URL.
+- 404 → NotFound; 401 → panel path stashed in `sessionStorage` (assert the token is NOT present in any `?next=`/URL) and redirect to `/login`; after login the stashed path is consumed and navigated to.
+- Token threaded into the stats request URL; the stats call uses `skipAuthRedirect: true`.
 
 ---
 
@@ -163,11 +169,11 @@ New SPA area at `/superuser/:token` (nested index = Dashboard), wired into `lib/
 
 **Backend**
 - `models_auth.py` — add `SuperuserPanelToken`.
-- `alembic/versions/<rev>_add_superuser_panel_token.py` — migration.
-- `superuser_token.py` (or a section of a new `superuser/` package) — token service: `mint()`, `validate(token) -> None | raises`, `purge_expired()`, `destroy_active()`.
-- `api/superuser.py` — router: `require_superuser_panel` dependency + `GET /api/superuser/{token}/stats`.
-- `superuser/__main__.py` — interim CLI (`create-superuser`, `pin`, `activate`).
-- Logout hook wiring in `api/auth.py` (destroy active token on superuser logout) + purge in the periodic cleanup task.
+- `alembic/versions/<rev>_add_superuser_panel_token.py` — migration (`down_revision = "4e17d3637814"`).
+- `superuser/service.py` — panel-token service (`mint()`, `validate(db, token) -> User | raises`, `destroy_active(db)`) + `create_or_promote_superuser(db, email) -> User`. (No `purge_expired` — no background purge; §3.3.)
+- `api/superuser.py` — router: `require_superuser_panel` dependency (validates token, then resolves the session inline via `auth.validate_session` — **not** `Depends(require_superuser)`) + `GET /api/superuser/{token}/stats`.
+- `superuser/__main__.py` — interim CLI shim over `service.py` (`create-superuser`, `pin`, `activate`); opens `SessionLocal`.
+- Logout hook wiring in `api/auth.py` — destroy the active token only when the logging-out session's user `is_superuser`.
 - `schemas.py` — `SuperuserStatsResponse`.
 
 **Frontend**
@@ -183,4 +189,4 @@ New SPA area at `/superuser/:token` (nested index = Dashboard), wired into `lib/
 - **Course + admin-assignment UI** — create courses (backend endpoint exists), assign/remove `CourseAdmin`.
 - **Settings-as-data** — move SMTP / file-limits / session-durations from `.env` into DB-backed, panel-editable config (architecturally the trickiest — env override precedence, hot-reload).
 - **Setup checklist** — first-login: configure SMTP, test email delivery, create first course.
-- **Deployment / CLI** — Docker Compose stack + the real `mathion` CLI (`install`, `superuserpin`, `superuser`, `update`, `backup`, `status`, `start`/`stop`), which subsumes the interim `python -m mathion.superuser` verbs.
+- **Deployment / CLI** — Docker Compose stack + the real `mathion` CLI (`install`, `superuserpin`, `superuser`, `update`, `backup`, `status`, `start`/`stop`), which subsumes the interim `python -m mathion.superuser` verbs. **Deployment must set a real `MATHION_SECRET_KEY` before the first `create-superuser`/`activate`** — panel tokens and PINs are salted with `secret_key` (`auth.py:13`), so any minted under the `"dev-secret-key-change-in-production"` default would silently carry into production.
