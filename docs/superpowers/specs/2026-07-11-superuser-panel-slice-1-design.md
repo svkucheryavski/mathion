@@ -37,6 +37,7 @@ What is missing (and blocks everything): **no superuser account can exist today*
 - Interim `python -m mathion.superuser` command group (`create-superuser`, `pin`, `activate`).
 - Logout hook (superuser sessions only) that destroys the active panel token. No background purge task — the single-row table self-limits via per-request inactivity expiry + delete-on-logout + delete-on-reactivate.
 - Frontend `/superuser/:token` area: shell + dashboard + guard handling.
+- Email-aware login (bootstrap enabler): a public `GET /api/auth/config` → `{ email_enabled }` + `Login.svelte` adapting to skip "Send PIN" when email delivery is disabled, so a terminal-printed bootstrap PIN is actually usable.
 
 **Out of scope (later slices)** — user management; course/admin-assignment UI; settings-as-data (env→DB); setup checklist; the real `mathion` CLI + Docker deployment.
 
@@ -105,19 +106,30 @@ Response `SuperuserStatsResponse`:
 
 All plain aggregate queries; no N+1. Empty DB → zeros. Time comparisons use `datetime.now(timezone.utc)` with the same SQLite naive-datetime handling as `auth.py:150-153`. The `/stats` response carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer` as **defense-in-depth**, but since the token lives in the **document** URL the primary leak protection is document-level (§7): a `no-referrer` meta in `index.html` plus `Cache-Control: no-store` on the SPA `index.html` response for panel paths.
 
+### Public config endpoint (bootstrap enabler)
+
+`GET /api/auth/config` — **unauthenticated**, no token, no CSRF (GET). Returns `{ email_enabled: bool }` where `email_enabled = settings.email_mode != "disabled"`. Exposing this operational flag is not sensitive; it lets the login screen adapt when a PIN cannot be delivered by email (§7). Lives in `api/auth.py` (it is a general auth concern, not superuser-specific), but is in scope for this slice because the bootstrap depends on it.
+
 ---
 
 ## 6. Interim Bootstrap CLI — `python -m mathion.superuser`
 
-A small `argparse` shim in `backend/mathion/superuser/__main__.py` over importable business-logic functions in `backend/mathion/superuser/service.py` (e.g. `create_or_promote_superuser(db, email) -> User`, plus the token service's `mint()`). `__main__.py` opens a DB session via `mathion.database.SessionLocal` (as the seed scripts do) so it targets the configured `MATHION_DATABASE_URL`, and holds no business logic itself — this is what makes the future `mathion` CLI a zero-behavior-change wrapper over the same functions (and lets §9 test the functions directly).
+A small `argparse` shim in `backend/mathion/superuser/__main__.py` over importable business-logic functions in `backend/mathion/superuser/service.py`, each returning a **structured result** (not a printed string) so that `__main__.py` — and the future `mathion` CLI — are thin format-only shims and §9 can test the logic directly:
+- `create_or_promote_superuser(db, email) -> User` (raises on an invalid email — see the verb row).
+- `issue_bootstrap_pin(db, email) -> PinIssued(pin) | UnknownUser | DisabledUser | RateLimited` — wraps `auth.request_pin` and performs the follow-up disambiguation read; the shim maps each variant to a message.
+- `activate_panel(db) -> ActivateResult(token, url, has_superuser)` — mints the token (delete-then-insert, one transaction) and reports whether any superuser exists (for the warning).
+
+`__main__.py` opens a DB session via `mathion.database.SessionLocal` (as the seed scripts do) so it targets the configured `MATHION_DATABASE_URL`, calls these functions, and **only formats/prints** — no business logic, no DB decisions in the shim. This makes the future `mathion` CLI a zero-behavior-change wrapper over the same functions.
 
 | Verb | Behavior | Future CLI verb |
 |------|----------|-----------------|
-| `create-superuser <email>` | Via `create_or_promote_superuser`: **normalize the email (`strip().lower()`, matching `auth.py:35`)** before lookup/insert — a mixed-case/whitespace arg must not create a duplicate row against the normalized-email unique index (`models_auth.py:13`). Then create the user if absent, or promote an existing one (`is_superuser=True`). If the user exists but is **disabled**, re-enable it (`is_disabled=False`) as part of promotion — a bootstrap command's job is to yield a *usable* superuser, and disabled users cannot log in (`auth.py:37,143`). If already an enabled superuser, print "already a superuser (no change)". Idempotent. | part of `mathion install` |
-| `pin <email>` | Call `auth.request_pin(db, email)` and print the raw PIN. `request_pin` returns `None` for three distinct causes — unknown email, disabled user, or rate-limited (≥ 3/hr, `auth.py:37,50`). On `None`, do a follow-up read (query `User` by the **normalized** `strip().lower()` email) to disambiguate and print an actionable message: "unknown email" / "user is disabled" / "rate-limited: try again later — bootstrap can trip the 3/hr cap (PINs expire in 10 min); wait an hour, raise `MATHION_MAX_PIN_REQUESTS_PER_HOUR`, or clear `rate_limit_entries`". `request_pin` never sends email — it returns the PIN directly — so this works with `email_mode=disabled` and without `MATHION_DEBUG`. | `mathion superuserpin` |
-| `activate` | Replace the active panel token (single transaction) and print `{settings.base_url}/superuser/{token}`. Independent of any specific user. If **no superuser account exists yet**, still mint but warn ("no superuser accounts exist — run create-superuser first, or this URL will 404"). The printed URL reflects `MATHION_BASE_URL` (default `http://localhost:8000`); it must be set for non-local access. | `mathion superuser` |
+| `create-superuser <email>` | Via `create_or_promote_superuser`: **normalize the email (`strip().lower()`, matching `auth.py:35`)** then **validate it is non-empty and ≤254 chars** — reject whitespace-only (normalizes to `""`) or oversized input with an actionable error (SQLite does not reliably enforce the `String(254)` limit, so an oversized value could pass tests and fail on PostgreSQL; an empty email yields an unusable account). The normalization also prevents a mixed-case/whitespace arg creating a duplicate row against the normalized-email unique index (`models_auth.py:13`). Then create the user if absent, or promote an existing one (`is_superuser=True`). If the user exists but is **disabled**, re-enable it (`is_disabled=False`) as part of promotion — a bootstrap command's job is to yield a *usable* superuser, and disabled users cannot log in (`auth.py:37,143`). If already an enabled superuser, print "already a superuser (no change)". Idempotent. | part of `mathion install` |
+| `pin <email>` | Via `issue_bootstrap_pin` (wraps `auth.request_pin`): on `PinIssued`, print the raw PIN. `request_pin` returns `None` for three distinct causes — unknown email, disabled user, or rate-limited (≥ 3/hr, `auth.py:37,50`); the service does a follow-up read (query `User` by the **normalized** `strip().lower()` email) and returns `UnknownUser` / `DisabledUser` / `RateLimited`, which the shim prints as "unknown email" / "user is disabled" / "rate-limited: try again later — bootstrap can trip the 3/hr cap (PINs expire in 10 min); wait an hour, raise `MATHION_MAX_PIN_REQUESTS_PER_HOUR`, or clear `rate_limit_entries`". `request_pin` never sends email — it returns the PIN directly — so this works with `email_mode=disabled` and without `MATHION_DEBUG`. | `mathion superuserpin` |
+| `activate` | Via `activate_panel`: replace the active panel token (single transaction) and print `{settings.base_url}/superuser/{token}`. Independent of any specific user. If **no superuser account exists yet** (`has_superuser=false`), still mint but warn ("no superuser accounts exist — run create-superuser first, or this URL will 404"). The printed URL reflects `MATHION_BASE_URL` (default `http://localhost:8000`); it must be set for non-local access. | `mathion superuser` |
 
-The three verbs together make the panel reachable and testable end-to-end without email configured: create/promote a superuser → mint a login PIN → mint the panel URL.
+The three verbs make the panel reachable end-to-end without email configured — **but only because the login screen is email-aware** (§7). Critical gotcha this avoids: the normal login screen's "Send PIN" calls `auth.request_pin`, which **marks every prior unused PIN as used** (`auth.py:53`) and mints a replacement that is **neither emailed nor printed** (`email_mode=disabled`, no `MATHION_DEBUG`) — silently killing a CLI-generated PIN and burning a rate-limit slot (`auth.py:50`, 3/hr). The email-aware login (§7) skips "Send PIN" when email is disabled, so the terminal-printed PIN stays valid and is entered directly.
+
+**Recommended bootstrap:** `create-superuser <email>` → `activate` (copy the printed URL) → open the URL → on the email-disabled login screen, enter your email; run `pin <email>` in the terminal and read the printed PIN; enter it → panel. (PINs expire in 10 min, so run `pin` when you are ready to type it.)
 
 ---
 
@@ -134,7 +146,9 @@ New SPA area at `/superuser/:token`, wired into `routes.ts` / `App.svelte`. The 
 
 **Guard handling in the SPA** (owned by `SuperuserDashboard`'s stats-fetch `catch`, branching on `ApiError.status`):
 - **404** (bad/expired token, or non-superuser) → render a **panel-specific expired/not-found state** inline ("This panel link is not valid or has expired — re-run `activate` to mint a new one"), NOT the generic `NotFound` page (whose "Back" goes to `/courses`, a dead-end for an operator). This also covers **mid-session expiry** — a refetch after the 30-min window returns 404 while the operator is already viewing the panel.
-- **401** (valid token, no session) → `sessionStorage.setItem('superuser_return_path', currentRoute.path)` **then** `navigate('/login', { replace: true, force: true })`. The panel path (which contains the token) is stashed in `sessionStorage`, **never** in a `?next=` query param. On successful login, `Login.svelte` (`onSubmitPin`) checks `sessionStorage['superuser_return_path']` **first** — consuming and removing it, taking precedence over the existing `?next=` handling — and navigates there; if absent it falls back to the current `?next=` / `defaultLandingPath` logic.
+- **401** (valid token, no session) → `sessionStorage.setItem('superuser_return_path', currentRoute.path)` **then** `navigate('/login', { replace: true, force: true })`. The panel path (which contains the token) is stashed in `sessionStorage`, **never** in a `?next=` query param. `Login.svelte` **captures the stashed path into component-local state on mount and immediately deletes the `sessionStorage` key** (NOT on successful login); on successful verification it navigates to the captured path (precedence over `?next=`), else falls back to the current `?next=` / `defaultLandingPath` logic. Capturing-and-clearing at *mount* bounds the key's lifetime to a single Login mount, so an **abandoned** panel redirect cannot leave a stale key that hijacks a later ordinary login — the next login mounts fresh with the key already gone.
+
+**Email-aware login (bootstrap enabler):** `Login.svelte` fetches `GET /api/auth/config` (§5) on mount. When `email_enabled` is **false**, it skips the "Send PIN" step entirely and presents a combined **email + PIN** form with an explanatory message ("Email delivery isn't configured — enter your email and the PIN shown in the server terminal"), submitting straight to `verify-pin` **without** calling `request-pin`. When `email_enabled` is **true**, the current two-step flow (email → Send PIN → PIN) is unchanged. This is what makes the terminal-printed bootstrap PIN usable (§6) — the disabled-email screen never fires the PIN-invalidating `request_pin`. The adaptation is not superuser-specific: with email off, no user can receive a PIN, so direct entry is the correct behavior for everyone until email is configured.
 
 **Sign-out:** the shell's sign-out does `await logout(); navigate('/login', { replace: true, force: true })` — it does **not** return to the panel path (the backend logout hook has destroyed the token, §3.3, so that path now 404s). `replace: true` keeps the now-dead token out of the current history entry.
 
@@ -162,17 +176,20 @@ New SPA area at `/superuser/:token`, wired into `routes.ts` / `App.svelte`. The 
 - 30-min expiry: a token last-active >30 min ago is deleted and 404s; a request inside the window bumps `last_active_at` (throttled — a second request inside 5 min does not re-write); a freshly-minted token opened >30 min after `activate` 404s on first load.
 - Logout: a **superuser** logout destroys the active panel token; a **non-superuser** logout leaves it intact.
 - Stats correctness: counts; `storage_bytes` sums course + run **+ submission** files; a submission-only DB reports non-zero storage; active-window boundary users (just inside vs. just outside 24h / 7d); an expired-but-recently-active session still counts; a disabled user's residual session is not specially excluded.
-- CLI verbs: `create-superuser` creates, idempotently promotes, **re-enables a disabled** user, no-ops an already-superuser, and **normalizes a mixed-case email to a single row** (no duplicate); `pin` returns a PIN that `verify_pin` accepts and disambiguates `None` into unknown / disabled / **rate-limited** (after 3 requests); `activate` prints a URL whose token validates and supersedes a prior one, and warns when no superuser exists. Tests target the `service.py` functions against the `conftest.py` DB fixture and assert DB state (e.g. `User.is_superuser is True`, token row count == 1), not printed strings.
+- CLI **service functions** (tested directly against the `conftest.py` DB fixture, asserting returned result objects + DB state — not printed strings): `create_or_promote_superuser` creates, idempotently promotes, **re-enables a disabled** user, no-ops an already-superuser, **collapses a mixed-case email to a single row** (no duplicate), and **rejects empty/whitespace-only and >254-char emails**; `issue_bootstrap_pin` returns `PinIssued` (a PIN that `verify_pin` accepts) vs `UnknownUser` / `DisabledUser` / `RateLimited` (after 3 requests); `activate_panel` returns `has_superuser=false` when none exists and a token that validates + supersedes a prior one.
 - Two sessions for the **same** user count **once** in `active_users_24h/7d` (the `DISTINCT` is load-bearing).
 - Response headers: the `/stats` response sets `Cache-Control: no-store` + `Referrer-Policy: no-referrer`; the SPA document response for a panel path carries the `no-referrer` policy (meta present) + `Cache-Control: no-store`.
+- `GET /api/auth/config` returns `email_enabled=false` when `email_mode=disabled` and `true` otherwise, with no auth required.
 
 **Frontend** (mount/unmount/flushSync, Svelte 5 runes; no `@testing-library`)
 - Shell renders nav + sign-out.
 - Dashboard fetches + renders the five cards; loading + error states; storage formatted.
 - Shell is the route component and renders the Dashboard; `AppHeader` is suppressed on `/superuser/…` paths.
-- 404 → panel-specific expired/not-found state (NOT the generic `NotFound`); 401 → panel path stashed in `sessionStorage['superuser_return_path']` (assert the token is NOT present in any `?next=`/URL) and `navigate('/login', { replace, force })`; `Login.onSubmitPin` then consumes the stashed path (precedence over `?next=`), navigates there, and clears the key.
+- 404 → panel-specific expired/not-found state (NOT the generic `NotFound`); 401 → panel path stashed in `sessionStorage['superuser_return_path']` (assert the token is NOT present in any `?next=`/URL) and `navigate('/login', { replace, force })`; `Login.svelte` captures + clears the key **on mount** and, on successful verification, navigates to the captured path (precedence over `?next=`).
 - Sign-out calls `logout()` then navigates to `/login` (replace), NOT back to the panel path.
-- A **stale** `superuser_return_path` from an abandoned earlier attempt does NOT misroute a plain (non-panel) login — consume-and-clear-on-read means a normal login still lands on its `?next=`/default destination.
+- A **stale** `superuser_return_path` from an abandoned panel redirect does NOT misroute a later ordinary login — because Login captures + clears on mount, a fresh login mount sees no key and follows `?next=`/default.
+- **Email-aware login:** with `email_enabled=false` the login screen skips "Send PIN" and submits email+PIN directly to `verify-pin` (no `request-pin` call); with `email_enabled=true` the two-step flow is unchanged.
+- **Bootstrap end-to-end** (integration): a PIN from the CLI `issue_bootstrap_pin` service logs the operator in via the email-disabled login screen and lands on the panel (survives the 401 redirect).
 - Token threaded into the stats request URL; the stats call uses `skipAuthRedirect: true`.
 
 ---
@@ -183,18 +200,19 @@ New SPA area at `/superuser/:token`, wired into `routes.ts` / `App.svelte`. The 
 - `models_auth.py` — add `SuperuserPanelToken`.
 - `alembic/versions/<rev>_add_superuser_panel_token.py` — migration (`down_revision = "4e17d3637814"`).
 - `superuser/__init__.py` — package marker (regular-package convention, matching `api/` and `notifications/`).
-- `superuser/service.py` — panel-token service (`mint()` = **delete-existing-then-insert in a single transaction / one commit**, `validate(db, token) -> User | raises`, `destroy_active(db)`) + `create_or_promote_superuser(db, email) -> User`. (No `purge_expired` — no background purge; §3.3.)
-- `api/superuser.py` — router: `require_superuser_panel` dependency (validates token, then resolves the session inline via `auth.validate_session` — **not** `Depends(require_superuser)`) + `GET /api/superuser/{token}/stats`.
-- `superuser/__main__.py` — interim CLI shim over `service.py` (`create-superuser`, `pin`, `activate`); opens `SessionLocal`.
+- `superuser/service.py` — panel-token service (`mint()` = **delete-existing-then-insert in a single transaction / one commit**; `validate(db, token) -> SuperuserPanelToken | raises` — validates + bumps `last_active_at`, raises 404 on bad/expired, returns the **token row, not a user** (tokens are not user-bound); `destroy_active(db)`) + bootstrap logic returning structured results: `create_or_promote_superuser(db, email) -> User`, `issue_bootstrap_pin(db, email) -> PinIssued|UnknownUser|DisabledUser|RateLimited`, `activate_panel(db) -> ActivateResult(token, url, has_superuser)`. (No `purge_expired` — no background purge; §3.3.)
+- `api/superuser.py` — router: `require_superuser_panel` dependency (validates the token via `service.validate` → 404; then resolves the session inline via `auth.validate_session` → 401; then checks `is_superuser` → 404; **returns the `User`** — **not** `Depends(require_superuser)`) + `GET /api/superuser/{token}/stats`.
+- `superuser/__main__.py` — interim CLI shim over `service.py` (`create-superuser`, `pin`, `activate`); opens `SessionLocal`; parses args + formats the structured results, no business logic.
 - `main.py` — wire `superuser_router` into the `include_router` block (**before** the `/api/{rest:path}` catch-all at `main.py:109`, else the endpoint silently 404s), and attach `Cache-Control: no-store` to the `_spa_fallback` `index.html` response for `/superuser/…` paths.
-- Logout hook wiring in `api/auth.py` — destroy the active token only when the logging-out session's user `is_superuser`.
-- `schemas.py` — `SuperuserStatsResponse`.
+- `api/auth.py` — add public `GET /api/auth/config` → `{ email_enabled }`; and wire the logout hook to destroy the active panel token only when the logging-out session's user `is_superuser`.
+- `schemas.py` — `SuperuserStatsResponse` (+ the `AuthConfigResponse` `{ email_enabled }` shape).
 
 **Frontend**
 - `pages/superuser/SuperuserShell.svelte` (route component; renders `SuperuserDashboard` internally), `pages/superuser/SuperuserDashboard.svelte`.
 - `lib/superuser.ts` — typed stats wrapper (passes `skipAuthRedirect: true`).
 - `routes.ts` + `componentMap` in `App.svelte` — register `SuperuserShell` (`auth: false`); extend `App.svelte`'s `AppHeader` condition to exclude `/superuser/…` paths.
-- `pages/Login.svelte` — consume + clear `sessionStorage['superuser_return_path']` on successful login (precedence over `?next=`).
+- `pages/Login.svelte` — capture + clear `sessionStorage['superuser_return_path']` on **mount** (precedence over `?next=` at successful verification); fetch `GET /api/auth/config` on mount and, when `email_enabled=false`, present the combined email+PIN form (skip "Send PIN").
+- `lib/auth.svelte.ts` — add `getAuthConfig() -> { email_enabled }` (used by Login).
 - `index.html` — add `<meta name="referrer" content="no-referrer">`.
 
 ---
