@@ -1,7 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
-
 from mathion.models_auth import Session as UserSession, User
 from mathion.superuser import service as panel_service
 
@@ -92,26 +90,32 @@ def test_empty_db_storage_is_zero(admin_client, db):
 
 def test_active_windows_and_distinct(admin_client, db):
     now = datetime.now(timezone.utc)
-    u1, u2, u3 = User(email="w1@example.com"), User(email="w2@example.com"), User(email="w3@example.com")
-    db.add_all([u1, u2, u3])
+    # Tight ±5s boundaries for BOTH windows so a wrong window size is caught.
+    a, b, c, d = (
+        User(email="w1@example.com"), User(email="w2@example.com"),
+        User(email="w3@example.com"), User(email="w4@example.com"),
+    )
+    db.add_all([a, b, c, d])
     db.flush()
     exp = now + timedelta(days=7)
     db.add_all([
-        UserSession(user_id=u1.id, token_hash="h1", expires_at=exp,
-                    last_active_at=now - timedelta(hours=24) + timedelta(seconds=1)),  # inside 24h
-        UserSession(user_id=u1.id, token_hash="h1b", expires_at=exp,
-                    last_active_at=now - timedelta(minutes=1)),                          # dup for u1
-        UserSession(user_id=u2.id, token_hash="h2", expires_at=exp,
-                    last_active_at=now - timedelta(hours=25)),                           # outside 24h, inside 7d
-        UserSession(user_id=u3.id, token_hash="h3", expires_at=exp,
-                    last_active_at=now - timedelta(days=8)),                             # outside 7d
+        UserSession(user_id=a.id, token_hash="h_a", expires_at=exp,
+                    last_active_at=now - timedelta(hours=24) + timedelta(seconds=5)),   # just inside 24h
+        UserSession(user_id=a.id, token_hash="h_a2", expires_at=exp,
+                    last_active_at=now - timedelta(minutes=1)),                          # dup for a
+        UserSession(user_id=b.id, token_hash="h_b", expires_at=exp,
+                    last_active_at=now - timedelta(hours=24) - timedelta(seconds=5)),    # just outside 24h, inside 7d
+        UserSession(user_id=c.id, token_hash="h_c", expires_at=exp,
+                    last_active_at=now - timedelta(days=7) + timedelta(seconds=5)),      # just inside 7d
+        UserSession(user_id=d.id, token_hash="h_d", expires_at=exp,
+                    last_active_at=now - timedelta(days=7) - timedelta(seconds=5)),      # just outside 7d
     ])
     db.commit()
     token = panel_service.mint(db)
     data = admin_client.get(f"/api/superuser/{token}/stats").json()
     # admin_client's own session (~now) contributes one active user in both windows.
-    assert data["active_users_24h"] == 2   # {u1 (deduped), admin}
-    assert data["active_users_7d"] == 3    # {u1, u2, admin}
+    assert data["active_users_24h"] == 2   # {a (deduped), admin}
+    assert data["active_users_7d"] == 4    # {a, b, c, admin}
 
 
 def test_expired_but_recently_active_session_counts(admin_client, db):

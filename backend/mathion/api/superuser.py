@@ -48,7 +48,6 @@ def _count_active_since(db: Session, since: datetime) -> int:
 
 @router.get("/api/superuser/{token}/stats", response_model=SuperuserStatsResponse)
 def get_superuser_stats(
-    token: str,
     response: Response,
     _user: User = Depends(require_superuser_panel),
     db: Session = Depends(get_db),
