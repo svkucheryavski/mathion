@@ -41,6 +41,11 @@ export async function verifyPin(
   return user;
 }
 
+export async function getAuthConfig(): Promise<{ send_pin_enabled: boolean }> {
+  // Public endpoint; never 401s, so no skipAuthRedirect needed.
+  return api.get<{ send_pin_enabled: boolean }>('/api/auth/config');
+}
+
 export async function logout(): Promise<void> {
   try {
     await api.post('/api/auth/logout');
