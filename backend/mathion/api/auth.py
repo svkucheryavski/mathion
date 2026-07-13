@@ -4,7 +4,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import exists, select
 
-from mathion.auth import destroy_session, request_pin, verify_pin
+from mathion.auth import destroy_session, request_pin, validate_session, verify_pin
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -13,6 +13,7 @@ from mathion.models_auth import User
 from mathion.notifications.mailer import build_mailer_from_settings
 from mathion.notifications.templates import build_login_pin_message
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
+from mathion.superuser import service as panel_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -118,6 +119,11 @@ def logout(
 ):
     _require_csrf(request)
     if session_token:
+        # Resolve the user BEFORE destroying the session, so only a superuser's
+        # logout tears down the shared panel token (a normal user's must not).
+        user = validate_session(db, session_token)
+        if user is not None and user.is_superuser:
+            panel_service.destroy_active(db)
         destroy_session(db, session_token)
     response.delete_cookie("session_token")
     return {"message": "Logged out"}
