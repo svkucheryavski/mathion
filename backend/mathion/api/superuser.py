@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -48,7 +48,6 @@ def _count_active_since(db: Session, since: datetime) -> int:
 
 @router.get("/api/superuser/{token}/stats", response_model=SuperuserStatsResponse)
 def get_superuser_stats(
-    response: Response,
     _user: User = Depends(require_superuser_panel),
     db: Session = Depends(get_db),
 ) -> SuperuserStatsResponse:
@@ -58,10 +57,6 @@ def get_superuser_stats(
     run_asset_bytes = db.scalar(select(func.coalesce(func.sum(RunAsset.file_size), 0)))
     submission_bytes = db.scalar(select(func.coalesce(func.sum(Submission.file_size), 0)))
     now = datetime.now(timezone.utc)
-
-    # Defense-in-depth (primary protection is document-level, Task 11).
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Referrer-Policy"] = "no-referrer"
 
     return SuperuserStatsResponse(
         total_users=total_users,

@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 
@@ -70,6 +70,20 @@ async def lifespan(app):
 
 app = FastAPI(title="Mathion", version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+@app.middleware("http")
+async def _superuser_no_store(request: Request, call_next):
+    """no-store + no-referrer on EVERY /api/superuser/ response, including the
+    guard's 401/404 (which bypass the handler body). The panel token lives in
+    the URL, so error responses must not be cached or leak a Referer either."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/superuser/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 app.include_router(auth_router)
 app.include_router(courses_router)
 app.include_router(versions_router)

@@ -72,6 +72,19 @@ it('sign-out logs out then navigates to /login (not the panel path)', async () =
   expect(navSpy).toHaveBeenCalledWith('/login', { replace: true, force: true });
 });
 
+it('navigates to /login even when logout() rejects (token URL never lingers)', async () => {
+  const auth = await import('../lib/auth.svelte');
+  (auth.logout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network'));
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  vi.stubGlobal('fetch', dispatchFetch());
+  component = mount(SuperuserShell, { target, props: { token: 'tok' } });
+  await settle();
+  buttonByText(target, 'Sign out')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await settle();
+  expect(auth.logout).toHaveBeenCalled();
+  expect(navSpy).toHaveBeenCalledWith('/login', { replace: true, force: true });
+});
+
 it('suppresses AppHeader on /superuser paths but shows it on /courses', async () => {
   const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
   vi.stubGlobal('fetch', dispatchFetch());

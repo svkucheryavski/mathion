@@ -150,3 +150,16 @@ def test_stats_sets_no_store_and_no_referrer_headers(admin_client, db):
     resp = admin_client.get(f"/api/superuser/{token}/stats")
     assert resp.headers["Cache-Control"] == "no-store"
     assert resp.headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_error_responses_also_carry_no_store_headers(admin_client, auth_client, client, db):
+    # The middleware must stamp no-store/no-referrer on guard-exception responses
+    # (bad token, no session, non-superuser), not just the 200 success path.
+    token = panel_service.mint(db)
+    for resp in (
+        client.get(f"/api/superuser/{token}/stats"),          # 401 no session
+        auth_client.get(f"/api/superuser/{token}/stats"),     # 404 non-superuser
+        admin_client.get("/api/superuser/bogus/stats"),       # 404 bad token
+    ):
+        assert resp.headers["Cache-Control"] == "no-store"
+        assert resp.headers["Referrer-Policy"] == "no-referrer"

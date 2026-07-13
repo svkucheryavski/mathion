@@ -6,7 +6,13 @@
   let { token }: { token: string } = $props();
 
   async function onSignOut(): Promise<void> {
-    await logout();
+    try {
+      await logout();
+    } catch {
+      // Ignore a logout transport error — client session state is already
+      // cleared in logout()'s own finally. Navigate away regardless so the
+      // panel token URL never lingers on screen.
+    }
     // Do NOT return to the panel path — the backend logout hook has destroyed
     // the token, so that path now 404s. replace: true drops the dead token URL.
     void navigate('/login', { replace: true, force: true });
