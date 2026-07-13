@@ -46,7 +46,7 @@ class FileMailer(Mailer):
         # loads early in `build_mailer_from_settings` without dragging
         # templates.py's transitive deps along.
         from .templates import TEMPLATES
-        return frozenset(TEMPLATES.keys())
+        return frozenset(TEMPLATES.keys()) | {"login_pin"}
 
     def send(self, msg):
         ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S")

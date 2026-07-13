@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import exists, select
@@ -8,9 +10,13 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
+from mathion.notifications.mailer import build_mailer_from_settings
+from mathion.notifications.templates import build_login_pin_message
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 
 def _user_response_with_flags(db: Session, user: User) -> UserResponse:
@@ -50,7 +56,18 @@ def api_auth_config() -> AuthConfigResponse:
 @router.post("/request-pin")
 def api_request_pin(request: Request, data: PinRequestSchema, db: Session = Depends(get_db)):
     _require_csrf(request)
-    request_pin(db, data.email)
+    raw_pin = request_pin(db, data.email)
+    # Send only for a real, enabled, non-rate-limited user (request_pin returned
+    # a PIN) and only when debug is off. Response stays uniform regardless.
+    if raw_pin is not None and not settings.debug:
+        mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
+        if mailer is not None:
+            try:
+                msg = build_login_pin_message(data.email.strip().lower(), raw_pin)
+                with mailer.session():
+                    mailer.send(msg)
+            except Exception:
+                logger.exception("login PIN email send failed")  # static message; never the raw PIN
     return {"message": "PIN sent"}
 
 

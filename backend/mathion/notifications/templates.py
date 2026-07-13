@@ -101,3 +101,25 @@ def _build_email_message(subject, body, ctx, *, kind: str) -> EmailMessage:
     msg["X-Mathion-Kind"] = kind  # FileMailer reads this to name the .eml file
     msg.set_content(body, charset="utf-8")
     return msg
+
+
+LOGIN_PIN_KIND = "login_pin"
+
+
+def build_login_pin_message(email: str, pin: str) -> EmailMessage:
+    """Standalone login-PIN email. Not a TEMPLATES entry (those are
+    RenderContext -> (subject, body) callables). The raw PIN lives only in this
+    in-memory message — never persisted or logged."""
+    if not email:
+        raise ValueError("recipient has no email")
+    msg = EmailMessage()
+    msg["From"] = settings.email_from
+    msg["To"] = email  # EmailMessage default policy rejects CR/LF-injected headers
+    msg["Subject"] = "Your Mathion sign-in PIN"
+    msg["X-Mathion-Kind"] = LOGIN_PIN_KIND
+    msg.set_content(
+        f"Your Mathion sign-in PIN is {pin}. "
+        f"It expires in {settings.pin_expiry_minutes} minutes.",
+        charset="utf-8",
+    )
+    return msg
