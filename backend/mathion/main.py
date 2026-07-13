@@ -116,6 +116,13 @@ def _api_not_found(rest: str):
     raise HTTPException(status_code=404, detail="Not Found")
 
 
+def _panel_cache_headers(full_path: str) -> dict[str, str] | None:
+    """no-store for superuser panel document responses (the token is in the URL)."""
+    if full_path == "superuser" or full_path.startswith("superuser/"):
+        return {"Cache-Control": "no-store"}
+    return None
+
+
 # Guard 2: conditional SPA fallback. Starlette 1.x StaticFiles(html=True)
 # no longer serves index.html as a universal catch-all for unknown paths, so
 # we implement the SPA pattern manually:
@@ -143,6 +150,7 @@ if _frontend_dist.is_dir():
             candidate.relative_to(_frontend_dist.resolve())
         except ValueError:
             raise HTTPException(status_code=404)
+        headers = _panel_cache_headers(full_path)
         if candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(_frontend_dist / "index.html")
+            return FileResponse(candidate, headers=headers)
+        return FileResponse(_frontend_dist / "index.html", headers=headers)
