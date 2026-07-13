@@ -60,14 +60,14 @@ def api_request_pin(request: Request, data: PinRequestSchema, db: Session = Depe
     # Send only for a real, enabled, non-rate-limited user (request_pin returned
     # a PIN) and only when debug is off. Response stays uniform regardless.
     if raw_pin is not None and not settings.debug:
-        mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
-        if mailer is not None:
-            try:
+        try:
+            mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
+            if mailer is not None:
                 msg = build_login_pin_message(data.email.strip().lower(), raw_pin)
                 with mailer.session():
                     mailer.send(msg)
-            except Exception:
-                logger.exception("login PIN email send failed")  # static message; never the raw PIN
+        except Exception:
+            logger.exception("login PIN email send failed")  # static message; never the raw PIN
     return {"message": "PIN sent"}
 
 

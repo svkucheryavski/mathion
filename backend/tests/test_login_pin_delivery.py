@@ -89,3 +89,18 @@ def test_request_pin_still_200_under_lifespanless_client(client, db):
     # mode is "disabled", no debug -> no send, no AttributeError.
     resp = client.post("/api/auth/request-pin", json={"email": "whoever@example.com"})
     assert resp.status_code == 200
+
+
+def test_mailer_build_failure_stays_uniform(client, db, monkeypatch):
+    _make_user(db)
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "email_mode", "smtp")
+
+    def boom(s):
+        raise RuntimeError("bad mailer config")
+
+    monkeypatch.setattr(auth_api, "build_mailer_from_settings", boom)
+    fail_resp = client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    unknown_resp = client.post("/api/auth/request-pin", json={"email": "nobody@example.com"})
+    assert fail_resp.status_code == 200
+    assert fail_resp.json() == unknown_resp.json() == {"message": "PIN sent"}
