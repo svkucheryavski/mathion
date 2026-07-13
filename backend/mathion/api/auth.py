@@ -8,7 +8,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
-from mathion.schemas import PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
+from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -35,6 +35,16 @@ def _require_csrf(request: Request):
     """Check CSRF header on public POST endpoints."""
     if request.headers.get("X-Requested-With") != "mathion":
         raise HTTPException(status_code=403, detail="Missing CSRF header")
+
+
+@router.get("/config", response_model=AuthConfigResponse)
+def api_auth_config() -> AuthConfigResponse:
+    # True whenever "Send PIN" yields a retrievable PIN: debug (console print) or
+    # a delivering mailer (smtp inbox / file .eml outbox). Excludes the one-shot
+    # `memory` sink and `disabled`. Public, no auth, no CSRF (GET).
+    return AuthConfigResponse(
+        send_pin_enabled=settings.debug or settings.email_mode in ("smtp", "file")
+    )
 
 
 @router.post("/request-pin")

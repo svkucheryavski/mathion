@@ -875,3 +875,7 @@ class SuperuserStatsResponse(BaseModel):
     storage_bytes: int
     active_users_24h: int
     active_users_7d: int
+
+
+class AuthConfigResponse(BaseModel):
+    send_pin_enabled: bool
