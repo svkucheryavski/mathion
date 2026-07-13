@@ -867,3 +867,11 @@ class SequenceItemStateResponse(BaseModel):
     sequence: SequenceMeta
     student: StudentMeta
     items: list[SequenceItemState]
+
+
+class SuperuserStatsResponse(BaseModel):
+    total_users: int
+    total_courses: int
+    storage_bytes: int
+    active_users_24h: int
+    active_users_7d: int
