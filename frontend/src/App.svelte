@@ -18,6 +18,7 @@
   import RunListPage from './pages/runs/RunListPage.svelte';
   import RunDetailPage from './pages/runs/RunDetailPage.svelte';
   import TeacherRunListPage from './pages/teaching/TeacherRunListPage.svelte';
+  import SuperuserShell from './pages/superuser/SuperuserShell.svelte';
 
   const componentMap: Record<string, Component<Record<string, string>>> = {
     Login: Login as Component<Record<string, string>>,
@@ -31,6 +32,7 @@
     RunListPage: RunListPage as Component<Record<string, string>>,
     RunDetailPage: RunDetailPage as Component<Record<string, string>>,
     TeacherRunListPage: TeacherRunListPage as Component<Record<string, string>>,
+    SuperuserShell: SuperuserShell as Component<Record<string, string>>,
   };
 
   const matched = $derived(matchRoute(routes, currentRoute.path));
@@ -59,7 +61,7 @@
   });
 </script>
 
-{#if !session.loading && session.user && currentRoute.path !== '/login'}
+{#if !session.loading && session.user && currentRoute.path !== '/login' && !currentRoute.path.startsWith('/superuser')}
   <AppHeader />
 {/if}
 
