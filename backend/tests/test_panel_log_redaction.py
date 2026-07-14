@@ -29,6 +29,7 @@ def _make_access_record(args):
         ("/superuser/SECRET/", "/superuser/[redacted]/"),            # trailing slash preserved
         ("/api/superuser/SECRET/stats", "/api/superuser/[redacted]/stats"),
         ("/api/superuser/SECRET/stats?x=1", "/api/superuser/[redacted]/stats?x=1"),  # query preserved
+        ("/superuser/SECRET?x=1", "/superuser/[redacted]?x=1"),      # token directly before ? -> [^/?]+ stops at ?
         ("/superuser/", "/superuser/"),                              # empty token -> unchanged
         ("/superuserfoo", "/superuserfoo"),                          # no trailing / -> unchanged
         ("/api/courses/abc-123", "/api/courses/abc-123"),            # non-panel -> unchanged
@@ -59,7 +60,25 @@ def test_filter_redacts_head_method():
     args = ("127.0.0.1:0", "HEAD", "/api/superuser/SECRET/stats", "1.1", 200)
     rec = _make_access_record(args)
     assert PanelAccessLogFilter().filter(rec) is True
-    assert rec.args[2] == "/api/superuser/[redacted]/stats"  # keys on args[2], not method
+    # Full 5-tuple: only index 2 changed, the other four fields byte-identical.
+    assert rec.args == ("127.0.0.1:0", "HEAD", "/api/superuser/[redacted]/stats", "1.1", 200)
+
+
+def test_filter_passes_list_args_unchanged():
+    # A 5-element LIST is NOT a tuple; guard must skip it. Guards against a
+    # future widening of the isinstance(args, tuple) check to Sequence.
+    args = ["127.0.0.1:0", "GET", "/api/superuser/SECRET/stats", "1.1", 200]
+    rec = _make_access_record(args)
+    assert PanelAccessLogFilter().filter(rec) is True
+    assert rec.args == ["127.0.0.1:0", "GET", "/api/superuser/SECRET/stats", "1.1", 200]
+
+
+def test_filter_passes_str_args_unchanged():
+    # A str is a Sequence but not a tuple; guard must skip it (no per-char indexing).
+    args = "/api/superuser/SECRET/stats"
+    rec = _make_access_record(args)
+    assert PanelAccessLogFilter().filter(rec) is True
+    assert rec.args == "/api/superuser/SECRET/stats"
 
 
 # ---- Integration: through uvicorn's real AccessFormatter -----------------
