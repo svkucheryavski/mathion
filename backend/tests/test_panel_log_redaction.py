@@ -138,3 +138,17 @@ def test_install_is_idempotent(clean_uvicorn_access_filters):
     panel_filters = [f for f in log.filters if isinstance(f, PanelAccessLogFilter)]
     assert len(panel_filters) == 1          # idempotent: exactly one, not two
     assert sentinel in log.filters          # unrelated filter left in place
+
+
+# ---- Install wiring (sub-test b): importing mathion.main installs it ------
+def test_app_import_wires_panel_log_filter():
+    """Importing mathion.main runs install() at module top level, so the
+    uvicorn.access logger carries a PanelAccessLogFilter process-globally.
+    Assert PRESENCE on the live logger WITHOUT stripping (a cached re-import is
+    a no-op that cannot re-install, so stripping would remove the very filter
+    this checks for). Robust to run order relative to the idempotency test,
+    whose fixture restores its snapshot in teardown."""
+    import mathion.main  # noqa: F401  (cached no-op here; documents the dependency)
+
+    log = logging.getLogger("uvicorn.access")
+    assert any(isinstance(f, PanelAccessLogFilter) for f in log.filters)

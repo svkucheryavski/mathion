@@ -36,6 +36,12 @@ from mathion.notifications import (
     SHUTDOWN_TIMEOUT_SECONDS,
     build_mailer_from_settings,
 )
+from mathion.superuser.log_redaction import install as install_log_redaction
+
+# Redact the panel token from uvicorn access logs. Installed at IMPORT TIME
+# (top level, NOT in the lifespan) so it is active under every uvicorn
+# --lifespan mode — importing this module wires it for the whole process.
+install_log_redaction()
 
 
 @asynccontextmanager
