@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import exists, select
 
@@ -54,21 +54,37 @@ def api_auth_config() -> AuthConfigResponse:
     )
 
 
+def _send_login_pin(email: str, raw_pin: str) -> None:
+    """Build a one-shot mailer and send the login PIN. Best-effort: any
+    build/send failure is caught and logged with a static message (never the
+    raw PIN). This is the SOLE error boundary for the send after it moved
+    off the response path."""
+    try:
+        mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
+        if mailer is not None:
+            msg = build_login_pin_message(email, raw_pin)
+            with mailer.session():
+                mailer.send(msg)
+    except Exception:
+        logger.exception("login PIN email send failed")  # static message; never the raw PIN
+
+
 @router.post("/request-pin")
-def api_request_pin(request: Request, data: PinRequestSchema, db: Session = Depends(get_db)):
+def api_request_pin(
+    request: Request,
+    data: PinRequestSchema,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     _require_csrf(request)
     raw_pin = request_pin(db, data.email)
-    # Send only for a real, enabled, non-rate-limited user (request_pin returned
-    # a PIN) and only when debug is off. Response stays uniform regardless.
+    # Schedule the send OFF the response path (not inline) only for a real,
+    # enabled, non-rate-limited user (request_pin returned a PIN) and only when
+    # debug is off. Response stays uniform regardless.
     if raw_pin is not None and not settings.debug:
-        try:
-            mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
-            if mailer is not None:
-                msg = build_login_pin_message(data.email.strip().lower(), raw_pin)
-                with mailer.session():
-                    mailer.send(msg)
-        except Exception:
-            logger.exception("login PIN email send failed")  # static message; never the raw PIN
+        # data.email is already stripped+lowercased by PinRequestSchema.normalize_email;
+        # the .strip().lower() here is belt-and-suspenders (a no-op post-schema).
+        background_tasks.add_task(_send_login_pin, data.email.strip().lower(), raw_pin)
     return {"message": "PIN sent"}
 
 
