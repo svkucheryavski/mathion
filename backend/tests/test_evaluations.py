@@ -105,6 +105,22 @@ def test_patch_evaluation_hides_existence(auth_client, admin_client, student_cli
     _assert_hidden(forbidden, missing)
 
 
+def test_patch_evaluation_as_admin_succeeds(admin_client, student_client_for, db, seed_run_with_groups):
+    """An authorized staff PATCH returns 200 and the change persists."""
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    ev = admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "accepted", "score": "90"},
+    ).json()
+    response = admin_client.patch(f"/api/evaluations/{ev['id']}", json={"score": 70})
+    assert response.status_code == 200
+    assert response.json()["score"] == 70
+    # And the change persisted — re-GET reflects the new value
+    reget = admin_client.get(f"/api/submissions/{sub['id']}/evaluation")
+    assert reget.status_code == 200
+    assert reget.json()["score"] == 70
+
+
 def test_post_evaluation_blocked_on_resubmission(admin_client, student_client_for, db, seed_run_with_groups):
     """Manual evaluation is blocked on auto-accepted resubmissions."""
     _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)

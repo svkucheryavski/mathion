@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from fastapi import HTTPException
 
-from mathion.api.helpers import require_run_admin_or_teacher
+from mathion.api.helpers import is_run_admin_or_teacher, require_run_admin_or_teacher
 from mathion.models import Course, CourseAdmin, CourseVersion, Run, RunTeacher
 
 
@@ -47,6 +47,30 @@ def test_unrelated_user_403(db, test_user):
     with pytest.raises(HTTPException) as excinfo:
         require_run_admin_or_teacher(db, test_user, run)
     assert excinfo.value.status_code == 403
+
+
+def test_is_run_admin_or_teacher_superuser_true(db, superuser):
+    _, run = _make_run(db)
+    assert is_run_admin_or_teacher(db, superuser, run) is True
+
+
+def test_is_run_admin_or_teacher_course_admin_true(db, test_user):
+    course, run = _make_run(db)
+    db.add(CourseAdmin(course_id=course.id, user_id=test_user.id))
+    db.commit()
+    assert is_run_admin_or_teacher(db, test_user, run) is True
+
+
+def test_is_run_admin_or_teacher_run_teacher_true(db, test_user):
+    _, run = _make_run(db)
+    db.add(RunTeacher(run_id=run.id, user_id=test_user.id))
+    db.commit()
+    assert is_run_admin_or_teacher(db, test_user, run) is True
+
+
+def test_is_run_admin_or_teacher_unrelated_false(db, test_user):
+    _, run = _make_run(db)
+    assert is_run_admin_or_teacher(db, test_user, run) is False
 
 
 # 404 on bad run_id is now the responsibility of each calling route handler

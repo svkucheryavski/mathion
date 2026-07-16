@@ -579,7 +579,9 @@ def has_run_teacher_on_course(db: Session, user: "User", course_id: int) -> bool
     """Return True iff the user has a RunTeacher row on any run of any version of the course.
 
     WARNING: READ-ONLY UI predicate. Do NOT use as a write-path authorization gate —
-    write paths must use `require_course_admin` / `require_run_admin_or_teacher`.
+    write paths must use a raising gate (`require_course_admin` /
+    `require_run_admin_or_teacher`), or, for privacy-preserving routes that hide
+    existence, the boolean `is_run_admin_or_teacher` mapping failure to a uniform 404.
 
     Used by `GET /api/courses/by-slug/{slug}` only. The version-list and block-list
     endpoints use tighter predicates (IN-subquery / has_run_pinned_to_version).
@@ -601,7 +603,9 @@ def has_run_pinned_to_version(db: Session, user: "User", version_id: int) -> boo
     """Return True iff the user has a RunTeacher row on a run whose version_id matches.
 
     WARNING: READ-ONLY UI predicate. Do NOT use as a write-path authorization gate —
-    write paths must use `require_course_admin` / `require_run_admin_or_teacher`.
+    write paths must use a raising gate (`require_course_admin` /
+    `require_run_admin_or_teacher`), or, for privacy-preserving routes that hide
+    existence, the boolean `is_run_admin_or_teacher` mapping failure to a uniform 404.
 
     Used by `GET /api/versions/{vid}/blocks` and `GET /assets/{vid}/{filename}`.
     No `course_id` parameter required — CourseVersion.id is globally unique.
