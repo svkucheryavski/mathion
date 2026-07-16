@@ -278,10 +278,10 @@ def get_submission(
     if is_run_admin_or_teacher(db, user, run):
         return sub
     if not mini_project_visible_to_student(run, mp):
-        raise HTTPException(status_code=403, detail="Not visible")
+        raise HTTPException(status_code=404, detail="Submission not found")
     group = get_submitter_group(db, run.id, user.id)
     if group is None or group.id != sub.group_id:
-        raise HTTPException(status_code=403, detail="Not a member of submitting group")
+        raise HTTPException(status_code=404, detail="Submission not found")
     return sub
 
 
@@ -296,10 +296,10 @@ def get_submission_file(
     run = db.get(Run, mp.run_id)
     if not is_run_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
-            raise HTTPException(status_code=403, detail="Not visible")
+            raise HTTPException(status_code=404, detail="Submission not found")
         group = get_submitter_group(db, run.id, user.id)
         if group is None or group.id != sub.group_id:
-            raise HTTPException(status_code=403, detail="Not a member of submitting group")
+            raise HTTPException(status_code=404, detail="Submission not found")
 
     abs_dir = submission_storage_dir(run.id, sub.group_id)
     abs_path = os.path.join(abs_dir, os.path.basename(sub.file_path))

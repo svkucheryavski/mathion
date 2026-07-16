@@ -566,3 +566,13 @@ def seed_published_course_version_with_enrollment_only(db, seed_publishable_vers
         return student, course
 
     return _factory
+
+
+def _assert_hidden(forbidden, missing):
+    """A forbidden response must be byte-indistinguishable from the missing-row 404:
+    same status, same raw body, same Content-Type/Content-Length."""
+    assert missing.status_code == 404
+    assert forbidden.status_code == 404
+    assert forbidden.content == missing.content
+    assert forbidden.headers["content-type"] == missing.headers["content-type"]
+    assert forbidden.headers["content-length"] == missing.headers["content-length"]

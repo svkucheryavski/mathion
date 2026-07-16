@@ -1,7 +1,7 @@
 import io
 from sqlalchemy import select
 
-from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO
+from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO, _assert_hidden
 
 
 def _make_submitted(admin_client, student_client_for, db, seed_run_with_groups):
@@ -128,3 +128,35 @@ def test_feedback_file_rejects_non_pdf_content(admin_client, student_client_for,
     )
     assert resp.status_code == 400
     assert resp.json()["detail"] == "feedback_file is not a valid PDF (missing %PDF- header)"
+
+
+def test_get_evaluation_hides_existence(admin_client, student_client_for, db, seed_run_with_groups):
+    from mathion.models import Run
+    run, ga, mp, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    admin_client.post(f"/api/submissions/{sub['id']}/evaluation", data={"result": "accepted"})
+    bob = student_client_for("bob@example.com")
+    missing = bob.get("/api/submissions/999999/evaluation")
+    membership = bob.get(f"/api/submissions/{sub['id']}/evaluation")
+    run_obj = db.get(Run, run["id"]); run_obj.is_published = False; db.commit()
+    alice = student_client_for("alice@example.com")
+    visibility = alice.get(f"/api/submissions/{sub['id']}/evaluation")
+    _assert_hidden(membership, missing)
+    _assert_hidden(visibility, missing)
+
+
+def test_get_feedback_file_hides_existence(admin_client, student_client_for, db, seed_run_with_groups):
+    from mathion.models import Run
+    run, ga, mp, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    ev = admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "minor_revision", "feedback_text": "x"},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
+    ).json()
+    bob = student_client_for("bob@example.com")
+    missing = bob.get("/api/evaluations/999999/feedback-file")
+    membership = bob.get(f"/api/evaluations/{ev['id']}/feedback-file")
+    run_obj = db.get(Run, run["id"]); run_obj.is_published = False; db.commit()
+    alice = student_client_for("alice@example.com")
+    visibility = alice.get(f"/api/evaluations/{ev['id']}/feedback-file")
+    _assert_hidden(membership, missing)
+    _assert_hidden(visibility, missing)

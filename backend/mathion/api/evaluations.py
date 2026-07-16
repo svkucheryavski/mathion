@@ -166,10 +166,10 @@ def get_evaluation(
     run = get_or_404(db, Run, mp.run_id)
     if not is_run_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
-            raise HTTPException(status_code=403, detail="Not visible")
+            raise HTTPException(status_code=404, detail="Submission not found")
         group = get_submitter_group(db, run.id, user.id)
         if group is None or group.id != sub.group_id:
-            raise HTTPException(status_code=403, detail="Not a group member")
+            raise HTTPException(status_code=404, detail="Submission not found")
     ev = db.execute(select(Evaluation).where(Evaluation.submission_id == sid)).scalar_one_or_none()
     if ev is None:
         raise HTTPException(status_code=404, detail="Evaluation not found")
@@ -216,10 +216,10 @@ def get_feedback_file(
     run = get_or_404(db, Run, mp.run_id)
     if not is_run_admin_or_teacher(db, user, run):
         if not mini_project_visible_to_student(run, mp):
-            raise HTTPException(status_code=403, detail="Not visible")
+            raise HTTPException(status_code=404, detail="Evaluation not found")
         group = get_submitter_group(db, run.id, user.id)
         if group is None or group.id != sub.group_id:
-            raise HTTPException(status_code=403, detail="Not a group member")
+            raise HTTPException(status_code=404, detail="Evaluation not found")
     if ev.feedback_file is None:
         raise HTTPException(status_code=404, detail="No feedback file")
     abs_dir = submission_storage_dir(run.id, sub.group_id)

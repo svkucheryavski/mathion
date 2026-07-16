@@ -1,6 +1,8 @@
 import io
 from sqlalchemy import select
 
+from tests.conftest import _assert_hidden
+
 
 def test_initial_submission(student_client_for, seed_run_with_published_mp):
     run, ga, _, mp = seed_run_with_published_mp()
@@ -205,3 +207,37 @@ def test_submission_rejects_non_pdf_content(student_client_for, seed_run_with_pu
     )
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Submission is not a valid PDF (missing %PDF- header)"
+
+
+def test_get_submission_hides_existence(student_client_for, db, seed_run_with_published_mp):
+    from mathion.models import Run
+    run, ga, gb, mp = seed_run_with_published_mp()
+    alice = student_client_for("alice@example.com")
+    sid = alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
+    ).json()["id"]
+    bob = student_client_for("bob@example.com")
+    missing = bob.get("/api/submissions/999999")
+    membership = bob.get(f"/api/submissions/{sid}")            # other group -> membership branch
+    run_obj = db.get(Run, run["id"]); run_obj.is_published = False; db.commit()
+    visibility = alice.get(f"/api/submissions/{sid}")          # run unpublished -> visibility branch
+    _assert_hidden(membership, missing)
+    _assert_hidden(visibility, missing)
+
+
+def test_get_submission_file_hides_existence(student_client_for, db, seed_run_with_published_mp):
+    from mathion.models import Run
+    run, ga, gb, mp = seed_run_with_published_mp()
+    alice = student_client_for("alice@example.com")
+    sid = alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
+    ).json()["id"]
+    bob = student_client_for("bob@example.com")
+    missing = bob.get("/api/submissions/999999/file")
+    membership = bob.get(f"/api/submissions/{sid}/file")
+    run_obj = db.get(Run, run["id"]); run_obj.is_published = False; db.commit()
+    visibility = alice.get(f"/api/submissions/{sid}/file")
+    _assert_hidden(membership, missing)
+    _assert_hidden(visibility, missing)
