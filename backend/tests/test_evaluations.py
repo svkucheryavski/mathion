@@ -112,10 +112,13 @@ def test_patch_evaluation_as_admin_succeeds(admin_client, student_client_for, db
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "accepted", "score": "90"},
     ).json()
+    assert ev["score"] == 90  # pre-PATCH baseline, so 70 below is provably a real change
     response = admin_client.patch(f"/api/evaluations/{ev['id']}", json={"score": 70})
     assert response.status_code == 200
     assert response.json()["score"] == 70
-    # And the change persisted — re-GET reflects the new value
+    # The change was durably committed, not just visible in the shared test session:
+    # rollback discards any uncommitted mutation before the re-GET forces a fresh read.
+    db.rollback()
     reget = admin_client.get(f"/api/submissions/{sub['id']}/evaluation")
     assert reget.status_code == 200
     assert reget.json()["score"] == 70
