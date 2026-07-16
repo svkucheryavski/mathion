@@ -1,6 +1,6 @@
 # Phase 9 Security Tightening — Slice B (submissions/evaluations) — Design
 
-**Status:** Draft, revised after codex pass 1 (CHANGES REQUIRED → all findings verified against code and folded in: scope expanded to 6 endpoints; fixture inventory corrected to 40/6 files; timing residual acknowledged; byte-identity test; signature-screening wording). Awaiting codex pass 2 + user approval. First slice of the Phase 9 hardening arc.
+**Status:** Draft, revised after codex passes 1–2 (all findings verified against code and folded in: scope expanded to 6 endpoints; fixture inventory corrected to 40/6 files; both GET unauthorized branches tested; inline 404 literals; orphaned import removed; timing residual acknowledged; byte-identity test; signature-screening wording). Awaiting codex pass 3 + user approval. First slice of the Phase 9 hardening arc.
 
 **Goal:** Close two backend-only security gaps on the submissions/evaluations surface:
 1. **#1 — Existence enumeration oracle:** six endpoints keyed by a submission/evaluation row id (`sid`/`eid`) return `403` when the caller is unauthorized, which confirms the row exists (a nonexistent id returns `404`). Probing ids and watching 403-vs-404 enumerates other groups' submissions/evaluations. Fix: on the unauthorized branch return a `404` whose **status code and response body** are identical to the missing-row `404`, so forbidden ≡ absent (status/body oracle closed; see the timing residual below).
@@ -67,9 +67,15 @@ Change the six unauthorized branches to `404`:
 | `create_evaluation` (`:67`) | replace `require_run_admin_or_teacher(...)` with `if not is_run_admin_or_teacher(db, user, run): raise HTTPException(404, "Submission not found")` | `"Submission not found"` |
 | `patch_evaluation` (`:188`) | same swap → `raise HTTPException(404, "Evaluation not found")` | `"Evaluation not found"` |
 
-`is_run_admin_or_teacher` (`helpers.py:139`) is the exact boolean equivalent of `require_run_admin_or_teacher` (superuser / course-admin / run-teacher → authorized), so the swap only changes the failure status (403→404) and preserves authorized-staff behaviour. It is already the pattern the read endpoints use for their staff branch.
+`is_run_admin_or_teacher` (`helpers.py:139`) is the exact boolean equivalent of `require_run_admin_or_teacher` (superuser / course-admin / run-teacher → authorized), so the swap only changes the failure status (403→404) and preserves authorized-staff behaviour. It is already the pattern the read endpoints use for their staff branch. After the swap, `require_run_admin_or_teacher` is no longer used in `evaluations.py` (its only two call sites) — remove it from that module's `helpers` import; `is_run_admin_or_teacher` is already imported there. (`submissions.py` never imported it — no import change there.)
 
-The forbidden-path 404 must be produced with the **same** string as `get_or_404`'s (`f"{Model.__name__} not found"`). The plan chooses the exact mechanism (inline literal matching the model name, or a tiny shared "not-found" raiser), but a test asserts the forbidden-id and nonexistent-id responses are byte-identical (see Testing).
+The forbidden-path 404 is a plain inline `raise HTTPException(status_code=404, detail="Submission not found")` / `"Evaluation not found"` — the exact string `get_or_404` emits for that model (`f"{Model.__name__} not found"`). No shared helper (six straightforward literals; a helper would still have to pick the per-endpoint model name — YAGNI). The byte-identity test (see Testing) guards against any drift between the two strings.
+
+**Each of the four GET endpoints has two *independent* unauthorized branches, both of which must flip and both of which must be tested:**
+- (a) **not visible** — `mini_project_visible_to_student` is false (`run.is_published AND mini_project.is_published`; e.g. the run is later unpublished). Sites: `submissions.py:279,297`; `evaluations.py:167,216`.
+- (b) **membership** — visible run, but the caller is in another group or has no group. Sites: `submissions.py:282,300`; `evaluations.py:170,219`.
+
+A test that only exercises branch (b) (e.g. an other-group student on a published run) would leave branch (a) able to remain 403 undetected, so the test matrix must cover both.
 
 **Explicitly preserved (NOT changed):**
 - Post-authorization-gate 404s (`File not found` / `File missing` at `submissions.py:307,309` and `evaluations.py:228,230`; `No feedback file` at `evaluations.py:222`). These fire only after the caller is authorized, so they reveal nothing cross-tenant. (In `get_evaluation`, an unauthorized prober is rejected at `:167/:170` before the evaluation query at `:171`, so they never reach `"Evaluation not found"` at `:173`.)
@@ -109,7 +115,10 @@ Empty files are already caught earlier (`"Empty file"` / `"Empty feedback file"`
 
 ## Testing (TDD)
 
-1. **#1 indistinguishability (new tests, RED→GREEN).** For each of the six endpoints, one test where an unauthorized actor requests (a) a real id belonging to another group/run and (b) a nonexistent id, asserting the two responses are byte-identical: equal `status_code`, equal raw `response.content`, and equal `Content-Type` / `Content-Length` headers (not just `.json()`; volatile Date/Server headers excluded). For the two mutation endpoints the probe uses the trivial payloads above (`result=accepted`; `{}`). These fail today (real id → 403) and pass after the flip.
+1. **#1 indistinguishability (new tests, RED→GREEN).** Assert byte-identity across every forbidden state vs a nonexistent id: equal `status_code`, equal raw `response.content`, and equal `Content-Type` / `Content-Length` headers (not just `.json()`; volatile Date/Server headers excluded).
+   - **Four GETs — both forbidden branches each:** (a) **visibility** — an existing submission/evaluation whose run is unpublished (so `mini_project_visible_to_student` is false); (b) **membership** — an existing row belonging to another group (visible, published run). Both, plus the nonexistent-id response, must be byte-identical. Covering only (b) is insufficient (it leaves the visibility sites able to stay 403).
+   - **Two mutations — single staff-authz probe each:** `create_evaluation` with `result=accepted` and `patch_evaluation` with `{}`, as a non-staff student, vs a nonexistent id → byte-identical 404. (These endpoints have one unauthorized path — the staff-authz swap.)
+   - All fail today (real id → 403) and pass after the flip.
 2. **#2 signature screen.**
    - Unit tests for `looks_like_pdf`: `b"%PDF-1.4 ..."` → True; `b"%PDF"` (4 bytes) → False; `b"MZ\x90\x00"` → False; `b""` → False; `b"%PD"` → False.
    - Endpoint tests: a `.pdf`-named upload with non-PDF content (`b"MZ\x90\x00"`, mime `application/pdf`) → `400` for both `create_submission` and `create_evaluation` (distinct from the existing extension test at `test_submissions.py:193`, which uploads `malware.exe`); a real `%PDF-`-prefixed upload → success (`201`).
@@ -121,7 +130,7 @@ Empty files are already caught earlier (`"Empty file"` / `"Empty feedback file"`
 
 - `mathion/assets.py` — add `PDF_MAGIC` + `looks_like_pdf`.
 - `mathion/api/submissions.py` — flip 4 read sites to 404; add signature screen in `create_submission`.
-- `mathion/api/evaluations.py` — flip `get_evaluation` (2) + `get_feedback_file` (2) reads to 404; swap `create_evaluation` + `patch_evaluation` authz to `is_run_admin_or_teacher`→404; add signature screen in `create_evaluation`.
+- `mathion/api/evaluations.py` — flip `get_evaluation` (2) + `get_feedback_file` (2) reads to 404; swap `create_evaluation` + `patch_evaluation` authz to `is_run_admin_or_teacher`→404; **remove the now-unused `require_run_admin_or_teacher` import**; add signature screen in `create_evaluation`.
 - Tests: `tests/test_submissions.py`, `tests/test_evaluations.py` (new #1/#2 tests + fixture updates); `tests/test_groups.py`, `tests/test_runs.py`, `tests/test_student_mini_projects.py`, `tests/test_mini_project_notifications.py` (fixture updates only).
 
 ## Success Criteria
@@ -147,5 +156,6 @@ Empty files are already caught earlier (`"Empty file"` / `"Empty feedback file"`
 ## Review Record
 
 - Codex pass 1 (2026-07-16): CHANGES REQUIRED. All findings verified against code and folded in — Critical (POST/PATCH oracle) → scope expanded to 6 endpoints; Important (fixtures 40/6 files; timing overclaim; `.json()` vs byte-identity) and Minors (signature-vs-validity wording; false-reject framing; "no user-facing effect" absolute) → applied. User approved the 6-endpoint scope expansion.
-- Codex pass 2 (pending) on this revised spec.
+- Codex pass 2 (2026-07-16): CHANGES REQUIRED, no Critical. Verified + folded in: Important (test matrix covered only the membership branch, leaving the four `not visible` sites able to stay 403 → tests now cover both visibility + membership branches per GET); Minor (commit to inline 404 literals, drop the shared-helper alternative); Minor (remove the orphaned `require_run_admin_or_teacher` import from `evaluations.py`). Codex also confirmed: the 6-endpoint set is complete (whole-tree search found no other submission/evaluation-id-keyed route), `is_run_admin_or_teacher` is a side-effect-free equivalent, the mutation probes are valid, detail strings match, the 40-literal/6-file fixture inventory is exact with no size/content assertions disturbed, and equal `HTTPException(404, detail)` produces identical 33-byte body + `Content-Type`/`Content-Length` under FastAPI 0.136.0.
+- Codex pass 3 (pending) on this revised spec.
 - User approval (pending).
