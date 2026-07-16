@@ -18,7 +18,7 @@ def _setup(admin_client, student_client_for, db, seed_run_with_groups):
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     student = student_client_for("alice@example.com")
     sub = student.post(f"/api/mini-projects/{mp['id']}/submissions",
-                       files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")}).json()
+                       files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")}).json()
     return run, ga, mp, sub
 
 
@@ -37,11 +37,11 @@ def test_evaluation_received_on_auto_accept(admin_client, student_client_for, db
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "minor_revision", "feedback_text": "fix"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     student = student_client_for("alice@example.com")
     student.post(f"/api/mini-projects/{mp['id']}/submissions",
-                 files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")})
+                 files={"file": ("r2.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")})
     rows = db.query(NotificationLogEntry).filter_by(kind="evaluation_received").all()
     # One for manual eval (minor_revision) + one for auto-accept = 2
     assert len(rows) == 2

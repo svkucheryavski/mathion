@@ -26,7 +26,7 @@ def test_submit_blocks_non_group_member(student_client_for, db, seed_run_with_pu
     outsider = student_client_for("outsider@example.com")
     response = outsider.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 403
 
@@ -43,7 +43,7 @@ def test_submit_enrolled_but_no_group(student_client_for, db, seed_run_with_publ
     lonely = student_client_for("lonely@example.com")
     response = lonely.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 403
 
@@ -67,7 +67,7 @@ def test_submit_blocked_after_hard_deadline(admin_client, student_client_for, db
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{mp_obj.id}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 409
 
@@ -79,7 +79,7 @@ def test_submit_to_disabled_group(admin_client, student_client_for, seed_run_wit
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 409
 
@@ -89,11 +89,11 @@ def test_pending_evaluation_blocks_resubmit(student_client_for, seed_run_with_pu
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     response = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 409
 
@@ -104,7 +104,7 @@ def test_first_submitted_at_set(student_client_for, db, seed_run_with_published_
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     db.expire_all()
     mp_obj = db.get(MiniProject, mp["id"])
@@ -116,7 +116,7 @@ def test_lock_blocks_assignment_md_edit(admin_client, student_client_for, seed_r
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     response = admin_client.patch(f"/api/mini-projects/{mp['id']}", json={"assignment_md": "new text"})
     assert response.status_code == 409
@@ -128,7 +128,7 @@ def _make_submitted(student_client_for, seed_run_with_published_mp):
     student = student_client_for("alice@example.com")
     sub = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     return run, ga, mp, sub
 
@@ -139,13 +139,13 @@ def test_resubmission_auto_accepts(admin_client, student_client_for, db, seed_ru
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "minor_revision", "feedback_text": "Fix"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     # Group member resubmits
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{sub['mini_project_id']}/submissions",
-        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 201
     new_sub = response.json()
@@ -161,12 +161,12 @@ def test_rejected_resets_to_initial(admin_client, student_client_for, seed_run_w
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "rejected", "feedback_text": "wrong file"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{sub['mini_project_id']}/submissions",
-        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 201
     assert response.json()["is_resubmission"] is False  # fresh initial
@@ -178,7 +178,7 @@ def test_accepted_blocks_resubmit(admin_client, student_client_for, seed_run_wit
     student = student_client_for("alice@example.com")
     response = student.post(
         f"/api/mini-projects/{sub['mini_project_id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert response.status_code == 409
 
@@ -194,3 +194,14 @@ def test_submit_disallowed_extension(student_client_for, seed_run_with_published
     )
     assert response.status_code == 400
     assert "File extension not allowed" in response.json()["detail"]
+
+
+def test_submission_rejects_non_pdf_content(student_client_for, seed_run_with_published_mp):
+    run, ga, gb, mp = seed_run_with_published_mp()
+    alice = student_client_for("alice@example.com")
+    resp = alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("evil.pdf", io.BytesIO(b"MZ\x90\x00not a pdf"), "application/pdf")},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Submission is not a valid PDF (missing %PDF- header)"

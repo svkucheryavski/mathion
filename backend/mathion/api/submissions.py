@@ -17,7 +17,7 @@ from mathion.api.helpers import (
     submission_storage_dir,
     to_utc_aware,
 )
-from mathion.assets import validate_extension
+from mathion.assets import looks_like_pdf, validate_extension
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -119,6 +119,8 @@ def create_submission(
             status_code=400,
             detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
         )
+    if not looks_like_pdf(content):
+        raise HTTPException(status_code=400, detail="Submission is not a valid PDF (missing %PDF- header)")
 
     # Determine submission_number
     block = db.get(Block, mp.block_id)

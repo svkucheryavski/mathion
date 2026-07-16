@@ -275,7 +275,7 @@ def test_list_returns_awaiting_evaluation_when_submission_no_eval(
     sc = student_client_for("alice@example.com")
     sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     resp = sc.get(f"/api/courses/{course.slug}/mini-projects")
     assert resp.status_code == 200
@@ -297,13 +297,13 @@ def test_list_returns_eval_result_status(
     sc = student_client_for("alice@example.com")
     sub = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     payload = {"result": result_value}
     files = None
     if result_value != "accepted":
         payload["feedback_text"] = "Feedback"
-        files = {"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")}
+        files = {"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")}
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data=payload,
@@ -492,7 +492,7 @@ def test_detail_already_accepted_blocks_submit(
     sc = student_client_for("alice@example.com")
     sub = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
@@ -517,7 +517,7 @@ def test_detail_awaiting_evaluation_blocks_submit(
     sc = student_client_for("alice@example.com")
     sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     resp = sc.get(_detail_url(course.slug, "b"))
     assert resp.status_code == 200, resp.text
@@ -565,12 +565,12 @@ def test_detail_resubmission_deadline_passed_blocks_resub(
     sc = student_client_for("alice@example.com")
     sub = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "major_revision", "feedback_text": "Redo"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     mp_obj = db.get(MiniProject, mp["id"])
     # CK ck_mini_project_hard_le_resubmission requires hard <= resub, so
@@ -598,12 +598,12 @@ def test_detail_rejected_allows_fresh_initial_submission(
     sc = student_client_for("alice@example.com")
     sub = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "rejected", "feedback_text": "No"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     resp = sc.get(_detail_url(course.slug, "b"))
     assert resp.status_code == 200, resp.text
@@ -654,7 +654,7 @@ def test_detail_full_name_fallback_to_email_local_part(
     # Submit so the submitter_full_name field is also exercised.
     sub = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     # Also clear evaluator full_name to test that branch.
     admin = _get_user_by_email(db, "admin@example.com")
@@ -663,7 +663,7 @@ def test_detail_full_name_fallback_to_email_local_part(
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "rejected", "feedback_text": "No"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     resp = sc.get(_detail_url(course.slug, "b"))
     assert resp.status_code == 200, resp.text
@@ -688,16 +688,16 @@ def test_detail_history_desc_by_submission_number(
     sc = student_client_for("alice@example.com")
     sub1 = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     admin_client.post(
         f"/api/submissions/{sub1['id']}/evaluation",
         data={"result": "major_revision", "feedback_text": "Redo"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     sub2 = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r2.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r2.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     resp = sc.get(_detail_url(course.slug, "b"))
     assert resp.status_code == 200, resp.text
@@ -964,7 +964,7 @@ def test_detail_filename_is_safe_basename(
     sc = student_client_for("alice@example.com")
     sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     resp = sc.get(_detail_url(course.slug, "b"))
     assert resp.status_code == 200, resp.text
@@ -999,7 +999,7 @@ def test_detail_latest_status_snapshot_consistent_with_history(
     # One submission, NO evaluation yet.
     sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
 
     # Phase 1: both fields must reflect the no-eval state together.
@@ -1079,7 +1079,7 @@ def test_detail_endpoint_does_not_call_legacy_derive_latest_status(
     # so the endpoint reaches the status-derivation step.
     sub_resp = sc.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     assert sub_resp.status_code in (200, 201), sub_resp.text
 

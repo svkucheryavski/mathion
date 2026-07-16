@@ -60,3 +60,12 @@ def test_get_mime_type():
     assert get_mime_type("pdf") == "application/pdf"
     assert get_mime_type("js") == "application/javascript"
     assert get_mime_type("unknown") == "application/octet-stream"
+
+
+def test_looks_like_pdf():
+    from mathion.assets import looks_like_pdf
+    assert looks_like_pdf(b"%PDF-1.4 stuff") is True
+    assert looks_like_pdf(b"%PDF") is False        # 4 bytes, no hyphen
+    assert looks_like_pdf(b"MZ\x90\x00") is False
+    assert looks_like_pdf(b"") is False
+    assert looks_like_pdf(b"%PD") is False

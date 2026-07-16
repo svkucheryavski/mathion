@@ -132,7 +132,7 @@ def test_delete_group_with_submissions_409(admin_client, student_client_for, db,
     student = student_client_for("alice@example.com")
     student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     # Remove alice from group so the student-count check passes
     students = admin_client.get(f"/api/runs/{run['id']}/students").json()

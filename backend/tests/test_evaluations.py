@@ -23,7 +23,7 @@ def _make_submitted(admin_client, student_client_for, db, seed_run_with_groups):
     student = student_client_for("alice@example.com")
     sub = student.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     ).json()
     return run, ga, mp, sub
 
@@ -56,7 +56,7 @@ def test_evaluate_already_evaluated_409(admin_client, student_client_for, db, se
                       data={"result": "accepted"})
     response = admin_client.post(f"/api/submissions/{sub['id']}/evaluation",
                                  data={"result": "rejected"},
-                                 files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")})
+                                 files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")})
     assert response.status_code == 409
 
 
@@ -105,7 +105,7 @@ def test_post_evaluation_blocked_on_resubmission(admin_client, student_client_fo
     admin_client.post(
         f"/api/submissions/{sub['id']}/evaluation",
         data={"result": "minor_revision", "feedback_text": "Fix x"},
-        files={"file": ("fb.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("fb.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     alice = student_client_for("alice@example.com")
     resub = alice.post(
@@ -117,3 +117,14 @@ def test_post_evaluation_blocked_on_resubmission(admin_client, student_client_fo
         data={"result": "accepted"},
     )
     assert response.status_code == 409
+
+
+def test_feedback_file_rejects_non_pdf_content(admin_client, student_client_for, db, seed_run_with_groups):
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    resp = admin_client.post(
+        f"/api/submissions/{sub['id']}/evaluation",
+        data={"result": "minor_revision", "feedback_text": "x"},
+        files={"file": ("fb.pdf", io.BytesIO(b"MZ\x90\x00not a pdf"), "application/pdf")},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "feedback_file is not a valid PDF (missing %PDF- header)"

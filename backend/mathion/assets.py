@@ -60,3 +60,15 @@ def validate_extension(filename: str) -> str | None:
 def get_mime_type(ext: str) -> str:
     """Get MIME type for a file extension."""
     return _EXTENSION_TO_MIME.get(ext, "application/octet-stream")
+
+
+PDF_MAGIC = b"%PDF-"
+
+
+def looks_like_pdf(content: bytes) -> bool:
+    """True if the bytes begin with the PDF file-header signature (%PDF-).
+
+    A header screen, not a full PDF parse: it rejects obviously non-PDF
+    content but does not guarantee structural validity.
+    """
+    return content.startswith(PDF_MAGIC)

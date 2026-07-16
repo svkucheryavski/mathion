@@ -238,7 +238,7 @@ def test_lower_end_date_blocked_by_submissions(admin_client, student_client_for,
     alice = student_client_for("alice@example.com")
     alice.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     response = admin_client.patch(
         f"/api/runs/{run['id']}",
@@ -262,7 +262,7 @@ def test_delete_run_with_submissions_no_force(admin_client, student_client_for, 
     alice = student_client_for("alice@example.com")
     alice.post(
         f"/api/mini-projects/{mp['id']}/submissions",
-        files={"file": ("r.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
     )
     # Clear roster + unpublish so we hit the submissions gate, not the students/published gate
     students = admin_client.get(f"/api/runs/{run['id']}/students").json()
