@@ -35,7 +35,7 @@
 
 (Line numbers are indicative anchors against the 2026-07-16 tree; the plan matches on surrounding code.)
 
-Attack paths (all reachable by any authenticated student; these endpoints have no CSRF gate, and `create_evaluation`/`patch_evaluation` are probeable trivially):
+Attack paths (all reachable by any authenticated student). The four GETs are CSRF-exempt (`get_current_user` enforces `X-Requested-With` only on mutations — dependencies.py:14). `create_evaluation`/`patch_evaluation` **do** pass that CSRF check, but it does not blunt enumeration: the header value (`mathion`) is static and non-secret, sent by every authenticated client, and a request missing it fails uniformly with `403 "Missing CSRF header"` *before* any `sid`/`eid` lookup (leaking nothing). All six thus remain trivially probeable:
 - The four GETs: request `sid`/`eid`; other-group row → `403`, absent → `404`.
 - `create_evaluation`: `result` validation (`:56-62`) runs **before** `get_or_404` and is `sid`-independent, so a probe sends `result=accepted` (needs no file), passes those `422` gates, then observes `403` (existing `sid`) vs `404 "Submission not found"` (absent).
 - `patch_evaluation`: `EvaluationUpdate` is all-optional, so an empty body `{}` reaches `get_or_404` and observes `403` (existing `eid`) vs `404 "Evaluation not found"` (absent). No mutation occurs on the unauthorized path.
