@@ -90,13 +90,19 @@ def test_get_evaluation_as_group_member(admin_client, student_client_for, db, se
 
 
 def test_post_evaluation_requires_admin_or_teacher(auth_client, admin_client, student_client_for, db, seed_run_with_groups):
-    """Plain authenticated user (not admin, not teacher) cannot create an evaluation."""
+    """Non-staff cannot create an evaluation, and existence is hidden (404, not 403)."""
     _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
-    response = auth_client.post(
-        f"/api/submissions/{sub['id']}/evaluation",
-        data={"result": "accepted"},
-    )
-    assert response.status_code == 403
+    missing = auth_client.post("/api/submissions/999999/evaluation", data={"result": "accepted"})
+    forbidden = auth_client.post(f"/api/submissions/{sub['id']}/evaluation", data={"result": "accepted"})
+    _assert_hidden(forbidden, missing)
+
+
+def test_patch_evaluation_hides_existence(auth_client, admin_client, student_client_for, db, seed_run_with_groups):
+    _, _, _, sub = _make_submitted(admin_client, student_client_for, db, seed_run_with_groups)
+    ev = admin_client.post(f"/api/submissions/{sub['id']}/evaluation", data={"result": "accepted"}).json()
+    missing = auth_client.patch("/api/evaluations/999999", json={})
+    forbidden = auth_client.patch(f"/api/evaluations/{ev['id']}", json={})
+    _assert_hidden(forbidden, missing)
 
 
 def test_post_evaluation_blocked_on_resubmission(admin_client, student_client_for, db, seed_run_with_groups):

@@ -13,7 +13,6 @@ from mathion.api.helpers import (
     get_submitter_group,
     is_run_admin_or_teacher,
     mini_project_visible_to_student,
-    require_run_admin_or_teacher,
     submission_storage_dir,
 )
 from mathion.assets import looks_like_pdf, validate_extension
@@ -64,7 +63,8 @@ def create_evaluation(
     sub = get_or_404(db, Submission, sid)
     mp = db.get(MiniProject, sub.mini_project_id)
     run = get_or_404(db, Run, mp.run_id)
-    require_run_admin_or_teacher(db, user, run)
+    if not is_run_admin_or_teacher(db, user, run):
+        raise HTTPException(status_code=404, detail="Submission not found")
 
     if sub.is_resubmission:
         raise HTTPException(status_code=409, detail="Submission was auto-accepted; cannot manually evaluate")
@@ -187,7 +187,8 @@ def patch_evaluation(
     sub = db.get(Submission, ev.submission_id)
     mp = db.get(MiniProject, sub.mini_project_id)
     run = get_or_404(db, Run, mp.run_id)
-    require_run_admin_or_teacher(db, user, run)
+    if not is_run_admin_or_teacher(db, user, run):
+        raise HTTPException(status_code=404, detail="Evaluation not found")
 
     updates = data.model_dump(exclude_unset=True)
     new_result = updates.get("result", ev.result)
