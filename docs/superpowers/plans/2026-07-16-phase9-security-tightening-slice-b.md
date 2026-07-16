@@ -104,7 +104,7 @@ def test_submission_rejects_non_pdf_content(student_client_for, seed_run_with_pu
         files={"file": ("evil.pdf", io.BytesIO(b"MZ\x90\x00not a pdf"), "application/pdf")},
     )
     assert resp.status_code == 400
-    assert "PDF" in resp.json()["detail"]
+    assert resp.json()["detail"] == "Submission is not a valid PDF (missing %PDF- header)"
 ```
 
 Add to `tests/test_evaluations.py` (uses the existing `_make_submitted` helper):
@@ -118,7 +118,7 @@ def test_feedback_file_rejects_non_pdf_content(admin_client, student_client_for,
         files={"file": ("fb.pdf", io.BytesIO(b"MZ\x90\x00not a pdf"), "application/pdf")},
     )
     assert resp.status_code == 400
-    assert "PDF" in resp.json()["detail"]
+    assert resp.json()["detail"] == "feedback_file is not a valid PDF (missing %PDF- header)"
 ```
 
 - [ ] **Step 6: Run them, expect failure**
@@ -136,7 +136,14 @@ cd backend && sed -i '' 's/b"%PDF"/b"%PDF-1.4"/g' \
   tests/test_submissions.py tests/test_evaluations.py tests/test_groups.py \
   tests/test_runs.py tests/test_student_mini_projects.py tests/test_mini_project_notifications.py
 ```
-Verify none remain: `cd backend && grep -rn 'b"%PDF"' tests/ | grep -v 'b"%PDF-'` → expect no output.
+Verify none remain in the swept files (do NOT grep all of `tests/` — Step 1's `test_assets.py` intentionally keeps a bare `b"%PDF"` in the `looks_like_pdf(b"%PDF") is False` unit case):
+```bash
+cd backend && grep -rn 'b"%PDF"' \
+  tests/test_submissions.py tests/test_evaluations.py tests/test_groups.py \
+  tests/test_runs.py tests/test_student_mini_projects.py tests/test_mini_project_notifications.py \
+  | grep -v 'b"%PDF-'
+```
+Expected: no output.
 
 - [ ] **Step 8: Wire the screen into both uploads**
 
