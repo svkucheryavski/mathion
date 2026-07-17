@@ -10,7 +10,7 @@ dependencies = [
     "alembic>=1.13.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
-    "psycopg2-binary>=2.9.0",
+    "psycopg[binary]>=3.2",
     "markdown-it-py>=3.0",
     "mdit-py-plugins>=0.4",
     "nh3>=0.2",
@@ -27,6 +27,13 @@ dev = [
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Only the app package is distributable; alembic/ (migrations), scripts/, and
+# tests/ are run in place (via `python -m` / pytest with pythonpath=["."]), not
+# installed. Without this, setuptools flat-layout auto-discovery errors on the
+# multiple top-level dirs (alembic + mathion).
+include = ["mathion*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
