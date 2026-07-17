@@ -1,9 +1,28 @@
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from mathion.config import settings
 
-engine = create_engine(settings.database_url, echo=False)
+# Pool + connection settings. `pool_pre_ping` survives dropped connections;
+# `pool_recycle` pre-empts idle-connection reaping by hosts/proxies; `pool_timeout`
+# bounds the wait on a saturated pool. `connect_args.options` pins the session
+# timezone to UTC (app relies on UTC everywhere) and sets a generous server-side
+# statement_timeout so a runaway query cannot pin a scarce connection. Size the
+# pool small — managed hosts cap connections low, and the notification dispatcher
+# forces a single worker when email is enabled (reserve +1 for its SessionLocal).
+engine = create_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_size=5,
+    max_overflow=5,
+    pool_timeout=30,
+    connect_args={
+        "connect_timeout": 10,
+        "options": "-c statement_timeout=30000 -c TimeZone=UTC",
+    },
+)
 SessionLocal = sessionmaker(bind=engine)
 
 
@@ -17,17 +36,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def enable_sqlite_fk(engine):
-    """Enable foreign key enforcement for SQLite."""
-    if "sqlite" in str(engine.url):
-
-        @event.listens_for(engine, "connect")
-        def set_sqlite_pragma(dbapi_conn, connection_record):
-            cursor = dbapi_conn.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-
-enable_sqlite_fk(engine)
