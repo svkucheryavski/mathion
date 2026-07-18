@@ -3,35 +3,185 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient as BaseTestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
-# ---- MUST RUN BEFORE any mathion.* import — Settings() in config.py:29
-# is constructed at import time and snapshots MATHION_EMAIL_MODE.
+# ---- MUST RUN BEFORE any mathion.* import. Settings() snapshots the env at
+# import time. We ASSIGN (never setdefault) MATHION_DATABASE_URL to a DISTINCT
+# test database so the app engine, dispatcher/CLI SessionLocal(), and Alembic all
+# share ONE engine bound to the test DB — and so an exported dev/prod URL can
+# never be inherited into the destructive DROP SCHEMA/TRUNCATE path below.
+_PRIOR_APP_DB_URL = os.environ.get("MATHION_DATABASE_URL")  # captured for the guard
+_TEST_DB_URL = os.environ.get(
+    "MATHION_TEST_DATABASE_URL",
+    "postgresql+psycopg://mathion:mathion@localhost:5432/mathion_test",
+)
+os.environ["MATHION_DATABASE_URL"] = _TEST_DB_URL
 os.environ.setdefault("MATHION_EMAIL_MODE", "disabled")
 
-# ---- mathion.* imports follow after the env-set is applied.
+# ---- mathion.* imports follow after the env is applied.
 from mathion.config import settings
-from mathion.database import Base, get_db
+from mathion.database import Base, SessionLocal, engine, get_db
 from mathion.main import app
 from mathion.models_auth import User
 from mathion.auth import request_pin, verify_pin
 
 
-def pytest_configure(config):
-    assert settings.email_mode == "disabled", (
-        f"Test conftest race: settings.email_mode is {settings.email_mode!r} but "
-        "the disable_dispatcher_loop recipe expects 'disabled'. A pyproject.toml "
-        "plugin or parent conftest imported mathion.config before this conftest's "
-        "os.environ.setdefault could run."
+def _same_destructive_target(url_a: str, url_b: str) -> bool:
+    """True if two URLs plausibly identify the SAME physical database.
+
+    Compares (resolved host address set, effective port, database) — NOT the
+    login user (a different role is not a different database). Conservative:
+    on any resolution error, treat as the same target (abort-safe).
+    """
+    import socket
+
+    a, b = make_url(url_a), make_url(url_b)
+    if (a.database or "") != (b.database or ""):
+        return False
+    if (a.port or 5432) != (b.port or 5432):
+        return False
+
+    def addrs(host: str) -> set:
+        try:
+            return {ai[4][0] for ai in socket.getaddrinfo(host or "localhost", None)}
+        except OSError:
+            return set()
+
+    aa, ba = addrs(a.host or "localhost"), addrs(b.host or "localhost")
+    if not aa or not ba:
+        return True  # cannot resolve -> conservatively "same"
+    return bool(aa & ba)  # address-set OVERLAP, not full identity
+
+
+def _host_is_local(host: str) -> bool:
+    """True only if the host resolves EXCLUSIVELY to loopback addresses.
+
+    Conservative: an unresolvable host, or one with any non-loopback address,
+    returns False so the §5(c) rail demands an explicit opt-in before it can
+    DROP SCHEMA on a non-local database.
+    """
+    import ipaddress
+    import socket
+
+    try:
+        addresses = {ai[4][0] for ai in socket.getaddrinfo(host or "localhost", None)}
+    except OSError:
+        return False
+    if not addresses:
+        return False
+    try:
+        return all(ipaddress.ip_address(a).is_loopback for a in addresses)
+    except ValueError:
+        return False
+
+
+# libpq/psycopg query keys that can redirect the EFFECTIVE connection target away
+# from the URL authority (host:port/database). make_url() only parses the authority,
+# so a URL like .../mathion_test?dbname=mathion passes the name rail yet actually
+# connects to `mathion`, and ?host=remote bypasses the non-local rail. Reject them.
+_CONNECTION_INDIRECTION_KEYS = frozenset(
+    {"host", "hostaddr", "port", "dbname", "service", "servicefile"}
+)
+
+
+def _reject_connection_indirection(label: str, url_str: str) -> None:
+    offending = sorted(
+        k for k in make_url(url_str).query if k.lower() in _CONNECTION_INDIRECTION_KEYS
     )
+    if offending:
+        raise RuntimeError(
+            f"Refusing to run: the {label} database URL carries connection-target query "
+            f"parameter(s) {offending} that override the URL host/port/database and would "
+            "bypass this guard. Put host, port, and database in the URL itself, not the query."
+        )
 
 
-# Module-level test-date helpers. Replace hardcoded YYYY-MM-DD strings that
-# rot once today crosses them (MP publish requires hard_deadline > now;
-# run publish requires end_date >= deadlines). Ordering:
-#   NEAR_DEADLINE_ISO  <  FAR_DEADLINE_ISO  <  RUN_END_DATE  <  RUN_END_DATE_FAR
+# libpq fills any UNSET connection parameter from these environment variables, so
+# they redirect the EFFECTIVE target the same way the query keys above do — but
+# invisibly to make_url(). PGHOSTADDR is the sharpest: it overrides the network
+# address even when the URL says host=localhost (the host is then used only for
+# auth/TLS naming), so the loopback rail would pass while psycopg connects to a
+# remote IP. PGSERVICE can inject hostaddr/host/port/dbname via a service file.
+# Reject any of them outright rather than reasoning per-field about what the URL
+# does or does not pin.
+_CONNECTION_INDIRECTION_ENV_VARS = frozenset(
+    {"PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE"}
+)
+
+
+def _reject_connection_indirection_env() -> None:
+    # Truthy check: an empty value (e.g. PGHOST="") is treated by libpq as unset and
+    # cannot redirect, so only a non-empty value is a real bypass.
+    offending = sorted(k for k in _CONNECTION_INDIRECTION_ENV_VARS if os.environ.get(k))
+    if offending:
+        raise RuntimeError(
+            f"Refusing to run: libpq environment variable(s) {offending} are set. They fill "
+            "unset connection parameters and can override the effective host/port/database "
+            "(e.g. PGHOSTADDR redirects the network address even when the URL says "
+            "host=localhost), bypassing this guard. Unset them before running the test suite."
+        )
+
+
+def pytest_configure(config):
+    # Last rail before the destructive DROP SCHEMA/TRUNCATE. Runs at collection.
+    # Uses explicit raise (not assert) so `python -O`/PYTHONOPTIMIZE cannot strip a
+    # data-loss guard. Every rail validates the EFFECTIVE connection target: query
+    # indirection is rejected first and an explicit host is required, so make_url's
+    # authority fields ARE what psycopg connects to.
+    url = settings.database_url
+    # Effective app default when the env var was absent before conftest overwrote it.
+    prior = _PRIOR_APP_DB_URL or "postgresql+psycopg://mathion:mathion@localhost:5432/mathion"
+    # (0) Reject libpq ENVIRONMENT indirection first: it applies to every psycopg
+    # connection this process makes, independent of either URL, so it must fall before
+    # we trust any authority field.
+    _reject_connection_indirection_env()
+    # (0a) Reject libpq QUERY indirection on BOTH URLs before trusting their authority.
+    _reject_connection_indirection("test", url)
+    _reject_connection_indirection("application", prior)
+    parsed = make_url(url)
+    # (0b) Require an explicit host so PGHOST / a unix socket cannot redirect the
+    # connection somewhere the loopback check never sees.
+    if not parsed.host:
+        raise RuntimeError(
+            "Refusing to run: the test database URL must specify an explicit host "
+            "(e.g. localhost). An absent host lets PGHOST/PGSERVICE redirect the "
+            "connection past this guard."
+        )
+    # (0c) Require an explicit port so the destructive target is fully pinned and the
+    # same-target check below compares exact ports rather than an assumed 5432 default.
+    if parsed.port is None:
+        raise RuntimeError(
+            "Refusing to run: the test database URL must specify an explicit port "
+            "(e.g. :5432) so the destructive target is fully pinned."
+        )
+    dbname = parsed.database or ""
+    if not (dbname == "mathion_test" or dbname.startswith("mathion_test_")):
+        raise RuntimeError(
+            f"Refusing to run: test DB name {dbname!r} is not mathion_test / mathion_test_*. "
+            "The harness DROPs and TRUNCATEs this database."
+        )
+    # §5(c): a non-local test host requires an exact affirmative opt-in — otherwise
+    # a mathion_test* DB on a remote host would get DROP SCHEMA with no extra rail.
+    if not _host_is_local(parsed.host) and os.environ.get("MATHION_TEST_ALLOW_NONLOCAL") != "1":
+        raise RuntimeError(
+            f"Refusing to run: test DB host {parsed.host!r} is not local (does not resolve to "
+            "loopback). The harness DROPs SCHEMA on this database. Set "
+            "MATHION_TEST_ALLOW_NONLOCAL=1 to explicitly permit a non-local test target."
+        )
+    if _same_destructive_target(url, prior):
+        raise RuntimeError(
+            f"Refusing to run: the test DB {url!r} resolves to the SAME physical database "
+            f"as the application URL {prior!r}. Point MATHION_TEST_DATABASE_URL at a distinct DB."
+        )
+    if settings.email_mode != "disabled":
+        raise RuntimeError(
+            "Test conftest race: settings.email_mode is not 'disabled' — a plugin/parent "
+            "conftest imported mathion.config before os.environ could be set."
+        )
+
+
+# Module-level test-date helpers (unchanged from prior harness).
 NEAR_DEADLINE_ISO = f"{(date.today() + timedelta(days=60)).isoformat()}T23:59:00Z"
 FAR_DEADLINE_ISO = f"{(date.today() + timedelta(days=120)).isoformat()}T23:59:00Z"
 RUN_END_DATE = (date.today() + timedelta(days=180)).isoformat()
@@ -59,33 +209,74 @@ class CSRFTestClient(BaseTestClient):
         kwargs["headers"].setdefault("X-Requested-With", "mathion")
         return super().delete(*args, **kwargs)
 
-test_engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+
+def _ensure_test_database_exists():
+    """CREATE DATABASE mathion_test if absent, via an autocommit maintenance conn."""
+    import psycopg
+    from psycopg import sql
+
+    u = make_url(settings.database_url)
+    # Derive the maintenance DSN from the parsed URL rather than interpolating —
+    # an f-string injects the literal "None" for passwordless/.pgpass/PGPASSWORD
+    # URLs and drops query args (e.g. ?sslmode=require). `.set` swaps the driver
+    # (libpq rejects the +psycopg suffix) and database to the postgres maint DB.
+    # (pytest_configure already rejected host/dbname/port query indirection, so this
+    # maintenance connection cannot be redirected away from the validated target.)
+    maint = u.set(
+        drivername="postgresql", database="postgres"
+    ).render_as_string(hide_password=False)
+    with psycopg.connect(maint, autocommit=True) as c:
+        exists = c.execute("select 1 from pg_database where datname = %s", (u.database,)).fetchone()
+        if not exists:
+            try:
+                # Identifier() safely quotes the DB name (a mathion_test_* shard could
+                # otherwise contain a `"`); DuplicateDatabase tolerates a concurrent
+                # harness that created it between the existence check and here.
+                c.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(u.database)))
+            except psycopg.errors.DuplicateDatabase:
+                pass
 
 
-@event.listens_for(test_engine, "connect")
-def set_sqlite_pragma(dbapi_conn, connection_record):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+@pytest.fixture(scope="session", autouse=True)
+def _build_schema():
+    """Once per session: ensure the test DB exists, reset its schema, run migrations."""
+    from alembic import command
+    from alembic.config import Config
+    from pathlib import Path
+
+    _ensure_test_database_exists()
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+    command.upgrade(alembic_cfg, "head")
+    yield
 
 
-TestSession = sessionmaker(bind=test_engine)
+# All model tables, child-before-parent irrelevant under CASCADE. alembic_version
+# is NOT a model table, so it is left intact.
+def _truncate_all(conn):
+    tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+    # SET LOCAL confines the timeout to this truncate transaction, so it can't
+    # leak onto the pooled connection and shorten a later app query's lock wait.
+    conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+    conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    Base.metadata.create_all(bind=test_engine)
+def _isolation():
+    """Function-scoped truncation, autouse so a test that writes through the app
+    WITHOUT requesting `db` still cannot leak rows into the next test (spec §5).
+    `db` also depends on this fixture, so for DB-using tests pytest LIFO-finalizes
+    db (session close) BEFORE this truncates — encoding the teardown order."""
     yield
-    Base.metadata.drop_all(bind=test_engine)
+    with engine.begin() as conn:
+        _truncate_all(conn)
 
 
 @pytest.fixture
-def db():
-    session = TestSession()
+def db(_isolation):
+    session = SessionLocal()
     try:
         yield session
     finally:
@@ -94,7 +285,9 @@ def db():
 
 @pytest.fixture
 def client(db):
-    """Bare unauthenticated TestClient. Sets up the db override for the request."""
+    """Bare unauthenticated TestClient sharing the db session via get_db override.
+    NOT entered as a context manager — that would start the app lifespan (dispatcher)
+    for every test. The client opens no session of its own."""
     def override_get_db():
         try:
             yield db
