@@ -46,7 +46,13 @@ def sanitize_filename(name: str) -> str:
     if not base:
         base = "file"
 
-    return f"{base}.{ext}" if ext else base
+    # Cap the full name at Postgres String(255): truncate the base, keep the
+    # extension (a derived name — truncation beats rejecting the upload).
+    ext_part = f".{ext}" if ext else ""
+    keep = 255 - len(ext_part)
+    if keep <= 0:  # pathological: the extension alone exceeds the column width
+        return ext_part[:255]
+    return base[:keep] + ext_part
 
 
 def validate_extension(filename: str) -> str | None:

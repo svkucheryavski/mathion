@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
@@ -126,8 +126,8 @@ class ItemCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     type: Literal["static_page", "video", "quiz", "interactive_app"]
     content_md: str | None = None
-    video_url: str | None = None
-    script_url: str | None = None
+    video_url: str | None = Field(default=None, max_length=500)
+    script_url: str | None = Field(default=None, max_length=500)
 
     @field_validator("video_url", mode="before")
     @classmethod
@@ -169,8 +169,8 @@ class ItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, min_length=1, max_length=200)
     content_md: str | None = None
-    video_url: str | None = None
-    script_url: str | None = None
+    video_url: str | None = Field(default=None, max_length=500)
+    script_url: str | None = Field(default=None, max_length=500)
 
     @field_validator("video_url", mode="before")
     @classmethod
@@ -241,7 +241,7 @@ class EnrollRequest(BaseModel):
 
 
 class EnrollBatchRequest(BaseModel):
-    emails: list[str] = Field(min_length=1)
+    emails: list[Annotated[str, Field(max_length=254)]] = Field(min_length=1)
 
 
 class EnrollmentResponse(BaseModel):
@@ -304,17 +304,17 @@ class QuestionCreate(BaseModel):
     text_md: str = Field(min_length=1)
     type: Literal["single_choice", "multiple_choice", "numeric_answer", "text_answer"]
     explanation_md: str | None = None
-    correct_numeric: Decimal | None = None
-    precision: int | None = Field(default=None, ge=0)
-    correct_text: str | None = None
+    correct_numeric: Decimal | None = Field(default=None, max_digits=20, decimal_places=10)
+    precision: int | None = Field(default=None, ge=0, le=10)
+    correct_text: str | None = Field(default=None, max_length=500)
 
 
 class QuestionUpdate(BaseModel):
     text_md: str | None = Field(default=None, min_length=1)
     explanation_md: str | None = None
-    correct_numeric: Decimal | None = None
-    precision: int | None = Field(default=None, ge=0)
-    correct_text: str | None = None
+    correct_numeric: Decimal | None = Field(default=None, max_digits=20, decimal_places=10)
+    precision: int | None = Field(default=None, ge=0, le=10)
+    correct_text: str | None = Field(default=None, max_length=500)
 
 
 class QuestionResponse(BaseModel):
@@ -360,7 +360,7 @@ class OptionResponse(BaseModel):
 
 class ReorderItem(BaseModel):
     id: int
-    order: int = Field(ge=1)
+    order: int = Field(ge=1, le=2147483647)
 
 
 class ReorderRequest(BaseModel):
@@ -498,9 +498,9 @@ class RunStudentCreate(BaseModel):
 
 
 class RunStudentBatchRow(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=200)
     email: str = Field(min_length=1, max_length=254)
-    group: str | None = None  # group name; auto-created if missing
+    group: str | None = Field(default=None, max_length=80)  # group name; auto-created if missing
 
     @field_validator("email")
     @classmethod
