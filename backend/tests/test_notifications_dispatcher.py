@@ -2,7 +2,6 @@ import pytest
 import smtplib
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import text
 
 from mathion.notifications.dispatcher import _build_render_context
 from mathion.models_auth import NotificationLogEntry, User
@@ -72,16 +71,16 @@ def test_build_render_context_missing_run_raises(db, seeded_user):
 
 
 def test_build_render_context_missing_user_raises(db, seeded_run):
-    # user_id=999999 doesn't exist; bypass FK via raw INSERT (FK enforced by
-    # SQLite at the ORM level would reject db.flush() with IntegrityError).
-    db.execute(text("PRAGMA foreign_keys=OFF"))
+    # The recipient can vanish between tick() loading its batch and render()
+    # (a concurrent user deletion). Construct a TRANSIENT entry — never
+    # persisted — pointing at a missing user_id but a VALID run_id, so the run
+    # lookup passes and we reach the user-None branch (dispatcher.py:68-70).
+    # We never write an invalid FK; Postgres enforces FKs unconditionally.
     entry = NotificationLogEntry(
         user_id=999999, kind="run_enrolled",
         payload={"run_id": seeded_run["run"].id},
     )
-    db.add(entry); db.flush()
-    db.execute(text("PRAGMA foreign_keys=ON"))
-    with pytest.raises(LookupError, match="referent missing"):
+    with pytest.raises(LookupError, match="referent missing: user:999999"):
         _build_render_context(db, entry)
 
 
@@ -227,8 +226,8 @@ def test_transient_failure_1st_retry(db, seeded_run):
     tick(db, _RaisingMailer(ConnectionRefusedError("nope")), now=now)
     db.refresh(entry)
     assert entry.retry_count == 1
-    # SQLite strips tzinfo on readback; compare using naive reference
-    expected = (now + timedelta(seconds=300)).replace(tzinfo=None)
+    # Postgres TIMESTAMPTZ round-trips tz-aware; compare aware-to-aware.
+    expected = now + timedelta(seconds=300)
     assert entry.next_attempt_at == expected
     assert entry.error is None
 

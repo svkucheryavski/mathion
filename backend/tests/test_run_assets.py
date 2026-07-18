@@ -231,33 +231,27 @@ def test_list_assets_uploaded_by_email_null_when_user_deleted_set_null(
     )
 
 
-def test_list_assets_uploaded_by_email_null_when_user_row_missing(
+def test_list_assets_uploaded_by_email_null_when_user_deleted_via_cascade(
     admin_client, db, seed_run_with_groups
 ):
-    """uploaded_by points at a nonexistent user row → uploaded_by_email=None.
-
-    Simulates a hard-delete that bypassed the SET NULL cascade (defensive
-    guarantee). PRAGMA off needed because SQLite FK enforcement (on by
-    default in conftest) would otherwise reject the insert.
-    """
-    from sqlalchemy import text
-
+    """Hard-deleting the uploader fires RunAsset.uploaded_by ondelete=SET NULL,
+    so the listing reports uploaded_by_email=None. Exercises the real cascade
+    (no FK-disable trickery — Postgres enforces FKs unconditionally)."""
     from mathion.models import RunAsset
+    from mathion.models_auth import User
 
     run, _, _ = seed_run_with_groups()
-    db.execute(text("PRAGMA foreign_keys=OFF"))
-    try:
-        a = RunAsset(
-            run_id=run["id"],
-            filename="ghost.pdf",
-            file_size=10,
-            mime_type="application/pdf",
-            uploaded_by=99999,  # nonexistent user row
-        )
-        db.add(a)
-        db.commit()
-    finally:
-        db.execute(text("PRAGMA foreign_keys=ON"))
+    # A bare throwaway user with no submissions/evaluations, so the RESTRICT FKs
+    # on those tables do not block the delete.
+    ghost = User(email="ghost-uploader@example.com", full_name="Ghost")
+    db.add(ghost); db.commit(); db.refresh(ghost)
+    a = RunAsset(
+        run_id=run["id"], filename="ghost.pdf", file_size=10,
+        mime_type="application/pdf", uploaded_by=ghost.id,
+    )
+    db.add(a); db.commit()
+
+    db.delete(ghost); db.commit()  # SET NULL cascades to a.uploaded_by
 
     list_resp = admin_client.get(f"/api/runs/{run['id']}/assets")
     assert list_resp.status_code == 200

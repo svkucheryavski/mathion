@@ -27,7 +27,13 @@ from mathion.models_auth import (  # noqa: F401
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: fileConfig defaults to True, which would
+    # flip every already-created logger to disabled=True. When migrations run
+    # in-process (the test harness's _build_schema, or any app that upgrades on
+    # boot), that would silence application loggers like `mathion.notifications`.
+    # Alembic's own logging config still applies; we only stop it from muting
+    # loggers it doesn't own.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
