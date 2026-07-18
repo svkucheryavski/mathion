@@ -60,7 +60,7 @@ def get_content_json(version_id: int, db: Session = Depends(get_db), user: User 
             .joinedload(Item.questions)
             .joinedload(Question.options)
         )
-        .order_by(Block.order)
+        .order_by(Block.order, Block.id)
     ).unique().scalars().all()
 
     return {
@@ -124,7 +124,7 @@ def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = 
             .joinedload(Sequence.items)
             .joinedload(Item.questions)
         )
-        .order_by(Block.order)
+        .order_by(Block.order, Block.id)
     ).unique().scalars().all()
 
     return {

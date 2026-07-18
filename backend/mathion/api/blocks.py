@@ -106,7 +106,7 @@ def list_blocks(version_id: int, limit: int = 100, offset: int = 0, db: Session 
         if not is_admin and not has_run_pinned_to_version(db, user, version_id):
             raise HTTPException(status_code=403, detail="Access denied")
     blocks = db.execute(
-        select(Block).where(Block.version_id == version_id).order_by(Block.order).offset(offset).limit(limit)
+        select(Block).where(Block.version_id == version_id).order_by(Block.order, Block.id).offset(offset).limit(limit)
     ).scalars().all()
     return blocks
 
@@ -283,7 +283,7 @@ def list_sequences(block_id: int, limit: int = 100, offset: int = 0, db: Session
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
     sequences = db.execute(
-        select(Sequence).where(Sequence.block_id == block_id).order_by(Sequence.order).offset(offset).limit(limit)
+        select(Sequence).where(Sequence.block_id == block_id).order_by(Sequence.order, Sequence.id).offset(offset).limit(limit)
     ).scalars().all()
     return sequences
 

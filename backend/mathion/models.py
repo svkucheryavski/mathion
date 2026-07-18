@@ -52,7 +52,7 @@ class CourseVersion(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     course: Mapped["Course"] = relationship(back_populates="versions")
-    blocks: Mapped[list["Block"]] = relationship(back_populates="version", cascade="all, delete-orphan", order_by="Block.order")
+    blocks: Mapped[list["Block"]] = relationship(back_populates="version", cascade="all, delete-orphan", order_by="Block.order, Block.id")
 
 
 class Block(Base):
@@ -71,7 +71,7 @@ class Block(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     version: Mapped["CourseVersion"] = relationship(back_populates="blocks")
-    sequences: Mapped[list["Sequence"]] = relationship(back_populates="block", cascade="all, delete-orphan", order_by="Sequence.order")
+    sequences: Mapped[list["Sequence"]] = relationship(back_populates="block", cascade="all, delete-orphan", order_by="Sequence.order, Sequence.id")
 
 
 class Sequence(Base):
@@ -88,7 +88,7 @@ class Sequence(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     block: Mapped["Block"] = relationship(back_populates="sequences")
-    items: Mapped[list["Item"]] = relationship(back_populates="sequence", cascade="all, delete-orphan", order_by="Item.order")
+    items: Mapped[list["Item"]] = relationship(back_populates="sequence", cascade="all, delete-orphan", order_by="Item.order, Item.id")
 
 
 class Item(Base):
@@ -117,7 +117,7 @@ class Item(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     sequence: Mapped["Sequence"] = relationship(back_populates="items")
-    questions: Mapped[list["Question"]] = relationship(back_populates="item", cascade="all, delete-orphan", order_by="Question.order")
+    questions: Mapped[list["Question"]] = relationship(back_populates="item", cascade="all, delete-orphan", order_by="Question.order, Question.id")
 
 
 class Question(Base):
@@ -142,7 +142,7 @@ class Question(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     item: Mapped["Item"] = relationship(back_populates="questions")
-    options: Mapped[list["AnswerOption"]] = relationship(back_populates="question", cascade="all, delete-orphan", order_by="AnswerOption.order")
+    options: Mapped[list["AnswerOption"]] = relationship(back_populates="question", cascade="all, delete-orphan", order_by="AnswerOption.order, AnswerOption.id")
 
 
 class AnswerOption(Base):

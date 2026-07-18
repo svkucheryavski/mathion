@@ -155,7 +155,7 @@ def my_courses(user: User = Depends(get_current_user), db: Session = Depends(get
     enrollments = db.execute(
         select(StudentEnrollment)
         .where(StudentEnrollment.user_id == user.id)
-        .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc())
+        .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc(), StudentEnrollment.id.desc())
     ).scalars().all()
 
     rows_by_course: dict[int, MyCourseResponse] = {}
@@ -229,7 +229,7 @@ def resolve_my_version(course_slug: str, user: User = Depends(get_current_user),
             CourseVersion.is_disabled == False,
             StudentEnrollment.user_id == user.id,
         )
-        .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc())
+        .order_by(StudentEnrollment.is_active.desc(), StudentEnrollment.created_at.desc(), StudentEnrollment.id.desc())
         .limit(1)
     ).scalar_one_or_none()
 

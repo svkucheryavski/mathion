@@ -53,7 +53,7 @@ def _load_sequences(db: Session, version_id: int) -> list[dict]:
         .where(Block.version_id == version_id)
         .group_by(Block.id, Block.order, Block.title,
                   Sequence.id, Sequence.order, Sequence.title)
-        .order_by(Block.order, Sequence.order)
+        .order_by(Block.order, Block.id, Sequence.order, Sequence.id)
     ).all()
 
     return [
@@ -158,7 +158,7 @@ def _load_run_students(db: Session, run_id: int) -> list[dict]:
         .join(User, User.id == RunStudent.user_id)
         .outerjoin(Group, Group.id == RunStudent.group_id)
         .where(RunStudent.run_id == run_id)
-        .order_by(RunStudent.created_at)
+        .order_by(RunStudent.created_at, RunStudent.id)
     ).all()
 
     return [
@@ -289,7 +289,7 @@ def get_mini_projects(
         select(MiniProject, Block)
         .join(Block, Block.id == MiniProject.block_id)
         .where(MiniProject.run_id == run_id)
-        .order_by(Block.order)
+        .order_by(Block.order, Block.id)
     ).all()
 
     groups = db.execute(
@@ -537,7 +537,7 @@ def get_sequence_item_state(
             (UserItemState.item_id == Item.id) & (UserItemState.user_id == user_id),
         )
         .where(Item.sequence_id == seq.id)
-        .order_by(Item.order.asc())
+        .order_by(Item.order.asc(), Item.id.asc())
     ).all()
 
     item_states: list[SequenceItemState] = []

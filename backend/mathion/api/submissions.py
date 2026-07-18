@@ -249,7 +249,7 @@ def list_submissions(
     run = get_or_404(db, Run, mp.run_id)
     if is_run_admin_or_teacher(db, user, run):
         subs = db.execute(
-            select(Submission).where(Submission.mini_project_id == mp_id).order_by(Submission.submitted_at)
+            select(Submission).where(Submission.mini_project_id == mp_id).order_by(Submission.submitted_at, Submission.id)
         ).scalars().all()
     else:
         if not mini_project_visible_to_student(run, mp):
@@ -261,7 +261,7 @@ def list_submissions(
             select(Submission).where(
                 Submission.mini_project_id == mp_id,
                 Submission.group_id == group.id,
-            ).order_by(Submission.submitted_at)
+            ).order_by(Submission.submitted_at, Submission.id)
         ).scalars().all()
     return subs
 

@@ -122,6 +122,7 @@ def list_students(
             CourseVersion.course_id == course_id,
             StudentEnrollment.is_active == True,  # noqa: E712
         )
+        .order_by(StudentEnrollment.id)
     ).scalars().all()
     return [_enrollment_to_response(e) for e in enrollments]
 

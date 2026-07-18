@@ -82,7 +82,7 @@ def list_questions(item_id: int, db: Session = Depends(get_db), user: User = Dep
     item, version = _get_version_for_item(db, item_id)
     require_course_admin(db, user, version.course_id)
     questions = db.execute(
-        select(Question).where(Question.item_id == item_id).order_by(Question.order)
+        select(Question).where(Question.item_id == item_id).order_by(Question.order, Question.id)
     ).scalars().all()
     return questions
 
@@ -190,7 +190,7 @@ def list_options(question_id: int, db: Session = Depends(get_db), user: User = D
     question, version = _get_version_for_question(db, question_id)
     require_course_admin(db, user, version.course_id)
     options = db.execute(
-        select(AnswerOption).where(AnswerOption.question_id == question_id).order_by(AnswerOption.order)
+        select(AnswerOption).where(AnswerOption.question_id == question_id).order_by(AnswerOption.order, AnswerOption.id)
     ).scalars().all()
     return options
 

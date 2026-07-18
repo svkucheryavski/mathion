@@ -78,7 +78,7 @@ def get_newest_published_version(db: Session, course_id: int):
     version = db.execute(
         select(CourseVersion)
         .where(CourseVersion.course_id == course_id, CourseVersion.state == "published")
-        .order_by(CourseVersion.published_at.desc())
+        .order_by(CourseVersion.published_at.desc(), CourseVersion.id.desc())
         .limit(1)
     ).scalar_one_or_none()
     if version is None:

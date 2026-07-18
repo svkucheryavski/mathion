@@ -59,7 +59,7 @@ def list_teachers(run_id: int, db: Session = Depends(get_db), user: User = Depen
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
     rows = db.execute(
-        select(RunTeacher).where(RunTeacher.run_id == run_id).order_by(RunTeacher.created_at)
+        select(RunTeacher).where(RunTeacher.run_id == run_id).order_by(RunTeacher.created_at, RunTeacher.id)
     ).scalars().all()
     return [_to_response(rt) for rt in rows]
 

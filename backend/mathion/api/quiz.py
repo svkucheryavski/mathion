@@ -174,7 +174,7 @@ def reveal_quiz(item_id: int, user: User = Depends(get_current_user), db: Sessio
 
     # Load questions
     questions = db.execute(
-        select(Question).where(Question.item_id == item_id).order_by(Question.order)
+        select(Question).where(Question.item_id == item_id).order_by(Question.order, Question.id)
     ).scalars().all()
 
     last_answers = state.last_answers or {}

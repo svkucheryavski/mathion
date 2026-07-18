@@ -102,7 +102,7 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
             LoginPIN.is_used == False,  # noqa: E712
             LoginPIN.expires_at > datetime.now(timezone.utc),
         )
-        .order_by(LoginPIN.created_at.desc())
+        .order_by(LoginPIN.created_at.desc(), LoginPIN.id.desc())
     ).scalars().first()
 
     if not pin or not verify_pin_hash(raw_pin, pin.pin_hash):

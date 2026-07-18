@@ -66,7 +66,7 @@ def list_runs(course_id: int, db: Session = Depends(get_db), user: User = Depend
     runs = db.execute(
         select(Run).join(CourseVersion, CourseVersion.id == Run.version_id)
         .where(CourseVersion.course_id == course_id)
-        .order_by(Run.start_date)
+        .order_by(Run.start_date, Run.id)
     ).scalars().all()
     return runs
 

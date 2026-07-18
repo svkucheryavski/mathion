@@ -108,7 +108,7 @@ def clone_version_content(db: Session, source, new) -> None:
     from mathion.models import AnswerOption, Block, Item, Question, Sequence
 
     src_blocks = db.execute(
-        select(Block).where(Block.version_id == source.id).order_by(Block.order)
+        select(Block).where(Block.version_id == source.id).order_by(Block.order, Block.id)
     ).scalars().all()
     for sb in src_blocks:
         nb = Block(version_id=new.id, title=sb.title, slug=sb.slug, order=sb.order,
@@ -117,7 +117,7 @@ def clone_version_content(db: Session, source, new) -> None:
         db.flush()
 
         src_seqs = db.execute(
-            select(Sequence).where(Sequence.block_id == sb.id).order_by(Sequence.order)
+            select(Sequence).where(Sequence.block_id == sb.id).order_by(Sequence.order, Sequence.id)
         ).scalars().all()
         for ss in src_seqs:
             ns = Sequence(block_id=nb.id, title=ss.title, slug=ss.slug, order=ss.order)
@@ -125,7 +125,7 @@ def clone_version_content(db: Session, source, new) -> None:
             db.flush()
 
             src_items = db.execute(
-                select(Item).where(Item.sequence_id == ss.id).order_by(Item.order)
+                select(Item).where(Item.sequence_id == ss.id).order_by(Item.order, Item.id)
             ).scalars().all()
             for si in src_items:
                 ni = Item(sequence_id=ns.id, title=si.title, slug=si.slug, order=si.order,
@@ -144,7 +144,7 @@ def clone_version_content(db: Session, source, new) -> None:
                     sync_asset_references(db, new.id, [si.content_md], {"item_id": ni.id})
 
                 src_questions = db.execute(
-                    select(Question).where(Question.item_id == si.id).order_by(Question.order)
+                    select(Question).where(Question.item_id == si.id).order_by(Question.order, Question.id)
                 ).scalars().all()
                 for sq in src_questions:
                     nq = Question(
@@ -161,7 +161,7 @@ def clone_version_content(db: Session, source, new) -> None:
                     sync_asset_references(db, new.id, [sq.text_md, sq.explanation_md], {"question_id": nq.id})
 
                     src_options = db.execute(
-                        select(AnswerOption).where(AnswerOption.question_id == sq.id).order_by(AnswerOption.order)
+                        select(AnswerOption).where(AnswerOption.question_id == sq.id).order_by(AnswerOption.order, AnswerOption.id)
                     ).scalars().all()
                     for so in src_options:
                         db.add(AnswerOption(question_id=nq.id, text=so.text,

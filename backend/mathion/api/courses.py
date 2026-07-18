@@ -42,7 +42,7 @@ def create_course(data: CourseCreate, db: Session = Depends(get_db), user: User 
 @router.get("/api/courses", response_model=list[CourseResponse])
 def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if user.is_superuser:
-        courses = db.execute(select(Course).offset(offset).limit(limit)).scalars().all()
+        courses = db.execute(select(Course).order_by(Course.id).offset(offset).limit(limit)).scalars().all()
         return [
             CourseResponse.model_validate(c).model_copy(update={"is_admin": _is_admin_for(db, user, c.id)})
             for c in courses
@@ -62,7 +62,7 @@ def list_courses(limit: int = 100, offset: int = 0, db: Session = Depends(get_db
     visible_ids = set(admin_course_ids) | set(enrolled_course_ids)
     if not visible_ids:
         return []
-    courses = db.execute(select(Course).where(Course.id.in_(visible_ids)).offset(offset).limit(limit)).scalars().all()
+    courses = db.execute(select(Course).where(Course.id.in_(visible_ids)).order_by(Course.id).offset(offset).limit(limit)).scalars().all()
     return [
         CourseResponse.model_validate(c).model_copy(update={"is_admin": _is_admin_for(db, user, c.id)})
         for c in courses

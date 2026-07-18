@@ -117,7 +117,7 @@ def list_students(run_id: int, db: Session = Depends(get_db), user: User = Depen
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
     rows = db.execute(
-        select(RunStudent).where(RunStudent.run_id == run_id).order_by(RunStudent.created_at)
+        select(RunStudent).where(RunStudent.run_id == run_id).order_by(RunStudent.created_at, RunStudent.id)
     ).scalars().all()
     return [_to_response(rs) for rs in rows]
 

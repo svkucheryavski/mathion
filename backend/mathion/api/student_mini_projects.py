@@ -92,7 +92,7 @@ def _resolve_student_run(db: Session, user: User, course_slug: str) -> Run:
             Run.is_published == True,  # noqa: E712
             RunStudent.user_id == user.id,
         )
-        .order_by(Run.start_date.desc())
+        .order_by(Run.start_date.desc(), Run.id.desc())
     ).scalars().all()
     if not runs:
         raise HTTPException(
@@ -219,7 +219,7 @@ def list_student_mini_projects(
             MiniProject.run_id == run.id,
             MiniProject.is_published == True,  # noqa: E712 — SQL boolean comparison
         )
-        .order_by(Block.order.asc())
+        .order_by(Block.order.asc(), Block.id.asc())
     ).scalars().all()
 
     return [_serialize_list_item(db, mp, group) for mp in mps]

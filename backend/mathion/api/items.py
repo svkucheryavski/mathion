@@ -96,7 +96,7 @@ def list_items(sequence_id: int, limit: int = 100, offset: int = 0, db: Session 
     version = _get_version_for_sequence(db, sequence_id)
     require_course_admin(db, user, version.course_id)
     items = db.execute(
-        select(Item).where(Item.sequence_id == sequence_id).order_by(Item.order).offset(offset).limit(limit)
+        select(Item).where(Item.sequence_id == sequence_id).order_by(Item.order, Item.id).offset(offset).limit(limit)
     ).scalars().all()
     return items
 
