@@ -414,6 +414,48 @@ def test_publish_run_409_plural_copy_for_n_geq_2(
     )
 
 
+def test_publish_run_409_conflicts_ordered_by_runstudent_id(
+    admin_client, db, seed_two_published_runs_same_course
+):
+    """§7a determinism CONTRACT guard for the runs.py roster-conflict aggregate.
+
+    publish_run loads run_a's roster ordered by RunStudent.id and appends each
+    student's conflicts in that order. s1 (added by the fixture), then s2, then
+    s3 are added to run_a IN THAT ORDER, so their run_a RunStudent.id is
+    ascending and the aggregated `conflicts` array must be [s1, s2, s3]. Like
+    the helper guard, this pins the ordering CONTRACT: a small-table seq scan
+    tends to yield insertion order already, so dropping `.order_by(RunStudent.id)`
+    need not reproduce a live mis-order.
+    """
+    from mathion.models import RunStudent, RunTeacher
+
+    run_a, run_b, s1 = seed_two_published_runs_same_course()
+    run_a.is_published = False
+    db.add(run_a)
+    db.commit()
+    db.refresh(run_a)
+
+    # Add two more students to run_a AFTER s1, each also on run_b (conflict).
+    s2 = User(email="s2@example.com", full_name="S2")
+    s3 = User(email="s3@example.com", full_name="S3")
+    db.add_all([s2, s3])
+    db.flush()
+    db.add_all([
+        RunStudent(run_id=run_a.id, user_id=s2.id),
+        RunStudent(run_id=run_b.id, user_id=s2.id),
+        RunStudent(run_id=run_a.id, user_id=s3.id),
+        RunStudent(run_id=run_b.id, user_id=s3.id),
+    ])
+    admin = db.query(User).filter_by(email="admin@example.com").one()
+    db.add(RunTeacher(run_id=run_a.id, user_id=admin.id))
+    db.commit()
+
+    response = admin_client.post(f"/api/runs/{run_a.id}/publish")
+    assert response.status_code == 409
+    conflicts = response.json()["conflicts"]
+    assert [c["user_id"] for c in conflicts] == [s1.id, s2.id, s3.id]
+
+
 def test_publish_run_200_when_no_conflicts(
     admin_client, db, seed_publishable_version
 ):

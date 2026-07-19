@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.helpers import INT4_MAX, bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence
@@ -53,7 +53,13 @@ def create_question(item_id: int, data: QuestionCreate, db: Session = Depends(ge
     if item.type != "quiz":
         raise HTTPException(status_code=409, detail="Can only add questions to quiz items")
 
-    next_order = (db.scalar(select(func.max(Question.order)).where(Question.item_id == item_id)) or 0) + 1
+    current_max_order = db.scalar(select(func.max(Question.order)).where(Question.item_id == item_id)) or 0
+    if current_max_order >= INT4_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot add another question: the order sequence is exhausted.",
+        )
+    next_order = current_max_order + 1
     text_html = render_with_assets(db, version.id, data.text_md)
     explanation_html = render_with_assets(db, version.id, data.explanation_md)
     question = Question(
@@ -172,7 +178,13 @@ def create_option(question_id: int, data: OptionCreate, db: Session = Depends(ge
     if question.type not in ("single_choice", "multiple_choice"):
         raise HTTPException(status_code=409, detail="Options are only for choice-type questions")
 
-    next_order = (db.scalar(select(func.max(AnswerOption.order)).where(AnswerOption.question_id == question_id)) or 0) + 1
+    current_max_order = db.scalar(select(func.max(AnswerOption.order)).where(AnswerOption.question_id == question_id)) or 0
+    if current_max_order >= INT4_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot add another option: the order sequence is exhausted.",
+        )
+    next_order = current_max_order + 1
     option = AnswerOption(
         question_id=question_id,
         text=data.text,

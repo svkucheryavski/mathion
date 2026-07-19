@@ -7,6 +7,20 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
+def _normalize_email(v: str) -> str:
+    """Normalize (strip + lowercase), then bound to <=254 chars.
+
+    Some Unicode lowercases to MORE codepoints (e.g. 'İ' U+0130 -> 'i̇' = 2), so a
+    raw value <=254 can expand past the users.email VARCHAR(254) column. Re-check
+    after normalization so the overflow is a 422 here, never a driver DataError
+    (500) on the User insert downstream.
+    """
+    v = v.strip().lower()
+    if len(v) > 254:
+        raise ValueError("email must be at most 254 characters after normalization")
+    return v
+
+
 class CourseCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     name: str = Field(min_length=1, max_length=200)
@@ -237,11 +251,16 @@ class EnrollRequest(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, v: str) -> str:
-        return v.strip().lower()
+        return _normalize_email(v)
 
 
 class EnrollBatchRequest(BaseModel):
     emails: list[Annotated[str, Field(max_length=254)]] = Field(min_length=1)
+
+    @field_validator("emails")
+    @classmethod
+    def normalize_emails(cls, v: list[str]) -> list[str]:
+        return [_normalize_email(e) for e in v]
 
 
 class EnrollmentResponse(BaseModel):
@@ -456,7 +475,7 @@ class RunTeacherCreate(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, v: str) -> str:
-        return v.strip().lower()
+        return _normalize_email(v)
 
 
 class RunTeacherResponse(BaseModel):
@@ -494,7 +513,7 @@ class RunStudentCreate(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, v: str) -> str:
-        return v.strip().lower()
+        return _normalize_email(v)
 
 
 class RunStudentBatchRow(BaseModel):
@@ -505,7 +524,7 @@ class RunStudentBatchRow(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, v: str) -> str:
-        return v.strip().lower()
+        return _normalize_email(v)
 
 
 class RunStudentBatchRequest(BaseModel):

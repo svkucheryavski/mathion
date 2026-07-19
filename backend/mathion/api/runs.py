@@ -222,6 +222,9 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
         select(RunStudent.user_id, User.email)
         .join(User, User.id == RunStudent.user_id)
         .where(RunStudent.run_id == run_id)
+        # §7a: deterministic tie-breaker so the aggregated conflict array order
+        # is stable across query plans.
+        .order_by(RunStudent.id)
     ).all()
 
     aggregate: list[dict] = []

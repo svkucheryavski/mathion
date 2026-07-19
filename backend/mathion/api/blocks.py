@@ -3,7 +3,7 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, has_run_pinned_to_version, require_course_admin, slugify
+from mathion.api.helpers import INT4_MAX, get_or_404, has_run_pinned_to_version, require_course_admin, slugify
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.markdown import render_markdown
@@ -71,7 +71,13 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
 
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
-    next_order = (db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0) + 1
+    current_max_order = db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0
+    if current_max_order >= INT4_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot add another block: the order sequence is exhausted.",
+        )
+    next_order = current_max_order + 1
     block = Block(
         version_id=version_id,
         title=data.title,
@@ -262,7 +268,13 @@ def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(g
 
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
-    next_order = (db.scalar(select(func.max(Sequence.order)).where(Sequence.block_id == block_id)) or 0) + 1
+    current_max_order = db.scalar(select(func.max(Sequence.order)).where(Sequence.block_id == block_id)) or 0
+    if current_max_order >= INT4_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot add another sequence: the order sequence is exhausted.",
+        )
+    next_order = current_max_order + 1
     seq = Sequence(block_id=block_id, title=data.title, slug=slug, order=next_order)
     db.add(seq)
     try:

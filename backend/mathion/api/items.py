@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, slugify, sync_asset_references, sync_script_reference
+from mathion.api.helpers import INT4_MAX, bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, slugify, sync_asset_references, sync_script_reference
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence
@@ -69,7 +69,13 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
 
     # NOTE: order assignment is not safe under concurrent writes.
     # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
-    next_order = (db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0) + 1
+    current_max_order = db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0
+    if current_max_order >= INT4_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot add another item: the order sequence is exhausted.",
+        )
+    next_order = current_max_order + 1
     item = Item(
         sequence_id=sequence_id, title=data.title, slug=slug, order=next_order,
         type=data.type, content_md=data.content_md, content_html="",

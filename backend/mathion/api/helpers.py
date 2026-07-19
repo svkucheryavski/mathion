@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 STUDENT_ALREADY_ACTIVE_ERROR_CODE = "student_already_active_in_course"
 
+# Upper bound of a PostgreSQL int4 column. Derived-order create sites guard
+# against overflowing the `order` column when the current max is already here.
+INT4_MAX = 2_147_483_647
+
 
 _NON_SLUG = re.compile(r"[^a-z0-9]+")
 
@@ -644,6 +648,9 @@ def find_student_active_conflicts(
             Run.is_published == True,
             Run.id != exclude_run_id,
         )
+        # §7a: deterministic tie-breaker so the user-facing 409 names a stable
+        # conflicting run (run_roster.py reads conflict_dicts[0]['run_title']).
+        .order_by(Run.id)
     ).all()
     return [(row[0], row[1]) for row in rows]
 

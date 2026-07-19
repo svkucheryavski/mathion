@@ -210,6 +210,156 @@ def test_check_evaluation_feedback_file_required(db):
     )
 
 
+# --- Criterion 4: boundary-VALID inserts must be ACCEPTED --------------------
+#
+# The rejection tests above prove each CHECK fires on an invalid value, but
+# compare_metadata (test_no_schema_drift) is blind to CHECK expression TEXT, so
+# a stricter-wrong operator (`<` for `<=`, score max 99, a missing enum member)
+# would pass every test. These insert each CHECK's boundary-VALID value and
+# assert it COMMITS. Every named operator is <= / >= / > / IN, so the boundary
+# MUST succeed — a failure here is a real schema bug, not a test to weaken.
+
+def _expect_insert_ok(db, sql, params):
+    """A boundary-valid raw INSERT must commit without any IntegrityError."""
+    db.execute(text(sql), params)
+    db.commit()
+
+
+def _insert_submission(db, ids, submission_number):
+    """Insert an extra VALID submission (distinct submission_number) under the
+    seeded mp+group and return its id. Evaluations need one submission each
+    because evaluations.submission_id is UNIQUE."""
+    return db.execute(
+        text(
+            "INSERT INTO submissions "
+            "(mini_project_id, group_id, submission_number, submitted_by, file_path, file_size, is_late, is_resubmission) "
+            "VALUES (:mp, :grp, :num, :user, '/x.pdf', 1, false, false) RETURNING id"
+        ),
+        {"mp": ids["mp"], "grp": ids["group"], "num": submission_number, "user": ids["user"]},
+    ).scalar_one()
+
+
+def test_check_mini_project_soft_le_hard_boundary_ok(db):
+    ids = _seed_parents(db)
+    # soft == hard satisfies `soft_deadline <= hard_deadline` (equal, boundary).
+    _expect_insert_ok(
+        db,
+        "INSERT INTO mini_projects "
+        "(run_id, block_id, assignment_md, assignment_html, is_published, soft_deadline, hard_deadline) "
+        "VALUES (:run, :block, 'a', '<p>a</p>', false, :soft, :hard)",
+        {"run": ids["run"], "block": ids["block_free"],
+         "soft": "2030-01-01T00:00:00+00", "hard": "2030-01-01T00:00:00+00"},
+    )
+
+
+def test_check_mini_project_hard_le_resubmission_boundary_ok(db):
+    ids = _seed_parents(db)
+    # hard == resubmission (equal, boundary); soft NULL so ck_soft_le_hard passes.
+    _expect_insert_ok(
+        db,
+        "INSERT INTO mini_projects "
+        "(run_id, block_id, assignment_md, assignment_html, is_published, hard_deadline, resubmission_deadline) "
+        "VALUES (:run, :block, 'a', '<p>a</p>', false, :hard, :resub)",
+        {"run": ids["run"], "block": ids["block_free"],
+         "hard": "2030-01-01T00:00:00+00", "resub": "2030-01-01T00:00:00+00"},
+    )
+
+
+def test_check_submission_number_and_file_size_boundary_ok(db):
+    ids = _seed_parents(db)
+    # submission_number = 2 satisfies `>= 1` (distinct from seeded 1 so the unique
+    # doesn't fire); file_size = 1 is the boundary of `> 0`. Both must be accepted.
+    _expect_insert_ok(
+        db,
+        "INSERT INTO submissions "
+        "(mini_project_id, group_id, submission_number, submitted_by, file_path, file_size, is_late, is_resubmission) "
+        "VALUES (:mp, :grp, 2, :user, '/x.pdf', 1, false, false)",
+        {"mp": ids["mp"], "grp": ids["group"], "user": ids["user"]},
+    )
+
+
+def test_check_submission_number_boundary_one_ok(db):
+    ids = _seed_parents(db)
+    # The test above uses number=2, which does NOT pin the `>= 1` boundary (a
+    # mistaken `>= 2` would still pass). Pin it directly with number=1. The
+    # seeded submission already occupies (mp, group, 1) and uq_submission_number
+    # is UNIQUE on (mini_project_id, group_id, submission_number), so insert a
+    # SECOND mini_project on block_free (which _seed_parents leaves with no MP)
+    # to dodge that collision — number=1 then pins the >=1 boundary directly.
+    mp2 = db.execute(text(
+        "INSERT INTO mini_projects (run_id, block_id, assignment_md, assignment_html, is_published) "
+        "VALUES (:run, :block, 'a', '<p>a</p>', false) RETURNING id"
+    ), {"run": ids["run"], "block": ids["block_free"]}).scalar_one()
+    db.commit()
+    _expect_insert_ok(
+        db,
+        "INSERT INTO submissions "
+        "(mini_project_id, group_id, submission_number, submitted_by, file_path, file_size, is_late, is_resubmission) "
+        "VALUES (:mp, :grp, 1, :user, '/x.pdf', 1, false, false)",
+        {"mp": mp2, "grp": ids["group"], "user": ids["user"]},
+    )
+
+
+def test_check_evaluation_result_enum_boundary_ok(db):
+    ids = _seed_parents(db)
+    # Each of the FOUR valid enum members must be ACCEPTED. submission_id is
+    # UNIQUE so each evaluation needs a distinct submission; the three
+    # non-'accepted' members supply a non-NULL feedback_file to satisfy
+    # ck_evaluation_feedback_file_required.
+    members = [
+        ("accepted", None),
+        ("rejected", "/f.pdf"),
+        ("major_revision", "/f.pdf"),
+        ("minor_revision", "/f.pdf"),
+    ]
+    sub_ids = [ids["sub"]] + [_insert_submission(db, ids, n) for n in (2, 3, 4)]
+    for (result, feedback), sub_id in zip(members, sub_ids):
+        _expect_insert_ok(
+            db,
+            "INSERT INTO evaluations (submission_id, evaluated_by, result, feedback_file) "
+            "VALUES (:sub, :user, :result, :feedback)",
+            {"sub": sub_id, "user": ids["user"], "result": result, "feedback": feedback},
+        )
+
+
+def test_check_evaluation_score_range_boundary_ok(db):
+    ids = _seed_parents(db)
+    # score 0 (lower) and score 100 (upper) are both in `0 <= score <= 100`.
+    # Two evaluations need two distinct submissions (submission_id is UNIQUE).
+    sub2 = _insert_submission(db, ids, 2)
+    _expect_insert_ok(
+        db,
+        "INSERT INTO evaluations (submission_id, evaluated_by, result, score) "
+        "VALUES (:sub, :user, 'accepted', 0)",
+        {"sub": ids["sub"], "user": ids["user"]},
+    )
+    _expect_insert_ok(
+        db,
+        "INSERT INTO evaluations (submission_id, evaluated_by, result, score) "
+        "VALUES (:sub, :user, 'accepted', 100)",
+        {"sub": sub2, "user": ids["user"]},
+    )
+
+
+def test_check_evaluation_feedback_file_required_boundary_ok(db):
+    ids = _seed_parents(db)
+    # 'accepted' may omit feedback_file (NULL) — the OR-branch is satisfied.
+    _expect_insert_ok(
+        db,
+        "INSERT INTO evaluations (submission_id, evaluated_by, result, feedback_file) "
+        "VALUES (:sub, :user, 'accepted', NULL)",
+        {"sub": ids["sub"], "user": ids["user"]},
+    )
+    # A non-'accepted' member WITH a non-NULL feedback_file is also accepted.
+    sub2 = _insert_submission(db, ids, 2)
+    _expect_insert_ok(
+        db,
+        "INSERT INTO evaluations (submission_id, evaluated_by, result, feedback_file) "
+        "VALUES (:sub, :user, 'rejected', '/f.pdf')",
+        {"sub": sub2, "user": ids["user"]},
+    )
+
+
 # --- Criterion 4: TIMESTAMPTZ semantics + UTC session ------------------------
 
 def test_timestamptz_semantic_roundtrip(db):
