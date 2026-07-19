@@ -15,9 +15,13 @@ router = APIRouter(tags=["enrollment"])
 def _enroll_user(db: Session, user: User, course_id: int, version: CourseVersion) -> StudentEnrollment:
     """Deactivate any existing active enrollment for this user+course, then create new one.
 
-    NOTE: There is a race condition risk for duplicate active enrollments on the same
-    version. PostgreSQL supports partial unique indexes which could enforce this at the
-    DB level, but SQLite does not. The check below mitigates the issue in application code.
+    NOTE: The (user_id, version_id) unique constraint already blocks duplicate rows on a
+    single version. The unguarded invariant is one ACTIVE enrollment per (user, course)
+    across versions — under READ COMMITTED, two concurrent enrollments on different
+    versions each read only committed rows, so neither sees the other's not-yet-committed
+    active row before inserting its own, leaving two active. DB-level enforcement is
+    deferred to the concurrency-hardening slice; for now the deactivate-then-insert below
+    mitigates it in application code.
     """
     # Check for any existing row (active or inactive) on the target version.
     # The (user_id, version_id) unique constraint requires that we reactivate

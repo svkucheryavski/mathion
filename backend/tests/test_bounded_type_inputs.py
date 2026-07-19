@@ -1,7 +1,7 @@
 """Bounded-type inputs return 422, never a 500 DataError (Postgres §7b).
 
 Postgres enforces the VARCHAR(n) / NUMERIC(p,s) / INTEGER column bounds that
-SQLite silently ignored. The write schemas now carry matching bounds, so
+were previously unenforced. The write schemas now carry matching bounds, so
 over-bound input is rejected at request validation (HTTP 422) instead of
 reaching the driver and raising a 500 DataError. These tests pin that contract
 at representative create AND update endpoints, plus the sanitize_filename

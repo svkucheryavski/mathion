@@ -1,10 +1,12 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
+from sqlalchemy.engine import make_url
 
 from mathion.api.auth import router as auth_router
 from mathion.api.blocks import router as blocks_router
@@ -43,10 +45,25 @@ from mathion.superuser.log_redaction import install as install_log_redaction
 # --lifespan mode — importing this module wires it for the whole process.
 install_log_redaction()
 
+# Log through uvicorn's own logger so the startup line is actually emitted under
+# uvicorn's default logging config: a plain module logger inherits root's WARNING
+# level and uvicorn installs no handler on root, so an INFO record on it would be
+# silently dropped on a real boot. `uvicorn.error` is configured at INFO with a
+# handler.
+logger = logging.getLogger("uvicorn.error")
+
 
 @asynccontextmanager
 async def lifespan(app):
     app.state.settings = settings
+    # Echo the (password-redacted) database target on real uvicorn boot, so a
+    # prod deploy that forgot MATHION_DATABASE_URL and silently fell back to the
+    # localhost dev default is visible in the logs. make_url never renders the
+    # password. This is in the lifespan on purpose — it must NOT fire on every
+    # mathion.database import under alembic/CLI/tests.
+    _db = make_url(settings.database_url)
+    logger.info("Database target: %s@%s:%s/%s",
+                _db.username, _db.host, _db.port or 5432, _db.database)
     app.state.shutdown = asyncio.Event()
     app.state.mailer = build_mailer_from_settings(settings)
     app.state.lock_fd = None

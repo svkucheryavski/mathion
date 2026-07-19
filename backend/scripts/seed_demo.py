@@ -76,7 +76,11 @@ def seed() -> None:
     try:
         user = db.execute(select(User).where(User.email == DEV_EMAIL)).scalar_one_or_none()
         if not user:
-            raise SystemExit(f"User {DEV_EMAIL} not found — create it first.")
+            # Self-contained: create the dev account so a fresh bootstrap can seed
+            # without a manual prerequisite step.
+            user = User(email=DEV_EMAIL, full_name="Dev")
+            db.add(user)
+            db.flush()
 
         existing = db.execute(select(Course).where(Course.slug == DEMO_SLUG)).scalar_one_or_none()
         if existing:

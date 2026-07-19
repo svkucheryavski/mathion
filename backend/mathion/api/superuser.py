@@ -37,8 +37,8 @@ def require_superuser_panel(
 
 
 def _count_active_since(db: Session, since: datetime) -> int:
-    # SQLite drops tzinfo uniformly on store and on bind, so both the stored
-    # last_active_at and this tz-aware `since` compare as naive UTC strings.
+    # Postgres compares the TIMESTAMPTZ last_active_at column against the
+    # tz-aware `since` bound directly — both are timezone-aware instants.
     return db.scalar(
         select(func.count(func.distinct(UserSession.user_id))).where(
             UserSession.last_active_at >= since

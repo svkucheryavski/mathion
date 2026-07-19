@@ -83,9 +83,9 @@ def test_run_render_422_on_missing_asset(admin_client, seed_run_with_groups):
 def test_run_render_no_reference_rows_created(admin_client, seed_run_with_groups, db):
     """Side-effect-free: rendering does NOT create RunAssetReference rows.
 
-    Uses the `db` test fixture (NOT a fresh SessionLocal) so the query lands on
-    the per-test in-memory SQLite schema — see test_run_roster_bulk.py:104 for
-    the same pattern.
+    Uses the `db` test fixture (the shared session) rather than a fresh
+    SessionLocal, so the query sees the state seeded by this test — see
+    test_run_roster_bulk.py:104 for the same pattern.
     """
     from mathion.models import RunAssetReference
 

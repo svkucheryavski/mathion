@@ -149,7 +149,8 @@ def validate_session(db: DBSession, raw_token: str) -> User | None:
     now = datetime.now(timezone.utc)
     last_active = session.last_active_at
     if last_active is not None and last_active.tzinfo is None:
-        # SQLite may store naive datetimes; treat as UTC
+        # Defensive: Postgres TIMESTAMPTZ always reads back tz-aware, but coerce
+        # any naive value to UTC before the arithmetic below.
         last_active = last_active.replace(tzinfo=timezone.utc)
     if last_active is None or (now - last_active).total_seconds() > 300:
         session.last_active_at = now

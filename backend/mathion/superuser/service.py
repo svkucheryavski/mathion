@@ -47,7 +47,8 @@ def validate(db: DBSession, token: str) -> SuperuserPanelToken:
     now = datetime.now(timezone.utc)
     last_active = row.last_active_at
     if last_active is not None and last_active.tzinfo is None:
-        # SQLite may store naive datetimes; treat as UTC (mirrors auth.py:150-153).
+        # Defensive: coerce any naive datetime to UTC (Postgres TIMESTAMPTZ is
+        # already tz-aware; mirrors auth.py).
         last_active = last_active.replace(tzinfo=timezone.utc)
 
     if last_active is None or (now - last_active).total_seconds() > PANEL_INACTIVITY_SECONDS:

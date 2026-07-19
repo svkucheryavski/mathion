@@ -37,8 +37,10 @@ def bump_content_updated_at(version) -> None:
 
 
 def to_utc_aware(dt: datetime | None) -> datetime | None:
-    """Normalize a datetime read from the DB (which may be tz-naive on SQLite
-    or tz-aware on Postgres) to a tz-aware UTC datetime for safe comparisons."""
+    """Normalize a datetime to a tz-aware UTC datetime for safe comparisons.
+
+    Postgres TIMESTAMPTZ values already read back tz-aware; this also coerces any
+    naive datetime (e.g. from a non-DB source) to UTC."""
     if dt is None:
         return None
     if dt.tzinfo is None:
