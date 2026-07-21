@@ -1,9 +1,11 @@
 # Phase 9-A2 — PostgreSQL Concurrency Hardening (student/roster races) — Design
 
-**Status:** rev 5 (post 4× 5-reviewer Opus panel — Round 4: 2 APPROVE, no Criticals, no design defect)
+**Status:** rev 6 (post 5× 5-reviewer Opus panel — **Round 5: 5/5 APPROVE, converged**; awaiting codex gate)
 **Date:** 2026-07-21
 **Predecessor:** Phase 9-A1 PostgreSQL migration (merged `dc60688`, 2026-07-19) — dev+test+prod on PostgreSQL 17, giving real advisory locks + concurrent-connection testability.
 **Branch:** `feat/phase9-a2-concurrency`
+
+**rev 5 → rev 6 (Round-5 convergence panel — 5/5 APPROVE, zero load-bearing issues; only cosmetic/precision nits folded in):** keep the `mkstemp`+write inside the temp-cleanup `try` so a pre-lock write failure is also cleaned (§5.4); reword the reject-path lock-hold precision (the sub-ms unlink runs before `get_db` rolls back — negligible, §5.4); Task 3 names **both** #2-RunStudent fail-firsts (§7). No mechanism, scope, or test-design change. The locking design was empirically re-validated on live PG17 across rounds (SAVEPOINT/advisory survival, `statement_timeout` bounding a blocked acquire, `os.replace` ≈0.2 ms, the reversed-order barrier → `40P01`).
 
 **rev 4 → rev 5 (Round-4 panel — 2 APPROVE (pg-mechanics, codebase-fit both re-verified on live PG17), 3 CHANGES converging on ONE Important; no Criticals, no design/mechanism defect; record in `scratchpad/a2-spec-review-round4-adjudication.md`):**
 - **Guaranteed temp-file cleanup (the one Important — found by 3 reviewers).** The rev-4 reorder moved the `mkstemp`+write ahead of the lock, so a gate/deadline `409` (the pending-gate 409 is the *most common* deadline-rush rejection) would orphan a ≤20 MB `.upload-*.tmp` in the persistent submission tree. rev 5 wraps the whole locked region in `try/finally` that unlinks the temp on every exit, and mandates an orphan-temp regression test (§5.4, §9).
@@ -129,9 +131,11 @@ Acquire, once, up front, before the per-row loop, in §3.2 order: `ENROLLMENT(co
 **Guaranteed temp-file cleanup (required — do not omit).** Because the temp file is now written *before* the under-lock gates, every gate/deadline `409` or error between the write and `os.replace` would otherwise orphan a ≤20 MB `.upload-*.tmp` in the **persistent** `submission_storage_dir` — there is no sweeper, `get_db`'s `finally` frees the lock but not the file, and the pending-gate 409 (`:85`, co-submitters racing) is the highest-frequency deadline-rush rejection, so orphans accumulate unbounded on the exact hot path this slice targets. (Pre-reorder this could not happen — the temp file was written last, after all gates.) Wrap the region in `try/finally` around the existing `tmp_path=None` sentinel:
 
 ```python
-fd, tmp_path = tempfile.mkstemp(dir=abs_dir, prefix=".upload-", suffix=".tmp")   # before the lock
-# write content to fd ...
+os.makedirs(abs_dir, exist_ok=True)
+fd, tmp_path = tempfile.mkstemp(dir=abs_dir, prefix=".upload-", suffix=".tmp")
 try:
+    with os.fdopen(fd, "wb") as f:      # write BEFORE the locks — no I/O under a lock
+        f.write(content)
     advisory_xact_lock(db, LOCK_NS_MINIPROJECT, mp.id)
     advisory_xact_lock(db, LOCK_NS_SUBMISSION, mp.id, group.id)
     # ...gates (may raise 409/500)... insert ... first_submitted_at UPDATE ...
@@ -142,7 +146,7 @@ finally:
         try: os.remove(tmp_path)
         except OSError: pass
 ```
-A successful `os.replace` nulls the sentinel so the `finally` is a no-op; every gate-reject/error unlinks the orphan; cleanup runs after commit/raise, so it does not lengthen the lock hold. (Reading+writing the file before the gate means a gate-rejected request has done that I/O; that waste is the price of a short class-wide hold — acceptable.)
+Keep the `mkstemp`+write **inside** the `try` so a pre-lock write failure (e.g. ENOSPC) is cleaned up too — preserving the coverage the current enclosing `try/except` already gives. A successful `os.replace` nulls the sentinel so the `finally` is a no-op; every gate-reject/error unlinks the orphan. On the success path the `finally` is a no-op (post-commit, locks already freed); on a gate-reject/error the unlink is a single sub-ms metadata `os.remove` that runs *before* `get_db` rolls back the locks — negligibly extending only the reject-path hold (same order as the `os.replace` already accepted under the lock), never the 20 MB I/O the reorder moved out. (Reading+writing the file before the gate means a gate-rejected request has done that I/O; that waste is the price of a short class-wide hold — acceptable.)
 
 **Delete the dead retry:** remove the `except IntegrityError` handler at `submissions.py:152-173` and collapse `try: db.flush()` (`:150-151`) to a bare `db.flush()` (the lock makes the collision unreachable; without the lock, deletion alone would turn a collision into a 500 — they land together).
 
@@ -179,7 +183,7 @@ Task 1 lands the fixture + seam + wiring/ordering helper + one real fail-first (
 
 - **Task 1 — Foundations:** `advisory_xact_lock` + the four namespace constants + `MAX_GROUP_SIZE`; the **`get_or_create_user` SAVEPOINT fix (C1)**; the NullPool concurrency fixture (with thread-join teardown); the forced-interleave seam + wiring/ordering-assert helper; proven by the Layer-1 `pg_try` primitive test + the #3 asymmetric fail-first.
 - **Task 2 — capacity:** `CAPACITY(run_id)` in `enroll_user_in_run` (covers single add + batch rows) + `patch_student` move + `bulk_move` (once before loop) + the four `MAX_GROUP_SIZE` swaps; #1 forced-interleave + fail-first + move-site ordering assertions.
-- **Task 3 — enrollment:** `ENROLLMENT(course_id)` at `add_student` (get_or_create-first), `enroll_student`, `enroll_batch`, `publish_run`; #2 RunStudent forced-interleave + fail-first, and the `_enroll_user` two-version count-based test (GREEN wraps the lock).
+- **Task 3 — enrollment:** `ENROLLMENT(course_id)` at `add_student` (get_or_create-first), `enroll_student`, `enroll_batch`, `publish_run`; #2 RunStudent forced-interleave + **both** fail-firsts (pre-existing-student and new-email variants, §6), and the `_enroll_user` two-version count-based test (GREEN wraps the lock).
 - **Task 4 — batch:** `add_students_batch` acquires `ENROLLMENT`+`CAPACITY` up front (§5.3, both wired) + the deadlock order-reversal regression test (between-acquisitions barrier).
 - **Task 5 — submission:** move file I/O ahead of the lock; `SUBMISSION(mp_id, group_id)` in `create_submission` fixing double-pending + delete the dead retry (§5.4); #3 forced-interleave.
 - **Task 6 — mini-project lifecycle:** `MINIPROJECT(mp_id)` in `create_submission` (before `SUBMISSION`) + `patch_mini_project`/`delete_mini_project` re-read (§5.5); the #5 delete-bypass fail-first (sequenced GREEN) + a `patch_mini_project` forced-interleave.
