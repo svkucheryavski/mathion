@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import (
     build_submission_filename,
     get_or_404,
@@ -90,6 +91,11 @@ def create_submission(
         is_resubmission = True
     else:
         raise HTTPException(status_code=500, detail=f"Unexpected evaluation result: {latest_result}")
+
+    # Test-only seam between the pending-gate read and the write (no-op in prod).
+    # Task 5 adds the SUBMISSION advisory lock around this region; the seam lets
+    # the #3 concurrency test drive a deterministic double-pending interleave.
+    advisory.interleave_hook("submission_pending")
 
     # Deadline gates
     now = datetime.now(timezone.utc)

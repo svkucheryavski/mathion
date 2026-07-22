@@ -61,18 +61,25 @@ def get_or_404(db: Session, model: type[Base], id: int, detail: str | None = Non
 
 
 def get_or_create_user(db: Session, email: str):
-    """Return existing user by email, or create a new one with email only."""
+    """Return existing user by email, or create a new one with email only.
+
+    Concurrent-insert recovery uses a SAVEPOINT (db.begin_nested), NOT a
+    top-level db.rollback(): every enrollment path now holds an advisory lock
+    across this call, and a top-level rollback would end the transaction and
+    release that lock. The SAVEPOINT unwinds only the failed INSERT; an advisory
+    lock acquired before the savepoint survives ROLLBACK TO SAVEPOINT.
+    """
     from mathion.models_auth import User
 
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if user is None:
-        user = User(email=email, full_name=None)
-        db.add(user)
         try:
-            db.flush()  # flush to detect duplicate from concurrent request
+            with db.begin_nested():
+                user = User(email=email, full_name=None)
+                db.add(user)
+                db.flush()  # detect a concurrent insert on the unique email index
         except IntegrityError:
-            db.rollback()
-            # Re-query — the other concurrent request already created the user
+            # The other request already created the user — re-query the winner.
             user = db.execute(select(User).where(User.email == email)).scalar_one()
     return user
 
