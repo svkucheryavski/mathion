@@ -1,6 +1,6 @@
 # Phase 9-A2 — PostgreSQL Concurrency Hardening (student/roster races) — Design
 
-**Status:** rev 11 (5× 5-reviewer Opus panel converged 5/5 + **codex adversarial gate: rounds 1–5 folded (14 findings, 2 Criticals)**; awaiting codex round-6 re-review)
+**Status:** rev 11 — **APPROVED by both gates.** 5× 5-reviewer Opus panel converged 5/5 (at rev 6) + **codex adversarial gate: rounds 1–5 folded (14 findings, 2 Criticals) → APPROVE at round 6 (rev 11)**. Ready for `writing-plans`.
 **Date:** 2026-07-22
 **Predecessor:** Phase 9-A1 PostgreSQL migration (merged `dc60688`, 2026-07-19) — dev+test+prod on PostgreSQL 17, giving real advisory locks + concurrent-connection testability.
 **Branch:** `feat/phase9-a2-concurrency`
