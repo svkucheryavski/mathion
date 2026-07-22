@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import text
 
 from mathion.api import advisory
@@ -28,6 +29,7 @@ def test_advisory_xact_lock_blocks_second_session_until_commit(concurrency):
     sb.rollback()
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_worker_raising_mid_section_leaves_db_truncatable(concurrency):
     """A worker that acquires an advisory lock then RAISES mid-critical-section
     must not leave its lock held: closing its session (what fixture teardown does)
@@ -102,6 +104,13 @@ def test_get_or_create_user_savepoint_preserves_advisory_lock(concurrency):
     sb.add(User(email=email, full_name=None))
     sb.flush()
 
+    # Capture both connections' backend PIDs on the main thread (both sessions
+    # already have a live connection; each NullPool session keeps one stable
+    # connection whose backend PID is fixed for its life). a_pid is captured from
+    # sa BEFORE spawning run_a, so it equals the PID thread A's INSERT runs on.
+    a_pid = sa.execute(text("SELECT pg_backend_pid()")).scalar()
+    b_pid = sb.execute(text("SELECT pg_backend_pid()")).scalar()
+
     result = {}
 
     def run_a():
@@ -116,10 +125,10 @@ def test_get_or_create_user_savepoint_preserves_advisory_lock(concurrency):
     # guaranteed onto the INSERT/recovery path — not a hoped-for interleave.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        blocked = sc.execute(text(
-            "SELECT count(*) FROM pg_stat_activity "
-            "WHERE cardinality(pg_blocking_pids(pid)) > 0"
-        )).scalar()
+        blocked = sc.execute(
+            text("SELECT :b = ANY(pg_blocking_pids(:a))"),
+            {"a": a_pid, "b": b_pid},
+        ).scalar()
         sc.rollback()  # fresh snapshot on the next poll
         if blocked:
             break
