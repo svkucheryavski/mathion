@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 from tempfile import SpooledTemporaryFile
 
 import psycopg
-import pytest
 from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
