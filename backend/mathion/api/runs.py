@@ -131,6 +131,17 @@ def delete_run(
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
 
+    # Invariant #5 (spec §5.5): lock every mini-project of the run (ascending id, ns 2)
+    # so a concurrent create_submission cannot commit a first submission mid-delete.
+    # The non-force has_submissions re-check is then atomic (clean 409 instead of a raw
+    # FK 23503 500 from the group_id RESTRICT cascade), and the force cascade cannot
+    # race a stale insert against a just-deleted mini-project.
+    mp_ids_to_lock = db.execute(
+        select(MiniProject.id).where(MiniProject.run_id == run_id).order_by(MiniProject.id)
+    ).scalars().all()
+    for locked_mp_id in mp_ids_to_lock:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, locked_mp_id)
+
     if not force:
         if run.is_published:
             raise HTTPException(status_code=409, detail="Unpublish run before deleting")

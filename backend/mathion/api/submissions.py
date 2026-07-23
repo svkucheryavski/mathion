@@ -29,10 +29,6 @@ from mathion.schemas import SubmissionResponse
 router = APIRouter(tags=["submissions"])
 
 
-# TODO(phase 9): resubmission gate race — two members observing the same
-# 'major_revision'/'minor_revision' result can both pass the pending check
-# and submit twice for one revision cycle. Address via SAVEPOINT-based
-# retry or a per-mini-project advisory lock when we move to Postgres.
 def _latest_evaluation_result(db: Session, mini_project_id: int, group_id: int) -> tuple[str | None, int | None]:
     """Return (result, evaluator_user_id) of the latest evaluation for this group's
     latest submission on this mini-project. (None, None) if no submissions or no
@@ -99,7 +95,17 @@ def create_submission(
             raise HTTPException(status_code=500, detail="Failed to write submission to disk")
 
         # --- Lock, then the DB-only critical section ---
+        # Invariant #5 (spec §5.4/§5.5): acquire MINIPROJECT (ns 2) BEFORE
+        # SUBMISSION (ns 3) — ascending namespace order — then re-fetch mp under
+        # the lock so the deadline gates read the FRESH row. Without the refresh a
+        # concurrent patch/delete_mini_project under MINIPROJECT is defeated by the
+        # stale pre-lock snapshot (mp loaded at :56); if the mini-project was deleted
+        # in the window the refetch returns None -> the same 404 get_or_404 would give.
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, mp.id)
         advisory.advisory_xact_lock(db, advisory.LOCK_NS_SUBMISSION, mp.id, group.id)
+        mp = db.get(MiniProject, mp.id, populate_existing=True)  # fresh row under the lock
+        if mp is None:
+            raise HTTPException(status_code=404, detail="Mini-project not found")
 
         latest_result, prev_evaluator = _latest_evaluation_result(db, mp.id, group.id)
         if latest_result == "accepted":

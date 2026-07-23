@@ -1,5 +1,6 @@
 import os
 import threading
+from datetime import datetime, timedelta, timezone
 from tempfile import SpooledTemporaryFile
 
 import pytest
@@ -8,10 +9,12 @@ from sqlalchemy import func, select
 from starlette.datastructures import UploadFile
 
 from mathion.api import advisory, submissions
-from mathion.api.helpers import submission_storage_dir
+from mathion.api.helpers import submission_storage_dir, to_utc_aware
+from mathion.api.mini_projects import patch_mini_project
 from mathion.api.submissions import create_submission
-from mathion.models import RunStudent, Submission
+from mathion.models import MiniProject, RunStudent, Submission
 from mathion.models_auth import User
+from mathion.schemas import MiniProjectUpdate
 from tests.conftest import record_lock_calls
 
 
@@ -236,3 +239,99 @@ def test_submission_wiring_and_ordering(monkeypatch, db, seed_run_with_published
 
     assert ("lock", advisory.LOCK_NS_SUBMISSION, (mp["id"], ga["id"])) in events
     assert read_seen["after_lock"] is True  # pending-gate read happened AFTER the lock
+
+
+# --- Task 6 (invariant #5): stale-`mp` on the submit side (spec §6, "#5 stale-`mp`
+# on the submit side"). create_submission re-fetches mp under MINIPROJECT so the
+# deadline gates read the FRESH row, not the pre-lock :56 snapshot. ---
+
+def test_stale_mp_submit_side_reproduces_without_refetch_block(
+    concurrency, monkeypatch, db, seed_run_with_published_mp
+):
+    """RED (lock removed): thread A (create_submission) re-fetches the deadline BEFORE
+    a concurrent patch shortens it, then parks; thread B (patch_mini_project) shortens
+    hard_deadline into the PAST and commits; released A reads its stale (pre-shorten)
+    deadline and ACCEPTS the submission past the new deadline. Without the MINIPROJECT
+    lock, nothing forces A to re-read after B commits — the stale snapshot governs."""
+    run, ga, gb, mp = seed_run_with_published_mp()
+    alice = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+    admin = db.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+
+    # Lock removed so A (parked at submission_pending) does not hold MINIPROJECT and
+    # B's patch can proceed without blocking.
+    monkeypatch.setattr(advisory, "advisory_xact_lock", lambda db, ns, *ids: None)
+
+    real_hook = advisory.interleave_hook
+    a_parked = threading.Event()
+    a_release = threading.Event()
+
+    def hook(label):
+        if label == "submission_pending":
+            a_parked.set()
+            if not a_release.wait(timeout=10):
+                raise RuntimeError("submission_pending seam release timed out")
+        return real_hook(label)
+
+    monkeypatch.setattr(advisory, "interleave_hook", hook)
+
+    (sa,) = concurrency.make_sessions(1)
+    result = {}
+
+    def submit_a():
+        try:
+            u = sa.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+            create_submission(mp["id"], _pdf_upload(), db=sa, user=u)
+            result["status"] = "accepted"
+        except HTTPException as exc:
+            sa.rollback()
+            result["status"] = exc.status_code
+        except Exception as exc:  # surface silent thread failures
+            result["error"] = repr(exc)
+
+    ta = concurrency.spawn(submit_a)  # A: refetches future deadline, parks
+    assert a_parked.wait(timeout=10), "create_submission never reached the seam"
+
+    # B shortens hard_deadline into the past and commits (mp is unlocked -> allowed).
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=past), db=db, user=admin)
+    db.rollback()
+
+    a_release.set()  # release A -> reads its stale future deadline -> accepts
+    ta.join(timeout=10)
+
+    assert result.get("error") is None, f"submit thread failed: {result.get('error')}"
+    assert result["status"] == "accepted"  # BUG: accepted past the now-past deadline
+    (probe,) = concurrency.make_sessions(1)
+    fresh = probe.get(MiniProject, mp["id"])
+    committed = probe.execute(
+        select(func.count()).select_from(Submission).where(Submission.mini_project_id == mp["id"])
+    ).scalar()
+    hard = fresh.hard_deadline
+    probe.rollback()
+    assert to_utc_aware(hard) < datetime.now(timezone.utc)  # deadline really is in the past
+    assert committed == 1  # the stale-read submission was committed
+
+
+def test_stale_mp_submit_side_blocked_by_refetch(db, seed_run_with_published_mp):
+    """GREEN (sequenced, real lock + refetch): run the patch to full commit FIRST, then
+    create_submission acquires MINIPROJECT, re-fetches mp (populate_existing), reads the
+    now-past hard_deadline, and rejects with 409 'Initial submission deadline passed'.
+    The fresh row governs, not the pre-lock snapshot."""
+    run, ga, gb, mp = seed_run_with_published_mp()
+    alice = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+    admin = db.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=past), db=db, user=admin)  # commits
+
+    with pytest.raises(HTTPException) as ei:
+        create_submission(mp["id"], _pdf_upload(), db=db, user=alice)
+    db.rollback()
+    assert ei.value.status_code == 409
+    assert ei.value.detail == "Initial submission deadline passed"
+
+    leftovers = [
+        f for f in os.listdir(submission_storage_dir(run["id"], ga["id"]))
+        if f.startswith(".upload-") and f.endswith(".tmp")
+    ]
+    assert leftovers == []  # the try/finally unlinked the pre-lock temp on the 409
