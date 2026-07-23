@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import (
     STUDENT_ALREADY_ACTIVE_ERROR_CODE,
     enroll_user_in_run,
@@ -142,11 +143,10 @@ def patch_student(run_id: int, user_id: int, data: RunStudentUpdate,
                 raise HTTPException(status_code=400, detail="Group not in this run")
             if g.is_disabled:
                 raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
-            # TODO(phase 9): SELECT-count + UPDATE is not atomic; two concurrent moves
-            # could both observe count=9 and both succeed. Real-world impact is low;
-            # fix via SAVEPOINT in Phase 9 alongside _enroll_user_in_run capacity race.
+            advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run_id)
             count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.group_id == new_gid))
-            if count >= 10 and rs.group_id != new_gid:
+            advisory.interleave_hook("capacity")
+            if count >= advisory.MAX_GROUP_SIZE and rs.group_id != new_gid:
                 raise HTTPException(status_code=409, detail="Group capacity reached")
         rs.group_id = new_gid
 
@@ -317,11 +317,13 @@ def bulk_move_students(
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
 
-    # TODO(phase 9): SELECT-count + UPDATE per row is non-atomic, and the bulk
-    # version widens the window because the outer transaction commits only
-    # after the whole loop. Two concurrent bulk-moves into the same near-full
-    # group can both succeed past 10. Real-world impact is low; fix via
-    # SELECT FOR UPDATE on Postgres alongside single-PATCH at run_roster.py:87.
+    # Hold CAPACITY(run_id) across the whole loop (Phase 9-A2): the per-row
+    # count-read + UPDATE below is otherwise non-atomic, and the bulk version
+    # widens the window because the outer transaction commits only after the
+    # whole loop. One run-keyed acquire up front covers every row, so a
+    # concurrent bulk-move / add into the same group serializes behind it.
+    if data.group_id is not None:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run_id)
     results = []
     for uid in data.user_ids:
         sp = db.begin_nested()
@@ -355,7 +357,7 @@ def bulk_move_students(
                         RunStudent.group_id == data.group_id,
                     )
                 )
-                if count >= 10:
+                if count >= advisory.MAX_GROUP_SIZE:
                     sp.rollback()
                     results.append({
                         "user_id": uid, "status": "error",

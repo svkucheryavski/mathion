@@ -176,7 +176,7 @@ def is_run_admin_or_teacher(db: Session, user, run) -> bool:
 def enroll_user_in_run(db: Session, user, run, group_id: int | None):
     """Enroll a user in a run.
 
-    1. Group capacity check (max 10 if group_id given).
+    1. Group capacity check (rejects a full target group if group_id given).
     2. Activate StudentEnrollment for run.version_id (deactivates other active
        enrollments on this course via the existing `_enroll_user`).
     3. Create or update RunStudent row. If a RunStudent row already exists for
@@ -186,11 +186,12 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
 
     Caller must commit. Raises HTTPException on capacity / disabled-version.
 
-    Note: the capacity check is a SELECT-count + INSERT, not atomic. Two
-    concurrent admins could both observe count=9 and both succeed. Real-world
-    impact is low (admin operations); a SAVEPOINT-based fix lands in Phase 9.
+    Note: the group-capacity check holds CAPACITY(run.id) across the count-read
+    and the insert (Phase 9-A2), so two concurrent adds into the same near-full
+    group serialize — the second re-reads the committed count and 409s.
     """
     from sqlalchemy import func
+    from mathion.api import advisory
     from mathion.api.enrollment import _enroll_user
     from mathion.models import CourseVersion, RunStudent
     from mathion.models_auth import NotificationLogEntry
@@ -200,8 +201,10 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
         raise HTTPException(status_code=403, detail="Run version is disabled")
 
     if group_id is not None:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run.id)
         count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.group_id == group_id))
-        if count >= 10:
+        advisory.interleave_hook("capacity")
+        if count >= advisory.MAX_GROUP_SIZE:
             raise HTTPException(status_code=409, detail="Group capacity reached")
 
     _enroll_user(db, user, version.course_id, version)

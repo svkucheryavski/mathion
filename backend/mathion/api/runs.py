@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import (
     find_student_active_conflicts,
     get_newest_published_version,
@@ -206,10 +207,10 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
             .outerjoin(RunStudent, RunStudent.group_id == Group.id)
             .where(Group.run_id == run_id)
             .group_by(Group.id)
-            .having(func.count(RunStudent.id) > 10)
+            .having(func.count(RunStudent.id) > advisory.MAX_GROUP_SIZE)
         ).all()
         for _, gname, cnt in oversized:
-            violations.append(f"group '{gname}' has {cnt} students (max 10)")
+            violations.append(f"group '{gname}' has {cnt} students (max {advisory.MAX_GROUP_SIZE})")
 
     if violations:
         raise HTTPException(status_code=409, detail="; ".join(violations))
