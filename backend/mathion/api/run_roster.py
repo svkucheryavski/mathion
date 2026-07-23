@@ -185,13 +185,28 @@ def add_students_batch(
             status_code=409,
             content={"detail": "Cannot add students to an unpublished run",
                      "error_code": RUN_UNPUBLISHED_ERROR_CODE})
-    results = []
+    # Phase 9-A2 (spec §5.3): acquire ENROLLMENT(course_id) then CAPACITY(run.id)
+    # ONCE up front, in ascending namespace order, BEFORE the per-row begin_nested()
+    # savepoints. Advisory-xact locks acquired before a savepoint survive ROLLBACK
+    # TO SAVEPOINT, so a failed row cannot drop the batch's locks — this up-front
+    # acquire is the load-bearing hold; enroll_user_in_run's per-row CAPACITY
+    # re-acquire on the SAME run key is a harmless re-entrant no-op under it.
+    results: list[dict | None] = [None] * len(data.rows)
     course_id = run.version.course_id
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run.id)
 
-    for row in data.rows:
+    # Deadlock-freedom (spec §3.2/§5.3): visit rows in normalized-email order so any
+    # two (even different-course) batches acquire the shared `users` index/row locks
+    # in one global order and cannot cycle — no global lock needed. Emit results in
+    # INPUT order (results[i]) so the 207 response shape/order is unchanged.
+    visit_order = sorted(range(len(data.rows)), key=lambda i: data.rows[i].email.strip().lower())
+    for i in visit_order:
+        row = data.rows[i]
         # User creation happens at the outer transaction; safe to keep even if
-        # the per-row enrollment later fails.
+        # the per-row enrollment later fails (get_or_create_user is SAVEPOINT-safe).
         target = get_or_create_user(db, row.email)
+        advisory.interleave_hook("batch_between_users")
 
         # M5: enforce one-active-RunStudent-per-course invariant. Check fires
         # IMMEDIATELY after get_or_create_user and BEFORE any side effects
@@ -201,12 +216,12 @@ def add_students_batch(
             db, target.id, course_id=course_id, exclude_run_id=run.id
         )
         if conflicts:
-            results.append({
+            results[i] = {
                 "email": row.email,
                 "status": "error",
                 "detail": f"Already active in '{conflicts[0][1]}'",
                 "error_code": STUDENT_ALREADY_ACTIVE_ERROR_CODE,
-            })
+            }
             continue
 
         sp = db.begin_nested()
@@ -228,14 +243,14 @@ def add_students_batch(
 
             rs = enroll_user_in_run(db, target, run, gid)
             sp.commit()
-            results.append({"email": row.email, "status": "added", "group_id": rs.group_id})
+            results[i] = {"email": row.email, "status": "added", "group_id": rs.group_id}
         except HTTPException as e:
             sp.rollback()
-            results.append({"email": row.email, "status": "error", "detail": e.detail})
+            results[i] = {"email": row.email, "status": "error", "detail": e.detail}
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected error in batch student add for %s", row.email)
             sp.rollback()
-            results.append({"email": row.email, "status": "error", "detail": "internal error"})
+            results[i] = {"email": row.email, "status": "error", "detail": "internal error"}
 
     db.commit()
     return {"results": results}

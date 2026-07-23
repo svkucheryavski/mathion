@@ -6,6 +6,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
+# Phase 9-A2 (spec §3.3/§5.3): cap enrollment batches. advisory.py imports nothing
+# from mathion, so importing the constant here creates no cycle (verified via
+# `python -c "import mathion.schemas"`). Keeps the batch's lock-hold short so the
+# shared statement_timeout 57014 backstop stays rare, and bounds request size.
+from mathion.api.advisory import MAX_BATCH_SIZE
+
 
 def _normalize_email(v: str) -> str:
     """Normalize (strip + lowercase), then bound to <=254 chars.
@@ -255,7 +261,7 @@ class EnrollRequest(BaseModel):
 
 
 class EnrollBatchRequest(BaseModel):
-    emails: list[Annotated[str, Field(max_length=254)]] = Field(min_length=1)
+    emails: list[Annotated[str, Field(max_length=254)]] = Field(min_length=1, max_length=MAX_BATCH_SIZE)
 
     @field_validator("emails")
     @classmethod
@@ -528,7 +534,7 @@ class RunStudentBatchRow(BaseModel):
 
 
 class RunStudentBatchRequest(BaseModel):
-    rows: list[RunStudentBatchRow] = Field(min_length=1)
+    rows: list[RunStudentBatchRow] = Field(min_length=1, max_length=MAX_BATCH_SIZE)
 
 
 class RunStudentBatchResultRow(BaseModel):
