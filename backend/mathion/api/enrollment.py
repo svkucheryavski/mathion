@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import get_newest_published_version, get_or_404, get_or_create_user, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -82,6 +83,10 @@ def enroll_student(
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)
+    # Phase 9-A2 invariant #2 (spec §5.2): ENROLLMENT(course_id) BEFORE
+    # get_or_create_user (advisory-before-index) so the deactivate-then-insert in
+    # _enroll_user is atomic and the users index INSERT sits inside the lock.
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
     user = get_or_create_user(db, data.email)
     enrollment = _enroll_user(db, user, course_id, version)
     db.commit()
@@ -100,11 +105,17 @@ def enroll_batch(
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)
     unique_emails = list(dict.fromkeys(e.strip().lower() for e in data.emails))
-    results = []
-    for email in unique_emails:
-        user = get_or_create_user(db, email)
-        enrollment = _enroll_user(db, user, course_id, version)
-        results.append(enrollment)
+    # Phase 9-A2 invariant #2 (spec §5.2/§5.3): ENROLLMENT(course_id) once BEFORE
+    # the loop, before any get_or_create_user (advisory-before-index).
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
+    # Deadlock-freedom (spec §3.2/§5.3): touch the shared `users` rows in a stable
+    # normalized-email order, but return results in the client's INPUT order.
+    order = sorted(range(len(unique_emails)), key=lambda i: unique_emails[i])
+    by_index: dict[int, StudentEnrollment] = {}
+    for i in order:
+        user = get_or_create_user(db, unique_emails[i])
+        by_index[i] = _enroll_user(db, user, course_id, version)
+    results = [by_index[i] for i in range(len(unique_emails))]
     db.commit()
     for enrollment in results:
         db.refresh(enrollment)

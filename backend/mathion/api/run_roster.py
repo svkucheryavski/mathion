@@ -72,41 +72,39 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot add students to disabled group")
 
-    # L2/M6: check runs AFTER input-validation, BEFORE side effects.
-    # Resolve user only — do NOT create. If user doesn't exist, no conflict
-    # possible (no RunStudent row to compare against).
-    existing_user = db.execute(
-        select(User).where(User.email == data.email)
-    ).scalar_one_or_none()
-    if existing_user is not None:
-        conflicts = find_student_active_conflicts(
-            db,
-            existing_user.id,
-            course_id=run.version.course_id,
-            exclude_run_id=run.id,
-        )
-        if conflicts:
-            conflict_dicts = [
-                {
-                    "user_id": existing_user.id,
-                    "email": existing_user.email,
-                    "run_id": rid_other,
-                    "run_title": title,
-                }
-                for (rid_other, title) in conflicts
-            ]
-            detail = (
-                f"{data.email} is already active in run "
-                f"\"{conflict_dicts[0]['run_title']}\" of the same course."
-            )
-            return JSONResponse(
-                status_code=409,
-                content=make_already_active_409_body(
-                    conflict_dicts, summary_override=detail
-                ),
-            )
-
+    # Phase 9-A2 invariant #2 (spec §5.2): acquire ENROLLMENT(course_id) BEFORE
+    # get_or_create_user so the users.email index INSERT sits INSIDE the advisory
+    # lock (advisory-before-index; wrapping only the inner enroll would reopen the
+    # advisory-vs-unique-index deadlock the cross-endpoint test proves).
+    course_id = run.version.course_id
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
+    # get_or_create FIRST (SAVEPOINT-safe) so a brand-new email is also conflict-
+    # checked under the lock — fixes the pre-reorder bypass where existing_user=None
+    # skipped the check.
     target = get_or_create_user(db, data.email)
+    conflicts = find_student_active_conflicts(
+        db, target.id, course_id=course_id, exclude_run_id=run.id
+    )
+    advisory.interleave_hook("enrollment_runstudent")
+    if conflicts:
+        conflict_dicts = [
+            {
+                "user_id": target.id,
+                "email": target.email,
+                "run_id": rid_other,
+                "run_title": title,
+            }
+            for (rid_other, title) in conflicts
+        ]
+        detail = (
+            f"{data.email} is already active in run "
+            f"\"{conflict_dicts[0]['run_title']}\" of the same course."
+        )
+        return JSONResponse(
+            status_code=409,
+            content=make_already_active_409_body(conflict_dicts, summary_override=detail),
+        )
+
     rs = enroll_user_in_run(db, target, run, data.group_id)
     db.commit()
     db.refresh(rs)

@@ -174,9 +174,6 @@ def delete_run(
 
 @router.post("/api/runs/{run_id}/publish", response_model=RunResponse)
 def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    # TODO(phase 9): publish-gate validation is read-then-write; a teacher
-    # could be removed concurrently between the count check and is_published
-    # update. Fix via SAVEPOINT-wrapped re-check in Phase 9.
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
     version = db.get(CourseVersion, run.version_id)
@@ -184,6 +181,11 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
         raise HTTPException(status_code=409, detail="Cannot publish run on a disabled course version")
     if run.is_published:
         raise HTTPException(status_code=409, detail="Run is already published")
+
+    # Phase 9-A2 invariant #2 (spec §5.2): hold ENROLLMENT(course_id) across the
+    # readiness/conflict reads and the is_published flip so the publish gate is
+    # atomic against a concurrent add_student on the same course.
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, run.version.course_id)
 
     violations: list[str] = []
 
