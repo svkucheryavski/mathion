@@ -101,6 +101,8 @@ def enroll_batch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if len(data.emails) > advisory.MAX_BATCH_SIZE:
+        raise HTTPException(status_code=422, detail="Batch too large (max 300); split into smaller chunks")
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)

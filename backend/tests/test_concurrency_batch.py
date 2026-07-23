@@ -118,6 +118,7 @@ def test_batch_rows_over_cap_rejected_422(admin_client, seed_publishable_version
     rows = [{"email": f"u{i}@example.com"} for i in range(advisory.MAX_BATCH_SIZE + 1)]
     resp = admin_client.post(f"/api/runs/{run['id']}/students/batch", json={"rows": rows})
     assert resp.status_code == 422
+    assert resp.json()["detail"] == "Batch too large (max 300); split into smaller chunks"
 
 
 def test_enroll_batch_emails_over_cap_rejected_422(admin_client, seed_publishable_version):
@@ -125,6 +126,7 @@ def test_enroll_batch_emails_over_cap_rejected_422(admin_client, seed_publishabl
     emails = [f"u{i}@example.com" for i in range(advisory.MAX_BATCH_SIZE + 1)]
     resp = admin_client.post(f"/api/courses/{course['id']}/enroll-batch", json={"emails": emails})
     assert resp.status_code == 422
+    assert resp.json()["detail"] == "Batch too large (max 300); split into smaller chunks"
 
 
 # --------------------------------------------------------------------------

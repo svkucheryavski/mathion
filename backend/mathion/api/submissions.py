@@ -105,7 +105,7 @@ def create_submission(
         advisory.advisory_xact_lock(db, advisory.LOCK_NS_SUBMISSION, mp.id, group.id)
         mp = db.get(MiniProject, mp.id, populate_existing=True)  # fresh row under the lock
         if mp is None:
-            raise HTTPException(status_code=404, detail="Mini-project not found")
+            raise HTTPException(status_code=404, detail="MiniProject not found")
 
         latest_result, prev_evaluator = _latest_evaluation_result(db, mp.id, group.id)
         if latest_result == "accepted":

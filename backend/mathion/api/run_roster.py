@@ -178,6 +178,8 @@ def add_students_batch(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if len(data.rows) > advisory.MAX_BATCH_SIZE:
+        raise HTTPException(status_code=422, detail="Batch too large (max 300); split into smaller chunks")
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
     if not run.is_published:

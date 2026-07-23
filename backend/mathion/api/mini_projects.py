@@ -163,7 +163,7 @@ def patch_mini_project(
     advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, mp_id)
     mp = db.get(MiniProject, mp_id, populate_existing=True)
     if mp is None:
-        raise HTTPException(status_code=404, detail="Mini-project not found")
+        raise HTTPException(status_code=404, detail="MiniProject not found")
     advisory.interleave_hook("mp_patch")
 
     locked = mp.first_submitted_at is not None
@@ -232,7 +232,7 @@ def delete_mini_project(
     advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, mp_id)
     mp = db.get(MiniProject, mp_id, populate_existing=True)
     if mp is None:
-        raise HTTPException(status_code=404, detail="Mini-project not found")
+        raise HTTPException(status_code=404, detail="MiniProject not found")
 
     is_locked = mp.first_submitted_at is not None
     advisory.interleave_hook("mp_delete")
