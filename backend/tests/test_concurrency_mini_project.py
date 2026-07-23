@@ -138,29 +138,95 @@ def test_delete_mp_bypass_reproduces_without_lock(
     assert gone is None  # the locked mini-project was deleted
 
 
-def test_delete_mp_bypass_blocked_by_lock(db, seed_run_with_published_mp):
-    """GREEN (sequenced, spec §6): run the submit to full commit FIRST, then the
-    run-teacher's delete_mini_project acquires MINIPROJECT, re-fetches the whole entity,
-    reads is_locked=True, and hits the force/course-admin gate -> 409."""
+def test_delete_mp_bypass_blocked_by_lock(
+    concurrency, monkeypatch, db, seed_run_with_published_mp
+):
+    """GREEN (blocking, spec §6): A (create_submission) acquires MINIPROJECT and parks
+    HOLDING it (uncommitted); B (delete_mini_project non-force), past its authz load that
+    read is_locked=False, BLOCKS on MINIPROJECT(mp); release A -> it commits the first
+    submission (mp now locked) and releases; B unblocks, re-fetches the whole entity ->
+    is_locked=True -> 409 force/course-admin gate. Load-bearing: B's pre-lock snapshot
+    still says unlocked; only the under-lock refetch produces the 409. A committed, B 409,
+    mp still present."""
     run, ga, gb, mp = seed_run_with_published_mp()
-    teacher = db.execute(select(User).where(User.email == "teach@example.com")).scalar_one()
-    alice = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
 
-    create_submission(mp["id"], _pdf_upload(), db=db, user=alice)  # commits -> mp locked
+    sa, sb, sc = concurrency.make_sessions(3)  # sc is a dedicated blocking-poll probe
+    sa_pid, sb_pid = _pid(sa), _pid(sb)
 
-    with pytest.raises(HTTPException) as ei:
-        delete_mini_project(mp["id"], force=False, db=db, user=teacher)
-    db.rollback()
-    assert ei.value.status_code == 409
-    assert ei.value.detail == "Mini-project is locked (has submissions); use ?force=true"
-    assert db.get(MiniProject, mp["id"]) is not None  # not deleted (post-rollback re-read)
+    # A acquires MINIPROJECT and holds it (parks); B blocks on that same lock.
+    real_lock = advisory.advisory_xact_lock
+    a_holds = threading.Event()
+    a_release = threading.Event()
+
+    def lock_ctl(session, ns, *ids):
+        if ns == advisory.LOCK_NS_MINIPROJECT and session is sa:
+            real_lock(session, ns, *ids)  # acquire and hold
+            a_holds.set()
+            if not a_release.wait(timeout=10):
+                raise RuntimeError("a_release timed out")
+            return
+        if ns == advisory.LOCK_NS_MINIPROJECT and session is sb:
+            real_lock(session, ns, *ids)  # now block on A's held lock
+            return
+        real_lock(session, ns, *ids)
+
+    monkeypatch.setattr(advisory, "advisory_xact_lock", lock_ctl)
+
+    res_a, res_b = {}, {}
+
+    def submit_a():  # A = mutator: commits a first submission -> locks mp
+        try:
+            u = sa.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+            create_submission(mp["id"], _pdf_upload(), db=sa, user=u)
+            res_a["status"] = "committed"
+        except HTTPException as exc:
+            sa.rollback()
+            res_a["status"] = exc.status_code
+        except Exception as exc:  # surface silent thread failures
+            res_a["error"] = repr(exc)
+
+    def delete_b():  # B = reader: non-force delete, blocks then re-fetches is_locked=True
+        try:
+            u = sb.execute(select(User).where(User.email == "teach@example.com")).scalar_one()
+            delete_mini_project(mp["id"], force=False, db=sb, user=u)
+            res_b["status"] = "deleted"
+        except HTTPException as exc:
+            sb.rollback()
+            res_b["status"] = exc.status_code
+            res_b["detail"] = exc.detail
+        except Exception as exc:  # surface silent thread failures
+            res_b["error"] = repr(exc)
+
+    ta = concurrency.spawn(submit_a)  # A: acquires + holds MINIPROJECT (uncommitted)
+    assert a_holds.wait(timeout=10), "create_submission never acquired MINIPROJECT"
+
+    tb = concurrency.spawn(delete_b)  # B: past authz (is_locked=False), blocks on MINIPROJECT
+    assert _wait_blocked(sc, sb_pid, sa_pid), "delete B never blocked on A's MINIPROJECT lock"
+
+    a_release.set()  # A: refetch -> insert -> commit (mp locked) -> release
+    ta.join(timeout=10)
+    tb.join(timeout=10)
+
+    assert res_a.get("error") is None, f"submit A failed: {res_a.get('error')}"
+    assert res_a["status"] == "committed"
+    assert res_b.get("error") is None, f"delete B failed: {res_b.get('error')}"
+    assert res_b["status"] == 409  # under-lock refetch reads is_locked=True -> force gate
+    assert res_b["detail"] == "Mini-project is locked (has submissions); use ?force=true"
+
+    (probe,) = concurrency.make_sessions(1)
+    assert probe.get(MiniProject, mp["id"]) is not None  # not deleted
+    committed = probe.execute(
+        select(func.count()).select_from(Submission).where(Submission.mini_project_id == mp["id"])
+    ).scalar()
+    probe.rollback()
+    assert committed == 1  # A committed exactly one submission
 
 
 # =====================================================================================
 # #5 patch two-PATCH deadline lost-update — spec §6, "#5 patch — symmetric, two-PATCH"
 # =====================================================================================
 
-def _lock_mp(db, mp_id, ga):
+def _lock_mp(db, mp_id):
     """Commit a first submission (alice) so the mini-project becomes locked."""
     alice = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
     create_submission(mp_id, _pdf_upload(), db=db, user=alice)
@@ -175,7 +241,7 @@ def test_patch_two_patch_deadline_lost_update_reproduces_without_lock(
     proposed D1 against its STALE D0, passes (D1>D0), and commits -> D2 shortened to
     D1, violating 'can only be extended'. Lock removed so B does not block on A."""
     run, ga, gb, mp = seed_run_with_published_mp()
-    _lock_mp(db, mp["id"], ga)  # first_submitted_at set -> extension guard applies
+    _lock_mp(db, mp["id"])  # first_submitted_at set -> extension guard applies
     db.rollback()
 
     d1 = datetime.now(timezone.utc) + timedelta(days=75)
@@ -235,25 +301,87 @@ def test_patch_two_patch_deadline_lost_update_reproduces_without_lock(
     assert to_utc_aware(final) == to_utc_aware(d1)  # LOST UPDATE: D2 overwritten by D1
 
 
-def test_patch_two_patch_deadline_lock_prevents_lost_update(db, seed_run_with_published_mp):
-    """GREEN (sequenced, whole-entity refetch): run A's extension to full commit (D2)
-    first, then B (proposing D1 < D2) acquires MINIPROJECT, re-fetches the whole entity,
-    sees D2, and its extension guard rejects D1 <= D2 -> 409 'can only be extended'."""
+def test_patch_two_patch_deadline_lock_prevents_lost_update(
+    concurrency, monkeypatch, db, seed_run_with_published_mp
+):
+    """GREEN (blocking, whole-entity refetch): A (patch -> D2, extend) acquires MINIPROJECT
+    and parks HOLDING it; B (patch -> D1, D1<D2), past its pre-lock load that read D0,
+    BLOCKS on MINIPROJECT(mp); release A -> it commits D2 and releases; B unblocks,
+    re-fetches the whole entity -> sees D2 -> extension guard rejects D1 <= D2 -> 409
+    'can only be extended'. Load-bearing: B's stale D0 would pass the guard (D1>D0); only
+    the under-lock refetch of D2 rejects it. A committed D2, B 409, final deadline == D2."""
     run, ga, gb, mp = seed_run_with_published_mp()
-    _lock_mp(db, mp["id"], ga)
-    admin = db.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+    _lock_mp(db, mp["id"])  # first_submitted_at set -> extension guard applies
 
-    d1 = datetime.now(timezone.utc) + timedelta(days=75)
+    sa, sb, sc = concurrency.make_sessions(3)  # sc is a dedicated blocking-poll probe
+    sa_pid, sb_pid = _pid(sa), _pid(sb)
+
+    d1 = datetime.now(timezone.utc) + timedelta(days=75)  # D0(=+60d) < D1 < D2
     d2 = datetime.now(timezone.utc) + timedelta(days=90)
 
-    patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=d2), db=db, user=admin)  # commits D2
+    real_lock = advisory.advisory_xact_lock
+    a_holds = threading.Event()
+    a_release = threading.Event()
 
-    with pytest.raises(HTTPException) as ei:
-        patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=d1), db=db, user=admin)
-    db.rollback()
-    assert ei.value.status_code == 409
-    assert "can only be extended" in ei.value.detail
-    assert to_utc_aware(db.get(MiniProject, mp["id"]).hard_deadline) == to_utc_aware(d2)
+    def lock_ctl(session, ns, *ids):
+        if ns == advisory.LOCK_NS_MINIPROJECT and session is sa:
+            real_lock(session, ns, *ids)  # acquire and hold
+            a_holds.set()
+            if not a_release.wait(timeout=10):
+                raise RuntimeError("a_release timed out")
+            return
+        if ns == advisory.LOCK_NS_MINIPROJECT and session is sb:
+            real_lock(session, ns, *ids)  # now block on A's held lock
+            return
+        real_lock(session, ns, *ids)
+
+    monkeypatch.setattr(advisory, "advisory_xact_lock", lock_ctl)
+
+    res_a, res_b = {}, {}
+
+    def patch_a():  # A = mutator: extend to D2, holds MINIPROJECT
+        try:
+            u = sa.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+            patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=d2), db=sa, user=u)
+            res_a["status"] = "committed"
+        except HTTPException as exc:
+            sa.rollback()
+            res_a["status"] = exc.status_code
+        except Exception as exc:  # surface silent thread failures
+            res_a["error"] = repr(exc)
+
+    def patch_b():  # B = reader: propose D1 < D2, blocks then re-fetches D2 -> 409
+        try:
+            u = sb.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+            patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=d1), db=sb, user=u)
+            res_b["status"] = "committed"
+        except HTTPException as exc:
+            sb.rollback()
+            res_b["status"] = exc.status_code
+            res_b["detail"] = exc.detail
+        except Exception as exc:  # surface silent thread failures
+            res_b["error"] = repr(exc)
+
+    ta = concurrency.spawn(patch_a)  # A: acquires + holds MINIPROJECT (uncommitted)
+    assert a_holds.wait(timeout=10), "patch A never acquired MINIPROJECT"
+
+    tb = concurrency.spawn(patch_b)  # B: past pre-lock load (D0), blocks on MINIPROJECT
+    assert _wait_blocked(sc, sb_pid, sa_pid), "patch B never blocked on A's MINIPROJECT lock"
+
+    a_release.set()  # A: refetch -> extension guard passes (D2>D0) -> commit D2 -> release
+    ta.join(timeout=10)
+    tb.join(timeout=10)
+
+    assert res_a.get("error") is None, f"patch A failed: {res_a.get('error')}"
+    assert res_a["status"] == "committed"
+    assert res_b.get("error") is None, f"patch B failed: {res_b.get('error')}"
+    assert res_b["status"] == 409  # under-lock refetch reads D2 -> extension guard rejects D1
+    assert "can only be extended" in res_b["detail"]
+
+    (probe,) = concurrency.make_sessions(1)
+    final = probe.get(MiniProject, mp["id"]).hard_deadline
+    probe.rollback()
+    assert to_utc_aware(final) == to_utc_aware(d2)  # D2 preserved, no lost update
 
 
 # =====================================================================================

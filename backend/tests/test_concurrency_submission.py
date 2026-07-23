@@ -1,11 +1,12 @@
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from tempfile import SpooledTemporaryFile
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from starlette.datastructures import UploadFile
 
 from mathion.api import advisory, submissions
@@ -25,6 +26,31 @@ def _pdf_upload():
     spool.write(b"%PDF-1.4 concurrency test")
     spool.seek(0)
     return UploadFile(file=spool, filename="r.pdf")
+
+
+def _pid(session):
+    """Backend PID of a NullPool session's connection.
+
+    Does NOT rollback: on a NullPool session, rollback releases (closes) the
+    connection, so the next statement would run on a fresh backend with a new PID.
+    The leftover read-only SELECT just opens the transaction the following
+    create_submission / delete_run continues on the SAME connection (stable PID)."""
+    return session.execute(text("SELECT pg_backend_pid()")).scalar()
+
+
+def _wait_blocked(probe, blocked_pid, by_pid, timeout=10):
+    """Poll pg_blocking_pids until `blocked_pid` is blocked by `by_pid`."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        blocked = probe.execute(
+            text("SELECT :b = ANY(pg_blocking_pids(:a))"),
+            {"a": blocked_pid, "b": by_pid},
+        ).scalar()
+        probe.rollback()
+        if blocked:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def test_pending_submission_race_reproduces_without_lock(
@@ -312,23 +338,92 @@ def test_stale_mp_submit_side_reproduces_without_refetch_block(
     assert committed == 1  # the stale-read submission was committed
 
 
-def test_stale_mp_submit_side_blocked_by_refetch(db, seed_run_with_published_mp):
-    """GREEN (sequenced, real lock + refetch): run the patch to full commit FIRST, then
-    create_submission acquires MINIPROJECT, re-fetches mp (populate_existing), reads the
-    now-past hard_deadline, and rejects with 409 'Initial submission deadline passed'.
-    The fresh row governs, not the pre-lock snapshot."""
+def test_stale_mp_submit_side_blocked_by_refetch(
+    concurrency, monkeypatch, db, seed_run_with_published_mp
+):
+    """GREEN (blocking, real lock + refetch): A (patch -> past deadline; mp unlocked so it
+    may shorten freely) acquires MINIPROJECT and parks HOLDING it; B (create_submission),
+    past its pre-lock mp load (submissions.py :56) that read the FUTURE deadline, BLOCKS on
+    MINIPROJECT(mp); release A -> it commits the past deadline and releases; B unblocks,
+    re-fetches mp under the lock -> now-past hard_deadline -> 409 'Initial submission
+    deadline passed'. Load-bearing: B's pre-lock snapshot still holds the FUTURE deadline
+    and would accept; only the under-lock refetch rejects. The try/finally unlinks B's
+    pre-lock temp on the 409."""
     run, ga, gb, mp = seed_run_with_published_mp()
-    alice = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
-    admin = db.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+
+    sa, sb, sc = concurrency.make_sessions(3)  # sc is a dedicated blocking-poll probe
+    sa_pid, sb_pid = _pid(sa), _pid(sb)
 
     past = datetime.now(timezone.utc) - timedelta(days=1)
-    patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=past), db=db, user=admin)  # commits
 
-    with pytest.raises(HTTPException) as ei:
-        create_submission(mp["id"], _pdf_upload(), db=db, user=alice)
-    db.rollback()
-    assert ei.value.status_code == 409
-    assert ei.value.detail == "Initial submission deadline passed"
+    real_lock = advisory.advisory_xact_lock
+    a_holds = threading.Event()
+    a_release = threading.Event()
+
+    def lock_ctl(session, ns, *ids):
+        if ns == advisory.LOCK_NS_MINIPROJECT and session is sa:
+            real_lock(session, ns, *ids)  # acquire and hold
+            a_holds.set()
+            if not a_release.wait(timeout=10):
+                raise RuntimeError("a_release timed out")
+            return
+        if ns == advisory.LOCK_NS_MINIPROJECT and session is sb:
+            real_lock(session, ns, *ids)  # now block on A's held lock
+            return
+        real_lock(session, ns, *ids)
+
+    monkeypatch.setattr(advisory, "advisory_xact_lock", lock_ctl)
+
+    res_a, res_b = {}, {}
+
+    def patch_a():  # A = mutator: shorten hard_deadline into the past, holds MINIPROJECT
+        try:
+            u = sa.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
+            patch_mini_project(mp["id"], MiniProjectUpdate(hard_deadline=past), db=sa, user=u)
+            res_a["status"] = "committed"
+        except HTTPException as exc:
+            sa.rollback()
+            res_a["status"] = exc.status_code
+        except Exception as exc:  # surface silent thread failures
+            res_a["error"] = repr(exc)
+
+    def submit_b():  # B = reader: blocks, then re-fetches the now-past deadline -> 409
+        try:
+            u = sb.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+            create_submission(mp["id"], _pdf_upload(), db=sb, user=u)
+            res_b["status"] = "accepted"
+        except HTTPException as exc:
+            sb.rollback()
+            res_b["status"] = exc.status_code
+            res_b["detail"] = exc.detail
+        except Exception as exc:  # surface silent thread failures
+            res_b["error"] = repr(exc)
+
+    ta = concurrency.spawn(patch_a)  # A: acquires + holds MINIPROJECT (uncommitted)
+    assert a_holds.wait(timeout=10), "patch A never acquired MINIPROJECT"
+
+    tb = concurrency.spawn(submit_b)  # B: past pre-lock mp load (future deadline), blocks
+    assert _wait_blocked(sc, sb_pid, sa_pid), "submit B never blocked on A's MINIPROJECT lock"
+
+    a_release.set()  # A: refetch -> shorten to past -> commit -> release
+    ta.join(timeout=10)
+    tb.join(timeout=10)
+
+    assert res_a.get("error") is None, f"patch A failed: {res_a.get('error')}"
+    assert res_a["status"] == "committed"
+    assert res_b.get("error") is None, f"submit B failed: {res_b.get('error')}"
+    assert res_b["status"] == 409  # under-lock refetch reads the past deadline
+    assert res_b["detail"] == "Initial submission deadline passed"
+
+    (probe,) = concurrency.make_sessions(1)
+    fresh = probe.get(MiniProject, mp["id"])
+    committed = probe.execute(
+        select(func.count()).select_from(Submission).where(Submission.mini_project_id == mp["id"])
+    ).scalar()
+    hard = fresh.hard_deadline
+    probe.rollback()
+    assert to_utc_aware(hard) < datetime.now(timezone.utc)  # deadline really is in the past
+    assert committed == 0  # B rejected -> nothing committed
 
     leftovers = [
         f for f in os.listdir(submission_storage_dir(run["id"], ga["id"]))
