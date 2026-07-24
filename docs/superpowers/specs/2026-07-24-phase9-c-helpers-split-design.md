@@ -1,6 +1,6 @@
 # Phase 9-C — `helpers.py` God-Module Split (Design)
 
-**Status:** Draft for review (rev 7 — after codex pass 1)
+**Status:** CONVERGED (rev 7) — 5 Opus-xhigh review rounds (ended 4/4 APPROVE) + 2 codex passes (pass 2 APPROVE); awaiting user review
 **Date:** 2026-07-24
 **Scope:** Backend-only, pure refactor. No behavior change.
 
