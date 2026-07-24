@@ -1,6 +1,6 @@
 # Phase 9-C — `helpers.py` God-Module Split (Design)
 
-**Status:** Draft for review (rev 4 — after Opus review round 3)
+**Status:** Draft for review (rev 5 — after Opus review round 4)
 **Date:** 2026-07-24
 **Scope:** Backend-only, pure refactor. No behavior change.
 
@@ -31,13 +31,15 @@ sites change.
 - **No opportunistic fixes.** Any latent issue noticed during the move is left as-is (or
   filed separately); this slice does not change what the code does. The **one** carve-out to
   this pure-move guarantee is a purely-cosmetic edit *inside* the moved code: dropping the
-  stale `helpers.py:NNN` line numbers in the two docstrings that move into `asset_render.py`
+  stale `(helpers.py:NNN)` citations in the two docstrings that move into `asset_render.py`
   (they would otherwise cite a deleted file; see Migration). No moved *code* is altered.
 - **No new behavior tests.** The existing suite is the regression net (see Testing).
 - **No further decomposition** of the six target modules, and no non-`import` changes to any
-  file *outside* the six modules. Stale `helpers.py:NNN` references that live in files this
-  slice does NOT edit (`run_assets.py`, `test_dashboard_item_drilldown.py`) are knowingly
-  left alone (out of scope).
+  file *outside* the six modules. Two files carry stale `helpers.py:NNN` references in
+  comments that are knowingly left alone (out of scope): `run_assets.py` — whose `import`
+  line the final task *does* repoint (it is one of the 21 production importers), but whose
+  stale non-import comments (`run_assets.py:359`, `:362`) are not touched — and
+  `test_dashboard_item_drilldown.py`, which is not an importer and is not edited at all.
 - **No function renames.** Names are preserved so importers change only the *source
   module*, not the imported symbol.
 - **No permanent compatibility shim.** The transitional re-export in `helpers.py` (see
@@ -133,8 +135,10 @@ For each target module M:
    (helpers.py:179)" → "Mirrors `render_with_assets`") and `sync_run_asset_references`
    ("Mirrors `sync_asset_references` (helpers.py:215)" → "Mirrors `sync_asset_references`");
    both now name functions that co-locate in `asset_render.py`. Drop the whole
-   `(helpers.py:NNN)` token, not just the number (leaving a bare `(helpers.py)` would still
-   cite a deleted file). Leave every other line-reference untouched — in particular the
+   `(helpers.py:NNN)` token **and its single preceding space** (the before→after fragments
+   above show the exact result), not just the number — leaving a bare `(helpers.py)` would
+   still cite a deleted file, and dropping only the parenthetical without its preceding space
+   would leave a double space. Leave every other line-reference untouched — in particular the
    co-located `markdown.py:71` comment inside `render_with_run_assets` stays (that file is
    not deleted).
 2. In `helpers.py`, replace the moved definitions with a **re-export**:
@@ -175,9 +179,10 @@ definition lives in its focused module.
 2. Delete `backend/mathion/api/helpers.py`.
 3. Grep-confirm **zero** residual references across the whole `backend/` tree (not just
    `mathion/` + `tests/`), matching the literal `mathion\.api\.helpers` and `import helpers`
-   with the regex dot **escaped**, and excluding generated build artifacts (`*.egg-info/` —
-   `mathion.egg-info/SOURCES.txt` lists the path `mathion/api/helpers.py`, which an unescaped
-   `api.helpers` pattern would false-positive on).
+   with the regex dot **escaped**. (Escaping matters: an *unescaped* `api.helpers` would also
+   match the path `mathion/api/helpers.py` that the generated `mathion.egg-info/SOURCES.txt`
+   lists; the escaped `\.` does not match that slash, so no build-artifact exclusion is
+   needed.)
 4. Run the full suite → **green**. Additionally, import-check the one importer the suite does
    **not** cover (see Testing): `backend/.venv/bin/python -c "import scripts.seed_teaching_dashboards_smoke"`
    (run from `backend/`) must succeed.
@@ -196,15 +201,17 @@ This is a behavior-preserving move, so the safety net is the **existing** suite 
   resolving, so green proves the move preserved the public surface and behavior. Two distinct
   failure modes are caught at two different times, and it is worth being precise about which:
   - A **missing re-export name** (the shim forgets to re-export a moved symbol) fails at
-    **collection time**: every importer does `from mathion.api.helpers import <name>` at
-    module top, so pytest's import of the app graph (`conftest.py` does
-    `from mathion.main import app`) raises `ImportError: cannot import name` before any test
-    runs. This is the strangler's real per-extraction-step teeth (see Risks).
+    **collection time**: importers do `from mathion.api.helpers import <name>` (most at
+    module top; 7 inside function bodies — see the final task), and every moved name has at
+    least one *module-level* importer that pytest loads when it imports the app graph
+    (`conftest.py` does `from mathion.main import app`, pulling in all 21 production routers),
+    so a forgotten re-export raises `ImportError: cannot import name` before any test runs.
+    This is the strangler's real per-extraction-step teeth (see Risks).
   - A **missing module-level import inside a moved function** fails as a `NameError`, and
     *when* depends on how the name is used. Names read at module load — annotations
-    (`db: Session`, `type[Base]`, since there is no `from __future__ import annotations`) and
-    module-level statements (`re`, consumed by `_NON_SLUG = re.compile(...)`) — red the suite
-    at **collection time** too. Names read only inside function *bodies* (`select`,
+    (`db: Session`, `type[Base]`, and `datetime` via `to_utc_aware`'s signature; there is no
+    `from __future__ import annotations`) and module-level statements (`re`, consumed by
+    `_NON_SLUG = re.compile(...)`) — red the suite at **collection time** too. Names read only inside function *bodies* (`select`,
     `HTTPException`, `os`, `settings`, `sanitize_filename`, `IntegrityError`, the module-level
     models `roster_ops` carries) raise only when a test **calls** that function — so their net
     is test *call-coverage*, not import-time detection (see the coverage paragraph below).
@@ -267,11 +274,12 @@ test_version_clone` (under `backend/tests/`). Function-body import sites:
 
 - `helpers.py` no longer exists; the six modules exist with the exact function/constant
   assignment above.
-- Zero references to `mathion.api.helpers` remain in `backend/` source (grep-verified with
-  the regex dot escaped and `*.egg-info/` build artifacts excluded).
+- Zero references to `mathion.api.helpers` remain in `backend/` source (grep-verified; the
+  escaped regex dot does not match the `mathion/api/helpers.py` path in
+  `mathion.egg-info/SOURCES.txt`).
 - No function's behavior, signature, or message changed (pure move).
 - Full suite green (1160 passed / 1 skipped, modulo unrelated drift), verified after every
   task and on the merged result; the seed script import-checks clean.
 - No Alembic migration; no non-import changes to any file outside the six modules. Within the
-  six new modules, the only non-verbatim edit is the two dropped docstring line-numbers (the
-  Non-Goals carve-out).
+  six new modules, the only non-verbatim edit is the two dropped `(helpers.py:NNN)` docstring
+  citations (the Non-Goals carve-out).
