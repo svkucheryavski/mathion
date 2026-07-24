@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import (
     STUDENT_ALREADY_ACTIVE_ERROR_CODE,
     enroll_user_in_run,
@@ -71,41 +72,39 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot add students to disabled group")
 
-    # L2/M6: check runs AFTER input-validation, BEFORE side effects.
-    # Resolve user only — do NOT create. If user doesn't exist, no conflict
-    # possible (no RunStudent row to compare against).
-    existing_user = db.execute(
-        select(User).where(User.email == data.email)
-    ).scalar_one_or_none()
-    if existing_user is not None:
-        conflicts = find_student_active_conflicts(
-            db,
-            existing_user.id,
-            course_id=run.version.course_id,
-            exclude_run_id=run.id,
-        )
-        if conflicts:
-            conflict_dicts = [
-                {
-                    "user_id": existing_user.id,
-                    "email": existing_user.email,
-                    "run_id": rid_other,
-                    "run_title": title,
-                }
-                for (rid_other, title) in conflicts
-            ]
-            detail = (
-                f"{data.email} is already active in run "
-                f"\"{conflict_dicts[0]['run_title']}\" of the same course."
-            )
-            return JSONResponse(
-                status_code=409,
-                content=make_already_active_409_body(
-                    conflict_dicts, summary_override=detail
-                ),
-            )
-
+    # Phase 9-A2 invariant #2 (spec §5.2): acquire ENROLLMENT(course_id) BEFORE
+    # get_or_create_user so the users.email index INSERT sits INSIDE the advisory
+    # lock (advisory-before-index; wrapping only the inner enroll would reopen the
+    # advisory-vs-unique-index deadlock the cross-endpoint test proves).
+    course_id = run.version.course_id
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
+    # get_or_create FIRST (SAVEPOINT-safe) so a brand-new email is also conflict-
+    # checked under the lock — fixes the pre-reorder bypass where existing_user=None
+    # skipped the check.
     target = get_or_create_user(db, data.email)
+    conflicts = find_student_active_conflicts(
+        db, target.id, course_id=course_id, exclude_run_id=run.id
+    )
+    advisory.interleave_hook("enrollment_runstudent")
+    if conflicts:
+        conflict_dicts = [
+            {
+                "user_id": target.id,
+                "email": target.email,
+                "run_id": rid_other,
+                "run_title": title,
+            }
+            for (rid_other, title) in conflicts
+        ]
+        detail = (
+            f"{data.email} is already active in run "
+            f"\"{conflict_dicts[0]['run_title']}\" of the same course."
+        )
+        return JSONResponse(
+            status_code=409,
+            content=make_already_active_409_body(conflict_dicts, summary_override=detail),
+        )
+
     rs = enroll_user_in_run(db, target, run, data.group_id)
     db.commit()
     db.refresh(rs)
@@ -142,11 +141,10 @@ def patch_student(run_id: int, user_id: int, data: RunStudentUpdate,
                 raise HTTPException(status_code=400, detail="Group not in this run")
             if g.is_disabled:
                 raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
-            # TODO(phase 9): SELECT-count + UPDATE is not atomic; two concurrent moves
-            # could both observe count=9 and both succeed. Real-world impact is low;
-            # fix via SAVEPOINT in Phase 9 alongside _enroll_user_in_run capacity race.
+            advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run_id)
             count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.group_id == new_gid))
-            if count >= 10 and rs.group_id != new_gid:
+            advisory.interleave_hook("capacity")
+            if count >= advisory.MAX_GROUP_SIZE and rs.group_id != new_gid:
                 raise HTTPException(status_code=409, detail="Group capacity reached")
         rs.group_id = new_gid
 
@@ -180,6 +178,8 @@ def add_students_batch(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if len(data.rows) > advisory.MAX_BATCH_SIZE:
+        raise HTTPException(status_code=422, detail="Batch too large (max 300); split into smaller chunks")
     run = get_or_404(db, Run, run_id)
     require_run_admin_or_teacher(db, user, run)
     if not run.is_published:
@@ -187,13 +187,28 @@ def add_students_batch(
             status_code=409,
             content={"detail": "Cannot add students to an unpublished run",
                      "error_code": RUN_UNPUBLISHED_ERROR_CODE})
-    results = []
+    # Phase 9-A2 (spec §5.3): acquire ENROLLMENT(course_id) then CAPACITY(run.id)
+    # ONCE up front, in ascending namespace order, BEFORE the per-row begin_nested()
+    # savepoints. Advisory-xact locks acquired before a savepoint survive ROLLBACK
+    # TO SAVEPOINT, so a failed row cannot drop the batch's locks — this up-front
+    # acquire is the load-bearing hold; enroll_user_in_run's per-row CAPACITY
+    # re-acquire on the SAME run key is a harmless re-entrant no-op under it.
+    results: list[dict | None] = [None] * len(data.rows)
     course_id = run.version.course_id
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run.id)
 
-    for row in data.rows:
+    # Deadlock-freedom (spec §3.2/§5.3): visit rows in normalized-email order so any
+    # two (even different-course) batches acquire the shared `users` index/row locks
+    # in one global order and cannot cycle — no global lock needed. Emit results in
+    # INPUT order (results[i]) so the 207 response shape/order is unchanged.
+    visit_order = sorted(range(len(data.rows)), key=lambda i: data.rows[i].email.strip().lower())
+    for i in visit_order:
+        row = data.rows[i]
         # User creation happens at the outer transaction; safe to keep even if
-        # the per-row enrollment later fails.
+        # the per-row enrollment later fails (get_or_create_user is SAVEPOINT-safe).
         target = get_or_create_user(db, row.email)
+        advisory.interleave_hook("batch_between_users")
 
         # M5: enforce one-active-RunStudent-per-course invariant. Check fires
         # IMMEDIATELY after get_or_create_user and BEFORE any side effects
@@ -203,12 +218,12 @@ def add_students_batch(
             db, target.id, course_id=course_id, exclude_run_id=run.id
         )
         if conflicts:
-            results.append({
+            results[i] = {
                 "email": row.email,
                 "status": "error",
                 "detail": f"Already active in '{conflicts[0][1]}'",
                 "error_code": STUDENT_ALREADY_ACTIVE_ERROR_CODE,
-            })
+            }
             continue
 
         sp = db.begin_nested()
@@ -230,14 +245,14 @@ def add_students_batch(
 
             rs = enroll_user_in_run(db, target, run, gid)
             sp.commit()
-            results.append({"email": row.email, "status": "added", "group_id": rs.group_id})
+            results[i] = {"email": row.email, "status": "added", "group_id": rs.group_id}
         except HTTPException as e:
             sp.rollback()
-            results.append({"email": row.email, "status": "error", "detail": e.detail})
+            results[i] = {"email": row.email, "status": "error", "detail": e.detail}
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected error in batch student add for %s", row.email)
             sp.rollback()
-            results.append({"email": row.email, "status": "error", "detail": "internal error"})
+            results[i] = {"email": row.email, "status": "error", "detail": "internal error"}
 
     db.commit()
     return {"results": results}
@@ -317,11 +332,13 @@ def bulk_move_students(
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot move student into disabled group")
 
-    # TODO(phase 9): SELECT-count + UPDATE per row is non-atomic, and the bulk
-    # version widens the window because the outer transaction commits only
-    # after the whole loop. Two concurrent bulk-moves into the same near-full
-    # group can both succeed past 10. Real-world impact is low; fix via
-    # SELECT FOR UPDATE on Postgres alongside single-PATCH at run_roster.py:87.
+    # Hold CAPACITY(run_id) across the whole loop (Phase 9-A2): the per-row
+    # count-read + UPDATE below is otherwise non-atomic, and the bulk version
+    # widens the window because the outer transaction commits only after the
+    # whole loop. One run-keyed acquire up front covers every row, so a
+    # concurrent bulk-move / add into the same group serializes behind it.
+    if data.group_id is not None:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run_id)
     results = []
     for uid in data.user_ids:
         sp = db.begin_nested()
@@ -355,7 +372,7 @@ def bulk_move_students(
                         RunStudent.group_id == data.group_id,
                     )
                 )
-                if count >= 10:
+                if count >= advisory.MAX_GROUP_SIZE:
                     sp.rollback()
                     results.append({
                         "user_id": uid, "status": "error",

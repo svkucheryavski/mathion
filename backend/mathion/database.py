@@ -13,6 +13,7 @@ from mathion.config import settings
 engine = create_engine(
     settings.database_url,
     echo=False,
+    isolation_level="READ COMMITTED",  # A2: post-lock re-read depends on this; do not rely on server default
     pool_pre_ping=True,
     pool_recycle=1800,
     pool_size=5,

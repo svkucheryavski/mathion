@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import (
     find_student_active_conflicts,
     get_newest_published_version,
@@ -130,6 +131,17 @@ def delete_run(
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
 
+    # Invariant #5 (spec §5.5): lock every mini-project of the run (ascending id, ns 2)
+    # so a concurrent create_submission cannot commit a first submission mid-delete.
+    # The non-force has_submissions re-check is then atomic (clean 409 instead of a raw
+    # FK 23503 500 from the group_id RESTRICT cascade), and the force cascade cannot
+    # race a stale insert against a just-deleted mini-project.
+    mp_ids_to_lock = db.execute(
+        select(MiniProject.id).where(MiniProject.run_id == run_id).order_by(MiniProject.id)
+    ).scalars().all()
+    for locked_mp_id in mp_ids_to_lock:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, locked_mp_id)
+
     if not force:
         if run.is_published:
             raise HTTPException(status_code=409, detail="Unpublish run before deleting")
@@ -173,9 +185,6 @@ def delete_run(
 
 @router.post("/api/runs/{run_id}/publish", response_model=RunResponse)
 def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    # TODO(phase 9): publish-gate validation is read-then-write; a teacher
-    # could be removed concurrently between the count check and is_published
-    # update. Fix via SAVEPOINT-wrapped re-check in Phase 9.
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
     version = db.get(CourseVersion, run.version_id)
@@ -183,6 +192,11 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
         raise HTTPException(status_code=409, detail="Cannot publish run on a disabled course version")
     if run.is_published:
         raise HTTPException(status_code=409, detail="Run is already published")
+
+    # Phase 9-A2 invariant #2 (spec §5.2): hold ENROLLMENT(course_id) across the
+    # readiness/conflict reads and the is_published flip so the publish gate is
+    # atomic against a concurrent add_student on the same course.
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, run.version.course_id)
 
     violations: list[str] = []
 
@@ -206,10 +220,10 @@ def publish_run(run_id: int, db: Session = Depends(get_db), user: User = Depends
             .outerjoin(RunStudent, RunStudent.group_id == Group.id)
             .where(Group.run_id == run_id)
             .group_by(Group.id)
-            .having(func.count(RunStudent.id) > 10)
+            .having(func.count(RunStudent.id) > advisory.MAX_GROUP_SIZE)
         ).all()
         for _, gname, cnt in oversized:
-            violations.append(f"group '{gname}' has {cnt} students (max 10)")
+            violations.append(f"group '{gname}' has {cnt} students (max {advisory.MAX_GROUP_SIZE})")
 
     if violations:
         raise HTTPException(status_code=409, detail="; ".join(violations))

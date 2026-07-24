@@ -769,3 +769,74 @@ def _assert_hidden(forbidden, missing):
     assert forbidden.content == missing.content
     assert forbidden.headers["content-type"] == missing.headers["content-type"]
     assert forbidden.headers["content-length"] == missing.headers["content-length"]
+
+
+class _Concurrency:
+    """Owns a dedicated NullPool engine + the worker sessions/threads a
+    concurrency test spawns, so teardown can join threads and release
+    connections BEFORE the autouse _isolation TRUNCATE."""
+
+    def __init__(self, maker):
+        self._maker = maker
+        self.sessions = []
+        self.threads = []
+
+    def make_sessions(self, n):
+        made = [self._maker() for _ in range(n)]
+        self.sessions.extend(made)
+        return made
+
+    def spawn(self, target, *args, **kwargs):
+        import threading
+        t = threading.Thread(target=target, args=args, kwargs=kwargs)
+        t.start()
+        self.threads.append(t)
+        return t
+
+
+@pytest.fixture
+def concurrency(_isolation):
+    """Dedicated NullPool engine (never the app pool) yielding real separate
+    connections for multi-thread race tests. Depends on _isolation so pytest
+    LIFO-finalizes this fixture (join threads -> release locks) BEFORE the
+    autouse TRUNCATE runs."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    eng = create_engine(
+        settings.database_url,
+        poolclass=NullPool,
+        isolation_level="READ COMMITTED",
+        connect_args={
+            "connect_timeout": 10,
+            "options": "-c statement_timeout=30000 -c TimeZone=UTC",
+        },
+    )
+    helper = _Concurrency(sessionmaker(bind=eng))
+    yield helper
+    for t in helper.threads:
+        t.join(timeout=10)
+        if t.is_alive():
+            raise RuntimeError("concurrency worker thread did not finish within 10s")
+    for s in helper.sessions:
+        s.rollback()
+        s.close()
+    eng.dispose()
+
+
+def record_lock_calls(monkeypatch):
+    """Spy on advisory.advisory_xact_lock: append ('lock', namespace, ids) to a
+    shared ordered list, then delegate to the real implementation. Returned list
+    lets a wiring/ordering test assert the lock args AND that the lock precedes a
+    later-recorded ('read', ...) event."""
+    from mathion.api import advisory
+    events = []
+    real = advisory.advisory_xact_lock
+
+    def spy(db, namespace, *ids):
+        events.append(("lock", namespace, tuple(ids)))
+        return real(db, namespace, *ids)
+
+    monkeypatch.setattr(advisory, "advisory_xact_lock", spy)
+    return events

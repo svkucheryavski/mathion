@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.helpers import (
     get_or_404,
     is_run_admin_or_teacher,
@@ -155,6 +156,16 @@ def patch_mini_project(
     run = get_or_404(db, Run, mp.run_id)
     require_run_admin_or_teacher(db, user, run)
 
+    # Invariant #5 (spec §5.5): serialize on MINIPROJECT(mp_id) and re-fetch the
+    # WHOLE entity under the lock so the lock flag AND the extension-guard old-deadline
+    # reads come from the fresh row — otherwise two PATCHes can lost-update a deadline
+    # the other extended (Finding 4). 404 if a concurrent delete removed it.
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, mp_id)
+    mp = db.get(MiniProject, mp_id, populate_existing=True)
+    if mp is None:
+        raise HTTPException(status_code=404, detail="MiniProject not found")
+    advisory.interleave_hook("mp_patch")
+
     locked = mp.first_submitted_at is not None
     updates = data.model_dump(exclude_unset=True)
     violations = []
@@ -213,7 +224,18 @@ def delete_mini_project(
     run = get_or_404(db, Run, mp.run_id)
     require_run_admin_or_teacher(db, user, run)
 
+    # Invariant #5 (spec §5.5): serialize on MINIPROJECT(mp_id) and re-fetch the
+    # WHOLE entity under the lock so the lock flag is fresh — otherwise a first
+    # submission committing in the read-then-act window lets a run-teacher delete a
+    # now-locked mini-project without the course-admin force escalation. 404 if a
+    # concurrent delete removed it.
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, mp_id)
+    mp = db.get(MiniProject, mp_id, populate_existing=True)
+    if mp is None:
+        raise HTTPException(status_code=404, detail="MiniProject not found")
+
     is_locked = mp.first_submitted_at is not None
+    advisory.interleave_hook("mp_delete")
     if is_locked and not force:
         raise HTTPException(status_code=409, detail="Mini-project is locked (has submissions); use ?force=true")
     if is_locked and force:

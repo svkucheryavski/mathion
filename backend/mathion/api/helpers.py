@@ -61,18 +61,25 @@ def get_or_404(db: Session, model: type[Base], id: int, detail: str | None = Non
 
 
 def get_or_create_user(db: Session, email: str):
-    """Return existing user by email, or create a new one with email only."""
+    """Return existing user by email, or create a new one with email only.
+
+    Concurrent-insert recovery uses a SAVEPOINT (db.begin_nested), NOT a
+    top-level db.rollback(): every enrollment path now holds an advisory lock
+    across this call, and a top-level rollback would end the transaction and
+    release that lock. The SAVEPOINT unwinds only the failed INSERT; an advisory
+    lock acquired before the savepoint survives ROLLBACK TO SAVEPOINT.
+    """
     from mathion.models_auth import User
 
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if user is None:
-        user = User(email=email, full_name=None)
-        db.add(user)
         try:
-            db.flush()  # flush to detect duplicate from concurrent request
+            with db.begin_nested():
+                user = User(email=email, full_name=None)
+                db.add(user)
+                db.flush()  # detect a concurrent insert on the unique email index
         except IntegrityError:
-            db.rollback()
-            # Re-query — the other concurrent request already created the user
+            # The other request already created the user — re-query the winner.
             user = db.execute(select(User).where(User.email == email)).scalar_one()
     return user
 
@@ -169,7 +176,7 @@ def is_run_admin_or_teacher(db: Session, user, run) -> bool:
 def enroll_user_in_run(db: Session, user, run, group_id: int | None):
     """Enroll a user in a run.
 
-    1. Group capacity check (max 10 if group_id given).
+    1. Group capacity check (rejects a full target group if group_id given).
     2. Activate StudentEnrollment for run.version_id (deactivates other active
        enrollments on this course via the existing `_enroll_user`).
     3. Create or update RunStudent row. If a RunStudent row already exists for
@@ -179,11 +186,12 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
 
     Caller must commit. Raises HTTPException on capacity / disabled-version.
 
-    Note: the capacity check is a SELECT-count + INSERT, not atomic. Two
-    concurrent admins could both observe count=9 and both succeed. Real-world
-    impact is low (admin operations); a SAVEPOINT-based fix lands in Phase 9.
+    Note: the group-capacity check holds CAPACITY(run.id) across the count-read
+    and the insert (Phase 9-A2), so two concurrent adds into the same near-full
+    group serialize — the second re-reads the committed count and 409s.
     """
     from sqlalchemy import func
+    from mathion.api import advisory
     from mathion.api.enrollment import _enroll_user
     from mathion.models import CourseVersion, RunStudent
     from mathion.models_auth import NotificationLogEntry
@@ -193,8 +201,10 @@ def enroll_user_in_run(db: Session, user, run, group_id: int | None):
         raise HTTPException(status_code=403, detail="Run version is disabled")
 
     if group_id is not None:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_CAPACITY, run.id)
         count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.group_id == group_id))
-        if count >= 10:
+        advisory.interleave_hook("capacity")
+        if count >= advisory.MAX_GROUP_SIZE:
             raise HTTPException(status_code=409, detail="Group capacity reached")
 
     _enroll_user(db, user, version.course_id, version)
