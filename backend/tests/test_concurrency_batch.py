@@ -4,8 +4,8 @@
 front (advisory-xact locks acquired before the per-row begin_nested savepoints
 survive ROLLBACK TO SAVEPOINT), then processes its per-row `users`-table writes in
 normalized-email order (deadlock-freedom, no global lock, spec §3.2/§5.3),
-restoring the 207 results to INPUT order. Both batch schemas are capped at
-MAX_BATCH_SIZE.
+restoring the 207 results to INPUT order. Both batch endpoints reject oversize
+input (> MAX_BATCH_SIZE) with an in-handler 422 guard, before any lock.
 
 Off-HTTP semantics (spec §6): thread bodies call the router functions directly
 with per-thread sessions; add_students_batch RETURNS a dict (207 body), per-row
