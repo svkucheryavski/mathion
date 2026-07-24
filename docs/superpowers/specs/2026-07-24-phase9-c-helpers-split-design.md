@@ -1,6 +1,6 @@
 # Phase 9-C — `helpers.py` God-Module Split (Design)
 
-**Status:** Draft for review (rev 5 — after Opus review round 4)
+**Status:** Draft for review (rev 6 — Opus review converged round 5, 4/4 APPROVE)
 **Date:** 2026-07-24
 **Scope:** Backend-only, pure refactor. No behavior change.
 
@@ -136,9 +136,11 @@ For each target module M:
    ("Mirrors `sync_asset_references` (helpers.py:215)" → "Mirrors `sync_asset_references`");
    both now name functions that co-locate in `asset_render.py`. Drop the whole
    `(helpers.py:NNN)` token **and its single preceding space** (the before→after fragments
-   above show the exact result), not just the number — leaving a bare `(helpers.py)` would
-   still cite a deleted file, and dropping only the parenthetical without its preceding space
-   would leave a double space. Leave every other line-reference untouched — in particular the
+   above show the exact citation substring to remove; whatever follows it in the docstring — a
+   space + "but…" for the first, ": deletes…" for the second — stays untouched), not just the
+   number. Leaving a bare `(helpers.py)` would still cite a deleted file, and dropping the
+   parenthetical without its preceding space would leave a double space. Leave every other
+   line-reference untouched — in particular the
    co-located `markdown.py:71` comment inside `render_with_run_assets` stays (that file is
    not deleted).
 2. In `helpers.py`, replace the moved definitions with a **re-export**:
@@ -239,9 +241,11 @@ This is a behavior-preserving move, so the safety net is the **existing** suite 
 
 ## Risks & mitigations
 
-- **Circular imports during migration** → mitigated by the extraction-order constraint
-  (`lookups` before `authz`) and by preserving every existing function-body import verbatim.
-  The one new load-time edge (`authz`→`lookups`) is acyclic by construction.
+- **Circular imports during migration** → the one new load-time edge (`authz`→`lookups`) is
+  acyclic by construction, and every existing function-body import is preserved verbatim so no
+  other new load-time edge appears. (The separate `lookups`-before-`authz` extraction-order
+  constraint is about module *existence* — avoiding a `ModuleNotFoundError` when `authz`'s new
+  import line runs — not cycle-prevention; see Dependency graph.)
 - **A missed re-export name** breaks importers mid-migration → the full-suite gate on each
   extraction task catches it (import errors fail collection).
 - **A missed importer in the final repoint** → the grep-for-zero-`api.helpers` gate catches
