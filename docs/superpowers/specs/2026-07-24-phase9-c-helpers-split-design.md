@@ -1,6 +1,6 @@
 # Phase 9-C — `helpers.py` God-Module Split (Design)
 
-**Status:** Draft for review (rev 3 — after Opus review rounds 1–2)
+**Status:** Draft for review (rev 4 — after Opus review round 3)
 **Date:** 2026-07-24
 **Scope:** Backend-only, pure refactor. No behavior change.
 
@@ -60,7 +60,7 @@ with any function that uses them and are not repeated per row.
 | Module | Functions (verbatim from `helpers.py`) | Module-level names it must carry | Responsibility |
 |---|---|---|---|
 | `text_utils.py` | `slugify`, `bump_content_updated_at`, `to_utc_aware` | `_NON_SLUG` (private regex); `re`, `datetime`/`timezone` | pure string / datetime helpers; no DB session |
-| `lookups.py` | `get_or_404`, `get_or_create_user`, `get_newest_published_version` | `INT4_MAX`; `Base` (runtime annotation on `get_or_404`); `IntegrityError` (`get_or_create_user`) | generic fetch / fetch-or-create + the int4 order-column bound |
+| `lookups.py` | `get_or_404`, `get_or_create_user`, `get_newest_published_version` | `INT4_MAX`; `Base` (load-time annotation on `get_or_404`); `IntegrityError` (`get_or_create_user`) | generic fetch / fetch-or-create + the int4 order-column bound |
 | `authz.py` | `require_course_admin`, `require_course_admin_for_run`, `require_run_admin_or_teacher`, `is_run_admin_or_teacher`, `has_run_teacher_on_course`, `has_run_pinned_to_version` | `from mathion.api.lookups import get_or_404` (the one new load-time api-import — see Dependency graph); `TYPE_CHECKING` `User` | authorization gates (raising) + read-only UI predicates |
 | `roster_ops.py` | `enroll_user_in_run`, `remove_run_student`, `find_student_active_conflicts`, `make_already_active_409_body` | `STUDENT_ALREADY_ACTIVE_ERROR_CODE`; **module-level `from mathion.models import CourseVersion, Run, RunStudent`** (uniquely required — see note) | shared enrollment/roster mutations + active-conflict logic |
 | `asset_render.py` | `render_with_assets`, `sync_asset_references`, `sync_script_reference`, `render_with_run_assets`, `sync_run_asset_references` | `os` | markdown asset-reference render/sync (course + run assets) |
@@ -95,9 +95,13 @@ resolve as a bare name — therefore **`authz.py` adds one new module-level impo
 module at load time (its only imports are stdlib/sqlalchemy/fastapi + `mathion.database.Base`),
 so loading `authz` never triggers loading `helpers` or `authz` back. Consequences:
 
-- **Extraction order:** `lookups` must be extracted **before** `authz`, so `authz`'s new
-  import targets the real `lookups` module (never the transitional `helpers` re-export),
-  precluding any transient `helpers ↔ authz` load cycle.
+- **Extraction order:** `lookups` must be extracted **before** `authz` for a concrete
+  reason — `authz`'s new line `from mathion.api.lookups import get_or_404` names
+  `mathion.api.lookups` explicitly, so if `lookups.py` does not yet exist when `authz` is
+  extracted, that import raises `ModuleNotFoundError` and reds the suite. (Because the line
+  names `lookups` explicitly it can never resolve through the transitional `helpers`
+  re-export in either order, so there is no `helpers ↔ authz` cycle to prevent — the
+  constraint is simply that the target module must exist first.)
 - Recommended order: `text_utils` → `lookups` → `authz` → `roster_ops` → `asset_render` →
   `submission_files` (the last three are mutually independent and may be reordered).
 
@@ -124,9 +128,15 @@ For each target module M:
    carrying every module-level import each moved function references in `helpers.py` (the
    table's *Module-level names* column highlights the notable ones; `Session`/`select`/
    `HTTPException` travel with any function that uses them). Body imports travel inside their
-   functions unchanged. Drop the `helpers.py:NNN` line-reference inside a *moved docstring*
-   (affects `render_with_run_assets` and `sync_run_asset_references`, whose docstrings
-   cross-reference functions that now live in the same `asset_render.py`).
+   functions unchanged. Drop **only** the stale `(helpers.py:NNN)` parenthetical from the two
+   moved docstrings that carry one — `render_with_run_assets` ("Mirrors `render_with_assets`
+   (helpers.py:179)" → "Mirrors `render_with_assets`") and `sync_run_asset_references`
+   ("Mirrors `sync_asset_references` (helpers.py:215)" → "Mirrors `sync_asset_references`");
+   both now name functions that co-locate in `asset_render.py`. Drop the whole
+   `(helpers.py:NNN)` token, not just the number (leaving a bare `(helpers.py)` would still
+   cite a deleted file). Leave every other line-reference untouched — in particular the
+   co-located `markdown.py:71` comment inside `render_with_run_assets` stays (that file is
+   not deleted).
 2. In `helpers.py`, replace the moved definitions with a **re-export**:
    `from mathion.api.M import <every public name that moved>`. This keeps `helpers.py`'s
    public surface byte-identical, so all 36 importers keep working untouched.
@@ -163,8 +173,11 @@ definition lives in its focused module.
      `run_roster`, `tests/test_active_constraint_helpers`). `tests/test_bounded_type_inputs.py`
      defines its *own* local `INT4_MAX` and is not an importer — leave it.
 2. Delete `backend/mathion/api/helpers.py`.
-3. Grep-confirm **zero** residual references to `api.helpers` / `import helpers` across the
-   whole `backend/` tree (not just `mathion/` + `tests/`).
+3. Grep-confirm **zero** residual references across the whole `backend/` tree (not just
+   `mathion/` + `tests/`), matching the literal `mathion\.api\.helpers` and `import helpers`
+   with the regex dot **escaped**, and excluding generated build artifacts (`*.egg-info/` —
+   `mathion.egg-info/SOURCES.txt` lists the path `mathion/api/helpers.py`, which an unescaped
+   `api.helpers` pattern would false-positive on).
 4. Run the full suite → **green**. Additionally, import-check the one importer the suite does
    **not** cover (see Testing): `backend/.venv/bin/python -c "import scripts.seed_teaching_dashboards_smoke"`
    (run from `backend/`) must succeed.
@@ -180,10 +193,21 @@ This is a behavior-preserving move, so the safety net is the **existing** suite 
 1160 passed / 1 skipped), not new tests.
 
 - Each extraction task gates on **full suite green** — the re-export keeps every import
-  resolving, so green proves the move preserved the public surface and behavior. Because
-  `helpers.py` has no `from __future__ import annotations`, every annotation is evaluated at
-  module load and `tests/conftest.py` imports the full app graph, so any missing module-level
-  import surfaces as a collection-time ImportError, not a silent break.
+  resolving, so green proves the move preserved the public surface and behavior. Two distinct
+  failure modes are caught at two different times, and it is worth being precise about which:
+  - A **missing re-export name** (the shim forgets to re-export a moved symbol) fails at
+    **collection time**: every importer does `from mathion.api.helpers import <name>` at
+    module top, so pytest's import of the app graph (`conftest.py` does
+    `from mathion.main import app`) raises `ImportError: cannot import name` before any test
+    runs. This is the strangler's real per-extraction-step teeth (see Risks).
+  - A **missing module-level import inside a moved function** fails as a `NameError`, and
+    *when* depends on how the name is used. Names read at module load — annotations
+    (`db: Session`, `type[Base]`, since there is no `from __future__ import annotations`) and
+    module-level statements (`re`, consumed by `_NON_SLUG = re.compile(...)`) — red the suite
+    at **collection time** too. Names read only inside function *bodies* (`select`,
+    `HTTPException`, `os`, `settings`, `sanitize_filename`, `IntegrityError`, the module-level
+    models `roster_ops` carries) raise only when a test **calls** that function — so their net
+    is test *call-coverage*, not import-time detection (see the coverage paragraph below).
 - **Coverage gap — the one file the suite does not protect:** `pyproject.toml` sets
   `testpaths = ["tests"]`, so `scripts/seed_teaching_dashboards_smoke.py` is never imported by
   pytest. A missed/incorrect repoint there passes the suite. Its safety net is therefore the
@@ -243,7 +267,8 @@ test_version_clone` (under `backend/tests/`). Function-body import sites:
 
 - `helpers.py` no longer exists; the six modules exist with the exact function/constant
   assignment above.
-- Zero references to `mathion.api.helpers` remain anywhere in `backend/` (grep-verified).
+- Zero references to `mathion.api.helpers` remain in `backend/` source (grep-verified with
+  the regex dot escaped and `*.egg-info/` build artifacts excluded).
 - No function's behavior, signature, or message changed (pure move).
 - Full suite green (1160 passed / 1 skipped, modulo unrelated drift), verified after every
   task and on the merged result; the seed script import-checks clean.
