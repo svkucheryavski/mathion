@@ -1,6 +1,6 @@
 # Phase 9-C — `helpers.py` God-Module Split (Design)
 
-**Status:** Draft for review (rev 6 — Opus review converged round 5, 4/4 APPROVE)
+**Status:** Draft for review (rev 7 — after codex pass 1)
 **Date:** 2026-07-24
 **Scope:** Backend-only, pure refactor. No behavior change.
 
@@ -186,8 +186,12 @@ definition lives in its focused module.
    lists; the escaped `\.` does not match that slash, so no build-artifact exclusion is
    needed.)
 4. Run the full suite → **green**. Additionally, import-check the one importer the suite does
-   **not** cover (see Testing): `backend/.venv/bin/python -c "import scripts.seed_teaching_dashboards_smoke"`
-   (run from `backend/`) must succeed.
+   **not** cover (see Testing). From the repo root, run
+   `cd backend && .venv/bin/python -c "import scripts.seed_teaching_dashboards_smoke"` — it must
+   exit 0. (The `cd backend` is load-bearing on both counts: `scripts` resolves as an implicit
+   namespace package only with `backend/` as the cwd, and the interpreter is then
+   `backend/.venv/bin/python` — i.e. `.venv/bin/python` from inside `backend/`, never the
+   doubled `backend/backend/.venv/...`.)
 
 This task may be split for reviewability (e.g. production+script importers, then test
 importers) — but if split, **only the final sub-task deletes `helpers.py`, runs the grep,
