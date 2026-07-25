@@ -3,7 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mathion.api import advisory
-from mathion.api.helpers import get_newest_published_version, get_or_404, get_or_create_user, require_course_admin
+from mathion.api.lookups import get_newest_published_version, get_or_404, get_or_create_user
+from mathion.api.authz import require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Course, CourseVersion

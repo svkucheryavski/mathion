@@ -106,7 +106,7 @@ def get_content_json(version_id: int, db: Session = Depends(get_db), user: User 
 
 @router.get("/api/versions/{version_id}/admin-tree")
 def get_admin_tree(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from mathion.api.helpers import require_course_admin
+    from mathion.api.authz import require_course_admin
     version = db.execute(
         select(CourseVersion)
         .options(joinedload(CourseVersion.course))

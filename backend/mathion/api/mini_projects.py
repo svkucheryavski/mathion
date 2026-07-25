@@ -7,17 +7,11 @@ from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from mathion.api import advisory
-from mathion.api.helpers import (
-    get_or_404,
-    is_run_admin_or_teacher,
-    mini_project_visible_to_student,
-    render_with_run_assets,
-    require_course_admin,
-    require_run_admin_or_teacher,
-    submission_storage_dir,
-    sync_run_asset_references,
-    to_utc_aware,
-)
+from mathion.api.text_utils import to_utc_aware
+from mathion.api.lookups import get_or_404
+from mathion.api.authz import is_run_admin_or_teacher, require_course_admin, require_run_admin_or_teacher
+from mathion.api.asset_render import render_with_run_assets, sync_run_asset_references
+from mathion.api.submission_files import mini_project_visible_to_student, submission_storage_dir
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import (

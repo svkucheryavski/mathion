@@ -7,7 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, has_run_pinned_to_version, require_course_admin
+from mathion.api.lookups import get_or_404
+from mathion.api.authz import has_run_pinned_to_version, require_course_admin
 from mathion.assets import get_mime_type, sanitize_filename, validate_extension
 from mathion.config import settings
 from mathion.database import get_db

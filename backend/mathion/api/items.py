@@ -6,7 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import INT4_MAX, bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, slugify, sync_asset_references, sync_script_reference
+from mathion.api.text_utils import bump_content_updated_at, slugify
+from mathion.api.lookups import INT4_MAX, get_or_404
+from mathion.api.authz import require_course_admin
+from mathion.api.asset_render import render_with_assets, sync_asset_references, sync_script_reference
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, CourseVersion, Item, Sequence

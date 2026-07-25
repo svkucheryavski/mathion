@@ -2,12 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import (
-    get_or_404,
-    get_or_create_user,
-    require_course_admin_for_run,
-    require_run_admin_or_teacher,
-)
+from mathion.api.lookups import get_or_404, get_or_create_user
+from mathion.api.authz import require_course_admin_for_run, require_run_admin_or_teacher
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Run, RunTeacher

@@ -7,14 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import (
-    build_feedback_filename,
-    get_or_404,
-    get_submitter_group,
-    is_run_admin_or_teacher,
-    mini_project_visible_to_student,
-    submission_storage_dir,
-)
+from mathion.api.lookups import get_or_404
+from mathion.api.authz import is_run_admin_or_teacher
+from mathion.api.submission_files import build_feedback_filename, get_submitter_group, mini_project_visible_to_student, submission_storage_dir
 from mathion.assets import looks_like_pdf, validate_extension
 from mathion.config import settings
 from mathion.database import get_db

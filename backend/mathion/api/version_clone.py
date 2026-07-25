@@ -104,7 +104,7 @@ def clone_version_content(db: Session, source, new) -> None:
     reference points at the new version. Assumes copy_version_assets has already
     run for `new`. Slugs copy verbatim — uniqueness is scoped to the fresh empty
     parents, so no collision is possible."""
-    from mathion.api.helpers import render_with_assets, sync_asset_references, sync_script_reference
+    from mathion.api.asset_render import render_with_assets, sync_asset_references, sync_script_reference
     from mathion.models import AnswerOption, Block, Item, Question, Sequence
 
     src_blocks = db.execute(
