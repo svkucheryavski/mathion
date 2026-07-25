@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import bump_content_updated_at, get_or_404, has_run_teacher_on_course, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.text_utils import bump_content_updated_at
+from mathion.api.lookups import get_or_404
+from mathion.api.authz import has_run_teacher_on_course, require_course_admin
+from mathion.api.asset_render import render_with_assets, sync_asset_references
 from mathion.api.version_clone import clone_version_content, collect_referenced_filenames, copy_version_assets
 from mathion.config import settings
 from mathion.database import get_db

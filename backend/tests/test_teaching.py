@@ -8,10 +8,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import (
-    has_run_teacher_on_course,
-    has_run_pinned_to_version,
-)
+from mathion.api.authz import has_run_pinned_to_version, has_run_teacher_on_course
 from mathion.models import Course, CourseAdmin, CourseVersion, Run, RunTeacher
 from mathion.models_auth import User
 

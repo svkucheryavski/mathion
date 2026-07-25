@@ -19,9 +19,7 @@ from mathion.models import (
     Question, Run, RunStudent, Sequence, Submission,
 )
 from mathion.models_auth import User, UserItemState
-from mathion.api.helpers import (
-    submission_storage_dir, build_submission_filename, build_feedback_filename,
-)
+from mathion.api.submission_files import build_feedback_filename, build_submission_filename, submission_storage_dir
 from mathion.markdown import render_markdown
 from scripts.seed_teaching_smoke import get_or_create_user, seed as seed_slice_a
 

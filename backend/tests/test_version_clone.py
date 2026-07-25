@@ -134,7 +134,7 @@ def _build_full_source(admin_client, db):
     # Establish the source interactive_app's script AssetReference (mirrors the
     # item PATCH-attach path). Without this the source app has ZERO references,
     # so the "source ref survives, no GC" assertion below would be vacuous.
-    from mathion.api.helpers import sync_script_reference
+    from mathion.api.asset_render import sync_script_reference
     sync_script_reference(db, version.id, app.id, "app.js")
 
     q_choice = Question(item_id=quiz.id, text_md="Pick ![t](tq.png)", text_html="",

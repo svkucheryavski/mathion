@@ -1,10 +1,6 @@
 """Tests for find_student_active_conflicts + make_already_active_409_body helpers."""
 
-from mathion.api.helpers import (
-    STUDENT_ALREADY_ACTIVE_ERROR_CODE,
-    find_student_active_conflicts,
-    make_already_active_409_body,
-)
+from mathion.api.roster_ops import STUDENT_ALREADY_ACTIVE_ERROR_CODE, find_student_active_conflicts, make_already_active_409_body
 from mathion.models import Run
 from mathion.models_auth import User
 

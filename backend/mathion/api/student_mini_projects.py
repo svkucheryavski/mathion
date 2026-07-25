@@ -15,11 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from mathion.api.helpers import (
-    get_submitter_group,
-    mini_project_visible_to_student,
-    to_utc_aware,
-)
+from mathion.api.text_utils import to_utc_aware
+from mathion.api.submission_files import get_submitter_group, mini_project_visible_to_student
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import (

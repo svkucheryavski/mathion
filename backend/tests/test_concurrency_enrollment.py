@@ -19,14 +19,9 @@ from sqlalchemy import func, select, text
 
 from mathion.api import advisory
 from mathion.api.enrollment import _enroll_user, enroll_batch, enroll_student
-from mathion.api.helpers import (
-    enroll_user_in_run,
-    find_student_active_conflicts,
-    get_newest_published_version,
-    get_or_404,
-    get_or_create_user,
-    require_course_admin,
-)
+from mathion.api.lookups import get_newest_published_version, get_or_404, get_or_create_user
+from mathion.api.authz import require_course_admin
+from mathion.api.roster_ops import enroll_user_in_run, find_student_active_conflicts
 from mathion.api.run_roster import add_student
 from mathion.models import Course, CourseVersion, Run, RunStudent, RunTeacher
 from mathion.models_auth import StudentEnrollment, User

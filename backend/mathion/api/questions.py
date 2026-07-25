@@ -2,7 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import INT4_MAX, bump_content_updated_at, get_or_404, render_with_assets, require_course_admin, sync_asset_references
+from mathion.api.text_utils import bump_content_updated_at
+from mathion.api.lookups import INT4_MAX, get_or_404
+from mathion.api.authz import require_course_admin
+from mathion.api.asset_render import render_with_assets, sync_asset_references
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Block, CourseVersion, Item, Question, Sequence

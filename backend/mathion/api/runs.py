@@ -7,16 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api import advisory
-from mathion.api.helpers import (
-    find_student_active_conflicts,
-    get_newest_published_version,
-    get_or_404,
-    has_submissions,
-    make_already_active_409_body,
-    require_course_admin,
-    require_course_admin_for_run,
-    require_run_admin_or_teacher,
-)
+from mathion.api.lookups import get_newest_published_version, get_or_404
+from mathion.api.authz import require_course_admin, require_course_admin_for_run, require_run_admin_or_teacher
+from mathion.api.roster_ops import find_student_active_conflicts, make_already_active_409_body
+from mathion.api.submission_files import has_submissions
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user

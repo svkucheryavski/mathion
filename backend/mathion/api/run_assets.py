@@ -10,13 +10,10 @@ from sqlalchemy.orm import Session
 
 from pydantic import BaseModel
 
-from mathion.api.helpers import (
-    get_or_404,
-    render_with_run_assets,
-    require_course_admin_for_run,
-    require_run_admin_or_teacher,
-    run_asset_storage_dir,
-)
+from mathion.api.lookups import get_or_404
+from mathion.api.authz import require_course_admin_for_run, require_run_admin_or_teacher
+from mathion.api.asset_render import render_with_run_assets
+from mathion.api.submission_files import run_asset_storage_dir
 from mathion.assets import get_mime_type, sanitize_filename, validate_extension
 from mathion.config import settings
 from mathion.database import get_db

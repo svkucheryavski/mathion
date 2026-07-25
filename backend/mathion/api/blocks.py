@@ -3,7 +3,9 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import INT4_MAX, get_or_404, has_run_pinned_to_version, require_course_admin, slugify
+from mathion.api.text_utils import slugify
+from mathion.api.lookups import INT4_MAX, get_or_404
+from mathion.api.authz import has_run_pinned_to_version, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.markdown import render_markdown

@@ -6,16 +6,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mathion.api import advisory
-from mathion.api.helpers import (
-    STUDENT_ALREADY_ACTIVE_ERROR_CODE,
-    enroll_user_in_run,
-    find_student_active_conflicts,
-    get_or_404,
-    get_or_create_user,
-    make_already_active_409_body,
-    remove_run_student,
-    require_run_admin_or_teacher,
-)
+from mathion.api.lookups import get_or_404, get_or_create_user
+from mathion.api.authz import require_run_admin_or_teacher
+from mathion.api.roster_ops import STUDENT_ALREADY_ACTIVE_ERROR_CODE, enroll_user_in_run, find_student_active_conflicts, make_already_active_409_body, remove_run_student
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Group, Run, RunStudent

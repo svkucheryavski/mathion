@@ -3,7 +3,8 @@ from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mathion.api.helpers import get_or_404, has_run_teacher_on_course, require_course_admin
+from mathion.api.lookups import get_or_404
+from mathion.api.authz import has_run_teacher_on_course, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user, require_superuser
 from mathion.models import Course, CourseAdmin, CourseVersion
