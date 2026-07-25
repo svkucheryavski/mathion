@@ -88,8 +88,8 @@ def test_admin_returns_200_with_full_payload(db, student_client_for):
     """Spec #1: CourseAdmin returns 200 with full payload (sequence + student + items).
 
     Uses a non-superuser User + CourseAdmin row to exercise the
-    `require_run_admin_or_teacher` CourseAdmin branch (helpers.py:118-127),
-    NOT the `is_superuser` short-circuit at helpers.py:115-116. The superuser
+    `require_run_admin_or_teacher` CourseAdmin branch (authz.py),
+    NOT the `is_superuser` short-circuit in authz.py. The superuser
     path is covered separately by `test_superuser_returns_200`.
     """
     run, seq, _items, student, course, _block = _publish_minimal_run(db)

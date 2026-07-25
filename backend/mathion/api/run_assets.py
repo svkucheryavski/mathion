@@ -353,10 +353,10 @@ def render_run_markdown(
     Side-effect-free: SELECTs only; no RunAssetReference rows are written here
     (sync_run_asset_references runs only on PATCH/POST of mini-projects).
     422 raised internally by render_with_run_assets when any referenced asset
-    is not in the run pool (helpers.py:448-450).
+    is not in the run pool (asset_render.render_with_run_assets).
 
     Gating: matches the rest of this router — `require_run_admin_or_teacher` is
-    a plain helper function (helpers.py:105), NOT a FastAPI dependency; called
+    a plain helper function (authz.py), NOT a FastAPI dependency; called
     imperatively after loading the run.
     """
     run = get_or_404(db, Run, run_id)
