@@ -10,7 +10,8 @@ from sqlalchemy import func, select, text
 from starlette.datastructures import UploadFile
 
 from mathion.api import advisory, submissions
-from mathion.api.helpers import submission_storage_dir, to_utc_aware
+from mathion.api.text_utils import to_utc_aware
+from mathion.api.submission_files import submission_storage_dir
 from mathion.api.mini_projects import patch_mini_project
 from mathion.api.submissions import create_submission
 from mathion.models import MiniProject, RunStudent, Submission

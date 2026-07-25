@@ -348,7 +348,7 @@ def test_put_replace_404_on_missing_asset_no_orphan_temp(
     run, _, _ = seed_run_with_groups()
     # The asset storage dir is created lazily on first POST; snapshot the run dir
     # contents (if any) so we can confirm nothing new appears after a failed PUT.
-    from mathion.api.helpers import run_asset_storage_dir
+    from mathion.api.submission_files import run_asset_storage_dir
     dirpath = run_asset_storage_dir(run["id"])
     before = set(os.listdir(dirpath)) if os.path.isdir(dirpath) else set()
 
@@ -395,7 +395,7 @@ def test_put_replace_404_on_cross_run_asset_id(
         files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
     ).json()
 
-    from mathion.api.helpers import run_asset_storage_dir
+    from mathion.api.submission_files import run_asset_storage_dir
     dirpath_a = run_asset_storage_dir(run_a["id"])
     before = set(os.listdir(dirpath_a)) if os.path.isdir(dirpath_a) else set()
 

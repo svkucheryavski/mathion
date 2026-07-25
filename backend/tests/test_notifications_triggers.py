@@ -7,7 +7,7 @@ T19: publish_mini_project emits mini_project_published per eligible student.
 import pytest
 from sqlalchemy import select, delete
 
-from mathion.api.helpers import enroll_user_in_run
+from mathion.api.roster_ops import enroll_user_in_run
 from mathion.models_auth import NotificationLogEntry, User
 from mathion.models import Run, Group
 from sqlalchemy.exc import NoResultFound

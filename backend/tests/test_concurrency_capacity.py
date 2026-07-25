@@ -3,7 +3,7 @@ import threading
 from sqlalchemy import func, select
 
 from mathion.api import advisory
-from mathion.api.helpers import enroll_user_in_run
+from mathion.api.roster_ops import enroll_user_in_run
 from mathion.api.run_roster import bulk_move_students, patch_student
 from mathion.models import Run, RunStudent
 from mathion.models_auth import User

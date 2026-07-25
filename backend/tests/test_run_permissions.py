@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from fastapi import HTTPException
 
-from mathion.api.helpers import is_run_admin_or_teacher, require_run_admin_or_teacher
+from mathion.api.authz import is_run_admin_or_teacher, require_run_admin_or_teacher
 from mathion.models import Course, CourseAdmin, CourseVersion, Run, RunTeacher
 
 

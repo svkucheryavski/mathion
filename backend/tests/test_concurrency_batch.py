@@ -24,7 +24,7 @@ from sqlalchemy.pool import NullPool
 
 from mathion.api import advisory
 from mathion.api.enrollment import enroll_student
-from mathion.api.helpers import enroll_user_in_run
+from mathion.api.roster_ops import enroll_user_in_run
 from mathion.api.run_roster import add_student, add_students_batch
 from mathion.config import settings
 from mathion.models import Run, RunStudent

@@ -22,7 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from starlette.datastructures import UploadFile
 
 from mathion.api import advisory, runs as runs_module, submissions
-from mathion.api.helpers import submission_storage_dir, to_utc_aware
+from mathion.api.text_utils import to_utc_aware
+from mathion.api.submission_files import submission_storage_dir
 from mathion.api.mini_projects import delete_mini_project, patch_mini_project
 from mathion.api.runs import delete_run
 from mathion.api.submissions import create_submission

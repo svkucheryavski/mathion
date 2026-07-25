@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import text
 
 from mathion.api import advisory
-from mathion.api.helpers import get_or_create_user
+from mathion.api.lookups import get_or_create_user
 from mathion.database import engine as app_engine
 from mathion.models_auth import User
 

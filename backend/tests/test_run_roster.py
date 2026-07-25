@@ -282,7 +282,7 @@ def test_batch_add_to_disabled_group_per_row_error(admin_client, seed_run_with_g
 
 
 def test_remove_run_student_helper_returns_false_for_unknown_user(db, seed_publishable_version, admin_client):
-    from mathion.api.helpers import remove_run_student
+    from mathion.api.roster_ops import remove_run_student
     from mathion.models import Run
 
     run_data = _make_published_run(admin_client, seed_publishable_version)
@@ -292,7 +292,7 @@ def test_remove_run_student_helper_returns_false_for_unknown_user(db, seed_publi
 
 
 def test_remove_run_student_helper_deletes_and_returns_true(db, seed_publishable_version, admin_client):
-    from mathion.api.helpers import remove_run_student
+    from mathion.api.roster_ops import remove_run_student
     from mathion.models import Run, RunStudent
     from mathion.models_auth import StudentEnrollment
 

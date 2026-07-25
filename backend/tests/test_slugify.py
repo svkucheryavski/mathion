@@ -1,6 +1,6 @@
 import pytest
 
-from mathion.api.helpers import slugify
+from mathion.api.text_utils import slugify
 
 
 @pytest.mark.parametrize(
