@@ -280,7 +280,7 @@ def bulk_delete_students(
                 })
         except HTTPException as e:
             sp.rollback()
-            # No code: HTTPException from helpers is not a known per-row
+            # No code: HTTPException from a roster_ops helper is not a known per-row
             # business error today; frontend should fall back to detail.
             results.append({"user_id": uid, "status": "error", "detail": e.detail})
         except Exception:  # noqa: BLE001
