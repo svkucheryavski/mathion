@@ -1,6 +1,6 @@
 # Phase 9-D Slice 1 — Deployment Foundation (Design)
 
-**Status:** Draft rev 2 (revised after review round 1 — 5 independent Opus reviewers)
+**Status:** Draft rev 3 (revised after review rounds 1 & 2 — 5 independent Opus reviewers each)
 **Date:** 2026-07-26
 **Author:** brainstormed with the maintainer
 **Depends on:** Phase 9-C complete (merged `9175c72` + doc sweep `f160acc`)
@@ -107,13 +107,26 @@ registry and the containerized stack is proven. **This spec covers Slice 1 only.
    end-to-end (including a non-root asset-volume write and DB persistence), runnable locally
    (no registry) and wired as a CI gate.
 
-### Two small in-scope code/packaging changes (justified by review; the ONLY app-side edits)
-- **`backend/pyproject.toml`**: add `python-multipart>=0.0.18` to `dependencies` (without it the
-  image cannot import `mathion.main` — §1.1). A distributability fix, not a logic change.
-- **`backend/mathion/config.py`** (or `main.py` startup): a **fail-closed guard** that refuses to
-  start when `secret_key` is empty or equals the dev default **and** the app is in a production
-  posture (`debug=False`). The default is a world-known hashing salt; documentation alone is the
-  wrong control for a data-adjacent secret. ~5 lines, additive.
+### Two small in-scope code/packaging changes (justified by review; the only app-code edits)
+- **`backend/pyproject.toml`**: add `python-multipart>=0.0.18` to `dependencies`. Without it,
+  `import mathion.main` raises **at import time** — FastAPI's multipart check fires when the upload
+  routes' `Form`/`File`/`UploadFile` params are registered (`params.File` subclasses `Form`;
+  `ensure_multipart_is_installed()` runs inside `APIRoute.__init__` at decoration = import; §1.1).
+  This is load-bearing for **both** the image **and** the CI `test` job (conftest imports
+  `mathion.main`), so it is not image-only. A distributability fix, not a logic change.
+- **`backend/mathion/main.py` lifespan startup** (NOT `config.py`, NOT module-import level): a
+  **fail-closed guard** that raises if `secret_key` is empty or equals the dev default **AND
+  `settings.cookie_secure is True`**. `cookie_secure` is the affirmative production signal — the prod
+  `.env` sets `MATHION_COOKIE_SECURE=1`; dev/test leave it `False`. (Gating on `cookie_secure` rather
+  than `debug` is deliberate: `debug=False` is the dev/test **default**, so a `debug`-gated guard
+  would fire during the suite — and CI is the release gate.) The dev-default secret is a world-known
+  hashing salt; documentation alone is the wrong control for a data-adjacent secret. **Verified
+  test-safe:** no existing test sets `cookie_secure`, and the four lifespan-entering tests
+  (`test_startup_db_log.py`, `test_notifications_lock.py` ×2, `test_notifications_lifespan.py`) all
+  run with `cookie_secure=False`, so the guard is inert across the whole suite → **no `conftest.py`,
+  CI, or existing-test change is required.** The guard ships with its own new unit test (positive:
+  real secret + `cookie_secure=1` boots; negative: default/empty secret + `cookie_secure=1` refuses).
+  ~5 lines, additive.
 
 ### Non-goals (explicitly deferred)
 - The `mathion` Go CLI (Slice 2), `update`/`backup`/`restore` and a `/version` endpoint (Slice 3),
@@ -131,11 +144,21 @@ registry and the containerized stack is proven. **This spec covers Slice 1 only.
 ## 3. The production image
 
 **Single multi-stage `Dockerfile` at the repo root** (build context = repo root — it needs both
-`frontend/` and `backend/`). A root **`.dockerignore`** excludes `.venv/`, `node_modules/`, `.git/`,
-`backend/tests/`, `docs/`, `.superpowers/`, scratch, **and secrets/artifacts: `.env`, `.env.*`
-(the tracked `.env.example`/`deploy/.env.prod.example` are contracts, but exclude anything matching
-`.env`/`.env.*` from the build context to prevent baking a real `.env` into a public layer),
-`outbox/`, `.coverage`, `htmlcov/`, `*.db`**.
+`frontend/` and `backend/`). A root **`.dockerignore`** excludes `**/.venv/`, `**/node_modules/`,
+`.git/`, `backend/tests/`, `docs/`, `.superpowers/`, scratch, **and secrets/artifacts: `.env`,
+`.env.*`, `outbox/`, `.coverage`, `htmlcov/`, `*.db`**. Two precision points that a plain pattern
+list gets wrong:
+- Docker `.dockerignore` matches **full context-relative paths** with **no** gitignore-style
+  any-depth fallback, so a bare `.venv/` / `node_modules/` matches only a **root** occurrence. In
+  this repo the venv is at `backend/.venv/` and node modules at `frontend/node_modules/` (there is
+  also a root `node_modules/`) — the patterns MUST therefore be `**/.venv/` / `**/node_modules/` (or
+  explicit `backend/.venv/`, `frontend/node_modules/`); bare names would miss the real venv and
+  balloon the build context. (Image *correctness* survives regardless — `pip install ./backend` builds
+  from `pyproject.toml` and `include=["mathion*"]` keeps the wheel clean — but this slice's whole
+  point is a lean image.)
+- The tracked `.env.example` / `deploy/.env.prod.example` are git **contracts**, not needed in the
+  build context; the `.env`/`.env.*` excludes drop them from the context, and nothing `COPY`s them
+  into the image, so no real `.env` is ever baked into a public layer.
 
 ### 3.1 Stage 1 — frontend build
 - `FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend` — the SPA output is
@@ -154,13 +177,26 @@ registry and the containerized stack is proven. **This spec covers Slice 1 only.
   `pyproject.toml`, now including `python-multipart`). This makes `uvicorn mathion.main:app` and
   `python -m mathion.superuser …` work from site-packages.
 - **Copy migration assets** excluded from the wheel, owned by the runtime user so a non-root process
-  can read them: **`COPY --chown=app:app backend/alembic.ini backend/alembic/ /app/…`**. This is
-  load-bearing: `backend/alembic.ini` is mode `0600` on disk; a plain root-owned `COPY` leaves it
-  unreadable by the non-root `app` user and `alembic upgrade head` fails with PermissionError. (Also
-  `chmod 0644 alembic.ini` for clarity.) `scripts/` seed files are not needed in the image.
+  can read them — using **two separate COPYs** so the directory tree is preserved. (A multi-source
+  `COPY a b/ dest/` copies the *contents* of `b/` into `dest/`, which would flatten `alembic/`'s
+  `env.py`/`versions/`/`script.py.mako` directly into `/app/` and break
+  `script_location = %(here)s/alembic` → `alembic upgrade head` fails with "Path doesn't exist:
+  /app/alembic".)
+
+  ```dockerfile
+  COPY --chown=app:app backend/alembic.ini /app/alembic.ini
+  COPY --chown=app:app backend/alembic/    /app/alembic/
+  ```
+
+  The `--chown` is load-bearing: `backend/alembic.ini` is mode `0600` on disk; a plain root-owned
+  `COPY` leaves it unreadable by the non-root `app` user and `alembic upgrade head` fails with
+  PermissionError. `--chown=app:app` **alone** fixes it — Docker preserves the source mode, and 0600
+  owned by `app` is readable by `app`; an extra `chmod 0644` is cosmetic. `scripts/` seed files are
+  not needed in the image.
 - **Copy the built SPA** and pin its path: `ENV MATHION_FRONTEND_DIST=/app/static`; copy
   `frontend/dist/` (from Stage 1) → `/app/static`. The pin is necessary — the settings default
-  resolves relative to the installed package (`site-packages/.../frontend/dist`, which won't exist).
+  resolves relative to the installed package location (from `site-packages/mathion/config.py` up
+  three parents → `.../lib/pythonX.Y/frontend/dist`, which won't exist).
 - **Non-root, pinned uid:** `useradd -u 10001 -r app`; `WORKDIR /app`; run as `app`. The **fixed
   uid** matters: a named volume persists across image versions (Slice 3 updates); an arbitrary uid
   that drifts on rebuild would make the pre-existing `mathion_assets` volume unwritable.
@@ -263,7 +299,9 @@ MATHION_VERSION=v0.1.0
 - The `MATHION_DATABASE_URL` duplicates **user, host, db, AND password** from the `POSTGRES_*`
   values — all four must track together. The Slice 2 installer generates once and writes both,
   eliminating the hazard.
-- `MATHION_SECRET_KEY` is **enforced** (§2 fail-closed guard), not merely advised.
+- `MATHION_SECRET_KEY` is **enforced** at server startup (§2 fail-closed guard). Because the guard is
+  `cookie_secure`-gated, a prod bring-up (this file sets `MATHION_COOKIE_SECURE=1`) with an
+  empty/default secret **refuses to start**; a dev run with `cookie_secure=0` is unaffected.
 - `MATHION_FRONTEND_DIST` is baked into the image (§3.2) and intentionally **absent** here.
 - `MATHION_BASE_URL` must be `https://<domain>` with no path.
 
@@ -274,13 +312,21 @@ MATHION_VERSION=v0.1.0
 - **Trigger:** push of a semver tag `v*`.
 - **Permissions:** `contents: read`, `packages: write` (GHCR via built-in `GITHUB_TOKEN` — no extra
   secret; first publish auto-creates the package on a user-owned repo).
-- **Gated on tests AND smoke:** `release.yml` first invokes `ci.yml` (reusable, `on:
-  workflow_call`) as prerequisite jobs, and the build-push job declares `needs: [test, smoke]`. A
-  red suite **or** a failed stack smoke ⇒ no image. (This is the net that catches import/boot
-  regressions like the multipart/alembic Criticals, which unit tests alone miss.)
+- **Gated on the full CI workflow:** `release.yml` calls `ci.yml` (reusable, `on: workflow_call`) as
+  a **single caller job named `ci`** (`jobs.ci: { uses: ./.github/workflows/ci.yml }`), and the
+  build-push job declares **`needs: [ci]`**. A reusable-workflow call surfaces in the caller as ONE
+  job; `ci.yml`'s internal `test`/`frontend`/`smoke` IDs are **not** addressable from `release.yml`,
+  so `needs: [test, smoke]` would be rejected ("depends on unknown job 'test'") and nothing would
+  publish. `needs: [ci]` transitively gates on all three (the `ci` job fails if any internal job
+  fails). A red suite, a broken SPA build, **or** a failed stack smoke ⇒ no image. (This is the net
+  that catches import/boot regressions like the multipart/alembic Criticals, which unit tests alone
+  miss.)
 - **Steps:** checkout → QEMU + Buildx → GHCR login → `docker/metadata-action` → `docker/build-push-
-  action` (root `Dockerfile`, `platforms: linux/amd64,linux/arm64`, GHA build cache with a
-  **per-platform scope** to avoid cross-arch thrash).
+  action` (root `Dockerfile`, `platforms: linux/amd64,linux/arm64`, `type=gha` build cache). (A
+  single multi-platform build-push invocation shares one BuildKit build + cache across both arches;
+  true per-platform cache scoping would need a platform matrix + a manifest-merge job — heavier than
+  this slice warrants, and there is no cross-arch cache "thrash" to avoid in the single-invocation
+  model.)
 - **Tag derivation (exact):** the produced image tag must keep the **`v`** (so it matches
   `MATHION_VERSION=v0.1.0` and the `${MATHION_VERSION}` pull) — use `type=ref,event=tag` (or
   `type=semver,pattern=v{{version}}`), **not** `pattern={{version}}` (which strips the `v`).
@@ -301,12 +347,17 @@ MATHION_VERSION=v0.1.0
 - **`test` job (runner-hosted — NOT a `container:` job, so the service is reachable at loopback):**
   a `postgres:17` **service** with `POSTGRES_USER=mathion`/`POSTGRES_PASSWORD=mathion` (superuser →
   CREATEDB, needed for `_ensure_test_database_exists`), `ports: 5432:5432`, and a `pg_isready`
-  healthcheck. Set **`MATHION_TEST_DATABASE_URL=postgresql+psycopg://mathion:mathion@localhost:5432/mathion_test`**;
+  healthcheck. Install with **`pip install ./backend[dev]`** — this pulls both pytest **and** the
+  runtime deps, including the newly-added `python-multipart`, which is required here too because
+  `conftest.py` imports `mathion.main` (without it, collection raises `RuntimeError`). Set
+  **`MATHION_TEST_DATABASE_URL=postgresql+psycopg://mathion:mathion@localhost:5432/mathion_test`**;
   **leave `MATHION_DATABASE_URL` unset**; set **none** of `PGHOST/PGHOSTADDR/PGPORT/PGDATABASE/
-  PGSERVICE/PGSERVICEFILE` (the conftest guard hard-fails on them). Run the full backend suite
-  (currently **1160 passed / 1 skipped**).
-- **`frontend` job:** `npm ci` + `npm test` (the script sets `TZ=Europe/Copenhagen` — required for
-  TZ-sensitive tests; do not run bare `vitest`) + `npm run build`.
+  PGSERVICE/PGSERVICEFILE` (the conftest guard hard-fails on them). `MATHION_SECRET_KEY` need **not**
+  be set — the §2 startup guard is `cookie_secure`-gated and no test enables secure cookies. Run the
+  full backend suite (currently **~1160 passed / 1 skipped**).
+- **`frontend` job (Node 22, matching the image's `node:22-alpine` build stage):** `npm ci` +
+  `npm test` (the script sets `TZ=Europe/Copenhagen` — required for TZ-sensitive tests; do not run
+  bare `vitest`) + `npm run build`.
 - **`smoke` job:** runs `deploy/smoke.sh` (single-arch amd64 `docker build` + stack bring-up +
   assertions, §10). Runs on PRs too, so a Dockerfile/image regression is caught **before merge**,
   not only on a release tag.
@@ -384,17 +435,32 @@ Packaging + ops, so the net differs from unit tests:
 1. **`ci.yml`** (§7) — backend suite + frontend build/tests + the `smoke` job; the release gate.
 2. **`deploy/smoke.sh`** — the key artifact, and a **CI-enforced release gate** (not just a local
    convenience). It:
-   - builds the production image **locally** (`docker build`, amd64 — no registry, runnable before
-     the repo is pushed and on PRs);
-   - brings up the prod stack against a **throwaway `.env`** (test secrets, ephemeral volumes);
-   - runs `alembic upgrade head`; creates a superuser + issues a PIN via `python -m
-     mathion.superuser` (also proves the alembic.ini-readable and multipart-import fixes);
-   - **asserts:** `GET /health`→200; SPA served at `/`; unknown deep link → `index.html`; bogus
+   - builds the production image **locally and tags it to the exact compose ref**
+     (`docker build -t ghcr.io/svkucheryavski/mathion:$VER .`, amd64 — no registry, runnable before
+     the repo is pushed and on PRs), writes `MATHION_VERSION=$VER` into the throwaway `.env`, and runs
+     `docker compose -f docker-compose.prod.yml up -d --wait` **without `pull`** — the prod compose has
+     `image:` and **no** `build:`, so a `pull` would try to fetch the not-yet-published GHCR image and
+     fail;
+   - uses a **throwaway `.env`** with ephemeral volumes that **must set a non-empty
+     `MATHION_SECRET_KEY`, `MATHION_COOKIE_SECURE=1`, and `MATHION_DEBUG=0`** — the prod posture. With
+     the §2 guard in place a default/empty secret would make `up --wait` time out; setting a real
+     secret both unblocks boot **and positively exercises the guard** (it must PASS on a correct
+     config);
+   - runs `alembic upgrade head` (proves the alembic.ini-readable fix); creates a superuser + issues a
+     PIN via `python -m mathion.superuser`;
+   - **asserts:** `GET /health`→200 — this successful **app boot** is what proves the **multipart
+     import fix** (uvicorn imports `mathion.main`; the superuser CLI imports only `mathion.database`,
+     so it does not exercise that path); SPA served at `/`; unknown deep link → `index.html`; bogus
      `/api/<nonexistent>` → **JSON 404** (API/SPA boundary); **a non-root write to the
-     `mathion_assets` volume succeeds** (e.g. `exec app python -c "open('/data/mathion/assets/.probe','w').write('x')"`
-     — catches the mis-owned-volume 500-on-upload class that /health would pass); and **DB data
-     persists across a container restart**;
-   - tears down (removing the ephemeral volumes), exiting non-zero on any failed assertion.
+     `mathion_assets` volume succeeds** (e.g. `exec app python -c
+     "open('/data/mathion/assets/.probe','w').write('x')"` — catches the mis-owned-volume
+     500-on-upload class that /health would pass); a **first-login round-trip** (issue a PIN via the
+     CLI, then `POST /api/auth/verify-pin` → 200 with `Set-Cookie: …; Secure`, guarding the auth/cookie
+     path the walkthrough depends on); and **DB data persists across a full `down` (NO `-v`) + `up`
+     recreation** — a plain `docker restart` keeps the container filesystem and would not prove the
+     *named* `mathion_pgdata` volume is what persists;
+   - tears down with `down -v` (removing the ephemeral volumes), exiting non-zero on any failed
+     assertion.
 3. **Manual acceptance** — the §8 steps double as a one-time fresh-VM checklist.
 
 **Local vs maintainer-hand-off (honest scope):** the Dockerfile, compose, `deploy/.env.prod.example`,
@@ -414,16 +480,23 @@ GitHub auth (the agent shell cannot push).
 - `deploy/.env.prod.example`
 - `deploy/smoke.sh` (executable stack smoke)
 - `.github/workflows/ci.yml` (test + frontend + smoke; reusable via `workflow_call`)
-- `.github/workflows/release.yml` (build + push to GHCR, gated on `ci.yml`)
+- `.github/workflows/release.yml` (build + push to GHCR, gated on `ci.yml` via `needs: [ci]`)
+- `backend/tests/test_startup_secret_guard.py` (unit test for the §2 guard — positive: real secret +
+  `cookie_secure=1` boots; negative: default/empty secret + `cookie_secure=1` refuses)
 
 **Modified:**
 - `README.md` (new "Self-hosting Mathion" section + TLS/reverse-proxy guidance + operational notes)
 - `backend/pyproject.toml` (add `python-multipart>=0.0.18` to `dependencies`)
-- `backend/mathion/config.py` **or** `backend/mathion/main.py` (fail-closed `secret_key` guard)
+- `backend/mathion/main.py` (fail-closed `secret_key` guard in the **lifespan startup** path — NOT
+  `config.py`, NOT module import; `cookie_secure`-gated)
 
-**Not modified:** root `.env.example` (dev/test — deliberately untouched); root `.gitignore`
-(already ignores `.env`; the bare `.env` pattern does **not** match `.env.example`, so do **not**
-change it to `.env*`, which would swallow the tracked contract files).
+**Deliberately NOT modified:**
+- `backend/tests/conftest.py` and the existing suite — the `cookie_secure`-gated guard is inert under
+  tests (verified: no test enables secure cookies), so no existing-test accommodation is needed. This
+  keeps the app-code edits to exactly the two above.
+- root `.env.example` (dev/test — untouched); root `.gitignore` (already ignores `.env`; the bare
+  `.env` pattern does **not** match `.env.example`, so do **not** change it to `.env*`, which would
+  swallow the tracked contract files).
 
 **Forward note (NOT this slice):** `main.py` hard-codes `FastAPI(version="0.1.0")` and there is no
 `/version` endpoint; Slice 3's `update` health-check will want a real deployed-version surface.
@@ -443,9 +516,10 @@ Documented in the plan as explicit hand-offs; everything else is agent-authored 
 ## 13. Open questions
 
 None. All design decisions are settled, including the base-image pin (**python:3.13-slim**), reverse
-proxy (reproxy primary), registry (GHCR), multi-arch (amd64+arm64), the two in-scope code changes
-(python-multipart dep + secret_key guard), and the `smoke`-as-release-gate design. Remaining
-exactness (final workflow YAML, exact Dockerfile layering) is implementation detail for the plan.
+proxy (reproxy primary), registry (GHCR), multi-arch (amd64+arm64), the two in-scope app-code changes
+(python-multipart dep + a `cookie_secure`-gated `secret_key` guard in the lifespan), the
+`needs: [ci]` release gate, and the `smoke`-as-release-gate design. Remaining exactness (final
+workflow YAML, exact Dockerfile layering) is implementation detail for the plan.
 
 ---
 
@@ -478,3 +552,48 @@ user/host/db too; `ci.yml` `push: branches:[main]` + `npm test` (TZ); explicit `
 `alembic.ini`/separate-copy necessity; `/health` + SPA/JSON-404 boundary matching the smoke;
 `MATHION_FRONTEND_DIST` mapping + pin necessity; email-disabled first-login path; one-slice scope +
 honest local-vs-hand-off boundary.
+
+---
+
+## 15. Review round 2 — resolutions (5 independent Opus reviewers)
+
+Round-2 convergence was strong with no contradictions across reviewers.
+
+**Critical fixed:** (a) **`secret_key` guard broke the release-gating test suite** (all 5 reviewers).
+`debug=False` is the dev/test default, so a `debug`-gated guard fires during the whole suite; both
+import-level placements break collection (+ in-process Alembic + the superuser CLI), and even a
+lifespan placement trips the four lifespan-entering tests. **Resolved** by gating the guard on
+**`cookie_secure is True`** (the prod signal) **in the lifespan only** — verified inert across the
+suite (no test enables secure cookies), so **no `conftest.py`/CI/existing-test change is needed**; the
+guard ships with its own new unit test. (b) **`release.yml`'s `needs: [test, smoke]` is invalid**
+against a `workflow_call` reuse (2 reviewers) — a reusable call is one caller job; internal IDs aren't
+addressable → the workflow is rejected and nothing publishes. **Resolved** to `needs: [ci]` on the
+single `ci` caller job (transitively gates test+frontend+smoke).
+
+**Important fixed:** the illustrative **Alembic `COPY` flattened the migrations dir** (3 reviewers) →
+two separate dir-preserving `COPY`s (and `--chown` alone suffices; `chmod` cosmetic); the **smoke
+`.env` must set a real `MATHION_SECRET_KEY`** (+ `cookie_secure=1`, `debug=0`) or the guard blocks
+`up --wait` (3 reviewers); **`.dockerignore` `.venv/`/`node_modules/` patterns miss the real dirs**
+(`backend/.venv/`, `frontend/node_modules/`) since Docker matches full context-relative paths → use
+`**/.venv/`, `**/node_modules/`; **§7 must `pip install ./backend[dev]`** and pin **Node 22**, and
+python-multipart is load-bearing for the **CI test job** too (conftest imports `mathion.main`), not
+image-only.
+
+**Minor fixed:** smoke tags the local build to the exact compose ref and runs **without `pull`**;
+DB-persistence asserted via **`down` (no `-v`) + `up`** recreation, not `restart`; the **multipart fix
+is proven by the app boot / `/health`**, not the superuser CLI (attribution corrected); a **verify-pin
+first-login round-trip** added to the smoke; dropped the inaccurate "per-platform cache scope" claim
+(single multi-platform build shares one cache); documented that a `cookie_secure=1` local run needs a
+real secret; tightened the site-packages-path wording; softened the hard-coded test count.
+
+**Confirmed correct by round-2 reviewers (unchanged):** python-multipart genuinely absent + raises at
+import (File⊂Form; `ensure_multipart_is_installed` at `APIRoute.__init__`); `alembic.ini` 0600 +
+`--chown` fix; `secret_key` salts hashing + empty-env-overrides-default; `/health` no-DB + boots
+healthy pre-migration in email-disabled mode; API/SPA/JSON-404 boundary; conftest test-DB contract
+(env var, PG* rejection, CREATEDB, loopback rails) + `MATHION_DATABASE_URL`-unset safety; runner-hosted
+(not `container:`) required for `localhost:5432`; frontend TZ requirement; base-image `3.13-slim`
+no-apt/no-compiler chain (all deps ship cp313/abi3 amd64+aarch64 wheels; bare uvicorn avoids
+uvloop/httptools C-ext); `stop_grace_period: 35s`; superuser CLI is multipart-independent; loopback vs
+container-proxy reachability; tag-derivation keeps `v` + `latest` on non-prereleases; GHCR publish
+model; no `/version` endpoint yet (forward note holds); dev artifacts + `.gitignore` no-op reasoning;
+scope discipline clean; no residual TBDs.
