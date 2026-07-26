@@ -1,6 +1,6 @@
 # Phase 9-D Slice 1 — Deployment Foundation (Design)
 
-**Status:** Draft rev 4 (Opus rounds 1-3 converged 5/5 APPROVE; revised again after a codex pass)
+**Status:** Draft rev 4.1 (Opus rounds 1-3 converged 5/5 APPROVE; two codex passes applied)
 **Date:** 2026-07-26
 **Author:** brainstormed with the maintainer
 **Depends on:** Phase 9-C complete (merged `9175c72` + doc sweep `f160acc`)
@@ -163,11 +163,12 @@ plain pattern list gets wrong:
   from `pyproject.toml` and `include=["mathion*"]` keeps the wheel clean — but this slice's whole
   point is a lean image.)
 - The tracked `.env.example` / `deploy/.env.prod.example` are git **contracts** with no real secrets.
-  The load-bearing exclude is the root-anchored **`.env`** pattern, which drops any real `.env` written
-  at the context root (the smoke's throwaway `.env` lives there too) → no real secret is baked into a
-  public layer. Note the root-anchored `.env.*` matches only the root-level `.env.example`, **not** the
-  nested `deploy/.env.prod.example`; that placeholder harmlessly stays in the build context, and
-  nothing `COPY`s either example into the image.
+  The load-bearing excludes are the any-depth **`**/.env`** and **`**/.env.*`** patterns: `**/.env`
+  drops any real `.env` at any depth, and `**/.env.*` also excludes **both** example contracts (root
+  `.env.example` **and** nested `deploy/.env.prod.example`) from the build context. That is harmless —
+  neither example is a frontend, backend, or migration build input, and nothing `COPY`s them into the
+  image — so no real secret is ever baked into a public layer. (If an example were ever needed in the
+  context, re-include it with a `!.env.example` / `!deploy/.env.prod.example` negation.)
 
 ### 3.1 Stage 1 — frontend build
 - `FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend` — the SPA output is
@@ -480,9 +481,13 @@ Packaging + ops, so the net differs from unit tests:
      holding a copy of `docker-compose.prod.yml` + its own `.env`. This is deliberate: the smoke **must
      never write the repo-root `.env`** (that is the real-deployment secret path per §8; a local run
      must not clobber it), and running compose from the temp dir makes the app service's
-     `env_file: .env` resolve to the temp file. Run `docker compose -p mathion_smoke up -d --wait`
-     **without `pull`** (the prod compose has `image:` and **no** `build:`, so a `pull` would fetch the
-     not-yet-published GHCR image and fail). The `-p mathion_smoke` project (overriding the file's
+     `env_file: .env` resolve to the temp file. **Every** smoke Compose command runs (from the temp
+     dir) as `docker compose -f docker-compose.prod.yml -p mathion_smoke …` — Compose auto-discovers
+     only `docker-compose.yml`/`compose.yml`, **not** the `.prod.` name, so the explicit `-f` is
+     required (use one shell helper/array for `up`/`exec`/`run`/the persistence cycle/`down`). Bring it
+     up with `… up -d --wait` **without `pull`** (the prod compose has `image:` and **no** `build:`, so
+     a `pull` would fetch the not-yet-published GHCR image and fail). The `-p mathion_smoke` project
+     (overriding the file's
      `name: mathion_prod`) plus the separate working dir namespace the smoke's
      `mathion_pgdata`/`mathion_assets` volumes to `mathion_smoke_*`, so the terminal `down -v` cannot
      touch the dev or prod stacks;
@@ -506,7 +511,8 @@ Packaging + ops, so the net differs from unit tests:
      `down` (NO `-v`) + `up`
      recreation** — a plain `docker restart` keeps the container filesystem and would not prove the
      *named* `mathion_pgdata` volume is what persists;
-   - tears down with `docker compose -p mathion_smoke down -v` (removing the ephemeral volumes) and
+   - tears down with `docker compose -f docker-compose.prod.yml -p mathion_smoke down -v` (removing the
+     ephemeral volumes) and
      deletes the temp working dir, exiting non-zero on any failed
      assertion.
 3. **Manual acceptance** — the §8 steps double as a one-time fresh-VM checklist.
@@ -703,3 +709,12 @@ does not enforce HTTPS → §1.1 wording corrected. Hardening the validator (`pa
 as a possible future app-code change, out of scope here.
 
 No codex finding was rejected; all were reproduced against the code/README before applying.
+
+**Codex re-review (round 4b):** confirmed 7 of the 8 resolutions correct (reproxy verified against
+reproxy **v1.7.0** flags/defaults) and caught two issues the round-4 edits themselves introduced,
+both fixed here: (a) the rewritten §10 smoke ran `docker compose` **without `-f`**, but Compose
+auto-discovers only `docker-compose.yml`/`compose.yml` — **not** the `.prod.` name — so the smoke
+would fail "no configuration file provided" → every smoke command now uses
+`-f docker-compose.prod.yml -p mathion_smoke`; (b) §3's contract-file explanation still described the
+old root-anchored `.env.*` behaviour → rewritten to match the any-depth `**/.env.*` patterns (which
+exclude both example contracts from the context, harmlessly).
