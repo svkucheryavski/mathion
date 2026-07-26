@@ -1,6 +1,6 @@
 # Phase 9-D Slice 1 — Deployment Foundation (Design)
 
-**Status:** Draft rev 4.1 (Opus rounds 1-3 converged 5/5 APPROVE; two codex passes applied)
+**Status:** Converged rev 4.1 — Opus rounds 1-3 (5/5 APPROVE) + codex (3 passes, final **APPROVE**). Pending User Review Gate.
 **Date:** 2026-07-26
 **Author:** brainstormed with the maintainer
 **Depends on:** Phase 9-C complete (merged `9175c72` + doc sweep `f160acc`)
@@ -718,3 +718,6 @@ would fail "no configuration file provided" → every smoke command now uses
 `-f docker-compose.prod.yml -p mathion_smoke`; (b) §3's contract-file explanation still described the
 old root-anchored `.env.*` behaviour → rewritten to match the any-depth `**/.env.*` patterns (which
 exclude both example contracts from the context, harmlessly).
+
+**Codex final pass (round 4c):** both round-4b fixes confirmed, no remaining and no newly-introduced
+findings — **APPROVE**. The spec has now converged through both review gates.
