@@ -1,6 +1,6 @@
 # Phase 9-D Slice 1 — Deployment Foundation (Design)
 
-**Status:** Draft rev 3 (revised after review rounds 1 & 2 — 5 independent Opus reviewers each)
+**Status:** Draft rev 4 (Opus rounds 1-3 converged 5/5 APPROVE; revised again after a codex pass)
 **Date:** 2026-07-26
 **Author:** brainstormed with the maintainer
 **Depends on:** Phase 9-C complete (merged `9175c72` + doc sweep `f160acc`)
@@ -65,7 +65,9 @@ registry and the containerized stack is proven. **This spec covers Slice 1 only.
   `cookie_secure` (default `False`; the session cookie's `secure=` comes **solely** from this, not
   from request scheme — `api/auth.py`), `debug` (default `False`), `frontend_dist`
   (`MATHION_FRONTEND_DIST` maps to it via the prefix), `email_mode` (default `"disabled"`),
-  `base_url` (validated: requires a host; **rejects any path, plus userinfo/query/fragment and
+  `base_url` (validated: requires a non-empty authority — it checks `parsed.netloc`, **not** a
+  hostname, so a degenerate `https://:443` passes; HTTPS itself is an operator contract, not
+  validator-enforced. **Rejects any path, plus userinfo/query/fragment and
   control/whitespace**). PIN limits: `pin_expiry_minutes=10`, `max_pin_requests_per_hour=3`,
   `max_pin_failures_per_hour=5`. No code consumes `request.client`, `X-Forwarded-*`, or the request
   scheme anywhere (grep-verified) — nothing security-relevant depends on the client IP/proto.
@@ -145,9 +147,13 @@ registry and the containerized stack is proven. **This spec covers Slice 1 only.
 
 **Single multi-stage `Dockerfile` at the repo root** (build context = repo root — it needs both
 `frontend/` and `backend/`). A root **`.dockerignore`** excludes `**/.venv/`, `**/node_modules/`,
-`.git/`, `backend/tests/`, `docs/`, `.superpowers/`, scratch, **and secrets/artifacts: `.env`,
-`.env.*`, `outbox/`, `.coverage`, `htmlcov/`, `*.db`**. Two precision points that a plain pattern
-list gets wrong:
+`.git/`, `backend/tests/`, `docs/`, `.superpowers/`, scratch, **and secrets/artifacts at ANY depth:
+`**/.env`, `**/.env.*`, `**/outbox/`, `**/.coverage`, `**/htmlcov/`, `**/*.db`**. The `**/` on the
+artifact patterns is load-bearing for the same reason as the venv/node_modules ones (below): Docker
+has no gitignore any-depth fallback, and the app's default e-mail outbox is `./outbox/` (FileMailer
+writes real `.eml` files there), which in dev lands at `backend/outbox/` — a root-only `outbox/`
+would miss it and could bake real message content into a public layer. Two precision points that a
+plain pattern list gets wrong:
 - Docker `.dockerignore` matches **full context-relative paths** with **no** gitignore-style
   any-depth fallback, so a bare `.venv/` / `node_modules/` matches only a **root** occurrence. In
   this repo the venv is at `backend/.venv/` and node modules at `frontend/node_modules/` (there is
@@ -187,14 +193,17 @@ list gets wrong:
   /app/alembic".)
 
   ```dockerfile
-  COPY --chown=app:app backend/alembic.ini /app/alembic.ini
-  COPY --chown=app:app backend/alembic/    /app/alembic/
+  COPY --chown=10001:10001 backend/alembic.ini /app/alembic.ini
+  COPY --chown=10001:10001 backend/alembic/    /app/alembic/
   ```
 
   The `--chown` is load-bearing: `backend/alembic.ini` is mode `0600` on disk; a plain root-owned
   `COPY` leaves it unreadable by the non-root `app` user and `alembic upgrade head` fails with
-  PermissionError. `--chown=app:app` **alone** fixes it — Docker preserves the source mode, and 0600
-  owned by `app` is readable by `app`; an extra `chmod 0644` is cosmetic. `scripts/` seed files are
+  PermissionError. The **numeric** `--chown=10001:10001` is deliberate — a name form (`--chown=app:app`)
+  requires `useradd` to have run **before** these COPYs (BuildKit resolves the name via the image's
+  `/etc/passwd`), while the numeric uid/gid has no such build-order dependency. `--chown` alone
+  suffices (Docker preserves the source mode; 0600 owned by uid 10001 is readable by that uid); an
+  extra `chmod 0644` is cosmetic. `scripts/` seed files are
   not needed in the image.
 - **Copy the built SPA** and pin its path: `ENV MATHION_FRONTEND_DIST=/app/static`; copy
   `frontend/dist/` (from Stage 1) → `/app/static`. The pin is necessary — the settings default
@@ -228,7 +237,15 @@ list gets wrong:
 
 ## 4. The runtime stack — `docker-compose.prod.yml`
 
-A **separate** compose file; the dev `docker-compose.yml` (db-only) is **left untouched**.
+A **separate** compose file; the dev `docker-compose.yml` (db-only) is **left untouched**. The prod
+file **MUST declare a top-level `name: mathion_prod`.** Selecting a different file with `-f` does
+**not** create a different Compose project — the default project name is the repo-dir basename
+(`mathion`), shared with the dev stack — so without an explicit name the prod stack would reuse the
+dev stack's `mathion_pgdata`/`mathion_assets` volumes and `db`/`app` identities: a prod first-boot
+could attach the dev DB (init'd with password `mathion`, ignoring the prod `POSTGRES_PASSWORD` → auth
+failure), and the dev README's `docker compose down -v` reset would wipe the prod database.
+`name: mathion_prod` scopes the volumes to `mathion_prod_*`; the §10 smoke's `-p mathion_smoke` still
+overrides it. Every production command uses `-f docker-compose.prod.yml`.
 
 ### 4.1 `app` service
 - `image: ghcr.io/svkucheryavski/mathion:${MATHION_VERSION}` — version is a `.env` variable (Slice 3
@@ -403,13 +420,19 @@ issuance); a reverse proxy for TLS (reproxy primary, Caddy alternative — §9).
   `rate_limit_entries` table.
 - **Data safety:** `mathion_pgdata` + `mathion_assets` hold all state. **`docker compose down -v`
   permanently deletes them** — use plain `down` to stop. Until Slice 3 adds `mathion backup`,
-  back up manually: `docker compose exec db pg_dump -U mathion mathion > backup.sql` + a snapshot of
-  the assets volume.
+  back up manually: `docker compose -f docker-compose.prod.yml exec db pg_dump -U mathion mathion >
+  backup.sql` + a snapshot of the assets volume. (Always pass `-f docker-compose.prod.yml` so the
+  command targets the prod stack, not the dev `db`.)
 - **Secrets are first-init-only for the DB:** don't change `POSTGRES_PASSWORD` after the first `up`
   against an existing `mathion_pgdata` (it won't take, and the app will fail auth).
-- **Upgrades (interim, until Slice 3's `mathion update`):** back up → bump `MATHION_VERSION` →
-  `pull` → `up -d --wait` → `exec app alembic upgrade head`. Skipping the migrate step causes schema
-  drift → 500s; there is no automated backup/rollback yet.
+- **Upgrades (interim, until Slice 3's `mathion update`):** expect **brief downtime**, and migrate
+  **before** the new code serves traffic — `/health` does no DB check (main.py), so a freshly-`up`ed
+  new container reports healthy and would serve against the **old** schema → 500s. Order: back up →
+  **stop the proxy** (drain traffic) → `docker compose -f docker-compose.prod.yml stop app` → bump
+  `MATHION_VERSION` → `pull` → migrate on the new image via a one-off container
+  (`docker compose -f docker-compose.prod.yml run --rm app alembic upgrade head`) → `up -d --wait` →
+  **restart the proxy**. There is no automated backup/rollback yet (Slice 3). (Initial §8 bring-up is
+  already safe: the proxy is started only after the migrate step.)
 - **Bind-mount users:** if `mathion_assets` is switched to a host bind mount, `chown -R 10001:10001`
   the host directory (named volumes inherit ownership automatically; bind mounts do not).
 
@@ -421,9 +444,20 @@ Let's Encrypt. **Caddy** is the ubiquitous alternative. The proxy is the deploye
 
 **Reachability — the doc must be explicit about two topologies:**
 - **Host-run proxy (clean, supported path):** reproxy binary/systemd or host-run Caddy targeting
-  `http://127.0.0.1:8000` — works because the app publishes on host loopback. Example reproxy:
-  `--ssl.type=auto --ssl.acme-fqdn=<domain> --static.rule='*,/,http://127.0.0.1:8000'`; Caddy:
-  `<domain> { reverse_proxy 127.0.0.1:8000 }`.
+  `http://127.0.0.1:8000` — works because the app publishes on host loopback. Example reproxy
+  (**pin to a specific reproxy release and verify the flags — they have shifted across versions**;
+  the form below is verified against the current reproxy README):
+  ```
+  reproxy --listen=:443 --ssl.type=auto --ssl.fqdn=<domain> --ssl.http-port=80 \
+          --max=25M --static.enabled --static.rule='*,/,http://127.0.0.1:8000'
+  ```
+  Each flag matters: host mode **defaults to `127.0.0.1:443`** (loopback), so `--listen=:443` is
+  required for public reachability; ACME http-01 needs port 80 (`--ssl.http-port=80`);
+  `--static.enabled` is required **in addition to** `--static.rule`; and reproxy's **default `--max`
+  is 64K** — it MUST be raised above `MATHION_MAX_FILE_SIZE` (20 MiB default) or uploads/large bodies
+  are rejected at the proxy before reaching FastAPI (`--max=25M` leaves multipart headroom; keep the
+  two aligned). Binding 80/443 needs root or `CAP_NET_BIND_SERVICE`. Caddy alternative (no low
+  default body limit; auto-manages 80/443 + ACME): `<domain> { reverse_proxy 127.0.0.1:8000 }`.
 - **Containerized proxy:** `127.0.0.1:8000` is the *proxy container's* own loopback and will 502.
   A container proxy must instead join the app's compose network and target **`http://app:8000`** (the
   app listens on `0.0.0.0:8000` inside the container regardless of the host publish), or use
@@ -441,20 +475,21 @@ Packaging + ops, so the net differs from unit tests:
 2. **`deploy/smoke.sh`** — the key artifact, and a **CI-enforced release gate** (not just a local
    convenience). It:
    - builds the production image **locally and tags it to the exact compose ref**
-     (`docker build -t ghcr.io/svkucheryavski/mathion:$VER .`, amd64 — no registry, runnable before
-     the repo is pushed and on PRs), writes `MATHION_VERSION=$VER` into the throwaway `.env`, and runs
-     `docker compose -p mathion_smoke -f docker-compose.prod.yml up -d --wait` **without `pull`** — the
-     prod compose has `image:` and **no** `build:`, so a `pull` would try to fetch the not-yet-published
-     GHCR image and fail. **Every smoke compose command runs under the isolated project `-p
-     mathion_smoke`**: the prod stack reuses the volume name `mathion_pgdata`, so under the default
-     project (the repo-dir basename `mathion`, shared with the dev `docker-compose.yml`) the terminal
-     `down -v` would destroy a developer's dev DB — an isolated project namespaces the volumes to
-     `mathion_smoke_*`;
-   - uses a **throwaway `.env`** with ephemeral volumes that **must set a non-empty
-     `MATHION_SECRET_KEY`, `MATHION_COOKIE_SECURE=1`, and `MATHION_DEBUG=0`** — the prod posture. With
-     the §2 guard in place a default/empty secret would make `up --wait` time out; setting a real
-     secret both unblocks boot **and positively exercises the guard** (it must PASS on a correct
-     config);
+     (`docker build -t ghcr.io/svkucheryavski/mathion:$VER <repo-root>`, amd64 — no registry, runnable
+     before the repo is pushed and on PRs), then brings the stack up **from a temp working directory**
+     holding a copy of `docker-compose.prod.yml` + its own `.env`. This is deliberate: the smoke **must
+     never write the repo-root `.env`** (that is the real-deployment secret path per §8; a local run
+     must not clobber it), and running compose from the temp dir makes the app service's
+     `env_file: .env` resolve to the temp file. Run `docker compose -p mathion_smoke up -d --wait`
+     **without `pull`** (the prod compose has `image:` and **no** `build:`, so a `pull` would fetch the
+     not-yet-published GHCR image and fail). The `-p mathion_smoke` project (overriding the file's
+     `name: mathion_prod`) plus the separate working dir namespace the smoke's
+     `mathion_pgdata`/`mathion_assets` volumes to `mathion_smoke_*`, so the terminal `down -v` cannot
+     touch the dev or prod stacks;
+   - the temp `.env` **must set a non-empty `MATHION_SECRET_KEY`, `MATHION_COOKIE_SECURE=1`, and
+     `MATHION_DEBUG=0`** (plus `MATHION_VERSION=$VER` for `image:` interpolation) — the prod posture.
+     With the §2 guard in place a default/empty secret would make `up --wait` time out; a real secret
+     both unblocks boot **and positively exercises the guard** (it must PASS on a correct config);
    - runs `alembic upgrade head` (proves the alembic.ini-readable fix); creates a superuser + issues a
      PIN via `python -m mathion.superuser`;
    - **asserts:** `GET /health`→200 — this successful **app boot** is what proves the **multipart
@@ -471,7 +506,8 @@ Packaging + ops, so the net differs from unit tests:
      `down` (NO `-v`) + `up`
      recreation** — a plain `docker restart` keeps the container filesystem and would not prove the
      *named* `mathion_pgdata` volume is what persists;
-   - tears down with `down -v` (removing the ephemeral volumes), exiting non-zero on any failed
+   - tears down with `docker compose -p mathion_smoke down -v` (removing the ephemeral volumes) and
+     deletes the temp working dir, exiting non-zero on any failed
      assertion.
 3. **Manual acceptance** — the §8 steps double as a one-time fresh-VM checklist.
 
@@ -488,7 +524,7 @@ GitHub auth (the agent shell cannot push).
 
 **Created:**
 - `Dockerfile` (repo root, multi-stage) + `.dockerignore` (repo root)
-- `docker-compose.prod.yml` (repo root)
+- `docker-compose.prod.yml` (repo root; declares top-level `name: mathion_prod` for project isolation)
 - `deploy/.env.prod.example`
 - `deploy/smoke.sh` (executable stack smoke)
 - `.github/workflows/ci.yml` (test + frontend + smoke; reusable via `workflow_call`)
@@ -631,3 +667,39 @@ flow; multipart attribution). Only five trivial documentation minors were raised
   can't destroy a developer's dev-DB volume (both stacks use the name `mathion_pgdata`).
 
 The Opus panel has converged. Next gate: codex review, then the User Review Gate → implementation plan.
+
+---
+
+## 17. Review round 4 — codex resolutions
+
+The codex pass (read-only, `model_reasoning_effort=high`) confirmed every application-level claim the
+Opus panel verified (multipart import-criticality, the `cookie_secure`-gated guard's test-safety, the
+Alembic dir-preserve, the CI DB contract, `needs: [ci]`, the login/CSRF/`duration_days`/PIN facts,
+scope discipline) — and caught **deployment-level defects the Opus panel missed**. All verified
+against the code and the reproxy README, and all applied here:
+
+**Critical:** (C1) **prod/dev Compose share resources.** `-f` does not create a separate project;
+both stacks default to project name `mathion` and both declare `mathion_pgdata`, so a prod boot could
+attach the dev DB (wrong password → auth failure) and the dev README's `down -v` could wipe the prod
+DB. → prod compose declares **`name: mathion_prod`**; the backup command gains `-f
+docker-compose.prod.yml`. (Ironically §10 already isolated the *smoke* with `-p mathion_smoke` but the
+prod stack was left colliding.) (C2) **the reproxy example was invalid** — verified against the
+reproxy README: the flag is `--ssl.fqdn` (not `--ssl.acme-fqdn`), `--static.enabled` is required
+alongside `--static.rule`, and host mode defaults to `127.0.0.1:443` (loopback) so `--listen=:443` +
+`--ssl.http-port=80` are needed. → §9 command corrected + version-pin/privilege caveats.
+
+**Important:** (I1) the other `.dockerignore` artifact patterns were still root-only → made any-depth
+`**/…` (the app's default `./outbox/` `.eml` store lands at `backend/outbox/`, which a root-only
+`outbox/` would miss). (I2) `--chown=app:app` requires `app` to exist at COPY time → switched the
+Alembic COPYs to numeric `--chown=10001:10001` (no build-order dependency). (I3) reproxy's default
+`--max` is **64K** < 20 MiB uploads → set `--max=25M`, documented to track `MATHION_MAX_FILE_SIZE`.
+(I4) the smoke wrote the repo-root `.env` (the real-deployment secret path) → it now runs from a temp
+working dir with its own `.env`, never touching repo-root. (I5) the interim upgrade started the new
+app before migrating (`/health` is DB-less, so it would serve on the old schema) → reordered to
+stop-app → migrate (one-off container) → up, with brief documented downtime.
+
+**Minor:** (M1) the `base_url` validator checks `netloc`, not a hostname (`https://:443` passes) and
+does not enforce HTTPS → §1.1 wording corrected. Hardening the validator (`parsed.hostname`) is noted
+as a possible future app-code change, out of scope here.
+
+No codex finding was rejected; all were reproduced against the code/README before applying.
