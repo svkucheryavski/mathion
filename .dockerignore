@@ -1,0 +1,20 @@
+# VCS / tooling
+.git/
+.superpowers/
+docs/
+
+# Python caches / test-only
+backend/tests/
+**/__pycache__/
+**/*.pyc
+
+# Never ship deps, secrets, or generated artifacts (any depth — Docker has no
+# gitignore any-depth fallback, so bare names would miss backend/.venv etc.)
+**/.venv/
+**/node_modules/
+**/.env
+**/.env.*
+**/outbox/
+**/.coverage
+**/htmlcov/
+**/*.db
