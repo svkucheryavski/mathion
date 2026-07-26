@@ -31,7 +31,7 @@ from mathion.api.submissions import router as submissions_router
 from mathion.api.superuser import router as superuser_router
 from mathion.api.teaching import router as teaching_router
 from mathion.api.versions import router as versions_router
-from mathion.config import settings
+from mathion.config import settings, Settings
 from mathion.notifications import (
     run_forever,
     acquire_singleton_lock,
@@ -55,6 +55,22 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(app):
+    # Fail closed: refuse to boot with the world-known dev secret (or an empty
+    # one) when we're in a production posture (secure cookies enabled). The
+    # secret salts PIN/token hashing (auth.hash_token), so a default in prod is
+    # a real vulnerability, not a nag. Gated on cookie_secure — the prod .env
+    # sets MATHION_COOKIE_SECURE=1; dev/tests leave it False, so this is inert
+    # there. Lives here (lifespan), never at import, so pytest / alembic /
+    # `python -m mathion.superuser` are unaffected.
+    if settings.cookie_secure and (
+        not settings.secret_key
+        or settings.secret_key == Settings.model_fields["secret_key"].default
+    ):
+        raise RuntimeError(
+            "Refusing to start: MATHION_SECRET_KEY is unset or still the dev "
+            "default while MATHION_COOKIE_SECURE=1 (production). Set a strong "
+            "secret, e.g. `openssl rand -base64 48`."
+        )
     app.state.settings = settings
     # Echo the (password-redacted) database target on real uvicorn boot, so a
     # prod deploy that forgot MATHION_DATABASE_URL and silently fell back to the
