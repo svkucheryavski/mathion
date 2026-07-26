@@ -156,9 +156,12 @@ list gets wrong:
   balloon the build context. (Image *correctness* survives regardless — `pip install ./backend` builds
   from `pyproject.toml` and `include=["mathion*"]` keeps the wheel clean — but this slice's whole
   point is a lean image.)
-- The tracked `.env.example` / `deploy/.env.prod.example` are git **contracts**, not needed in the
-  build context; the `.env`/`.env.*` excludes drop them from the context, and nothing `COPY`s them
-  into the image, so no real `.env` is ever baked into a public layer.
+- The tracked `.env.example` / `deploy/.env.prod.example` are git **contracts** with no real secrets.
+  The load-bearing exclude is the root-anchored **`.env`** pattern, which drops any real `.env` written
+  at the context root (the smoke's throwaway `.env` lives there too) → no real secret is baked into a
+  public layer. Note the root-anchored `.env.*` matches only the root-level `.env.example`, **not** the
+  nested `deploy/.env.prod.example`; that placeholder harmlessly stays in the build context, and
+  nothing `COPY`s either example into the image.
 
 ### 3.1 Stage 1 — frontend build
 - `FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend` — the SPA output is
@@ -347,7 +350,7 @@ MATHION_VERSION=v0.1.0
 - **`test` job (runner-hosted — NOT a `container:` job, so the service is reachable at loopback):**
   a `postgres:17` **service** with `POSTGRES_USER=mathion`/`POSTGRES_PASSWORD=mathion` (superuser →
   CREATEDB, needed for `_ensure_test_database_exists`), `ports: 5432:5432`, and a `pg_isready`
-  healthcheck. Install with **`pip install ./backend[dev]`** — this pulls both pytest **and** the
+  healthcheck. Install with **`pip install './backend[dev]'`** (quote the extra — `zsh`/glob-safe) — this pulls both pytest **and** the
   runtime deps, including the newly-added `python-multipart`, which is required here too because
   `conftest.py` imports `mathion.main` (without it, collection raises `RuntimeError`). Set
   **`MATHION_TEST_DATABASE_URL=postgresql+psycopg://mathion:mathion@localhost:5432/mathion_test`**;
@@ -424,7 +427,9 @@ Let's Encrypt. **Caddy** is the ubiquitous alternative. The proxy is the deploye
 - **Containerized proxy:** `127.0.0.1:8000` is the *proxy container's* own loopback and will 502.
   A container proxy must instead join the app's compose network and target **`http://app:8000`** (the
   app listens on `0.0.0.0:8000` inside the container regardless of the host publish), or use
-  `network_mode: host` (Linux), or `extra_hosts: ["host.docker.internal:host-gateway"]`.
+  `network_mode: host` (Linux). A `host.docker.internal:host-gateway` mapping does **not** help with
+  the loopback-only publish — it resolves to the bridge-gateway IP, which `127.0.0.1:8000` refuses;
+  it would work only if the app were re-published on `0.0.0.0:8000`.
 
 ---
 
@@ -438,9 +443,13 @@ Packaging + ops, so the net differs from unit tests:
    - builds the production image **locally and tags it to the exact compose ref**
      (`docker build -t ghcr.io/svkucheryavski/mathion:$VER .`, amd64 — no registry, runnable before
      the repo is pushed and on PRs), writes `MATHION_VERSION=$VER` into the throwaway `.env`, and runs
-     `docker compose -f docker-compose.prod.yml up -d --wait` **without `pull`** — the prod compose has
-     `image:` and **no** `build:`, so a `pull` would try to fetch the not-yet-published GHCR image and
-     fail;
+     `docker compose -p mathion_smoke -f docker-compose.prod.yml up -d --wait` **without `pull`** — the
+     prod compose has `image:` and **no** `build:`, so a `pull` would try to fetch the not-yet-published
+     GHCR image and fail. **Every smoke compose command runs under the isolated project `-p
+     mathion_smoke`**: the prod stack reuses the volume name `mathion_pgdata`, so under the default
+     project (the repo-dir basename `mathion`, shared with the dev `docker-compose.yml`) the terminal
+     `down -v` would destroy a developer's dev DB — an isolated project namespaces the volumes to
+     `mathion_smoke_*`;
    - uses a **throwaway `.env`** with ephemeral volumes that **must set a non-empty
      `MATHION_SECRET_KEY`, `MATHION_COOKIE_SECURE=1`, and `MATHION_DEBUG=0`** — the prod posture. With
      the §2 guard in place a default/empty secret would make `up --wait` time out; setting a real
@@ -455,8 +464,11 @@ Packaging + ops, so the net differs from unit tests:
      `mathion_assets` volume succeeds** (e.g. `exec app python -c
      "open('/data/mathion/assets/.probe','w').write('x')"` — catches the mis-owned-volume
      500-on-upload class that /health would pass); a **first-login round-trip** (issue a PIN via the
-     CLI, then `POST /api/auth/verify-pin` → 200 with `Set-Cookie: …; Secure`, guarding the auth/cookie
-     path the walkthrough depends on); and **DB data persists across a full `down` (NO `-v`) + `up`
+     CLI, then `POST /api/auth/verify-pin` → 200 with `Set-Cookie: …; Secure` — the curl must send
+     `-H 'X-Requested-With: mathion'` (the CSRF header the app requires) and a JSON body
+     `{"email":…, "pin":…, "duration_days":N}` with `duration_days` in 1–30 (required, no default),
+     guarding the auth/cookie path the walkthrough depends on); and **DB data persists across a full
+     `down` (NO `-v`) + `up`
      recreation** — a plain `docker restart` keeps the container filesystem and would not prove the
      *named* `mathion_pgdata` volume is what persists;
    - tears down with `down -v` (removing the ephemeral volumes), exiting non-zero on any failed
@@ -597,3 +609,25 @@ uvloop/httptools C-ext); `stop_grace_period: 35s`; superuser CLI is multipart-in
 container-proxy reachability; tag-derivation keeps `v` + `latest` on non-prereleases; GHCR publish
 model; no `/version` endpoint yet (forward note holds); dev artifacts + `.gitignore` no-op reasoning;
 scope discipline clean; no residual TBDs.
+
+---
+
+## 16. Review round 3 — convergence
+
+All **5 independent Opus reviewers APPROVED** rev 3 (image/build, CI/CD, runtime/config, operator
+flow, whole-spec coherence): **zero Critical, zero Important**, each round-2 resolution independently
+re-verified against the code (guard test-safety re-confirmed by fresh greps; `needs: [ci]` validity;
+two-COPY Alembic; `**/.venv/` globs; `pip install ./backend[dev]`; smoke build-tag/no-pull; verify-pin
+flow; multipart attribution). Only five trivial documentation minors were raised and applied here:
+- quote `'./backend[dev]'` in §7 for `zsh`/glob portability;
+- §10 verify-pin curl must send `-H 'X-Requested-With: mathion'` (CSRF) + a JSON body with the required
+  `duration_days` (1–30);
+- §9 dropped the broken `host.docker.internal:host-gateway` container-proxy option (it can't reach a
+  loopback-only publish);
+- §3 corrected the `.dockerignore` wording — root-anchored `.env.*` matches only root `.env.example`,
+  not the nested `deploy/.env.prod.example` (which harmlessly stays in context; the load-bearing
+  exclude is the root `.env` pattern);
+- §10 smoke runs every compose command under an isolated project (`-p mathion_smoke`) so its `down -v`
+  can't destroy a developer's dev-DB volume (both stacks use the name `mathion_pgdata`).
+
+The Opus panel has converged. Next gate: codex review, then the User Review Gate → implementation plan.
