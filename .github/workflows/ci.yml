@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: mathion
+          POSTGRES_PASSWORD: mathion
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mathion"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      MATHION_TEST_DATABASE_URL: postgresql+psycopg://mathion:mathion@localhost:5432/mathion_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install backend + dev deps
+        run: pip install './backend[dev]'
+      - name: Run backend suite
+        run: cd backend && pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: cd frontend && npm ci
+      - name: Test (TZ pinned by the npm script)
+        run: cd frontend && npm test
+      - name: Build
+        run: cd frontend && npm run build
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stack smoke (builds the prod image, boots the stack, asserts)
+        run: bash deploy/smoke.sh
