@@ -1,7 +1,7 @@
 # Phase 9-D Slice 2 — `mathion` Go CLI: Design
 
-**Status:** design (brainstorming output, round-2 after spec-convergence review; awaiting
-re-review → writing-plans)
+**Status:** design (brainstorming output; converged through 5 revision rounds — Opus panel
+×2 + codex ×2; awaiting final codex gate → writing-plans)
 **Epic:** Phase 9-D (make Mathion self-hostable + distributable). Slice 1 (Deployment
 Foundation) shipped as `ghcr.io/svkucheryavski/mathion:v0.1.1` (public). This is Slice 2
 of 4.
@@ -14,6 +14,14 @@ of 4.
 > (never regenerates secrets) so partial-failure retry is safe; plain `uninstall` retains
 > config + volumes; goreleaser runs **build-only** (cli-v* isn't semver) with `gh` publish;
 > the `version` GHCR probe is cut (deferred to Slice 3).
+>
+> Rounds 3–5 note: folded codex round-1/round-2 findings + a final Opus verification. Resume
+> persists the normalized admin email in an atomic `install-state` file written **before**
+> `.env` and **fails closed** on a malformed/incomplete config (never regenerating secrets
+> over an initialized volume); `gh release` runs with `GH_TOKEN`; `checksum.name_template`
+> is pinned to `checksums.txt` and `main.version` is injected from the original `cli-v*` tag
+> via `CLI_TAG`; the installer test lives in `release-cli.yml`, out of the app-release-gating
+> `cli-unit`.
 
 ## 1. Goal
 
@@ -219,7 +227,10 @@ sudo mathion install [--domain D] [--admin-email E] [--version TAG] [--yes]
    (`config.py`: scheme ∈ {http,https} — always `https` here; non-empty netloc; no
    userinfo; valid in-range port; no path/query/fragment; no whitespace/control). A scheme
    typed into `--domain` is rejected (prevents `https://https://…`). A golden accept/reject
-   table (derived from `config.py`) guards parity.
+   table (derived from `config.py`) guards parity. On resume, input-gathering is skipped, so
+   `--domain`/`--admin-email`/`--version` are ignored — changing the admin later is
+   `mathion superuser`'s job and version bumps are Slice 3's `update`; the CLI **warns** if a
+   supplied flag diverges from the stored `install-state`/`.env`.
 4. **Write config (fresh install).** Generate secrets (§6); write
    `<cfgdir>/docker-compose.yml` from the embed and the `install-state` file (normalized
    admin email), then `<cfgdir>/.env` atomically **last** — so a complete `.env` always
@@ -265,9 +276,14 @@ Go test that asserts the copy is **byte-identical** to the repo-root
   write` scopes the token but doesn't expose it to `gh`); the workflow declares
   `permissions: contents: write`. The pinned **`archives.name_template` is
   `mathion_{{ .Os }}_{{ .Arch }}`**, yielding exactly `mathion_linux_amd64.tar.gz` and
-  `mathion_linux_arm64.tar.gz` (plus `checksums.txt`) — the same names `install.sh`
-  constructs. ldflags inject `main.version` as the full `cli-v*` tag (so `mathion version`
-  prints `cli-v0.1.0`) and `main.defaultImage` as the hand-maintained app-image literal.
+  `mathion_linux_arm64.tar.gz` — the same names `install.sh` constructs. The
+  **`checksum.name_template` is pinned to `checksums.txt`** (goreleaser's default embeds
+  project+version, e.g. `mathion_0.1.0_checksums.txt`, which would break the literal
+  `dist/checksums.txt` both the `gh release` step and `install.sh` expect). ldflags inject
+  `main.version` from the **original** tag — the workflow exports `CLI_TAG=${{ github.ref_name }}`
+  and a custom builds ldflag `-X main.version={{ .Env.CLI_TAG }}` sets it to the full
+  `cli-v0.1.0` (goreleaser's default `{{ .Version }}` would be the sanitized `0.1.0`) — and
+  `main.defaultImage` from the hand-maintained app-image literal.
 - **Independent version line.** CLI releases (`cli-v*`, starting `cli-v0.1.0`) version
   independently of the app image (`v*`). `main.version` = the CLI tag; `main.defaultImage`
   = the recommended app tag (hand-maintained, bumped when cutting a CLI release; operators
@@ -306,14 +322,12 @@ Go test that asserts the copy is **byte-identical** to the repo-root
 - **resume / fail-closed:** `.env` + `install-state` present → reuse (no secret regen, email
   read from state); `.env` malformed/incomplete or state missing/invalid → abort (no regen);
   the fresh path writes compose + state **before** `.env`.
-- **installer:** run `deploy/install.sh` against a locally-built `dist/` (goreleaser) to
-  verify `uname -m` mapping, name-template match, and checksum-verification-before-install.
 
 **Integration (real Docker):** non-interactive `install --yes --domain … --admin-email …
 --version <published-tag>` into a temp `MATHION_CONFIG_DIR` with a **unique `-p` project**
 (hidden test override) → assert stack healthy, `/health` `200`, and the superuser row via
 `compose exec -T db psql -U mathion -d mathion -tAc "select count(*) from users where
-is_superuser and email='…'"` → `uninstall --purge` cleans up (isolated volumes only). This
+is_superuser and email='…'"` → `uninstall --purge` cleans up (isolated volumes only) — the purge typed-confirmation is read from stdin, so the test pipes the resolved project name. This
 mirrors `deploy/smoke.sh`, which already proves Docker/Compose-v2 + this exact flow run on
 `ubuntu-latest`.
 
@@ -327,7 +341,10 @@ mirrors `deploy/smoke.sh`, which already proves Docker/Compose-v2 + this exact f
   the app-release-gating reusable `ci.yml`, so a CLI-test flake or a GHCR hiccup can never
   block an app-image release. It passes an explicit published `--version`. The
   goreleaser+`gh release` publish job is gated `if: startsWith(github.ref, 'refs/tags/cli-v')`
-  so PRs run build + tests only.
+  so PRs run build + tests only. An **`install.sh` test** — run against a goreleaser-built
+  `dist/` to verify `uname -m` mapping, the shared name-template, and checksum-before-install
+  — also lives here (it needs goreleaser + shell, not `go test`, so it stays out of the
+  app-release-gating `cli-unit`).
 
 ## 12. Boundaries & non-goals
 
