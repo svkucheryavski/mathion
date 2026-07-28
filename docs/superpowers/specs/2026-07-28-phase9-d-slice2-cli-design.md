@@ -187,7 +187,7 @@ the `-p` value).
 | `superuser <email>` | `compose exec -T app python -m mathion.superuser create-superuser <email>`; the subcommand is **idempotent** (exits 0 after a successful create or promote; non-zero on invalid input or an execution failure), so the CLI gates on the exit code |
 | `logs [app\|db] [-f]` | `compose logs [--follow] [service]` |
 | `version` | prints the CLI build version (`main.version`) + the pinned `MATHION_VERSION` from `.env`. **No registry/GHCR query** (deferred to Slice 3). |
-| `uninstall` | `compose down` — removes containers + network but **retains named volumes AND `<cfgdir>` (.env + compose)**, so `mathion start` fully restores the deployment. `--purge` → `compose down -v` **and** remove `<cfgdir>`, behind a confirmation that first **resolves and displays the exact project + volume names** and requires the operator to type the resolved project name (`mathion_prod`) — not a generic word. |
+| `uninstall` | `compose down` — removes containers + network but **retains named volumes AND `<cfgdir>` (.env + compose)**, so `mathion start` fully restores the deployment. `--purge` → `compose down -v` **and** remove `<cfgdir>`, behind a confirmation that first **resolves and displays the exact project + volume names** and requires the operator to type the resolved project name (`mathion_prod`) — not a generic word. `<cfgdir>` is removed **only after `down -v` succeeds**, so a failed volume teardown leaves `.env` + `install-state` intact and never manufactures the config-gone/volume-present state the install-time volume guard defends against. |
 
 The container entrypoint strings (`python -m mathion.superuser {create-superuser,pin}`,
 `alembic upgrade head`) are re-verified during planning against the package
@@ -214,6 +214,15 @@ sudo mathion install [--domain D] [--admin-email E] [--version TAG] [--yes]
    not a regular file, or the `install-state` file is missing or invalid, `install` aborts
    with guidance (repair the file, or `uninstall --purge` for a clean slate) — it never
    treats a broken config as fresh and never regenerates secrets over an initialized volume.
+   **Volume guard (fresh-path gate):** only the fresh path (steps 3–4) generates secrets, so
+   on that branch — after the Docker preflight (step 2) confirms the daemon, and before any
+   secret is generated — `install` checks the resolved project's named volumes: if either
+   `mathion_prod_mathion_pgdata` or `mathion_prod_mathion_assets` already exists (`docker
+   volume inspect`), it **aborts without generating or writing any secret**, directing the
+   operator to restore `<cfgdir>/.env` or run `uninstall --purge`. This closes the
+   `.env`-deleted-but-volume-survives hole — a regenerated DB password can never
+   authenticate against an already-initialized `pgdata`. Only a genuinely clean slate (no
+   `.env` **and** no fixed-project volumes) is treated as fresh.
 2. **Preflight.** Config dir is a safe (non-symlink, root-owned, `0700`) directory;
    `docker` + `docker compose` v2 present and the daemon reachable. **Fresh install only:**
    host port `127.0.0.1:8000` free (connect-probe) — this check is **skipped on resume**,
@@ -321,7 +330,12 @@ Go test that asserts the copy is **byte-identical** to the repo-root
   `docker-compose.prod.yml`, byte for byte.
 - **resume / fail-closed:** `.env` + `install-state` present → reuse (no secret regen, email
   read from state); `.env` malformed/incomplete or state missing/invalid → abort (no regen);
-  the fresh path writes compose + state **before** `.env`.
+  the fresh path writes compose + state **before** `.env`; **`.env` absent but a
+  fixed-project volume present → abort with no secret generated** (fake Runner reports the
+  volume present); a genuinely clean slate (no `.env`, no volumes) proceeds fresh.
+- **purge ordering:** `down -v` runs **before** `<cfgdir>` removal; a fake Runner that
+  fails `down -v` leaves `<cfgdir>` (`.env` + `install-state`) intact and skips the removal
+  — purge is never partially destructive.
 
 **Integration (real Docker):** non-interactive `install --yes --domain … --admin-email …
 --version <published-tag>` into a temp `MATHION_CONFIG_DIR` with a **unique `-p` project**
@@ -363,7 +377,8 @@ mirrors `deploy/smoke.sh`, which already proves Docker/Compose-v2 + this exact f
 3. Layout/privilege → system-wide root, `/etc/mathion` (config) + `/usr/local/bin` (binary);
    config layout is apt-forward (binary path differs by channel, Slice 4 resolves).
 4. `install` depth → up to superuser **account**; PIN via separate `mathion pin`; **install
-   resumes** (never regenerates secrets).
+   resumes** (never regenerates secrets); the fresh path **aborts** if a fixed-project
+   volume already exists — no secret regen over initialized data.
 5. `MATHION_BASE_URL` = `https://<domain>`, validated against the backend rule; `--domain`
    is authority-only, scheme rejected. (`https`-only — prod is TLS-terminating proxy +
    `COOKIE_SECURE=1`.)
