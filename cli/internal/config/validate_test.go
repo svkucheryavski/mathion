@@ -30,6 +30,7 @@ func TestBuildBaseURLReject(t *testing.T) {
 		"learn.example.edu#frag",      // fragment
 		"learn.example.edu ",          // whitespace
 		"learn\texample.edu",          // control/whitespace
+		":8000",                       // port with no host
 		"",                            // empty host
 	}
 	for _, in := range bad {

@@ -31,7 +31,7 @@ func BuildBaseURL(domain string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("--domain is not a valid host: %q (%v)", domain, err)
 	}
-	if u.Host == "" {
+	if u.Hostname() == "" {
 		return "", fmt.Errorf("--domain missing host: %q", domain)
 	}
 	if u.User != nil {
