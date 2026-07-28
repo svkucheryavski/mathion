@@ -122,8 +122,10 @@ the **resolved** `<cfgdir>`, never a hardcoded `/etc/mathion`).
 - The config dir is created/validated as a **root-owned, non-symlink** directory, mode
   `0700` (so the mere existence of `.env` isn't world-listable). A world-writable or
   symlinked target is rejected.
-- `.env` is written **atomically**: a temp file in the same directory opened
-  `O_CREATE|O_EXCL|O_WRONLY, 0600`, fully written, `fsync`'d, then `rename`'d into place.
+- `.env` is written **atomically**: a **uniquely-named** temp file in the same directory
+  (mkstemp-style, mode `0600`), fully written, `fsync`'d, then `rename`'d over the target. A
+  fixed temp name is avoided so a stale leftover from a prior crash can't wedge every future
+  write.
 - `.env` is written **last** in the config step, so its presence marks a *complete* config
   transaction (a crash can't leave a truncated secret that the resume path would trust).
 
@@ -169,11 +171,11 @@ the `-p` value).
 | `start` | `compose up -d --wait` |
 | `stop` | `compose stop` (containers stopped; volumes + config retained) |
 | `status` | `compose ps`; probe `http://127.0.0.1:8000/health` (expect `200 {"status":"ok"}`); print pinned `MATHION_VERSION`. Clear message if the stack is down. |
-| `pin <email>` | `compose exec -T app python -m mathion.superuser pin <email>`; **surfaces container stdout** (the printed PIN or the error/rate-limit line — the subcommand exits 0 regardless, so the CLI does not gate on exit code) and reminds the operator the PIN expires in 10 min and issuance is rate-limited 3/hour. Requires the stack running. |
-| `superuser <email>` | `compose exec -T app python -m mathion.superuser create-superuser <email>`; surfaces stdout (treats "already exists" as a non-fatal notice) |
+| `pin <email>` | `compose exec -T app python -m mathion.superuser pin <email>`; **surfaces container stdout** (the printed PIN or the error/rate-limit line — the subcommand exits 0 regardless, so the CLI does not gate on exit code) and reminds the operator the PIN expires in 10 min, issuance is rate-limited 3/hour, and to log in at `https://<domain>` — **NOT** `http://127.0.0.1:8000`. Requires the stack running. |
+| `superuser <email>` | `compose exec -T app python -m mathion.superuser create-superuser <email>`; the subcommand is **fully idempotent** (prints a confirmation and exits 0 whether it creates or promotes; exits non-zero only on an invalid email), so the CLI gates on the exit code |
 | `logs [app\|db] [-f]` | `compose logs [--follow] [service]` |
 | `version` | prints the CLI build version (`main.version`) + the pinned `MATHION_VERSION` from `.env`. **No registry/GHCR query** (deferred to Slice 3). |
-| `uninstall` | `compose down` — removes containers + network but **retains named volumes AND `<cfgdir>` (.env + compose)**, so `mathion start` fully restores the deployment. `--purge` → `compose down -v` **and** remove `<cfgdir>`, behind a confirmation that first **resolves and displays the exact project + volume names** and requires the operator to type that identity (not a generic word). |
+| `uninstall` | `compose down` — removes containers + network but **retains named volumes AND `<cfgdir>` (.env + compose)**, so `mathion start` fully restores the deployment. `--purge` → `compose down -v` **and** remove `<cfgdir>`, behind a confirmation that first **resolves and displays the exact project + volume names** and requires the operator to type the resolved project name (`mathion_prod`) — not a generic word. |
 
 The container entrypoint strings (`python -m mathion.superuser {create-superuser,pin}`,
 `alembic upgrade head`) are re-verified during planning against the package
@@ -190,13 +192,17 @@ sudo mathion install [--domain D] [--admin-email E] [--version TAG] [--yes]
 (`--yes` is **scoped to `install`** — it never reaches `uninstall`'s purge confirmation.)
 
 1. **Config-transaction / resume check FIRST.** If `<cfgdir>/.env` exists and is valid,
-   `install` **resumes** — it reuses the existing secrets and re-runs the idempotent
-   remaining steps (5–7); it never regenerates `POSTGRES_SECRET`/password. (This is what
-   makes partial-failure retry safe: Postgres honors `POSTGRES_PASSWORD` only at first
-   volume init, so regeneration would brick a half-initialized DB.)
+   `install` **resumes**: it reuses the existing secrets, **re-writes
+   `<cfgdir>/docker-compose.yml` from the embed** (idempotent — covers a manually removed
+   copy), skips input-gathering (step 3), and re-runs the idempotent steps 5–7. It never
+   regenerates `MATHION_SECRET_KEY` or the DB password. (This is what makes partial-failure
+   retry safe: Postgres honors `POSTGRES_PASSWORD` only at first volume init, so
+   regeneration would brick a half-initialized DB.)
 2. **Preflight.** Config dir is a safe (non-symlink, root-owned, `0700`) directory;
-   `docker` + `docker compose` v2 present and the daemon reachable; host port
-   `127.0.0.1:8000` free (connect-probe). Fail fast with a specific message each.
+   `docker` + `docker compose` v2 present and the daemon reachable. **Fresh install only:**
+   host port `127.0.0.1:8000` free (connect-probe) — this check is **skipped on resume**,
+   where our own (possibly still-unhealthy) `app` legitimately holds the port. Fail fast with
+   a specific message each.
 3. **Gather inputs (fresh install only).** Prompt for domain and admin email
    (`--domain`/`--admin-email` skip the matching prompt; `--yes` requires both).
    **Domain → URL:** `--domain` accepts an *authority* — `host[:port]`, no scheme, no
@@ -211,7 +217,8 @@ sudo mathion install [--domain D] [--admin-email E] [--version TAG] [--yes]
 5. **Pull + up.** `compose pull` then `compose up -d --wait`.
 6. **Migrate.** `compose exec -T app alembic upgrade head` (idempotent).
 7. **Create superuser account.** `compose exec -T app python -m mathion.superuser
-   create-superuser <email>` (idempotent notice if already present).
+   create-superuser <email>` (fully idempotent — creates or promotes and exits 0; the CLI
+   gates on the exit code).
 8. **Next steps.** Print: set up the reverse proxy (link to the README section); **then log
    in at `https://<domain>` — NOT `http://127.0.0.1:8000`** (the `Secure` session cookie
    won't persist over plain HTTP); then `sudo mathion pin <email>` for the first-login PIN;
@@ -233,25 +240,33 @@ Go test that asserts the copy is **byte-identical** to the repo-root
 
 ## 10. Distribution & versioning
 
-- **goreleaser, build-only.** The CLI's `cli-v*` tag is **not** semver, and goreleaser's
-  OSS edition requires a semver current tag (prefixed/monorepo tags are a Pro feature). So
-  the release workflow: on a `cli-v*` tag → derive a sanitized semver (strip the `cli-v`
-  prefix → e.g. `0.1.0`) → run goreleaser to **build/archive/checksum only** (no publish),
-  with `CGO_ENABLED=0` (guaranteeing the static binary), `builds.main` pointing at `cli/`,
-  `binary: mathion`, targets `linux/amd64` + `linux/arm64`, producing archives + a
-  `checksums.txt` → then publish those artifacts to the `cli-v*` GitHub Release via
-  `gh release create`. The workflow declares `permissions: contents: write`.
+- **goreleaser, build-only.** The `cli-v*` tag is **not** semver, and OSS goreleaser
+  requires a semver current tag (prefixed/monorepo tags are a Pro feature). The release
+  workflow, on a `cli-v*` tag: sanitize the tag (`v${TAG#cli-v}` → `v0.1.0`) and run
+  **`GORELEASER_CURRENT_TAG=v0.1.0 goreleaser release --clean --skip=publish`** — the
+  `release` pipeline (NOT `goreleaser build`, which emits bare binaries) is what produces the
+  archives + `checksums.txt`; `--skip=publish` withholds goreleaser's own GitHub release;
+  `GORELEASER_CURRENT_TAG` feeds the sanitized semver so validation passes. `.goreleaser.yaml`:
+  `version: 2`, run with `working-directory: cli`, `builds.main: ./`, `binary: mathion`,
+  `env: [CGO_ENABLED=0]` (static binary), targets `linux/{amd64,arm64}`, and a **pinned
+  `archives.name_template`** (the single filename string `install.sh` also uses — below).
+  Then `gh release create "$TAG" dist/*.tar.gz dist/checksums.txt` publishes to the `cli-v*`
+  release; the workflow declares `permissions: contents: write`. ldflags inject
+  `main.version` as the full `cli-v*` tag (so `mathion version` prints `cli-v0.1.0`) and
+  `main.defaultImage` as the hand-maintained app-image literal.
 - **Independent version line.** CLI releases (`cli-v*`, starting `cli-v0.1.0`) version
   independently of the app image (`v*`). `main.version` = the CLI tag; `main.defaultImage`
   = the recommended app tag (hand-maintained, bumped when cutting a CLI release; operators
   can always override with `install --version`).
 - **`curl | sh` installer** (`deploy/install.sh`): resolves the latest **`cli-v*`** release
-  by **listing releases and filtering the `cli-` prefix** (GitHub's repo-wide
-  `/releases/latest` is not prefix-aware and could return an app `v*` release), or takes an
-  explicit version arg; maps `uname -m` (`x86_64→amd64`, `aarch64|arm64→arm64`, **hard-fail
-  on anything else**); downloads the archive + `checksums.txt` with `curl -f` (fail-closed,
-  HTTPS-only, no http fallback); **verifies the checksum before** extract/`chmod +x`;
-  installs to `/usr/local/bin/mathion`. No undeclared `jq`/python dependency. Usage:
+  by listing releases and filtering the `cli-` prefix — via a `curl … /releases | grep`-style
+  parse, **no `jq`/python** (GitHub's repo-wide `/releases/latest` is not prefix-aware and
+  could return an app `v*` release) — or takes an explicit version arg; maps `uname -m`
+  (`x86_64→amd64`, `aarch64|arm64→arm64`, **hard-fail on anything else**); downloads the
+  archive (whose filename follows the **same `archives.name_template`** pinned in
+  `.goreleaser.yaml`) + `checksums.txt` with `curl -f` (fail-closed, HTTPS-only, no http
+  fallback); **verifies the checksum before** extract/`chmod +x`; installs to
+  `/usr/local/bin/mathion`. Usage:
   `curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh`.
 - **Trust model (documented limitation):** `checksums.txt` from the same release provides
   *integrity* (corruption/partial-download detection), not *authenticity* — the trust
@@ -285,10 +300,12 @@ mirrors `deploy/smoke.sh`, which already proves Docker/Compose-v2 + this exact f
 - A **`cli-unit`** job is added to the reusable `.github/workflows/ci.yml`
   (`working-directory: cli`; `go vet ./...` + unit tests). It is fast and needs no
   Docker/registry, so it safely gates PRs **and** app-image releases.
-- The **integration** test runs in the CLI's own release workflow (`release-cli.yml`, on
-  `cli-v*`) and on PRs that touch `cli/` — but is **NOT** part of the app-release-gating
-  reusable `ci.yml`, so a CLI-test flake or a GHCR hiccup can never block an app-image
-  release. It passes an explicit published `--version`.
+- The **integration** test runs in the CLI's own workflow (`release-cli.yml`, triggered on
+  `push: tags: [cli-v*]` **and** `pull_request: paths: [cli/**]`) — but is **NOT** part of
+  the app-release-gating reusable `ci.yml`, so a CLI-test flake or a GHCR hiccup can never
+  block an app-image release. It passes an explicit published `--version`. The
+  goreleaser+`gh release` publish job is gated `if: startsWith(github.ref, 'refs/tags/cli-v')`
+  so PRs run build + tests only.
 
 ## 12. Boundaries & non-goals
 
