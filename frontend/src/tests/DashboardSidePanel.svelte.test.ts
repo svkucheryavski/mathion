@@ -107,8 +107,19 @@ function mountPanel(opts: MountPanelOpts) {
   return { host, onClose: onClose as ReturnType<typeof vi.fn>, onRefetch: onRefetch as ReturnType<typeof vi.fn> };
 }
 
+// Drain the async chain deterministically. A fixed count of `tick()`s (microtask
+// hops) is environment-fragile: node 22's undici uses one more microtask to read a
+// Response body than newer nodes, so a 3-tick wait passed locally but left the panel
+// mid-load in CI. Crossing a macrotask boundary (`setTimeout` 0) flushes the ENTIRE
+// pending microtask queue regardless of its length; interleaving `flushSync()` applies
+// Svelte effects (incl. the `tick().then(() => …focus())` handlers) between rounds. A
+// few rounds cover chained load → $effect → focus stages. Every test that asserts a
+// still-pending/loading state uses a never-resolving fetch, so full draining is safe.
 async function settle() {
-  await tick(); await tick(); await tick();
+  for (let i = 0; i < 5; i++) {
+    flushSync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
   flushSync();
 }
 
