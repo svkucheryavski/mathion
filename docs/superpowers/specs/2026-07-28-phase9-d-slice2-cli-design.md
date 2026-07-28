@@ -175,7 +175,9 @@ empty/default). **Invariant: the CLI never prints generated secrets to stdout/lo
 All `compose`/`exec` calls use the base:
 `docker compose -p mathion_prod -f <cfgdir>/docker-compose.yml --env-file <cfgdir>/.env …`
 (the explicit `-p` — §3 — is present on **every** call; a hidden test override changes only
-the `-p` value).
+the `-p` value). The **one exception** is `uninstall --purge`'s teardown — a recovery
+hatch that must run even when `.env`/compose are gone — which targets the resolved project
+**by identity** with bare `docker` (no `-f`/`--env-file`); see the `uninstall` row.
 
 | Command | Behaviour |
 |---|---|
@@ -187,7 +189,7 @@ the `-p` value).
 | `superuser <email>` | `compose exec -T app python -m mathion.superuser create-superuser <email>`; the subcommand is **idempotent** (exits 0 after a successful create or promote; non-zero on invalid input or an execution failure), so the CLI gates on the exit code |
 | `logs [app\|db] [-f]` | `compose logs [--follow] [service]` |
 | `version` | prints the CLI build version (`main.version`) + the pinned `MATHION_VERSION` from `.env`. **No registry/GHCR query** (deferred to Slice 3). |
-| `uninstall` | `compose down` — removes containers + network but **retains named volumes AND `<cfgdir>` (.env + compose)**, so `mathion start` fully restores the deployment. `--purge` → `compose down -v` **and** remove `<cfgdir>`, behind a confirmation that first **resolves and displays the exact project + volume names** and requires the operator to type the resolved project name (`mathion_prod`) — not a generic word. `<cfgdir>` is removed **only after `down -v` succeeds**, so a failed volume teardown leaves `.env` + `install-state` intact and never manufactures the config-gone/volume-present state the install-time volume guard defends against. |
+| `uninstall` | `compose down` — removes containers + network but **retains named volumes AND `<cfgdir>` (.env + compose)**, so `mathion start` fully restores the deployment. `--purge` removes both, as an **identity-based recovery hatch** independent of `.env`/compose: it tears down the resolved project **by name** — remove the project's containers (`docker rm -f` those labeled `com.docker.compose.project=mathion_prod`), then `docker network rm mathion_prod_default` and `docker volume rm mathion_prod_mathion_pgdata mathion_prod_mathion_assets`, each **tolerating an already-absent resource** so a partially-torn-down or orphaned stack (only the volumes surviving) still fully purges. With config present, `docker compose -p mathion_prod down -v --remove-orphans` is the graceful equivalent, but the by-name path is authoritative and needs neither `-f` nor `--env-file`. Then it removes `<cfgdir>`. It is gated by a confirmation that first **resolves and displays the exact project + volume names** and requires the operator to type the resolved project name (`mathion_prod`), not a generic word. `<cfgdir>` is removed **only after teardown succeeds**, so a failed teardown leaves `.env` + `install-state` intact and never manufactures a config-gone/volume-present orphan — and because purge needs no `.env`, it is exactly the hatch the install volume guard points to. |
 
 The container entrypoint strings (`python -m mathion.superuser {create-superuser,pin}`,
 `alembic upgrade head`) are re-verified during planning against the package
@@ -219,7 +221,7 @@ sudo mathion install [--domain D] [--admin-email E] [--version TAG] [--yes]
    secret is generated — `install` checks the resolved project's named volumes: if either
    `mathion_prod_mathion_pgdata` or `mathion_prod_mathion_assets` already exists (`docker
    volume inspect`), it **aborts without generating or writing any secret**, directing the
-   operator to restore `<cfgdir>/.env` or run `uninstall --purge`. This closes the
+   operator to restore `<cfgdir>/.env` or run `uninstall --purge` (identity-based, so it works with `.env` gone). This closes the
    `.env`-deleted-but-volume-survives hole — a regenerated DB password can never
    authenticate against an already-initialized `pgdata`. Only a genuinely clean slate (no
    `.env` **and** no fixed-project volumes) is treated as fresh.
@@ -333,9 +335,14 @@ Go test that asserts the copy is **byte-identical** to the repo-root
   the fresh path writes compose + state **before** `.env`; **`.env` absent but a
   fixed-project volume present → abort with no secret generated** (fake Runner reports the
   volume present); a genuinely clean slate (no `.env`, no volumes) proceeds fresh.
-- **purge ordering:** `down -v` runs **before** `<cfgdir>` removal; a fake Runner that
-  fails `down -v` leaves `<cfgdir>` (`.env` + `install-state`) intact and skips the removal
-  — purge is never partially destructive.
+- **purge (identity-based, ordered):** teardown targets the resolved project's resources **by
+  name** — `docker rm -f` by the `com.docker.compose.project=mathion_prod` label, `docker
+  network rm`, and `docker volume rm` of the two resolved volume names — with **no
+  `-f`/`--env-file`**, so `.env`-absent + a surviving volume still purges (fake Runner asserts
+  the by-name argv, the absence of `--env-file`, and that an already-absent resource is
+  tolerated); `<cfgdir>` removal runs **only after** teardown succeeds — a fake Runner that
+  fails teardown leaves `<cfgdir>` (`.env` + `install-state`) intact and skips removal (purge
+  is never partially destructive).
 
 **Integration (real Docker):** non-interactive `install --yes --domain … --admin-email …
 --version <published-tag>` into a temp `MATHION_CONFIG_DIR` with a **unique `-p` project**
@@ -362,7 +369,9 @@ mirrors `deploy/smoke.sh`, which already proves Docker/Compose-v2 + this exact f
 
 ## 12. Boundaries & non-goals
 
-- Wraps only: `docker compose` (Slice 1), the container's `alembic`, and
+- Wraps only: `docker compose` (Slice 1) plus a few **narrowly-scoped bare `docker` calls**
+  (`volume inspect` for the install volume guard; `down`/`volume rm` by resolved identity for
+  `--purge`), the container's `alembic`, and
   `python -m mathion.superuser {create-superuser,pin}`. **Zero** changes to
   backend/frontend/compose — the embedded compose is a verbatim copy.
 - Not responsible for TLS/reverse proxy, DNS, firewalls, or OS packages.
@@ -383,7 +392,9 @@ mirrors `deploy/smoke.sh`, which already proves Docker/Compose-v2 + this exact f
    is authority-only, scheme rejected. (`https`-only — prod is TLS-terminating proxy +
    `COOKIE_SECURE=1`.)
 6. `uninstall` retains config + volumes; `--purge` removes both behind an identity-bound
-   typed confirmation; `--yes` is install-scoped.
+   typed confirmation and tears down **by resolved identity** (no `.env`/compose dependency),
+   so it doubles as the recovery hatch for a lost-`.env` / surviving-volume state; `--yes` is
+   install-scoped.
 7. `version` prints CLI + pinned image version only; no GHCR discovery (Slice 3).
 8. Posture → cobra + goreleaser (**build-only**, `gh` publish; no Pro) + `go:embed`
    (drift-guarded). `main.{version,defaultImage}` have non-empty in-source defaults.
