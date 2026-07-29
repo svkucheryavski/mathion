@@ -57,6 +57,28 @@ func TestFailClosedOnMissingState(t *testing.T) {
 	}
 }
 
+func TestDanglingEnvSymlinkFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	// .env is a symlink whose target does not exist. os.Stat(.env) would return
+	// ENOENT (following the link) and a Stat-based check would treat it as "absent"
+	// → fresh install → regenerated secrets. The dispatcher must instead treat the
+	// broken symlink as present-but-not-a-regular-file and fail closed.
+	if err := os.Symlink(filepath.Join(dir, "nonexistent-target"), filepath.Join(dir, ".env")); err != nil {
+		t.Fatal(err)
+	}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: os.Stdout, Err: os.Stderr}
+	err := app.runInstall(context.Background(), installOpts{Domain: "d.edu", AdminEmail: "a@b.edu"})
+	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("dangling .env symlink must fail closed, got %v", err)
+	}
+	// no fresh install ran: .env must still be the dangling symlink, never replaced
+	// by a regular file full of freshly-generated secrets.
+	fi, lerr := os.Lstat(filepath.Join(dir, ".env"))
+	if lerr != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf(".env should remain the dangling symlink, got mode=%v err=%v", fi.Mode(), lerr)
+	}
+}
+
 func TestVolumeGuardBlocksFreshOverExistingVolume(t *testing.T) {
 	dir := t.TempDir() // no .env, no state → provisionally fresh
 	f := runnerWithVolumes(map[string]bool{"mathion_prod_mathion_pgdata": true})

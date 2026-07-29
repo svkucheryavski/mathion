@@ -35,7 +35,15 @@ func newInstallCmd(app *App) *cobra.Command {
 
 func (a *App) runInstall(ctx context.Context, o installOpts) error {
 	envPath := a.CfgDir + "/.env"
-	_, statErr := os.Stat(envPath)
+	// Lstat (not Stat): Stat follows symlinks, so a DANGLING .env symlink returns
+	// ENOENT and would be misread as "absent" → the fresh path, which regenerates
+	// secrets. Lstat inspects the entry itself: a genuinely missing entry is the
+	// only "absent" (→ fresh); a dangling/non-regular symlink is present-but-broken
+	// (→ fail-closed regular-file guard below); any other fs error fails closed.
+	fi, statErr := os.Lstat(envPath)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fmt.Errorf("cannot access %s: %w", envPath, statErr)
+	}
 	envExists := statErr == nil
 
 	// Step 2 (partial): docker/daemon reachable — needed by both branches.
@@ -44,8 +52,10 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 	}
 
 	if envExists {
-		// RESUME or FAIL CLOSED. .env must be a complete, valid config.
-		if fi, err := os.Lstat(envPath); err != nil || !fi.Mode().IsRegular() {
+		// RESUME or FAIL CLOSED. .env must be a complete, valid config. The Lstat
+		// above already inspected the entry; a symlink/dir/anything non-regular is
+		// rejected here (a dangling .env symlink lands here, not on the fresh path).
+		if !fi.Mode().IsRegular() {
 			return fmt.Errorf(".env at %s is not a regular file; repair it or run `mathion uninstall --purge`", envPath)
 		}
 		st, err := config.ReadState(a.CfgDir)
