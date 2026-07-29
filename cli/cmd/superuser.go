@@ -2,10 +2,15 @@ package cmd
 
 import "github.com/spf13/cobra"
 
-// newSuperuserCmd is a stub; its RunE body is implemented in a later task.
 func newSuperuserCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:  "superuser",
-		RunE: func(*cobra.Command, []string) error { return nil },
+		Use:   "superuser <email>",
+		Short: "Create or promote a superuser account (idempotent)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			// create-superuser exits 0 on create/promote, non-zero on invalid
+			// input — gate on the exit code.
+			return app.compose(c.Context(), "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", args[0])
+		},
 	}
 }
