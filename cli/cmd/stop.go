@@ -2,10 +2,12 @@ package cmd
 
 import "github.com/spf13/cobra"
 
-// newStopCmd is a stub; its RunE body is implemented in a later task.
 func newStopCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:  "stop",
-		RunE: func(*cobra.Command, []string) error { return nil },
+		Use:   "stop",
+		Short: "Stop the stack (containers stopped; data + config retained)",
+		RunE: func(c *cobra.Command, _ []string) error {
+			return app.compose(c.Context(), "stop")
+		},
 	}
 }

@@ -24,6 +24,19 @@ var buildVersion, buildDefaultImage = "dev", "v0.1.1"
 
 func SetBuildInfo(v, img string) { buildVersion, buildDefaultImage = v, img }
 
+func (a *App) composeArgs(sub ...string) []string {
+	base := []string{
+		"compose", "-p", a.Project,
+		"-f", a.CfgDir + "/docker-compose.yml",
+		"--env-file", a.CfgDir + "/.env",
+	}
+	return append(base, sub...)
+}
+
+func (a *App) compose(ctx context.Context, sub ...string) error {
+	return a.Runner.Run(ctx, a.composeArgs(sub...)...)
+}
+
 func resolveCfgDir() string {
 	if v := os.Getenv("MATHION_CONFIG_DIR"); v != "" {
 		return v
