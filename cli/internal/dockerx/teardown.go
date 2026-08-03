@@ -9,8 +9,9 @@ import (
 )
 
 // Purge tears down the resolved project's resources by name (config-independent).
-// Order: containers -> network -> volumes. Only a not-found outcome is tolerated;
-// any other failure fails teardown so the caller retains <cfgdir>.
+// Order: containers -> network -> volumes. A resource is removed only when it is
+// positively present; any error while checking or removing fails teardown so the
+// caller retains <cfgdir> (fail-closed).
 func Purge(ctx context.Context, r compose.Runner, project string) error {
 	out, err := r.Output(ctx, "ps", "-aq", "--filter", "label=com.docker.compose.project="+project)
 	if err != nil {
@@ -27,24 +28,34 @@ func Purge(ctx context.Context, r compose.Runner, project string) error {
 			return fmt.Errorf("removing containers: %w", err)
 		}
 	}
-	if err := removeIfPresent(ctx, r, []string{"network", "inspect"}, []string{"network", "rm"}, project+"_default"); err != nil {
+	if err := removeIfPresent(ctx, r, "network", project+"_default"); err != nil {
 		return err
 	}
 	for _, vol := range []string{project + "_mathion_pgdata", project + "_mathion_assets"} {
-		if err := removeIfPresent(ctx, r, []string{"volume", "inspect"}, []string{"volume", "rm"}, vol); err != nil {
+		if err := removeIfPresent(ctx, r, "volume", vol); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// removeIfPresent inspects a resource; if absent, skips (tolerated); if present,
-// removes it and returns any removal error (a non-absence failure).
-func removeIfPresent(ctx context.Context, r compose.Runner, inspect, remove []string, name string) error {
-	if _, err := r.Output(ctx, append(inspect, name)...); err != nil {
+// removeIfPresent checks whether a resource of the given kind ("network" | "volume")
+// exists via `<kind> ls --filter name=^<name>$ --quiet`, which lists the resource
+// only when it is present and exits zero either way. An empty result means the
+// resource is absent (tolerated, skipped); a non-empty result means it exists, so
+// it is removed. Any error from the existence check or the removal fails teardown:
+// unlike `inspect`, `ls` errors only on a genuine failure (daemon down, permission,
+// transport), never merely because the resource is missing, so only a positively
+// absent resource is skipped.
+func removeIfPresent(ctx context.Context, r compose.Runner, kind, name string) error {
+	out, err := r.Output(ctx, kind, "ls", "--filter", "name=^"+name+"$", "--quiet")
+	if err != nil {
+		return fmt.Errorf("checking %s %s: %w", kind, name, err)
+	}
+	if strings.TrimSpace(out) == "" {
 		return nil // absent -> nothing to remove
 	}
-	if err := r.Run(ctx, append(remove, name)...); err != nil {
+	if err := r.Run(ctx, kind, "rm", name); err != nil {
 		return fmt.Errorf("removing %s: %w", name, err)
 	}
 	return nil
