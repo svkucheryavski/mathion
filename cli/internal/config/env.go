@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -83,7 +84,18 @@ func ValidateEnvComplete(m map[string]string) error {
 			return fmt.Errorf("missing required key %s", k)
 		}
 	}
-	if pw := m["POSTGRES_PASSWORD"]; !strings.Contains(m["MATHION_DATABASE_URL"], "mathion:"+pw+"@") {
+	// Parse the URL and compare its actual userinfo to POSTGRES_USER/PASSWORD — a
+	// substring match on the raw string is spoofable (a decoy `mathion:<pw>@` in a
+	// query string would pass while the real credentials are wrong).
+	u, err := url.Parse(m["MATHION_DATABASE_URL"])
+	if err != nil {
+		return fmt.Errorf("MATHION_DATABASE_URL is not a valid URL: %w", err)
+	}
+	if u.User == nil {
+		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
+	}
+	pw, hasPw := u.User.Password()
+	if u.User.Username() != "mathion" || !hasPw || pw != m["POSTGRES_PASSWORD"] {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
 	}
 	return nil

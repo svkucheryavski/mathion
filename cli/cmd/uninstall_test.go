@@ -119,3 +119,32 @@ func TestPurgeRefusesUnrecognizedCfgDir(t *testing.T) {
 		t.Fatalf("guard must abort before any docker command, got %v", f.Calls)
 	}
 }
+
+func TestPurgeRefusesSymlinkCfgDir(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	seedInstall(t, target) // a VALID marker lives inside the symlink target
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	// Trailing slash: a naive Lstat(link+"/") dereferences the symlink and would
+	// see the target dir, skipping the symlink guard. Cleaning the path first
+	// makes Lstat see the link itself.
+	app := &App{CfgDir: link + "/", Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("purge must refuse a symlink config dir, got %v", err)
+	}
+	if _, e := os.Stat(filepath.Join(target, "install-state")); e != nil {
+		t.Fatal("symlink target removed despite the guard refusing")
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("guard must abort before any docker command, got %v", f.Calls)
+	}
+}

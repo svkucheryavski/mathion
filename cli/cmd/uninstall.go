@@ -33,13 +33,16 @@ func newUninstallCmd(app *App) *cobra.Command {
 			// Bind the config-dir removal to a directory mathion recognizes BEFORE
 			// any teardown, so a mis-set MATHION_CONFIG_DIR (e.g. "/", "$HOME") fails
 			// closed with nothing destroyed rather than being blown away by RemoveAll.
-			if err := recognizedCfgDir(app.CfgDir); err != nil {
+			// The guard returns the CLEANED path — use it for RemoveAll so a trailing
+			// slash can't make Lstat dereference a final symlink the guard then skips.
+			cleanDir, err := recognizedCfgDir(app.CfgDir)
+			if err != nil {
 				return err
 			}
 			if err := dockerx.Purge(c.Context(), app.Runner, app.Project); err != nil {
 				return err // teardown failed -> cfgdir retained
 			}
-			if err := os.RemoveAll(app.CfgDir); err != nil {
+			if err := os.RemoveAll(cleanDir); err != nil {
 				return err
 			}
 			fmt.Fprintln(app.Out, "purged.")
@@ -52,28 +55,32 @@ func newUninstallCmd(app *App) *cobra.Command {
 
 // recognizedCfgDir verifies cfgdir is a real, absolute, non-symlink directory
 // that mathion created — proven by a readable, valid install-state marker inside
-// it. This binds the caller's os.RemoveAll to a directory we own, so a mis-set
-// MATHION_CONFIG_DIR ("/", "$HOME", a symlink, a path with no marker) can never
-// be recursively deleted by `uninstall --purge`.
-func recognizedCfgDir(cfgdir string) error {
+// it — and returns the CLEANED path for the caller to remove. This binds the
+// caller's os.RemoveAll to a directory we own, so a mis-set MATHION_CONFIG_DIR
+// ("/", "$HOME", a symlink, a path with no marker) can never be recursively
+// deleted by `uninstall --purge`. The path is cleaned ONCE up front and every
+// check runs against that clean path: a trailing slash or `/.` would otherwise
+// make Lstat dereference a final symlink, letting the symlink guard skip it.
+func recognizedCfgDir(cfgdir string) (string, error) {
 	if !filepath.IsAbs(cfgdir) {
-		return fmt.Errorf("config dir %q is not an absolute path; refusing to purge it", cfgdir)
+		return "", fmt.Errorf("config dir %q is not an absolute path; refusing to purge it", cfgdir)
 	}
-	if clean := filepath.Clean(cfgdir); clean == "/" {
-		return fmt.Errorf("config dir %q resolves to the filesystem root; refusing to purge it", cfgdir)
+	clean := filepath.Clean(cfgdir)
+	if clean == "/" {
+		return "", fmt.Errorf("config dir %q resolves to the filesystem root; refusing to purge it", cfgdir)
 	}
-	fi, err := os.Lstat(cfgdir)
+	fi, err := os.Lstat(clean)
 	if err != nil {
-		return fmt.Errorf("cannot access config dir %q: %w", cfgdir, err)
+		return "", fmt.Errorf("cannot access config dir %q: %w", clean, err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("config dir %q is a symlink; refusing to purge it", cfgdir)
+		return "", fmt.Errorf("config dir %q is a symlink; refusing to purge it", clean)
 	}
 	if !fi.IsDir() {
-		return fmt.Errorf("config dir %q is not a directory; refusing to purge it", cfgdir)
+		return "", fmt.Errorf("config dir %q is not a directory; refusing to purge it", clean)
 	}
-	if _, err := config.ReadState(cfgdir); err != nil {
-		return fmt.Errorf("config dir %q has no valid mathion install-state marker (%w); refusing to purge it — remove it by hand if that is really what you want", cfgdir, err)
+	if _, err := config.ReadState(clean); err != nil {
+		return "", fmt.Errorf("config dir %q has no valid mathion install-state marker (%w); refusing to purge it — remove it by hand if that is really what you want", clean, err)
 	}
-	return nil
+	return clean, nil
 }

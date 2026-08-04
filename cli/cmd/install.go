@@ -29,7 +29,7 @@ func newInstallCmd(app *App) *cobra.Command {
 	c.Flags().StringVar(&o.Domain, "domain", "", "deployment domain (host[:port], no scheme)")
 	c.Flags().StringVar(&o.AdminEmail, "admin-email", "", "first superuser email")
 	c.Flags().StringVar(&o.Version, "version", "", "app image tag (default: recommended)")
-	c.Flags().BoolVar(&o.Yes, "yes", false, "non-interactive: require --domain and --admin-email")
+	c.Flags().BoolVar(&o.Yes, "yes", false, "scripted/CI install: never prompt (both --domain and --admin-email are required regardless)")
 	return c
 }
 

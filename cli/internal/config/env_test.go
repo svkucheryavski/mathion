@@ -85,6 +85,20 @@ func TestValidateEnvComplete(t *testing.T) {
 	if err := ValidateEnvComplete(dec); err == nil || !strings.Contains(err.Error(), "coupled") {
 		t.Errorf("decoupled DB password must fail closed, got %v", err)
 	}
+	// Spoof: the real userinfo password is wrong, but a decoy `mathion:<pw>@` sits
+	// in a query string. A substring check would accept it; parsing userinfo rejects.
+	spoof := ParseEnv(RenderEnv(gen()))
+	spoof["POSTGRES_PASSWORD"] = "expected"
+	spoof["MATHION_DATABASE_URL"] = "postgresql+psycopg://mathion:wrong@db:5432/mathion?x=mathion:expected@"
+	if err := ValidateEnvComplete(spoof); err == nil || !strings.Contains(err.Error(), "coupled") {
+		t.Errorf("a decoy substring must not satisfy the coupling check, got %v", err)
+	}
+	// Malformed URL → fail closed.
+	bad := ParseEnv(RenderEnv(gen()))
+	bad["MATHION_DATABASE_URL"] = "://not a url"
+	if err := ValidateEnvComplete(bad); err == nil {
+		t.Errorf("a malformed DB URL must fail closed, got nil")
+	}
 }
 
 func TestEnvKeyParityWithExample(t *testing.T) {
