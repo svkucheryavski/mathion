@@ -69,6 +69,90 @@ inbound TCP **80 and 443** open (for ACME/Let's Encrypt); a reverse proxy for TL
 **published** image — valid only after the maintainer has pushed a release and
 made the GHCR package public.
 
+### Self-hosting with the `mathion` CLI
+
+The recommended path. The `mathion` CLI installs and manages the whole stack for
+you — no editing `.env` or running `docker compose` by hand. There are two
+distinct steps: first install the CLI **binary**, then use it to stand up the
+**deployment**.
+
+**Install the CLI.** The one-liner downloads the latest `cli-v*` release, verifies
+its checksum against the release `checksums.txt`, and installs `mathion` to
+`/usr/local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh
+```
+
+Prefer to read before you run? Download, inspect, then execute:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh -o install.sh
+less install.sh          # review what it does
+sudo sh install.sh
+```
+
+The installer verifies **integrity** (sha256 against `checksums.txt`), not
+**authenticity** — it confirms the archive wasn't corrupted or truncated in
+transit, but does not prove who built it. Signed artifacts are planned for a
+future release; until then, inspect the script and pin a known release tag
+(`sudo sh install.sh cli-v0.1.0`) if that distinction matters to you.
+
+**Stand up the deployment.** The `mathion` commands shell out to `docker`, so they
+run as root — prefix each with `sudo`. `install` prompts for the deployment
+**domain** and **admin email** (or take them as flags):
+
+```bash
+sudo mathion install --domain school.edu --admin-email you@school.edu
+```
+
+`--domain` is a bare host or `host:port` — **no scheme**. This writes the config,
+pulls the image, starts the stack on `127.0.0.1:8000`, migrates the database, and
+creates the first superuser. Add `--yes` for a non-interactive run (which then
+requires both `--domain` and `--admin-email`).
+
+Then finish setup:
+
+1. Put a TLS reverse proxy in front of `127.0.0.1:8000` — see
+   [TLS / reverse proxy (external)](#tls--reverse-proxy-external) below. Confirm
+   `https://<domain>` loads with a valid cert before continuing (ACME + DNS can
+   take minutes).
+2. Issue the first-login PIN (it expires in 10 minutes):
+
+   ```bash
+   sudo mathion pin you@school.edu
+   ```
+
+3. Browse to **`https://<domain>`** and log in with your email + PIN. Log in over
+   HTTPS, **not** `http://127.0.0.1:8000` — the Secure session cookie won't persist
+   over plain HTTP, so a login there silently fails to stick.
+
+**Survive a reboot.** The stack's containers use `restart: unless-stopped`, but
+that policy only takes effect if the Docker daemon itself starts at boot. Enable
+it once:
+
+```bash
+sudo systemctl enable docker
+```
+
+**Command reference** (all commands shell out to `docker`, so run them with
+`sudo`):
+
+| Command | What it does |
+| --- | --- |
+| `mathion install --domain <host[:port]> --admin-email <email> [--version <tag>] [--yes]` | Install and start a deployment (`--domain` has no scheme; `--yes` is non-interactive and requires `--domain` + `--admin-email`). |
+| `mathion start` | Start the stack (`docker compose up -d --wait`). |
+| `mathion stop` | Stop the stack (containers stopped; data + config retained). |
+| `mathion status` | Show stack status + `/health`. |
+| `mathion logs [app\|db]` | Show stack logs (optionally for a single service). |
+| `mathion version` | Print CLI + pinned image version. |
+| `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
+| `mathion pin <email>` | Issue a first-login PIN (expires in 10 min; rate-limited 3/hour). |
+| `mathion uninstall` | Stop and remove containers (keeps data + config). |
+| `mathion uninstall --purge` | Also remove volumes and config — **destructive**; requires typing the project name to confirm. |
+
+### Manual setup (docker compose)
+
 Work from a directory containing `docker-compose.prod.yml`.
 
 ```bash
