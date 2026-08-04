@@ -98,9 +98,9 @@ transit, but does not prove who built it. Signed artifacts are planned for a
 future release; until then, inspect the script and pin a known release tag
 (`sudo sh install.sh cli-v0.1.0`) if that distinction matters to you.
 
-**Stand up the deployment.** The `mathion` commands shell out to `docker`, so they
-run as root — prefix each with `sudo`. `install` prompts for the deployment
-**domain** and **admin email** (or take them as flags):
+**Stand up the deployment.** The `mathion` commands manage Docker containers, so
+run them as root — prefix each with `sudo`. Pass the deployment **domain** and
+**admin email** as flags (both are required):
 
 ```bash
 sudo mathion install --domain school.edu --admin-email you@school.edu
@@ -108,8 +108,9 @@ sudo mathion install --domain school.edu --admin-email you@school.edu
 
 `--domain` is a bare host or `host:port` — **no scheme**. This writes the config,
 pulls the image, starts the stack on `127.0.0.1:8000`, migrates the database, and
-creates the first superuser. Add `--yes` for a non-interactive run (which then
-requires both `--domain` and `--admin-email`).
+creates the first superuser. For scripted or CI installs, add `--yes`; it requires
+both `--domain` and `--admin-email` to be set. (Interactive prompting for omitted
+values is planned but not yet available — supply both flags for now.)
 
 Then finish setup:
 
@@ -135,8 +136,8 @@ it once:
 sudo systemctl enable docker
 ```
 
-**Command reference** (all commands shell out to `docker`, so run them with
-`sudo`):
+**Command reference** (run each with `sudo` — the commands manage the Docker stack
+or read root-owned config):
 
 | Command | What it does |
 | --- | --- |
