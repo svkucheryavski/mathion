@@ -93,11 +93,14 @@ func TestValidateEnvComplete(t *testing.T) {
 	if err := ValidateEnvComplete(spoof); err == nil || !strings.Contains(err.Error(), "coupled") {
 		t.Errorf("a decoy substring must not satisfy the coupling check, got %v", err)
 	}
-	// Malformed URL → fail closed.
+	// Malformed URL → fail closed, and the error must NOT echo the URL: a raw
+	// url.Parse error carries the whole URL, DB password included.
 	bad := ParseEnv(RenderEnv(gen()))
-	bad["MATHION_DATABASE_URL"] = "://not a url"
+	bad["MATHION_DATABASE_URL"] = "postgresql+psycopg://mathion:" + bad["POSTGRES_PASSWORD"] + "@db:5432/mathion\x7f" // control char → parse error
 	if err := ValidateEnvComplete(bad); err == nil {
 		t.Errorf("a malformed DB URL must fail closed, got nil")
+	} else if strings.Contains(err.Error(), bad["POSTGRES_PASSWORD"]) {
+		t.Errorf("malformed-URL error must not leak the DB password: %q", err)
 	}
 }
 

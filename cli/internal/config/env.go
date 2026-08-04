@@ -89,7 +89,9 @@ func ValidateEnvComplete(m map[string]string) error {
 	// query string would pass while the real credentials are wrong).
 	u, err := url.Parse(m["MATHION_DATABASE_URL"])
 	if err != nil {
-		return fmt.Errorf("MATHION_DATABASE_URL is not a valid URL: %w", err)
+		// Static message on purpose: *url.Error.Error() echoes the raw URL, which
+		// carries the DB password — never wrap it into an operator-visible error.
+		return fmt.Errorf("MATHION_DATABASE_URL is not a valid URL")
 	}
 	if u.User == nil {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
