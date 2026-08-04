@@ -30,19 +30,26 @@ func newUninstallCmd(app *App) *cobra.Command {
 			if strings.TrimSpace(line) != app.Project {
 				return fmt.Errorf("confirmation did not match %q; aborting", app.Project)
 			}
-			// Bind the config-dir removal to a directory mathion recognizes BEFORE
-			// any teardown, so a mis-set MATHION_CONFIG_DIR (e.g. "/", "$HOME") fails
-			// closed with nothing destroyed rather than being blown away by RemoveAll.
-			// The guard returns the CLEANED path — use it for RemoveAll so a trailing
-			// slash can't make Lstat dereference a final symlink the guard then skips.
-			cleanDir, err := recognizedCfgDir(app.CfgDir)
-			if err != nil {
-				return err
-			}
+			// Identity teardown FIRST — the typed confirmation above is what gates it.
+			// It removes the resolved project's docker resources BY NAME and needs no
+			// config, so it must run even in the orphan (.env/config gone, volumes
+			// surviving) state and stay safely re-runnable to finish a partial purge —
+			// exactly the recovery hatch the install volume-guard points to. Gating it
+			// on cfgdir recognition would defeat that (a lost /etc/mathion would strand
+			// the docker resources).
 			if err := dockerx.Purge(c.Context(), app.Runner, app.Project); err != nil {
-				return err // teardown failed -> cfgdir retained
+				return err // teardown failed -> cfgdir retained (survives non-absence failure)
 			}
-			if err := os.RemoveAll(cleanDir); err != nil {
+			// Remove <cfgdir> ONLY if it is a directory mathion recognizes — that is
+			// what keeps a mis-set MATHION_CONFIG_DIR ("/", "$HOME", a symlink) from
+			// being blown away by RemoveAll. recognizedCfgDir returns the CLEANED path
+			// (so a trailing slash can't make Lstat dereference a final symlink). An
+			// unrecognized-or-already-gone cfgdir is NOT a failure here: teardown has
+			// already succeeded and purge must stay re-runnable, so leave it in place
+			// with a note rather than aborting.
+			if cleanDir, err := recognizedCfgDir(app.CfgDir); err != nil {
+				fmt.Fprintf(app.Err, "note: config dir left in place (%v)\n", err)
+			} else if err := os.RemoveAll(cleanDir); err != nil {
 				return err
 			}
 			fmt.Fprintln(app.Out, "purged.")
