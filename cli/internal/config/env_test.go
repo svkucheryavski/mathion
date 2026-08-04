@@ -65,6 +65,28 @@ func exampleKeys(t *testing.T) map[string]string {
 	return out
 }
 
+func TestValidateEnvComplete(t *testing.T) {
+	// A freshly generated .env is complete and coupled.
+	good := ParseEnv(RenderEnv(gen()))
+	if err := ValidateEnvComplete(good); err != nil {
+		t.Fatalf("a generated .env must validate, got %v", err)
+	}
+	// Each required key missing → error naming that key.
+	for _, k := range []string{"MATHION_SECRET_KEY", "POSTGRES_PASSWORD", "MATHION_DATABASE_URL", "MATHION_BASE_URL", "MATHION_VERSION"} {
+		m := ParseEnv(RenderEnv(gen()))
+		delete(m, k)
+		if err := ValidateEnvComplete(m); err == nil || !strings.Contains(err.Error(), k) {
+			t.Errorf("missing %s must fail closed, got %v", k, err)
+		}
+	}
+	// Decoupled DB password (URL no longer carries POSTGRES_PASSWORD) → error.
+	dec := ParseEnv(RenderEnv(gen()))
+	dec["POSTGRES_PASSWORD"] = "rotated-but-url-not-updated"
+	if err := ValidateEnvComplete(dec); err == nil || !strings.Contains(err.Error(), "coupled") {
+		t.Errorf("decoupled DB password must fail closed, got %v", err)
+	}
+}
+
 func TestEnvKeyParityWithExample(t *testing.T) {
 	gen := ParseEnv(RenderEnv(gen()))
 	for k := range exampleKeys(t) {

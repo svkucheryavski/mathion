@@ -9,7 +9,20 @@ import (
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 )
+
+// seedInstall writes the install-state marker (+ a .env) that the --purge guard
+// requires before it will os.RemoveAll a config dir.
+func seedInstall(t *testing.T, dir string) {
+	t.Helper()
+	if err := config.WriteState(dir, config.State{Schema: 1, AdminEmail: "you@example.edu"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestUninstallPlainIsComposeDown(t *testing.T) {
 	f := &compose.FakeRunner{}
@@ -47,7 +60,7 @@ func TestPurgeRequiresTypedProjectName(t *testing.T) {
 
 func TestPurgeSuccessRemovesCfgDir(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".env"), []byte("x"), 0o600)
+	seedInstall(t, dir) // install-state marker + .env
 	// Default fake: ps -> "", every `ls` -> "" (absent) => Purge succeeds cleanly.
 	f := &compose.FakeRunner{}
 	var out bytes.Buffer
@@ -67,7 +80,7 @@ func TestPurgeSuccessRemovesCfgDir(t *testing.T) {
 
 func TestPurgeRetainsCfgDirOnTeardownFailure(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".env"), []byte("x"), 0o600)
+	seedInstall(t, dir) // marker present, so the guard passes and we reach teardown
 	// ps succeeds, but the existence check errors (daemon-down-like) => fail closed.
 	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
 		if len(args) > 0 && args[0] == "ps" {
@@ -83,5 +96,26 @@ func TestPurgeRetainsCfgDirOnTeardownFailure(t *testing.T) {
 	}
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e != nil {
 		t.Fatal("cfgdir removed despite teardown failure")
+	}
+}
+
+func TestPurgeRefusesUnrecognizedCfgDir(t *testing.T) {
+	dir := t.TempDir()
+	// .env present but NO install-state marker → the dir is not one mathion owns,
+	// so even a correctly-typed confirmation must not trigger os.RemoveAll.
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("x"), 0o600)
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "install-state") {
+		t.Fatalf("purge must refuse a config dir with no install-state marker, got %v", err)
+	}
+	if _, e := os.Stat(filepath.Join(dir, ".env")); e != nil {
+		t.Fatal("cfgdir removed despite failing the recognized-dir guard")
+	}
+	// The guard runs BEFORE teardown, so no docker command should have executed.
+	if len(f.Calls) != 0 {
+		t.Fatalf("guard must abort before any docker command, got %v", f.Calls)
 	}
 }

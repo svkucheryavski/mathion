@@ -58,12 +58,23 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 		if !fi.Mode().IsRegular() {
 			return fmt.Errorf(".env at %s is not a regular file; repair it or run `mathion uninstall --purge`", envPath)
 		}
+		// .env holds secrets — a resume must refuse a file that has been made
+		// group/world-accessible rather than reuse it.
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			return fmt.Errorf(".env at %s is group/world-accessible (%v); it holds secrets — fix with `chmod 600 %s`", envPath, perm, envPath)
+		}
 		st, err := config.ReadState(a.CfgDir)
 		if err != nil {
 			return fmt.Errorf("install-state is missing or invalid (%w); repair it or run `mathion uninstall --purge`", err)
 		}
-		if _, err := config.ReadEnvFile(a.CfgDir); err != nil {
+		envMap, err := config.ReadEnvFile(a.CfgDir)
+		if err != nil {
 			return fmt.Errorf(".env is unreadable (%w); repair it or run `mathion uninstall --purge`", err)
+		}
+		// Fail closed on a corrupt/incomplete .env: resume trusts it verbatim, so
+		// a missing key or decoupled DB password must abort, not boot a broken stack.
+		if err := config.ValidateEnvComplete(envMap); err != nil {
+			return fmt.Errorf(".env is incomplete or inconsistent (%w); repair it or run `mathion uninstall --purge`", err)
 		}
 		warnDivergentFlags(a, o, st) // domain/email/version are ignored on resume
 		return a.resume(ctx, st)
@@ -83,10 +94,11 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 	if err := dockerx.PortFree("127.0.0.1:8000"); err != nil {
 		return err
 	}
-	if o.Yes && (o.Domain == "" || o.AdminEmail == "") {
-		return fmt.Errorf("--yes requires both --domain and --admin-email")
+	// Both values are required on a fresh install regardless of --yes (interactive
+	// prompting for omitted values is planned for a later slice, not implemented).
+	if o.Domain == "" || o.AdminEmail == "" {
+		return fmt.Errorf("install requires --domain and --admin-email (interactive prompting is planned but not yet available)")
 	}
-	// (interactive prompt for any missing value when not --yes) — promptIfEmpty
 	return a.runInstallFresh(ctx, o)
 }
 
@@ -116,7 +128,7 @@ func (a *App) resume(ctx context.Context, st config.State) error {
 	if err := a.compose(ctx, "exec", "-T", "app", "alembic", "upgrade", "head"); err != nil {
 		return err
 	}
-	return a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", st.AdminEmail)
+	return a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", st.AdminEmail)
 }
 
 func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
@@ -169,7 +181,7 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 	if err := a.compose(ctx, "exec", "-T", "app", "alembic", "upgrade", "head"); err != nil {
 		return err
 	}
-	if err := a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", email); err != nil {
+	if err := a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", email); err != nil {
 		return err
 	}
 

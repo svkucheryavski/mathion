@@ -65,3 +65,26 @@ func ReadEnvFile(cfgdir string) (map[string]string, error) {
 	}
 	return ParseEnv(string(b)), nil
 }
+
+// ValidateEnvComplete checks a parsed `.env` carries the load-bearing keys and
+// that the DB credentials stay coupled — the password inside MATHION_DATABASE_URL
+// must equal POSTGRES_PASSWORD (see GenerateEnv). A resume trusts an existing
+// `.env` instead of regenerating it, so a half-written or hand-corrupted file
+// must fail closed rather than boot a mis-credentialed stack.
+func ValidateEnvComplete(m map[string]string) error {
+	for _, k := range []string{
+		"MATHION_SECRET_KEY",
+		"POSTGRES_PASSWORD",
+		"MATHION_DATABASE_URL",
+		"MATHION_BASE_URL",
+		"MATHION_VERSION",
+	} {
+		if strings.TrimSpace(m[k]) == "" {
+			return fmt.Errorf("missing required key %s", k)
+		}
+	}
+	if pw := m["POSTGRES_PASSWORD"]; !strings.Contains(m["MATHION_DATABASE_URL"], "mathion:"+pw+"@") {
+		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
+	}
+	return nil
+}

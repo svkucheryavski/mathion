@@ -9,16 +9,24 @@ import (
 )
 
 func TestVolumeExists(t *testing.T) {
-	present := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) { return "ok", nil }}
+	// `volume ls --filter name=^X$ --quiet` prints the volume name when present.
+	present := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+		return "mathion_prod_mathion_pgdata\n", nil
+	}}
 	got, err := VolumeExists(context.Background(), present, "mathion_prod_mathion_pgdata")
 	if err != nil || !got {
 		t.Fatalf("VolumeExists present = (%v,%v), want (true,nil)", got, err)
 	}
-	// docker volume inspect exits non-zero when the volume is absent.
-	absent := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) { return "", &exitErr{} }}
+	// ...and prints nothing when the volume is absent.
+	absent := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) { return "", nil }}
 	got, err = VolumeExists(context.Background(), absent, "x")
 	if err != nil || got {
 		t.Fatalf("VolumeExists absent = (%v,%v), want (false,nil)", got, err)
+	}
+	// A daemon/CLI error must PROPAGATE (fail closed), never be read as "absent".
+	failing := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) { return "", &exitErr{} }}
+	if got, err := VolumeExists(context.Background(), failing, "x"); err == nil || got {
+		t.Fatalf("VolumeExists on docker error = (%v,%v), want (false, non-nil)", got, err)
 	}
 }
 

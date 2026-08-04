@@ -11,14 +11,18 @@ import (
 	"github.com/svkucheryavski/mathion/cli/internal/config"
 )
 
-// helper: a fake runner whose `volume inspect` reports the named volumes present.
+// helper: a fake runner whose `volume ls --filter name=^X$ --quiet` reports the
+// named volumes present (VolumeExists prints the name when present, nothing when
+// absent). Everything else (docker/compose version preflight) returns OK.
 func runnerWithVolumes(present map[string]bool) *compose.FakeRunner {
 	return &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
-		if len(args) >= 3 && args[0] == "volume" && args[1] == "inspect" {
-			if present[args[2]] {
-				return "ok", nil
+		if len(args) >= 2 && args[0] == "volume" && args[1] == "ls" {
+			for _, a := range args {
+				if name := strings.TrimSuffix(strings.TrimPrefix(a, "name=^"), "$"); name != a && present[name] {
+					return name + "\n", nil
+				}
 			}
-			return "", &noSuch{}
+			return "", nil
 		}
 		return "", nil
 	}}
@@ -90,5 +94,62 @@ func TestVolumeGuardBlocksFreshOverExistingVolume(t *testing.T) {
 	// NO secret written
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e == nil {
 		t.Fatal(".env was written despite the volume guard aborting")
+	}
+}
+
+func TestVolumeGuardFailsClosedOnDockerError(t *testing.T) {
+	dir := t.TempDir() // no .env, no state → provisionally fresh
+	// docker/compose version preflight OK, but the volume check itself errors.
+	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+		if len(args) >= 2 && args[0] == "volume" && args[1] == "ls" {
+			return "", &noSuch{}
+		}
+		return "", nil
+	}}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
+	err := app.runInstall(context.Background(), installOpts{Domain: "d.edu", AdminEmail: "a@b.edu"})
+	if err == nil {
+		t.Fatal("volume guard must fail closed when the docker volume check errors")
+	}
+	if _, e := os.Stat(filepath.Join(dir, ".env")); e == nil {
+		t.Fatal(".env was written despite the volume check erroring")
+	}
+}
+
+func TestResumeFailsClosedOnLooseEnvPerms(t *testing.T) {
+	dir := t.TempDir()
+	config.WriteState(dir, config.State{Schema: 1, AdminEmail: "you@example.edu"})
+	env := config.GenerateEnv("https://learn.example.edu", "v0.1.1", "S==", "hex")
+	envPath := filepath.Join(dir, ".env")
+	os.WriteFile(envPath, []byte(config.RenderEnv(env)), 0o600)
+	os.Chmod(envPath, 0o644) // force group/world-readable regardless of umask
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: os.Stdout, Err: os.Stderr}
+	err := app.runInstall(context.Background(), installOpts{Domain: "d.edu", AdminEmail: "a@b.edu"})
+	if err == nil || !strings.Contains(err.Error(), "group/world") {
+		t.Fatalf("resume must reject a group/world-accessible .env, got %v", err)
+	}
+}
+
+func TestResumeFailsClosedOnIncompleteEnv(t *testing.T) {
+	dir := t.TempDir()
+	config.WriteState(dir, config.State{Schema: 1, AdminEmail: "you@example.edu"})
+	// readable + 0600, but missing MATHION_DATABASE_URL/BASE_URL/VERSION coupling
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("MATHION_SECRET_KEY=x\nPOSTGRES_PASSWORD=hex\n"), 0o600)
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: os.Stdout, Err: os.Stderr}
+	err := app.runInstall(context.Background(), installOpts{Domain: "d.edu", AdminEmail: "a@b.edu"})
+	if err == nil || !strings.Contains(err.Error(), "incomplete or inconsistent") {
+		t.Fatalf("resume must reject an incomplete .env, got %v", err)
+	}
+}
+
+func TestInstallRequiresBothFlags(t *testing.T) {
+	dir := t.TempDir() // no .env, no state → fresh path
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: os.Stdout, Err: os.Stderr}
+	err := app.runInstall(context.Background(), installOpts{Domain: "d.edu"}) // admin-email omitted
+	if err == nil || !strings.Contains(err.Error(), "requires --domain and --admin-email") {
+		t.Fatalf("install must require both flags regardless of --yes, got %v", err)
+	}
+	if _, e := os.Stat(filepath.Join(dir, ".env")); e == nil {
+		t.Fatal(".env written despite a missing required flag")
 	}
 }

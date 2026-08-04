@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
@@ -12,7 +13,7 @@ import (
 
 func TestFreshInstallWritesConfigAndRuns(t *testing.T) {
 	dir := t.TempDir()
-	f := &compose.FakeRunner{} // all runs succeed, volume-inspect returns absent by default
+	f := &compose.FakeRunner{} // runInstallFresh bypasses the volume guard; all runs/outputs succeed
 	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
 	err := app.runInstallFresh(context.Background(), installOpts{
 		Domain: "learn.example.edu", AdminEmail: "You@Example.edu", Version: "v0.1.1",
@@ -40,20 +41,24 @@ func TestFreshInstallWritesConfigAndRuns(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dir, "docker-compose.yml")); string(b) != string(compose.ComposeYAML) {
 		t.Fatal("compose file not written from embed")
 	}
-	// verify the ordered compose subcommands were invoked
-	saw := func(sub string) bool {
-		for _, c := range f.Calls {
-			for _, a := range c {
-				if a == sub {
-					return true
-				}
-			}
-		}
-		return false
+	// .env holds secrets: it must be written 0600 (owner-only).
+	if fi, err := os.Stat(filepath.Join(dir, ".env")); err != nil {
+		t.Fatal(err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Fatalf(".env mode = %v, want 0600", fi.Mode().Perm())
 	}
-	for _, s := range []string{"pull", "up", "upgrade", "create-superuser"} {
-		if !saw(s) {
-			t.Errorf("install never ran %q", s)
-		}
+	// The compose steps must run in the exact order pull → up → migrate → superuser
+	// (a wrong order would migrate before the stack is up, or create a superuser
+	// against an unmigrated DB). Email is normalized; `--` guards the positional.
+	base := []string{"compose", "-p", "mathion_prod", "-f", filepath.Join(dir, "docker-compose.yml"), "--env-file", filepath.Join(dir, ".env")}
+	with := func(sub ...string) []string { return append(append([]string{}, base...), sub...) }
+	want := [][]string{
+		with("pull"),
+		with("up", "-d", "--wait"),
+		with("exec", "-T", "app", "alembic", "upgrade", "head"),
+		with("exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", "you@example.edu"),
+	}
+	if !reflect.DeepEqual(f.Calls, want) {
+		t.Fatalf("compose calls =\n%v\nwant\n%v", f.Calls, want)
 	}
 }
