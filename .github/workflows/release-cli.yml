@@ -54,7 +54,12 @@ jobs:
           APP_IMAGE: v0.1.1                          # recommended app image (hand-maintained)
         run: |
           SEMVER="v${CLI_TAG#cli-v}"                 # cli-v0.1.0 -> v0.1.0
-          GORELEASER_CURRENT_TAG="$SEMVER" goreleaser release --clean --skip=publish
+          # skip=validate: the CLI tag is cli-v*, but goreleaser's git-state check
+          # looks up a tag literally named "$SEMVER" (e.g. v0.1.1) and requires it on
+          # HEAD — which collides with the app's own v* release tag on another commit.
+          # CI checks out the exact cli-v* tag on a clean tree, and none of our output
+          # templates use goreleaser's .Version, so the validation is safe to skip.
+          GORELEASER_CURRENT_TAG="$SEMVER" goreleaser release --clean --skip=publish,validate
       - name: Publish release
         working-directory: cli
         env:
