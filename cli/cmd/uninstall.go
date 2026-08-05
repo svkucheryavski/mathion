@@ -49,8 +49,14 @@ func newUninstallCmd(app *App) *cobra.Command {
 			// with a note rather than aborting.
 			if cleanDir, err := recognizedCfgDir(app.CfgDir); err != nil {
 				fmt.Fprintf(app.Err, "note: config dir left in place (%v)\n", err)
-			} else if err := os.RemoveAll(cleanDir); err != nil {
+			} else if err := removeCfgArtifacts(cleanDir); err != nil {
 				return err
+			} else if err := os.Remove(cleanDir); err != nil && !os.IsNotExist(err) {
+				// cfgdir is not empty: the operator pointed MATHION_CONFIG_DIR at a
+				// populated/sensitive directory ($HOME, /etc, ...). We removed the
+				// files mathion wrote and leave everything else intact — os.RemoveAll
+				// would have recursively wiped the whole directory.
+				fmt.Fprintf(app.Err, "note: removed mathion's config files but left %s in place (%v)\n", cleanDir, err)
 			}
 			fmt.Fprintln(app.Out, "purged.")
 			return nil
@@ -90,4 +96,32 @@ func recognizedCfgDir(cfgdir string) (string, error) {
 		return "", fmt.Errorf("config dir %q has no valid mathion install-state marker (%w); refusing to purge it — remove it by hand if that is really what you want", clean, err)
 	}
 	return clean, nil
+}
+
+// removeCfgArtifacts deletes ONLY the files mathion writes into a config dir —
+// never recursively: the compose file, install-state, .env, and any leftover
+// atomic-write temp files. The caller then rmdir's the directory only if it is
+// now empty. So even though `install` will plant an install-state marker wherever
+// MATHION_CONFIG_DIR points (making recognizedCfgDir accept e.g. a home dir or
+// /etc), a --purge of such a location removes only mathion's own files and leaves
+// everything else — where os.RemoveAll would have wiped the entire directory.
+func removeCfgArtifacts(cfgdir string) error {
+	// .env first: it holds the secrets, so it goes even if a later step fails.
+	for _, name := range []string{".env", "docker-compose.yml", "install-state"} {
+		if err := os.Remove(filepath.Join(cfgdir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	entries, err := os.ReadDir(cfgdir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") { // config.AtomicWrite's temp pattern
+			if err := os.Remove(filepath.Join(cfgdir, e.Name())); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	return nil
 }

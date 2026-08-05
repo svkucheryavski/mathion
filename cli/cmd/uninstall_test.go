@@ -156,6 +156,40 @@ func TestPurgeTearsDownButKeepsSymlinkCfgDir(t *testing.T) {
 	}
 }
 
+func TestPurgeRemovesOnlyMathionFilesFromPopulatedCfgDir(t *testing.T) {
+	// `install` plants a valid install-state marker wherever MATHION_CONFIG_DIR
+	// points, so recognizedCfgDir accepts even a populated/sensitive dir ($HOME,
+	// /etc, ...). --purge must then remove ONLY mathion's own files and leave the
+	// rest — os.RemoveAll would have recursively wiped the whole directory.
+	dir := t.TempDir()
+	seedInstall(t, dir) // install-state + .env (mathion's)
+	userFile := filepath.Join(dir, "important.txt")
+	if err := os.WriteFile(userFile, []byte("do not delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	var errBuf bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errBuf, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("purge must succeed, got %v", err)
+	}
+	// mathion's files are gone (secrets removed)
+	for _, name := range []string{".env", "install-state"} {
+		if _, e := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(e) {
+			t.Fatalf("%s must be removed, stat err = %v", name, e)
+		}
+	}
+	// the user's file AND the directory itself survive — never RemoveAll'd
+	if b, e := os.ReadFile(userFile); e != nil || string(b) != "do not delete" {
+		t.Fatalf("a non-mathion file in the config dir must be left intact (b=%q err=%v)", b, e)
+	}
+	if !strings.Contains(errBuf.String(), "left") {
+		t.Fatalf("expected a note that the populated dir was left in place, got %q", errBuf.String())
+	}
+}
+
 func TestPurgeOrphanStateStillTearsDown(t *testing.T) {
 	// Orphan/recovery state: the config dir does not exist at all (.env + config
 	// gone) but docker resources may survive. --purge is the config-independent
