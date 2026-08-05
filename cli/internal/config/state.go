@@ -11,7 +11,10 @@ import (
 // directory, fsync, then rename. mode is applied to the final file.
 func AtomicWrite(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, ".tmp-*")
+	// Distinctive temp prefix (not a generic ".tmp-*") so `uninstall --purge`'s
+	// cleanup can target mathion's own atomic-write leftovers without ever matching
+	// a user's ".tmp-…" file in a config dir mistakenly pointed at a populated location.
+	f, err := os.CreateTemp(dir, ".mathion-tmp-*")
 	if err != nil {
 		return err
 	}

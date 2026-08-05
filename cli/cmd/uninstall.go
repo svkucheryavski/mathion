@@ -51,7 +51,7 @@ func newUninstallCmd(app *App) *cobra.Command {
 				fmt.Fprintf(app.Err, "note: config dir left in place (%v)\n", err)
 			} else if err := removeCfgArtifacts(cleanDir); err != nil {
 				return err
-			} else if err := os.Remove(cleanDir); err != nil && !os.IsNotExist(err) {
+			} else if err := rmdirCfgDir(cleanDir); err != nil && !os.IsNotExist(err) {
 				// cfgdir is not empty: the operator pointed MATHION_CONFIG_DIR at a
 				// populated/sensitive directory ($HOME, /etc, ...). We removed the
 				// files mathion wrote and leave everything else intact — os.RemoveAll
@@ -106,22 +106,60 @@ func recognizedCfgDir(cfgdir string) (string, error) {
 // /etc), a --purge of such a location removes only mathion's own files and leaves
 // everything else — where os.RemoveAll would have wiped the entire directory.
 func removeCfgArtifacts(cfgdir string) error {
+	// Open cfgdir THROUGH its parent as an os.Root so every removal below is
+	// symlink-safe and fd-relative. recognizedCfgDir already Lstat'd cfgdir as a
+	// real dir, but that is a path-based check: between it and these deletes, a
+	// user who controls the parent could swap cfgdir for a symlink and redirect
+	// path-based os.Remove calls (os.RemoveAll used fd-relative unlinkat and did
+	// not have this exposure). Resolving cfgdir under its parent Root instead
+	// rejects such a swap with "path escapes from parent" rather than following it.
+	parent, err := os.OpenRoot(filepath.Dir(cfgdir))
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	root, err := parent.OpenRoot(filepath.Base(cfgdir))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	// .env first: it holds the secrets, so it goes even if a later step fails.
 	for _, name := range []string{".env", "docker-compose.yml", "install-state"} {
-		if err := os.Remove(filepath.Join(cfgdir, name)); err != nil && !os.IsNotExist(err) {
+		if err := root.Remove(name); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
-	entries, err := os.ReadDir(cfgdir)
+	d, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	entries, err := d.ReadDir(-1)
+	d.Close()
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".tmp-") { // config.AtomicWrite's temp pattern
-			if err := os.Remove(filepath.Join(cfgdir, e.Name())); err != nil && !os.IsNotExist(err) {
+		// Only mathion's own atomic-write leftovers: a distinctive prefix (so a
+		// user's ".tmp-…" file is never matched) AND a regular file (so a hand-made
+		// directory of that name is never touched — it would also block the rmdir).
+		if e.Type().IsRegular() && strings.HasPrefix(e.Name(), ".mathion-tmp-") {
+			if err := root.Remove(e.Name()); err != nil && !os.IsNotExist(err) {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// rmdirCfgDir removes the (now-empty) config dir via its parent Root, so a
+// symlink swapped in for cfgdir after its files were cleared is rejected
+// ("path escapes from parent") rather than followed. A non-empty dir yields a
+// normal error the caller surfaces as a note.
+func rmdirCfgDir(cfgdir string) error {
+	parent, err := os.OpenRoot(filepath.Dir(cfgdir))
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	return parent.Remove(filepath.Base(cfgdir))
 }

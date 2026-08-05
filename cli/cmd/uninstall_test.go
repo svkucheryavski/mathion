@@ -167,6 +167,12 @@ func TestPurgeRemovesOnlyMathionFilesFromPopulatedCfgDir(t *testing.T) {
 	if err := os.WriteFile(userFile, []byte("do not delete"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A user file whose name resembles a temp file: the cleanup must match only
+	// mathion's distinctive ".mathion-tmp-" prefix, never a generic ".tmp-…".
+	tmpLike := filepath.Join(dir, ".tmp-notes")
+	if err := os.WriteFile(tmpLike, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	f := &compose.FakeRunner{}
 	var errBuf bytes.Buffer
 	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errBuf, In: strings.NewReader("mathion_prod\n")}
@@ -185,8 +191,35 @@ func TestPurgeRemovesOnlyMathionFilesFromPopulatedCfgDir(t *testing.T) {
 	if b, e := os.ReadFile(userFile); e != nil || string(b) != "do not delete" {
 		t.Fatalf("a non-mathion file in the config dir must be left intact (b=%q err=%v)", b, e)
 	}
+	// a user's ".tmp-…" file must NOT be caught by the temp cleanup
+	if b, e := os.ReadFile(tmpLike); e != nil || string(b) != "keep me" {
+		t.Fatalf("a user's .tmp-* file must survive (b=%q err=%v)", b, e)
+	}
 	if !strings.Contains(errBuf.String(), "left") {
 		t.Fatalf("expected a note that the populated dir was left in place, got %q", errBuf.String())
+	}
+}
+
+func TestRemoveCfgArtifactsRejectsEscapingSymlink(t *testing.T) {
+	// Simulate the TOCTOU swap: after recognizedCfgDir validated it, cfgdir has
+	// become a symlink pointing OUTSIDE its parent (at a victim dir / /etc). The
+	// os.Root-based removal must reject it ("path escapes from parent") and delete
+	// nothing in the target — where path-based os.Remove would have followed it.
+	cfgParent := t.TempDir()
+	victim := t.TempDir() // outside cfgParent
+	victimEnv := filepath.Join(victim, ".env")
+	if err := os.WriteFile(victimEnv, []byte("VICTIM SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(cfgParent, "cfg")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeCfgArtifacts(link); err == nil {
+		t.Fatal("removeCfgArtifacts must reject a cfgdir that is an escaping symlink")
+	}
+	if _, e := os.Stat(victimEnv); e != nil {
+		t.Fatalf("victim .env deleted through an escaping symlink — TOCTOU not closed (%v)", e)
 	}
 }
 
