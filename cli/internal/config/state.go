@@ -11,7 +11,10 @@ import (
 // directory, fsync, then rename. mode is applied to the final file.
 func AtomicWrite(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, ".tmp-*")
+	// Distinctive temp prefix (not a generic ".tmp-*") so `uninstall --purge`'s
+	// cleanup can target mathion's own atomic-write leftovers without ever matching
+	// a user's ".tmp-…" file in a config dir mistakenly pointed at a populated location.
+	f, err := os.CreateTemp(dir, ".mathion-tmp-*")
 	if err != nil {
 		return err
 	}
@@ -75,6 +78,14 @@ func ReadState(cfgdir string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	return ParseState(b)
+}
+
+// ParseState validates raw install-state bytes. Callers that must read the
+// marker through a symlink-safe file handle (e.g. os.Root) read the bytes
+// themselves and validate them here, so the exact same schema check backs both
+// the path-based ReadState and the fd-bound recognition in `uninstall --purge`.
+func ParseState(b []byte) (State, error) {
 	var s State
 	if err := json.Unmarshal(b, &s); err != nil {
 		return State{}, fmt.Errorf("install-state is not valid JSON: %w", err)

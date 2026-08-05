@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -99,28 +100,32 @@ func TestPurgeRetainsCfgDirOnTeardownFailure(t *testing.T) {
 	}
 }
 
-func TestPurgeRefusesUnrecognizedCfgDir(t *testing.T) {
+func TestPurgeTearsDownButKeepsUnrecognizedCfgDir(t *testing.T) {
 	dir := t.TempDir()
-	// .env present but NO install-state marker → the dir is not one mathion owns,
-	// so even a correctly-typed confirmation must not trigger os.RemoveAll.
+	// .env present but NO install-state marker → not a dir mathion owns. The
+	// identity teardown must STILL run (it needs no config), but os.RemoveAll must
+	// not touch this dir — it is left in place with a note, and the command succeeds.
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("x"), 0o600)
-	f := &compose.FakeRunner{}
-	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	f := &compose.FakeRunner{} // default: ps/ls -> "" => teardown succeeds (absent = no-op)
+	var errBuf bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errBuf, In: strings.NewReader("mathion_prod\n")}
 	cmd := newUninstallCmd(app)
 	cmd.SetArgs([]string{"--purge"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "install-state") {
-		t.Fatalf("purge must refuse a config dir with no install-state marker, got %v", err)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("purge must complete (teardown runs) even when cfgdir is unrecognized, got %v", err)
+	}
+	if len(f.Calls) == 0 {
+		t.Fatal("identity teardown must run regardless of cfgdir recognition")
 	}
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e != nil {
-		t.Fatal("cfgdir removed despite failing the recognized-dir guard")
+		t.Fatal("an unrecognized cfgdir must be left in place, not removed")
 	}
-	// The guard runs BEFORE teardown, so no docker command should have executed.
-	if len(f.Calls) != 0 {
-		t.Fatalf("guard must abort before any docker command, got %v", f.Calls)
+	if !strings.Contains(errBuf.String(), "config dir left in place") {
+		t.Fatalf("expected a note that the cfgdir was left in place, got %q", errBuf.String())
 	}
 }
 
-func TestPurgeRefusesSymlinkCfgDir(t *testing.T) {
+func TestPurgeTearsDownButKeepsSymlinkCfgDir(t *testing.T) {
 	base := t.TempDir()
 	target := filepath.Join(base, "target")
 	if err := os.Mkdir(target, 0o700); err != nil {
@@ -132,19 +137,141 @@ func TestPurgeRefusesSymlinkCfgDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &compose.FakeRunner{}
-	// Trailing slash: a naive Lstat(link+"/") dereferences the symlink and would
-	// see the target dir, skipping the symlink guard. Cleaning the path first
-	// makes Lstat see the link itself.
-	app := &App{CfgDir: link + "/", Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	var errBuf bytes.Buffer
+	// Trailing slash: Lstat(Clean(link+"/")) sees the LINK, so the removal guard
+	// skips it. Teardown still runs; the symlink and its target are left untouched.
+	app := &App{CfgDir: link + "/", Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errBuf, In: strings.NewReader("mathion_prod\n")}
 	cmd := newUninstallCmd(app)
 	cmd.SetArgs([]string{"--purge"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("purge must refuse a symlink config dir, got %v", err)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("purge must complete (teardown runs) with a symlink cfgdir, got %v", err)
+	}
+	if len(f.Calls) == 0 {
+		t.Fatal("identity teardown must run even when cfgdir is a symlink")
 	}
 	if _, e := os.Stat(filepath.Join(target, "install-state")); e != nil {
-		t.Fatal("symlink target removed despite the guard refusing")
+		t.Fatal("symlink target removed despite the removal guard")
 	}
-	if len(f.Calls) != 0 {
-		t.Fatalf("guard must abort before any docker command, got %v", f.Calls)
+	if !strings.Contains(errBuf.String(), "config dir left in place") {
+		t.Fatalf("expected a note that the cfgdir was left in place, got %q", errBuf.String())
+	}
+}
+
+func TestPurgeRemovesOnlyMathionFilesFromPopulatedCfgDir(t *testing.T) {
+	// `install` plants a valid install-state marker wherever MATHION_CONFIG_DIR
+	// points, so recognizedCfgDir accepts even a populated/sensitive dir ($HOME,
+	// /etc, ...). --purge must then remove ONLY mathion's own files and leave the
+	// rest — os.RemoveAll would have recursively wiped the whole directory.
+	dir := t.TempDir()
+	seedInstall(t, dir) // install-state + .env (mathion's)
+	userFile := filepath.Join(dir, "important.txt")
+	if err := os.WriteFile(userFile, []byte("do not delete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A user file whose name resembles a temp file: the cleanup must match only
+	// mathion's distinctive ".mathion-tmp-" prefix, never a generic ".tmp-…".
+	tmpLike := filepath.Join(dir, ".tmp-notes")
+	if err := os.WriteFile(tmpLike, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	var errBuf bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errBuf, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("purge must succeed, got %v", err)
+	}
+	// mathion's files are gone (secrets removed)
+	for _, name := range []string{".env", "install-state"} {
+		if _, e := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(e) {
+			t.Fatalf("%s must be removed, stat err = %v", name, e)
+		}
+	}
+	// the user's file AND the directory itself survive — never RemoveAll'd
+	if b, e := os.ReadFile(userFile); e != nil || string(b) != "do not delete" {
+		t.Fatalf("a non-mathion file in the config dir must be left intact (b=%q err=%v)", b, e)
+	}
+	// a user's ".tmp-…" file must NOT be caught by the temp cleanup
+	if b, e := os.ReadFile(tmpLike); e != nil || string(b) != "keep me" {
+		t.Fatalf("a user's .tmp-* file must survive (b=%q err=%v)", b, e)
+	}
+	if !strings.Contains(errBuf.String(), "left") {
+		t.Fatalf("expected a note that the populated dir was left in place, got %q", errBuf.String())
+	}
+}
+
+func TestRemoveCfgArtifactsRejectsEscapingSymlink(t *testing.T) {
+	// Simulate the TOCTOU swap: after recognizedCfgDir validated it, cfgdir has
+	// become a symlink pointing OUTSIDE its parent (at a victim dir / /etc). The
+	// os.Root-based removal must reject it ("path escapes from parent") and delete
+	// nothing in the target — where path-based os.Remove would have followed it.
+	cfgParent := t.TempDir()
+	victim := t.TempDir() // outside cfgParent
+	victimEnv := filepath.Join(victim, ".env")
+	if err := os.WriteFile(victimEnv, []byte("VICTIM SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(cfgParent, "cfg")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeCfgArtifacts(link); err == nil {
+		t.Fatal("removeCfgArtifacts must reject a cfgdir that is an escaping symlink")
+	}
+	if _, e := os.Stat(victimEnv); e != nil {
+		t.Fatalf("victim .env deleted through an escaping symlink — TOCTOU not closed (%v)", e)
+	}
+}
+
+func TestRemoveCfgArtifactsRejectsInParentSymlink(t *testing.T) {
+	// The subtler leaf race: after recognizedCfgDir validated it, cfgdir is
+	// swapped for a RELATIVE symlink to a SIBLING inside the same parent. That
+	// stays within the parent root, so parent.OpenRoot FOLLOWS it (an escaping
+	// symlink would be rejected, but this one is not). The marker re-check on the
+	// opened handle must then see the sibling has no valid install-state, return
+	// errCfgUnrecognized, and delete nothing — otherwise the sibling's own .env,
+	// docker-compose.yml and install-state would be removed.
+	parent := t.TempDir()
+	victim := filepath.Join(parent, "victim") // sibling, no valid marker
+	if err := os.Mkdir(victim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victimEnv := filepath.Join(victim, ".env")
+	if err := os.WriteFile(victimEnv, []byte("VICTIM SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "cfg")
+	if err := os.Symlink("victim", link); err != nil { // RELATIVE → stays in-root
+		t.Fatal(err)
+	}
+	err := removeCfgArtifacts(link)
+	if !errors.Is(err, errCfgUnrecognized) {
+		t.Fatalf("in-parent symlink to a markerless dir must be refused as unrecognized, got %v", err)
+	}
+	if _, e := os.Stat(victimEnv); e != nil {
+		t.Fatalf("victim .env deleted through an in-parent symlink — leaf TOCTOU not closed (%v)", e)
+	}
+}
+
+func TestPurgeOrphanStateStillTearsDown(t *testing.T) {
+	// Orphan/recovery state: the config dir does not exist at all (.env + config
+	// gone) but docker resources may survive. --purge is the config-independent
+	// recovery hatch — teardown must run and the command must succeed (so a partial
+	// purge can be re-run to finish), not abort on the missing dir.
+	dir := filepath.Join(t.TempDir(), "gone") // never created
+	f := &compose.FakeRunner{}
+	var errBuf bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errBuf, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("purge in the orphan state (no config) must still tear down, got %v", err)
+	}
+	if len(f.Calls) == 0 {
+		t.Fatal("identity teardown must run in the orphan state")
+	}
+	if !strings.Contains(errBuf.String(), "config dir left in place") {
+		t.Fatalf("expected a note about the missing config dir, got %q", errBuf.String())
 	}
 }
