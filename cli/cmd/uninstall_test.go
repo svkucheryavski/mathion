@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -220,6 +221,36 @@ func TestRemoveCfgArtifactsRejectsEscapingSymlink(t *testing.T) {
 	}
 	if _, e := os.Stat(victimEnv); e != nil {
 		t.Fatalf("victim .env deleted through an escaping symlink — TOCTOU not closed (%v)", e)
+	}
+}
+
+func TestRemoveCfgArtifactsRejectsInParentSymlink(t *testing.T) {
+	// The subtler leaf race: after recognizedCfgDir validated it, cfgdir is
+	// swapped for a RELATIVE symlink to a SIBLING inside the same parent. That
+	// stays within the parent root, so parent.OpenRoot FOLLOWS it (an escaping
+	// symlink would be rejected, but this one is not). The marker re-check on the
+	// opened handle must then see the sibling has no valid install-state, return
+	// errCfgUnrecognized, and delete nothing — otherwise the sibling's own .env,
+	// docker-compose.yml and install-state would be removed.
+	parent := t.TempDir()
+	victim := filepath.Join(parent, "victim") // sibling, no valid marker
+	if err := os.Mkdir(victim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victimEnv := filepath.Join(victim, ".env")
+	if err := os.WriteFile(victimEnv, []byte("VICTIM SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "cfg")
+	if err := os.Symlink("victim", link); err != nil { // RELATIVE → stays in-root
+		t.Fatal(err)
+	}
+	err := removeCfgArtifacts(link)
+	if !errors.Is(err, errCfgUnrecognized) {
+		t.Fatalf("in-parent symlink to a markerless dir must be refused as unrecognized, got %v", err)
+	}
+	if _, e := os.Stat(victimEnv); e != nil {
+		t.Fatalf("victim .env deleted through an in-parent symlink — leaf TOCTOU not closed (%v)", e)
 	}
 }
 

@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,13 @@ import (
 	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
 )
+
+// errCfgUnrecognized is returned by removeCfgArtifacts when the opened config
+// dir carries no valid install-state marker. It is not a failure: the caller
+// leaves the dir in place with a note (teardown has already succeeded and purge
+// must stay re-runnable). It also fail-safely closes a leaf-swap race — see
+// removeCfgArtifacts.
+var errCfgUnrecognized = errors.New("config dir has no valid mathion install-state marker")
 
 func newUninstallCmd(app *App) *cobra.Command {
 	var purge bool
@@ -49,7 +58,11 @@ func newUninstallCmd(app *App) *cobra.Command {
 			// with a note rather than aborting.
 			if cleanDir, err := recognizedCfgDir(app.CfgDir); err != nil {
 				fmt.Fprintf(app.Err, "note: config dir left in place (%v)\n", err)
-			} else if err := removeCfgArtifacts(cleanDir); err != nil {
+			} else if err := removeCfgArtifacts(cleanDir); errors.Is(err, errCfgUnrecognized) {
+				// A leaf-swap race redirected the open to a dir with no valid
+				// marker: delete nothing, leave it in place (fail-safe).
+				fmt.Fprintf(app.Err, "note: config dir left in place (%v)\n", err)
+			} else if err != nil {
 				return err
 			} else if err := rmdirCfgDir(cleanDir); err != nil && !os.IsNotExist(err) {
 				// cfgdir is not empty: the operator pointed MATHION_CONFIG_DIR at a
@@ -105,14 +118,17 @@ func recognizedCfgDir(cfgdir string) (string, error) {
 // MATHION_CONFIG_DIR points (making recognizedCfgDir accept e.g. a home dir or
 // /etc), a --purge of such a location removes only mathion's own files and leaves
 // everything else — where os.RemoveAll would have wiped the entire directory.
+//
+// It returns errCfgUnrecognized (a non-fatal signal to leave the dir in place)
+// when the OPENED handle carries no valid install-state marker.
 func removeCfgArtifacts(cfgdir string) error {
 	// Open cfgdir THROUGH its parent as an os.Root so every removal below is
 	// symlink-safe and fd-relative. recognizedCfgDir already Lstat'd cfgdir as a
 	// real dir, but that is a path-based check: between it and these deletes, a
 	// user who controls the parent could swap cfgdir for a symlink and redirect
 	// path-based os.Remove calls (os.RemoveAll used fd-relative unlinkat and did
-	// not have this exposure). Resolving cfgdir under its parent Root instead
-	// rejects such a swap with "path escapes from parent" rather than following it.
+	// not have this exposure). Resolving cfgdir under its parent Root rejects a
+	// swap to an ESCAPING symlink with "path escapes from parent".
 	parent, err := os.OpenRoot(filepath.Dir(cfgdir))
 	if err != nil {
 		return err
@@ -123,6 +139,16 @@ func removeCfgArtifacts(cfgdir string) error {
 		return err
 	}
 	defer root.Close()
+	// A swap to a RELATIVE in-parent symlink (e.g. cfgdir -> a sibling victim)
+	// stays inside the parent root, so parent.OpenRoot FOLLOWS it rather than
+	// rejecting it. Close that leaf race by re-validating the install-state marker
+	// through the SAME opened handle we are about to delete from: if the open was
+	// redirected to any directory without a valid mathion marker (a user's $HOME,
+	// /etc, ...), we remove nothing. A swap can therefore only ever land on another
+	// directory that already IS a mathion config dir — not a meaningful target.
+	if err := readMarker(root); err != nil {
+		return err
+	}
 	// .env first: it holds the secrets, so it goes even if a later step fails.
 	for _, name := range []string{".env", "docker-compose.yml", "install-state"} {
 		if err := root.Remove(name); err != nil && !os.IsNotExist(err) {
@@ -151,10 +177,36 @@ func removeCfgArtifacts(cfgdir string) error {
 	return nil
 }
 
-// rmdirCfgDir removes the (now-empty) config dir via its parent Root, so a
-// symlink swapped in for cfgdir after its files were cleared is rejected
-// ("path escapes from parent") rather than followed. A non-empty dir yields a
-// normal error the caller surfaces as a note.
+// readMarker validates the install-state marker through an already-opened,
+// symlink-safe os.Root handle (as opposed to path-based config.ReadState),
+// binding the recognition check to the exact inode removeCfgArtifacts deletes
+// from. A missing or invalid marker yields errCfgUnrecognized; a genuine I/O
+// error is returned as-is (the caller fails closed and retains the dir).
+func readMarker(root *os.Root) error {
+	f, err := root.Open("install-state")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errCfgUnrecognized
+		}
+		return err
+	}
+	b, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	if _, err := config.ParseState(b); err != nil {
+		return fmt.Errorf("%w (%v)", errCfgUnrecognized, err)
+	}
+	return nil
+}
+
+// rmdirCfgDir removes the (now-empty) config dir via its parent Root. Going
+// through the parent means an ESCAPING symlink swapped in for cfgdir is rejected
+// ("path escapes from parent"); a swap to a relative in-parent symlink unlinks
+// the symlink itself (parent.Remove does not follow the final component) rather
+// than the directory it points at. A non-empty dir yields a normal error the
+// caller surfaces as a note.
 func rmdirCfgDir(cfgdir string) error {
 	parent, err := os.OpenRoot(filepath.Dir(cfgdir))
 	if err != nil {
