@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,11 +49,12 @@ func fsyncDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	if err := d.Sync(); err != nil {
-		d.Close()
-		return err
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil {
+		return errors.Join(syncErr, closeErr) // errors.Join drops nils
 	}
-	return d.Close()
+	return closeErr
 }
 
 // RemoveSync unlinks path and fsyncs its parent directory so the removal is
