@@ -59,6 +59,86 @@ func ParseEnv(text string) map[string]string {
 	return out
 }
 
+// envLineKey computes the key a `.env` line contributes, matching ParseEnv's
+// per-line rule exactly (TrimSpace, skip blank/comment, Cut on '=', TrimSpace the
+// key). A line that contributes no key returns "" — which never equals a real key
+// name — so re-pin passes it through verbatim.
+func envLineKey(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return ""
+	}
+	k, _, ok := strings.Cut(line, "=")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(k)
+}
+
+// RepinVersion rewrites MATHION_VERSION in <cfgdir>/.env to newTag while
+// preserving every unrelated line. It is line-oriented (not a full regenerate) so
+// operator edits, comments, and extra keys survive an `update`/rollback re-pin.
+// The tag is validated BEFORE any read or write — a hostile tag must never touch
+// the file — and the whole file is re-validated AFTER the write so a re-pin can
+// never leave a corrupt or mis-targeted `.env` behind. Error messages stay static
+// or name only the key/tag role: the file carries the DB password and must never
+// leak into an operator-visible error.
+func RepinVersion(cfgdir, newTag string) error {
+	// (1) Validate the tag first — reject a hostile tag before touching the file.
+	if err := ValidateOCITag(newTag); err != nil {
+		return err
+	}
+	// (2) Read the current `.env` raw so unrelated lines pass through verbatim.
+	raw, err := os.ReadFile(cfgdir + "/.env")
+	if err != nil {
+		return fmt.Errorf("re-pin: read .env: %w", err)
+	}
+	// (3) Walk lines: emit the new value on the FIRST MATHION_VERSION match, drop
+	// later exact matches, append if never seen, pass everything else through.
+	lines := strings.Split(string(raw), "\n")
+	out := make([]string, 0, len(lines)+1)
+	seen := false
+	for _, line := range lines {
+		if envLineKey(line) == "MATHION_VERSION" {
+			if seen {
+				continue // collapse duplicates
+			}
+			out = append(out, "MATHION_VERSION="+newTag)
+			seen = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !seen {
+		// Append. When the file ended with a newline, Split left a trailing "" —
+		// insert the new line before it so we keep exactly one trailing newline and
+		// never double a blank line.
+		if n := len(out); n > 0 && out[n-1] == "" {
+			out[n-1] = "MATHION_VERSION=" + newTag
+			out = append(out, "")
+		} else {
+			out = append(out, "MATHION_VERSION="+newTag)
+		}
+	}
+	// (4) Write atomically with the private mode the `.env` requires.
+	if err := AtomicWrite(cfgdir+"/.env", []byte(strings.Join(out, "\n")), 0o600); err != nil {
+		return fmt.Errorf("re-pin: write .env: %w", err)
+	}
+	// (5) Re-read and assert the re-pin took AND the whole file is still valid, so a
+	// re-pin can never leave a corrupt or mis-targeted `.env`.
+	m, err := ReadEnvFile(cfgdir)
+	if err != nil {
+		return fmt.Errorf("re-pin: re-read .env: %w", err)
+	}
+	if m["MATHION_VERSION"] != newTag {
+		return fmt.Errorf("re-pin: MATHION_VERSION did not take effect")
+	}
+	if err := ValidateEnvComplete(m); err != nil {
+		return fmt.Errorf("re-pin produced an invalid .env: %w", err)
+	}
+	return nil
+}
+
 // ReadEnvFile loads and parses the `.env` file in cfgdir.
 func ReadEnvFile(cfgdir string) (map[string]string, error) {
 	b, err := os.ReadFile(cfgdir + "/.env")

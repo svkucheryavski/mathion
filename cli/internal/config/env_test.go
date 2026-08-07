@@ -166,6 +166,38 @@ func TestValidateEnvCompleteStrengthened(t *testing.T) {
 	}
 }
 
+func TestRepinVersion(t *testing.T) {
+	dir := t.TempDir()
+	raw := "# comment\nMATHION_SECRET_KEY=sk\nPOSTGRES_USER=mathion\nPOSTGRES_DB=mathion\n" +
+		"POSTGRES_PASSWORD=pw\nMATHION_DATABASE_URL=postgresql+psycopg://mathion:pw@db:5432/mathion\n" +
+		"MATHION_BASE_URL=https://x\nMATHION_VERSION_EXTRA=keepme\nMATHION_VERSION=v0.1.0\n" +
+		"MATHION_VERSION=v0.1.0\nSMTP_HOST=mail\n"
+	os.WriteFile(dir+"/.env", []byte(raw), 0o600)
+	if err := RepinVersion(dir, "v0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(dir + "/.env")
+	s := string(out)
+	if strings.Count(s, "\nMATHION_VERSION=") != 1 { // duplicates collapsed to one
+		t.Fatalf("expected one MATHION_VERSION line:\n%s", s)
+	}
+	if !strings.Contains(s, "MATHION_VERSION=v0.2.0") {
+		t.Fatalf("new tag missing:\n%s", s)
+	}
+	for _, keep := range []string{"# comment", "MATHION_VERSION_EXTRA=keepme", "SMTP_HOST=mail"} {
+		if !strings.Contains(s, keep) {
+			t.Fatalf("clobbered %q:\n%s", keep, s)
+		}
+	}
+	fi, _ := os.Stat(dir + "/.env")
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v", fi.Mode())
+	}
+	if err := RepinVersion(dir, `"bad"`); err == nil {
+		t.Fatalf("ValidateOCITag must reject a hostile tag before writing")
+	}
+}
+
 func TestEnvKeyParityWithExample(t *testing.T) {
 	gen := ParseEnv(RenderEnv(gen()))
 	for k := range exampleKeys(t) {
