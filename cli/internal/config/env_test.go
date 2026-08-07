@@ -155,6 +155,15 @@ func TestValidateEnvCompleteStrengthened(t *testing.T) {
 			t.Errorf("non-identifier %s must be rejected", k)
 		}
 	}
+	// Parser differential: Go splits userinfo at the last '@', SQLAlchemy/libpq at
+	// the first. Coupling passes (password matches POSTGRES_PASSWORD), so the
+	// multi-'@' guard must reject.
+	adv := base()
+	adv["POSTGRES_PASSWORD"] = "pw@evil.example,db"
+	adv["MATHION_DATABASE_URL"] = "postgresql+psycopg://mathion:pw@evil.example,db@db:5432/mathion"
+	if err := ValidateEnvComplete(adv); err == nil {
+		t.Errorf("multi-@ userinfo differential must be rejected")
+	}
 }
 
 func TestEnvKeyParityWithExample(t *testing.T) {

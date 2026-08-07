@@ -135,6 +135,14 @@ func ValidateEnvComplete(m map[string]string) error {
 	if u.User.Username() != m["POSTGRES_USER"] || !hasPw || pw != m["POSTGRES_PASSWORD"] {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
 	}
+	// Go's url.Parse splits userinfo at the LAST '@', but SQLAlchemy/libpq split at
+	// the FIRST — a password containing '@host' makes Go see host "db" while the
+	// backend connects elsewhere. The canonical URL has exactly one '@' (hex
+	// password). Checked after the coupling check so a wrong password still surfaces
+	// as the "coupled" error (the pre-existing spoof case has a decoy '@' in a query).
+	if strings.Count(m["MATHION_DATABASE_URL"], "@") != 1 {
+		return fmt.Errorf("MATHION_DATABASE_URL must contain exactly one '@'")
+	}
 	// Path must be exactly the target database, with no query or fragment that
 	// could redirect the connection (e.g. `?host=` / `?dbname=`).
 	if u.EscapedPath() != "/"+m["POSTGRES_DB"] {
