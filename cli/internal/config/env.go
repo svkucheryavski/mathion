@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -67,14 +68,22 @@ func ReadEnvFile(cfgdir string) (map[string]string, error) {
 	return ParseEnv(string(b)), nil
 }
 
+// pgIdentRe matches a plain SQL identifier — the only shape POSTGRES_USER and
+// POSTGRES_DB may take, so the values we pin MATHION_DATABASE_URL against cannot
+// smuggle URL metacharacters (`@`, `/`, `?`, `%`, …) into the comparison.
+var pgIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // ValidateEnvComplete checks a parsed `.env` carries the load-bearing keys and
-// that the DB credentials stay coupled — the password inside MATHION_DATABASE_URL
-// must equal POSTGRES_PASSWORD (see GenerateEnv). A resume trusts an existing
+// that the DB target stays pinned — MATHION_DATABASE_URL must address the bundled
+// `db` service on 5432 with the exact POSTGRES_USER/PASSWORD/DB (see GenerateEnv),
+// and MATHION_VERSION must be a legal image tag. A resume trusts an existing
 // `.env` instead of regenerating it, so a half-written or hand-corrupted file
-// must fail closed rather than boot a mis-credentialed stack.
+// must fail closed rather than boot a mis-credentialed or mis-targeted stack.
 func ValidateEnvComplete(m map[string]string) error {
 	for _, k := range []string{
 		"MATHION_SECRET_KEY",
+		"POSTGRES_USER",
+		"POSTGRES_DB",
 		"POSTGRES_PASSWORD",
 		"MATHION_DATABASE_URL",
 		"MATHION_BASE_URL",
@@ -84,21 +93,55 @@ func ValidateEnvComplete(m map[string]string) error {
 			return fmt.Errorf("missing required key %s", k)
 		}
 	}
-	// Parse the URL and compare its actual userinfo to POSTGRES_USER/PASSWORD — a
-	// substring match on the raw string is spoofable (a decoy `mathion:<pw>@` in a
-	// query string would pass while the real credentials are wrong).
+	// POSTGRES_USER/POSTGRES_DB must be plain identifiers — they are the trusted
+	// values the DB URL below is pinned against.
+	for _, k := range []string{"POSTGRES_USER", "POSTGRES_DB"} {
+		if !pgIdentRe.MatchString(m[k]) {
+			return fmt.Errorf("%s is not a valid identifier", k)
+		}
+	}
+	// MATHION_VERSION is interpolated into `image: ...:<tag>`; reject anything an
+	// OCI tag may not contain (quotes, shell-expansion, whitespace) before it can
+	// reach the compose file.
+	if err := ValidateOCITag(m["MATHION_VERSION"]); err != nil {
+		return fmt.Errorf("MATHION_VERSION is not a valid image tag")
+	}
+	// The DB URL is a compose-internal target, not an arbitrary DSN: reject
+	// percent-encoding outright. GenerateEnv never emits it (the password is hex),
+	// and url.Parse would otherwise decode `%61`→`a` and let a disguised host, db,
+	// or userinfo slip past the exact-match component checks below.
+	if strings.Contains(m["MATHION_DATABASE_URL"], "%") {
+		return fmt.Errorf("MATHION_DATABASE_URL must not be percent-encoded")
+	}
 	u, err := url.Parse(m["MATHION_DATABASE_URL"])
 	if err != nil {
 		// Static message on purpose: *url.Error.Error() echoes the raw URL, which
 		// carries the DB password — never wrap it into an operator-visible error.
 		return fmt.Errorf("MATHION_DATABASE_URL is not a valid URL")
 	}
+	// Pin scheme/host/port to the bundled db service — a divergent host or port
+	// a resumed deploy would silently trust must fail closed.
+	if u.Scheme != "postgresql+psycopg" || u.Hostname() != "db" || u.Port() != "5432" {
+		return fmt.Errorf("MATHION_DATABASE_URL does not target the bundled db service")
+	}
+	// Compare actual userinfo to POSTGRES_USER/PASSWORD — a substring match on the
+	// raw string is spoofable (a decoy `mathion:<pw>@` in a query would pass while
+	// the real credentials are wrong). Checked before the query guard so a mismatch
+	// still surfaces as a coupling error.
 	if u.User == nil {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
 	}
 	pw, hasPw := u.User.Password()
-	if u.User.Username() != "mathion" || !hasPw || pw != m["POSTGRES_PASSWORD"] {
+	if u.User.Username() != m["POSTGRES_USER"] || !hasPw || pw != m["POSTGRES_PASSWORD"] {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
+	}
+	// Path must be exactly the target database, with no query or fragment that
+	// could redirect the connection (e.g. `?host=` / `?dbname=`).
+	if u.EscapedPath() != "/"+m["POSTGRES_DB"] {
+		return fmt.Errorf("MATHION_DATABASE_URL does not target the POSTGRES_DB database")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("MATHION_DATABASE_URL must not carry query or fragment parameters")
 	}
 	return nil
 }

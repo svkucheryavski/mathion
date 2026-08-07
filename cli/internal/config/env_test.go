@@ -104,6 +104,59 @@ func TestValidateEnvComplete(t *testing.T) {
 	}
 }
 
+func TestValidateEnvCompleteStrengthened(t *testing.T) {
+	good := ParseEnv(RenderEnv(GenerateEnv("https://x", "v0.1.1", "sk", "pw")))
+	if err := ValidateEnvComplete(good); err != nil {
+		t.Fatalf("GenerateEnv output must pass: %v", err)
+	}
+	base := func() map[string]string {
+		m := map[string]string{}
+		for k, v := range good {
+			m[k] = v
+		}
+		return m
+	}
+	reject := map[string]string{
+		"divergent host": "postgresql+psycopg://mathion:pw@remote:5432/mathion",
+		"wrong port":     "postgresql+psycopg://mathion:pw@db:5433/mathion",
+		"query dbname":   "postgresql+psycopg://mathion:pw@db:5432/mathion?dbname=other",
+		"query host":     "postgresql+psycopg://mathion:pw@db:5432/mathion?host=evil",
+		"raw pct db":     "postgresql+psycopg://mathion:pw@db:5432/m%61thion",
+		"raw pct db2":    "postgresql+psycopg://mathion:pw@db:5432/%6Dathion",
+		"trailing pct":   "postgresql+psycopg://mathion:pw@db:5432/mathion%2F",
+		"pct userinfo":   "postgresql+psycopg://m%61thion:pw@db:5432/mathion",
+		"wrong scheme":   "postgresql://mathion:pw@db:5432/mathion",
+	}
+	for name, url := range reject {
+		m := base()
+		m["MATHION_DATABASE_URL"] = url
+		if err := ValidateEnvComplete(m); err == nil {
+			t.Errorf("%s: expected rejection, got nil", name)
+		}
+	}
+	// round-10 #2: MATHION_VERSION must pass ValidateOCITag.
+	for _, bad := range []string{`"v0.1.1"`, "${X:-v0.1.1}", "v 0.1.1"} {
+		m := base()
+		m["MATHION_VERSION"] = bad
+		if err := ValidateEnvComplete(m); err == nil {
+			t.Errorf("MATHION_VERSION=%q must be rejected", bad)
+		}
+	}
+	// missing POSTGRES_USER / POSTGRES_DB, and non-identifier values.
+	for _, k := range []string{"POSTGRES_USER", "POSTGRES_DB"} {
+		m := base()
+		delete(m, k)
+		if err := ValidateEnvComplete(m); err == nil {
+			t.Errorf("missing %s must be rejected", k)
+		}
+		m2 := base()
+		m2[k] = "bad-name!"
+		if err := ValidateEnvComplete(m2); err == nil {
+			t.Errorf("non-identifier %s must be rejected", k)
+		}
+	}
+}
+
 func TestEnvKeyParityWithExample(t *testing.T) {
 	gen := ParseEnv(RenderEnv(gen()))
 	for k := range exampleKeys(t) {
