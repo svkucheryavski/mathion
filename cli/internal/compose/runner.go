@@ -145,20 +145,29 @@ func (r ExecRunner) StreamInEnv(ctx context.Context, env []string, stdin io.Read
 	}
 
 	// Copy stdin in a goroutine so an early child exit cannot deadlock the write.
-	// The copy error (typically EPIPE/ErrClosedPipe once the child closes its
-	// read end) is intentionally discarded: the child's exit status is the
-	// authoritative outcome and is surfaced below.
-	copyDone := make(chan struct{})
+	// The copy error is captured, not discarded: a command that exits 0 without
+	// consuming all of stdin (child closes its read end → EPIPE) means the dump
+	// was NOT fully delivered, and that must surface. The command's own failure
+	// stays authoritative and is checked first. On a write error we also drain
+	// the remainder of stdin so a blocked producer (e.g. an io.Pipe writer) is
+	// released rather than leaked.
+	copyErrCh := make(chan error, 1)
 	go func() {
-		defer close(copyDone)
-		_, _ = io.Copy(wc, stdin)
+		_, cErr := io.Copy(wc, stdin)
+		if cErr != nil {
+			_, _ = io.Copy(io.Discard, stdin)
+		}
 		_ = wc.Close()
+		copyErrCh <- cErr
 	}()
 
 	waitErr := cmd.Wait()
-	<-copyDone
+	copyErr := <-copyErrCh
 	if waitErr != nil {
-		return toExitError(waitErr, stderr.Bytes())
+		return toExitError(waitErr, stderr.Bytes()) // command failure is authoritative
+	}
+	if copyErr != nil {
+		return fmt.Errorf("feeding stdin failed: %w", copyErr) // delivery incomplete
 	}
 	return nil
 }

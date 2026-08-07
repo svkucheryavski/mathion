@@ -123,6 +123,7 @@ func TestExecRunnerOutputRunsBinary(t *testing.T) {
 func TestExecRunnerSanitizesEnv(t *testing.T) {
 	requireSh(t)
 	t.Setenv("MATHION_VERSION", "vBOGUS")
+	t.Setenv("MATHION_VERSION_EXTRA", "survive") // near-miss: exact-key, not prefix, stripping
 	t.Setenv("POSTGRES_USER", "pguser")
 	t.Setenv("POSTGRES_PASSWORD", "leak")
 	t.Setenv("POSTGRES_DB", "pgdb")
@@ -131,12 +132,14 @@ func TestExecRunnerSanitizesEnv(t *testing.T) {
 	r := ExecRunner{Bin: "/bin/sh"}
 	var out bytes.Buffer
 	err := r.Stream(context.Background(), &out,
-		"-c", `printf '%s|%s|%s|%s|%s' "$MATHION_VERSION" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" "$OTHER_KEY"`)
+		"-c", `printf '%s|%s|%s|%s|%s|%s' "$MATHION_VERSION" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_DB" "$OTHER_KEY" "$MATHION_VERSION_EXTRA"`)
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
 	}
-	if got, want := out.String(), "||||keep"; got != want {
-		t.Fatalf("child env = %q, want %q (four keys stripped, OTHER_KEY kept)", got, want)
+	// Four keys stripped; OTHER_KEY kept; MATHION_VERSION_EXTRA survives (exact-key
+	// stripping must not match the MATHION_VERSION prefix).
+	if got, want := out.String(), "||||keep|survive"; got != want {
+		t.Fatalf("child env = %q, want %q", got, want)
 	}
 }
 
@@ -211,6 +214,24 @@ func TestExecRunnerStreamInPrefersExitOverEPIPE(t *testing.T) {
 	}
 	if string(ee.Stderr) != "boom" {
 		t.Fatalf("ExitError.Stderr = %q, want %q", ee.Stderr, "boom")
+	}
+}
+
+// TestExecRunnerStreamInReportsUndeliveredStdin covers a child that exits 0 but
+// does NOT consume all of stdin: the copy hits EPIPE, so StreamIn must report a
+// non-nil delivery error rather than falsely claiming the dump was delivered. It
+// is a wrapped copy error, not a command *ExitError (the command succeeded).
+func TestExecRunnerStreamInReportsUndeliveredStdin(t *testing.T) {
+	requireSh(t)
+	r := ExecRunner{Bin: "/bin/sh"}
+	big := strings.NewReader(strings.Repeat("x", 1<<20)) // 1 MiB > pipe buffer
+	err := r.StreamIn(context.Background(), big, "-c", "exit 0")
+	if err == nil {
+		t.Fatal("expected non-nil error: child exited 0 without draining stdin")
+	}
+	var ee *ExitError
+	if errors.As(err, &ee) {
+		t.Fatalf("want a delivery error, got a command *ExitError: %v", err)
 	}
 }
 
