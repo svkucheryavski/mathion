@@ -42,6 +42,9 @@ func TestGuardEntryRouting(t *testing.T) {
 			if !strings.Contains(out.String(), "image ID equals the recorded target") {
 				t.Errorf("%s: refuse must print identity-verified escape", cmd)
 			}
+			if !strings.Contains(out.String(), "docker inspect --format '{{.Image}}' <app-container>") {
+				t.Errorf("%s: refuse must print the executable identity-check command", cmd)
+			}
 		}
 	}
 }
@@ -79,7 +82,7 @@ func TestGuardEntryUnreadableBreadcrumbFailsClosed(t *testing.T) {
 	if strings.Contains(s, "mathion restore -- ''") {
 		t.Errorf("must not print bogus empty recovery command; got %q", s)
 	}
-	for _, want := range []string{"image ID equals the recorded target", "/version alone is NOT sufficient", varlib.JournalPath()} {
+	for _, want := range []string{"image ID equals the recorded target", "docker inspect --format '{{.Image}}' <app-container>", "/version alone is NOT sufficient", varlib.JournalPath()} {
 		if !strings.Contains(s, want) {
 			t.Errorf("undecodable refuse message missing %q; got %q", want, s)
 		}
