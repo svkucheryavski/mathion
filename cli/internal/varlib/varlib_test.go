@@ -1,6 +1,7 @@
 package varlib_test
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -27,6 +28,27 @@ func TestEnsureBackupsDir(t *testing.T) {
 	if err := varlib.EnsureBackupsDir(); err == nil {
 		t.Fatalf("symlinked managed dir must be rejected")
 	}
+}
+
+func TestLockExclusive(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MATHION_VARLIB_DIR", root)
+	varlib.EnsureBackupsDir()
+	rel, err := varlib.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := varlib.Lock(); !errors.Is(err, varlib.ErrLocked) {
+		t.Fatalf("second Lock should be ErrLocked, got %v", err)
+	}
+	if err := rel(); err != nil {
+		t.Fatal(err)
+	}
+	rel2, err := varlib.Lock() // released -> reacquirable
+	if err != nil {
+		t.Fatalf("reacquire after release: %v", err)
+	}
+	rel2()
 }
 
 func TestStagingDirUnique(t *testing.T) {

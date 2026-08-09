@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // defaultRoot is the on-host managed state dir. Tests override it via the
@@ -98,6 +99,37 @@ func ensureLevel(dir string) (created bool, err error) {
 	// Root-ownership is enforced at runtime (operations require root); tests run
 	// unprivileged, so ownership is not asserted here.
 	return !preexisting, nil
+}
+
+// ErrLocked is returned by Lock when another mathion operation already holds the
+// cross-process operation lock.
+var ErrLocked = errors.New("another mathion operation holds the lock")
+
+// Lock acquires the advisory cross-process lock at LockPath so two
+// backup/restore/update runs can never overlap. It opens (creating if needed)
+// the lock file and takes a non-blocking exclusive flock. If another process (or
+// another open of this file in-process) already holds it, Lock returns ErrLocked.
+// On success it returns a release closure that unlocks and closes the fd; the
+// lock is per-open-file-description, so the returned fd must be held for the whole
+// operation and released exactly once.
+func Lock() (func() error, error) {
+	fd, err := syscall.Open(LockPath(), syscall.O_CREAT|syscall.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock file: %w", err)
+	}
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		syscall.Close(fd)
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrLocked
+		}
+		return nil, fmt.Errorf("acquiring lock: %w", err)
+	}
+	release := func() error {
+		unlockErr := syscall.Flock(fd, syscall.LOCK_UN)
+		closeErr := syscall.Close(fd)
+		return errors.Join(unlockErr, closeErr) // errors.Join drops nils
+	}
+	return release, nil
 }
 
 // StagingDir creates a unique per-call staging directory under Root (mode 0700)
