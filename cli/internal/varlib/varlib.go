@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -124,10 +125,20 @@ func Lock() (func() error, error) {
 		}
 		return nil, fmt.Errorf("acquiring lock: %w", err)
 	}
+	// Guard the release with sync.Once: a raw syscall fd has none of os.File's
+	// double-close protection, so a stale second release() would flock/close a
+	// descriptor whose integer the OS may have reused for another operation's
+	// lock — silently dropping it. Running the syscalls exactly once and caching
+	// the joined error makes release idempotent.
+	var once sync.Once
+	var releaseErr error
 	release := func() error {
-		unlockErr := syscall.Flock(fd, syscall.LOCK_UN)
-		closeErr := syscall.Close(fd)
-		return errors.Join(unlockErr, closeErr) // errors.Join drops nils
+		once.Do(func() {
+			unlockErr := syscall.Flock(fd, syscall.LOCK_UN)
+			closeErr := syscall.Close(fd)
+			releaseErr = errors.Join(unlockErr, closeErr) // errors.Join drops nils
+		})
+		return releaseErr
 	}
 	return release, nil
 }

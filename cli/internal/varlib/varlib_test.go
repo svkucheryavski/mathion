@@ -51,6 +51,34 @@ func TestLockExclusive(t *testing.T) {
 	rel2()
 }
 
+func TestLockReleaseIdempotent(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("MATHION_VARLIB_DIR", root)
+	varlib.EnsureBackupsDir()
+	rel, err := varlib.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rel(); err != nil {
+		t.Fatal(err)
+	}
+	// Fresh lock — its fd typically reuses the integer just closed.
+	rel2, err := varlib.Lock()
+	if err != nil {
+		t.Fatalf("reacquire: %v", err)
+	}
+	defer rel2()
+	// Stale second call of the FIRST release must be a safe no-op and must NOT
+	// unlock/close rel2's (possibly fd-reused) descriptor.
+	if err := rel(); err != nil {
+		t.Fatalf("second release should be a safe no-op, got %v", err)
+	}
+	// rel2's lock must still be held.
+	if _, err := varlib.Lock(); !errors.Is(err, varlib.ErrLocked) {
+		t.Fatalf("stale double-release dropped the live lock; got %v", err)
+	}
+}
+
 func TestStagingDirUnique(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MATHION_VARLIB_DIR", root)
