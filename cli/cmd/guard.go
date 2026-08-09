@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
@@ -76,47 +77,71 @@ func guardEntry(a *App, cmd string) (proceed bool, err error) {
 	return true, nil
 }
 
+// leadFor returns the kind-worded opening sentence fragment for the refuse
+// message, so both message branches share one wording and a decoded kind is
+// reported even when the breadcrumb names no backup.
+func leadFor(kind string) string {
+	switch kind {
+	case "update":
+		return "A previous update was interrupted"
+	case "restore":
+		return "A previous restore was interrupted"
+	default:
+		return "A previous mathion operation was interrupted"
+	}
+}
+
 // printRefuse writes the operator-facing recovery guidance for a leftover
 // breadcrumb. The text is static-shaped (the breadcrumb carries no secrets): it
-// names the exact restore command to recover, and — for operators who have
-// independently confirmed the deployment is whole — the identity-verified manual
-// clear, which requires the running image to equal the recorded target before the
-// breadcrumb may be removed by hand.
+// names how to recover, and — for operators who have independently confirmed the
+// deployment is whole — the identity-verified manual clear, which requires the
+// running image to equal the recorded target before the breadcrumb may be removed
+// by hand. BOTH branches emit that same escape so an undecodable breadcrumb is no
+// weaker a gate than a decoded one.
 func printRefuse(a *App, j *varlib.Journal) {
 	w := a.Err
 
 	// No usable BackupPath (undecodable breadcrumb, or one that names no backup):
-	// generic fail-closed message. Never print a bogus `mathion restore -- ''`.
+	// fail-closed message. Never print a bogus `mathion restore -- ''`; direct the
+	// operator to restore from their most recent backup (which clears the
+	// breadcrumb) rather than a specific recovery command.
 	if j.BackupPath == "" {
 		fmt.Fprintf(w,
-			"A previous mathion operation was interrupted and left an unreadable recovery\n"+
-				"breadcrumb at %s; refusing to proceed. Restore from your most recent backup,\n"+
-				"verify the deployment is whole, then remove that file by hand.\n",
-			varlib.JournalPath())
+			"%s and left an unreadable recovery breadcrumb at %s; refusing to proceed.\n"+
+				"It records no backup path, so restore from your most recent backup (the\n"+
+				"restore clears this breadcrumb).\n",
+			leadFor(j.Kind), varlib.JournalPath())
+		writeIdentityEscape(w, j.TargetImageID)
 		return
 	}
 
-	lead := "A previous operation was interrupted"
-	switch j.Kind {
-	case "update":
-		lead = "A previous update was interrupted"
-	case "restore":
-		lead = "A previous restore was interrupted"
-	}
-	fmt.Fprintf(w, "%s and left the deployment in an unverified state; refusing to proceed.\n", lead)
+	fmt.Fprintf(w, "%s and left the deployment in an unverified state; refusing to proceed.\n", leadFor(j.Kind))
 	if j.OldTag != "" && j.TargetTag != "" {
 		fmt.Fprintf(w, "Interrupted from %s toward %s.\n", j.OldTag, j.TargetTag)
 	}
-
 	fmt.Fprintf(w, "\nRecover by re-running the restore:\n\n    %s\n", varlib.RecoveryCommand(j.BackupPath))
+	writeIdentityEscape(w, j.TargetImageID)
+}
 
+// writeIdentityEscape writes the identity-verified manual-clear escape: the
+// operator may remove the breadcrumb by hand ONLY IF the running app container's
+// image ID equals the recorded target. A /version check is explicitly rejected as
+// insufficient (it is env-derived and would report the target even if a moved tag
+// booted a different image). When targetImageID is empty the recorded target is
+// unavailable (an undecodable breadcrumb), so the manual clear CANNOT be satisfied
+// and restore is the only safe path.
+func writeIdentityEscape(w io.Writer, targetImageID string) {
 	fmt.Fprint(w,
 		"\nOnly if you have independently verified the deployment is already whole may\n"+
 			"you clear this breadcrumb by hand. Inspect the running app container's image ID:\n\n"+
 			"    docker inspect --format '{{.Image}}' <app-container>\n\n"+
 			"and remove the breadcrumb ONLY IF that image ID equals the recorded target")
-	if j.TargetImageID != "" {
-		fmt.Fprintf(w, " (%s)", j.TargetImageID)
+	if targetImageID != "" {
+		fmt.Fprintf(w, " (%s)", targetImageID)
+	} else {
+		fmt.Fprint(w,
+			".\nThis breadcrumb is unreadable, so the recorded target is UNAVAILABLE and the\n"+
+				"manual clear CANNOT be satisfied — restore is the only safe path")
 	}
 	fmt.Fprintf(w, ":\n\n    rm -f %s\n\nChecking /version alone is NOT sufficient.\n", varlib.JournalPath())
 }

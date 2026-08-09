@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,6 +56,32 @@ func TestGuardEntryNoBreadcrumbProceeds(t *testing.T) {
 		app := &App{Out: io.Discard, Err: io.Discard}
 		if proceed, err := guardEntry(app, cmd); !proceed || err != nil {
 			t.Errorf("%s with no breadcrumb: proceed=%v err=%v", cmd, proceed, err)
+		}
+	}
+}
+
+func TestGuardEntryUnreadableBreadcrumbFailsClosed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vl")
+	t.Setenv("MATHION_VARLIB_DIR", root)
+	if err := varlib.EnsureBackupsDir(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(varlib.JournalPath(), []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	app := &App{Out: &out, Err: &out}
+	proceed, err := guardEntry(app, "update")
+	if proceed || err == nil {
+		t.Fatalf("undecodable breadcrumb must refuse: proceed=%v err=%v", proceed, err)
+	}
+	s := out.String()
+	if strings.Contains(s, "mathion restore -- ''") {
+		t.Errorf("must not print bogus empty recovery command; got %q", s)
+	}
+	for _, want := range []string{"image ID equals the recorded target", "/version alone is NOT sufficient", varlib.JournalPath()} {
+		if !strings.Contains(s, want) {
+			t.Errorf("undecodable refuse message missing %q; got %q", want, s)
 		}
 	}
 }
