@@ -82,6 +82,25 @@ func anyCallContains(calls [][]string, sub string) bool {
 	return false
 }
 
+func countCallsContaining(calls [][]string, sub string) int {
+	n := 0
+	for _, c := range calls {
+		if strings.Contains(strings.Join(c, " "), sub) {
+			n++
+		}
+	}
+	return n
+}
+
+// asRoot drives requireRoot's geteuid seam so a non-root test process passes the
+// root gate, restoring the original on cleanup.
+func asRoot(t *testing.T) {
+	t.Helper()
+	orig := geteuid
+	geteuid = func() int { return 0 }
+	t.Cleanup(func() { geteuid = orig })
+}
+
 // assertOrderedSubseq checks that wants appear as an ordered subsequence of the
 // recorded calls (other calls may interleave).
 func assertOrderedSubseq(t *testing.T, calls [][]string, wants []string) {
@@ -451,5 +470,112 @@ func TestBackupEngineImageIDEmptyWhenResolutionFails(t *testing.T) {
 	}
 	if m := readManifest(t, final); m.ImageID != "" {
 		t.Fatalf("ImageID = %q, want empty when tag resolution fails", m.ImageID)
+	}
+}
+
+// TestBackupCmdLockHeldReturnsInProgress: a concurrently held operation lock makes
+// the backup command fail closed with the ErrLocked sentinel (the RunE takes the
+// lock right after EnsureBackupsDir, before any sweep or engine work).
+func TestBackupCmdLockHeldReturnsInProgress(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	asRoot(t)
+
+	release, err := varlib.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = release() }()
+
+	f := okFake()
+	app, _, _ := backupApp(cfg, f)
+	c := newBackupCmd(app)
+	c.SetContext(context.Background())
+
+	if err := c.RunE(c, nil); !errors.Is(err, varlib.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+	if anyCallContains(f.Calls, "pg_dump") {
+		t.Fatalf("no work must run when the lock is held; calls=%v", f.Calls)
+	}
+}
+
+// TestBackupCmdRefusesOnBreadcrumb: a leftover recovery breadcrumb makes backup
+// refuse (guardEntry runs AFTER the lock, before the engine), so no pg_dump vector
+// is ever issued.
+func TestBackupCmdRefusesOnBreadcrumb(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	asRoot(t)
+
+	if err := varlib.WriteJournal(varlib.Journal{
+		Schema:     1,
+		Kind:       "update",
+		TargetTag:  "v9.9.9",
+		BackupPath: "/b/x.tar.gz",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	f := okFake()
+	app, _, _ := backupApp(cfg, f)
+	c := newBackupCmd(app)
+	c.SetContext(context.Background())
+
+	if err := c.RunE(c, nil); err == nil {
+		t.Fatal("backup must refuse on a leftover recovery breadcrumb")
+	}
+	// Sweep `ps -aq` calls may precede the refusal; only the dump vector's absence
+	// proves the engine never ran.
+	if anyCallContains(f.Calls, "pg_dump") {
+		t.Fatalf("guardEntry must refuse before any pg_dump; calls=%v", f.Calls)
+	}
+}
+
+// TestBackupCmdHappyPathCallsEngineOnce: with no breadcrumb, the command runs the
+// engine exactly once (one pg_dump vector) and lands a single managed archive.
+func TestBackupCmdHappyPathCallsEngineOnce(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	asRoot(t)
+
+	f := okFake()
+	app, _, _ := backupApp(cfg, f)
+	c := newBackupCmd(app)
+	c.SetContext(context.Background())
+
+	if err := c.RunE(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := countCallsContaining(f.Calls, "pg_dump"); n != 1 {
+		t.Fatalf("expected exactly one pg_dump call, got %d; calls=%v", n, f.Calls)
+	}
+	matches, _ := filepath.Glob(filepath.Join(varlib.BackupsDir(), "mathion-backup-*.tar.gz"))
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly one managed archive in %s, got %v", varlib.BackupsDir(), matches)
+	}
+}
+
+// TestBackupCmdOutFlagThreaded: the --out flag is threaded through to the engine,
+// which drops a 0600 copy at the requested path.
+func TestBackupCmdOutFlagThreaded(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	asRoot(t)
+
+	app, _, _ := backupApp(cfg, okFake())
+	outPath := filepath.Join(t.TempDir(), "copy.tar.gz")
+
+	c := newBackupCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("out", outPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.RunE(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatalf("--out file must exist afterward: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("--out mode = %v, want 0600", fi.Mode().Perm())
 	}
 }

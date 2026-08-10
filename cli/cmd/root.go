@@ -61,7 +61,7 @@ func newRootCmd(app *App) *cobra.Command {
 	root.AddCommand(
 		newInstallCmd(app), newStartCmd(app), newStopCmd(app), newStatusCmd(app),
 		newLogsCmd(app), newPinCmd(app), newSuperuserCmd(app), newVersionCmd(app),
-		newUninstallCmd(app),
+		newUninstallCmd(app), newBackupCmd(app),
 	)
 	return root
 }

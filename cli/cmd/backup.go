@@ -12,11 +12,53 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/archive"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
+
+// newBackupCmd builds the `mathion backup` command. It is the first lock-taking
+// command and establishes the preamble order every such command follows:
+// root check -> ensure managed backups dir -> take the operation lock (held for
+// the whole run) -> sweep stale staging + orphaned worker containers -> refuse on
+// a leftover recovery breadcrumb -> run the lock-free engine. guardEntry runs
+// AFTER the lock so a concurrent operation cannot race the breadcrumb check.
+func newBackupCmd(app *App) *cobra.Command {
+	var out string
+	c := &cobra.Command{
+		Use:   "backup",
+		Short: "Back up the database and assets to a managed archive",
+		RunE: func(c *cobra.Command, _ []string) error {
+			if err := requireRoot(); err != nil {
+				return err
+			}
+			if err := varlib.EnsureBackupsDir(); err != nil {
+				return err
+			}
+			release, err := varlib.Lock()
+			if err != nil {
+				return err // ErrLocked message is already clear
+			}
+			defer func() { _ = release() }()
+			if err := varlib.SweepStaleStaging(); err != nil {
+				return err
+			}
+			if err := dockerx.SweepWorkers(c.Context(), app.Runner, app.Project); err != nil {
+				return err
+			}
+			if proceed, err := guardEntry(app, "backup"); !proceed {
+				return err
+			}
+			_, err = backupEngine(c.Context(), app, out)
+			return err
+		},
+	}
+	c.Flags().StringVar(&out, "out", "", "also copy the archive to PATH (must not exist; a symlink is refused)")
+	return c
+}
 
 // backupEngine performs a lock-free, online backup: it dumps the database and the
 // asset tree into a fresh 0700 staging dir, records a metadata manifest, assembles
