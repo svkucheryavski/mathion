@@ -161,7 +161,9 @@ func TestExtractRejectsHostileMembers(t *testing.T) {
 		{"duplicate", archiveDuplicate("db.dump")},
 	} {
 		dir := t.TempDir()
-		os.WriteFile(dir+"/a.tar.gz", tc.build(), 0o600)
+		if err := os.WriteFile(dir+"/a.tar.gz", tc.build(), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := archive.Extract(t.TempDir(), dir+"/a.tar.gz", caps); err == nil {
 			t.Errorf("%s: expected rejection", tc.name)
 		}
@@ -244,6 +246,27 @@ func TestExtractRejectsBadManifest(t *testing.T) {
 		if _, err := archive.Extract(t.TempDir(), p, caps); err == nil {
 			t.Errorf("%s: expected rejection", tc.name)
 		}
+	}
+}
+
+// ---- Extract: manifest.json is size-bounded (OOM defense) ------------------
+
+func TestExtractRejectsOversizedManifest(t *testing.T) {
+	// MaxMember (4 MiB) is deliberately LARGER than the manifest body, so only
+	// the dedicated 1 MiB manifest cap can reject it — proving that cap is what
+	// fires, not the general payload cap. The oversized body is caught at the
+	// header size check, before any large read (no OOM).
+	caps := archive.Caps{MaxMember: 4 << 20, MaxTotal: 16 << 20}
+	db, assets := "DBDUMP", "ASSETS"
+	m := archive.Manifest{
+		Schema:         1,
+		MathionVersion: "v9.9.9",
+		CreatedAt:      strings.Repeat("A", 2<<20), // 2 MiB → manifest.json body > 1 MiB
+		SHA256:         map[string]string{"db.dump": sha256hex(db), "assets.tar": sha256hex(assets)},
+	}
+	p := writeArchiveFile(t, buildArchive(t, m, db, assets))
+	if _, err := archive.Extract(t.TempDir(), p, caps); err == nil {
+		t.Fatal("expected rejection of oversized manifest.json")
 	}
 }
 

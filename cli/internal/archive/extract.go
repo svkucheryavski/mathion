@@ -175,6 +175,13 @@ var allowedMembers = map[string]bool{
 // otherwise-allowed headers from spinning tar.Next forever.
 const maxEntries = 16
 
+// maxManifestBytes caps manifest.json specifically. A real manifest is a few
+// hundred bytes; this only stops a hostile giant (a multi-MiB created_at, or
+// millions of sha256 map entries) from making encoding/json allocate gigabytes
+// and OOM-kill the root-privileged restore process. The payload cap
+// (caps.MaxMember, up to 1 TiB) is far too loose to protect the JSON decoder.
+const maxManifestBytes int64 = 1 << 20 // 1 MiB
+
 // Extract is the DoS-safe ALLOWLIST extractor and the trust boundary that makes
 // an untrusted backup archive safe to unpack on the host. It writes the three
 // allowlisted members into stagingDir (which the caller treats as DISPOSABLE and
@@ -246,8 +253,14 @@ func Extract(stagingDir, archivePath string, caps Caps) (Manifest, error) {
 		if h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA {
 			return zero, fmt.Errorf("restore: archive member %q is not a regular file (typeflag %d)", name, h.Typeflag)
 		}
-		if h.Size < 0 || h.Size > caps.MaxMember {
-			return zero, fmt.Errorf("restore: archive member %q size %d exceeds member cap %d", name, h.Size, caps.MaxMember)
+		sizeCap := caps.MaxMember
+		if name == "manifest.json" {
+			// manifest.json is decoded in-process by encoding/json, so it gets a
+			// tiny dedicated cap rather than the (huge) payload cap.
+			sizeCap = maxManifestBytes
+		}
+		if h.Size < 0 || h.Size > sizeCap {
+			return zero, fmt.Errorf("restore: archive member %q size %d exceeds cap %d", name, h.Size, sizeCap)
 		}
 		if err := writeMember(root, name, tr); err != nil {
 			return zero, err
@@ -316,7 +329,10 @@ func readStagedManifest(root *os.Root) (Manifest, error) {
 		return m, fmt.Errorf("restore: open manifest.json: %w", err)
 	}
 	defer f.Close()
-	if err := json.NewDecoder(f).Decode(&m); err != nil {
+	// Belt-and-suspenders: the extraction size cap already bounds the written
+	// file to <= maxManifestBytes, so this LimitReader never truncates a real
+	// manifest — it only re-asserts the ceiling for the in-process JSON decode.
+	if err := json.NewDecoder(io.LimitReader(f, maxManifestBytes)).Decode(&m); err != nil {
 		return m, fmt.Errorf("restore: parse manifest.json: %w", err)
 	}
 	return m, nil
