@@ -89,10 +89,13 @@ const restartTimeout = 30 * time.Second
 func restoreEngine(ctx context.Context, a *App, archivePath string, opts restoreOpts) error {
 	// (0) Whether a recovery breadcrumb was ALREADY present at entry — read before
 	// 6b writes our own. restore is exempt from the entry-check refusal, so it may
-	// run WITH a breadcrumb (as recovery); this flag gates the 6c restart. A read
-	// error degrades to false: that only weakens the best-effort restart, never
-	// safety.
-	_, breadcrumbAtEntry, _ := varlib.ReadJournal()
+	// run WITH a breadcrumb (as recovery); this flag gates the 6c restart. FAIL
+	// CLOSED: a journal read error means we cannot prove the deployment is clean, so
+	// treat it as "breadcrumb present" and SUPPRESS the best-effort restart — wrongly
+	// restarting a recovery restore could boot an inconsistent pre-restore container
+	// (e.g. an interrupted update's old app against a forward-migrated DB).
+	_, present, jerr := varlib.ReadJournal()
+	breadcrumbAtEntry := present || jerr != nil
 
 	// (2) Extract + validate into a fresh 0700 staging dir. Any failure aborts
 	// BEFORE any mutation; the staging dir is discarded no matter what.
@@ -169,25 +172,36 @@ func restoreEngine(ctx context.Context, a *App, archivePath string, opts restore
 			}
 			return fmt.Errorf("pulling %s: %w", compose.ImageRepo+":"+manifest.MathionVersion, err)
 		}
-		// Pull succeeded: resolve the pulled id, warn on a recorded-id mismatch, and
-		// finalize the breadcrumb (re-enabling the manual-clear escape).
-		img.RID = imageIDOfTag(ctx, a, manifest.MathionVersion)
-		if manifest.ImageID != "" && manifest.ImageID != img.RID {
+		// Pull succeeded: resolve the pulled id STRICTLY. If we cannot confirm the
+		// resulting id (read failure or empty id), the post-pull state is UNCERTAIN —
+		// retain the absent-id breadcrumb from 6b and abort rather than record an
+		// unresolved target; a re-run then resolves the now-local image via 4a. A
+		// successful pull already moved the boot tag onto the pulled digest, so NO
+		// retag is needed on this path.
+		rid, err := resolveImageID(ctx, a, manifest.MathionVersion)
+		if err != nil {
+			return fmt.Errorf("resolving pulled %s: %w", compose.ImageRepo+":"+manifest.MathionVersion, err)
+		}
+		img.RID = rid
+		if manifest.ImageID != "" && manifest.ImageID != rid {
 			fmt.Fprintf(a.Err, "warning: recorded image id %s differs from the pulled %s:%s id %s\n",
-				manifest.ImageID, compose.ImageRepo, manifest.MathionVersion, img.RID)
+				manifest.ImageID, compose.ImageRepo, manifest.MathionVersion, rid)
 		}
 		if opts.WriteBreadcrumb {
-			if err := writeRestoreBreadcrumb(archivePath, manifest.MathionVersion, img.RID); err != nil {
+			if err := writeRestoreBreadcrumb(archivePath, manifest.MathionVersion, rid); err != nil {
 				return err
 			}
 		}
-	}
-
-	// Retag if the boot tag does not already resolve to R_id (a no-op right after a
-	// pull, which already moved the tag; fires in the local-R_id case).
-	if imageIDOfTag(ctx, a, manifest.MathionVersion) != img.RID {
-		if err := a.Runner.Run(ctx, "tag", img.RID, compose.ImageRepo+":"+manifest.MathionVersion); err != nil {
-			return err
+	} else {
+		// Local-R_id path: retag if the boot tag does not already resolve to R_id (the
+		// tag moved off the backed-up image, or R_id is a still-local recorded id the
+		// current tag no longer points at). This runs ONLY when no pull happened — a
+		// successful pull already moved the tag, so re-inspecting there risks a
+		// transient failure spuriously retagging.
+		if imageIDOfTag(ctx, a, manifest.MathionVersion) != img.RID {
+			if err := a.Runner.Run(ctx, "tag", img.RID, compose.ImageRepo+":"+manifest.MathionVersion); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -221,7 +235,10 @@ func writeRestoreBreadcrumb(backupPath, version, rid string) error {
 // then raw-inspect shape). Any failure yields (id, false) — this is best-effort
 // state used only to gate the 6c restart, never a hard precondition.
 func capturePreRestoreAppState(ctx context.Context, a *App) (id string, runningHealthy bool) {
-	out, _ := a.Runner.Output(ctx, a.composeArgs("ps", "-q", "app")...)
+	out, err := a.Runner.Output(ctx, a.composeArgs("ps", "-q", "app")...)
+	if err != nil {
+		return "", false // any ps failure ⇒ not-healthy (fail-safe; ps may emit partial stdout on error)
+	}
 	id = strings.TrimSpace(out)
 	if id == "" {
 		return "", false
@@ -239,11 +256,28 @@ func capturePreRestoreAppState(ctx context.Context, a *App) (id string, runningH
 }
 
 // imageIDOfTag returns the local id ImageRepo:<version> resolves to, or "" on any
-// error (a missing tag => "" => a retag is needed).
+// error (a missing tag => "" => a retag is needed). Used only on the local-R_id
+// retag path, where a "" (unresolved) result correctly means "retag needed".
 func imageIDOfTag(ctx context.Context, a *App, version string) string {
 	out, err := a.Runner.Output(ctx, "image", "inspect", compose.ImageRepo+":"+version, "--format", "{{.Id}}")
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// resolveImageID resolves ImageRepo:<version> to its local id STRICTLY: a read
+// failure OR an empty id is returned as an error. It is used after a pull, where an
+// unresolvable id means the post-pull state is uncertain and the restore must abort
+// (retaining the absent-id breadcrumb) rather than record an absent target.
+func resolveImageID(ctx context.Context, a *App, version string) (string, error) {
+	out, err := a.Runner.Output(ctx, "image", "inspect", compose.ImageRepo+":"+version, "--format", "{{.Id}}")
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(out)
+	if id == "" {
+		return "", fmt.Errorf("image inspect returned an empty id for %s:%s", compose.ImageRepo, version)
+	}
+	return id, nil
 }

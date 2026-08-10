@@ -458,8 +458,10 @@ func TestRestoreEngineRestartOnCleanPullError(t *testing.T) {
 	if !s.HasDeadline {
 		t.Fatal("restart context must carry a deadline")
 	}
-	if d := time.Until(s.Deadline); d <= 0 || d > restartTimeout+2*time.Second {
-		t.Fatalf("restart deadline %v out of expected ~%v range", d, restartTimeout)
+	// Symmetric tolerance: a regression that used a much shorter timeout (e.g. the
+	// wrong context nesting, or a 1s constant) must fail the LOWER bound too.
+	if d := time.Until(s.Deadline); d < restartTimeout-2*time.Second || d > restartTimeout+2*time.Second {
+		t.Fatalf("restart deadline %v not within ±2s of %v", d, restartTimeout)
 	}
 	if _, present, _ := varlib.ReadJournal(); !present {
 		t.Fatal("breadcrumb must remain after a best-effort restart")
@@ -499,5 +501,103 @@ func TestRestoreEngineNoRestartWhenUnhealthy(t *testing.T) {
 	}
 	if hasCall(f.Calls, isStart) {
 		t.Fatalf("an unhealthy pre-state must not be restarted; calls=%v", f.Calls)
+	}
+}
+
+// TestRestoreEngineNoRestartWhenJournalUnreadable: a journal read error at entry
+// must FAIL CLOSED (breadcrumbAtEntry treated as present) so a healthy clean-looking
+// restore does NOT restart on a pull error — a wrong restart could boot an
+// inconsistent pre-restore container.
+func TestRestoreEngineNoRestartWhenJournalUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("run as non-root: mode 0000 does not block root reads")
+	}
+	cfg := setupBackupEnv(t)
+	if err := varlib.WriteJournal(varlib.Journal{Schema: 1, Kind: "update", TargetTag: "v0.0.9", BackupPath: "/x/y.tar.gz"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(varlib.JournalPath(), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(varlib.JournalPath(), 0o600) })
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag})
+	f := pullFlaggedRunner("appcid\n", "true healthy\n", errors.New("pull failed"), nil)
+	app, _, _ := engineApp(cfg, f, "")
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err == nil {
+		t.Fatal("expected the pull error to surface")
+	}
+	if hasCall(f.Calls, isStart) {
+		t.Fatalf("an unreadable journal must fail closed (no restart); calls=%v", f.Calls)
+	}
+}
+
+// TestRestoreEngineNoRestartWhenPsErrors: a `compose ps -q app` error — even one
+// that emits a partial container id on stdout — must classify not-healthy (any ps
+// failure ⇒ fail-safe), so no restart runs on a pull error.
+func TestRestoreEngineNoRestartWhenPsErrors(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag})
+	f := &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			j := strings.Join(args, " ")
+			switch {
+			case strings.Contains(j, callPsApp):
+				return "appcid\n", errors.New("daemon hiccup") // partial stdout + error
+			case len(args) > 0 && args[0] == "inspect":
+				return "true healthy\n", nil
+			case len(args) >= 2 && args[0] == "image" && args[1] == "inspect":
+				return "", errors.New("no such image")
+			}
+			return "", nil
+		},
+		RunFunc: func(args []string) error {
+			if isPull(args) {
+				return errors.New("pull failed")
+			}
+			return nil
+		},
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err == nil {
+		t.Fatal("expected the pull error to surface")
+	}
+	if hasCall(f.Calls, isStart) {
+		t.Fatalf("a ps failure must classify not-healthy (no restart) despite partial stdout; calls=%v", f.Calls)
+	}
+}
+
+// TestRestoreEnginePullSucceedsButResolveFails (round-10 #3 sibling): a pull that
+// succeeds but whose resulting id cannot be resolved is an UNCERTAIN state — the
+// engine must abort (not return success), leave the absent-id breadcrumb retained,
+// and never retag on a "" id.
+func TestRestoreEnginePullSucceedsButResolveFails(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag})
+	f := &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			j := strings.Join(args, " ")
+			switch {
+			case strings.Contains(j, callPsApp):
+				return "", nil // no app
+			case len(args) >= 2 && args[0] == "image" && args[1] == "inspect":
+				return "", errors.New("inspect unavailable") // preflight => pull-flagged; post-pull => still fails
+			}
+			return "", nil
+		},
+		RunFunc: func(args []string) error { return nil }, // pull SUCCEEDS
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err == nil {
+		t.Fatal("a pull whose id cannot be resolved must abort (uncertain state)")
+	}
+	if hasCall(f.Calls, isTag) {
+		t.Fatalf("must not retag when the pulled id is unresolvable; calls=%v", f.Calls)
+	}
+	j, present, _ := varlib.ReadJournal()
+	if !present {
+		t.Fatal("the absent-id breadcrumb must be retained")
+	}
+	if j.TargetImageID != "" {
+		t.Fatalf("target_image_id = %q, want absent (never finalized on an unresolved pull)", j.TargetImageID)
 	}
 }
