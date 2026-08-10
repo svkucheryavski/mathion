@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -161,9 +162,22 @@ func spoolPGStderr(op string, err error) error {
 		// Still must not leak the stderr — report only that the save failed.
 		return fmt.Errorf("%s failed (exit %d); stderr could not be saved (%v)", op, ee.Code, cerr)
 	}
+	// Check the write/sync/close: pg_dump often fails BECAUSE the disk is full,
+	// which is exactly when this spool truncates. Only a fully persisted log lets
+	// us truthfully claim "full stderr saved"; on any I/O failure remove the
+	// incomplete log and say so. The io error is an fs error (not the stderr
+	// bytes), so it is safe to surface; ee.Stderr is NEVER included.
 	path := f.Name()
-	_, _ = f.Write(ee.Stderr)
-	_ = f.Close()
+	n, werr := f.Write(ee.Stderr)
+	if werr == nil && n != len(ee.Stderr) {
+		werr = fmt.Errorf("short write %d/%d", n, len(ee.Stderr))
+	}
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	if ioErr := cmp.Or(werr, syncErr, closeErr); ioErr != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("%s failed (exit %d); stderr could not be fully saved (%v)", op, ee.Code, ioErr)
+	}
 	return fmt.Errorf("%s failed (exit %d); full stderr (may contain PII) saved to %s", op, ee.Code, path)
 }
 

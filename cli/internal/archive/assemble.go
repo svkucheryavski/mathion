@@ -17,6 +17,11 @@ import (
 // hashes before it reaches the payload.
 var memberOrder = []string{"db.dump", "assets.tar"}
 
+// now is a seam over time.Now (matching the codebase's `var geteuid = os.Geteuid`
+// idiom) so a white-box test can pin the archive timestamp and force a same-second
+// collision deterministically. It is never rebound outside tests.
+var now = time.Now
+
 // Assemble writes a durable gzip-tar backup archive into dstDir from the given
 // staging members (member name → staging path) plus the marshaled manifest, and
 // returns the final archive path.
@@ -144,7 +149,7 @@ func writeTarFile(tw *tar.Writer, name, path string) error {
 // current UTC second: mathion-backup-<ts>-<ver>.tar.gz, then -<ver>-2.tar.gz,
 // -3, ... — the same shape SelectLatest parses.
 func pickName(dstDir, ver string) (string, error) {
-	base := "mathion-backup-" + time.Now().UTC().Format("20060102T150405Z") + "-" + ver
+	base := "mathion-backup-" + now().UTC().Format("20060102T150405Z") + "-" + ver
 	for i := 1; ; i++ {
 		name := base + ".tar.gz"
 		if i >= 2 {

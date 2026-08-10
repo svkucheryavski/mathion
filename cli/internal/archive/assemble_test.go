@@ -98,23 +98,8 @@ func TestAssembleMembersAndNoOverwrite(t *testing.T) {
 	if !strings.HasPrefix(filepath.Base(final1), "mathion-backup-") || !strings.HasSuffix(final1, "-v9.9.9.tar.gz") {
 		t.Fatalf("unexpected archive name %s", filepath.Base(final1))
 	}
-
-	// A second Assemble in the same second must NOT overwrite the first: it gets a
-	// -2 collision suffix, and the first archive survives untouched.
-	final2, err := archive.Assemble(dst, members, manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if final2 == final1 {
-		t.Fatalf("second Assemble reused the first path %s", final2)
-	}
-	if !strings.HasSuffix(filepath.Base(final2), "-2.tar.gz") {
-		t.Fatalf("second Assemble in same second must get -2 suffix, got %s", filepath.Base(final2))
-	}
-	if _, err := os.Stat(final1); err != nil {
-		t.Fatalf("first archive must survive the second Assemble: %v", err)
-	}
-	// No leftover temp files.
+	// No leftover temp files. (Same-second no-overwrite is covered deterministically
+	// by the white-box TestAssembleCollisionSuffix in assemble_internal_test.go.)
 	entries, _ := os.ReadDir(dst)
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".tmp") {

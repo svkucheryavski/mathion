@@ -6,9 +6,11 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -98,6 +100,21 @@ func assertOrderedSubseq(t *testing.T, calls [][]string, wants []string) {
 	}
 }
 
+// assertCallEquals finds the first recorded call whose joined form contains marker
+// and asserts its COMPLETE arg vector equals want (exact, order-sensitive).
+func assertCallEquals(t *testing.T, calls [][]string, marker string, want []string) {
+	t.Helper()
+	for _, c := range calls {
+		if strings.Contains(strings.Join(c, " "), marker) {
+			if !reflect.DeepEqual(c, want) {
+				t.Fatalf("call for %q:\n got  %v\n want %v", marker, c, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("no call matched %q; calls=%v", marker, calls)
+}
+
 func readManifest(t *testing.T, path string) archive.Manifest {
 	t.Helper()
 	f, err := os.Open(path)
@@ -147,25 +164,22 @@ func TestBackupEngineArgvAndManifest(t *testing.T) {
 		"run --rm --no-deps --pull never -T app alembic current",
 		"inspect appcid --format {{.Image}}",
 	})
-	if !anyCallContains(f.Calls, "pg_dump") {
-		t.Fatal("no pg_dump call recorded")
-	}
-	// --pull never must be present on the assets + alembic one-offs.
-	for _, want := range []string{"tar -C /data/mathion/assets", "alembic current"} {
-		found := false
-		for _, c := range f.Calls {
-			j := strings.Join(c, " ")
-			if strings.Contains(j, want) {
-				found = true
-				if !strings.Contains(j, "--pull never") {
-					t.Fatalf("call %q missing --pull never", j)
-				}
-			}
-		}
-		if !found {
-			t.Fatalf("no call matched %q", want)
-		}
-	}
+	// Full-vector equality (not substring): a broken PGPASSWORD wrapper, a dropped
+	// -U/-Fc, a lost --pull never, or a reordered flag must fail the test.
+	assertCallEquals(t, f.Calls, "pg_dump", app.composeArgs(
+		"exec", "-T", "db", "sh", "-c",
+		`PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"`,
+	))
+	assertCallEquals(t, f.Calls, "tar -C /data/mathion/assets", app.composeArgs(
+		"run", "--rm", "--no-deps", "--pull", "never", "-T", "app", "sh", "-c",
+		`tar -C /data/mathion/assets -cf - .`,
+	))
+	assertCallEquals(t, f.Calls, "alembic current", app.composeArgs(
+		"run", "--rm", "--no-deps", "--pull", "never", "-T", "app", "alembic", "current",
+	))
+	assertCallEquals(t, f.Calls, "inspect appcid", []string{
+		"inspect", "appcid", "--format", "{{.Image}}",
+	})
 
 	m := readManifest(t, final)
 	if m.SHA256["db.dump"] == "" || m.SHA256["assets.tar"] == "" {
@@ -248,11 +262,12 @@ func TestBackupEngineTarExitTwoFatal(t *testing.T) {
 func TestBackupEnginePGStderrScrubbed(t *testing.T) {
 	cfg := setupBackupEnv(t)
 	const pii = "secret@example.com"
+	rawStderr := []byte("ERROR: Key (email)=(" + pii + ") already exists")
 	f := &compose.FakeRunner{
 		OutputFunc: okOutputs,
 		StreamFunc: func(w io.Writer, args []string) error {
 			if strings.Contains(strings.Join(args, " "), "pg_dump") {
-				return &compose.ExitError{Code: 1, Stderr: []byte("ERROR: Key (email)=(" + pii + ") already exists")}
+				return &compose.ExitError{Code: 1, Stderr: rawStderr}
 			}
 			return okStream(w, args)
 		},
@@ -280,9 +295,11 @@ func TestBackupEnginePGStderrScrubbed(t *testing.T) {
 	if fi.Mode().Perm() != 0o600 {
 		t.Fatalf("pg-error log mode = %v, want 0600", fi.Mode().Perm())
 	}
+	// "full stderr saved" must be truthful: the persisted log is EXACTLY the raw
+	// stderr bytes, byte-for-byte (not merely a substring).
 	b, _ := os.ReadFile(matches[0])
-	if !strings.Contains(string(b), pii) {
-		t.Fatalf("spooled log must contain the raw stderr, got %q", string(b))
+	if !bytes.Equal(b, rawStderr) {
+		t.Fatalf("spooled log must equal the raw stderr exactly; got %q want %q", string(b), string(rawStderr))
 	}
 }
 
@@ -402,5 +419,37 @@ func TestBackupEngineImageIDFallbackToTag(t *testing.T) {
 	}
 	if m := readManifest(t, final); m.ImageID != "sha256:fromtag" {
 		t.Fatalf("ImageID = %q, want sha256:fromtag", m.ImageID)
+	}
+}
+
+// TestBackupEngineImageIDEmptyWhenResolutionFails locks the invariant that a
+// mutable tag is NEVER recorded as the immutable image_id when resolution fails:
+// no app container is up AND the `image inspect <ImageRepo:ver>` call errors, so
+// image_id must be empty (restore then takes the tag-pull path).
+func TestBackupEngineImageIDEmptyWhenResolutionFails(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	f := &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			j := strings.Join(args, " ")
+			switch {
+			case strings.Contains(j, "ps -q db"):
+				return "dbcid\n", nil
+			case strings.Contains(j, "ps -q app"):
+				return "", nil // no app container -> fall back to image inspect
+			case len(args) >= 2 && args[0] == "image" && args[1] == "inspect":
+				return "sha256:should-not-be-used\n", errors.New("no such image")
+			}
+			return "", nil
+		},
+		StreamFunc: okStream,
+	}
+	app, _, _ := backupApp(cfg, f)
+
+	final, err := backupEngine(context.Background(), app, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := readManifest(t, final); m.ImageID != "" {
+		t.Fatalf("ImageID = %q, want empty when tag resolution fails", m.ImageID)
 	}
 }
