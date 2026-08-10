@@ -80,6 +80,23 @@ type restoreOpts struct {
 // wedged daemon cannot hang recovery indefinitely.
 const restartTimeout = 30 * time.Second
 
+// restoreDBScript decode-gates the load: pg_restore -f "$t" fully decodes the -Fc dump
+// BEFORE the DROP/CREATE SCHEMA + psql load, which run under ON_ERROR_STOP=1 and
+// --single-transaction so any failure rolls back (DB unchanged). Never add -j/-l/-L to
+// pg_restore here: they need a seekable input, but the -Fc archive arrives on a
+// non-seekable stdin pipe. psql -h db targets the running db service, not this
+// postmaster-less client. $POSTGRES_* come from the db service's environment (compose
+// interpolates them from --env-file), never host argv.
+const restoreDBScript = `t=$(mktemp) || exit 1; r=$(mktemp) || { rm -f "$t"; exit 1; }; pg_restore -f "$t"; rc=$?; if [ "$rc" -ne 0 ]; then rm -f "$t" "$r"; exit "$rc"; fi; printf "DROP SCHEMA public CASCADE; CREATE SCHEMA public AUTHORIZATION \"%s\";\n" "$POSTGRES_USER" > "$r" || { rm -f "$t" "$r"; exit 1; }; PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -v ON_ERROR_STOP=1 -v VERBOSITY=verbose --single-transaction -f "$r" -f "$t" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; rc=$?; rm -f "$t" "$r"; exit "$rc"`
+
+// restoreAssetsScript clears the assets volume's contents (dotfiles included, mountpoint
+// kept) then extracts the pre-scanned assets.tar from stdin. --no-same-owner: the app
+// container runs as a non-root uid; && stops extraction after a failed clear.
+const restoreAssetsScript = `find /data/mathion/assets -mindepth 1 -delete && tar --no-same-owner -C /data/mathion/assets -xf -`
+
+// workerRemoveTries bounds forceRemoveWorker's create/observe race loop.
+const workerRemoveTries = 10
+
 // restoreEngine rewinds the deployment from archivePath. It implements the read /
 // confirm / stage half of restore — steps 2, 4a, 5, 6, 6b, 6c — and returns before
 // the destructive DB/assets load (steps 7-10 land in later tasks, which also clear
@@ -106,6 +123,12 @@ func restoreEngine(ctx context.Context, a *App, archivePath string, opts restore
 	defer os.RemoveAll(staging)
 	manifest, err := archive.Extract(staging, archivePath, opts.Caps)
 	if err != nil {
+		return err
+	}
+	// (3) Pre-scan the inner assets.tar for symlink/traversal — the outer extractor
+	// only proved it is a regular file, not that its members are safe. This guards
+	// step 8's extract, so abort here (before confirm/DB-load) on a hostile archive.
+	if err := archive.PrescanAssets(filepath.Join(staging, "assets.tar")); err != nil {
 		return err
 	}
 
@@ -205,9 +228,88 @@ func restoreEngine(ctx context.Context, a *App, archivePath string, opts restore
 		}
 	}
 
-	// R_id is the gate target for step 10; steps 7-10 (DB load, assets, .env re-pin,
-	// gate + breadcrumb clear) land in Tasks 17-18.
+	// pid-scoped one-off worker names so cleanupWorkers can target exactly this run's
+	// containers. Both loads are NAMED `compose run` one-offs (not `exec`) so a
+	// cancellation can force-remove the whole decode+load lifecycle.
+	pid := os.Getpid()
+	dbWorker := fmt.Sprintf("mathion_restore_db_%d", pid)
+	assetsWorker := fmt.Sprintf("mathion_restore_assets_%d", pid)
+
+	// cleanupWorkers force-removes BOTH named workers under a fresh WithoutCancel
+	// context (so it runs even when ctx was cancelled), before restoreEngine returns —
+	// i.e. before the command layer releases the lock. Safe to call when a worker never
+	// started (--rm already removed a completed one; a never-created name is stably
+	// absent immediately).
+	cleanupWorkers := func() {
+		wc := context.WithoutCancel(ctx)
+		forceRemoveWorker(wc, a.Runner, dbWorker)
+		forceRemoveWorker(wc, a.Runner, assetsWorker)
+	}
+
+	// (7) Restore the DB: pg_restore fully DECODES the -Fc dump to a temp file, and only
+	// then is the destructive DROP/CREATE SCHEMA + load run under ON_ERROR_STOP +
+	// --single-transaction (so a mid-load failure rolls back; a bad decode never reaches
+	// the DROP). Named one-off so cancellation force-removes the whole decode+load
+	// lifecycle. pg stderr may embed row-level PII → spoolPGStderr, NEVER surface it.
+	dbf, err := os.Open(filepath.Join(staging, "db.dump"))
+	if err != nil {
+		return err
+	}
+	defer dbf.Close()
+	if err := a.Runner.StreamIn(ctx, dbf, a.composeArgs(
+		"run", "--rm", "--no-deps", "--pull", "never",
+		"--name", dbWorker, "--label", "io.mathion.worker=1",
+		"-T", "db", "sh", "-c", restoreDBScript,
+	)...); err != nil {
+		cleanupWorkers()
+		return spoolPGStderr("pg_restore", err)
+	}
+
+	// (8) Restore assets on the manifest-target image (app still stopped). MATHION_VERSION
+	// pins the validated target (retagged local at 6c) rather than the not-yet-re-pinned
+	// .env tag. --pull never (target already local). find … -delete clears contents incl.
+	// dotfiles without removing the mountpoint; --no-same-owner since the container runs as
+	// a non-root uid; && stops extraction after a failed clear. DB first (transactional);
+	// re-running the same restore is idempotent if assets fail after the DB is in.
+	af, err := os.Open(filepath.Join(staging, "assets.tar"))
+	if err != nil {
+		return err
+	}
+	defer af.Close()
+	if err := a.Runner.StreamInEnv(ctx, []string{"MATHION_VERSION=" + manifest.MathionVersion}, af, a.composeArgs(
+		"run", "--rm", "--no-deps", "--pull", "never",
+		"--name", assetsWorker, "--label", "io.mathion.worker=1",
+		"-T", "app", "sh", "-c", restoreAssetsScript,
+	)...); err != nil {
+		cleanupWorkers()
+		return fmt.Errorf("restoring assets: %w", err)
+	}
+
+	// R_id is the gate target for step 10; steps 9-10 (.env re-pin, gate + breadcrumb
+	// clear) land in Task 18. The step-6b breadcrumb is retained until that gate.
 	return nil
+}
+
+// forceRemoveWorker best-effort force-removes a named one-off worker and confirms it
+// is stably absent, closing the create/observe race where a create is still
+// registering server-side. Because StreamIn/StreamInEnv are synchronous, by the time
+// a caller handles their error the `compose run` HAS returned (launch-resolved), so
+// this only needs to drive the name to absent. Called under context.WithoutCancel so a
+// cancelled parent still cleans up before the lock releases. Errors are swallowed: a
+// second signal / wedged daemon falls back to the startup orphan sweep. Shared with
+// update's migrate cleanup. No sleep — the docker round-trips pace the loop; the bound
+// + startup-sweep backstop cover a wedged daemon.
+func forceRemoveWorker(ctx context.Context, r compose.Runner, name string) {
+	for i := 0; i < workerRemoveTries; i++ {
+		_ = r.Run(ctx, "rm", "-f", name) // idempotent; ignores "No such container"
+		// `ps -aq --filter name=^<name>$` lists the id only when present and exits zero
+		// either way, so err==nil && empty ⇒ stably absent (unlike `inspect`, which
+		// errors merely because a container is missing).
+		out, err := r.Output(ctx, "ps", "-aq", "--filter", "name=^"+name+"$")
+		if err == nil && strings.TrimSpace(out) == "" {
+			return // stably absent
+		}
+	}
 }
 
 // writeRestoreBreadcrumb durably writes the kind:"restore" recovery breadcrumb. rid

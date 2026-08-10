@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +159,7 @@ func writeRestoreArchive(t *testing.T, dstDir string, m archive.Manifest) string
 	db := filepath.Join(stg, "db.dump")
 	as := filepath.Join(stg, "assets.tar")
 	mustWrite(t, db, []byte("DBDUMP"))
-	mustWrite(t, as, []byte("ASSETS")) // raw bytes ok: the inner pre-scan is deferred
+	mustWrite(t, as, validAssetsTar(t)) // a real, pre-scan-safe tar: step 3 now scans it
 	m.Schema = 1
 	if m.MathionVersion == "" {
 		m.MathionVersion = "v1.2.3"
@@ -599,5 +601,246 @@ func TestRestoreEnginePullSucceedsButResolveFails(t *testing.T) {
 	}
 	if j.TargetImageID != "" {
 		t.Fatalf("target_image_id = %q, want absent (never finalized on an unresolved pull)", j.TargetImageID)
+	}
+}
+
+// --- restore DB load + assets + cancellation cleanup (Task 17) --------------
+
+// validAssetsTar returns a REAL, pre-scan-safe assets.tar (one regular file, no
+// "..", no absolute path) so the step-3 PrescanAssets accepts it.
+func validAssetsTar(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	body := []byte("hi")
+	if err := tw.WriteHeader(&tar.Header{Name: "hello.txt", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// containsArg reports whether call contains want as a whole token.
+func containsArg(call []string, want string) bool {
+	for _, a := range call {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// argAfter returns the token immediately following flag in call, or "".
+func argAfter(call []string, flag string) string {
+	for i, a := range call {
+		if a == flag && i+1 < len(call) {
+			return call[i+1]
+		}
+	}
+	return ""
+}
+
+// hasEnv reports whether any EnvCalls vector carries the want "K=V" entry.
+func hasEnv(envCalls [][]string, want string) bool {
+	for _, e := range envCalls {
+		for _, kv := range e {
+			if kv == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// rmForce matches a `rm -f <name>` cleanup call whose name carries the prefix.
+func rmForce(prefix string) func([]string) bool {
+	return func(c []string) bool {
+		return len(c) == 3 && c[0] == "rm" && c[1] == "-f" && strings.HasPrefix(c[2], prefix)
+	}
+}
+
+// isLoadCall matches a destructive one-off compose-run call for the given worker
+// name prefix (distinct from the `rm`/`ps` cleanup calls, which do not start with
+// "compose").
+func isLoadCall(prefix string) func([]string) bool {
+	return func(c []string) bool { return head(c) == "compose" && joinHas(prefix)(c) }
+}
+
+// TestRestoreLoadHappyPath: with a clean local-RID preflight and both destructive
+// one-offs returning nil, the engine returns nil after driving the DB load via
+// StreamIn (compose run, NOT exec, restoreDBScript trailing) and the assets restore
+// via StreamInEnv (MATHION_VERSION pinned, restoreAssetsScript trailing), DB first.
+func TestRestoreLoadHappyPath(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	var sawDB, sawAssets bool
+	f := &compose.FakeRunner{
+		OutputFunc: recordedIDLocalOutput,
+		StreamInFunc: func(_ io.Reader, args []string) error {
+			switch {
+			case joinHas("mathion_restore_db_")(args):
+				sawDB = true
+			case joinHas("mathion_restore_assets_")(args):
+				sawAssets = true
+			}
+			return nil
+		},
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sawDB || !sawAssets {
+		t.Fatalf("both loads must run through StreamIn/StreamInEnv (db=%v assets=%v)", sawDB, sawAssets)
+	}
+	di := idxOfCall(f.Calls, isLoadCall("mathion_restore_db_"))
+	ai := idxOfCall(f.Calls, isLoadCall("mathion_restore_assets_"))
+	if di < 0 || ai < 0 || di >= ai {
+		t.Fatalf("want DB load before assets load; db=%d assets=%d calls=%v", di, ai, f.Calls)
+	}
+	db := f.Calls[di]
+	if containsArg(db, "exec") {
+		t.Fatalf("DB load must be a `run` one-off, not `exec`; got %v", db)
+	}
+	for _, want := range []string{"run", "--rm", "--no-deps", "--pull", "never", "--label", "io.mathion.worker=1", "-T", "db", "sh", "-c"} {
+		if !containsArg(db, want) {
+			t.Fatalf("DB load argv missing %q; got %v", want, db)
+		}
+	}
+	if !strings.HasPrefix(argAfter(db, "--name"), "mathion_restore_db_") {
+		t.Fatalf("DB load must carry a pid-scoped --name; got %v", db)
+	}
+	if db[len(db)-1] != restoreDBScript {
+		t.Fatalf("DB load trailing arg must be restoreDBScript; got %q", db[len(db)-1])
+	}
+	as := f.Calls[ai]
+	for _, want := range []string{"run", "-T", "app"} {
+		if !containsArg(as, want) {
+			t.Fatalf("assets load argv missing %q; got %v", want, as)
+		}
+	}
+	if !strings.HasPrefix(argAfter(as, "--name"), "mathion_restore_assets_") {
+		t.Fatalf("assets load must carry a pid-scoped --name; got %v", as)
+	}
+	if as[len(as)-1] != restoreAssetsScript {
+		t.Fatalf("assets load trailing arg must be restoreAssetsScript; got %q", as[len(as)-1])
+	}
+	if !hasEnv(f.EnvCalls, "MATHION_VERSION="+managedTag) {
+		t.Fatalf("assets load must pin MATHION_VERSION=%s via StreamInEnv; EnvCalls=%v", managedTag, f.EnvCalls)
+	}
+}
+
+// TestRestoreLoadDBErrorPIISafe: a non-zero DB-load exit is scrubbed via
+// spoolPGStderr (generic message + 0600 log path, never the raw pg stderr), both
+// named workers are force-removed, and the recovery breadcrumb is RETAINED. Also
+// covers the "surfaces the real command ExitError, not a stdin EPIPE" requirement.
+func TestRestoreLoadDBErrorPIISafe(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{
+		OutputFunc: recordedIDLocalOutput,
+		StreamInFunc: func(_ io.Reader, args []string) error {
+			if joinHas("mathion_restore_db_")(args) {
+				return &compose.ExitError{Code: 1, Stderr: []byte("SECRET_PII_ROW")}
+			}
+			return nil
+		},
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps})
+	if err == nil {
+		t.Fatal("expected a DB-load error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "pg_restore failed (exit 1)") || !strings.Contains(msg, "saved to") {
+		t.Fatalf("want a scrubbed pg_restore error with a saved-log path; got %q", msg)
+	}
+	if strings.Contains(msg, "SECRET_PII_ROW") {
+		t.Fatalf("error leaked raw pg stderr: %q", msg)
+	}
+	// The surfaced error came from the command ExitError (exit 1), not a stdin EPIPE.
+	if strings.Contains(msg, "closed pipe") || strings.Contains(strings.ToLower(msg), "epipe") {
+		t.Fatalf("want the command exit error, not a stdin pipe error: %q", msg)
+	}
+	if !hasCall(f.Calls, rmForce("mathion_restore_db_")) || !hasCall(f.Calls, rmForce("mathion_restore_assets_")) {
+		t.Fatalf("both workers must be force-removed on a DB-load failure; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("breadcrumb must be RETAINED on a DB-load failure")
+	}
+}
+
+// TestRestoreLoadAssetsError: a failed assets restore returns a wrapped
+// "restoring assets" error, force-removes both workers, and retains the breadcrumb.
+func TestRestoreLoadAssetsError(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{
+		OutputFunc: recordedIDLocalOutput,
+		StreamInFunc: func(_ io.Reader, args []string) error {
+			if joinHas("mathion_restore_assets_")(args) {
+				return errors.New("tar: broken pipe")
+			}
+			return nil // DB load succeeds
+		},
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps})
+	if err == nil {
+		t.Fatal("expected an assets-restore error")
+	}
+	if !strings.Contains(err.Error(), "restoring assets") {
+		t.Fatalf("want a wrapped 'restoring assets' error; got %q", err.Error())
+	}
+	if !hasCall(f.Calls, rmForce("mathion_restore_db_")) || !hasCall(f.Calls, rmForce("mathion_restore_assets_")) {
+		t.Fatalf("both workers must be force-removed on an assets-restore failure; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("breadcrumb must be RETAINED on an assets-restore failure")
+	}
+}
+
+// TestRestoreCancelCleansUpUnderWithoutCancel: a context cancel mid-DB-load (as if
+// Ctrl-C while pg_restore is still decoding) force-removes BOTH workers before the
+// engine returns, and the cleanup runs under context.WithoutCancel — so the rm call
+// snapshots a LIVE context (Err()==nil), not the cancelled parent. Breadcrumb kept.
+func TestRestoreCancelCleansUpUnderWithoutCancel(t *testing.T) {
+	cfg := setupBackupEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &compose.FakeRunner{
+		OutputFunc: recordedIDLocalOutput,
+		StreamInFunc: func(_ io.Reader, args []string) error {
+			if joinHas("mathion_restore_db_")(args) {
+				cancel() // Ctrl-C lands while the decode+load one-off is still running
+				return ctx.Err()
+			}
+			return nil
+		},
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	if err := restoreEngine(ctx, app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err == nil {
+		t.Fatal("expected the cancellation to surface")
+	}
+	di := idxOfCall(f.Calls, rmForce("mathion_restore_db_"))
+	if di < 0 {
+		t.Fatalf("db worker must be force-removed on cancel; calls=%v", f.Calls)
+	}
+	// WithoutCancel proof: had cleanup reused the cancelled ctx, this snapshot would
+	// be context.Canceled.
+	if s := f.CtxSnaps[di]; s.Err != nil {
+		t.Fatalf("cleanup must run under context.WithoutCancel (live ctx); got Err=%v", s.Err)
+	}
+	if !hasCall(f.Calls, rmForce("mathion_restore_assets_")) {
+		t.Fatalf("assets worker must also be force-removed on cancel; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("breadcrumb must be RETAINED on cancel")
 	}
 }
