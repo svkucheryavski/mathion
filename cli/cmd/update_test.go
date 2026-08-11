@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
 // TestUpdateGuardPreconditionValidatesEnv: a broken/incomplete .env aborts BEFORE
@@ -152,4 +154,169 @@ func TestUpdateGuardConfirmNoRollbackClause(t *testing.T) {
 			t.Fatalf("want \"left as-is; recover with mathion restore\" in output; got %q", out.String())
 		}
 	})
+}
+
+// --- update steps 5-6b (stop, offline backup, pre-mutation validate, breadcrumb) ---
+
+// update21Fake drives a full Task-21 run to a REAL, prescan-valid auto-backup and a
+// resolvable preflight. OutputFunc: ps -q db => "dbcid" (backup precondition), alembic
+// current => a rev, then delegate to recordedIDLocalOutput (ps -q app => "", image
+// inspect …{{.Id}} => "sha256:rec" [= captured A and manifest ImageID], recorded-id
+// inspect => "" present). StreamFunc writes real db.dump bytes + a VALID assets tar.
+func update21Fake(t *testing.T) *compose.FakeRunner {
+	tarBytes := validAssetsTar(t)
+	return &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			j := strings.Join(args, " ")
+			switch {
+			case strings.Contains(j, "ps -q db"):
+				return "dbcid\n", nil
+			case strings.Contains(j, "alembic current"):
+				return "67e8294b4267 (head)\n", nil
+			}
+			return recordedIDLocalOutput(args)
+		},
+		StreamFunc: func(w io.Writer, args []string) error {
+			j := strings.Join(args, " ")
+			switch {
+			case strings.Contains(j, "pg_dump"):
+				_, _ = w.Write([]byte("DBDUMP"))
+			case strings.Contains(j, "tar -C /data/mathion/assets"):
+				_, _ = w.Write(tarBytes)
+			}
+			return nil
+		},
+	}
+}
+
+// TestUpdate6HappyOrderingAndBreadcrumb pins the whole steps-5..6b spine in one run:
+// (a) ordering stop app -> offline backup (pg_dump stream) -> 6a preflight inspect;
+// (b) 6a's preflight never retags (no `docker tag` anywhere); (c) the step-6b
+// breadcrumb lands with EXACTLY the 7 fields, target_image_id == the captured A.
+func TestUpdate6HappyOrderingAndBreadcrumb(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	app, _, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("a full step-5..6b run must return nil; got %v", err)
+	}
+	// (a) ordering: stop app -> backup pg_dump stream -> 6a preflight recorded-id inspect
+	// (image inspect sha256:rec — unique to the preflight, unlike the pre-stop A-capture
+	// inspect which targets ImageRepo:<tag>).
+	si := idxOfCall(f.Calls, joinHas("stop app"))
+	bi := idxOfCall(f.Calls, joinHas("pg_dump"))
+	pi := idxOfCall(f.Calls, joinHas("inspect sha256:rec"))
+	if si < 0 || bi < 0 || pi < 0 || !(si < bi && bi < pi) {
+		t.Fatalf("bad order stop=%d backup=%d preflight=%d calls=%v", si, bi, pi, f.Calls)
+	}
+	// (b) 6a's preflight is read-only: no docker tag anywhere.
+	if hasCall(f.Calls, isTag) {
+		t.Fatalf("update steps 5-6b must never retag; calls=%v", f.Calls)
+	}
+	// (c) the durable breadcrumb landed with exactly the step-6b fields.
+	j, present, err := varlib.ReadJournal()
+	if err != nil || !present {
+		t.Fatalf("breadcrumb must be present after 6b (present=%v err=%v)", present, err)
+	}
+	if j.Schema != 1 || j.Kind != "update" || j.OldTag != "v0.1.1" || j.TargetTag != "v2.0.0" || j.TargetImageID != "sha256:rec" {
+		t.Fatalf("breadcrumb fields = %+v", j)
+	}
+	if j.CreatedAt == "" {
+		t.Fatal("breadcrumb created_at must be set")
+	}
+	if j.BackupPath == "" || !strings.HasPrefix(j.BackupPath, varlib.BackupsDir()) {
+		t.Fatalf("breadcrumb backup_path = %q, want a managed backups-dir path", j.BackupPath)
+	}
+}
+
+// TestUpdate6aValidateFailStartsApp: the auto-backup's inner assets.tar is garbage, so
+// 6a's PrescanAssets rejects the rollback point BEFORE any mutation — a clean abort
+// that (i) starts app back up, (ii) writes NO breadcrumb, (iii) never retags. The
+// parent ctx is pre-cancelled, so the start-app must run under context.WithoutCancel
+// (its CtxSnap is LIVE) while the earlier stop-app snapshotted the cancelled parent.
+func TestUpdate6aValidateFailStartsApp(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	// Corrupt the auto-backup's inner assets.tar so 6a's PrescanAssets fails.
+	f.StreamFunc = func(w io.Writer, args []string) error {
+		j := strings.Join(args, " ")
+		switch {
+		case strings.Contains(j, "pg_dump"):
+			_, _ = w.Write([]byte("DBDUMP"))
+		case strings.Contains(j, "tar -C /data/mathion/assets"):
+			_, _ = w.Write([]byte("ASSETS")) // GARBAGE -> invalid inner tar
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	app, _, _ := engineApp(cfg, f, "")
+	if err := runUpdate(ctx, app, updateOpts{Version: "v2.0.0", Yes: true}); err == nil {
+		t.Fatal("6a must reject an invalid inner assets.tar")
+	}
+	if !hasCall(f.Calls, joinHas("start app")) {
+		t.Fatalf("a 6a failure must start app; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("a 6a failure must not write a breadcrumb (nothing mutated)")
+	}
+	if hasCall(f.Calls, isTag) {
+		t.Fatalf("6a must never retag; calls=%v", f.Calls)
+	}
+	// WithoutCancel proof: start app ran on a LIVE ctx though the parent was cancelled.
+	sti := idxOfCall(f.Calls, joinHas("start app"))
+	spi := idxOfCall(f.Calls, joinHas("stop app"))
+	if f.CtxSnaps[sti].Err != nil {
+		t.Fatalf("start app must run under context.WithoutCancel (live ctx); got Err=%v", f.CtxSnaps[sti].Err)
+	}
+	if f.CtxSnaps[spi].Err == nil {
+		t.Fatal("stop app should have snapshotted the CANCELLED parent ctx")
+	}
+}
+
+// TestUpdateBackupFailStartsApp: backupEngine's db-running precondition fails (ps -q db
+// => ""), so step 6 aborts with "start the stack first". The engine must start app back
+// up and write NO breadcrumb.
+func TestUpdateBackupFailStartsApp(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			if strings.Contains(strings.Join(args, " "), "ps -q db") {
+				return "", nil // backupEngine => "start the stack first"
+			}
+			return recordedIDLocalOutput(args)
+		},
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err == nil {
+		t.Fatal("a backup precondition failure must abort")
+	}
+	if !hasCall(f.Calls, joinHas("start app")) {
+		t.Fatalf("a step-6 backup failure must start app; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("a step-6 backup failure must not write a breadcrumb")
+	}
+}
+
+// TestUpdate6bWriteFailStartsApp: backup + 6a succeed, but the 6b breadcrumb write
+// fails (stubbed seam). That is a PRE-mutation abort: the error surfaces (carrying the
+// write failure), app is started back up, and no breadcrumb persists.
+func TestUpdate6bWriteFailStartsApp(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	prev := writeJournalFn
+	writeJournalFn = func(varlib.Journal) error { return errors.New("fsync failed") }
+	t.Cleanup(func() { writeJournalFn = prev })
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "fsync failed") {
+		t.Fatalf("a 6b write failure must surface; got %v", err)
+	}
+	if !hasCall(f.Calls, joinHas("start app")) {
+		t.Fatalf("a 6b write failure must start app; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("a failed 6b write must persist no breadcrumb")
+	}
 }
