@@ -11,8 +11,14 @@ import (
 
 	"github.com/svkucheryavski/mathion/cli/internal/archive"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
+
+// gateFn is the deployment gate restoreEngine runs at step 10; a package seam so
+// full-engine tests drive step-10 outcomes without a live app + HTTP server (the
+// gate's own logic is covered directly by gate_test.go).
+var gateFn = gateImageAndVersion
 
 // imageResolve is the outcome of the read-only restore image preflight (step 4a):
 // which local image the rewind would boot. RID is the resolved image id; when it
@@ -97,12 +103,12 @@ const restoreAssetsScript = `find /data/mathion/assets -mindepth 1 -delete && ta
 // workerRemoveTries bounds forceRemoveWorker's create/observe race loop.
 const workerRemoveTries = 10
 
-// restoreEngine rewinds the deployment from archivePath. It implements the read /
-// confirm / stage half of restore — steps 2, 4a, 5, 6, 6b, 6c — and returns before
-// the destructive DB/assets load (steps 7-10 land in later tasks, which also clear
-// the breadcrumb on the step-10 gate). Nothing before step 6 mutates deployment
-// state, so a declined confirmation or an extract/preflight failure leaves the
-// deployment untouched.
+// restoreEngine rewinds the deployment from archivePath end to end: read/confirm/
+// stage (steps 2, 4a, 5, 6, 6b, 6c), the destructive DB + assets load (steps 7-8),
+// then the .env re-pin + app recreate + deployment gate (steps 9-10), clearing the
+// recovery breadcrumb only once the gate confirms the correct image is serving.
+// Nothing before step 6 mutates deployment state, so a declined confirmation or an
+// extract/preflight failure leaves the deployment untouched.
 func restoreEngine(ctx context.Context, a *App, archivePath string, opts restoreOpts) error {
 	// (0) Whether a recovery breadcrumb was ALREADY present at entry — read before
 	// 6b writes our own. restore is exempt from the entry-check refusal, so it may
@@ -285,8 +291,28 @@ func restoreEngine(ctx context.Context, a *App, archivePath string, opts restore
 		return fmt.Errorf("restoring assets: %w", err)
 	}
 
-	// R_id is the gate target for step 10; steps 9-10 (.env re-pin, gate + breadcrumb
-	// clear) land in Task 18. The step-6b breadcrumb is retained until that gate.
+	// (9) Re-pin .env to the restored version (assert-after-write inside RepinVersion),
+	// then recreate app on the validated, now-local target image. --wait owns the
+	// health-wait; --pull never because 6c guaranteed the image is local.
+	if err := config.RepinVersion(a.CfgDir, manifest.MathionVersion); err != nil {
+		return err
+	}
+	if err := a.compose(ctx, "up", "-d", "--wait", "--pull", "never", "app"); err != nil {
+		return err
+	}
+	// (10) Gate: authoritative image-ID match + legacy-tolerant /version. Restore is
+	// non-strict (a rewind to a pre-/version image must pass on the SPA/404 shape).
+	if err := gateFn(ctx, a, img.RID, manifest.MathionVersion, false); err != nil {
+		return err
+	}
+	// Gate passed = the correct image is serving. A STANDALONE restore now clears its
+	// step-6b breadcrumb; a failed clear is a NON-FATAL warning (the restore is done).
+	if opts.WriteBreadcrumb {
+		if err := varlib.RemoveJournal(); err != nil {
+			fmt.Fprintf(a.Err, "restored successfully; remove %s manually (%v)\n", varlib.JournalPath(), err)
+		}
+	}
+	fmt.Fprintf(a.Out, "restored to %s from %s\n", manifest.MathionVersion, filepath.Base(archivePath))
 	return nil
 }
 

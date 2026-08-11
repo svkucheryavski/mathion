@@ -14,6 +14,7 @@ import (
 
 	"github.com/svkucheryavski/mathion/cli/internal/archive"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
@@ -237,10 +238,40 @@ func recordedIDLocalOutput(args []string) (string, error) {
 	return "", nil
 }
 
+// setupRestoreEnv is setupBackupEnv's complete-.env sibling: steps 9-10 run
+// config.RepinVersion, which re-validates the WHOLE file via ValidateEnvComplete,
+// so the minimal .env setupBackupEnv writes (missing SECRET_KEY / DATABASE_URL /
+// coupled POSTGRES_* ...) would fail the re-pin. Render a full GenerateEnv set here
+// so a restore that reaches step 9 can re-pin cleanly.
+func setupRestoreEnv(t *testing.T) string {
+	t.Helper()
+	t.Setenv("MATHION_VARLIB_DIR", filepath.Join(t.TempDir(), "vl"))
+	if err := varlib.EnsureBackupsDir(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := t.TempDir()
+	env := config.GenerateEnv("https://learn.example.edu", "v0.1.1", "SECRET==", "abc123hex")
+	if err := os.WriteFile(filepath.Join(cfg, ".env"), []byte(config.RenderEnv(env)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// stubGate replaces the step-10 deployment gate seam with one returning ret, so a
+// full-engine test can drive the step-10 outcome without a live app + HTTP server
+// (the gate's own logic is covered directly in gate_test.go). Restored on cleanup.
+func stubGate(t *testing.T, ret error) {
+	t.Helper()
+	prev := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error { return ret }
+	t.Cleanup(func() { gateFn = prev })
+}
+
 // TestRestoreEngineConfirmAccept: typing the project name proceeds through up-db
 // then stop-app, in that order.
 func TestRestoreEngineConfirmAccept(t *testing.T) {
-	cfg := setupBackupEnv(t)
+	cfg := setupRestoreEnv(t)
+	stubGate(t, nil)
 	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, CreatedAt: "2026-08-01T00:00:00Z", ImageID: "sha256:rec"})
 	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
 	app, _, _ := engineApp(cfg, f, "mathion_prod\n")
@@ -318,7 +349,8 @@ func pullFlaggedRunner(psApp, health string, pullErr error, onStop func()) *comp
 // TestRestoreEngineOrdering: 4a -> confirm(bypassed) -> capture -> up db -> stop app
 // -> pull, in that order, with a breadcrumb landing before the pull.
 func TestRestoreEngineOrdering(t *testing.T) {
-	cfg := setupBackupEnv(t)
+	cfg := setupRestoreEnv(t)
+	stubGate(t, nil)
 	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag})
 	f := pullFlaggedRunner("appcid\n", "true healthy\n", nil, nil)
 	app, _, _ := engineApp(cfg, f, "")
@@ -332,9 +364,8 @@ func TestRestoreEngineOrdering(t *testing.T) {
 	if psi < 0 || ui < 0 || si < 0 || pi < 0 || !(psi < ui && ui < si && si < pi) {
 		t.Fatalf("bad order psi=%d ui=%d si=%d pi=%d calls=%v", psi, ui, si, pi, f.Calls)
 	}
-	if _, present, _ := varlib.ReadJournal(); !present {
-		t.Fatal("expected a breadcrumb after a pull-flagged restore")
-	}
+	// (The trailing "breadcrumb present after" assertion is gone: a successful
+	// restore now clears its breadcrumb at step 10. The ordering above is the point.)
 }
 
 // TestRestoreEnginePullFlaggedFinalize: the breadcrumb is written with an absent
@@ -343,9 +374,17 @@ func TestRestoreEnginePullFlaggedFinalize(t *testing.T) {
 	cfg := setupBackupEnv(t)
 	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag})
 	f := pullFlaggedRunner("", "", nil, nil) // no app => no restart concern
+	// Fail the DB load so the engine returns at step 7 — before step 10 would clear
+	// the breadcrumb — leaving the 6c-finalized target_image_id intact to assert.
+	f.StreamInFunc = func(_ io.Reader, args []string) error {
+		if joinHas("mathion_restore_db_")(args) {
+			return errors.New("db load stops the restore before step 9")
+		}
+		return nil
+	}
 	app, _, _ := engineApp(cfg, f, "")
-	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err == nil {
+		t.Fatal("expected the DB-load failure to stop the restore before step 9")
 	}
 	if !hasCall(f.Calls, isPull) {
 		t.Fatalf("expected a pull; calls=%v", f.Calls)
@@ -380,10 +419,18 @@ func TestRestoreEngineLocalRIDRetag(t *testing.T) {
 			}
 			return "", nil
 		},
+		// Fail the DB load so the engine returns at step 7 (before step 10 would clear
+		// the breadcrumb), preserving the 6c-written target_image_id for the assertion.
+		StreamInFunc: func(_ io.Reader, args []string) error {
+			if joinHas("mathion_restore_db_")(args) {
+				return errors.New("db load stops the restore before step 9")
+			}
+			return nil
+		},
 	}
 	app, _, _ := engineApp(cfg, f, "")
-	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err == nil {
+		t.Fatal("expected the DB-load failure to stop the restore before step 9")
 	}
 	if hasCall(f.Calls, isPull) {
 		t.Fatalf("recorded-id-local restore must not pull; calls=%v", f.Calls)
@@ -676,7 +723,8 @@ func isLoadCall(prefix string) func([]string) bool {
 // StreamIn (compose run, NOT exec, restoreDBScript trailing) and the assets restore
 // via StreamInEnv (MATHION_VERSION pinned, restoreAssetsScript trailing), DB first.
 func TestRestoreLoadHappyPath(t *testing.T) {
-	cfg := setupBackupEnv(t)
+	cfg := setupRestoreEnv(t)
+	stubGate(t, nil)
 	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
 	var sawDB, sawAssets bool
 	f := &compose.FakeRunner{
@@ -842,5 +890,90 @@ func TestRestoreCancelCleansUpUnderWithoutCancel(t *testing.T) {
 	}
 	if _, present, _ := varlib.ReadJournal(); !present {
 		t.Fatal("breadcrumb must be RETAINED on cancel")
+	}
+}
+
+// --- restore re-pin + recreate + gate (Task 18) -----------------------------
+
+// TestRestoreGatePassClearsBreadcrumb: a full happy restore re-pins .env to the
+// restored version, recreates app (up -d --wait --pull never app), and — because
+// the (stubbed) gate passes — clears the step-6b breadcrumb and prints the summary.
+func TestRestoreGatePassClearsBreadcrumb(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	stubGate(t, nil)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, out, _ := engineApp(cfg, f, "")
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// (a) the re-pin took.
+	m, err := config.ReadEnvFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["MATHION_VERSION"] != managedTag {
+		t.Fatalf("MATHION_VERSION re-pin = %q, want %q", m["MATHION_VERSION"], managedTag)
+	}
+	// (b) app was recreated on the validated local image with --wait and --pull never.
+	if !hasCall(f.Calls, joinHas("up -d --wait --pull never app")) {
+		t.Fatalf("expected an `up -d --wait --pull never app` recreate; calls=%v", f.Calls)
+	}
+	// (c) the breadcrumb was cleared post-gate.
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("a passed-gate restore must clear its breadcrumb")
+	}
+	// (d) the success summary was printed.
+	if s := out.String(); !strings.Contains(s, "restored to "+managedTag+" from ") {
+		t.Fatalf("expected a `restored to %s from ` summary; got %q", managedTag, s)
+	}
+}
+
+// TestRestoreGateFailRetainsBreadcrumb: a failing gate surfaces its error and
+// RETAINS the breadcrumb (never cleared on a gate failure), so a re-run still
+// recovers.
+func TestRestoreGateFailRetainsBreadcrumb(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	stubGate(t, errors.New("gate: mismatch"))
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "")
+	err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps})
+	if err == nil || !strings.Contains(err.Error(), "gate: mismatch") {
+		t.Fatalf("expected the gate error to surface; got %v", err)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("breadcrumb must be RETAINED on a gate failure")
+	}
+}
+
+// TestRestoreGateRemoveWarns: the gate passes but the post-gate breadcrumb remove
+// fails (backups dir turned read-only by the gate's side effect exactly when the
+// unlink runs). The failed remove is a NON-FATAL warning — the restore still
+// returns nil — and the warning names the journal path for manual cleanup.
+func TestRestoreGateRemoveWarns(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("run as non-root: mode 0500 does not block root unlink")
+	}
+	cfg := setupRestoreEnv(t)
+	arc := writeRestoreArchive(t, t.TempDir(), archive.Manifest{MathionVersion: managedTag, ImageID: "sha256:rec"})
+	// The gate stub side-effects the backups dir read-only exactly when it runs —
+	// AFTER 6b wrote the breadcrumb (dir still 0700), but BEFORE the post-gate
+	// RemoveJournal, so the unlink fails. Restore the mode before the temp-dir cleanup.
+	prev := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error {
+		_ = os.Chmod(varlib.BackupsDir(), 0o500)
+		return nil
+	}
+	t.Cleanup(func() { gateFn = prev })
+	t.Cleanup(func() { _ = os.Chmod(varlib.BackupsDir(), 0o700) })
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, errb := engineApp(cfg, f, "")
+	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err != nil {
+		t.Fatalf("a failed post-gate remove must be non-fatal; got %v", err)
+	}
+	w := errb.String()
+	if !strings.Contains(w, "remove ") || !strings.Contains(w, varlib.JournalPath()) {
+		t.Fatalf("expected a non-fatal remove warning naming the journal path; got %q", w)
 	}
 }
