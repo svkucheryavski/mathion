@@ -3,17 +3,78 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/archive"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
+
+// newRestoreCmd builds `mathion restore`. It follows the same lock-taking preamble
+// as backup (root -> ensure backups dir -> lock -> sweeps -> entry-check -> work),
+// but restore is EXEMPT from the breadcrumb refusal (classify("restore")==proceed):
+// it is a recovery command and RUNS WITH a leftover breadcrumb, replacing it with
+// its own kind:"restore" one at step 6b and clearing it at step 10 on a clean gate.
+func newRestoreCmd(app *App) *cobra.Command {
+	var latest, yes bool
+	c := &cobra.Command{
+		Use:   "restore [archive]",
+		Short: "Restore the database and assets from a managed or explicit backup archive",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			if err := requireRoot(); err != nil {
+				return err
+			}
+			// Usage validation (fail fast, before the lock): EXACTLY one target source.
+			if latest && len(args) > 0 {
+				return errors.New("--latest and an explicit archive path are mutually exclusive")
+			}
+			if !latest && len(args) == 0 {
+				return errors.New("provide an archive path or --latest")
+			}
+			if err := varlib.EnsureBackupsDir(); err != nil {
+				return err
+			}
+			release, err := varlib.Lock()
+			if err != nil {
+				return err // ErrLocked message is already clear
+			}
+			defer func() { _ = release() }()
+			if err := varlib.SweepStaleStaging(); err != nil {
+				return err
+			}
+			if err := dockerx.SweepWorkers(c.Context(), app.Runner, app.Project); err != nil {
+				return err
+			}
+			if proceed, err := guardEntry(app, "restore"); !proceed {
+				return err // restore is exempt; this only trips on a hard read error's fail-closed path
+			}
+			// Resolve the target archive (SelectLatest needs the ensured backups dir).
+			path := ""
+			if latest {
+				path, err = archive.SelectLatest(varlib.BackupsDir())
+				if err != nil {
+					return err
+				}
+			} else {
+				path = args[0]
+			}
+			caps := archive.TierFor(path, varlib.BackupsDir())
+			return restoreEngine(c.Context(), app, path, restoreOpts{Yes: yes, WriteBreadcrumb: true, Caps: caps})
+		},
+	}
+	c.Flags().BoolVar(&latest, "latest", false, "restore the most recent managed backup in the backups dir")
+	c.Flags().BoolVar(&yes, "yes", false, "skip the destructive-restore confirmation prompt")
+	return c
+}
 
 // gateFn is the deployment gate restoreEngine runs at step 10; a package seam so
 // full-engine tests drive step-10 outcomes without a live app + HTTP server (the

@@ -947,6 +947,188 @@ func TestRestoreGateFailRetainsBreadcrumb(t *testing.T) {
 	}
 }
 
+// --- restore COMMAND (Task 19) ----------------------------------------------
+
+// TestRestoreCmdLatestResolves: with `--latest` (no positional) and a managed
+// archive in the backups dir, the command resolves the target via SelectLatest and
+// runs the engine end to end (proven by the DB-load one-off being issued).
+func TestRestoreCmdLatestResolves(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	stubGate(t, nil)
+	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RunE(c, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("engine must have run the DB load (proving --latest resolved via SelectLatest); calls=%v", f.Calls)
+	}
+}
+
+// TestRestoreCmdLatestNoBackups: `--latest` against a freshly-ensured (empty)
+// backups dir surfaces SelectLatest's no-backups error and never touches the engine.
+func TestRestoreCmdLatestNoBackups(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RunE(c, nil); err == nil {
+		t.Fatal("expected a no-backups error from SelectLatest")
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("engine must not run when SelectLatest finds nothing; calls=%v", f.Calls)
+	}
+}
+
+// TestRestoreCmdUntrustedPathWarns: an explicit archive OUTSIDE the backups dir
+// makes TierFor pick UntrustedCaps, so the engine's !Yes confirm path prints the
+// untrusted-SQL warning; the typed project name confirms and the restore completes.
+func TestRestoreCmdUntrustedPathWarns(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	stubGate(t, nil)
+	path := writeRestoreArchive(t, t.TempDir(), archive.Manifest{ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, errb := engineApp(cfg, f, "mathion_prod\n") // confirm input; NOT --yes
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.RunE(c, []string{path}); err != nil {
+		t.Fatalf("confirmation should match and the restore succeed; got %v", err)
+	}
+	if !strings.Contains(errb.String(), "outside the managed backups dir") {
+		t.Fatalf("expected the untrusted-path warning (TierFor -> UntrustedCaps); errb=%q", errb.String())
+	}
+}
+
+// TestRestoreCmdExemptProceedsReplacesBreadcrumb: restore is EXEMPT from the
+// entry-check refusal — it PROCEEDS past a leftover kind:"update" breadcrumb (unlike
+// backup, which refuses) and REPLACES it with its own kind:"restore" one at step 6b.
+// A stubbed gate failure stops the engine at step 10 with that breadcrumb retained,
+// so this single test pins both "exempt proceeds" and "replaced with kind:restore".
+func TestRestoreCmdExemptProceedsReplacesBreadcrumb(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	if err := varlib.WriteJournal(varlib.Journal{Schema: 1, Kind: "update", TargetTag: "v9.9.9", BackupPath: "/b/x.tar.gz"}); err != nil {
+		t.Fatal(err)
+	}
+	stubGate(t, errors.New("gate stop"))
+	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	err := c.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "gate stop") {
+		t.Fatalf("restore must PROCEED past the update breadcrumb and stop at the gate; got %v", err)
+	}
+	j, present, rerr := varlib.ReadJournal()
+	if rerr != nil || !present {
+		t.Fatalf("breadcrumb must be retained on a gate failure; present=%v err=%v", present, rerr)
+	}
+	if j.Kind != "restore" {
+		t.Fatalf("step 6b must REPLACE the update breadcrumb with a kind:restore one; got kind=%q", j.Kind)
+	}
+}
+
+// TestRestoreCmdLockHeld: mirroring backup, a concurrently held operation lock makes
+// the command fail closed with the ErrLocked sentinel before any resolution or engine
+// work (the lock is taken right after EnsureBackupsDir). No archive need exist.
+func TestRestoreCmdLockHeld(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	release, err := varlib.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = release() }()
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.RunE(c, []string{"/any/path.tar.gz"}); !errors.Is(err, varlib.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no engine work must run when the lock is held; calls=%v", f.Calls)
+	}
+}
+
+// TestRestoreCmdYesBypassesConfirm: `--yes` skips the destructive confirmation, so an
+// EMPTY In still completes — whereas without --yes the empty In would fail step 5.
+func TestRestoreCmdYesBypassesConfirm(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	stubGate(t, nil)
+	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "") // EMPTY In
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RunE(c, nil); err != nil {
+		t.Fatalf("--yes must bypass the confirm on an empty In; got %v", err)
+	}
+}
+
+// TestRestoreCmdFlagValidation: the two usage errors fail fast (before the lock),
+// with no engine work. (a) --latest AND a positional path are mutually exclusive;
+// (b) neither is provided. Fresh command per sub-case.
+func TestRestoreCmdFlagValidation(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	// (a) --latest AND an explicit path -> mutually exclusive.
+	f1 := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app1, _, _ := engineApp(cfg, f1, "")
+	c1 := newRestoreCmd(app1)
+	c1.SetContext(context.Background())
+	if err := c1.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c1.RunE(c1, []string{"/p.tar.gz"}); err == nil {
+		t.Fatal("--latest and an explicit path must be mutually exclusive")
+	}
+	if hasCall(f1.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no engine work on a usage error; calls=%v", f1.Calls)
+	}
+	// (b) neither --latest nor a path -> must provide one.
+	f2 := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app2, _, _ := engineApp(cfg, f2, "")
+	c2 := newRestoreCmd(app2)
+	c2.SetContext(context.Background())
+	if err := c2.RunE(c2, nil); err == nil {
+		t.Fatal("must require either an archive path or --latest")
+	}
+	if hasCall(f2.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no engine work on a usage error; calls=%v", f2.Calls)
+	}
+}
+
 // TestRestoreGateRemoveWarns: the gate passes but the post-gate breadcrumb remove
 // fails (backups dir turned read-only by the gate's side effect exactly when the
 // unlink runs). The failed remove is a NON-FATAL warning — the restore still
