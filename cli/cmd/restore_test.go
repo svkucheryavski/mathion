@@ -956,7 +956,12 @@ func TestRestoreCmdLatestResolves(t *testing.T) {
 	cfg := setupRestoreEnv(t)
 	asRoot(t)
 	stubGate(t, nil)
-	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
+	// Two managed archives: the SECOND written (v2.0.0) is newest by every SelectLatest
+	// tiebreak (equal-or-later ts, later mtime, lexicographically greater name), so
+	// --latest must resolve to IT — proven by the .env being re-pinned to v2.0.0, not
+	// v1.2.3. One archive alone could not tell "newest" from "the only/arbitrary one".
+	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec", MathionVersion: "v1.2.3"})
+	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec", MathionVersion: "v2.0.0"})
 	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
 	app, _, _ := engineApp(cfg, f, "")
 	c := newRestoreCmd(app)
@@ -971,7 +976,14 @@ func TestRestoreCmdLatestResolves(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !hasCall(f.Calls, joinHas("mathion_restore_db_")) {
-		t.Fatalf("engine must have run the DB load (proving --latest resolved via SelectLatest); calls=%v", f.Calls)
+		t.Fatalf("engine must have run the DB load; calls=%v", f.Calls)
+	}
+	env, err := config.ReadEnvFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["MATHION_VERSION"] != "v2.0.0" {
+		t.Fatalf("--latest must restore the NEWEST archive (re-pin to v2.0.0); got MATHION_VERSION=%q", env["MATHION_VERSION"])
 	}
 }
 
@@ -987,8 +999,9 @@ func TestRestoreCmdLatestNoBackups(t *testing.T) {
 	if err := c.Flags().Set("latest", "true"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.RunE(c, nil); err == nil {
-		t.Fatal("expected a no-backups error from SelectLatest")
+	err := c.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "no backups matching") {
+		t.Fatalf("expected SelectLatest's specific no-backups error; got %v", err)
 	}
 	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
 		t.Fatalf("engine must not run when SelectLatest finds nothing; calls=%v", f.Calls)
@@ -1069,8 +1082,10 @@ func TestRestoreCmdLockHeld(t *testing.T) {
 	if err := c.RunE(c, []string{"/any/path.tar.gz"}); !errors.Is(err, varlib.ErrLocked) {
 		t.Fatalf("expected ErrLocked, got %v", err)
 	}
-	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
-		t.Fatalf("no engine work must run when the lock is held; calls=%v", f.Calls)
+	// The lock is taken right after EnsureBackupsDir, BEFORE the sweeps — so NOT ONE
+	// runner call (SweepWorkers' ps included, recorded in Calls) may have been issued.
+	if len(f.Calls) != 0 {
+		t.Fatalf("no runner work must run when the lock is held; calls=%v", f.Calls)
 	}
 }
 
@@ -1102,6 +1117,15 @@ func TestRestoreCmdYesBypassesConfirm(t *testing.T) {
 func TestRestoreCmdFlagValidation(t *testing.T) {
 	cfg := setupRestoreEnv(t)
 	asRoot(t)
+	// Hold the operation lock for the whole test: usage validation runs BEFORE the
+	// lock, so each bad invocation must return its SPECIFIC validation error — NOT
+	// ErrLocked — and issue no runner call. (If validation moved after the lock,
+	// these would come back ErrLocked instead.)
+	release, err := varlib.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = release() }()
 	// (a) --latest AND an explicit path -> mutually exclusive.
 	f1 := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
 	app1, _, _ := engineApp(cfg, f1, "")
@@ -1110,22 +1134,24 @@ func TestRestoreCmdFlagValidation(t *testing.T) {
 	if err := c1.Flags().Set("latest", "true"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c1.RunE(c1, []string{"/p.tar.gz"}); err == nil {
-		t.Fatal("--latest and an explicit path must be mutually exclusive")
+	err = c1.RunE(c1, []string{"/p.tar.gz"})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") || errors.Is(err, varlib.ErrLocked) {
+		t.Fatalf("--latest + a path must fail validation BEFORE the lock; got %v", err)
 	}
-	if hasCall(f1.Calls, joinHas("mathion_restore_db_")) {
-		t.Fatalf("no engine work on a usage error; calls=%v", f1.Calls)
+	if len(f1.Calls) != 0 {
+		t.Fatalf("no runner work on a usage error; calls=%v", f1.Calls)
 	}
 	// (b) neither --latest nor a path -> must provide one.
 	f2 := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
 	app2, _, _ := engineApp(cfg, f2, "")
 	c2 := newRestoreCmd(app2)
 	c2.SetContext(context.Background())
-	if err := c2.RunE(c2, nil); err == nil {
-		t.Fatal("must require either an archive path or --latest")
+	err = c2.RunE(c2, nil)
+	if err == nil || !strings.Contains(err.Error(), "provide an archive") || errors.Is(err, varlib.ErrLocked) {
+		t.Fatalf("neither --latest nor a path must fail validation BEFORE the lock; got %v", err)
 	}
-	if hasCall(f2.Calls, joinHas("mathion_restore_db_")) {
-		t.Fatalf("no engine work on a usage error; calls=%v", f2.Calls)
+	if len(f2.Calls) != 0 {
+		t.Fatalf("no runner work on a usage error; calls=%v", f2.Calls)
 	}
 }
 
