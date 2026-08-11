@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,14 @@ var (
 	// point it at an httptest server (the loopback app port in production).
 	gateVersionURL = "http://127.0.0.1:8000/version"
 )
+
+// gateHTTPClient does NOT follow redirects: a 3xx from /version is a decisive
+// failure (e.g. a proxy auth wall bouncing to a login page), not a shape to
+// chase into a misleading 200. With ErrUseLastResponse, Do returns the 3xx
+// response itself, which classifies as a non-200/non-404 terminal fail.
+var gateHTTPClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 // gateImageAndVersion is the post-recreate deployment gate. It first makes the
 // AUTHORITATIVE check — the running app container's resolved image ID must equal
@@ -47,22 +56,24 @@ func gateImageAndVersion(ctx context.Context, a *App, targetID, targetVersion st
 	if got := strings.TrimSpace(img); got != targetID {
 		return fmt.Errorf("gate: running image %s does not match target %s (a moved tag booted the wrong image)", got, targetID)
 	}
-	// 2. Secondary /version confirmation, polled within the budget.
-	deadline := time.Now().Add(gateTimeout)
+	// 2. Secondary /version confirmation, hard-bounded by gateTimeout.
+	pollCtx, cancel := context.WithTimeout(ctx, gateTimeout)
+	defer cancel()
 	for {
-		pass, terminal, detail := probeVersionOnce(ctx, targetVersion, strictVersion)
+		pass, terminal, detail := probeVersionOnce(pollCtx, targetVersion, strictVersion)
 		if pass {
 			return nil
 		}
 		if terminal {
 			return fmt.Errorf("gate: /version rejected the deploy (%s)", detail)
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("gate: /version did not confirm within %s (%s)", gateTimeout, detail)
-		}
+		// Non-terminal (transport error / probe timeout): retry until the budget expires.
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-pollCtx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err() // parent cancelled
+			}
+			return fmt.Errorf("gate: /version did not confirm within %s (%s)", gateTimeout, detail) // budget expired
 		case <-time.After(pollInterval):
 		}
 	}
@@ -76,7 +87,7 @@ func probeVersionOnce(ctx context.Context, targetVersion string, strictVersion b
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(rctx, http.MethodGet, gateVersionURL, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := gateHTTPClient.Do(req)
 	if err != nil {
 		return false, false, err.Error() // transport error ⇒ retry
 	}
@@ -95,8 +106,10 @@ func probeVersionOnce(ctx context.Context, targetVersion string, strictVersion b
 			}
 			return false, true, fmt.Sprintf("version %q != target %q", vj.Version, targetVersion)
 		}
-		// Non-JSON 200: the SPA shell is the only tolerated shape (non-strict).
-		if !strictVersion && strings.Contains(strings.ToLower(ct), "text/html") {
+		// Non-JSON 200: the SPA shell is the only tolerated shape (non-strict). Parse
+		// the media type and require exact "text/html" — a substring match would also
+		// accept e.g. application/json; profile="text/html".
+		if mt, _, err := mime.ParseMediaType(ct); !strictVersion && err == nil && mt == "text/html" {
 			return true, true, ""
 		}
 		return false, true, fmt.Sprintf("unexpected 200 body (content-type %q)", ct)

@@ -111,6 +111,27 @@ func TestGatePassNonStrictSPA(t *testing.T) {
 	}
 }
 
+// TestGateFailRedirectNotFollowed: a 302 from /version is a TERMINAL fail — the gate
+// must NOT follow it to a 200 text/html login page and mis-classify that as the
+// SPA-shell pass. Regression for the redirect-following fail-open (finding 1).
+func TestGateFailRedirectNotFollowed(t *testing.T) {
+	shrinkGate(t, 200*time.Millisecond, 10*time.Millisecond)
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/version" {
+			http.Redirect(w, r, "/login", http.StatusFound) // 302 -> auth wall
+			return
+		}
+		// The login page a redirect-following client would have chased into and
+		// wrongly accepted as the non-strict SPA shell.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><html><body>login</body></html>"))
+	})
+	f := gateRunner(gateAppCID, gateTargetID)
+	if err := gateImageAndVersion(context.Background(), gateApp(f), gateTargetID, gateTargetVer, false); err == nil {
+		t.Fatal("a 302 from /version must be a terminal fail, not followed to a 200 SPA page")
+	}
+}
+
 // TestGateFailDifferentVersion: an exact JSON with a DIFFERENT version fails in both
 // modes (a terminal reject — the wrong code is serving).
 func TestGateFailDifferentVersion(t *testing.T) {
