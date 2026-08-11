@@ -111,6 +111,23 @@ func TestGatePassNonStrictSPA(t *testing.T) {
 	}
 }
 
+// TestGateFailSubstringContentType: the SPA tolerance requires an EXACT text/html
+// media type. A 200 whose Content-Type merely CONTAINS "text/html" as a parameter
+// (e.g. application/json; profile="text/html") over a non-object body must NOT pass
+// — it reaches the media-type check and mime.ParseMediaType yields application/json.
+// Regression for the content-type substring-match (finding 2).
+func TestGateFailSubstringContentType(t *testing.T) {
+	shrinkGate(t, 200*time.Millisecond, 10*time.Millisecond)
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", `application/json; profile="text/html"`)
+		_, _ = w.Write([]byte("<not-json>")) // non-object body ⇒ falls through to the media-type check
+	})
+	f := gateRunner(gateAppCID, gateTargetID)
+	if err := gateImageAndVersion(context.Background(), gateApp(f), gateTargetID, gateTargetVer, false); err == nil {
+		t.Fatal(`a content-type that only contains "text/html" as a parameter must not pass as an SPA shell`)
+	}
+}
+
 // TestGateFailRedirectNotFollowed: a 302 from /version is a TERMINAL fail — the gate
 // must NOT follow it to a 200 text/html login page and mis-classify that as the
 // SPA-shell pass. Regression for the redirect-following fail-open (finding 1).
