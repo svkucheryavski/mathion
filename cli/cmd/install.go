@@ -23,6 +23,11 @@ func newInstallCmd(app *App) *cobra.Command {
 		Use:   "install",
 		Short: "Install and start a Mathion deployment",
 		RunE: func(c *cobra.Command, _ []string) error {
+			release, proceed, err := lockAndGuard(c.Context(), app, "install")
+			defer release()
+			if err != nil || !proceed {
+				return err
+			}
 			return app.runInstall(c.Context(), o) // dispatcher: Task 12
 		},
 	}
@@ -119,12 +124,28 @@ func (a *App) resume(ctx context.Context, st config.State) error {
 	if err := config.AtomicWrite(a.CfgDir+"/docker-compose.yml", composeBytes(), 0o644); err != nil {
 		return err
 	}
-	if err := a.compose(ctx, "pull"); err != nil {
+	// Volume-gated pull: the pgdata volume already existing means the image was
+	// obtained by the prior (crashed) attempt — skip the registry pull so a
+	// moved/absent tag can't swap the image out from under initialized data.
+	// Positively absent ⇒ the prior attempt died before `up`, so the pull is safe
+	// and needed. A detection error fails CLOSED (treat as present → no pull):
+	// unlike the fresh volume guard (which must abort before regenerating secrets),
+	// resume reuses existing config, so it proceeds without the pull.
+	pgdata := a.Project + "_mathion_pgdata"
+	present, verr := dockerx.VolumeExists(ctx, a.Runner, pgdata)
+	if verr != nil {
+		present = true // fail closed
+	}
+	if !present {
+		if err := a.compose(ctx, "pull"); err != nil {
+			return err
+		}
+	}
+	if err := a.compose(ctx, "up", "-d", "--wait", "--pull", "never"); err != nil {
 		return err
 	}
-	if err := a.compose(ctx, "up", "-d", "--wait"); err != nil {
-		return err
-	}
+	// Always run the idempotent migrate: a crash between `up` and migrate leaves the
+	// schema un-upgraded, and `alembic upgrade head` is a no-op when already current.
 	if err := a.compose(ctx, "exec", "-T", "app", "alembic", "upgrade", "head"); err != nil {
 		return err
 	}
