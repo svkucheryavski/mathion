@@ -85,8 +85,8 @@ func TestUninstallPurgeClearsBreadcrumbAfterTeardown(t *testing.T) {
 		if _, present, _ := varlib.ReadJournal(); present {
 			t.Fatal("a successful purge must clear the breadcrumb after teardown")
 		}
-		if len(f.Calls) == 0 {
-			t.Fatal("teardown must have run before the breadcrumb was cleared")
+		if !hasCall(f.Calls, joinHas("network ls")) {
+			t.Fatalf("teardown (Purge) must run before the breadcrumb is cleared; calls=%v", f.Calls)
 		}
 		// The lock must be released after the command returns.
 		rel, lerr := varlib.Lock()
@@ -208,8 +208,8 @@ func TestPurgeTearsDownButKeepsUnrecognizedCfgDir(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("purge must complete (teardown runs) even when cfgdir is unrecognized, got %v", err)
 	}
-	if len(f.Calls) == 0 {
-		t.Fatal("identity teardown must run regardless of cfgdir recognition")
+	if !hasCall(f.Calls, joinHas("network ls")) {
+		t.Fatalf("identity teardown (Purge) must run regardless of cfgdir recognition; calls=%v", f.Calls)
 	}
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e != nil {
 		t.Fatal("an unrecognized cfgdir must be left in place, not removed")
@@ -241,8 +241,8 @@ func TestPurgeTearsDownButKeepsSymlinkCfgDir(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("purge must complete (teardown runs) with a symlink cfgdir, got %v", err)
 	}
-	if len(f.Calls) == 0 {
-		t.Fatal("identity teardown must run even when cfgdir is a symlink")
+	if !hasCall(f.Calls, joinHas("network ls")) {
+		t.Fatalf("identity teardown (Purge) must run even when cfgdir is a symlink; calls=%v", f.Calls)
 	}
 	if _, e := os.Stat(filepath.Join(target, "install-state")); e != nil {
 		t.Fatal("symlink target removed despite the removal guard")
@@ -365,8 +365,8 @@ func TestPurgeOrphanStateStillTearsDown(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("purge in the orphan state (no config) must still tear down, got %v", err)
 	}
-	if len(f.Calls) == 0 {
-		t.Fatal("identity teardown must run in the orphan state")
+	if !hasCall(f.Calls, joinHas("network ls")) {
+		t.Fatalf("identity teardown (Purge) must run in the orphan state; calls=%v", f.Calls)
 	}
 	if !strings.Contains(errBuf.String(), "config dir left in place") {
 		t.Fatalf("expected a note about the missing config dir, got %q", errBuf.String())

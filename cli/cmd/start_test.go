@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -11,7 +12,10 @@ import (
 )
 
 func newTestApp(f *compose.FakeRunner) *App {
-	return &App{CfgDir: "/etc/mathion", Project: "mathion_prod", Runner: f}
+	// Default Out/Err to io.Discard and In to an empty reader so command paths
+	// that write a note or read a prompt never nil-panic; capture-tests reassign
+	// app.Out/app.Err after construction.
+	return &App{CfgDir: "/etc/mathion", Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard, In: bytes.NewReader(nil)}
 }
 
 // rootedVarlib makes the shared lock+guard preamble pass: geteuid→0 (asRoot) plus
