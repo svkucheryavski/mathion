@@ -266,6 +266,12 @@ func TestResumeVolumeCheckErrorFailsClosed(t *testing.T) {
 // recovery breadcrumb makes its RunE refuse (non-nil error) BEFORE reaching
 // runInstall — no `up`, no `pull` — and the breadcrumb is retained (install never
 // clears it). No flags needed: the guard refuses before flag validation.
+//
+// Non-vacuity: with no flags set, runInstall would itself error ("requires
+// --domain and --admin-email") before any up/pull, so `err != nil` + no-up/pull
+// would hold even if the guard were absent. We therefore assert the error is the
+// GUARD'S refusal ("refusing…"), which the missing-flags error never contains —
+// removing the guard flips this to the missing-flags message and fails the test.
 func TestInstallRefusesOnBreadcrumb(t *testing.T) {
 	rootedVarlib(t)
 	seedBreadcrumb(t)
@@ -273,8 +279,9 @@ func TestInstallRefusesOnBreadcrumb(t *testing.T) {
 	var errb bytes.Buffer
 	app := &App{CfgDir: t.TempDir(), Project: "mathion_prod", Runner: f, Err: &errb}
 	cmd := newInstallCmd(app)
-	if err := cmd.RunE(cmd, nil); err == nil {
-		t.Fatal("install must refuse on a leftover recovery breadcrumb")
+	err := cmd.RunE(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "refusing") {
+		t.Fatalf("install must refuse via the guard on a leftover breadcrumb, got %v", err)
 	}
 	if hasCall(f.Calls, joinHas("up -d")) || hasBareArg(f.Calls, "pull") {
 		t.Fatalf("install must not reach runInstall on a breadcrumb; calls=%v", f.Calls)
