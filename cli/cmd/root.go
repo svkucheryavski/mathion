@@ -22,6 +22,11 @@ type App struct {
 // which in turn receives goreleaser ldflags at release time.
 var buildVersion, buildDefaultImage = "dev", "v0.1.1"
 
+// osExit is the process-exit seam Execute's error mapping and the update signal
+// handler's second-signal hard-exit call; a var so tests can drive them without
+// terminating the test process.
+var osExit = os.Exit
+
 func SetBuildInfo(v, img string) { buildVersion, buildDefaultImage = v, img }
 
 func (a *App) composeArgs(sub ...string) []string {
@@ -61,7 +66,7 @@ func newRootCmd(app *App) *cobra.Command {
 	root.AddCommand(
 		newInstallCmd(app), newStartCmd(app), newStopCmd(app), newStatusCmd(app),
 		newLogsCmd(app), newPinCmd(app), newSuperuserCmd(app), newVersionCmd(app),
-		newUninstallCmd(app), newBackupCmd(app), newRestoreCmd(app),
+		newUninstallCmd(app), newBackupCmd(app), newRestoreCmd(app), newUpdateCmd(app),
 	)
 	return root
 }
@@ -75,6 +80,6 @@ func Execute() {
 	}
 	if err := newRootCmd(app).ExecuteContext(context.Background()); err != nil {
 		app.Err.Write([]byte("error: " + err.Error() + "\n"))
-		os.Exit(1)
+		osExit(exitCode(err))
 	}
 }

@@ -460,3 +460,154 @@ func TestUpdateGatePostRemoveWarns(t *testing.T) {
 		t.Fatalf("this task never rolls back; got a restore call: %v", f.Calls)
 	}
 }
+
+// --- update failure matrix (auto-rollback / --no-rollback / interrupt / exit-3) ---
+
+// strictDiscriminatingGate stubs gateFn so update's FORWARD gate (strict=true) FAILS
+// while the auto-rollback's own gate (strict=false) PASSES — a single seam that makes
+// update fail its commit gate yet lets the rewind's non-strict gate succeed.
+func strictDiscriminatingGate(t *testing.T) {
+	t.Helper()
+	prev := gateFn
+	gateFn = func(_ context.Context, _ *App, _, _ string, strict bool) error {
+		if strict {
+			return errors.New("gate mismatch")
+		}
+		return nil
+	}
+	t.Cleanup(func() { gateFn = prev })
+}
+
+// TestUpdateRollbackOnGateFailRecovers: a clean step-10 gate failure (ctx live) auto-
+// rolls-back IN-PROCESS to the just-taken backup under a fresh ctx — reaping the migrate
+// one-off, reverting .env to the pre-update tag, and clearing the breadcrumb — and
+// returns a plain "rolled back" error (NOT a rollbackFailedError).
+func TestUpdateRollbackOnGateFailRecovers(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	strictDiscriminatingGate(t)
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	// (a) non-nil, "rolled back", and NOT a rollbackFailedError.
+	if err == nil || !strings.Contains(err.Error(), "rolled back") {
+		t.Fatalf("want a \"rolled back\" error; got %v", err)
+	}
+	var rbf rollbackFailedError
+	if errors.As(err, &rbf) {
+		t.Fatalf("a recovered rollback must NOT be a rollbackFailedError; got %v", err)
+	}
+	// (b) the migrate one-off was force-removed.
+	if !hasCall(f.Calls, joinHas("rm -f mathion_migrate_")) {
+		t.Fatalf("the migrate one-off must be force-removed; calls=%v", f.Calls)
+	}
+	// (c) the rollback ran in-process (the named restore db worker appears).
+	if !hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("the auto-rollback must run the in-process restore; calls=%v", f.Calls)
+	}
+	// (d) the breadcrumb is gone (cleared after the rewind).
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("a recovered rollback must clear the breadcrumb")
+	}
+	// (e) .env was reverted to the pre-update tag (the rollback undid step-8's re-pin).
+	env, rerr := config.ReadEnvFile(cfg)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if env["MATHION_VERSION"] != "v0.1.1" {
+		t.Fatalf("rollback must revert .env to v0.1.1; got %q", env["MATHION_VERSION"])
+	}
+	// (f) the migrate ran with EXACTLY the deliberate sanitized-env override, exactly once
+	// (the cmd-level sanitized-env guard; the rollback's assets load adds its OWN
+	// MATHION_VERSION=v0.1.1 env, which must not be miscounted).
+	count := 0
+	for _, ec := range f.EnvCalls {
+		if reflect.DeepEqual(ec, []string{"MATHION_VERSION=v2.0.0"}) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("want exactly one migrate Env call [MATHION_VERSION=v2.0.0]; got %d in %v", count, f.EnvCalls)
+	}
+}
+
+// TestUpdateRollbackNoRollbackLeavesState: with --no-rollback a step-7 migrate failure
+// leaves the deployment as-is — no auto-rollback, breadcrumb retained, the manual-
+// recovery hint returned — but the migrate one-off is still reaped.
+func TestUpdateRollbackNoRollbackLeavesState(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	f.RunFunc = func(args []string) error {
+		if strings.Contains(strings.Join(args, " "), "alembic upgrade head") {
+			return errors.New("migrate boom")
+		}
+		return nil
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true, NoRollback: true})
+	if err == nil || !strings.Contains(err.Error(), "--no-rollback is set") || !strings.Contains(err.Error(), "mathion restore -- ") {
+		t.Fatalf("want a --no-rollback leave-as-is error with the restore hint; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("--no-rollback must NOT auto-rollback; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("--no-rollback must leave the breadcrumb in place")
+	}
+	if !hasCall(f.Calls, joinHas("rm -f mathion_migrate_")) {
+		t.Fatalf("the migrate one-off must still be reaped; calls=%v", f.Calls)
+	}
+}
+
+// TestUpdateRollbackAlsoFailsExit3: the update fails (gate) AND the auto-rollback's DB
+// load ALSO fails → a rollbackFailedError (exit 3) whose message names the UNKNOWN
+// state, with the breadcrumb LEFT IN PLACE (the deployment is unrecovered).
+func TestUpdateRollbackAlsoFailsExit3(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	strictDiscriminatingGate(t)
+	f.StreamInFunc = func(io.Reader, []string) error { return errors.New("restore db boom") }
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	var rbf rollbackFailedError
+	if !errors.As(err, &rbf) {
+		t.Fatalf("a failed rollback must return a rollbackFailedError; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "UNKNOWN state") {
+		t.Fatalf("want the UNKNOWN-state message; got %v", err)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("an unrecovered rollback must leave the breadcrumb in place")
+	}
+}
+
+// TestUpdateSignalRefusesOnInterrupt: a cancelled ctx (the state after the first signal
+// cancelled it) makes the failure handler REFUSE — reap the migrate one-off, then leave
+// the breadcrumb + failed state and return the manual-recovery hint, with NO auto-
+// rollback. (The FakeRunner ignores ctx, so steps 5-6b still run; the handler's
+// ctx.Err()!=nil branch is the unit under test.)
+func TestUpdateSignalRefusesOnInterrupt(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	f.RunFunc = func(args []string) error {
+		if strings.Contains(strings.Join(args, " "), "alembic upgrade head") {
+			return errors.New("migrate boom")
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(ctx, app, updateOpts{Version: "v2.0.0", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "interrupted") || !strings.Contains(err.Error(), "mathion restore -- ") {
+		t.Fatalf("want an interrupted refusal with the restore hint; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("an interrupt must NOT auto-rollback; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("an interrupt must leave the breadcrumb in place")
+	}
+	if !hasCall(f.Calls, joinHas("rm -f mathion_migrate_")) {
+		t.Fatalf("the migrate one-off must be reaped on interrupt; calls=%v", f.Calls)
+	}
+}

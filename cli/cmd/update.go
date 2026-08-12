@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/archive"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
@@ -27,11 +31,146 @@ type updateOpts struct {
 // without corrupting the real backups dir.
 var writeJournalFn = varlib.WriteJournal
 
-// runUpdate performs an in-place upgrade: pull-verify a DISTINCT target, stop, take
-// a consistent offline backup, migrate, re-pin, recreate, and gate — with
-// auto-rollback on a clean failure. THIS skeleton implements steps 1-4 only
-// (preconditions, same-tag guard, confirm, pull + capture the target image ID A);
-// steps 5-10 + the failure matrix arrive in Tasks 21-23.
+// rollbackFailedError marks the worst update outcome: the update failed AND the auto-
+// rollback to the pre-update backup ALSO failed, so the deployment is left in an unknown
+// state with the recovery breadcrumb intact. exitCode maps it to 3 (distinct from a plain
+// failure's 1) so an operator/automation can tell "failed but recovered" from "failed and
+// NOT recovered — manual intervention required".
+type rollbackFailedError struct{ err error }
+
+func (e rollbackFailedError) Error() string { return e.err.Error() }
+func (e rollbackFailedError) Unwrap() error { return e.err }
+
+// exitCode maps a top-level command error to a process exit code: 0 (nil), 3 (a
+// rollbackFailedError anywhere in the chain), else 1. root.go's Execute calls osExit(exitCode(err)).
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var rbf rollbackFailedError
+	if errors.As(err, &rbf) {
+		return 3
+	}
+	return 1
+}
+
+// withSignalCancel returns a child ctx cancelled on the FIRST SIGINT/SIGTERM (a graceful
+// stop the update failure handler observes via ctx.Err()) and hard-exits 130 on the SECOND
+// (an impatient operator's escape hatch, bypassing any in-flight rollback). stop() (deferred
+// by the caller) unregisters the handler and releases the goroutine on the normal path.
+// Installed ONLY for the update command's duration; exit is injectable for tests.
+func withSignalCancel(parent context.Context, exit func(int)) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		defer signal.Stop(ch)
+		select {
+		case <-ch:
+			cancel() // first signal: graceful cancel
+		case <-done:
+			return // command finished without a signal
+		}
+		select {
+		case <-ch:
+			exit(130) // second signal: hard exit
+		case <-done:
+			return
+		}
+	}()
+	return ctx, func() { close(done); cancel() }
+}
+
+// updateFailMeta carries the state a step-7..10 failure needs to recover.
+type updateFailMeta struct {
+	oldTag, target, backupPath, migrateWorker string
+	caps                                      archive.Caps
+}
+
+// updateFailure is the failure matrix for a clean or interrupted step-7..10 error. It ALWAYS
+// reaps the migrate one-off first (idempotent — covers a cancel, a clean non-zero migrate exit,
+// or a transport error, any of which can leave the container behind despite --rm), then branches:
+//   - ctx cancelled (an interrupt): REFUSE — no auto-rollback; leave the breadcrumb + failed
+//     state and hand back the manual-recovery command (a half-known state is safer rewound
+//     deliberately than automatically).
+//   - --no-rollback: leave the breadcrumb + failed state; hand back the hint.
+//   - otherwise (a clean failure, ctx live): auto-rollback IN-PROCESS to the just-taken backup
+//     under a FRESH UNCANCELLED ctx (a late signal must not abort the rewind; the second-signal
+//     hard-exit is the only way out). On success clear the breadcrumb (a failed clear only WARNS);
+//     on failure return a rollbackFailedError (exit 3) with the breadcrumb LEFT IN PLACE.
+func updateFailure(ctx context.Context, a *App, opts updateOpts, m updateFailMeta, cause error) error {
+	forceRemoveWorker(context.WithoutCancel(ctx), a.Runner, m.migrateWorker)
+
+	if ctx.Err() != nil {
+		return fmt.Errorf("update %s → %s interrupted; the deployment may be partway through — recover with: mathion restore -- %s (cause: %w)", m.oldTag, m.target, m.backupPath, cause)
+	}
+	if opts.NoRollback {
+		return fmt.Errorf("update %s → %s failed and --no-rollback is set; the deployment is left as-is — recover with: mathion restore -- %s (cause: %w)", m.oldTag, m.target, m.backupPath, cause)
+	}
+
+	fmt.Fprintf(a.Err, "update %s → %s failed (%v); rolling back to %s\n", m.oldTag, m.target, cause, m.backupPath)
+	if rbErr := restoreEngine(context.WithoutCancel(ctx), a, m.backupPath, restoreOpts{Yes: true, WriteBreadcrumb: false, Caps: m.caps}); rbErr != nil {
+		return rollbackFailedError{err: fmt.Errorf("update %s → %s failed (%v) AND the auto-rollback to %s ALSO failed (%v); the deployment is in an UNKNOWN state — the recovery breadcrumb at %s is retained, recover manually with: mathion restore -- %s", m.oldTag, m.target, cause, m.backupPath, rbErr, varlib.JournalPath(), m.backupPath)}
+	}
+	if err := varlib.RemoveJournal(); err != nil {
+		fmt.Fprintf(a.Err, "rolled back to %s; the deployment is healthy — remove %s manually (%v)\n", m.backupPath, varlib.JournalPath(), err)
+	}
+	return fmt.Errorf("update %s → %s failed (%w); rolled back — the previous version is restored and serving", m.oldTag, m.target, cause)
+}
+
+// newUpdateCmd builds `mathion update`. It follows the lock-taking preamble backup/
+// restore establish (root -> ensure backups dir -> lock -> sweeps -> entry-check), then
+// installs a two-signal handler for the run's duration (first SIGINT/SIGTERM cancels
+// gracefully so the failure handler refuses rather than auto-rolls-back; a second hard-
+// exits 130) and drives runUpdate. "update" is in classify's REFUSE set, so a leftover
+// breadcrumb makes guardEntry refuse.
+func newUpdateCmd(app *App) *cobra.Command {
+	var version string
+	var noRollback, yes bool
+	c := &cobra.Command{
+		Use:   "update",
+		Short: "Update the deployment to a new version (pull-verify → back up → migrate → health-check, auto-rollback on failure)",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			if err := requireRoot(); err != nil {
+				return err
+			}
+			if err := varlib.EnsureBackupsDir(); err != nil {
+				return err
+			}
+			release, err := varlib.Lock()
+			if err != nil {
+				return err // ErrLocked message is already clear
+			}
+			defer func() { _ = release() }()
+			if err := varlib.SweepStaleStaging(); err != nil {
+				return err
+			}
+			if err := dockerx.SweepWorkers(c.Context(), app.Runner, app.Project); err != nil {
+				return err
+			}
+			if proceed, err := guardEntry(app, "update"); !proceed {
+				return err
+			}
+			ctx, stop := withSignalCancel(c.Context(), osExit)
+			defer stop()
+			return runUpdate(ctx, app, updateOpts{Version: version, NoRollback: noRollback, Yes: yes})
+		},
+	}
+	c.Flags().StringVar(&version, "version", "", "target version tag (default: the CLI's built-in target)")
+	c.Flags().BoolVar(&noRollback, "no-rollback", false, "on failure leave the deployment as-is instead of auto-rolling-back")
+	c.Flags().BoolVar(&yes, "yes", false, "skip the update confirmation prompt")
+	return c
+}
+
+// runUpdate performs an in-place upgrade end to end: pull-verify a DISTINCT target
+// image (capturing its id A) → stop app → take + validate a consistent offline backup →
+// write the recovery breadcrumb → migrate → re-pin .env → recreate app → STRICT gate =
+// the commit point (a passing gate clears the breadcrumb and is never auto-rolled-back).
+// A clean step-7..10 failure auto-rolls-back IN-PROCESS to the just-taken backup; an
+// interrupt (ctx cancelled) or --no-rollback instead refuses, leaving the breadcrumb and
+// failed state behind the manual-recovery hint. See updateFailure for the full matrix.
 func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	// 1. Precondition: the STRENGTHENED env validation (ValidateEnvComplete also
 	// ValidateOCITags MATHION_VERSION) BEFORE any docker mutation — so the same-tag
@@ -169,24 +308,25 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	// deterministic --name/--label let the Task-23 failure handler force-remove a
 	// still-running migrate one-off and let the startup sweep reap it after a SIGKILL.
 	migrateWorker := fmt.Sprintf("mathion_migrate_%d", os.Getpid())
+	meta := updateFailMeta{oldTag: oldTag, target: target, backupPath: backupPath, migrateWorker: migrateWorker, caps: caps}
 	if err := a.Runner.RunEnv(ctx, []string{"MATHION_VERSION=" + target}, a.composeArgs(
 		"run", "--rm", "--no-deps", "--pull", "never",
 		"--name", migrateWorker, "--label", "io.mathion.worker=1",
 		"-T", "app", "alembic", "upgrade", "head",
 	)...); err != nil {
-		return err // Task 23 routes this through the failure matrix (auto-rollback)
+		return updateFailure(ctx, a, opts, meta, err)
 	}
 
 	// (8) Re-pin MATHION_VERSION=<target> — ONLY now, after migrate succeeded (line
 	// -oriented, atomic, validated, assert-after-write inside RepinVersion).
 	if err := config.RepinVersion(a.CfgDir, target); err != nil {
-		return err
+		return updateFailure(ctx, a, opts, meta, err)
 	}
 
 	// (9) Recreate app on the migrated schema (--pull never — target already pulled at
 	// step 4; --wait blocks on the healthcheck).
 	if err := a.compose(ctx, "up", "-d", "--wait", "--pull", "never", "app"); err != nil {
-		return err
+		return updateFailure(ctx, a, opts, meta, err)
 	}
 
 	// (10) STRICT gate = the commit point: the running app's resolved image ID must ==
@@ -195,7 +335,7 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	// and exact — no legacy SPA/404 tolerance here; that applies only to the rollback's
 	// own gate). A passing gate = committed; NEVER auto-rolled-back thereafter.
 	if err := gateFn(ctx, a, A, target, true); err != nil {
-		return err
+		return updateFailure(ctx, a, opts, meta, err)
 	}
 
 	// Committed. Clear the breadcrumb. A FAILED clear is a DISTINCT non-rollback warning
