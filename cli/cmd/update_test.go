@@ -3,14 +3,18 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
@@ -79,7 +83,12 @@ func TestUpdatePullDistinctTargetCapturesA(t *testing.T) {
 	// Install a counting /version server so any stray probe on a distinct target is
 	// caught; a distinct target must never probe.
 	n := useGateServer(t, func(w http.ResponseWriter, r *http.Request) {})
-	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) { return "sha256:AAA\n", nil }}
+	// Steps 5-10 now run to completion, so drive a full valid backup/migrate/recreate
+	// and stub the step-10 commit gate to nil so the run returns nil. stubGate replaces
+	// gateFn only — NOT probeVersionOnce — so the counting server below still catches a
+	// stray guard probe on the distinct-target path (the 0-probe assertion stays live).
+	stubGate(t, nil)
+	f := update21Fake(t)
 	app, _, _ := engineApp(cfg, f, "")
 	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
 		t.Fatalf("distinct target with a good pull must return nil; got %v", err)
@@ -196,9 +205,14 @@ func update21Fake(t *testing.T) *compose.FakeRunner {
 func TestUpdate6HappyOrderingAndBreadcrumb(t *testing.T) {
 	cfg := setupRestoreEnv(t)
 	f := update21Fake(t)
+	// Steps 7-10 now exist; a PASSING step-10 gate would clear the very breadcrumb this
+	// test inspects. Stub the gate to FAIL so the run stops at step 10 with steps 5-6b
+	// already done and the breadcrumb still on disk (the technique the restore
+	// PullFlagged tests use to freeze pre-clear state for inspection).
+	stubGate(t, errors.New("gate stop"))
 	app, _, _ := engineApp(cfg, f, "")
-	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
-		t.Fatalf("a full step-5..6b run must return nil; got %v", err)
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err == nil || !strings.Contains(err.Error(), "gate stop") {
+		t.Fatalf("the stubbed step-10 gate failure must surface (freezing the breadcrumb); got %v", err)
 	}
 	// (a) ordering: stop app -> backup pg_dump stream -> 6a preflight recorded-id inspect
 	// (image inspect sha256:rec — unique to the preflight, unlike the pre-stop A-capture
@@ -318,5 +332,131 @@ func TestUpdate6bWriteFailStartsApp(t *testing.T) {
 	}
 	if _, present, _ := varlib.ReadJournal(); present {
 		t.Fatal("a failed 6b write must persist no breadcrumb")
+	}
+}
+
+// --- update steps 7-10 (migrate, re-pin, recreate, strict gate = commit point) ---
+
+// captureGate records the args the engine passes to the step-10 gate seam and returns
+// ret; restores the previous gateFn on cleanup.
+func captureGate(t *testing.T, ret error) *struct {
+	ID, Ver        string
+	Strict, Called bool
+} {
+	t.Helper()
+	c := &struct {
+		ID, Ver        string
+		Strict, Called bool
+	}{}
+	prev := gateFn
+	gateFn = func(_ context.Context, _ *App, id, ver string, strict bool) error {
+		c.ID, c.Ver, c.Strict, c.Called = id, ver, strict, true
+		return ret
+	}
+	t.Cleanup(func() { gateFn = prev })
+	return c
+}
+
+// TestUpdateMigrateRunEnvTargetOnly pins step 7: the migrate one-off runs via the
+// env-aware RunEnv with EXACTLY one env element (MATHION_VERSION=<target>) and nowhere
+// else; it carries the deterministic --name/--label + --pull never; it precedes the
+// step-9 recreate; and the step-8 re-pin took only after migrate succeeded.
+func TestUpdateMigrateRunEnvTargetOnly(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	captureGate(t, nil) // pass the gate so the whole run completes
+	app, _, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("a full happy-path update must return nil; got %v", err)
+	}
+	// (a) EXACTLY one *Env call — the migrate one-off — carrying ONLY the target env
+	// (backupEngine + preflight use no *Env call).
+	if len(f.EnvCalls) != 1 {
+		t.Fatalf("want exactly one Env call (migrate); got %d: %v", len(f.EnvCalls), f.EnvCalls)
+	}
+	if want := []string{"MATHION_VERSION=v2.0.0"}; !reflect.DeepEqual(f.EnvCalls[0], want) {
+		t.Fatalf("migrate env = %v; want %v", f.EnvCalls[0], want)
+	}
+	// (b) the migrate argv carries the deterministic --name/--label + --pull never.
+	mi := idxOfCall(f.Calls, joinHas("alembic upgrade head"))
+	if mi < 0 {
+		t.Fatalf("expected a migrate call; got %v", f.Calls)
+	}
+	migrate := f.Calls[mi]
+	worker := fmt.Sprintf("mathion_migrate_%d", os.Getpid())
+	for _, tok := range []string{"--name", worker, "--label", "io.mathion.worker=1", "--pull", "never"} {
+		if !slices.Contains(migrate, tok) {
+			t.Fatalf("migrate call missing %q; got %v", tok, migrate)
+		}
+	}
+	// (c) ordering: migrate precedes the step-9 recreate.
+	ri := idxOfCall(f.Calls, joinHas("up -d --wait --pull never app"))
+	if ri < 0 || !(mi < ri) {
+		t.Fatalf("migrate (idx %d) must precede recreate (idx %d); calls %v", mi, ri, f.Calls)
+	}
+	// (d) step-8 re-pin took (only after migrate) — .env now pins the target.
+	env, err := config.ReadEnvFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["MATHION_VERSION"] != "v2.0.0" {
+		t.Fatalf("re-pin: MATHION_VERSION = %q; want v2.0.0", env["MATHION_VERSION"])
+	}
+}
+
+// TestUpdateGatePassCommits pins step 10: the strict gate is wired with the captured A
+// as the target id, the target version, and strictVersion=true; a PASS is the commit
+// point — the breadcrumb is cleared and the success line printed.
+func TestUpdateGatePassCommits(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	c := captureGate(t, nil)
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("a passing gate must commit and return nil; got %v", err)
+	}
+	// Gate WIRING: strict, id == the captured A ("sha256:rec"), version == target.
+	if !c.Called || c.ID != "sha256:rec" || c.Ver != "v2.0.0" || !c.Strict {
+		t.Fatalf("gate wiring = %+v; want Called id=sha256:rec ver=v2.0.0 strict=true", c)
+	}
+	// COMMIT: the breadcrumb is cleared on the gate pass.
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("a passing gate must clear the recovery breadcrumb")
+	}
+	if !strings.Contains(out.String(), "updated v0.1.1 → v2.0.0 (backup: ") {
+		t.Fatalf("want the commit success line; got %q", out.String())
+	}
+}
+
+// TestUpdateGatePostRemoveWarns: the gate passes but the post-commit RemoveJournal
+// fails (the gate stub turns the backups dir read-only exactly when it runs). That is a
+// DISTINCT non-rollback warning — the update stays committed (no restore, not exit 3),
+// the breadcrumb is left in place, and the operator is told to remove it manually.
+func TestUpdateGatePostRemoveWarns(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("mode 0500 does not block a root unlink")
+	}
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	// Side-effect gate: read-only the backups dir AFTER 6b wrote the breadcrumb and
+	// BEFORE the post-gate unlink, so RemoveJournal's os.Remove fails.
+	prev := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error {
+		_ = os.Chmod(varlib.BackupsDir(), 0o500)
+		return nil
+	}
+	t.Cleanup(func() { _ = os.Chmod(varlib.BackupsDir(), 0o700); gateFn = prev })
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "could not remove the recovery breadcrumb") {
+		t.Fatalf("a failed post-gate breadcrumb clear must warn; got %v", err)
+	}
+	// The unlink failed → the breadcrumb is STILL present (no rollback deleted it).
+	if _, present, _ := varlib.ReadJournal(); !present {
+		t.Fatal("a failed clear must leave the breadcrumb in place")
+	}
+	// Guard against an accidental rollback: this task never restores.
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("this task never rolls back; got a restore call: %v", f.Calls)
 	}
 }

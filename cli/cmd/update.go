@@ -161,7 +161,52 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 		return err
 	}
 
-	return nil // steps 7-10 (migrate, re-pin, recreate, gate, commit) in Task 22
+	// (7) Migrate WITHOUT serving and WITHOUT re-pinning, via the env-aware RunEnv. The
+	// appended MATHION_VERSION=<target> overrides the sanitized baseline so the one-off
+	// runs the TARGET image while .env still pins the old tag. A plain `run` (App.compose)
+	// CANNOT set the env — it would interpolate the OLD ${MATHION_VERSION}, run the old
+	// image, apply nothing, and make the gate fail → a rollback EVERY time. The
+	// deterministic --name/--label let the Task-23 failure handler force-remove a
+	// still-running migrate one-off and let the startup sweep reap it after a SIGKILL.
+	migrateWorker := fmt.Sprintf("mathion_migrate_%d", os.Getpid())
+	if err := a.Runner.RunEnv(ctx, []string{"MATHION_VERSION=" + target}, a.composeArgs(
+		"run", "--rm", "--no-deps", "--pull", "never",
+		"--name", migrateWorker, "--label", "io.mathion.worker=1",
+		"-T", "app", "alembic", "upgrade", "head",
+	)...); err != nil {
+		return err // Task 23 routes this through the failure matrix (auto-rollback)
+	}
+
+	// (8) Re-pin MATHION_VERSION=<target> — ONLY now, after migrate succeeded (line
+	// -oriented, atomic, validated, assert-after-write inside RepinVersion).
+	if err := config.RepinVersion(a.CfgDir, target); err != nil {
+		return err
+	}
+
+	// (9) Recreate app on the migrated schema (--pull never — target already pulled at
+	// step 4; --wait blocks on the healthcheck).
+	if err := a.compose(ctx, "up", "-d", "--wait", "--pull", "never", "app"); err != nil {
+		return err
+	}
+
+	// (10) STRICT gate = the commit point: the running app's resolved image ID must ==
+	// the captured A (NOT a re-resolved tag), plus a strict JSON /version=={"version":
+	// target} (a forward update always targets a slice-3+ image, so /version is present
+	// and exact — no legacy SPA/404 tolerance here; that applies only to the rollback's
+	// own gate). A passing gate = committed; NEVER auto-rolled-back thereafter.
+	if err := gateFn(ctx, a, A, target, true); err != nil {
+		return err
+	}
+
+	// Committed. Clear the breadcrumb. A FAILED clear is a DISTINCT non-rollback warning
+	// (the update is healthy — do NOT roll back / enter the matrix / exit 3); a leftover
+	// breadcrumb would otherwise make the next command refuse.
+	if err := varlib.RemoveJournal(); err != nil {
+		return fmt.Errorf("updated %s → %s successfully, but could not remove the recovery breadcrumb %s; the deployment is healthy — verify the app serves %s (running image ID == %s), then remove %s manually: %w",
+			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)
+	}
+	fmt.Fprintf(a.Out, "updated %s → %s (backup: %s; prune old backups manually)\n", oldTag, target, backupPath)
+	return nil
 }
 
 // startAppOnAbort best-effort restarts app after a pre-mutation abort in steps 5-6b,
