@@ -530,6 +530,41 @@ func TestUpdateRollbackOnGateFailRecovers(t *testing.T) {
 	}
 }
 
+// TestUpdateRollbackRunsDetachedFromLateCancel: the in-process rollback runs under a
+// FRESH context.WithoutCancel, so a signal that cancels the parent MID-rollback (after
+// updateFailure's ctx.Err() refuse gate has already passed) must NOT abort the rewind.
+// Simulated by cancelling the parent on the rollback's DB load (StreamIn
+// mathion_restore_db_): the LATER assets load (StreamInEnv mathion_restore_assets_) must
+// still snapshot a LIVE ctx (Err==nil) — proof the rollback is detached — and the rollback
+// completes (breadcrumb cleared). With the raw ctx that later call would snapshot Canceled.
+func TestUpdateRollbackRunsDetachedFromLateCancel(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := update21Fake(t)
+	strictDiscriminatingGate(t) // update's strict gate fails → enter the auto-rollback
+	ctx, cancel := context.WithCancel(context.Background())
+	f.StreamInFunc = func(_ io.Reader, args []string) error {
+		if strings.Contains(strings.Join(args, " "), "mathion_restore_db_") {
+			cancel() // a signal arrives mid-rollback, AFTER the ctx.Err() refuse gate
+		}
+		return nil
+	}
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(ctx, app, updateOpts{Version: "v2.0.0", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "rolled back") {
+		t.Fatalf("the detached rollback must still recover; got %v", err)
+	}
+	ai := idxOfCall(f.Calls, joinHas("mathion_restore_assets_"))
+	if ai < 0 {
+		t.Fatalf("the rollback's assets load must run; calls=%v", f.Calls)
+	}
+	if f.CtxSnaps[ai].Err != nil {
+		t.Fatalf("the rollback must run on the WithoutCancel-detached ctx: assets load snapshotted Err=%v after a mid-rollback parent cancel", f.CtxSnaps[ai].Err)
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("the detached rollback must complete and clear the breadcrumb")
+	}
+}
+
 // TestUpdateRollbackNoRollbackLeavesState: with --no-rollback a step-7 migrate failure
 // leaves the deployment as-is — no auto-rollback, breadcrumb retained, the manual-
 // recovery hint returned — but the migrate one-off is still reaped.
