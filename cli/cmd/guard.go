@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
@@ -21,6 +23,35 @@ func requireRoot() error {
 		return errors.New("requires root; re-run with sudo")
 	}
 	return nil
+}
+
+// lockAndGuard runs the shared preamble every lock-taking command performs before its own
+// work: root check → ensure the managed backups dir → take the operation lock (held for the
+// whole run) → sweep stale staging + orphaned worker containers → entry-check. It returns a
+// release the caller MUST defer (a no-op until the lock is actually taken, so `defer release()`
+// is safe on every path), plus guardEntry's proceed/err. On proceed=false the lock (if taken)
+// is released by that deferred release; the caller just returns err.
+func lockAndGuard(ctx context.Context, app *App, cmd string) (release func() error, proceed bool, err error) {
+	release = func() error { return nil }
+	if err = requireRoot(); err != nil {
+		return release, false, err
+	}
+	if err = varlib.EnsureBackupsDir(); err != nil {
+		return release, false, err
+	}
+	rel, err := varlib.Lock()
+	if err != nil {
+		return release, false, err // ErrLocked message is already clear
+	}
+	release = rel
+	if err = varlib.SweepStaleStaging(); err != nil {
+		return release, false, err
+	}
+	if err = dockerx.SweepWorkers(ctx, app.Runner, app.Project); err != nil {
+		return release, false, err
+	}
+	proceed, err = guardEntry(app, cmd)
+	return release, proceed, err
 }
 
 // entryOutcome classifies how a command reacts to a leftover recovery breadcrumb

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
+	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
 // errCfgUnrecognized is returned by removeCfgArtifacts when the opened config
@@ -27,6 +28,11 @@ func newUninstallCmd(app *App) *cobra.Command {
 		Use:   "uninstall",
 		Short: "Stop and remove containers (keeps data + config unless --purge)",
 		RunE: func(c *cobra.Command, _ []string) error {
+			release, proceed, err := lockAndGuard(c.Context(), app, "uninstall")
+			defer release()
+			if err != nil || !proceed {
+				return err
+			}
 			if !purge {
 				return app.compose(c.Context(), "down")
 			}
@@ -48,6 +54,13 @@ func newUninstallCmd(app *App) *cobra.Command {
 			// the docker resources).
 			if err := dockerx.Purge(c.Context(), app.Runner, app.Project); err != nil {
 				return err // teardown failed -> cfgdir retained (survives non-absence failure)
+			}
+			// Purge succeeded — the deployment is gone, so clear any recovery breadcrumb now
+			// (uninstall is exempt from the entry-check, so it ran WITH one; only post-teardown
+			// is removing it safe). A leftover would otherwise make a fresh install refuse. A
+			// failed remove is a non-fatal note (purge stays re-runnable).
+			if err := varlib.RemoveJournal(); err != nil {
+				fmt.Fprintf(app.Err, "note: could not remove the recovery breadcrumb at %s (%v)\n", varlib.JournalPath(), err)
 			}
 			// Remove <cfgdir> ONLY if it is a directory mathion recognizes — that is
 			// what keeps a mis-set MATHION_CONFIG_DIR ("/", "$HOME", a symlink) from
