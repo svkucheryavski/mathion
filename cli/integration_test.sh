@@ -209,11 +209,12 @@ query_sql() {
 }
 
 # json_version — reads a /version body on stdin and prints its .version field, or
-# NOTHING when the body is not a JSON object (transport error / text-html SPA / HTML that
-# merely mentions "version"). jq is MANDATORY (asserted in preflight): it parses a REAL
-# JSON document, so trailing HTML after a JSON object (`{"version":"v2"}<html>…`) is a
-# parse error and yields empty — no substring/prefix heuristic that a broken route slips.
-json_version() { jq -er '.version // empty'; }
+# NOTHING when the body is not EXACTLY ONE top-level JSON object. jq is MANDATORY
+# (asserted in preflight). `-s` slurps the whole stream into an array so trailing bytes
+# after a JSON object (`{"version":"v2"}<html>…`, `{...}\n<html>`, two objects) make the
+# slurp either error or have length!=1 -> empty; a streaming `.version` would instead
+# print "v2" for the leading object and only then error, which `|| true` would keep.
+json_version() { jq -esr 'if (length==1 and (.[0]|type)=="object") then (.[0].version // empty) else empty end'; }
 
 # version_field — the running app's /version value, or EMPTY when /version is not a
 # JSON object (transport error, non-JSON SPA, or a 404). Never fails the caller.
@@ -230,6 +231,32 @@ app_healthy_once() { curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | grep -q 
 
 # volume_exists NAME — 0 iff a docker volume named exactly NAME exists.
 volume_exists() { docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$1"; }
+
+# image_presence REF — prints present|absent|error. `error` (the docker query itself
+# failed) is distinct from `absent` so callers can FAIL CLOSED rather than treat a
+# transient query failure as "not there" (which would risk clobbering a pre-existing ref).
+image_presence() {
+	local out rc
+	out=$(docker image inspect "$1" 2>&1)
+	rc=$?
+	if [ "$rc" -eq 0 ]; then
+		printf 'present'
+		return
+	fi
+	case "$out" in
+	*"No such image"*) printf 'absent' ;;
+	*) printf 'error' ;;
+	esac
+}
+
+# ref_is_owned REF — 0 iff REF was recorded in OWNED_IMAGE_REFS (created by THIS run).
+ref_is_owned() {
+	local r
+	for r in "${OWNED_IMAGE_REFS[@]:-}"; do
+		if [ "$r" = "$1" ]; then return 0; fi
+	done
+	return 1
+}
 
 # read_journal_backup_path — prints the recovery breadcrumb's backup_path
 # (varlib.Journal JSON field `backup_path`). jq is MANDATORY (asserted in preflight).
@@ -266,20 +293,26 @@ wait_unhealthy() {
 #     or non-JSON (SPA) result is a FAIL — it means the /version route is broken and is
 #     accidentally serving the SPA shell (the very false-pass this guards against).
 assert_version_or_spa() {
-	local tag="$1" ctx="$2" body ver code ctype
-	body=$(curl -sS --max-time 5 "$VERSION_URL" 2>/dev/null || true)
+	local tag="$1" ctx="$2" raw body meta code ctype ver
+	# Capture body + status + content-type from ONE request so all three describe the SAME
+	# response (three separate curls could race a changing app). The sentinel is appended
+	# after the body; /version bodies (JSON or SPA HTML) never contain it.
+	raw=$(curl -sS --max-time 5 -w '\n__META__%{http_code} %{content_type}' "$VERSION_URL" 2>/dev/null || true)
+	body=${raw%$'\n'__META__*}
+	meta=${raw##*__META__}
+	code=${meta%% *}
+	ctype=${meta#* }
 	ver=$(printf '%s' "$body" | json_version 2>/dev/null || true)
 	if [ "$tag" = "$LEGACY_TAG" ]; then
 		if [ -n "$ver" ]; then
 			fail "$ctx (legacy $LEGACY_TAG unexpectedly served JSON /version=[$ver]; expected the text/html SPA shell)"
 		fi
-		# The body must NOT be a JSON document at all — a valid {} / {"foo":"bar"} would
-		# yield an empty .version yet is NOT the legacy SPA shape this branch certifies.
-		if printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
-			fail "$ctx (legacy /version parsed as JSON; expected a non-JSON text/html SPA body)"
+		# The body must NOT be valid JSON at all — a `{}` / `{"foo":"bar"}` (empty .version)
+		# or a literal `false`/`null` is still JSON, not the legacy SPA shape this certifies.
+		# `jq -e 'true'` exits 0 iff the body is ANY valid JSON (independent of its value).
+		if printf '%s' "$body" | jq -e 'true' >/dev/null 2>&1; then
+			fail "$ctx (legacy /version parsed as valid JSON; expected a non-JSON text/html SPA body)"
 		fi
-		code=$(http_code "$VERSION_URL")
-		ctype=$(http_ctype "$VERSION_URL")
 		assert_eq "200" "$code" "$ctx (legacy SPA /version status)"
 		assert_contains "$ctype" "text/html" "$ctx (legacy SPA /version content-type)"
 	else
@@ -378,13 +411,24 @@ ensure_registry() {
 supply_sabotage() {
 	local reg_ref="$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG"
 	local ghcr_ref="$IMAGE_REPO:$ITEST_SABOTAGE_TAG"
-	if docker image inspect "$reg_ref" >/dev/null 2>&1 || docker image inspect "$ghcr_ref" >/dev/null 2>&1; then
-		fail "supply_sabotage: a sabotage image ref already exists ($reg_ref or $ghcr_ref); choose a fresh ITEST_SABOTAGE_TAG so cleanup never deletes a pre-existing image"
-	fi
+	# IDEMPOTENT: legs 3 and 4 both call this in one run, and the refs live until the EXIT
+	# cleanup. If a prior leg already supplied them (recorded as run-owned), reuse and return
+	# — do NOT re-run the collision check (which would see this run's own reg_ref and abort).
+	if ref_is_owned "$reg_ref"; then return 0; fi
+	# First supply of this run: FAIL CLOSED on collision or on a docker query error, so
+	# cleanup can never delete a ref this run did not create.
+	local r
+	for r in "$reg_ref" "$ghcr_ref"; do
+		case "$(image_presence "$r")" in
+		present) fail "supply_sabotage: sabotage ref $r already exists and was NOT created by this run; choose a fresh ITEST_SABOTAGE_TAG so cleanup never deletes a pre-existing image" ;;
+		error) fail "supply_sabotage: docker could not be queried for $r (failing closed rather than risk clobbering a pre-existing ref)" ;;
+		absent) : ;;
+		esac
+	done
 	docker pull "$IMAGE_REPO:$LEGACY_TAG" >/dev/null
 	ensure_registry
 	docker tag "$IMAGE_REPO:$LEGACY_TAG" "$reg_ref"
-	OWNED_IMAGE_REFS+=("$reg_ref") # owned the moment it is created, before push
+	OWNED_IMAGE_REFS+=("$reg_ref") # owned the instant it is created, before push
 	docker push "$reg_ref" >/dev/null
 	# The leg's redirected `update` pull materializes ghcr_ref locally; the collision
 	# refusal above proved it did not pre-exist, so this run unambiguously owns it too.
@@ -413,16 +457,20 @@ cleanup() {
 	if [ "${REGISTRY_STARTED:-0}" = "1" ]; then docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1; fi
 
 	# VERIFY every resource we claim to have removed is actually gone; WARN LOUDLY (stderr)
-	# on residue or on a verify query that itself fails, instead of silently swallowing.
+	# on residue OR on a verify query that itself fails, instead of silently swallowing.
 	if [ "${#OWNED_IMAGE_REFS[@]}" -gt 0 ]; then
 		for ref in "${OWNED_IMAGE_REFS[@]}"; do
-			if docker image inspect "$ref" >/dev/null 2>&1; then
-				note "cleanup: run-created image ref still present (manual removal needed): $ref"
-			fi
+			case "$(image_presence "$ref")" in
+			present) note "cleanup: run-created image ref still present (manual removal needed): $ref" ;;
+			error) note "cleanup: could not verify removal of image ref (verify manually): $ref" ;;
+			esac
 		done
 	fi
 	if [ "${REGISTRY_STARTED:-0}" = "1" ]; then
-		if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$REGISTRY_NAME"; then
+		local reg_names
+		if ! reg_names=$(docker ps -a --format '{{.Names}}' 2>/dev/null); then
+			note "cleanup: could not verify removal of the throwaway registry container (verify manually): $REGISTRY_NAME"
+		elif printf '%s\n' "$reg_names" | grep -qx "$REGISTRY_NAME"; then
 			note "cleanup: throwaway registry container still present (manual removal needed): $REGISTRY_NAME"
 		fi
 	fi
@@ -551,7 +599,10 @@ leg_lifecycle_commands() {
 	# broken/missing image(pinned) read.
 	local vout
 	vout=$("$MATHION_BIN" version 2>&1) || fail "lifecycle: mathion version failed"
-	assert_contains "$vout" "image (pinned)  $ITEST_BASE_TAG" "lifecycle version names the pinned image on the image(pinned) line"
+	# EXACT line match (grep -Fxq): a substring match on "image (pinned)  v0.1.1" would also
+	# match "image (pinned)  v0.1.10"; a whole-line match cannot.
+	printf '%s\n' "$vout" | grep -Fxq "image (pinned)  $ITEST_BASE_TAG" ||
+		fail "lifecycle: version output lacks the exact pinned line 'image (pinned)  $ITEST_BASE_TAG'"
 
 	# stop: the app goes DOWN while the named volumes are RETAINED (stop != purge).
 	"$MATHION_BIN" stop || fail "lifecycle: mathion stop failed"
