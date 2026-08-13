@@ -38,14 +38,14 @@
 #     on its own. The forced-failure/legacy legs therefore need ONE maintainer-side
 #     prerequisite (this script capability-checks it and SKIPS LOUDLY when absent —
 #     it NEVER silently skips):
-#       (i)  ITEST_SABOTAGE_MODE=redirect — a daemon-level redirect of
-#            ghcr.io/svkucheryavski/mathion -> ITEST_REGISTRY (containerd
-#            certs.d/ghcr.io/hosts.toml, or a registry mirror). This script pushes the
-#            sabotage image to ITEST_REGISTRY and relies on your redirect.
-#       (ii) ITEST_SABOTAGE_MODE=push  (needs ITEST_ALLOW_GHCR_PUSH=1 and a prior
-#            `docker login ghcr.io`) — pushes THROWAWAY sabotage tags to the REAL
-#            ghcr.io/svkucheryavski/mathion repo; cleanup removes the local refs and
-#            warns that the pushed package versions may need manual deletion (`gh api`).
+#       ITEST_SABOTAGE_MODE=redirect — a daemon-level redirect of
+#       ghcr.io/svkucheryavski/mathion -> ITEST_REGISTRY (containerd
+#       certs.d/ghcr.io/hosts.toml, or a registry mirror). This script pushes the
+#       sabotage image to the THROWAWAY ITEST_REGISTRY and relies on your redirect so
+#       the CLI's `docker pull ghcr.io/...:<tag>` resolves locally.
+#     Pushing throwaway tags to the REAL public ghcr repo is deliberately NOT
+#     supported: auto-deleting remote package versions from an EXIT trap is hazardous
+#     and leaving them would pollute the public repo.
 #     Real v0.1.1 is a real published ghcr.io tag and needs NEITHER.
 #
 # ---------------------------------------------------------------------------------
@@ -55,8 +55,7 @@
 #   ITEST_BASE_TAG         base deploy tag for legs 1/2/3/6     (default: v0.1.1)
 #   ITEST_OTHER_TAG        a SECOND real ghcr tag for legs 2/5  (default: <unset> -> legs 2/5 SKIP)
 #   ITEST_SABOTAGE_TAG     forward-failing tag for legs 3/4     (default: <unset> -> legs 3/4 SKIP)
-#   ITEST_SABOTAGE_MODE    redirect | push (how sabotage reaches the ghcr pull source)
-#   ITEST_ALLOW_GHCR_PUSH  set to 1 to permit push-mode (pushes to the REAL ghcr repo)
+#   ITEST_SABOTAGE_MODE    redirect (the ONLY supported sabotage-supply path; see above)
 #   ITEST_REGISTRY         throwaway registry for redirect-mode (default: localhost:5000)
 #   ITEST_SLOW_MIGRATION   set to 1 to assert a slow/2nd migration exists (enables leg 5)
 #   ITEST_DOMAIN           install --domain value               (default: localhost:8000)
@@ -69,6 +68,7 @@
 # LEGS (each prints exactly one PASS/FAIL/SKIP; a FAIL exits non-zero with a diagnostic)
 # ---------------------------------------------------------------------------------
 #   1. backup -> mutate DB row + add/delete assets -> restore -> assert full revert.  [runs w/ base tag]
+#   L. lifecycle: version / stop / start / uninstall (retain vs purge).               [runs w/ base tag]
 #   2. happy update to a 2nd real tag -> /version JSON == target.                     [SKIP w/o ITEST_OTHER_TAG]
 #   3. post-backup forced-failure update -> auto-rollback to old, breadcrumb cleared. [SKIP w/o sabotage supply]
 #   4. legacy real-v0.1.1 rollback: forward strict-gate fails -> rollback TO v0.1.1
@@ -87,8 +87,8 @@
 #     there is no older schema to restore over a newer one. It is deferred, not
 #     tested here.
 #   * Legs 2-5 are NOT CI-runnable: they need real ghcr.io images, a Docker host, and
-#     root, and are excluded from `go test`. Legs 1 and 6 also need a Docker host +
-#     root (hence the whole script is the manual/opt-in lane).
+#     root, and are excluded from `go test`. Leg 1, the lifecycle leg, and leg 6 also
+#     need a Docker host + root (hence the whole script is the manual/opt-in lane).
 
 set -euo pipefail
 IFS=$' \t\n'
@@ -101,7 +101,6 @@ ITEST_BASE_TAG="${ITEST_BASE_TAG:-v0.1.1}"
 ITEST_OTHER_TAG="${ITEST_OTHER_TAG:-}"
 ITEST_SABOTAGE_TAG="${ITEST_SABOTAGE_TAG:-}"
 ITEST_SABOTAGE_MODE="${ITEST_SABOTAGE_MODE:-}"
-ITEST_ALLOW_GHCR_PUSH="${ITEST_ALLOW_GHCR_PUSH:-}"
 ITEST_REGISTRY="${ITEST_REGISTRY:-localhost:5000}"
 ITEST_SLOW_MIGRATION="${ITEST_SLOW_MIGRATION:-}"
 ITEST_DOMAIN="${ITEST_DOMAIN:-localhost:8000}"
@@ -130,10 +129,10 @@ PASS_COUNT=0
 SKIP_COUNT=0
 HAVE_JQ=0
 REGISTRY_STARTED=0
+SABOTAGE_SUPPLIED=0
 _CLEANED=0
 CAP_OUT=""
 CAP_RC=0
-PUSHED_TAGS=()
 
 # --------------------------------------------------------------------------------
 # Logging + assertion helpers.
@@ -208,16 +207,26 @@ query_sql() {
 		sed 's/[[:space:]]//g'
 }
 
-# json_version — reads a body on stdin, prints its .version field (empty if the body
-# is not a JSON object, e.g. the legacy text/html SPA). jq if present, else sed.
+# json_version — reads a body on stdin, prints its .version field, or NOTHING when the
+# body is not a JSON object (e.g. the legacy text/html SPA, or arbitrary HTML that
+# merely contains the word "version"). jq parses a real object; the sed fallback is
+# anchored on a `{...}` object shape (body must begin with `{`), never a bare substring.
 json_version() {
 	if [ "${HAVE_JQ:-0}" = "1" ]; then
-		jq -r '.version // empty'
+		jq -er '.version // empty'
 	else
-		sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+		local body trimmed
+		body=$(cat)
+		trimmed=$(printf '%s' "$body" | sed -e 's/^[[:space:]]*//')
+		case "$trimmed" in
+		'{'*) printf '%s' "$trimmed" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' ;;
+		*) : ;;
+		esac
 	fi
 }
 
+# version_field — the running app's /version value, or EMPTY when /version is not a
+# JSON object (transport error, non-JSON SPA, or a 404). Never fails the caller.
 version_field() {
 	local body
 	body=$(curl -sS --max-time 5 "$VERSION_URL" 2>/dev/null || true)
@@ -226,33 +235,68 @@ version_field() {
 http_code()  { curl -sS -o /dev/null -w '%{http_code}'   --max-time 5 "$1" 2>/dev/null || echo "000"; }
 http_ctype() { curl -sS -o /dev/null -w '%{content_type}' --max-time 5 "$1" 2>/dev/null || echo ""; }
 
+# app_healthy_once — single-shot /health check (no retry); 0 iff the app serves ok.
+app_healthy_once() { curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | grep -q '"status":"ok"'; }
+
+# volume_exists NAME — 0 iff a docker volume named exactly NAME exists.
+volume_exists() { docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$1"; }
+
+# read_journal_backup_path — prints the recovery breadcrumb's backup_path
+# (varlib.Journal JSON field `backup_path`). jq if present, else an anchored sed.
+read_journal_backup_path() {
+	if [ "${HAVE_JQ:-0}" = "1" ]; then
+		jq -r '.backup_path // empty' "$JOURNAL" 2>/dev/null
+	else
+		sed -n 's/.*"backup_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$JOURNAL"
+	fi
+}
+
 # wait_healthy — poll the loopback /health until it reports ok (the CLI already
 # --wait's on the container healthcheck; this covers the port-forward settle).
 wait_healthy() {
 	local i=0
 	while [ "$i" -lt 30 ]; do
-		if curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | grep -q '"status":"ok"'; then
-			return 0
-		fi
+		if app_healthy_once; then return 0; fi
 		i=$((i + 1))
 		sleep 1
 	done
 	return 1
 }
 
-# assert_version_or_spa TAG CONTEXT — a slice-3+ image serves {"version":TAG} (assert
-# exact JSON); a legacy image (v0.1.1) serves a 200 text/html SPA (assert that shape).
-# Mirrors the gate's own strict-JSON vs non-strict-SPA tolerance.
+# wait_unhealthy — poll until /health is NOT ok (bounded), so a "stopped" assertion
+# tolerates the brief teardown settle.
+wait_unhealthy() {
+	local i=0
+	while [ "$i" -lt 15 ]; do
+		if ! app_healthy_once; then return 0; fi
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
+
+# assert_version_or_spa TAG CONTEXT — the /version contract depends on the tag:
+#   * LEGACY_TAG (v0.1.1): /version MUST be the 200 text/html SPA shell and MUST NOT
+#     parse as JSON (a JSON body would be wrong for the legacy image).
+#   * any other (slice-3+) tag: /version MUST be exact JSON {"version":TAG}. An empty
+#     or non-JSON (SPA) result is a FAIL — it means the /version route is broken and is
+#     accidentally serving the SPA shell (the very false-pass this guards against).
 assert_version_or_spa() {
 	local tag="$1" ctx="$2" ver code ctype
 	ver=$(version_field)
-	if [ -n "$ver" ]; then
-		assert_eq "$tag" "$ver" "$ctx (/version JSON)"
-	else
+	if [ "$tag" = "$LEGACY_TAG" ]; then
+		if [ -n "$ver" ]; then
+			fail "$ctx (legacy $LEGACY_TAG unexpectedly served JSON /version=[$ver]; expected the text/html SPA shell)"
+		fi
 		code=$(http_code "$VERSION_URL")
 		ctype=$(http_ctype "$VERSION_URL")
 		assert_eq "200" "$code" "$ctx (legacy SPA /version status)"
 		assert_contains "$ctype" "text/html" "$ctx (legacy SPA /version content-type)"
+	else
+		if [ -z "$ver" ]; then
+			fail "$ctx (expected JSON /version for non-legacy tag $tag, got empty/non-JSON — a broken /version route serving the SPA)"
+		fi
+		assert_eq "$tag" "$ver" "$ctx (/version JSON)"
 	fi
 }
 
@@ -312,13 +356,10 @@ fresh_deploy() {
 # --------------------------------------------------------------------------------
 # sabotage_available — 0 when a sabotage image can be supplied to the ghcr pull
 # source, else 1 (the caller then SKIPs loudly with the exact missing prerequisite).
+# Only the redirect supply path is supported (push-to-real-ghcr is intentionally out).
 sabotage_available() {
 	[ -n "${ITEST_SABOTAGE_TAG:-}" ] || return 1
-	case "${ITEST_SABOTAGE_MODE:-}" in
-	push) [ "${ITEST_ALLOW_GHCR_PUSH:-}" = "1" ] || return 1 ;;
-	redirect) : ;;
-	*) return 1 ;;
-	esac
+	[ "${ITEST_SABOTAGE_MODE:-}" = "redirect" ] || return 1
 	return 0
 }
 
@@ -335,46 +376,46 @@ ensure_registry() {
 	REGISTRY_STARTED=1
 }
 
-# supply_sabotage — materialize ITEST_SABOTAGE_TAG so update step 4's
-# `docker pull ghcr.io/...:<tag>` SUCCEEDS while its FORWARD strict gate FAILS.
-# Default content = real v0.1.1 (its /version is a 200 text/html SPA -> strict
-# reject). push mode pushes throwaway tags to the REAL ghcr repo; redirect mode
-# pushes to ITEST_REGISTRY and relies on the maintainer's ghcr->registry redirect.
+# supply_sabotage — materialize ITEST_SABOTAGE_TAG (redirect mode) so update step 4's
+# `docker pull ghcr.io/...:<tag>` SUCCEEDS while its FORWARD strict gate FAILS. Content
+# = real v0.1.1 (its /version is a 200 text/html SPA -> strict reject); pushed to the
+# throwaway ITEST_REGISTRY, resolved by the maintainer's ghcr->registry redirect.
+# Sets SABOTAGE_SUPPLIED so cleanup removes ONLY the refs this run actually created.
 supply_sabotage() {
 	docker pull "$IMAGE_REPO:$LEGACY_TAG" >/dev/null
-	case "$ITEST_SABOTAGE_MODE" in
-	push)
-		docker tag "$IMAGE_REPO:$LEGACY_TAG" "$IMAGE_REPO:$ITEST_SABOTAGE_TAG"
-		docker push "$IMAGE_REPO:$ITEST_SABOTAGE_TAG" >/dev/null
-		PUSHED_TAGS+=("$ITEST_SABOTAGE_TAG")
-		;;
-	redirect)
-		ensure_registry
-		docker tag "$IMAGE_REPO:$LEGACY_TAG" "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG"
-		docker push "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG" >/dev/null
-		;;
-	esac
+	ensure_registry
+	docker tag "$IMAGE_REPO:$LEGACY_TAG" "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG"
+	docker push "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG" >/dev/null
+	SABOTAGE_SUPPLIED=1
 }
 
 # --------------------------------------------------------------------------------
-# Idempotent cleanup — tears down the deployment, the throwaway registry, and any
-# sabotage image refs; safe when setup half-failed. Installed as the single EXIT trap.
+# Idempotent cleanup — tears down the deployment + the throwaway registry, removes
+# ONLY the sabotage image refs THIS run created, and VERIFIES teardown (warning loudly
+# on any residue). Safe when setup half-failed. Installed as the single EXIT trap.
 # --------------------------------------------------------------------------------
 cleanup() {
 	if [ "$_CLEANED" = "1" ]; then return 0; fi
 	_CLEANED=1
 	set +e
-	info "cleanup: tearing down deployment, registry, and sabotage tags"
+	info "cleanup: tearing down deployment, registry, and run-created sabotage refs"
 	teardown_deployment
 	reset_config
+	# Remove ONLY what this run created (never a pre-existing / never-created ref).
 	if [ "${REGISTRY_STARTED:-0}" = "1" ]; then docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1; fi
-	if [ -n "${ITEST_SABOTAGE_TAG:-}" ]; then
+	if [ "${SABOTAGE_SUPPLIED:-0}" = "1" ]; then
+		# The redirect pull materializes a local ghcr:<tag> ref; supply_sabotage also
+		# created the registry-path ref. Both were created by this run.
 		docker rmi -f "$IMAGE_REPO:$ITEST_SABOTAGE_TAG" >/dev/null 2>&1
 		docker rmi -f "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG" >/dev/null 2>&1
 	fi
-	if [ "${#PUSHED_TAGS[@]}" -gt 0 ]; then
-		note "throwaway sabotage tags were pushed to the REAL ghcr repo and may need manual deletion (gh api): ${PUSHED_TAGS[*]}"
-	fi
+	# Verify teardown actually completed; WARN LOUDLY (stderr) on residue instead of
+	# silently swallowing a failed down/purge.
+	local resid_c resid_v
+	resid_c=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)
+	if [ -n "$resid_c" ]; then note "cleanup: residual $PROJECT containers remain (manual removal needed): $resid_c"; fi
+	resid_v=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E "^${PROJECT}_(mathion_pgdata|mathion_assets)$")
+	if [ -n "$resid_v" ]; then note "cleanup: residual $PROJECT volumes remain (manual removal needed): $resid_v"; fi
 	return 0
 }
 trap cleanup EXIT
@@ -423,7 +464,7 @@ preflight() {
 	else
 		info "LEG 5 (crash-resume):            WILL SKIP (needs ITEST_SLOW_MIGRATION=1 + ITEST_OTHER_TAG)"
 	fi
-	info "LEG 1 (round-trip) + LEG 6 (tools/uid): WILL RUN (need only $ITEST_BASE_TAG)"
+	info "LEG 1 (round-trip) + LIFECYCLE (version/stop/start/uninstall) + LEG 6 (tools/uid): WILL RUN (need only $ITEST_BASE_TAG)"
 }
 
 # --------------------------------------------------------------------------------
@@ -435,18 +476,21 @@ leg1_backup_restore_roundtrip() {
 	fresh_deploy "$ITEST_BASE_TAG"
 
 	# Seed a deterministic DB probe row + one asset file BEFORE the backup, so the
-	# backup captures the pre-mutation world.
-	run_sql "CREATE TABLE IF NOT EXISTS itest_probe(id int PRIMARY KEY, v text); INSERT INTO itest_probe(id,v) VALUES (1,'orig') ON CONFLICT (id) DO UPDATE SET v=EXCLUDED.v;"
-	dc exec -T app sh -c 'printf orig > /data/mathion/assets/itest_keep.txt'
+	# backup captures the pre-mutation world. Each SETUP command is `|| fail`-guarded so
+	# a failure yields an attributable FAIL line, not a bare set -e abort.
+	run_sql "CREATE TABLE IF NOT EXISTS itest_probe(id int PRIMARY KEY, v text); INSERT INTO itest_probe(id,v) VALUES (1,'orig') ON CONFLICT (id) DO UPDATE SET v=EXCLUDED.v;" ||
+		fail "leg1: seeding itest_probe row failed"
+	dc exec -T app sh -c 'printf orig > /data/mathion/assets/itest_keep.txt' ||
+		fail "leg1: seeding itest_keep.txt asset failed"
 
 	local bkp
 	bkp=$(do_backup) || fail "leg1: backup failed / archive path not parsed"
 	info "backup archive: $bkp"
 
 	# Mutate: DB row + add one asset + delete the seeded asset.
-	run_sql "UPDATE itest_probe SET v='mutated' WHERE id=1;"
-	dc exec -T app sh -c 'printf added > /data/mathion/assets/itest_added.txt'
-	dc exec -T app sh -c 'rm -f /data/mathion/assets/itest_keep.txt'
+	run_sql "UPDATE itest_probe SET v='mutated' WHERE id=1;" || fail "leg1: mutating itest_probe row failed"
+	dc exec -T app sh -c 'printf added > /data/mathion/assets/itest_added.txt' || fail "leg1: adding itest_added.txt failed"
+	dc exec -T app sh -c 'rm -f /data/mathion/assets/itest_keep.txt' || fail "leg1: deleting itest_keep.txt failed"
 
 	# Prove the mutation actually took (guards against a no-op restore false pass).
 	local got
@@ -464,11 +508,56 @@ leg1_backup_restore_roundtrip() {
 	assert_eq "orig" "$got" "leg1 DB row reverted by restore"
 	assert_true "leg1 added asset gone after restore" dc exec -T app sh -c 'test ! -f /data/mathion/assets/itest_added.txt'
 	local keep
-	keep=$(dc exec -T app sh -c 'cat /data/mathion/assets/itest_keep.txt 2>/dev/null' | sed 's/[[:space:]]//g')
+	keep=$(dc exec -T app sh -c 'cat /data/mathion/assets/itest_keep.txt 2>/dev/null' | sed 's/[[:space:]]//g') ||
+		fail "leg1: could not read restored asset itest_keep.txt (restore did not bring it back?)"
 	assert_eq "orig" "$keep" "leg1 deleted asset restored by restore"
 	assert_version_or_spa "$ITEST_BASE_TAG" "leg1 /version == base after restore"
 	assert_file_absent "$JOURNAL" "leg1 breadcrumb cleared after restore"
 	pass "LEG 1: backup / mutate / restore round-trip reverted DB + assets + /version"
+}
+
+# --------------------------------------------------------------------------------
+# LIFECYCLE — version / stop / start / uninstall (retain vs purge). Self-contained
+# (own fresh_deploy + own teardown) so it does not disturb other legs; runs by default
+# since ITEST_BASE_TAG defaults to the real published v0.1.1.
+# --------------------------------------------------------------------------------
+leg_lifecycle_commands() {
+	hr
+	info "LIFECYCLE: version / stop / start / uninstall (retain vs purge)"
+	fresh_deploy "$ITEST_BASE_TAG"
+
+	# version: output names the PINNED image version (image (pinned) <MATHION_VERSION>).
+	local vout
+	vout=$("$MATHION_BIN" version 2>&1) || fail "lifecycle: mathion version failed"
+	assert_contains "$vout" "$ITEST_BASE_TAG" "lifecycle version names the pinned image ($ITEST_BASE_TAG)"
+
+	# stop: the app goes DOWN while the named volumes are RETAINED (stop != purge).
+	"$MATHION_BIN" stop || fail "lifecycle: mathion stop failed"
+	wait_unhealthy || fail "lifecycle: app still healthy after stop"
+	assert_true "lifecycle pgdata volume retained after stop" volume_exists "$PGDATA_VOL"
+	assert_true "lifecycle assets volume retained after stop" volume_exists "$ASSETS_VOL"
+
+	# start: the app comes back HEALTHY.
+	"$MATHION_BIN" start || fail "lifecycle: mathion start failed"
+	wait_healthy || fail "lifecycle: app not healthy after start"
+
+	# uninstall (non-purge): containers/network removed, BOTH named volumes RETAINED.
+	"$MATHION_BIN" uninstall || fail "lifecycle: mathion uninstall (non-purge) failed"
+	local remain
+	remain=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)
+	assert_eq "" "$remain" "lifecycle non-purge uninstall removed all project containers"
+	assert_true "lifecycle pgdata volume retained after non-purge uninstall" volume_exists "$PGDATA_VOL"
+	assert_true "lifecycle assets volume retained after non-purge uninstall" volume_exists "$ASSETS_VOL"
+
+	# uninstall --purge (typed project name piped to confirm): BOTH named volumes REMOVED.
+	printf '%s\n' "$PROJECT" | "$MATHION_BIN" uninstall --purge || fail "lifecycle: mathion uninstall --purge failed"
+	if volume_exists "$PGDATA_VOL"; then fail "lifecycle: purge did not remove $PGDATA_VOL"; fi
+	if volume_exists "$ASSETS_VOL"; then fail "lifecycle: purge did not remove $ASSETS_VOL"; fi
+
+	# Self-contained teardown so later legs start from a clean slate.
+	teardown_deployment
+	reset_config
+	pass "LIFECYCLE: version/stop/start ok; non-purge RETAINED volumes; purge REMOVED them"
 }
 
 # --------------------------------------------------------------------------------
@@ -499,7 +588,7 @@ leg3_forced_failure_rollback() {
 	hr
 	info "LEG 3: post-backup forced-failure update -> auto-rollback"
 	if ! sabotage_available; then
-		skip "LEG 3: needs a sabotage image at ITEST_SABOTAGE_TAG reachable via the HARDCODED ghcr.io pull source (set ITEST_SABOTAGE_TAG + ITEST_SABOTAGE_MODE=redirect|push; push also needs ITEST_ALLOW_GHCR_PUSH=1 and a prior docker login ghcr.io)."
+		skip "LEG 3: needs a sabotage image at ITEST_SABOTAGE_TAG reachable via the HARDCODED ghcr.io pull source (set ITEST_SABOTAGE_TAG + ITEST_SABOTAGE_MODE=redirect, plus a daemon-level ghcr.io->ITEST_REGISTRY redirect). The sabotage tag must differ from both the deployed tag and v0.1.1."
 		return 0
 	fi
 	fresh_deploy "$ITEST_BASE_TAG"
@@ -534,6 +623,9 @@ leg4_legacy_rollback() {
 	info "forcing failed update $LEGACY_TAG -> $ITEST_SABOTAGE_TAG (expect auto-rollback TO $LEGACY_TAG)"
 	capture "$MATHION_BIN" update --version "$ITEST_SABOTAGE_TAG" --yes
 	assert_eq "1" "$CAP_RC" "leg4 update exits 1 (rolled back to $LEGACY_TAG)"
+	# Proves a POST-backup failure that actually auto-rolled-back — NOT a pre-backup
+	# step-4 pull abort (e.g. a misconfigured redirect) that also exits 1 with no journal.
+	assert_contains "$CAP_OUT" "rolling back" "leg4 update announces the auto-rollback (post-backup failure, not a pre-backup pull abort)"
 	wait_healthy || fail "leg4: app not healthy after rollback to $LEGACY_TAG"
 	# The ROLLBACK's NON-STRICT gate must ACCEPT v0.1.1's 200 text/html SPA /version
 	# (image-ID is the authoritative check; /version is legacy-tolerant on a rollback).
@@ -577,6 +669,18 @@ leg5_crash_resume() {
 	wait "$cli_pid" 2>/dev/null || true
 
 	assert_file_present "$JOURNAL" "leg5 recovery breadcrumb survived the SIGKILL"
+	# The --rm migrate child can self-remove between detection and start, which would
+	# make the post-start "no workers remain" check vacuously credit the sweep. Prove the
+	# LABELED orphan is STILL PRESENT here, BEFORE start, so the sweep has real work to do.
+	local survived
+	survived=$(docker ps -aq --filter "label=io.mathion.worker=1" --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)
+	[ -n "$survived" ] || fail "leg5: the labeled migrate orphan did not survive the SIGKILL (need a slower migration so it is still present at start)"
+
+	# Read the recorded recovery path from the breadcrumb BEFORE recovery, so we recover
+	# the EXACT backup the hint names (not whatever --latest would pick from the dir).
+	local bp
+	bp=$(read_journal_backup_path) || fail "leg5: cannot read backup_path from journal $JOURNAL"
+	[ -n "$bp" ] || fail "leg5: journal $JOURNAL has no backup_path"
 
 	# `mathion start` preamble: flock -> SweepWorkers -> entry-check. It sweeps the
 	# labeled orphan AFTER taking the flock, then REFUSES on the breadcrumb (never
@@ -584,15 +688,20 @@ leg5_crash_resume() {
 	capture "$MATHION_BIN" start
 	assert_true "leg5 start refuses on the leftover breadcrumb" test "$CAP_RC" -ne 0
 	assert_contains "$CAP_OUT" "mathion restore --" "leg5 start prints the restore recovery hint"
+	assert_contains "$CAP_OUT" "$bp" "leg5 refuse hint names the recorded backup ($bp)"
+	# start must REFUSE, not boot the app on the forward schema (app was stopped at update
+	# step 5 and must stay down).
+	if app_healthy_once; then fail "leg5: start booted the app instead of refusing on the breadcrumb"; fi
 	local remaining
 	remaining=$(docker ps -aq --filter "label=io.mathion.worker=1" --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)
 	assert_eq "" "$remaining" "leg5 start label-swept the orphan worker after taking the flock"
 
-	# Recovery: restore --latest recovers the just-taken backup and clears the breadcrumb.
-	"$MATHION_BIN" restore --latest --yes || fail "leg5: recovery restore failed"
+	# Recovery: restore the EXACT recorded backup, which recovers the deployment and
+	# clears the breadcrumb.
+	"$MATHION_BIN" restore --yes -- "$bp" || fail "leg5: recovery restore of $bp failed"
 	wait_healthy || fail "leg5: app not healthy after recovery restore"
 	assert_file_absent "$JOURNAL" "leg5 breadcrumb cleared by the recovery restore"
-	pass "LEG 5: crash-resume swept the orphan, refused with the hint, and restore recovered"
+	pass "LEG 5: orphan survived the crash, start swept it + refused with the recorded-path hint, restore recovered"
 }
 
 # --------------------------------------------------------------------------------
@@ -617,8 +726,9 @@ leg6_tool_presence_uid() {
 	# The app process runs as the uid that OWNS the assets volume mount — so the
 	# backup/restore streams (which run as that uid) can read/write the tree.
 	local run_uid owner_uid
-	run_uid=$(dc exec -T app sh -c 'id -u' | sed 's/[[:space:]]//g')
-	owner_uid=$(dc exec -T app sh -c 'stat -c %u /data/mathion/assets' | sed 's/[[:space:]]//g')
+	run_uid=$(dc exec -T app sh -c 'id -u' | sed 's/[[:space:]]//g') || fail "leg6: could not read app container uid"
+	owner_uid=$(dc exec -T app sh -c 'stat -c %u /data/mathion/assets' | sed 's/[[:space:]]//g') ||
+		fail "leg6: could not stat the assets-volume owner uid"
 	assert_eq "$owner_uid" "$run_uid" "leg6 app runs as the assets-volume owner uid"
 	pass "LEG 6: tools present in host + containers; app runs as the assets-volume owner uid ($run_uid)"
 }
@@ -630,7 +740,7 @@ leg7_notes() {
 	hr
 	info "LEG 7: explicit non-runnable notes"
 	note "NOT RUNNABLE: 'restore an OLDER-schema backup over a MIGRATED DB' needs a SECOND Alembic migration to exist (only one migration ships today), so there is no older schema to restore over a newer one. Deferred until a 2nd migration lands."
-	note "NOT CI-RUNNABLE (manual/opt-in only): legs 2-5 need real ghcr.io images, a Docker host, and root; none of this script is part of \`go test\`."
+	note "NOT CI-RUNNABLE (manual/opt-in only): legs 2-5 need real ghcr.io images, a Docker host, and root; the default legs (1, lifecycle, 6) need a Docker host + root; none of this script is part of \`go test\`."
 	skip "LEG 7: documentation-only (older-schema-over-migrated-DB deferred until a 2nd migration; legs 2-5 excluded from CI)"
 }
 
@@ -640,6 +750,7 @@ leg7_notes() {
 main() {
 	preflight
 	leg1_backup_restore_roundtrip
+	leg_lifecycle_commands
 	leg2_happy_update
 	leg3_forced_failure_rollback
 	leg4_legacy_rollback
