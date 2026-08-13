@@ -127,12 +127,13 @@ LEGACY_TAG="v0.1.1"                                    # leg 4 requires the REAL
 # an unset var under `set -u`).
 PASS_COUNT=0
 SKIP_COUNT=0
-HAVE_JQ=0
 REGISTRY_STARTED=0
-SABOTAGE_SUPPLIED=0
 _CLEANED=0
 CAP_OUT=""
 CAP_RC=0
+# Image refs THIS run created (registry-path + ghcr sabotage tag); cleanup removes ONLY
+# these, and only after a collision refusal proved they did not pre-exist.
+OWNED_IMAGE_REFS=()
 
 # --------------------------------------------------------------------------------
 # Logging + assertion helpers.
@@ -207,23 +208,12 @@ query_sql() {
 		sed 's/[[:space:]]//g'
 }
 
-# json_version — reads a body on stdin, prints its .version field, or NOTHING when the
-# body is not a JSON object (e.g. the legacy text/html SPA, or arbitrary HTML that
-# merely contains the word "version"). jq parses a real object; the sed fallback is
-# anchored on a `{...}` object shape (body must begin with `{`), never a bare substring.
-json_version() {
-	if [ "${HAVE_JQ:-0}" = "1" ]; then
-		jq -er '.version // empty'
-	else
-		local body trimmed
-		body=$(cat)
-		trimmed=$(printf '%s' "$body" | sed -e 's/^[[:space:]]*//')
-		case "$trimmed" in
-		'{'*) printf '%s' "$trimmed" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' ;;
-		*) : ;;
-		esac
-	fi
-}
+# json_version — reads a /version body on stdin and prints its .version field, or
+# NOTHING when the body is not a JSON object (transport error / text-html SPA / HTML that
+# merely mentions "version"). jq is MANDATORY (asserted in preflight): it parses a REAL
+# JSON document, so trailing HTML after a JSON object (`{"version":"v2"}<html>…`) is a
+# parse error and yields empty — no substring/prefix heuristic that a broken route slips.
+json_version() { jq -er '.version // empty'; }
 
 # version_field — the running app's /version value, or EMPTY when /version is not a
 # JSON object (transport error, non-JSON SPA, or a 404). Never fails the caller.
@@ -242,14 +232,8 @@ app_healthy_once() { curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | grep -q 
 volume_exists() { docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$1"; }
 
 # read_journal_backup_path — prints the recovery breadcrumb's backup_path
-# (varlib.Journal JSON field `backup_path`). jq if present, else an anchored sed.
-read_journal_backup_path() {
-	if [ "${HAVE_JQ:-0}" = "1" ]; then
-		jq -r '.backup_path // empty' "$JOURNAL" 2>/dev/null
-	else
-		sed -n 's/.*"backup_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$JOURNAL"
-	fi
-}
+# (varlib.Journal JSON field `backup_path`). jq is MANDATORY (asserted in preflight).
+read_journal_backup_path() { jq -r '.backup_path // empty' "$JOURNAL" 2>/dev/null; }
 
 # wait_healthy — poll the loopback /health until it reports ok (the CLI already
 # --wait's on the container healthcheck; this covers the port-forward settle).
@@ -282,11 +266,17 @@ wait_unhealthy() {
 #     or non-JSON (SPA) result is a FAIL — it means the /version route is broken and is
 #     accidentally serving the SPA shell (the very false-pass this guards against).
 assert_version_or_spa() {
-	local tag="$1" ctx="$2" ver code ctype
-	ver=$(version_field)
+	local tag="$1" ctx="$2" body ver code ctype
+	body=$(curl -sS --max-time 5 "$VERSION_URL" 2>/dev/null || true)
+	ver=$(printf '%s' "$body" | json_version 2>/dev/null || true)
 	if [ "$tag" = "$LEGACY_TAG" ]; then
 		if [ -n "$ver" ]; then
 			fail "$ctx (legacy $LEGACY_TAG unexpectedly served JSON /version=[$ver]; expected the text/html SPA shell)"
+		fi
+		# The body must NOT be a JSON document at all — a valid {} / {"foo":"bar"} would
+		# yield an empty .version yet is NOT the legacy SPA shape this branch certifies.
+		if printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+			fail "$ctx (legacy /version parsed as JSON; expected a non-JSON text/html SPA body)"
 		fi
 		code=$(http_code "$VERSION_URL")
 		ctype=$(http_ctype "$VERSION_URL")
@@ -380,13 +370,25 @@ ensure_registry() {
 # `docker pull ghcr.io/...:<tag>` SUCCEEDS while its FORWARD strict gate FAILS. Content
 # = real v0.1.1 (its /version is a 200 text/html SPA -> strict reject); pushed to the
 # throwaway ITEST_REGISTRY, resolved by the maintainer's ghcr->registry redirect.
-# Sets SABOTAGE_SUPPLIED so cleanup removes ONLY the refs this run actually created.
+#
+# Data-safety: REFUSE up front if either sabotage ref already exists, so cleanup can
+# never delete a pre-existing image the operator cares about; then record each ref as
+# owned IMMEDIATELY after it is created (before push), so a mid-way failure still lets
+# cleanup remove exactly what this run made.
 supply_sabotage() {
+	local reg_ref="$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG"
+	local ghcr_ref="$IMAGE_REPO:$ITEST_SABOTAGE_TAG"
+	if docker image inspect "$reg_ref" >/dev/null 2>&1 || docker image inspect "$ghcr_ref" >/dev/null 2>&1; then
+		fail "supply_sabotage: a sabotage image ref already exists ($reg_ref or $ghcr_ref); choose a fresh ITEST_SABOTAGE_TAG so cleanup never deletes a pre-existing image"
+	fi
 	docker pull "$IMAGE_REPO:$LEGACY_TAG" >/dev/null
 	ensure_registry
-	docker tag "$IMAGE_REPO:$LEGACY_TAG" "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG"
-	docker push "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG" >/dev/null
-	SABOTAGE_SUPPLIED=1
+	docker tag "$IMAGE_REPO:$LEGACY_TAG" "$reg_ref"
+	OWNED_IMAGE_REFS+=("$reg_ref") # owned the moment it is created, before push
+	docker push "$reg_ref" >/dev/null
+	# The leg's redirected `update` pull materializes ghcr_ref locally; the collision
+	# refusal above proved it did not pre-exist, so this run unambiguously owns it too.
+	OWNED_IMAGE_REFS+=("$ghcr_ref")
 }
 
 # --------------------------------------------------------------------------------
@@ -401,21 +403,41 @@ cleanup() {
 	info "cleanup: tearing down deployment, registry, and run-created sabotage refs"
 	teardown_deployment
 	reset_config
-	# Remove ONLY what this run created (never a pre-existing / never-created ref).
-	if [ "${REGISTRY_STARTED:-0}" = "1" ]; then docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1; fi
-	if [ "${SABOTAGE_SUPPLIED:-0}" = "1" ]; then
-		# The redirect pull materializes a local ghcr:<tag> ref; supply_sabotage also
-		# created the registry-path ref. Both were created by this run.
-		docker rmi -f "$IMAGE_REPO:$ITEST_SABOTAGE_TAG" >/dev/null 2>&1
-		docker rmi -f "$ITEST_REGISTRY/svkucheryavski/mathion:$ITEST_SABOTAGE_TAG" >/dev/null 2>&1
+	# Remove ONLY the refs THIS run recorded as created (never a pre-existing ref).
+	local ref
+	if [ "${#OWNED_IMAGE_REFS[@]}" -gt 0 ]; then
+		for ref in "${OWNED_IMAGE_REFS[@]}"; do
+			docker rmi -f "$ref" >/dev/null 2>&1
+		done
 	fi
-	# Verify teardown actually completed; WARN LOUDLY (stderr) on residue instead of
-	# silently swallowing a failed down/purge.
+	if [ "${REGISTRY_STARTED:-0}" = "1" ]; then docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1; fi
+
+	# VERIFY every resource we claim to have removed is actually gone; WARN LOUDLY (stderr)
+	# on residue or on a verify query that itself fails, instead of silently swallowing.
+	if [ "${#OWNED_IMAGE_REFS[@]}" -gt 0 ]; then
+		for ref in "${OWNED_IMAGE_REFS[@]}"; do
+			if docker image inspect "$ref" >/dev/null 2>&1; then
+				note "cleanup: run-created image ref still present (manual removal needed): $ref"
+			fi
+		done
+	fi
+	if [ "${REGISTRY_STARTED:-0}" = "1" ]; then
+		if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$REGISTRY_NAME"; then
+			note "cleanup: throwaway registry container still present (manual removal needed): $REGISTRY_NAME"
+		fi
+	fi
 	local resid_c resid_v
-	resid_c=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)
-	if [ -n "$resid_c" ]; then note "cleanup: residual $PROJECT containers remain (manual removal needed): $resid_c"; fi
-	resid_v=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E "^${PROJECT}_(mathion_pgdata|mathion_assets)$")
-	if [ -n "$resid_v" ]; then note "cleanup: residual $PROJECT volumes remain (manual removal needed): $resid_v"; fi
+	if ! resid_c=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null); then
+		note "cleanup: could not query residual $PROJECT containers (verify + remove manually)"
+	elif [ -n "$resid_c" ]; then
+		note "cleanup: residual $PROJECT containers remain (manual removal needed): $resid_c"
+	fi
+	if ! resid_v=$(docker volume ls --format '{{.Name}}' 2>/dev/null); then
+		note "cleanup: could not query residual $PROJECT volumes (verify + remove manually)"
+	else
+		resid_v=$(printf '%s\n' "$resid_v" | grep -E "^${PROJECT}_(mathion_pgdata|mathion_assets)$")
+		if [ -n "$resid_v" ]; then note "cleanup: residual $PROJECT volumes remain (manual removal needed): $resid_v"; fi
+	fi
 	return 0
 }
 trap cleanup EXIT
@@ -438,13 +460,10 @@ preflight() {
 	have tar || fail "preflight: tar not found"
 	have find || fail "preflight: find not found"
 	have mktemp || fail "preflight: mktemp not found"
-	if have jq; then
-		HAVE_JQ=1
-		info "jq: present"
-	else
-		HAVE_JQ=0
-		note "jq: absent — using a sed JSON fallback"
-	fi
+	# jq is REQUIRED: the /version JSON-vs-SPA oracle and the journal parse must be strict
+	# (a sed/substring heuristic false-passes a broken route), so there is no fallback.
+	have jq || fail "preflight: jq not found (required for strict JSON /version + journal parsing)"
+	info "jq: present"
 	info "mathion binary: $(command -v "$MATHION_BIN")"
 	info "project=$PROJECT  config=$CFG_DIR  varlib=$VARLIB_DIR  base=$ITEST_BASE_TAG"
 
@@ -526,10 +545,13 @@ leg_lifecycle_commands() {
 	info "LIFECYCLE: version / stop / start / uninstall (retain vs purge)"
 	fresh_deploy "$ITEST_BASE_TAG"
 
-	# version: output names the PINNED image version (image (pinned) <MATHION_VERSION>).
+	# version: output names the PINNED image version on the EXACT shipped line
+	# (version.go prints "image (pinned)  <MATHION_VERSION>" with TWO spaces). Matching the
+	# bare tag would also match the "mathion <buildVersion>" CLI line and false-pass a
+	# broken/missing image(pinned) read.
 	local vout
 	vout=$("$MATHION_BIN" version 2>&1) || fail "lifecycle: mathion version failed"
-	assert_contains "$vout" "$ITEST_BASE_TAG" "lifecycle version names the pinned image ($ITEST_BASE_TAG)"
+	assert_contains "$vout" "image (pinned)  $ITEST_BASE_TAG" "lifecycle version names the pinned image on the image(pinned) line"
 
 	# stop: the app goes DOWN while the named volumes are RETAINED (stop != purge).
 	"$MATHION_BIN" stop || fail "lifecycle: mathion stop failed"
@@ -544,7 +566,8 @@ leg_lifecycle_commands() {
 	# uninstall (non-purge): containers/network removed, BOTH named volumes RETAINED.
 	"$MATHION_BIN" uninstall || fail "lifecycle: mathion uninstall (non-purge) failed"
 	local remain
-	remain=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)
+	remain=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null) ||
+		fail "lifecycle: docker ps (post-uninstall containers) query failed"
 	assert_eq "" "$remain" "lifecycle non-purge uninstall removed all project containers"
 	assert_true "lifecycle pgdata volume retained after non-purge uninstall" volume_exists "$PGDATA_VOL"
 	assert_true "lifecycle assets volume retained after non-purge uninstall" volume_exists "$ASSETS_VOL"
@@ -689,11 +712,20 @@ leg5_crash_resume() {
 	assert_true "leg5 start refuses on the leftover breadcrumb" test "$CAP_RC" -ne 0
 	assert_contains "$CAP_OUT" "mathion restore --" "leg5 start prints the restore recovery hint"
 	assert_contains "$CAP_OUT" "$bp" "leg5 refuse hint names the recorded backup ($bp)"
-	# start must REFUSE, not boot the app on the forward schema (app was stopped at update
-	# step 5 and must stay down).
-	if app_healthy_once; then fail "leg5: start booted the app instead of refusing on the breadcrumb"; fi
+	# start must REFUSE, not boot the app on the forward schema. Fail-closed: assert NO
+	# RUNNING app service container exists (the app container exists but is STOPPED from
+	# update step 5, so a running one means start booted it). This is stronger than a mere
+	# health check — a regression that boots the app but leaves it "starting"/unhealthy
+	# would slip an app_healthy_once check yet is caught here.
+	local running_app
+	running_app=$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=app" 2>/dev/null) ||
+		fail "leg5: docker ps (running app) query failed"
+	[ -z "$running_app" ] || fail "leg5: start booted the app (a running app container is present) instead of refusing on the breadcrumb"
+	# The labeled orphan must be gone (swept after the flock). Fail-closed on a query error
+	# so a transient docker failure cannot masquerade as an empty (swept) result.
 	local remaining
-	remaining=$(docker ps -aq --filter "label=io.mathion.worker=1" --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true)
+	remaining=$(docker ps -aq --filter "label=io.mathion.worker=1" --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null) ||
+		fail "leg5: docker ps (worker sweep check) query failed"
 	assert_eq "" "$remaining" "leg5 start label-swept the orphan worker after taking the flock"
 
 	# Recovery: restore the EXACT recorded backup, which recovers the deployment and
