@@ -40,7 +40,7 @@ func newUninstallCmd(app *App) *cobra.Command {
 			// then remove <cfgdir> only after teardown succeeds.
 			pgdata := app.Project + "_mathion_pgdata"
 			assets := app.Project + "_mathion_assets"
-			fmt.Fprintf(app.Out, "This PERMANENTLY deletes project %q, volumes %s and %s, and config dir %s.\nType the project name (%s) to confirm: ", app.Project, pgdata, assets, app.CfgDir, app.Project)
+			fmt.Fprintf(app.Out, "This PERMANENTLY deletes project %q, volumes %s and %s, and config dir %s (backups in %s are kept).\nType the project name (%s) to confirm: ", app.Project, pgdata, assets, app.CfgDir, varlib.BackupsDir(), app.Project)
 			line, _ := bufio.NewReader(app.In).ReadString('\n')
 			if strings.TrimSpace(line) != app.Project {
 				return fmt.Errorf("confirmation did not match %q; aborting", app.Project)

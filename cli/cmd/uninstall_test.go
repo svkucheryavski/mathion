@@ -171,6 +171,27 @@ func TestPurgeSuccessRemovesCfgDir(t *testing.T) {
 	}
 }
 
+// TestPurgeConfirmationNamesRetainedBackups pins the pre-release polish: the
+// destructive --purge confirmation must state that backups in /var/lib/mathion are
+// KEPT (spec §251 — purge deliberately leaves the varlib backups dir in place), so an
+// operator is not surprised to find backups surviving a "purge".
+func TestPurgeConfirmationNamesRetainedBackups(t *testing.T) {
+	rootedVarlib(t)
+	dir := t.TempDir()
+	seedInstall(t, dir)
+	f := &compose.FakeRunner{}
+	var out bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: &out, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if want := "backups in " + varlib.BackupsDir() + " are kept"; !strings.Contains(out.String(), want) {
+		t.Fatalf("purge confirmation must name the retained backups dir (%q); got %q", want, out.String())
+	}
+}
+
 func TestPurgeRetainsCfgDirOnTeardownFailure(t *testing.T) {
 	rootedVarlib(t)
 	dir := t.TempDir()

@@ -739,12 +739,15 @@ func TestRestoreLoadHappyPath(t *testing.T) {
 			return nil
 		},
 	}
-	app, _, _ := engineApp(cfg, f, "")
+	app, _, errb := engineApp(cfg, f, "")
 	if err := restoreEngine(context.Background(), app, arc, restoreOpts{Yes: true, WriteBreadcrumb: true, Caps: managedCaps}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !sawDB || !sawAssets {
 		t.Fatalf("both loads must run through StreamIn/StreamInEnv (db=%v assets=%v)", sawDB, sawAssets)
+	}
+	if !strings.Contains(errb.String(), "restoring database") {
+		t.Fatalf("a progress line must precede the now-quiet DB load; err=%q", errb.String())
 	}
 	di := idxOfCall(f.Calls, isLoadCall("mathion_restore_db_"))
 	ai := idxOfCall(f.Calls, isLoadCall("mathion_restore_assets_"))
@@ -780,6 +783,25 @@ func TestRestoreLoadHappyPath(t *testing.T) {
 	}
 	if !hasEnv(f.EnvCalls, "MATHION_VERSION="+managedTag) {
 		t.Fatalf("assets load must pin MATHION_VERSION=%s via StreamInEnv; EnvCalls=%v", managedTag, f.EnvCalls)
+	}
+}
+
+// TestRestoreDBScriptQuietsPsqlStdout pins the pre-release polish: the psql load's
+// stdout (its DDL/command-tag echo) is redirected to /dev/null so a successful restore
+// is quiet, while the PII-scrubbed stderr channel is left untouched and the transactional
+// guards (ON_ERROR_STOP + --single-transaction) are preserved — errors still surface and
+// still roll back.
+func TestRestoreDBScriptQuietsPsqlStdout(t *testing.T) {
+	if !strings.Contains(restoreDBScript, `-d "$POSTGRES_DB" >/dev/null`) {
+		t.Fatalf("psql load stdout must be redirected to /dev/null; script=%q", restoreDBScript)
+	}
+	if strings.Contains(restoreDBScript, "2>") {
+		t.Fatalf("restoreDBScript must never redirect stderr (the spooled PII-scrubbed channel); script=%q", restoreDBScript)
+	}
+	for _, must := range []string{"ON_ERROR_STOP=1", "--single-transaction"} {
+		if !strings.Contains(restoreDBScript, must) {
+			t.Fatalf("restoreDBScript must keep %q (the quiet redirect must not weaken the transactional load); script=%q", must, restoreDBScript)
+		}
 	}
 }
 

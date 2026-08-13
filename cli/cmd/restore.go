@@ -178,7 +178,7 @@ const restartTimeout = 30 * time.Second
 // non-seekable stdin pipe. psql -h db targets the running db service, not this
 // postmaster-less client. $POSTGRES_* come from the db service's environment (compose
 // interpolates them from --env-file), never host argv.
-const restoreDBScript = `t=$(mktemp) || exit 1; r=$(mktemp) || { rm -f "$t"; exit 1; }; pg_restore -f "$t"; rc=$?; if [ "$rc" -ne 0 ]; then rm -f "$t" "$r"; exit "$rc"; fi; printf "DROP SCHEMA public CASCADE; CREATE SCHEMA public AUTHORIZATION \"%s\";\n" "$POSTGRES_USER" > "$r" || { rm -f "$t" "$r"; exit 1; }; PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -v ON_ERROR_STOP=1 -v VERBOSITY=verbose --single-transaction -f "$r" -f "$t" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; rc=$?; rm -f "$t" "$r"; exit "$rc"`
+const restoreDBScript = `t=$(mktemp) || exit 1; r=$(mktemp) || { rm -f "$t"; exit 1; }; pg_restore -f "$t"; rc=$?; if [ "$rc" -ne 0 ]; then rm -f "$t" "$r"; exit "$rc"; fi; printf "DROP SCHEMA public CASCADE; CREATE SCHEMA public AUTHORIZATION \"%s\";\n" "$POSTGRES_USER" > "$r" || { rm -f "$t" "$r"; exit 1; }; PGPASSWORD="$POSTGRES_PASSWORD" psql -h db -v ON_ERROR_STOP=1 -v VERBOSITY=verbose --single-transaction -f "$r" -f "$t" -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null; rc=$?; rm -f "$t" "$r"; exit "$rc"`
 
 // restoreAssetsScript clears the assets volume's contents (dotfiles included, mountpoint
 // kept) then extracts the pre-scanned assets.tar from stdin. --no-same-owner: the app
@@ -347,6 +347,10 @@ func restoreEngine(ctx context.Context, a *App, archivePath string, opts restore
 		return err
 	}
 	defer dbf.Close()
+	// Progress line: the psql load's stdout is redirected to /dev/null in restoreDBScript
+	// (its DDL/command-tag echo is noise; errors still surface via the captured/spooled
+	// stderr), so print a single status line here to show a large restore is working.
+	fmt.Fprintln(a.Err, "restoring database...")
 	if err := a.Runner.StreamIn(ctx, dbf, a.composeArgs(
 		"run", "--rm", "--no-deps", "--pull", "never",
 		"--name", dbWorker, "--label", "io.mathion.worker=1",
