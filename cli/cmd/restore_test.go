@@ -1040,6 +1040,13 @@ func TestResolveRestoreCapsHonorsManagedOverrides(t *testing.T) {
 	managed := filepath.Join(backups, "mathion-backup-x.tar.gz")
 	untrusted := filepath.Join(t.TempDir(), "hostile.tar.gz")
 
+	// Hermetic baseline: neutralize any ambient MATHION_RESTORE_MAX_* (ManagedCaps
+	// treats "" as unset) so each subtest exercises ONLY the override it sets — an
+	// inherited malformed/out-of-range value in the OTHER cap var must not bleed in
+	// and spuriously hard-fail the lowered/raised cases.
+	t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "")
+	t.Setenv("MATHION_RESTORE_MAX_TOTAL_BYTES", "")
+
 	t.Run("managed lowered", func(t *testing.T) {
 		t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "1G")
 		caps, err := resolveRestoreCaps(managed, backups)
