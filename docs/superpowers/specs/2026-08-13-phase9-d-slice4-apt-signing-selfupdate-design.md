@@ -55,6 +55,26 @@ This slice touches distribution and the CLI only. No backend or frontend changes
 | D3 | CLI self-update | **Dedicated `mathion self-update`**, channel-aware (apt-managed → defer to apt; curl-managed → verify + forward-only swap) |
 | D4 | dual-install conflict | **Detect + warn, never auto-delete** |
 
+## 2.1 Slice split (4a / 4b)
+
+This design is implemented as two independently shippable slices sharing one key:
+
+- **Slice 4a — distribution + signing** (delivers `apt install mathion` and closes
+  the curl|sh authenticity gap): the `.deb`/nfpm (§5); the full key material +
+  lifecycle including **both** subkeys `S_rel`/`S_apt` (§6); the apt repo (§7);
+  `install.sh` authenticity (§8); dual-install detection incl. the `mathion
+  version` warning (§10, minus the `--short` flag); CI release signing +
+  `apt-publish` + `apt-resign` + the two environments (§11); packaging + hermetic
+  apt e2e + install.sh tests (§12); docs + manual prerequisites (§13, §14).
+  4a signs `checksums.txt` with `S_rel`, so its releases are already self-update-
+  verifiable.
+- **Slice 4b — CLI self-update** (consumes 4a's signed releases): the
+  `cli/internal/selfupdate` package + `mathion self-update` (§9); its deps
+  `go-crypto`/`x/mod/semver`/`x/sys/unix` (§9.2, M2); the `version --short` flag
+  (§10); the self-update Go unit tests + integration legs (§12); self-update docs.
+
+Each slice gets its own implementation plan. 4a is planned and executed first.
+
 ## 3. Open decisions
 
 - **M1 — distribution license: RESOLVED → Apache-2.0.** Repo-root `LICENSE`
