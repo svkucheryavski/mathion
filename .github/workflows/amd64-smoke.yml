@@ -37,7 +37,7 @@ jobs:
     env:
       IMAGE_REPO: ghcr.io/svkucheryavski/mathion
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the mathion CLI (real amd64 archive, checksum-verified)
         env:
