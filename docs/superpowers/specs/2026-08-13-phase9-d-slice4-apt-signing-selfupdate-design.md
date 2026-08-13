@@ -50,16 +50,15 @@ This slice touches distribution and the CLI only. No backend or frontend changes
 | D3 | CLI self-update | **Dedicated `mathion self-update`**, channel-aware (apt-managed → defer to apt; curl-managed → verify + forward-only swap) |
 | D4 | dual-install conflict | **Detect + warn, never auto-delete** (postinst, install.sh, `mathion version`) |
 
-## 3. Open decisions (need resolution before implementation)
+## 3. Open decisions
 
-- **M1 — distribution license (BLOCKING).** The repo has **no `LICENSE` file**.
-  Distributing a `.deb`/tarball requires an actual license granting redistribution
-  rights ("all rights reserved" does not), and the static Go binary bundles
-  third-party licenses (cobra, pflag, mousetrap, and the new go-crypto) that must
-  ship in `/usr/share/doc/mathion/copyright`. **Decision needed:** which license
-  (recommend a permissive OSS license, e.g. Apache-2.0 for its patent grant, or
-  MIT), or an explicit proprietary "install-and-run" redistribution grant.
-  Third-party notices generated via `go-licenses` and bundled regardless.
+- **M1 — distribution license: RESOLVED → Apache-2.0.** Add a repo-root `LICENSE`
+  (Apache-2.0; SPDX `Apache-2.0`) covering the whole repository. The `.deb`'s
+  `/usr/share/doc/mathion/copyright` (Debian machine-readable `copyright` format)
+  states Apache-2.0 and bundles third-party notices for the statically-linked Go
+  deps (cobra + mousetrap Apache-2.0; pflag BSD-3; go-crypto BSD-style),
+  generated via `go-licenses`. This unblocks package publishing. (Chosen for the
+  explicit patent grant + trademark carve-out + contribution terms over MIT.)
 - **M2 — new Go dependency (recommended: yes).** Add
   `github.com/ProtonMail/go-crypto/openpgp` for in-CLI detached-signature verify.
   Pin the version; constrain accepted digests to SHA-256-or-stronger; negative-test
@@ -106,6 +105,7 @@ the **signing subkey**, so routine rotation never forces users to re-add the key
 
 | Path | Change | Responsibility |
 |------|--------|----------------|
+| `LICENSE` | create | repo-root Apache-2.0 license text (M1) |
 | `cli/.goreleaser.yaml` | modify | add `nfpms:` (`.deb`, ships man page + copyright) and `signs:` (explicit subkey, `${artifact}.asc`, `--armor`, batch/loopback) |
 | `deploy/keys/mathion-pubkey.asc` | create | **canonical** ASCII-armored primary public key (source of truth) |
 | `cli/internal/selfupdate/mathion-pubkey.asc` | create | in-package copy for `go:embed` (embed cannot traverse `..`/leave the module); CI/test asserts byte-identity with the canonical copy |
@@ -133,7 +133,7 @@ the **signing subkey**, so routine rotation never forces users to re-add the key
   the CLI already probes Docker at runtime.
 - **`postinst`:** warn (never delete) if `/usr/local/bin/mathion` exists — it
   shadows this apt copy on the default `PATH` (see §10).
-- **Ships** `/usr/share/doc/mathion/copyright` (license per M1 + bundled
+- **Ships** `/usr/share/doc/mathion/copyright` (Apache-2.0 per M1 + bundled
   third-party notices) and `/usr/share/man/man1/mathion.1.gz` (M3).
 - **Not** individually debsig-signed: apt trust comes from the signed repo
   `Release` (§7); a local `apt-get install ./file.deb` performs no signature check
