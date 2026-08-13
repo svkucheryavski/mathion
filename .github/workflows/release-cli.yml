@@ -23,9 +23,11 @@ jobs:
       - name: Unit
         working-directory: cli
         run: go vet ./... && go test ./...
-      - name: Integration (real Docker install/purge)
+      - name: Integration harness — static validation (real-Docker legs are manual/opt-in)
         working-directory: cli
-        run: sh integration_test.sh
+        run: |
+          bash -n integration_test.sh
+          shellcheck integration_test.sh
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
