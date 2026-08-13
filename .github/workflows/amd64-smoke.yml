@@ -83,10 +83,13 @@ jobs:
 
           # /health: parse JSON (a substring grep would false-pass on unrelated 200 bodies).
           # install returns only after compose reports healthy; retry briefly for CI robustness.
+          # jq -se (slurp): require EXACTLY ONE top-level JSON object — bare `jq -e`
+          # bases its status on the LAST value of a multi-document stream, so a
+          # malformed `{"status":"bad"}\n{"status":"ok"}` body would false-pass.
           ok=""
           for _ in 1 2 3 4 5; do
             if curl -fsS --connect-timeout 5 --max-time 10 http://127.0.0.1:8000/health \
-                 | jq -e 'type == "object" and .status == "ok"' >/dev/null 2>&1; then ok=1; break; fi
+                 | jq -se 'length == 1 and (.[0] | type == "object" and .status == "ok")' >/dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done
           test -n "${ok}" || { echo "FAIL: /health not ok"; exit 1; }
@@ -94,8 +97,11 @@ jobs:
 
           ver="$(curl -fsS --connect-timeout 5 --max-time 10 http://127.0.0.1:8000/version)"
           echo "/version -> ${ver}"
-          printf '%s' "${ver}" | jq -e --arg v "${APP_VERSION}" '.version == $v' >/dev/null \
-            || { echo "FAIL: /version body is not {\"version\":\"${APP_VERSION}\"}"; exit 1; }
+          # slurp + length==1: reject a multi-document stream, a legacy 200 HTML SPA,
+          # and a missing/wrong .version. (stderr left visible: jq's parse error is a
+          # useful diagnostic on the single terminal check.)
+          printf '%s' "${ver}" | jq -se --arg v "${APP_VERSION}" 'length == 1 and (.[0] | type == "object" and .version == $v)' >/dev/null \
+            || { echo "FAIL: /version body is not a single {\"version\":\"${APP_VERSION}\"}"; exit 1; }
           echo "/version: ${APP_VERSION}"
 
           n="$(sudo docker exec mathion_prod-db-1 \
@@ -111,13 +117,17 @@ jobs:
 
           # Assert absence via queries that MUST themselves succeed (a failing
           # `volume inspect` would otherwise read as "absent" and false-pass).
-          vols="$(sudo docker volume ls --filter name=mathion_prod_mathion_ --format '{{.Name}}')"
+          # Filter on the EXACT compose project label, not a `name=` substring
+          # (substring over-matches e.g. `backup_mathion_prod_..._copy` -> spurious FAIL);
+          # compose stamps this label on all containers, the network, and named volumes.
+          proj="label=com.docker.compose.project=mathion_prod"
+          vols="$(sudo docker volume ls --filter "${proj}" --format '{{.Name}}')"
           test -z "${vols}" || { echo "FAIL: volumes survived purge: ${vols}"; exit 1; }
-          cons="$(sudo docker ps -a --filter name=mathion_prod- --format '{{.Names}}')"
+          cons="$(sudo docker ps -a --filter "${proj}" --format '{{.Names}}')"
           test -z "${cons}" || { echo "FAIL: containers survived purge: ${cons}"; exit 1; }
-          nets="$(sudo docker network ls --filter name=mathion_prod_ --format '{{.Name}}')"
+          nets="$(sudo docker network ls --filter "${proj}" --format '{{.Name}}')"
           test -z "${nets}" || { echo "FAIL: network survived purge: ${nets}"; exit 1; }
-          echo "purge: volumes + containers + network gone"
+          echo "purge: volumes + containers + network gone (compose project label)"
 
       - name: Cleanup (always)
         if: always()
