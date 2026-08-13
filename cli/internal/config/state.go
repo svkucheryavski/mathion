@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,7 +36,35 @@ func AtomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return fsyncDir(dir)
+}
+
+// fsyncDir fsyncs a directory so a rename/unlink of an entry within it is
+// durable across a power loss (a file-only fsync does not persist the dirent).
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil {
+		return errors.Join(syncErr, closeErr) // errors.Join drops nils
+	}
+	return closeErr
+}
+
+// RemoveSync unlinks path and fsyncs its parent directory so the removal is
+// durable. A missing file is not an error (idempotent — used to clear the
+// recovery breadcrumb, which a re-run may find already gone).
+func RemoveSync(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return fsyncDir(filepath.Dir(path))
 }
 
 func EnsureConfigDir(cfgdir string) error {

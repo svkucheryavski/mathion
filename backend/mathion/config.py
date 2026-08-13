@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    version: str = "unknown"          # reads MATHION_VERSION via env_prefix="MATHION_"
     database_url: str = "postgresql+psycopg://mathion:mathion@localhost:5432/mathion"
     asset_path: str = "/data/mathion/assets"
     max_file_size: int = 20 * 1024 * 1024  # 20MB

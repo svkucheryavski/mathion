@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -58,6 +59,86 @@ func ParseEnv(text string) map[string]string {
 	return out
 }
 
+// envLineKey computes the key a `.env` line contributes, matching ParseEnv's
+// per-line rule exactly (TrimSpace, skip blank/comment, Cut on '=', TrimSpace the
+// key). A line that contributes no key returns "" — which never equals a real key
+// name — so re-pin passes it through verbatim.
+func envLineKey(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return ""
+	}
+	k, _, ok := strings.Cut(line, "=")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(k)
+}
+
+// RepinVersion rewrites MATHION_VERSION in <cfgdir>/.env to newTag while
+// preserving every unrelated line. It is line-oriented (not a full regenerate) so
+// operator edits, comments, and extra keys survive an `update`/rollback re-pin.
+// The tag is validated BEFORE any read or write — a hostile tag must never touch
+// the file — and the whole file is re-validated AFTER the write so a re-pin can
+// never leave a corrupt or mis-targeted `.env` behind. Error messages stay static
+// or name only the key/tag role: the file carries the DB password and must never
+// leak into an operator-visible error.
+func RepinVersion(cfgdir, newTag string) error {
+	// (1) Validate the tag first — reject a hostile tag before touching the file.
+	if err := ValidateOCITag(newTag); err != nil {
+		return err
+	}
+	// (2) Read the current `.env` raw so unrelated lines pass through verbatim.
+	raw, err := os.ReadFile(cfgdir + "/.env")
+	if err != nil {
+		return fmt.Errorf("re-pin: read .env: %w", err)
+	}
+	// (3) Walk lines: emit the new value on the FIRST MATHION_VERSION match, drop
+	// later exact matches, append if never seen, pass everything else through.
+	lines := strings.Split(string(raw), "\n")
+	out := make([]string, 0, len(lines)+1)
+	seen := false
+	for _, line := range lines {
+		if envLineKey(line) == "MATHION_VERSION" {
+			if seen {
+				continue // collapse duplicates
+			}
+			out = append(out, "MATHION_VERSION="+newTag)
+			seen = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !seen {
+		// Append. When the file ended with a newline, Split left a trailing "" —
+		// insert the new line before it so we keep exactly one trailing newline and
+		// never double a blank line.
+		if n := len(out); n > 0 && out[n-1] == "" {
+			out[n-1] = "MATHION_VERSION=" + newTag
+			out = append(out, "")
+		} else {
+			out = append(out, "MATHION_VERSION="+newTag)
+		}
+	}
+	// (4) Write atomically with the private mode the `.env` requires.
+	if err := AtomicWrite(cfgdir+"/.env", []byte(strings.Join(out, "\n")), 0o600); err != nil {
+		return fmt.Errorf("re-pin: write .env: %w", err)
+	}
+	// (5) Re-read and assert the re-pin took AND the whole file is still valid, so a
+	// re-pin can never leave a corrupt or mis-targeted `.env`.
+	m, err := ReadEnvFile(cfgdir)
+	if err != nil {
+		return fmt.Errorf("re-pin: re-read .env: %w", err)
+	}
+	if m["MATHION_VERSION"] != newTag {
+		return fmt.Errorf("re-pin: MATHION_VERSION did not take effect")
+	}
+	if err := ValidateEnvComplete(m); err != nil {
+		return fmt.Errorf("re-pin produced an invalid .env: %w", err)
+	}
+	return nil
+}
+
 // ReadEnvFile loads and parses the `.env` file in cfgdir.
 func ReadEnvFile(cfgdir string) (map[string]string, error) {
 	b, err := os.ReadFile(cfgdir + "/.env")
@@ -67,14 +148,22 @@ func ReadEnvFile(cfgdir string) (map[string]string, error) {
 	return ParseEnv(string(b)), nil
 }
 
+// pgIdentRe matches a plain SQL identifier — the only shape POSTGRES_USER and
+// POSTGRES_DB may take, so the values we pin MATHION_DATABASE_URL against cannot
+// smuggle URL metacharacters (`@`, `/`, `?`, `%`, …) into the comparison.
+var pgIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // ValidateEnvComplete checks a parsed `.env` carries the load-bearing keys and
-// that the DB credentials stay coupled — the password inside MATHION_DATABASE_URL
-// must equal POSTGRES_PASSWORD (see GenerateEnv). A resume trusts an existing
+// that the DB target stays pinned — MATHION_DATABASE_URL must address the bundled
+// `db` service on 5432 with the exact POSTGRES_USER/PASSWORD/DB (see GenerateEnv),
+// and MATHION_VERSION must be a legal image tag. A resume trusts an existing
 // `.env` instead of regenerating it, so a half-written or hand-corrupted file
-// must fail closed rather than boot a mis-credentialed stack.
+// must fail closed rather than boot a mis-credentialed or mis-targeted stack.
 func ValidateEnvComplete(m map[string]string) error {
 	for _, k := range []string{
 		"MATHION_SECRET_KEY",
+		"POSTGRES_USER",
+		"POSTGRES_DB",
 		"POSTGRES_PASSWORD",
 		"MATHION_DATABASE_URL",
 		"MATHION_BASE_URL",
@@ -84,21 +173,63 @@ func ValidateEnvComplete(m map[string]string) error {
 			return fmt.Errorf("missing required key %s", k)
 		}
 	}
-	// Parse the URL and compare its actual userinfo to POSTGRES_USER/PASSWORD — a
-	// substring match on the raw string is spoofable (a decoy `mathion:<pw>@` in a
-	// query string would pass while the real credentials are wrong).
+	// POSTGRES_USER/POSTGRES_DB must be plain identifiers — they are the trusted
+	// values the DB URL below is pinned against.
+	for _, k := range []string{"POSTGRES_USER", "POSTGRES_DB"} {
+		if !pgIdentRe.MatchString(m[k]) {
+			return fmt.Errorf("%s is not a valid identifier", k)
+		}
+	}
+	// MATHION_VERSION is interpolated into `image: ...:<tag>`; reject anything an
+	// OCI tag may not contain (quotes, shell-expansion, whitespace) before it can
+	// reach the compose file.
+	if err := ValidateOCITag(m["MATHION_VERSION"]); err != nil {
+		return fmt.Errorf("MATHION_VERSION is not a valid image tag")
+	}
+	// The DB URL is a compose-internal target, not an arbitrary DSN: reject
+	// percent-encoding outright. GenerateEnv never emits it (the password is hex),
+	// and url.Parse would otherwise decode `%61`→`a` and let a disguised host, db,
+	// or userinfo slip past the exact-match component checks below.
+	if strings.Contains(m["MATHION_DATABASE_URL"], "%") {
+		return fmt.Errorf("MATHION_DATABASE_URL must not be percent-encoded")
+	}
 	u, err := url.Parse(m["MATHION_DATABASE_URL"])
 	if err != nil {
 		// Static message on purpose: *url.Error.Error() echoes the raw URL, which
 		// carries the DB password — never wrap it into an operator-visible error.
 		return fmt.Errorf("MATHION_DATABASE_URL is not a valid URL")
 	}
+	// Pin scheme/host/port to the bundled db service — a divergent host or port
+	// a resumed deploy would silently trust must fail closed.
+	if u.Scheme != "postgresql+psycopg" || u.Hostname() != "db" || u.Port() != "5432" {
+		return fmt.Errorf("MATHION_DATABASE_URL does not target the bundled db service")
+	}
+	// Compare actual userinfo to POSTGRES_USER/PASSWORD — a substring match on the
+	// raw string is spoofable (a decoy `mathion:<pw>@` in a query would pass while
+	// the real credentials are wrong). Checked before the query guard so a mismatch
+	// still surfaces as a coupling error.
 	if u.User == nil {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
 	}
 	pw, hasPw := u.User.Password()
-	if u.User.Username() != "mathion" || !hasPw || pw != m["POSTGRES_PASSWORD"] {
+	if u.User.Username() != m["POSTGRES_USER"] || !hasPw || pw != m["POSTGRES_PASSWORD"] {
 		return fmt.Errorf("MATHION_DATABASE_URL is not coupled to POSTGRES_PASSWORD")
+	}
+	// Go's url.Parse splits userinfo at the LAST '@', but SQLAlchemy/libpq split at
+	// the FIRST — a password containing '@host' makes Go see host "db" while the
+	// backend connects elsewhere. The canonical URL has exactly one '@' (hex
+	// password). Checked after the coupling check so a wrong password still surfaces
+	// as the "coupled" error (the pre-existing spoof case has a decoy '@' in a query).
+	if strings.Count(m["MATHION_DATABASE_URL"], "@") != 1 {
+		return fmt.Errorf("MATHION_DATABASE_URL must contain exactly one '@'")
+	}
+	// Path must be exactly the target database, with no query or fragment that
+	// could redirect the connection (e.g. `?host=` / `?dbname=`).
+	if u.EscapedPath() != "/"+m["POSTGRES_DB"] {
+		return fmt.Errorf("MATHION_DATABASE_URL does not target the POSTGRES_DB database")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("MATHION_DATABASE_URL must not carry query or fragment parameters")
 	}
 	return nil
 }

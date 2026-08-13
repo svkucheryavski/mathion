@@ -153,6 +153,11 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/version")
+def version_endpoint() -> dict:
+    return {"version": settings.version}
+
+
 # The two SPA additions MUST come AFTER the include_router() calls above AND
 # AFTER /health — a Starlette Mount registered first would shadow /health
 # because mounts match every prefix below them.

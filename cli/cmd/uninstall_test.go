@@ -11,6 +11,7 @@ import (
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
 // seedInstall writes the install-state marker (+ a .env) that the --purge guard
@@ -26,21 +27,21 @@ func seedInstall(t *testing.T, dir string) {
 }
 
 func TestUninstallPlainIsComposeDown(t *testing.T) {
+	rootedVarlib(t)
 	f := &compose.FakeRunner{}
 	cmd := newUninstallCmd(newTestApp(f))
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
+	// The preamble sweep is call 0; find the `down` and assert its exact argv.
 	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "down"}
-	if len(f.Calls) != 1 {
-		t.Fatalf("plain uninstall must issue exactly one command, got %d: %v", len(f.Calls), f.Calls)
-	}
-	if !reflect.DeepEqual(f.Calls[0], want) {
-		t.Fatalf("argv = %v, want %v", f.Calls[0], want)
+	if i := idxOfCall(f.Calls, func(a []string) bool { return reflect.DeepEqual(a, want) }); i < 0 {
+		t.Fatalf("plain uninstall must issue `... down`, got %v", f.Calls)
 	}
 }
 
 func TestPurgeRequiresTypedProjectName(t *testing.T) {
+	rootedVarlib(t)
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("x"), 0o600)
 	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) { return "", nil }}
@@ -53,13 +54,104 @@ func TestPurgeRequiresTypedProjectName(t *testing.T) {
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e != nil {
 		t.Fatal("cfgdir removed despite failed confirmation")
 	}
-	// A mismatched confirmation must abort before any teardown work runs.
-	if len(f.Calls) != 0 {
-		t.Fatalf("a mismatched confirmation must run no docker commands, got %v", f.Calls)
+	// A mismatched confirmation aborts AFTER the preamble sweep but BEFORE any
+	// teardown: no `down`/teardown ran, and the only runner call is the sweep's ps.
+	if hasCall(f.Calls, joinHas("down")) {
+		t.Fatalf("a mismatch must run no teardown; calls=%v", f.Calls)
+	}
+	if len(f.Calls) != 1 {
+		t.Fatalf("a mismatch must run no teardown, only the preamble sweep; got %v", f.Calls)
 	}
 }
 
+// TestUninstallPurgeClearsBreadcrumbAfterTeardown pins the breadcrumb lifecycle of
+// uninstall: a leftover recovery breadcrumb is cleared ONLY on the --purge path AND
+// ONLY after the typed confirmation AND a successful teardown. A mistyped
+// confirmation, a teardown failure, or a non-purge uninstall all RETAIN it.
+func TestUninstallPurgeClearsBreadcrumbAfterTeardown(t *testing.T) {
+	t.Run("purge-clears", func(t *testing.T) {
+		rootedVarlib(t)
+		seedBreadcrumb(t)
+		dir := t.TempDir()
+		seedInstall(t, dir)
+		f := &compose.FakeRunner{} // default: Purge succeeds cleanly
+		var errb bytes.Buffer
+		app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: &errb, In: strings.NewReader("mathion_prod\n")}
+		cmd := newUninstallCmd(app)
+		cmd.SetArgs([]string{"--purge"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("purge must succeed: %v", err)
+		}
+		if _, present, _ := varlib.ReadJournal(); present {
+			t.Fatal("a successful purge must clear the breadcrumb after teardown")
+		}
+		if !hasCall(f.Calls, joinHas("network ls")) {
+			t.Fatalf("teardown (Purge) must run before the breadcrumb is cleared; calls=%v", f.Calls)
+		}
+		// The lock must be released after the command returns.
+		rel, lerr := varlib.Lock()
+		if lerr != nil {
+			t.Fatalf("lock not released: %v", lerr)
+		}
+		_ = rel()
+	})
+
+	t.Run("mistyped-retains", func(t *testing.T) {
+		rootedVarlib(t)
+		seedBreadcrumb(t)
+		dir := t.TempDir()
+		f := &compose.FakeRunner{}
+		app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("wrong\n")}
+		cmd := newUninstallCmd(app)
+		cmd.SetArgs([]string{"--purge"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("a mistyped confirmation must abort")
+		}
+		if _, present, _ := varlib.ReadJournal(); !present {
+			t.Fatal("a mistyped confirmation must RETAIN the breadcrumb (it aborts before Purge)")
+		}
+	})
+
+	t.Run("teardown-fail-retains", func(t *testing.T) {
+		rootedVarlib(t)
+		seedBreadcrumb(t)
+		dir := t.TempDir()
+		seedInstall(t, dir)
+		// ps (the preamble sweep) succeeds; every other Output errors => Purge fails.
+		f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+			if len(args) > 0 && args[0] == "ps" {
+				return "", nil
+			}
+			return "", &noSuch{}
+		}}
+		app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+		cmd := newUninstallCmd(app)
+		cmd.SetArgs([]string{"--purge"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("a teardown failure must surface")
+		}
+		// Ordering proof: RemoveJournal runs AFTER Purge, so a Purge failure retains it.
+		if _, present, _ := varlib.ReadJournal(); !present {
+			t.Fatal("a teardown failure must RETAIN the breadcrumb")
+		}
+	})
+
+	t.Run("plain-retains", func(t *testing.T) {
+		rootedVarlib(t)
+		seedBreadcrumb(t)
+		f := &compose.FakeRunner{}
+		cmd := newUninstallCmd(newTestApp(f))
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("plain uninstall must succeed: %v", err)
+		}
+		if _, present, _ := varlib.ReadJournal(); !present {
+			t.Fatal("a non-purge uninstall must RETAIN the breadcrumb (it never clears it)")
+		}
+	})
+}
+
 func TestPurgeSuccessRemovesCfgDir(t *testing.T) {
+	rootedVarlib(t)
 	dir := t.TempDir()
 	seedInstall(t, dir) // install-state marker + .env
 	// Default fake: ps -> "", every `ls` -> "" (absent) => Purge succeeds cleanly.
@@ -80,6 +172,7 @@ func TestPurgeSuccessRemovesCfgDir(t *testing.T) {
 }
 
 func TestPurgeRetainsCfgDirOnTeardownFailure(t *testing.T) {
+	rootedVarlib(t)
 	dir := t.TempDir()
 	seedInstall(t, dir) // marker present, so the guard passes and we reach teardown
 	// ps succeeds, but the existence check errors (daemon-down-like) => fail closed.
@@ -101,6 +194,7 @@ func TestPurgeRetainsCfgDirOnTeardownFailure(t *testing.T) {
 }
 
 func TestPurgeTearsDownButKeepsUnrecognizedCfgDir(t *testing.T) {
+	rootedVarlib(t)
 	dir := t.TempDir()
 	// .env present but NO install-state marker → not a dir mathion owns. The
 	// identity teardown must STILL run (it needs no config), but os.RemoveAll must
@@ -114,8 +208,8 @@ func TestPurgeTearsDownButKeepsUnrecognizedCfgDir(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("purge must complete (teardown runs) even when cfgdir is unrecognized, got %v", err)
 	}
-	if len(f.Calls) == 0 {
-		t.Fatal("identity teardown must run regardless of cfgdir recognition")
+	if !hasCall(f.Calls, joinHas("network ls")) {
+		t.Fatalf("identity teardown (Purge) must run regardless of cfgdir recognition; calls=%v", f.Calls)
 	}
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e != nil {
 		t.Fatal("an unrecognized cfgdir must be left in place, not removed")
@@ -126,6 +220,7 @@ func TestPurgeTearsDownButKeepsUnrecognizedCfgDir(t *testing.T) {
 }
 
 func TestPurgeTearsDownButKeepsSymlinkCfgDir(t *testing.T) {
+	rootedVarlib(t)
 	base := t.TempDir()
 	target := filepath.Join(base, "target")
 	if err := os.Mkdir(target, 0o700); err != nil {
@@ -146,8 +241,8 @@ func TestPurgeTearsDownButKeepsSymlinkCfgDir(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("purge must complete (teardown runs) with a symlink cfgdir, got %v", err)
 	}
-	if len(f.Calls) == 0 {
-		t.Fatal("identity teardown must run even when cfgdir is a symlink")
+	if !hasCall(f.Calls, joinHas("network ls")) {
+		t.Fatalf("identity teardown (Purge) must run even when cfgdir is a symlink; calls=%v", f.Calls)
 	}
 	if _, e := os.Stat(filepath.Join(target, "install-state")); e != nil {
 		t.Fatal("symlink target removed despite the removal guard")
@@ -162,6 +257,7 @@ func TestPurgeRemovesOnlyMathionFilesFromPopulatedCfgDir(t *testing.T) {
 	// points, so recognizedCfgDir accepts even a populated/sensitive dir ($HOME,
 	// /etc, ...). --purge must then remove ONLY mathion's own files and leave the
 	// rest — os.RemoveAll would have recursively wiped the whole directory.
+	rootedVarlib(t)
 	dir := t.TempDir()
 	seedInstall(t, dir) // install-state + .env (mathion's)
 	userFile := filepath.Join(dir, "important.txt")
@@ -259,6 +355,7 @@ func TestPurgeOrphanStateStillTearsDown(t *testing.T) {
 	// gone) but docker resources may survive. --purge is the config-independent
 	// recovery hatch — teardown must run and the command must succeed (so a partial
 	// purge can be re-run to finish), not abort on the missing dir.
+	rootedVarlib(t)
 	dir := filepath.Join(t.TempDir(), "gone") // never created
 	f := &compose.FakeRunner{}
 	var errBuf bytes.Buffer
@@ -268,8 +365,8 @@ func TestPurgeOrphanStateStillTearsDown(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("purge in the orphan state (no config) must still tear down, got %v", err)
 	}
-	if len(f.Calls) == 0 {
-		t.Fatal("identity teardown must run in the orphan state")
+	if !hasCall(f.Calls, joinHas("network ls")) {
+		t.Fatalf("identity teardown (Purge) must run in the orphan state; calls=%v", f.Calls)
 	}
 	if !strings.Contains(errBuf.String(), "config dir left in place") {
 		t.Fatalf("expected a note about the missing config dir, got %q", errBuf.String())

@@ -27,6 +27,23 @@ func TestAtomicWriteModeAndContent(t *testing.T) {
 	}
 }
 
+func TestRemoveSyncIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "j.json")
+	if err := AtomicWrite(p, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveSync(p); err != nil {
+		t.Fatalf("first RemoveSync: %v", err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatalf("file still present: %v", err)
+	}
+	if err := RemoveSync(p); err != nil {
+		t.Fatalf("RemoveSync on absent file must be a no-op, got %v", err)
+	}
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteState(dir, State{Schema: 1, AdminEmail: "you@example.edu"}); err != nil {

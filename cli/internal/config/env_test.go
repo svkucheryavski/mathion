@@ -104,6 +104,100 @@ func TestValidateEnvComplete(t *testing.T) {
 	}
 }
 
+func TestValidateEnvCompleteStrengthened(t *testing.T) {
+	good := ParseEnv(RenderEnv(GenerateEnv("https://x", "v0.1.1", "sk", "pw")))
+	if err := ValidateEnvComplete(good); err != nil {
+		t.Fatalf("GenerateEnv output must pass: %v", err)
+	}
+	base := func() map[string]string {
+		m := map[string]string{}
+		for k, v := range good {
+			m[k] = v
+		}
+		return m
+	}
+	reject := map[string]string{
+		"divergent host": "postgresql+psycopg://mathion:pw@remote:5432/mathion",
+		"wrong port":     "postgresql+psycopg://mathion:pw@db:5433/mathion",
+		"query dbname":   "postgresql+psycopg://mathion:pw@db:5432/mathion?dbname=other",
+		"query host":     "postgresql+psycopg://mathion:pw@db:5432/mathion?host=evil",
+		"raw pct db":     "postgresql+psycopg://mathion:pw@db:5432/m%61thion",
+		"raw pct db2":    "postgresql+psycopg://mathion:pw@db:5432/%6Dathion",
+		"trailing pct":   "postgresql+psycopg://mathion:pw@db:5432/mathion%2F",
+		"pct userinfo":   "postgresql+psycopg://m%61thion:pw@db:5432/mathion",
+		"wrong scheme":   "postgresql://mathion:pw@db:5432/mathion",
+	}
+	for name, url := range reject {
+		m := base()
+		m["MATHION_DATABASE_URL"] = url
+		if err := ValidateEnvComplete(m); err == nil {
+			t.Errorf("%s: expected rejection, got nil", name)
+		}
+	}
+	// round-10 #2: MATHION_VERSION must pass ValidateOCITag.
+	for _, bad := range []string{`"v0.1.1"`, "${X:-v0.1.1}", "v 0.1.1"} {
+		m := base()
+		m["MATHION_VERSION"] = bad
+		if err := ValidateEnvComplete(m); err == nil {
+			t.Errorf("MATHION_VERSION=%q must be rejected", bad)
+		}
+	}
+	// missing POSTGRES_USER / POSTGRES_DB, and non-identifier values.
+	for _, k := range []string{"POSTGRES_USER", "POSTGRES_DB"} {
+		m := base()
+		delete(m, k)
+		if err := ValidateEnvComplete(m); err == nil {
+			t.Errorf("missing %s must be rejected", k)
+		}
+		m2 := base()
+		m2[k] = "bad-name!"
+		if err := ValidateEnvComplete(m2); err == nil {
+			t.Errorf("non-identifier %s must be rejected", k)
+		}
+	}
+	// Parser differential: Go splits userinfo at the last '@', SQLAlchemy/libpq at
+	// the first. Coupling passes (password matches POSTGRES_PASSWORD), so the
+	// multi-'@' guard must reject.
+	adv := base()
+	adv["POSTGRES_PASSWORD"] = "pw@evil.example,db"
+	adv["MATHION_DATABASE_URL"] = "postgresql+psycopg://mathion:pw@evil.example,db@db:5432/mathion"
+	if err := ValidateEnvComplete(adv); err == nil {
+		t.Errorf("multi-@ userinfo differential must be rejected")
+	}
+}
+
+func TestRepinVersion(t *testing.T) {
+	dir := t.TempDir()
+	raw := "# comment\nMATHION_SECRET_KEY=sk\nPOSTGRES_USER=mathion\nPOSTGRES_DB=mathion\n" +
+		"POSTGRES_PASSWORD=pw\nMATHION_DATABASE_URL=postgresql+psycopg://mathion:pw@db:5432/mathion\n" +
+		"MATHION_BASE_URL=https://x\nMATHION_VERSION_EXTRA=keepme\nMATHION_VERSION=v0.1.0\n" +
+		"MATHION_VERSION=v0.1.0\nSMTP_HOST=mail\n"
+	os.WriteFile(dir+"/.env", []byte(raw), 0o600)
+	if err := RepinVersion(dir, "v0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(dir + "/.env")
+	s := string(out)
+	if strings.Count(s, "\nMATHION_VERSION=") != 1 { // duplicates collapsed to one
+		t.Fatalf("expected one MATHION_VERSION line:\n%s", s)
+	}
+	if !strings.Contains(s, "MATHION_VERSION=v0.2.0") {
+		t.Fatalf("new tag missing:\n%s", s)
+	}
+	for _, keep := range []string{"# comment", "MATHION_VERSION_EXTRA=keepme", "SMTP_HOST=mail"} {
+		if !strings.Contains(s, keep) {
+			t.Fatalf("clobbered %q:\n%s", keep, s)
+		}
+	}
+	fi, _ := os.Stat(dir + "/.env")
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v", fi.Mode())
+	}
+	if err := RepinVersion(dir, `"bad"`); err == nil {
+		t.Fatalf("ValidateOCITag must reject a hostile tag before writing")
+	}
+}
+
 func TestEnvKeyParityWithExample(t *testing.T) {
 	gen := ParseEnv(RenderEnv(gen()))
 	for k := range exampleKeys(t) {
