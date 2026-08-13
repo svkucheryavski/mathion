@@ -5,13 +5,16 @@ name: amd64 smoke
 # GitHub's ubuntu-latest runners are native x86-64 with Docker + compose v2, curl,
 # and jq preinstalled, so this exercises the REAL amd64 CLI binary (installed via
 # the shipped, checksum-verified release archive) and the amd64 app image
-# end-to-end — install -> /health -> /version -> superuser row -> uninstall --purge —
-# without any cloud box.
+# end-to-end — install -> assert running image is amd64 -> /health -> /version ->
+# superuser row -> uninstall --purge — without any cloud box.
 #
 # It is the amd64 real-install lane: release-cli.yml's CI only STATIC-validates the
 # root-required manual integration harness (bash -n + shellcheck), so no gating job
 # performs a real Docker install. Trigger this from the Actions tab when validating
 # a release on amd64.
+#
+# Note: the runner default shell is `bash --noprofile --norc -eo pipefail`, so -e
+# and pipefail are already on; the explicit `set -euo pipefail` adds -u and documents intent.
 on:
   workflow_dispatch:
     inputs:
@@ -43,33 +46,53 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = "x86_64" || { echo "FAIL: runner is not x86_64 ($(uname -m))"; exit 1; }
           sudo sh deploy/install.sh "${CLI_VERSION}"
-          mathion version | head -2
-          # first line is the compile-time CLI build version; a real release archive
-          # bakes a cli-v* tag (a 'dev' build here would mean the wrong binary ran).
-          mathion version | head -1 | grep -q 'cli-v' || { echo "FAIL: CLI is not a release build"; exit 1; }
+          # Drain the full output once (no pipe into head: `mathion version | head -1`
+          # can SIGPIPE the CLI under pipefail and spuriously fail), then slice line 1.
+          vout="$(mathion version)"
+          printf '%s\n' "${vout}"
+          first="${vout%%$'\n'*}"
+          if [ -n "${CLI_VERSION}" ]; then
+            # A specific tag was requested: the baked build version must match it exactly
+            # (guards against a release archive carrying a mis-tagged binary).
+            test "${first}" = "mathion ${CLI_VERSION}" \
+              || { echo "FAIL: CLI version is '${first}', want 'mathion ${CLI_VERSION}'"; exit 1; }
+          else
+            # latest cli-v* resolved by the installer: require a release build, not 'dev'.
+            case "${first}" in
+              "mathion cli-v"*) : ;;
+              *) echo "FAIL: CLI is not a release build (got: '${first}')"; exit 1 ;;
+            esac
+          fi
 
-      - name: Deploy app (v0.2.0) + assert amd64 image, health, /version, superuser
+      - name: Deploy app + assert amd64 running image, health, /version, superuser
         env:
           APP_VERSION: ${{ inputs.app_version }}
         run: |
           set -euo pipefail
           sudo mathion install --version "${APP_VERSION}" --domain localhost:8000 --admin-email ci@example.edu --yes
 
-          # Prove we actually exercised the amd64 image (not an emulated/other arch).
-          arch="$(sudo docker image inspect "${IMAGE_REPO}:${APP_VERSION}" --format '{{.Architecture}}')"
-          echo "app image arch: ${arch}"
-          test "${arch}" = "amd64" || { echo "FAIL: app image arch is ${arch}, want amd64"; exit 1; }
+          # Assert the RUNNING app container (not just a locally-tagged image) is the
+          # requested amd64 image. Inspect the container's image ID, then its arch.
+          run_tag="$(sudo docker inspect --format '{{.Config.Image}}' mathion_prod-app-1)"
+          test "${run_tag}" = "${IMAGE_REPO}:${APP_VERSION}" \
+            || { echo "FAIL: running app image is '${run_tag}', want '${IMAGE_REPO}:${APP_VERSION}'"; exit 1; }
+          img_id="$(sudo docker inspect --format '{{.Image}}' mathion_prod-app-1)"
+          arch="$(sudo docker image inspect "${img_id}" --format '{{.Architecture}}')"
+          echo "running app image: ${run_tag} (${img_id}) arch=${arch}"
+          test "${arch}" = "amd64" || { echo "FAIL: running app image arch is '${arch}', want amd64"; exit 1; }
 
+          # /health: parse JSON (a substring grep would false-pass on unrelated 200 bodies).
           # install returns only after compose reports healthy; retry briefly for CI robustness.
           ok=""
           for _ in 1 2 3 4 5; do
-            if curl -fsS http://127.0.0.1:8000/health | grep -q '"status":"ok"'; then ok=1; break; fi
+            if curl -fsS --connect-timeout 5 --max-time 10 http://127.0.0.1:8000/health \
+                 | jq -e 'type == "object" and .status == "ok"' >/dev/null 2>&1; then ok=1; break; fi
             sleep 2
           done
           test -n "${ok}" || { echo "FAIL: /health not ok"; exit 1; }
           echo "health: ok"
 
-          ver="$(curl -fsS http://127.0.0.1:8000/version)"
+          ver="$(curl -fsS --connect-timeout 5 --max-time 10 http://127.0.0.1:8000/version)"
           echo "/version -> ${ver}"
           printf '%s' "${ver}" | jq -e --arg v "${APP_VERSION}" '.version == $v' >/dev/null \
             || { echo "FAIL: /version body is not {\"version\":\"${APP_VERSION}\"}"; exit 1; }
@@ -81,14 +104,20 @@ jobs:
           test "${n}" = "1" || { echo "FAIL: superuser count = ${n} (want 1)"; exit 1; }
           echo "superuser row: 1"
 
-      - name: Uninstall --purge + assert teardown
+      - name: Uninstall --purge + assert full teardown
         run: |
           set -euo pipefail
           printf 'mathion_prod\n' | sudo mathion uninstall --purge
-          if sudo docker volume inspect mathion_prod_mathion_pgdata >/dev/null 2>&1; then
-            echo "FAIL: pgdata volume survived purge"; exit 1
-          fi
-          echo "purge: volumes gone"
+
+          # Assert absence via queries that MUST themselves succeed (a failing
+          # `volume inspect` would otherwise read as "absent" and false-pass).
+          vols="$(sudo docker volume ls --filter name=mathion_prod_mathion_ --format '{{.Name}}')"
+          test -z "${vols}" || { echo "FAIL: volumes survived purge: ${vols}"; exit 1; }
+          cons="$(sudo docker ps -a --filter name=mathion_prod- --format '{{.Names}}')"
+          test -z "${cons}" || { echo "FAIL: containers survived purge: ${cons}"; exit 1; }
+          nets="$(sudo docker network ls --filter name=mathion_prod_ --format '{{.Name}}')"
+          test -z "${nets}" || { echo "FAIL: network survived purge: ${nets}"; exit 1; }
+          echo "purge: volumes + containers + network gone"
 
       - name: Cleanup (always)
         if: always()
