@@ -67,13 +67,37 @@ func newRestoreCmd(app *App) *cobra.Command {
 			} else {
 				path = args[0]
 			}
-			caps := archive.TierFor(path, varlib.BackupsDir())
+			caps, err := resolveRestoreCaps(path, varlib.BackupsDir())
+			if err != nil {
+				return err
+			}
 			return restoreEngine(c.Context(), app, path, restoreOpts{Yes: yes, WriteBreadcrumb: true, Caps: caps})
 		},
 	}
 	c.Flags().BoolVar(&latest, "latest", false, "restore the most recent managed backup in the backups dir")
 	c.Flags().BoolVar(&yes, "yes", false, "skip the destructive-restore confirmation prompt")
 	return c
+}
+
+// resolveRestoreCaps picks the extraction tier for archivePath, honoring the
+// operator's overrides for a MANAGED archive exactly as update does (update.go's
+// step-4 ManagedCaps(os.Getenv) call). TierFor deliberately returns only the managed
+// DEFAULTS for a backups-dir archive — its doc contract is that the restore flow
+// itself calls ManagedCaps when it wants the MATHION_RESTORE_MAX_* overrides — so this
+// is where restore honors them:
+//   - MANAGED (path resolves under backupsDir): ManagedCaps(os.Getenv), HARD-FAILING on
+//     a malformed override rather than silently widening/narrowing the DoS envelope.
+//   - UNTRUSTED (anywhere else): the FIXED UntrustedCaps, which is NOT env-overridable —
+//     a hostile /tmp archive can never widen its own caps.
+//
+// The UntrustedCaps() sentinel comparison is safe: Caps is a comparable 2×int64 struct
+// and the managed defaults (50/120 GiB) never equal the untrusted tier (2/5 GiB).
+func resolveRestoreCaps(archivePath, backupsDir string) (archive.Caps, error) {
+	caps := archive.TierFor(archivePath, backupsDir)
+	if caps == archive.UntrustedCaps() { // untrusted: fixed tier, overrides ignored
+		return caps, nil
+	}
+	return archive.ManagedCaps(os.Getenv)
 }
 
 // gateFn is the deployment gate restoreEngine runs at step 10; a package seam so

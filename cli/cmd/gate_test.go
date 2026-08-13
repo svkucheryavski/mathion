@@ -194,6 +194,23 @@ func TestGateFailIDMismatch(t *testing.T) {
 	}
 }
 
+// TestGateFailStrictSPA: strictVersion has no legacy tolerance, so a 200 text/html
+// SPA shell — the exact shape the NON-strict gate accepts (TestGatePassNonStrictSPA) —
+// must be REJECTED via probeVersionOnce's "unexpected 200 body" path. This pins the
+// forward/commit gate (update step 10) as never granting the SPA shell a pass; that
+// tolerance is the rollback gate's alone.
+func TestGateFailStrictSPA(t *testing.T) {
+	shrinkGate(t, 200*time.Millisecond, 10*time.Millisecond)
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><html><body>app</body></html>"))
+	})
+	f := gateRunner(gateAppCID, gateTargetID)
+	if err := gateImageAndVersion(context.Background(), gateApp(f), gateTargetID, gateTargetVer, true); err == nil {
+		t.Fatal("strict mode must reject a 200 text/html SPA shell (no legacy tolerance)")
+	}
+}
+
 // TestGateFailStrict404: strictVersion has no legacy tolerance, so a 404 fails.
 func TestGateFailStrict404(t *testing.T) {
 	shrinkGate(t, 200*time.Millisecond, 10*time.Millisecond)

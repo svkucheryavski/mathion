@@ -1028,6 +1028,98 @@ func TestRestoreCmdUntrustedPathWarns(t *testing.T) {
 	}
 }
 
+// TestResolveRestoreCapsHonorsManagedOverrides pins the restore command's cap
+// resolution (the update-vs-restore parity fix): a MANAGED archive (under the backups
+// dir) honors the operator's MATHION_RESTORE_MAX_* overrides — lowered, raised, and
+// HARD-FAILING on a malformed value — exactly as update.go's ManagedCaps(os.Getenv)
+// call does; an UNTRUSTED archive keeps the FIXED UntrustedCaps with the overrides
+// IGNORED (a hostile archive can never widen its own DoS envelope).
+func TestResolveRestoreCapsHonorsManagedOverrides(t *testing.T) {
+	setupRestoreEnv(t) // sets MATHION_VARLIB_DIR + ensures the backups dir
+	backups := varlib.BackupsDir()
+	managed := filepath.Join(backups, "mathion-backup-x.tar.gz")
+	untrusted := filepath.Join(t.TempDir(), "hostile.tar.gz")
+
+	t.Run("managed lowered", func(t *testing.T) {
+		t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "1G")
+		caps, err := resolveRestoreCaps(managed, backups)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if caps.MaxMember != 1<<30 {
+			t.Fatalf("MaxMember = %d, want the lowered override 1 GiB (%d)", caps.MaxMember, int64(1<<30))
+		}
+		if caps.MaxMember >= archive.ManagedDefaultMember {
+			t.Fatalf("override must LOWER below the default %d; got %d", archive.ManagedDefaultMember, caps.MaxMember)
+		}
+	})
+
+	t.Run("managed raised", func(t *testing.T) {
+		t.Setenv("MATHION_RESTORE_MAX_TOTAL_BYTES", "500G")
+		caps, err := resolveRestoreCaps(managed, backups)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if caps.MaxTotal != 500<<30 {
+			t.Fatalf("MaxTotal = %d, want the raised override 500 GiB (%d)", caps.MaxTotal, int64(500<<30))
+		}
+		if caps.MaxTotal <= archive.ManagedDefaultTotal {
+			t.Fatalf("override must RAISE above the default %d; got %d", archive.ManagedDefaultTotal, caps.MaxTotal)
+		}
+	})
+
+	t.Run("managed invalid hard-fails", func(t *testing.T) {
+		t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "banana")
+		if _, err := resolveRestoreCaps(managed, backups); err == nil ||
+			!strings.Contains(err.Error(), "MATHION_RESTORE_MAX_MEMBER_BYTES") {
+			t.Fatalf("a malformed managed override must hard-fail with the ManagedCaps error; got %v", err)
+		}
+	})
+
+	t.Run("untrusted ignores overrides", func(t *testing.T) {
+		// A malformed override that WOULD hard-fail a managed archive must be IGNORED for
+		// an untrusted path (fixed low tier, never env-overridable) — no error, caps stay
+		// UntrustedCaps despite a raised total also being set.
+		t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "banana")
+		t.Setenv("MATHION_RESTORE_MAX_TOTAL_BYTES", "500G")
+		caps, err := resolveRestoreCaps(untrusted, backups)
+		if err != nil {
+			t.Fatalf("an untrusted path must ignore overrides, not hard-fail; got %v", err)
+		}
+		if caps != archive.UntrustedCaps() {
+			t.Fatalf("untrusted caps = %+v, want the fixed UntrustedCaps %+v", caps, archive.UntrustedCaps())
+		}
+	})
+}
+
+// TestRestoreCmdInvalidManagedCapHardFails: end-to-end wiring — a MANAGED archive with
+// a malformed MATHION_RESTORE_MAX_* override makes the command HARD-FAIL at cap
+// resolution (proving restore, like update, honors managed cap overrides) with NO
+// restore attempted (the destructive DB-load one-off never runs).
+func TestRestoreCmdInvalidManagedCapHardFails(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	asRoot(t)
+	t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "banana")
+	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
+	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	err := c.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "MATHION_RESTORE_MAX_MEMBER_BYTES") {
+		t.Fatalf("a malformed managed cap override must hard-fail the command; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no restore must be attempted on a bad managed cap override; calls=%v", f.Calls)
+	}
+}
+
 // TestRestoreCmdExemptProceedsReplacesBreadcrumb: restore is EXEMPT from the
 // entry-check refusal — it PROCEEDS past a leftover kind:"update" breadcrumb (unlike
 // backup, which refuses) and REPLACES it with its own kind:"restore" one at step 6b.

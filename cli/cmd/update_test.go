@@ -646,3 +646,38 @@ func TestUpdateSignalRefusesOnInterrupt(t *testing.T) {
 		t.Fatalf("the migrate one-off must be reaped on interrupt; calls=%v", f.Calls)
 	}
 }
+
+// TestUpdateFailureShellQuotesRecoveryHint: the operator-facing recovery hint in both
+// the interrupted (ctx cancelled) and --no-rollback branches must SHELL-QUOTE the
+// backup path via varlib.RecoveryCommand, so a MATHION_VARLIB_DIR override whose path
+// contains a space stays ONE argument instead of splitting the suggested `mathion
+// restore` command right when the deployment is partway through a migration.
+func TestUpdateFailureShellQuotesRecoveryHint(t *testing.T) {
+	backup := "/var/lib/mathion state/backups/mathion-backup-2026.tar.gz"
+	want := varlib.RecoveryCommand(backup) // mathion restore -- '/var/lib/mathion state/…'
+	// A quoted form is what we assert; a raw interpolation would emit the path unquoted.
+	if !strings.Contains(want, "'") {
+		t.Fatalf("precondition: RecoveryCommand should shell-quote a spaced path; got %q", want)
+	}
+	m := updateFailMeta{oldTag: "v0.1.1", target: "v2.0.0", backupPath: backup, migrateWorker: "mathion_migrate_test"}
+
+	t.Run("interrupted", func(t *testing.T) {
+		f := &compose.FakeRunner{}
+		app, _, _ := engineApp(t.TempDir(), f, "")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // ctx.Err() != nil → the interrupted (refuse) branch
+		err := updateFailure(ctx, app, updateOpts{}, m, errors.New("boom"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("interrupted hint must contain the shell-quoted %q; got %v", want, err)
+		}
+	})
+
+	t.Run("no-rollback", func(t *testing.T) {
+		f := &compose.FakeRunner{}
+		app, _, _ := engineApp(t.TempDir(), f, "")
+		err := updateFailure(context.Background(), app, updateOpts{NoRollback: true}, m, errors.New("boom"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("--no-rollback hint must contain the shell-quoted %q; got %v", want, err)
+		}
+	})
+}

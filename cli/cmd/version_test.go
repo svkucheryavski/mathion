@@ -37,6 +37,11 @@ func TestVersionPrintsBoth(t *testing.T) {
 	stubRunningProbe(t, "")
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("MATHION_VERSION=v9.9.9\n"), 0o600)
+	// SetBuildInfo mutates the package globals buildVersion/buildDefaultImage; capture
+	// and restore them so this test does not bleed "cli-v0.1.0"/"v0.1.1" into any other
+	// test (e.g. one asserting the default buildDefaultImage update target).
+	prevV, prevImg := buildVersion, buildDefaultImage
+	t.Cleanup(func() { SetBuildInfo(prevV, prevImg) })
 	SetBuildInfo("cli-v0.1.0", "v0.1.1")
 	var out bytes.Buffer
 	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &out}

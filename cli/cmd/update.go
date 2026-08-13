@@ -103,15 +103,15 @@ func updateFailure(ctx context.Context, a *App, opts updateOpts, m updateFailMet
 	forceRemoveWorker(context.WithoutCancel(ctx), a.Runner, m.migrateWorker)
 
 	if ctx.Err() != nil {
-		return fmt.Errorf("update %s → %s interrupted; the deployment may be partway through — recover with: mathion restore -- %s (cause: %w)", m.oldTag, m.target, m.backupPath, cause)
+		return fmt.Errorf("update %s → %s interrupted; the deployment may be partway through — recover with: %s (cause: %w)", m.oldTag, m.target, varlib.RecoveryCommand(m.backupPath), cause)
 	}
 	if opts.NoRollback {
-		return fmt.Errorf("update %s → %s failed and --no-rollback is set; the deployment is left as-is — recover with: mathion restore -- %s (cause: %w)", m.oldTag, m.target, m.backupPath, cause)
+		return fmt.Errorf("update %s → %s failed and --no-rollback is set; the deployment is left as-is — recover with: %s (cause: %w)", m.oldTag, m.target, varlib.RecoveryCommand(m.backupPath), cause)
 	}
 
 	fmt.Fprintf(a.Err, "update %s → %s failed (%v); rolling back to %s\n", m.oldTag, m.target, cause, m.backupPath)
 	if rbErr := restoreEngine(context.WithoutCancel(ctx), a, m.backupPath, restoreOpts{Yes: true, WriteBreadcrumb: false, Caps: m.caps}); rbErr != nil {
-		return rollbackFailedError{err: fmt.Errorf("update %s → %s failed (%v) AND the auto-rollback to %s ALSO failed (%v); the deployment is in an UNKNOWN state — the recovery breadcrumb at %s is retained, recover manually with: mathion restore -- %s", m.oldTag, m.target, cause, m.backupPath, rbErr, varlib.JournalPath(), m.backupPath)}
+		return rollbackFailedError{err: fmt.Errorf("update %s → %s failed (%v) AND the auto-rollback to %s ALSO failed (%v); the deployment is in an UNKNOWN state — the recovery breadcrumb at %s is retained, recover manually with: %s", m.oldTag, m.target, cause, m.backupPath, rbErr, varlib.JournalPath(), varlib.RecoveryCommand(m.backupPath))}
 	}
 	if err := varlib.RemoveJournal(); err != nil {
 		fmt.Fprintf(a.Err, "rolled back to %s; the deployment is healthy — remove %s manually (%v)\n", m.backupPath, varlib.JournalPath(), err)
