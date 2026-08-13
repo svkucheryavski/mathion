@@ -223,9 +223,6 @@ version_field() {
 	body=$(curl -sS --max-time 5 "$VERSION_URL" 2>/dev/null || true)
 	printf '%s' "$body" | json_version 2>/dev/null || true
 }
-http_code()  { curl -sS -o /dev/null -w '%{http_code}'   --max-time 5 "$1" 2>/dev/null || echo "000"; }
-http_ctype() { curl -sS -o /dev/null -w '%{content_type}' --max-time 5 "$1" 2>/dev/null || echo ""; }
-
 # app_healthy_once — single-shot /health check (no retry); 0 iff the app serves ok.
 app_healthy_once() { curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null | grep -q '"status":"ok"'; }
 
@@ -236,10 +233,10 @@ volume_exists() { docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "
 # failed) is distinct from `absent` so callers can FAIL CLOSED rather than treat a
 # transient query failure as "not there" (which would risk clobbering a pre-existing ref).
 image_presence() {
-	local out rc
-	out=$(docker image inspect "$1" 2>&1)
-	rc=$?
-	if [ "$rc" -eq 0 ]; then
+	local out
+	# Assignment as the `if` condition is errexit-immune on every Bash (a bare
+	# `out=$(...); rc=$?` aborts the subshell before `rc=$?` under Bash 4.4+ errexit).
+	if out=$(docker image inspect "$1" 2>&1); then
 		printf 'present'
 		return
 	fi
@@ -297,7 +294,12 @@ assert_version_or_spa() {
 	# Capture body + status + content-type from ONE request so all three describe the SAME
 	# response (three separate curls could race a changing app). The sentinel is appended
 	# after the body; /version bodies (JSON or SPA HTML) never contain it.
-	raw=$(curl -sS --max-time 5 -w '\n__META__%{http_code} %{content_type}' "$VERSION_URL" 2>/dev/null || true)
+	# FAIL CLOSED on a curl error (nonzero exit): a truncated transfer (exit 18) or timeout
+	# (exit 28) can still leave code=200/ctype=text/html in the -w tail, which would
+	# false-pass a broken response if the exit were swallowed.
+	if ! raw=$(curl -sS --max-time 5 -w '\n__META__%{http_code} %{content_type}' "$VERSION_URL" 2>/dev/null); then
+		fail "$ctx (/version request failed — curl nonzero)"
+	fi
 	body=${raw%$'\n'__META__*}
 	meta=${raw##*__META__}
 	code=${meta%% *}
@@ -312,6 +314,12 @@ assert_version_or_spa() {
 		# `jq -e 'true'` exits 0 iff the body is ANY valid JSON (independent of its value).
 		if printf '%s' "$body" | jq -e 'true' >/dev/null 2>&1; then
 			fail "$ctx (legacy /version parsed as valid JSON; expected a non-JSON text/html SPA body)"
+		fi
+		# POSITIVE SPA proof: an empty (or non-HTML) 200 text/html body is a broken
+		# deployment, not the SPA. v0.1.1's /version catch-all serves the built Svelte
+		# index.html, which always carries an `<html ...>` tag — a non-brittle marker.
+		if ! printf '%s' "$body" | grep -qi '<html'; then
+			fail "$ctx (legacy /version body is not an HTML SPA shell — empty or non-HTML 200)"
 		fi
 		assert_eq "200" "$code" "$ctx (legacy SPA /version status)"
 		assert_contains "$ctype" "text/html" "$ctx (legacy SPA /version content-type)"
@@ -703,11 +711,9 @@ leg4_legacy_rollback() {
 	wait_healthy || fail "leg4: app not healthy after rollback to $LEGACY_TAG"
 	# The ROLLBACK's NON-STRICT gate must ACCEPT v0.1.1's 200 text/html SPA /version
 	# (image-ID is the authoritative check; /version is legacy-tolerant on a rollback).
-	local code ctype
-	code=$(http_code "$VERSION_URL")
-	ctype=$(http_ctype "$VERSION_URL")
-	assert_eq "200" "$code" "leg4 rollback /version serves 200 (legacy SPA)"
-	assert_contains "$ctype" "text/html" "leg4 rollback /version is a text/html SPA"
+	# Reuse the strengthened legacy oracle: guarded curl + ver-empty + not-JSON + nonempty
+	# `<html` body + 200 + text/html — a blank/broken 200 rollback can no longer pass.
+	assert_version_or_spa "$LEGACY_TAG" "leg4 rollback /version"
 	assert_file_absent "$JOURNAL" "leg4 breadcrumb cleared after legacy rollback"
 	pass "LEG 4: legacy rollback to real $LEGACY_TAG succeeded via the non-strict gate"
 }
