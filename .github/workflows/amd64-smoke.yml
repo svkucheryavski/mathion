@@ -1,0 +1,98 @@
+name: amd64 smoke
+
+# Manual, on-demand amd64 install validation.
+#
+# GitHub's ubuntu-latest runners are native x86-64 with Docker + compose v2, curl,
+# and jq preinstalled, so this exercises the REAL amd64 CLI binary (installed via
+# the shipped, checksum-verified release archive) and the amd64 app image
+# end-to-end — install -> /health -> /version -> superuser row -> uninstall --purge —
+# without any cloud box.
+#
+# It is the amd64 real-install lane: release-cli.yml's CI only STATIC-validates the
+# root-required manual integration harness (bash -n + shellcheck), so no gating job
+# performs a real Docker install. Trigger this from the Actions tab when validating
+# a release on amd64.
+on:
+  workflow_dispatch:
+    inputs:
+      cli_version:
+        description: "CLI release tag to install (e.g. cli-v0.2.0); empty = latest cli-v*"
+        required: false
+        default: ""
+      app_version:
+        description: "App image tag to deploy and assert on /version"
+        required: false
+        default: "v0.2.0"
+
+permissions:
+  contents: read
+
+jobs:
+  install-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE_REPO: ghcr.io/svkucheryavski/mathion
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the mathion CLI (real amd64 archive, checksum-verified)
+        env:
+          CLI_VERSION: ${{ inputs.cli_version }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64" || { echo "FAIL: runner is not x86_64 ($(uname -m))"; exit 1; }
+          sudo sh deploy/install.sh "${CLI_VERSION}"
+          mathion version | head -2
+          # first line is the compile-time CLI build version; a real release archive
+          # bakes a cli-v* tag (a 'dev' build here would mean the wrong binary ran).
+          mathion version | head -1 | grep -q 'cli-v' || { echo "FAIL: CLI is not a release build"; exit 1; }
+
+      - name: Deploy app (v0.2.0) + assert amd64 image, health, /version, superuser
+        env:
+          APP_VERSION: ${{ inputs.app_version }}
+        run: |
+          set -euo pipefail
+          sudo mathion install --version "${APP_VERSION}" --domain localhost:8000 --admin-email ci@example.edu --yes
+
+          # Prove we actually exercised the amd64 image (not an emulated/other arch).
+          arch="$(sudo docker image inspect "${IMAGE_REPO}:${APP_VERSION}" --format '{{.Architecture}}')"
+          echo "app image arch: ${arch}"
+          test "${arch}" = "amd64" || { echo "FAIL: app image arch is ${arch}, want amd64"; exit 1; }
+
+          # install returns only after compose reports healthy; retry briefly for CI robustness.
+          ok=""
+          for _ in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:8000/health | grep -q '"status":"ok"'; then ok=1; break; fi
+            sleep 2
+          done
+          test -n "${ok}" || { echo "FAIL: /health not ok"; exit 1; }
+          echo "health: ok"
+
+          ver="$(curl -fsS http://127.0.0.1:8000/version)"
+          echo "/version -> ${ver}"
+          printf '%s' "${ver}" | jq -e --arg v "${APP_VERSION}" '.version == $v' >/dev/null \
+            || { echo "FAIL: /version body is not {\"version\":\"${APP_VERSION}\"}"; exit 1; }
+          echo "/version: ${APP_VERSION}"
+
+          n="$(sudo docker exec mathion_prod-db-1 \
+                psql -U mathion -d mathion -tAc "select count(*) from users where is_superuser" \
+                | tr -d '[:space:]')"
+          test "${n}" = "1" || { echo "FAIL: superuser count = ${n} (want 1)"; exit 1; }
+          echo "superuser row: 1"
+
+      - name: Uninstall --purge + assert teardown
+        run: |
+          set -euo pipefail
+          printf 'mathion_prod\n' | sudo mathion uninstall --purge
+          if sudo docker volume inspect mathion_prod_mathion_pgdata >/dev/null 2>&1; then
+            echo "FAIL: pgdata volume survived purge"; exit 1
+          fi
+          echo "purge: volumes gone"
+
+      - name: Cleanup (always)
+        if: always()
+        run: |
+          # Idempotent teardown so a mid-run failure never leaves the runner dirty.
+          # The identity purge is config-independent and re-runnable.
+          printf 'mathion_prod\n' | sudo mathion uninstall --purge || true
