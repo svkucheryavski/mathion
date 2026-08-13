@@ -51,7 +51,7 @@ jobs:
         working-directory: cli
         env:
           CLI_TAG: ${{ github.ref_name }}          # cli-v0.1.0 -> main.version
-          APP_IMAGE: v0.1.1                          # recommended app image (hand-maintained)
+          APP_IMAGE: v0.2.0                          # recommended app image (hand-maintained)
         run: |
           SEMVER="v${CLI_TAG#cli-v}"                 # cli-v0.1.0 -> v0.1.0
           # skip=validate: the CLI tag is cli-v*, but goreleaser's git-state check
