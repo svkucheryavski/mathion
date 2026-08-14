@@ -18,7 +18,7 @@
 - **`.deb`:** package `mathion`; binary → `/usr/bin/mathion` (never `/usr/local`); arch `amd64`+`arm64`; version = `0.2.0`-style (strip the `cli-v` prefix — via `GORELEASER_CURRENT_TAG`, asserted with `dpkg-deb -f`); `Section: admin`, `Priority: optional`; **`Suggests: docker.io`** or none (NEVER `Recommends` — apt installs it by default); ships the keyring as **ordinary data, never a conffile**; NOT individually debsig-signed.
 - **Keyring path:** `/usr/share/keyrings/mathion-archive-keyring.gpg` (package-managed); `sources.list` uses `signed-by=` that path; `.nojekyll` at the **branch root**, apt content under `deb/`.
 - **apt repo:** single suite `stable`, component `main`, arches `amd64 arm64`; built with `apt-ftparchive generate` (`Tree{}` per-arch, `APT::FTPArchive::DoByHash "true"`); `Release` carries `Origin/Label/Suite/Codename/Components/Architectures/Date`, **`Acquire-By-Hash: yes`**, and a computed **`Valid-Until`**; both `InRelease` (clearsigned) and `Release.gpg` (detached).
-- **Two signing subkeys under one offline primary, channel separation ENFORCED on the verify side:** `S_rel` signs `checksums.txt` (curl|sh + 4b self-update); `S_apt` signs the apt `Release`. Each verifier trusts **only its channel's subkey** — no verifier carries both. Signing is non-interactive: `--batch --pinentry-mode loopback --local-user <fpr>! --digest-algo SHA256 --cert-digest-algo SHA256`, passphrase fed explicitly (goreleaser `signs.stdin`; `build.sh` via `--passphrase-fd`); goreleaser `signs:` MUST set `artifacts: checksum`, `${artifact}.asc`, `--armor`.
+- **Two signing subkeys under one offline primary, channel separation ENFORCED on the verify side:** `S_rel` signs `checksums.txt` (curl|sh + 4b self-update); `S_apt` signs the apt `Release`. Each verifier trusts **only its channel's subkey** — no verifier carries both. Signing is non-interactive: `--batch --pinentry-mode loopback --local-user <fpr>! --digest-algo SHA256 --cert-digest-algo SHA256`, passphrase fed explicitly on **fd 0** — goreleaser `signs.stdin` supplies the bytes but gpg only consumes them with `--passphrase-fd 0` in `signs.args` (loopback alone reads nothing → a protected key fails cold); `build.sh`/`resign.sh` pipe it to `--passphrase-fd 0` too. goreleaser `signs:` MUST set `artifacts: checksum`, `${artifact}.asc`, `--armor`.
 - **Verification (install.sh):** `--status-fd 1`; accept only `GOODSIG` + a `VALIDSIG` whose **signing (first) fingerprint** is `EXPECTED_SIGNING_FPR` (the `S_rel` subkey — so a compromise of the unattended `S_apt` cannot forge the curl|sh channel), with **no** `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG`; require **exactly one** matching checksum line; fail closed if `gnupg` absent. The install.sh verify logic lives in a sourceable `verify_sig` function driven directly by the test (not re-implemented).
 - **Two trimmed public keyrings (never one full key everywhere):** `deploy/keys/mathion-pubkey.asc` = **primary + `S_rel`** (embedded verbatim in install.sh + the 4b binary; verifies `checksums.txt`). `deploy/keys/mathion-apt-keyring.asc` → dearmored to `/usr/share/keyrings/mathion-archive-keyring.gpg` = **primary + `S_apt`** (packaged in the `.deb` + published to Pages; `apt`'s `signed-by=<keyring>` then enforces `S_apt`). On rotation, each keyring carries the outgoing **and** incoming subkey of its own channel during the overlap window.
 - **CI:** signing secrets only in protected environments — `release` (holds `S_rel`+`S_apt`, deploy restricted to `cli-v*` tags) and `pages-resign` (holds only `S_apt`, deploy restricted to `main`, unattended). SHA-pin all actions in signing/publish jobs. Cross-job artifacts via `upload/download-artifact` (never re-download from Releases). gh-pages publication is concurrency-guarded and must trigger a Pages rebuild (a `GITHUB_TOKEN` push does NOT).
@@ -34,7 +34,7 @@ These cannot be done by an implementer subagent; document them in `deploy/keys/R
    - `deploy/keys/mathion-pubkey.asc` = **primary + `S_rel` only** (`gpg --export --armor <primary>! <S_rel>!` minus S_apt, or export then strip the S_apt subkey). Paste this ASCII-armored block into `install.sh`'s embedded `mathion_embedded_key` here-doc and into the 4b binary embed.
    - `deploy/keys/mathion-apt-keyring.asc` = **primary + `S_apt` only**. Its dearmored form (`gpg --dearmor`) becomes `/usr/share/keyrings/mathion-archive-keyring.gpg` — CI derives it deterministically from this committed file (Task 7), so it is identical in the `.deb` and on Pages.
 
-   Record `EXPECTED_PRIMARY_FPR` (40-hex primary fingerprint), `EXPECTED_SIGNING_FPR` (the `S_rel` **subkey** fingerprint — install.sh pins this), and the `S_apt` subkey fingerprint. On rotation, add the incoming subkey to its own channel's keyring while the outgoing one still signs (overlap), and set install.sh's `EXPECTED_SIGNING_FPR` to accept both `S_rel` subkeys during the window.
+   Record `EXPECTED_PRIMARY_FPR` (40-hex primary fingerprint), `EXPECTED_SIGNING_FPR` (the `S_rel` **subkey** fingerprint — install.sh pins this as a **single scalar**), and the `S_apt` subkey fingerprint. On rotation, add the incoming subkey to its own channel's keyring while the outgoing one still signs (overlap). `install.sh` is fetched fresh on every install, so it pins **one** current `S_rel` fingerprint: to rotate, update `EXPECTED_SIGNING_FPR` to the new subkey and re-sign the latest `checksums.txt` with it **in the same release** — the freshly-fetched `install.sh` and the freshly-signed `checksums.txt` are always the same repo state (a brief CDN-cache skew fails closed → the user retries). The dual-accept **overlap** applies only to **4b's compile-time-embedded** binary key (an old binary can't refetch install.sh), not to install.sh — so `EXPECTED_SIGNING_FPR` stays a scalar here.
 2. **GitHub environments + secrets + variables:** create environment **`release`** (deployment rule = **branches AND tags**, tag pattern `cli-v*`) with secrets `GPG_S_REL_PRIVATE`, `GPG_S_APT_PRIVATE`, `GPG_PASSPHRASE`; create environment **`pages-resign`** (deployment branch = `main`, no required reviewers, wait-timer 0) with secrets `GPG_S_APT_PRIVATE`, `GPG_PASSPHRASE`. Also create environment/repo **variables** `S_REL_FPR` (the `S_rel` subkey fingerprint) and `S_APT_FPR` (the `S_apt` subkey fingerprint) — the signing/publish jobs read these via `${{ vars.* }}`.
 3. **Pages deploy token:** create a fine-grained PAT or GitHub App installation token with `contents:write` (and `pages:write` if using the build API) on this repo; store as `PAGES_DEPLOY_TOKEN` in both environments. (A default `GITHUB_TOKEN` push to `gh-pages` does not trigger a Pages build.)
 4. **Pages + branch:** create an empty `gh-pages` branch; enable **GitHub Pages** with source = `gh-pages` branch, root.
@@ -166,7 +166,7 @@ git commit -m "$(printf 'feat(cli): warn when mathion is installed via both apt 
 
 - [ ] **Step 1: Write the failing test (signature verify + resolver, throwaway key)**
 
-Append to `deploy/install_sh_test.sh` (before the final `echo "install_sh_test PASSED"`). This is a **behavioral** test: it generates a throwaway primary + two signing subkeys, **sources install.sh as a library**, points its `mathion_embedded_key`/`EXPECTED_*` at the throwaway key, and drives install.sh's **real** `verify_sig` through good / tampered / wrong-channel / revoked / gpg-absent — plus the resolver. (Assumes the file's `set -eu`; the negative cases are guarded by `if`.)
+Append to `deploy/install_sh_test.sh` (before the final `echo "install_sh_test PASSED"`). This is a **behavioral** test: it generates a throwaway primary + two signing subkeys, **sources install.sh as a library**, points its `mathion_embedded_key`/`EXPECTED_*` at the throwaway key, and drives install.sh's **real** `verify_sig` through good / tampered / wrong-channel / **expired** / **revoked** / gpg-absent — plus the resolver. (Assumes the file's `set -eu`; the negative cases are guarded by `if`. The expired case uses a separate `--faked-system-time` key so it needs no `sleep`.)
 
 ```sh
 # ---- authenticity: drive install.sh's REAL verify_sig with a throwaway key ----
@@ -212,12 +212,40 @@ printf 'checksum-content\n' > "$TKH/checksums.txt"
 # 3) signed by the OTHER subkey (simulates an S_apt-signed forge) -> rejected (channel separation)
 sign_with "$SUB_APT"
 if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: wrong-channel (S_apt) signature accepted"; exit 1; fi
-# 4) revoked key -> rejected. gpg auto-writes a revocation cert at key gen, but
+# 4) EXPIRED pinned key -> rejected (EXPKEYSIG, no GOODSIG). A single pinned subkey can't
+#    be both valid (cases 1-3) and expired, so build a SEPARATE throwaway whose primary +
+#    sub_rel were created in the PAST with a short expiry, sign while it was valid (faked
+#    past time), then verify NOW (expired). Re-point the embedded key + pins at it, then restore.
+EXH="$(mktemp -d)"; PAST=20200101T000000
+cat > "$EXH/kp" <<'EP'
+%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Key-Usage: cert
+Name-Real: Mathion Expired Test
+Name-Email: exp@example.invalid
+Expire-Date: 0
+%commit
+EP
+GNUPGHOME="$EXH" gpg --faked-system-time "$PAST" --batch --gen-key "$EXH/kp" >/dev/null 2>&1
+EXP_PRIMARY="$(GNUPGHOME="$EXH" gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10; exit}')"
+GNUPGHOME="$EXH" gpg --faked-system-time "$PAST" --batch --pinentry-mode loopback --passphrase '' --quick-add-key "$EXP_PRIMARY" ed25519 sign 2d >/dev/null 2>&1
+EXP_SUB="$(GNUPGHOME="$EXH" gpg --batch --with-colons --fingerprint "$EXP_PRIMARY" | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; exit}')"
+GNUPGHOME="$EXH" gpg --faked-system-time "$PAST" --batch --yes --armor --local-user "${EXP_SUB}!" --detach-sign -o "$TKH/checksums.txt.asc" "$TKH/checksums.txt" >/dev/null 2>&1
+mathion_embedded_key() { GNUPGHOME="$EXH" gpg --batch --export --armor "$EXP_PRIMARY"; }
+EXPECTED_SIGNING_FPR="$EXP_SUB"; EXPECTED_PRIMARY_FPR="$EXP_PRIMARY"
+if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: expired-key signature accepted"; exit 1; fi
+# restore the main throwaway key + pins for the remaining cases
+mathion_embedded_key() { gpg --batch --export --armor "$PRIMARY"; }
+EXPECTED_SIGNING_FPR="$SUB_REL"; EXPECTED_PRIMARY_FPR="$PRIMARY"
+# 5) revoked key -> rejected. gpg auto-writes a revocation cert at key gen, but
 #    colon-guards its armor ("Remove this colon before importing") — strip it.
 sign_with "$SUB_REL"
 sed 's/^://' "$TKH/openpgp-revocs.d/${PRIMARY}.rev" | gpg --batch --yes --import >/dev/null 2>&1
 if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: revoked-key signature accepted"; exit 1; fi
-# 5) gpg absent -> fail closed
+# 6) gpg absent -> fail closed. SC2123: emptying PATH is the deliberate mechanism to
+#    simulate "no gpg on PATH" inside the subshell — not an accidental clobber.
+# shellcheck disable=SC2123
 if ( PATH=""; verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt" ) 2>/dev/null; then
   echo "FAIL: verify_sig did not fail closed without gpg"; exit 1; fi
 
@@ -504,7 +532,7 @@ public key ONLY. CI dearmors this to /usr/share/keyrings/mathion-archive-keyring
 -----END PGP PUBLIC KEY BLOCK-----
 ```
 
-`deploy/keys/README.md`: document (per spec §6.1, §14) — generating the offline primary (cert-only) + `S_rel`/`S_apt` signing subkeys with expiry; **channel separation** — export **two trimmed keyrings**: `mathion-pubkey.asc` = primary+`S_rel` (embedded in install.sh + the 4b binary; verifies `checksums.txt`), and `mathion-apt-keyring.asc` = primary+`S_apt` (dearmored by CI to the apt keyring so `signed-by` enforces `S_apt`); recording `EXPECTED_PRIMARY_FPR` + `EXPECTED_SIGNING_FPR` (the S_rel subkey install.sh pins) + the S_apt fpr; storing the revocation cert offline; the **per-channel rotation** procedure (issue a new subkey from the offline primary during an overlap grace window in which the outgoing subkey still signs; ship the refreshed **channel-specific** keyring in the next release/`.deb`; during overlap install.sh's `EXPECTED_SIGNING_FPR` accepts both S_rel subkeys); the compromise/revocation procedure; and the out-of-band fingerprint publication.
+`deploy/keys/README.md`: document (per spec §6.1, §14) — generating the offline primary (cert-only) + `S_rel`/`S_apt` signing subkeys with expiry; **channel separation** — export **two trimmed keyrings**: `mathion-pubkey.asc` = primary+`S_rel` (embedded in install.sh + the 4b binary; verifies `checksums.txt`), and `mathion-apt-keyring.asc` = primary+`S_apt` (dearmored by CI to the apt keyring so `signed-by` enforces `S_apt`); recording `EXPECTED_PRIMARY_FPR` + `EXPECTED_SIGNING_FPR` (the S_rel subkey install.sh pins) + the S_apt fpr; storing the revocation cert offline; the **per-channel rotation** procedure (issue a new subkey from the offline primary during an overlap grace window in which the outgoing subkey still signs; ship the refreshed **channel-specific** keyring in the next release/`.deb`; `install.sh` is always fetched fresh so it pins the **current** `S_rel` scalar — update `EXPECTED_SIGNING_FPR` and re-sign the latest `checksums.txt` together; the dual-accept overlap is a **4b** compile-time-embedded-key concern, not install.sh); the compromise/revocation procedure; and the out-of-band fingerprint publication.
 
 - [ ] **Step 7: Validate the man page + presence checks**
 
@@ -680,10 +708,12 @@ git commit -m "$(printf 'feat(cli): build a signed-repo .deb via goreleaser nfpm
 ```sh
 #!/bin/sh
 set -eu
-export GNUPGHOME="$(mktemp -d)"; chmod 700 "$GNUPGHOME"
-# primary (cert-only) + signing subkey, mirroring the prod S_rel layout
-cat > "$GNUPGHOME/kp" <<'P'
-%no-protection
+GH="$(mktemp -d)"; export GNUPGHOME="$GH"; chmod 700 "$GH"   # split form: `export X="$(cmd)"` trips shellcheck SC2155
+# primary (cert-only) + signing subkey, mirroring the prod S_rel layout. PROTECTED
+# with a real passphrase so the sign exercises the prod fd-0 passphrase path — an
+# unprotected key would sign regardless of --passphrase-fd and mask a broken config.
+PASS="s3cr3t-test-pass"
+cat > "$GH/kp" <<P
 Key-Type: eddsa
 Key-Curve: ed25519
 Key-Usage: cert
@@ -693,15 +723,17 @@ Subkey-Usage: sign
 Name-Real: Mathion Rel Test
 Name-Email: rel@example.invalid
 Expire-Date: 0
+Passphrase: ${PASS}
 %commit
 P
-gpg --batch --gen-key "$GNUPGHOME/kp" >/dev/null 2>&1
+gpg --batch --gen-key "$GH/kp" >/dev/null 2>&1
 PRIMARY="$(gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10; exit}')"
 SUBKEY="$(gpg --batch --with-colons --fingerprint "$PRIMARY" | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; exit}')"
 cd "$(dirname "$0")/../../cli"
-# mirror prod: --local-user <subkey>! + an (empty) stdin passphrase (Task 7 adds stdin:).
-# skip nfpm (this test only needs checksums signing; nfpm inputs are prod-only).
-GPG_FINGERPRINT="${SUBKEY}!" GPG_PASSPHRASE="" \
+# mirror prod exactly: --local-user <subkey>! + the passphrase fed via signs.stdin ->
+# gpg's --passphrase-fd 0 (both configured in .goreleaser.yaml, Step 3). skip nfpm
+# (this test only needs checksums signing; nfpm inputs are prod-only).
+GPG_FINGERPRINT="${SUBKEY}!" GPG_PASSPHRASE="$PASS" \
   CLI_TAG=cli-v0.2.0 APP_IMAGE=v0.2.0 GORELEASER_CURRENT_TAG=v0.2.0 \
   goreleaser release --clean --skip=publish,nfpm --snapshot
 test -f dist/checksums.txt.asc || { echo "FAIL: checksums.txt.asc not produced"; exit 1; }
@@ -726,10 +758,13 @@ signs:
   - id: checksums
     artifacts: checksum
     signature: "${artifact}.asc"
+    stdin: "{{ .Env.GPG_PASSPHRASE }}"
     args:
       - "--batch"
       - "--pinentry-mode"
       - "loopback"
+      - "--passphrase-fd"
+      - "0"
       - "--armor"
       - "--digest-algo"
       - "SHA256"
@@ -741,7 +776,7 @@ signs:
       - "${artifact}"
 ```
 
-(`--digest-algo SHA256` pins the hash so nothing falls back to SHA-1 on an old gpg — spec §6.1. In production CI, `GPG_FINGERPRINT` = `S_rel`'s subkey fingerprint with a trailing `!`, and the passphrase is provided via `stdin:` — added in Task 7. The snapshot test sets `GPG_PASSPHRASE=""` so that once `stdin:` lands the env template still resolves; the throwaway key has no passphrase.)
+(`--digest-algo SHA256` pins the hash so nothing falls back to SHA-1 on an old gpg — spec §6.1. **`stdin` + `--passphrase-fd 0` together are load-bearing:** goreleaser's `stdin` writes `GPG_PASSPHRASE` to gpg's standard input, but `--pinentry-mode loopback` alone reads nothing — gpg only consumes the passphrase when `--passphrase-fd 0` points it at fd 0. Verified against a real protected key with a cold gpg-agent: without `--passphrase-fd 0` the sign fails; with it, it succeeds. In production CI `GPG_FINGERPRINT` = `S_rel`'s subkey fingerprint with a trailing `!` and `GPG_PASSPHRASE` = the real secret (Task 7); the throwaway test protects its key with `PASS` and sets `GPG_PASSPHRASE="$PASS"`, so the fd-0 path is genuinely exercised — an unprotected key would sign regardless and hide a broken config.)
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -757,21 +792,25 @@ Expected: clean.
 
 ```bash
 git add cli/.goreleaser.yaml deploy/deb/sign_test.sh
-git commit -m "$(printf 'feat(cli): sign checksums.txt with the release subkey (S_rel)\n\ngoreleaser signs: artifacts: checksum, armored \${artifact}.asc, batch/loopback,\n--local-user GPG_FINGERPRINT. sign_test.sh builds+verifies with a throwaway key.\nThis is the curl|sh + self-update authenticity anchor. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(cli): sign checksums.txt with the release subkey (S_rel)\n\ngoreleaser signs: artifacts: checksum, armored \${artifact}.asc, batch/loopback,\nstdin + --passphrase-fd 0 (both needed to feed a protected key), --local-user\nGPG_FINGERPRINT. sign_test.sh builds+verifies with a PROTECTED throwaway key so\nthe fd-0 passphrase path is exercised. curl|sh + self-update anchor. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
 ```
 
 ---
 
-## Task 6: apt repo build script + `apt-ftparchive generate` config + hermetic apt e2e
+## Task 6: apt repo build script + `apt-ftparchive generate` config + hermetic apt e2e + dates-only resign
 
 **Files:**
 - Create: `deploy/apt/apt-ftparchive.conf`
 - Create: `deploy/apt/build.sh`
 - Create: `deploy/apt/e2e_test.sh`
+- Create: `deploy/apt/resign.sh`
+- Create: `deploy/apt/resign_test.sh`
 
 **Interfaces:**
 - Consumes: built `.deb`s (Task 4) + a signing key (throwaway in test, `S_apt` in CI).
-- Produces: a signed apt repo tree under a given output dir; `build.sh <pool-input-dir> <repo-root> <s_apt_fpr>`.
+- Produces:
+  - `build.sh <pool-input-dir> <repo-root> <s_apt_fpr>` — publish builder (copy new debs, index, sign).
+  - `resign.sh <repo-root> <s_apt_fpr>` — **dates-only** Release refresh: verify + extract the S_apt-signed `InRelease` payload, replace only `Date`/`Valid-Until`, re-sign. Never re-reads/re-indexes the pool (laundering-proof); cold-start (no `InRelease`) is a graceful no-op. Used by the scheduled resign (Task 8).
 
 - [ ] **Step 1: `apt-ftparchive.conf`**
 
@@ -795,9 +834,13 @@ Tree "dists/stable" {
 
 ```sh
 #!/bin/sh
-# build.sh <pool-input-dir with *.deb> <repo-root> <S_apt-fingerprint>
-# Idempotent: pointing <pool-input-dir> at the repo's own pool (the resign case)
-# regenerates indexes + a fresh Date/Valid-Until over the existing debs and re-signs.
+# build.sh <pool-input-dir with new *.deb> <repo-root> <S_apt-fingerprint>
+# PUBLISH builder: copies new release .debs into the pool, (re)generates per-arch
+# indexes + a fresh Date/Valid-Until over the whole pool, and signs Release with S_apt.
+# The scheduled Valid-Until refresh does NOT use this script — it uses resign.sh
+# (dates-only, no pool re-index) so an unattended run cannot launder pool state (§7.2).
+# <pool-input-dir> is always distinct from the repo's own pool here (apt-publish passes
+# the downloaded-artifact dir), so no self-copy case arises.
 set -eu
 IN="$1"; ROOT="$2"; FPR="$3"
 VALID_DAYS="${MATHION_APT_VALID_DAYS:-30}"
@@ -807,11 +850,7 @@ DEST="$ROOT/deb/pool/main/m/mathion"
 
 mkdir -p "$DEST" "$ROOT/deb/dists/stable/main/binary-amd64" \
          "$ROOT/deb/dists/stable/main/binary-arm64"
-# copy new debs in — but SKIP when the input already IS the pool dir (resign),
-# where GNU cp would abort with "are the same file".
-if [ "$(cd "$IN" && pwd -P)" != "$(cd "$DEST" && pwd -P)" ]; then
-  cp "$IN"/mathion_*.deb "$DEST/"
-fi
+cp "$IN"/mathion_*.deb "$DEST/"
 
 cd "$ROOT/deb"
 apt-ftparchive generate "$CONF"
@@ -890,9 +929,14 @@ apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list
 apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion
 test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
 
-# tamper-negative: a corrupted, non-fallbackable Release must be REJECTED by apt
+# tamper-negative: a corrupted, non-fallbackable Release must be REJECTED by apt.
+# Modify a byte INSIDE the signed body (the Suite field), NOT a trailing append —
+# gpg/gpgv process only the first OpenPGP message and ignore bytes past the signature
+# block, so `printf 'x' >> InRelease` can slip through. A body edit breaks the
+# clearsigned digest -> gpgv rejects -> apt refuses the repo.
 rm -f "$WORK/site/deb/dists/stable/Release" "$WORK/site/deb/dists/stable/Release.gpg"
-printf 'tampered' >> "$WORK/site/deb/dists/stable/InRelease"
+sed 's/^Suite: stable/Suite: tampered/' "$WORK/site/deb/dists/stable/InRelease" > "$WORK/ir.tampered" \
+  && mv "$WORK/ir.tampered" "$WORK/site/deb/dists/stable/InRelease"
 if apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
      -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 >/dev/null 2>&1; then
   echo "FAIL: apt accepted a tampered InRelease"; exit 1
@@ -910,16 +954,121 @@ echo "apt e2e PASSED"
 Run: `sudo sh deploy/apt/e2e_test.sh`
 Expected: `apt e2e PASSED` (or `SKIP` if not root / no apt-utils). This proves `Release` signatures, per-arch indexes, by-hash, and `signed-by` all work end-to-end.
 
-- [ ] **Step 5: shellcheck**
+- [ ] **Step 5: Write the failing dates-only resign test (`deploy/apt/resign_test.sh`)**
 
-Run: `shellcheck deploy/apt/build.sh deploy/apt/e2e_test.sh`
+This proves resign is laundering-proof WITHOUT apt-utils or root (gpg only): the pool
+hash commitment is byte-identical before/after, so resign provably never re-reads/
+re-indexes the pool; a content-tampered `InRelease` is refused; cold start no-ops.
+
+```sh
+#!/bin/sh
+set -eu
+GH="$(mktemp -d)"; export GNUPGHOME="$GH"; chmod 700 "$GH"   # split form (shellcheck SC2155)
+cat > "$GH/kp" <<'P'
+%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Key-Usage: cert
+Subkey-Type: eddsa
+Subkey-Curve: ed25519
+Subkey-Usage: sign
+Name-Real: Mathion Apt Test
+Name-Email: apt@example.invalid
+Expire-Date: 0
+%commit
+P
+gpg --batch --gen-key "$GH/kp" >/dev/null 2>&1
+PRIMARY="$(gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10; exit}')"
+SUB="$(gpg --batch --with-colons --fingerprint "$PRIMARY" | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; exit}')"
+ROOT="$(mktemp -d)"; D="$ROOT/deb/dists/stable"; mkdir -p "$D"
+# minimal but realistic Release: stale Date/Valid-Until + a SHA256 pool-commitment block
+cat > "$D/Release" <<'R'
+Origin: Mathion
+Suite: stable
+Codename: stable
+Components: main
+Architectures: amd64 arm64
+Date: Mon, 01 Jan 2024 00:00:00 +0000
+Valid-Until: Mon, 15 Jan 2024 00:00:00 +0000
+SHA256:
+ 0000000000000000000000000000000000000000000000000000000000000000    42 main/binary-amd64/Packages
+R
+gpg --batch --pinentry-mode loopback --local-user "${SUB}!" --digest-algo SHA256 --clearsign -o "$D/InRelease" "$D/Release"
+extract_sha256() { awk '/^SHA256:/{p=1;print;next} p&&/^[ \t]/{print;next} p{exit}' "$1"; }
+before="$(extract_sha256 "$D/Release")"
+sh "$(dirname "$0")/resign.sh" "$ROOT" "$SUB"
+gpg --batch --verify "$D/InRelease" >/dev/null 2>&1 || { echo "FAIL: re-signed InRelease does not verify"; exit 1; }
+case "$(grep '^Valid-Until:' "$D/Release")" in *2024*|"") echo "FAIL: Valid-Until not refreshed"; exit 1;; esac
+after="$(extract_sha256 "$D/Release")"
+[ "$before" = "$after" ] || { echo "FAIL: pool hash commitment changed — resign re-read the pool"; exit 1; }
+# content-tamper the SIGNED body -> resign must refuse (fail closed)
+sed 's/Origin: Mathion/Origin: Evil/' "$D/InRelease" > "$D/InRelease.t" && mv "$D/InRelease.t" "$D/InRelease"
+if sh "$(dirname "$0")/resign.sh" "$ROOT" "$SUB" 2>/dev/null; then echo "FAIL: resigned over a tampered InRelease"; exit 1; fi
+# cold start (no InRelease) -> graceful no-op
+COLD="$(mktemp -d)"; mkdir -p "$COLD/deb/dists/stable"
+sh "$(dirname "$0")/resign.sh" "$COLD" "$SUB" || { echo "FAIL: cold start did not no-op"; exit 1; }
+echo "resign_test PASSED"
+```
+
+- [ ] **Step 6: Run to verify it fails**
+
+Run: `sh deploy/apt/resign_test.sh`
+Expected: FAIL — `resign.sh` does not exist yet (`sh: .../resign.sh: No such file`).
+
+- [ ] **Step 7: Write `deploy/apt/resign.sh` (dates-only, laundering-proof)**
+
+```sh
+#!/bin/sh
+# resign.sh <repo-root> <S_apt-fingerprint>
+# Dates-only Release refresh: verify the existing S_apt-signed InRelease, extract its
+# authenticated payload, replace ONLY Date/Valid-Until, re-sign. It NEVER re-reads or
+# re-indexes the pool, so an unattended run cannot launder tampered pool/Packages state
+# into a freshly-signed Release — it only extends the validity window of an already
+# S_apt-authenticated Release. Cold start (no InRelease) is a graceful no-op. (§7.2)
+set -eu
+ROOT="$1"; FPR="$2"
+VALID_DAYS="${MATHION_APT_VALID_DAYS:-30}"
+PASS="${GPG_PASSPHRASE:-}"
+D="$ROOT/deb/dists/stable"
+[ -f "$D/InRelease" ] || { echo "no signed repo yet ($D/InRelease absent); nothing to resign"; exit 0; }
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+# gpg --decrypt on a clearsigned file VERIFIES the S_apt signature and emits ONLY the
+# signed bytes; a bad signature makes it exit non-zero -> fail closed. Because it emits
+# only the verified payload, any bytes appended past the signature block are dropped.
+gpg --batch --output "$tmp/body" --decrypt "$D/InRelease" \
+  || { echo "existing InRelease fails S_apt verification — refusing to resign tampered state" >&2; exit 1; }
+# refresh ONLY Date/Valid-Until; every hash block (the pool commitment) is preserved verbatim
+sed '/^Date:/d;/^Valid-Until:/d' "$tmp/body" > "$tmp/new"
+{ echo "Date: $(date -u -R)"; echo "Valid-Until: $(date -u -R -d "+${VALID_DAYS} days")"; } >> "$tmp/new"
+gpg_sign() {   # mirrors build.sh: feed the passphrase on fd 0 when set (prod), skip when empty (throwaway)
+  if [ -n "$PASS" ]; then
+    printf '%s' "$PASS" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --local-user "${FPR}!" --digest-algo SHA256 "$@"
+  else
+    gpg --batch --pinentry-mode loopback --local-user "${FPR}!" --digest-algo SHA256 "$@"
+  fi
+}
+cp "$tmp/new" "$D/Release"
+rm -f "$D/InRelease" "$D/Release.gpg"
+gpg_sign --clearsign -o "$D/InRelease" "$D/Release"
+gpg_sign -abs        -o "$D/Release.gpg" "$D/Release"
+echo "apt Release re-signed (fresh Date/Valid-Until, pool commitments preserved) by $FPR"
+```
+
+- [ ] **Step 8: Run the resign test to verify it passes**
+
+Run: `sh deploy/apt/resign_test.sh`
+Expected: `resign_test PASSED`.
+
+- [ ] **Step 9: shellcheck**
+
+Run: `shellcheck deploy/apt/build.sh deploy/apt/e2e_test.sh deploy/apt/resign.sh deploy/apt/resign_test.sh`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add deploy/apt/apt-ftparchive.conf deploy/apt/build.sh deploy/apt/e2e_test.sh
-git commit -m "$(printf 'feat(cli): signed apt repo builder + hermetic apt e2e\n\napt-ftparchive generate (Tree{} per-arch, DoByHash) + a computed Valid-Until,\nsigned InRelease + Release.gpg by S_apt. e2e_test.sh builds+signs with a\nthrowaway key, serves over localhost, and apt installs mathion — exercising\nRelease signatures, per-arch indexes, by-hash and signed-by. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
+git add deploy/apt/apt-ftparchive.conf deploy/apt/build.sh deploy/apt/e2e_test.sh deploy/apt/resign.sh deploy/apt/resign_test.sh
+git commit -m "$(printf 'feat(cli): signed apt repo builder + hermetic apt e2e + dates-only resign\n\napt-ftparchive generate (Tree{} per-arch, DoByHash) + a computed Valid-Until,\nsigned InRelease + Release.gpg by S_apt. e2e_test.sh builds+signs with a\nthrowaway key, serves over localhost, apt installs mathion, and rejects a\ncontent-tampered InRelease. resign.sh does a dates-only Release refresh\n(verify+extract the signed payload, bump Date/Valid-Until, re-sign) that never\nre-reads the pool, so the unattended scheduled job cannot launder pool state;\nresign_test.sh proves the pool hash commitment is byte-identical across a\nrefresh. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
 ```
 
 ---
@@ -958,7 +1107,7 @@ git commit -m "$(printf 'feat(cli): signed apt repo builder + hermetic apt e2e\n
           gpg --dearmor < deploy/keys/mathion-apt-keyring.asc > deploy/keys/mathion-archive-keyring.gpg
 ```
 
-(c) In `cli/.goreleaser.yaml`, add `stdin: "{{ .Env.GPG_PASSPHRASE }}"` to the `signs` entry from Task 5 (goreleaser feeds the passphrase to gpg on stdin). This makes `GPG_PASSPHRASE` a required template var — sign_test already sets it to `""` (Task 5).
+(c) No `.goreleaser.yaml` change here: the signing config (`stdin: "{{ .Env.GPG_PASSPHRASE }}"` + `--passphrase-fd 0`) already landed in Task 5. The release job's only job is to supply the **real** `GPG_PASSPHRASE` secret (env in the Build step, (d)) so the fd-0 passphrase reaches the protected `S_rel` key. (This task therefore no longer touches `cli/.goreleaser.yaml` — it is not in the Step 6 `git add`.)
 
 (d) Replace the Build step so it signs, strictly validates the tag, and asserts the stripped version (refreshing the now-stale `--skip=validate` comment — nfpm's `file_name_template` DOES use `.Version`, so the assertion is what guards the strip):
 ```yaml
@@ -1051,7 +1200,16 @@ After `gh release create`, add:
           echo "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"; gpgconf --kill gpg-agent || true
           printf '%s' "$S_APT" | gpg --batch --import
           mkdir -p pages/deb
-          # anti-laundering: never re-sign a repo whose existing InRelease we can't verify with S_apt
+          # anti-laundering (partial): refuse to publish over an existing InRelease we
+          # can't verify with S_apt. This catches a replaced/broken InRelease. It does
+          # NOT re-verify each accumulated pool .deb against the signed Packages before
+          # apt-ftparchive re-indexes them — so a pool .deb tampered in place (old
+          # InRelease left valid over the old Packages) would be re-indexed and signed.
+          # Scoped residual: tampering the gh-pages pool requires the PAGES_DEPLOY_TOKEN,
+          # a per-repo PAT that also grants `main` write — i.e. the attacker could
+          # subvert the pipeline directly (out of scope, §1.1). The genuinely-unattended
+          # weak link is the scheduled resign, which Task 8 makes dates-only so it can
+          # NEVER re-read/re-index the pool (laundering-proof by construction).
           if [ -f pages/deb/dists/stable/InRelease ]; then
             gpg --batch --verify pages/deb/dists/stable/InRelease >/dev/null 2>&1 \
               || { echo "existing InRelease fails S_apt verification — refusing to publish over tampered state"; exit 1; }
@@ -1065,7 +1223,9 @@ After `gh release create`, add:
           cd pages
           git config user.name "mathion-ci"; git config user.email "ci@example.invalid"
           git add -A && git commit -m "apt: publish ${{ github.ref_name }}" || echo "no changes"
-          git push
+          # concurrency serializes publish/resign, so the only racer is an external
+          # gh-pages push; bounded rebase/retry (spec §11.3) rather than a hard fail.
+          git push || { git fetch origin gh-pages && git rebase origin/gh-pages && git push; }
 ```
 Cold start: the first run has an empty `gh-pages`; `mkdir -p pages/deb` + `build.sh`'s own `mkdir -p` handle it, and the InRelease pre-check is skipped (file absent). `.nojekyll` sits at `pages/` root (branch root).
 
@@ -1085,8 +1245,8 @@ Expected: valid YAML; actionlint issues addressed (or explained). (Real executio
 - [ ] **Step 6: Commit**
 
 ```bash
-git add .github/workflows/release-cli.yml cli/.goreleaser.yaml
-git commit -m "$(printf 'ci(cli): sign the release + publish the apt repo (release-cli.yml)\n\nrelease job: protected `release` env, import S_rel only, prepare .deb assets\n(gzip + dearmor apt keyring), goreleaser signs checksums with S_rel (stdin\npassphrase), strict cli-vX.Y.Z tag + dpkg-deb Version assertion, attach\n.deb + checksums.txt.asc to the Release, upload debs as an artifact. New\napt-publish job (contents: read): download-artifact + strengthened\nverify-before-index (reject EXP/REV, pin S_rel, exactly-one-line), apt-utils,\nanti-laundering InRelease pre-check, deterministic S_apt keyring, build+sign\nwith S_apt, push via PAGES_DEPLOY_TOKEN, concurrency-guarded. SHA-pin all\nactions incl. the release job. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
+git add .github/workflows/release-cli.yml
+git commit -m "$(printf 'ci(cli): sign the release + publish the apt repo (release-cli.yml)\n\nrelease job: protected `release` env, import S_rel only, prepare .deb assets\n(gzip + dearmor apt keyring), goreleaser signs checksums with S_rel (real\nGPG_PASSPHRASE secret -> fd 0), strict cli-vX.Y.Z tag + dpkg-deb Version\nassertion, attach .deb + checksums.txt.asc to the Release, upload debs as an\nartifact. New apt-publish job (contents: read): download-artifact +\nstrengthened verify-before-index (reject EXP/REV, pin S_rel, exactly-one-line),\napt-utils, anti-laundering InRelease pre-check, deterministic S_apt keyring,\nbuild+sign with S_apt, push via PAGES_DEPLOY_TOKEN (rebase/retry),\nconcurrency-guarded. SHA-pin all actions incl. the release job. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1119,32 +1279,32 @@ jobs:
       - uses: actions/checkout@<SHA> # v7  (default branch — deploy/apt script)
       - uses: actions/checkout@<SHA> # v7
         with: { ref: gh-pages, path: pages, token: ${{ secrets.PAGES_DEPLOY_TOKEN }} }
-      - name: Regenerate + re-sign Release (S_apt)
+      - name: Re-sign Release (dates-only, S_apt)
         env:
           S_APT: ${{ secrets.GPG_S_APT_PRIVATE }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          if [ ! -f pages/deb/dists/stable/Release ]; then echo "no repo yet; nothing to resign"; exit 0; fi
-          sudo apt-get update && sudo apt-get install -y apt-utils
-          export GNUPGHOME="$(mktemp -d)"; chmod 700 "$GNUPGHOME"
-          echo "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"; gpgconf --kill gpg-agent || true
+          GH="$(mktemp -d)"; export GNUPGHOME="$GH"; chmod 700 "$GH"
+          echo "allow-loopback-pinentry" > "$GH/gpg-agent.conf"; gpgconf --kill gpg-agent || true
           printf '%s' "$S_APT" | gpg --batch --import
-          # anti-laundering: only refresh a repo whose existing InRelease verifies with S_apt
-          if [ -f pages/deb/dists/stable/InRelease ]; then
-            gpg --batch --verify pages/deb/dists/stable/InRelease >/dev/null 2>&1 \
-              || { echo "existing InRelease fails S_apt verification — refusing to resign tampered state"; exit 1; }
-          fi
-          # build.sh regenerates indexes + a fresh Date/Valid-Until over the committed pool
-          # (input == pool dir -> the self-copy is skipped) and re-signs.
-          sh deploy/apt/build.sh "pages/deb/pool/main/m/mathion" "$PWD/pages" "${{ vars.S_APT_FPR }}"
+          # resign.sh is DATES-ONLY: it verifies + extracts the S_apt-signed InRelease
+          # payload, bumps Date/Valid-Until, and re-signs — it NEVER re-reads or
+          # re-indexes the pool. So this unattended job cannot launder tampered pool
+          # state into a freshly-signed Release (it can only extend the validity window
+          # of an already-authenticated Release), and needs no apt-utils. resign.sh's
+          # decrypt-verify IS the anti-laundering gate (fail-closed) and it no-ops
+          # gracefully when there is no InRelease yet (cold start).
+          sh deploy/apt/resign.sh "$PWD/pages" "${{ vars.S_APT_FPR }}"
       - name: Publish
         run: |
           cd pages
           git config user.name "mathion-ci"; git config user.email "ci@example.invalid"
           git add -A && git commit -m "apt: scheduled resign" || echo "no changes"
-          git push
+          git push || { git fetch origin gh-pages && git rebase origin/gh-pages && git push; }
 ```
-Note: `build.sh`'s first arg is a pool dir; pointing it at the existing `pool/main/m/mathion` makes input == destination, so build.sh **skips the self-copy** (guarded — GNU `cp` would otherwise abort with "are the same file") and regenerates indexes + a fresh `Date`/`Valid-Until` over the committed debs, then re-signs. The anti-laundering pre-check refuses to re-sign a repo whose current InRelease doesn't verify with S_apt. SHA-pin the actions.
+Note: the scheduled job uses `resign.sh` (Task 6), **not** `build.sh` — a dates-only
+refresh that never touches the pool, closing the laundering vector for the genuinely
+unattended path (spec §7.2/§11.4). No `apt-utils` needed (no `apt-ftparchive`). SHA-pin the actions.
 
 - [ ] **Step 2: Static validation**
 
@@ -1159,7 +1319,7 @@ Expected: valid; actionlint addressed.
 
 ```bash
 git add .github/workflows/apt-resign.yml
-git commit -m "$(printf 'ci(cli): scheduled apt Release re-sign (apt-resign.yml)\n\nUnattended pages-resign env (S_apt only, main-scoped); two-checkout like\napt-publish; regenerates Release (fresh Date/Valid-Until over the committed\npool) and re-signs so Valid-Until never lapses. Same concurrency group. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
+git commit -m "$(printf 'ci(cli): scheduled dates-only apt Release re-sign (apt-resign.yml)\n\nUnattended pages-resign env (S_apt only, main-scoped); two-checkout like\napt-publish; calls resign.sh (dates-only: verify+extract the signed InRelease\npayload, bump Date/Valid-Until, re-sign) so Valid-Until never lapses WITHOUT\nre-reading the pool — the unattended job cannot launder pool state. No\napt-utils. Same concurrency group; push rebase/retry. Slice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1190,11 +1350,23 @@ Add to `ci.yml` (secretless — throwaway key):
 
 - [ ] **Step 2: Add a local-`.deb` leg + dual-install assertion to `amd64-smoke.yml`**
 
-Add a step (after CLI install) that builds+installs the `.deb` locally and asserts the postinst dual-install warning fires when `/usr/local/bin/mathion` exists:
+The current `amd64-smoke.yml` job has **only `checkout`** — no Go or goreleaser — so the
+`.deb` leg must first install the toolchain (SHA-pinned, install-only, matching the
+`apt-e2e` job in Step 1) *before* it can run `goreleaser`. The prior CLI-install step
+already placed `/usr/local/bin/mathion`, so the postinst dual-install warning will fire.
+
+Add these steps to the `install-smoke` job, after the CLI-install step:
 ```yaml
+      - uses: actions/setup-go@<SHA> # v7
+        with: { go-version: "1.24" }
+      - uses: goreleaser/goreleaser-action@<SHA> # v6
+        with: { version: "~> v2", install-only: true }
       - name: Local .deb install + dual-install warning
         run: |
           set -euo pipefail
+          # goreleaser needs the same gitignored nfpm inputs the prod build creates
+          # (gz man/changelog/notices + a keyring file — a placeholder is fine here,
+          # since --skip=sign and this leg only exercises install/postinst).
           ( cd cli && gzip -9nkf ../deploy/man/mathion.1 && gzip -9nkf ../deploy/deb/changelog.Debian \
             && gzip -9nkf ../deploy/deb/THIRD_PARTY_NOTICES \
             && printf placeholder > ../deploy/keys/mathion-archive-keyring.gpg \
@@ -1255,13 +1427,13 @@ git commit -m "$(printf 'docs: apt install instructions + PATH-precedence guidan
 
 ## Self-review (author checklist)
 
-**Spec coverage (§2.1 4a scope):** §5 .deb → T3/T4; §6 signing/key lifecycle + channel separation → T5 (S_rel + digest-algo), T7 (import + prepare-assets), T3 (two keyrings doc), manual prereqs; §7 apt repo → T6; §8 install.sh authenticity → T2; §10 dual-install → T1 (version), T2 (install.sh), T4 (postinst); §11 CI (verify-before-index, anti-laundering, split envs) → T7/T8/T9; §12 tests → T2/T4/T5/T6/T9; §13 docs → T3/T10; §14 prereqs → Manual section. `version --short` correctly deferred to 4b. Covered.
+**Spec coverage (§2.1 4a scope):** §5 .deb → T3/T4; §6 signing/key lifecycle + channel separation → T5 (S_rel + digest-algo + `stdin`/`--passphrase-fd 0`), T7 (import + prepare-assets), T3 (two keyrings doc), manual prereqs; §7 apt repo (publish `build.sh` + dates-only laundering-proof `resign.sh`) → T6; §8 install.sh authenticity → T2; §10 dual-install → T1 (version), T2 (install.sh), T4 (postinst); §11 CI (verify-before-index, dates-only resign, split envs) → T7/T8/T9; §12 tests (incl. expired- & revoked-key rejection, resign hash-preservation) → T2/T4/T5/T6/T9; §13 docs → T3/T10; §14 prereqs → Manual section. `version --short` correctly deferred to 4b. Covered.
 
 **Channel separation (enforced on the verify side):** install.sh embeds primary+`S_rel` and pins `EXPECTED_SIGNING_FPR` (VALIDSIG first field) → an `S_apt` compromise can't forge curl|sh; the apt keyring is primary+`S_apt` (dearmored from `mathion-apt-keyring.asc`) → `signed-by` enforces `S_apt`. No verifier carries both subkeys.
 
 **Placeholder scan:** the only intentional placeholders are the **real GPG key material** (`deploy/keys/mathion-pubkey.asc` = primary+S_rel, `deploy/keys/mathion-apt-keyring.asc` = primary+S_apt, install.sh embedded block, `EXPECTED_PRIMARY_FPR`, `EXPECTED_SIGNING_FPR`, `${{ vars.S_REL_FPR }}`/`S_APT_FPR`) and the **action SHAs** — all explicitly maintainer/lookup-filled and marked. Tests use throwaway keys. No logic placeholders.
 
-**Type/name consistency:** `binExists`/`lookPath`/`maybeWarnDualInstall`/`aptBinPath`/`curlBinPath` (T1) consistent. `verify_sig`/`mathion_embedded_key`/`EXPECTED_SIGNING_FPR`/`MATHION_INSTALL_LIB` (T2) referenced identically by the behavioral test. `build.sh <in> <root> <fpr>` signature consistent across T6/T7/T8; it reads `GPG_PASSPHRASE`. `GPG_FINGERPRINT` env (T5) ↔ `${{ vars.S_REL_FPR }}!` (T7). Keyring path `/usr/share/keyrings/mathion-archive-keyring.gpg` consistent (T4/T6/T7/T10); source-of-truth `mathion-apt-keyring.asc` (T3) dearmored in T4-tests (placeholder) + T7 (prod). Concurrency group `mathion-gh-pages` identical in T7/T8. `--skip=` phases: install_sh_test `publish,sign,nfpm`; sign_test `publish,nfpm`; deb_test/e2e/amd64 `publish,sign`.
+**Type/name consistency:** `binExists`/`lookPath`/`maybeWarnDualInstall`/`aptBinPath`/`curlBinPath` (T1) consistent. `verify_sig`/`mathion_embedded_key`/`EXPECTED_SIGNING_FPR`/`MATHION_INSTALL_LIB` (T2) referenced identically by the behavioral test. `build.sh <in> <root> <fpr>` (publish, T6→T7) and `resign.sh <root> <fpr>` (dates-only, T6→T8) signatures consistent; both read `GPG_PASSPHRASE` and feed it on `--passphrase-fd 0`. `GPG_FINGERPRINT` env (T5) ↔ `${{ vars.S_REL_FPR }}!` (T7); goreleaser `signs` supplies the passphrase via `stdin` + `--passphrase-fd 0` (T5). Keyring path `/usr/share/keyrings/mathion-archive-keyring.gpg` consistent (T4/T6/T7/T10); source-of-truth `mathion-apt-keyring.asc` (T3) dearmored in T4-tests (placeholder) + T7 (prod). Concurrency group `mathion-gh-pages` identical in T7/T8; both push with rebase/retry. `--skip=` phases: install_sh_test `publish,sign,nfpm`; sign_test `publish,nfpm`; deb_test/e2e/amd64 `publish,sign`.
 
 **Known execution notes for the implementer:** tasks needing `apt-utils`/root (T6 e2e, T9 amd64 leg) SKIP gracefully off-CI; the tag-triggered signing/publish (T7) and scheduled resign (T8) are static-validated here and only run for real once the manual prereqs exist — that real run is the deferred maintainer smoke, not a task gate.
 
@@ -1270,8 +1442,14 @@ git commit -m "$(printf 'docs: apt install instructions + PATH-precedence guidan
 ## Plan review history
 
 **Review round 1 (pre-execution, 2026-08-13):** 4 independent reviewers (Opus 4.8 xhigh) + codex (high). Folded findings, all verified against the plan/spec before applying:
-- **CRITICAL (folded):** production release job never created nfpm inputs (T7b prepare-assets); `checksums.txt.asc`/`.deb` not attached to the Release (T7e); `build.sh` never fed the S_apt passphrase (T6 `gpg_sign`); apt-resign `cp` self-copy crash (T6 guard + T8 note); install.sh verify test was vacuous (T2 now sources the real `verify_sig`, adds expired/revoked/wrong-channel/gpg-absent).
+- **CRITICAL (folded):** production release job never created nfpm inputs (T7b prepare-assets); `checksums.txt.asc`/`.deb` not attached to the Release (T7e); `build.sh` never fed the S_apt passphrase (T6 `gpg_sign`); apt-resign `cp` self-copy crash (round-1 added a `build.sh` self-copy guard — **superseded in round 2**: resign no longer uses `build.sh`, it is dates-only via `resign.sh`, and the guard was removed); install.sh verify test was vacuous (T2 now sources the real `verify_sig`, adds expired/revoked/wrong-channel/gpg-absent).
 - **IMPORTANT (folded):** `stdin` passphrase broke sign_test (T5 `GPG_PASSPHRASE=""`); missing `S_REL_FPR`/`S_APT_FPR` vars (prereq 2); missing §5 tag/version guards (T7d); duplicate `Date:` in Release (T6, append only Valid-Until); apt-utils not installed in prod jobs (T7/T8); verify-before-index strengthened (T7); keyring completeness — apt keyring dearmored from committed file, never a per-job export (T7); SHA-pin the secret-bearing release job (T7 Step 4); digest-algo SHA256 (T5/T6).
 - **Design decision (user-approved):** enforce channel separation on the verify side — two trimmed keyrings, install.sh pins the S_rel subkey; revises spec §6.3/§16.
 - **Minor (folded):** `--allow-unauthenticated=false` → `-o APT::Get::AllowUnauthenticated=false`; `.gitignore` named files not `*.gz`; dropped phantom `go-licenses --template`; `contents: read` on the gh-pages jobs; dropped unused S_apt import from the release job; scheduled-workflow 60-day auto-disable note (prereq 6); e2e by-hash/Valid-Until/tamper assertions; sign_test subkey selection.
 - **Routed to 4b (recorded in spec §9):** Go `VerifyDetachedSignatureAndHash` + exact S_rel issuer; self-update must try releases descending until one verifies; fd-relative execution / root-owned-ancestry swap; bounded self-update downloads.
+
+**Review round 2 (post-fold re-review, 2026-08-14):** codex (high) re-reviewed the folded plan+spec; each finding verified against real gpg (dry-runs) before folding:
+- **CRITICAL (folded):** goreleaser `stdin` alone can't feed a protected key — added `--passphrase-fd 0` to `signs.args` + moved `stdin` into T5, and sign_test now uses a PROTECTED key so the fd-0 path is genuinely exercised (cold-agent dry-run confirmed: fails without the flag, signs with it). Anti-laundering didn't authenticate the state it re-signs — the unattended scheduled job now runs **dates-only** `resign.sh` (verify+extract the signed `InRelease` payload, bump only `Date`/`Valid-Until`, re-sign; never re-reads/re-indexes the pool), proven laundering-proof by `resign_test.sh` (pool hash commitment byte-identical); apt-publish's accumulated-pool residual is scoped to §1.1 (gh-pages write == repo write). amd64-smoke's `.deb` leg invoked `goreleaser` with no toolchain — added SHA-pinned `setup-go` + `goreleaser-action` (T9).
+- **IMPORTANT (folded):** finished the spec sweep (§4/§4.1/§12/§14 — two-keyring wording, `VerifyDetachedSignatureAndHash`, `contents: read`, `PAGES_DEPLOY_TOKEN`); reconciled the scalar `EXPECTED_SIGNING_FPR` with the rotation text (install.sh pins one current `S_rel`; dual-accept overlap is a 4b embedded-key concern); added a real **expired-key** case to the T2 test (separate `--faked-system-time` key, no `sleep`).
+- **MINOR (folded):** gh-pages push now `git push || fetch+rebase+push` (T7/T8); spec §11.3 matched.
+- **Surfaced by round-2 dry-runs (folded):** T6 e2e tamper switched from a trailing append (gpg/gpgv ignore bytes past the signature block) to a signed-body edit so apt reliably rejects; `sign_test`/`resign_test` use the split-form `export` and the T2 gpg-absent case carries a documented `# shellcheck disable=SC2123` (bare `export X="$(…)"` / `PATH=""` trip shellcheck → non-zero exit).

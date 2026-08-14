@@ -14,10 +14,11 @@ Give Mathion a first-class, cryptographically-authenticated distribution path:
 
 - `apt install mathion` from a signed apt repository hosted on GitHub Pages.
 - A signed `.deb` built in the existing goreleaser release.
-- One GPG key (long-lived offline **primary** + a CI-held signing **subkey**)
-  authenticating **both** channels — the apt repo `Release` **and** the curl|sh
-  release archives — closing the "integrity only, not authenticity" gap
-  `deploy/install.sh` flags.
+- One long-lived offline **primary** key with **two CI-held channel-specific signing
+  subkeys** — **S_rel** authenticates the curl|sh release archives (+ self-update),
+  **S_apt** authenticates the apt repo `Release`; separation is enforced on the verify
+  side (no verifier holds both subkeys — §4). This closes the "integrity only, not
+  authenticity" gap `deploy/install.sh` flags.
 - `mathion self-update` — a channel-aware, signature-verified, **forward-only**
   in-place upgrade of the CLI binary, distinct from `mathion update` (app).
 - Non-destructive detection of the dual-install / PATH-precedence footgun.
@@ -99,10 +100,16 @@ Each slice gets its own implementation plan. 4a is planned and executed first.
 
 Two authenticated channels, one trust anchor: a long-lived **offline primary**
 key with two CI-held **channel-specific signing subkeys** (S_rel for
-checksums/self-update, S_apt for apt metadata — §6.1). Everywhere a key is "the
-key", it is the **full transferable public key including both signing subkeys** —
-apt/gpgv and go-crypto verify a *subkey's* signature and need that subkey's public
-packet + its primary binding signature in the keyring; a primary-only export fails.
+checksums/self-update, S_apt for apt metadata — §6.1). **Channel separation is
+enforced on the verify side: two trimmed public keyrings, and no verifier holds
+both subkeys.** `mathion-pubkey.asc` (primary + **S_rel only**) is embedded in
+install.sh and the 4b binary to verify `checksums.txt`; `mathion-apt-keyring.asc`
+(primary + **S_apt only**) is dearmored to the apt keyring so `signed-by` enforces
+S_apt. Each keyring still carries its own subkey's public packet + primary binding
+signature (apt/gpgv and go-crypto verify a *subkey's* signature and need that
+binding; a primary-only export fails) — but neither carries the other channel's
+subkey, so a compromise of the unattended S_apt cannot forge the curl|sh channel,
+and a leaked S_rel cannot forge apt metadata.
 
 ```
                          ┌── release (goreleaser, tag cli-vX.Y.Z) ─┐
@@ -131,19 +138,20 @@ packet + its primary binding signature in the keyring; a primary-only export fai
 | Path | Change | Responsibility |
 |------|--------|----------------|
 | `LICENSE` | create | repo-root Apache-2.0 (M1) |
-| `cli/.goreleaser.yaml` | modify | `nfpms:` (`.deb` incl. keyring/man/copyright/changelog; explicit version stripping `cli-v`; `maintainer`/`description`/`homepage`); `signs:` with **`artifacts: checksum`**, exact subkey, `${artifact}.asc`, `--armor`, batch/loopback, `stdin` passphrase |
-| `deploy/keys/mathion-pubkey.asc` | create | **canonical** full public key (primary + signing subkey) — source of truth |
-| `deploy/keys/README.md` | create | key generation, subkey rotation (overlap-signing), revocation/compromise procedure, fingerprint |
+| `cli/.goreleaser.yaml` | modify | `nfpms:` (`.deb` incl. keyring/man/copyright/changelog; explicit version stripping `cli-v`; `maintainer`/`description`/`homepage`); `signs:` with **`artifacts: checksum`**, exact S_rel subkey, `${artifact}.asc`, `--armor`, batch/loopback, **`stdin` + `--passphrase-fd 0`** (both required to feed a protected key) |
+| `deploy/keys/mathion-pubkey.asc` | create | trimmed **primary + S_rel only** keyring — curl|sh/self-update trust anchor (embedded in install.sh + 4b binary) |
+| `deploy/keys/mathion-apt-keyring.asc` | create | trimmed **primary + S_apt only** keyring — CI dearmors it to `/usr/share/keyrings/mathion-archive-keyring.gpg` (in the `.deb` + on Pages); apt `signed-by` enforces S_apt |
+| `deploy/keys/README.md` | create | key generation, per-channel subkey rotation (overlap-signing; install.sh pins one current S_rel scalar, dual-accept overlap is a 4b concern), revocation/compromise procedure, fingerprints |
 | `cli/internal/selfupdate/mathion-pubkey.asc` | create | in-package copy for `go:embed`; a unit test `os.ReadFile("../../../deploy/keys/mathion-pubkey.asc")` asserts byte-identity, plus a CI `cmp` guard |
-| `cli/internal/selfupdate/` | create | release LIST+filter, download, `armor.Decode` + OpenPGP verify (`CheckDetachedSignatureAndHash`, SHA-256+, signer pinned to S_rel), semver forward-gate, `dpkg -S` channel detect, `x/sys/unix` `openat`/`renameat` TOCTOU-safe staged swap. Seams: HTTP base URL, download URL, dpkg exec func-var, swap **target path as a parameter** |
+| `cli/internal/selfupdate/` | create | release LIST+filter, download, `armor.Decode` + OpenPGP verify (**`VerifyDetachedSignatureAndHash`** so the issuer fingerprint is pinned to the S_rel **subkey**, not the parent entity — §6.3/§9.3; SHA-256+), semver forward-gate, `dpkg -S` channel detect, `x/sys/unix` `openat`/`renameat` TOCTOU-safe staged swap. Seams: HTTP base URL, download URL, dpkg exec func-var, swap **target path as a parameter** |
 | `cli/cmd/self_update.go` (+ `_test.go`) | create | command wiring; `requireRoot()` only before the curl-channel mutation |
 | `cli/cmd/version.go` | modify | dual-install warning **before** the not-installed/unreadable early returns; stat + `exec.LookPath` behind func-var seams for hermetic tests |
 | `cli/cmd/root.go` | modify | register `newSelfUpdateCmd` |
-| `deploy/install.sh` | modify | verify `checksums.txt.asc` against the **literally-embedded** pubkey via `--status-fd` (GOODSIG + expected fpr, reject EXP/REVKEYSIG), exactly-one checksum line, before sha256; align latest-tag resolution with self-update |
+| `deploy/install.sh` | modify | verify `checksums.txt.asc` against the **literally-embedded** primary+S_rel pubkey via `--status-fd` (GOODSIG + `VALIDSIG` **first** field == S_rel subkey `EXPECTED_SIGNING_FPR` + last field == primary; reject EXP/REVKEYSIG + wrong-channel S_apt), exactly-one checksum line, before sha256; align latest-tag resolution with self-update |
 | `deploy/man/mathion.1` | create | man page; packaged pre-gzipped (`gzip -9n`) as `mathion.1.gz` |
-| `deploy/apt/` | create | `apt-ftparchive` config (`Tree{}`, `DoByHash`) + repo build/publish + `Valid-Until` computation; shared by publish + resign |
-| `.github/workflows/release-cli.yml` | modify | `release` env for secrets; `upload-artifact` debs; `apt-publish` job (download-artifact, **verify**, generate, two-checkout push, `contents: write`, concurrency) |
-| `.github/workflows/apt-resign.yml` | create | scheduled **regenerate**-then-re-sign in a **separate unattended** env |
+| `deploy/apt/` | create | `apt-ftparchive` config (`Tree{}`, `DoByHash`); `build.sh` (publish: copy new debs, index, sign) + `Valid-Until` computation; **`resign.sh`** (dates-only Release refresh — verify+extract the signed `InRelease` payload, bump `Date`/`Valid-Until`, re-sign; never re-reads the pool → laundering-proof) + `resign_test.sh` |
+| `.github/workflows/release-cli.yml` | modify | `release` env for secrets; `upload-artifact` debs; `apt-publish` job (download-artifact, **verify**, `build.sh` generate, two-checkout push, **`contents: read`** — gh-pages push uses `PAGES_DEPLOY_TOKEN`, concurrency, rebase/retry) |
+| `.github/workflows/apt-resign.yml` | create | scheduled **dates-only** re-sign (`resign.sh`, no pool re-index, no apt-utils) in a **separate unattended** env |
 | `README.md` | modify | apt install (package-managed keyring), fingerprint, self-update usage, PATH-precedence note |
 
 ---
@@ -290,9 +298,10 @@ deb/
 Build with **`apt-ftparchive generate <config>`** (NOT standalone `packages`,
 which mixes arches and emits no by-hash) over the git-tracked `pool/`:
 
-1. Copy new release `.deb`s into `pool/main/m/mathion/` — **guarded**: when the
-   input dir already *is* the pool (the resign case), skip the copy (GNU `cp` of a
-   file onto itself aborts).
+1. `build.sh` (publish path) copies new release `.deb`s into `pool/main/m/mathion/`.
+   The input dir (the download-artifact dir) is always distinct from the pool, so no
+   self-copy case arises. (The scheduled refresh does **not** use `build.sh` — see
+   Freshness below — so it never re-reads the pool.)
 2. `generate` config with a `Tree { … Architectures "amd64 arm64"; Sections
    "main"; }` block (filters each `binary-<arch>/Packages` to that arch) and
    `APT::FTPArchive::DoByHash "true"` (creates the `by-hash/SHA256/` files;
@@ -309,18 +318,34 @@ which mixes arches and emits no by-hash) over the git-tracked `pool/`:
    --clearsign -o InRelease Release` and `gpg … -abs -o Release.gpg Release`.
 5. Publish to `gh-pages` (§11.3).
 
-**Freshness:** `Valid-Until` bounds replay/freeze. Because it expires, a scheduled
-job (§11.4) **regenerates** `Release` (fresh `Date`/`Valid-Until` over the
-unchanged committed `pool/`) then re-signs — re-clearsigning the *existing* bytes
-would preserve the stale dates and refresh nothing.
+**Freshness (dates-only resign):** `Valid-Until` bounds replay/freeze. Because it
+expires, a scheduled job (§11.4) runs `resign.sh`, which **verifies the existing
+S_apt-signed `InRelease` and extracts its authenticated payload** (`gpg --decrypt`
+of the clearsigned file — it emits only the signed bytes and exits non-zero on a bad
+signature), replaces **only** `Date`/`Valid-Until`, and re-signs. Every hash block
+(the `pool/` commitment) is preserved verbatim. It does **not** run `apt-ftparchive`
+or re-read `pool/` at all — so it needs no `apt-utils`, and it structurally cannot
+introduce new content. (Re-clearsigning the raw file unchanged would preserve stale
+dates and refresh nothing; regenerating over the pool would re-read possibly-tampered
+bytes — dates-only avoids both.)
 
-**Anti-laundering:** both the publish (§11.3) and resign (§11.4) jobs **verify the
-existing `InRelease` with S_apt before mutating**, and refuse to re-sign a repo
-whose current metadata does not verify — so a tampered `gh-pages` state cannot be
-laundered into a freshly-signed `Release`. (This does not defend against a malicious
-`main`-branch workflow change, which scheduled jobs execute as latest-default-branch
-code — that residual needs a dedicated repo or an external/HSM signer, out of scope
-for this slice.)
+**Anti-laundering:**
+- **Scheduled resign (§11.4) — laundering-proof by construction.** Because `resign.sh`
+  re-signs only the *already-authenticated* Release payload with fresh dates and never
+  re-reads/re-indexes `pool/`, the genuinely-unattended job cannot launder tampered
+  pool/Packages state into a signed `Release`; a broken/missing `InRelease` fails
+  closed (no-op on cold start, refuse on bad signature).
+- **Publish (§11.3) — verify-before-index + scoped residual.** The tag-triggered job
+  verifies each **new** `.deb` against the S_rel-signed `checksums.txt` before indexing
+  and refuses to publish over an existing `InRelease` that fails S_apt. It does **not**
+  re-verify every *accumulated* pool `.deb` against the signed `Packages` before
+  `apt-ftparchive` re-indexes, so a pool `.deb` tampered in place (old valid `InRelease`
+  left over the old `Packages`) could be re-indexed and signed. Scoped residual:
+  tampering the `gh-pages` pool requires the `PAGES_DEPLOY_TOKEN`, a per-repo PAT that
+  also grants `main` write — i.e. the attacker could subvert the pipeline directly.
+- Neither defends against a malicious `main`-branch workflow change, which scheduled
+  jobs execute as latest-default-branch code — that residual needs a dedicated repo or
+  an external/HSM signer, out of scope for this slice (§1.1).
 
 ### 7.3 User-facing install (package-managed keyring)
 Cold-start bootstrap (TOFU) installs the key to the package-managed path so later
@@ -525,9 +550,12 @@ No path is ever deleted automatically.
   `checksums.txt.asc` with the full acceptance rule (GOODSIG, `VALIDSIG` first field
   == S_rel, reject EXP/REV, exactly-one-line) and each `.deb`'s sha256 against its
   single checksum line **before** indexing/signing (never sign what wasn't verified).
-- **Anti-laundering:** if an `InRelease` already exists on `gh-pages`, verify it with
-  S_apt and **refuse** if it fails, before mutating. Dearmor the published keyring
-  deterministically from `mathion-apt-keyring.asc` (never a per-job export).
+- **Anti-laundering (partial, scoped — §7.2):** if an `InRelease` already exists on
+  `gh-pages`, verify it with S_apt and **refuse** if it fails, before mutating. This
+  does **not** re-verify each accumulated pool `.deb` against the signed `Packages`
+  before re-indexing; that residual is scoped to `PAGES_DEPLOY_TOKEN` == repo write
+  (out of scope, §1.1). Dearmor the published keyring deterministically from
+  `mathion-apt-keyring.asc` (never a per-job export).
 - Sign the `Release` with **S_apt**.
 - **Two checkouts** (avoids the "tag's `deploy/apt` script is absent on gh-pages"
   problem): tag tree into the default path, `gh-pages` into `./pages`; run the
@@ -550,12 +578,14 @@ No path is ever deleted automatically.
 Periodic (well inside `Valid-Until`), unattended, `permissions: contents: read`.
 Uses the **same two-checkout layout as §11.3** (the `deploy/apt` script lives on
 `main`, not on `gh-pages`): default-branch script tree + `gh-pages` state into
-`./pages`. Installs `apt-utils`; **anti-laundering** verifies the existing
-`InRelease` with S_apt before mutating and refuses if it fails; then **regenerates**
-`Release` (fresh `Date`/`Valid-Until` over the committed `pool/` — `build.sh`'s
-self-copy is **guarded** since input == pool dir), re-signs `InRelease`+`Release.gpg`
-with **S_apt**, and triggers a Pages rebuild (§11.3) — same concurrency group as
-`apt-publish`. No-ops gracefully if `dists/stable/Release` doesn't exist yet.
+`./pages`. Runs **`resign.sh` (dates-only)** — verify + extract the S_apt-signed
+`InRelease` payload, bump only `Date`/`Valid-Until`, re-sign `InRelease`+`Release.gpg`
+with **S_apt** — so it **never re-reads or re-indexes `pool/`** and needs **no
+`apt-utils`/`apt-ftparchive`**. This makes the genuinely-unattended job
+**laundering-proof by construction** (§7.2): the decrypt-verify *is* the
+anti-laundering gate (fail-closed on a bad `InRelease`), and it no-ops gracefully on
+cold start (no `InRelease` yet). Triggers a Pages rebuild (§11.3) via
+`PAGES_DEPLOY_TOKEN`; same concurrency group as `apt-publish`; push with rebase/retry.
 
 ### 11.5 PRs & the hermetic e2e
 PRs run unit + static validation **plus** the secretless hermetic apt e2e (§12) —
@@ -573,7 +603,8 @@ with the production subkey happens only on `cli-v*` tags + the schedule.
   resolved-path query), forward-gate (skip on `latest <= current`, refuse
   downgrade, `cli-*` filter over a mixed release list, `dev` proceeds), verify
   **fail-closed** on tampered archive / tampered signature / wrong / **expired** /
-  **revoked** key (via `CheckDetachedSignatureAndHash`), exactly-one-line, and the
+  **revoked** key (via `VerifyDetachedSignatureAndHash` with the issuer pinned to the
+  S_rel subkey — §6.3/§9.3), exactly-one-line, and the
   staged swap asserting resulting mode **`0755`** and rejecting a tar with ≠1
   regular `mathion` member. Throwaway test key only. Byte-identity test:
   in-package pubkey == `deploy/keys/mathion-pubkey.asc`
@@ -623,6 +654,10 @@ guidance; and in `deploy/keys/README.md` the key generation, subkey rotation
    (S_rel subkey — install.sh pins it), and create env/repo **variables** `S_REL_FPR`
    + `S_APT_FPR`.
 2. Create an empty `gh-pages` branch; enable **GitHub Pages** (source = `gh-pages`).
+   Create a fine-grained PAT / GitHub-App token with `contents:write` on this repo and
+   store it as **`PAGES_DEPLOY_TOKEN`** in **both** environments — the gh-pages push
+   uses it, not `GITHUB_TOKEN` (a `GITHUB_TOKEN` push to `gh-pages` does not trigger a
+   Pages build), which is why both gh-pages jobs run `permissions: contents: read`.
 3. Configure the two protected environments (`release` tag-scoped, rule = branches
    AND tags with `cli-v*`; `pages-resign` main-scoped, unattended), `cli-v*` tag
    protection, and SHA-pin the release/publish/resign actions. Note: scheduled
