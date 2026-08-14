@@ -47,7 +47,7 @@ var (
 // precedes /usr/bin on the default PATH, so `apt upgrade` can update a binary
 // the shell never runs. Never deletes anything.
 func maybeWarnDualInstall(w io.Writer) {
-	if !(binExists(aptBinPath) && binExists(curlBinPath)) {
+	if w == nil || !(binExists(aptBinPath) && binExists(curlBinPath)) {
 		return
 	}
 	active := curlBinPath + " (PATH precedence)"
