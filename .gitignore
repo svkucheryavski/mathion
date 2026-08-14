@@ -17,3 +17,9 @@ node_modules/
 .DS_Store
 .claude/
 .superpowers/
+
+# Generated deb-packaging inputs (gzipped assets + dearmored keyring; real ones built in CI)
+deploy/keys/mathion-archive-keyring.gpg
+deploy/man/mathion.1.gz
+deploy/deb/changelog.Debian.gz
+deploy/deb/THIRD_PARTY_NOTICES.gz
