@@ -981,12 +981,15 @@ cases:** (1) a VALID InRelease is refreshed with the pool hash commitment byte-i
 (so resign provably never re-reads/re-indexes the pool); (2) content-tamper → refused
 (gpg non-zero exit path); (3) **expired**- and (4) **revoked**-key `InRelease` → refused
 (gpg's exit code is **0** for those, so the gate must parse `--status-fd`); (5)
-**wrong-signer exercising the fpr pin** — the trusted keyring holds BOTH signers and the
-`InRelease` carries a real `GOODSIG` by the non-allowlisted one, so the rejection proves
-the `VALIDSIG` allowlist pin (not a missing-pubkey path); (6) cold-start no-op; and (7)
-**rotation overlap** — an outgoing-signed `InRelease` under an allowlist of
-`"outgoing incoming"` is accepted and re-signed, proving the documented S_apt cutover
-(§6.1) is possible. The allowlist arg is what makes (5) and (7) meaningful.
+**wrong-signer exercising the fpr pin** — the combined keyring holds BOTH signers and a
+`goodsig_under` helper confirms (in a clean home built from that keyring) the `InRelease`
+yields a real `GOODSIG` by the non-allowlisted signer, so the rejection proves the
+`VALIDSIG` allowlist pin, not a missing-pubkey path; (6) cold-start no-op; and (7)
+**rotation cutover** — **one primary with two sign subkeys** (outgoing+incoming): an
+outgoing-signed `InRelease` is re-signed with the **incoming** subkey under an allowlist
+of `"outgoing incoming"`, and the result's `VALIDSIG` is asserted to be the incoming fpr
+— proving the actual documented S_apt cutover (accept outgoing, sign incoming — §6.1),
+not merely overlap acceptance. The allowlist arg is what makes (5) and (7) meaningful.
 
 ```sh
 #!/bin/sh
@@ -1028,6 +1031,13 @@ SHA256:
 R
   GNUPGHOME="$_kh" gpg ${_ft:+--faked-system-time "$_ft"} --batch --pinentry-mode loopback --local-user "${_sub}!" --digest-algo SHA256 --clearsign -o "$_d/InRelease" "$_d/Release" 2>/dev/null
 }
+# goodsig_under <keyring.asc> <InRelease> -> 0 iff the file yields a GOODSIG in a CLEAN home
+# built from <keyring.asc> (proves the sig is good under THAT keyring, not a foreign home)
+goodsig_under() {
+  _kr="$1"; _f="$2"; _h="$(mktemp -d)"; chmod 700 "$_h"
+  GNUPGHOME="$_h" gpg --batch --import "$_kr" >/dev/null 2>&1
+  GNUPGHOME="$_h" gpg --batch --status-fd 1 --verify "$_f" 2>/dev/null | grep -q '^\[GNUPG:\] GOODSIG'
+}
 
 # 1) VALID: resign succeeds; the pool hash commitment is byte-identical (no pool re-read)
 mkkey ""; KH="$MK_HOME"; PR="$MK_PRIMARY"; SUB="$MK_SUB"
@@ -1060,20 +1070,25 @@ mkkey ""; AKH="$MK_HOME"; APR="$MK_PRIMARY"; ASUB="$MK_SUB"     # allowed signer
 mkkey ""; OKH="$MK_HOME"; OPR="$MK_PRIMARY"; OSUB="$MK_SUB"     # other (non-allowed) signer
 BKR="$(mktemp).asc"; { GNUPGHOME="$AKH" gpg --batch --export --armor "$APR"; GNUPGHOME="$OKH" gpg --batch --export --armor "$OPR"; } > "$BKR"
 mkrepo "$OKH" "$OSUB" ""; WROOT="$MK_ROOT"                      # signed by the OTHER key
-GNUPGHOME="$OKH" gpg --batch --verify "$WROOT/deb/dists/stable/InRelease" >/dev/null 2>&1 || { echo "FAIL: setup — other-signed InRelease should verify under its own key"; exit 1; }
+goodsig_under "$BKR" "$WROOT/deb/dists/stable/InRelease" || { echo "FAIL: setup — other-signed InRelease should GOODSIG under the combined keyring"; exit 1; }
 if GNUPGHOME="$OKH" sh "$DIR/resign.sh" "$WROOT" "$OSUB" "$BKR" "$ASUB" 2>/dev/null; then echo "FAIL: resigned an InRelease signed by a NON-allowlisted key"; exit 1; fi
 # 6) cold start (no InRelease) -> graceful no-op
 COLD="$(mktemp -d)"; mkdir -p "$COLD/deb/dists/stable"
 GNUPGHOME="$KH" sh "$DIR/resign.sh" "$COLD" "$SUB" "$KR" || { echo "FAIL: cold start did not no-op"; exit 1; }
-# 7) ROTATION OVERLAP: InRelease signed by OUTGOING; trusted keyring carries BOTH
-#    outgoing+incoming; allowlist = "outgoing incoming"; resign must ACCEPT the still-
-#    outgoing-signed InRelease and re-sign it (proves the cutover is possible — §6.1).
-mkkey ""; OGH="$MK_HOME"; OGPR="$MK_PRIMARY"; OGSUB="$MK_SUB"   # outgoing
-mkkey ""; NGH="$MK_HOME"; NGPR="$MK_PRIMARY"; NGSUB="$MK_SUB"   # incoming
-OVKR="$(mktemp).asc"; { GNUPGHOME="$OGH" gpg --batch --export --armor "$OGPR"; GNUPGHOME="$NGH" gpg --batch --export --armor "$NGPR"; } > "$OVKR"
-mkrepo "$OGH" "$OGSUB" ""; OVROOT="$MK_ROOT"                    # signed by OUTGOING
-GNUPGHOME="$OGH" sh "$DIR/resign.sh" "$OVROOT" "$OGSUB" "$OVKR" "$OGSUB $NGSUB" || { echo "FAIL: overlap resign (outgoing-signed, allowlist=out+in) refused"; exit 1; }
-GNUPGHOME="$OGH" gpg --batch --verify "$OVROOT/deb/dists/stable/InRelease" >/dev/null 2>&1 || { echo "FAIL: overlap re-signed InRelease does not verify"; exit 1; }
+# 7) ROTATION CUTOVER: ONE primary with TWO sign subkeys (outgoing+incoming). InRelease
+#    signed by OUTGOING; resign SIGNS with INCOMING while the allowlist accepts BOTH ->
+#    the re-signed InRelease must be INCOMING-signed. Proves the actual §6.1 cutover
+#    (accept outgoing, re-sign incoming), not merely overlap acceptance; models the
+#    outgoing+incoming subkeys under one primary as production does.
+mkkey ""; CKH="$MK_HOME"; CPR="$MK_PRIMARY"; OGSUB="$MK_SUB"    # primary + outgoing subkey
+GNUPGHOME="$CKH" gpg --batch --pinentry-mode loopback --passphrase '' --quick-add-key "$CPR" ed25519 sign 0d >/dev/null 2>&1
+NGSUB="$(GNUPGHOME="$CKH" gpg --with-colons --fingerprint "$CPR" | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{f=$10;s=0} END{print f}')"   # incoming = LAST sub
+[ "$NGSUB" != "$OGSUB" ] || { echo "FAIL: setup — incoming subkey fpr equals outgoing"; exit 1; }
+CKR="$(mktemp).asc"; GNUPGHOME="$CKH" gpg --batch --export --armor "$CPR" > "$CKR"   # keyring = primary + both subs
+mkrepo "$CKH" "$OGSUB" ""; CROOT="$MK_ROOT"                     # InRelease signed by OUTGOING
+GNUPGHOME="$CKH" sh "$DIR/resign.sh" "$CROOT" "$NGSUB" "$CKR" "$OGSUB $NGSUB" || { echo "FAIL: cutover resign refused"; exit 1; }
+cutst="$(GNUPGHOME="$CKH" gpg --batch --status-fd 1 --verify "$CROOT/deb/dists/stable/InRelease" 2>/dev/null)"
+printf '%s\n' "$cutst" | grep -q "^\[GNUPG:\] VALIDSIG $NGSUB " || { echo "FAIL: cutover did not re-sign with the INCOMING subkey"; exit 1; }
 echo "resign_test PASSED"
 ```
 
@@ -1125,6 +1140,10 @@ printf '%s\n' "$st" | grep -q '^\[GNUPG:\] GOODSIG' \
 if printf '%s\n' "$st" | grep -Eq '^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG|EXPSIG|ERRSIG|BADSIG)'; then
   echo "verify-inrelease: expired/revoked/bad S_apt signature" >&2; exit 1; fi
 vsfpr="$(printf '%s\n' "$st" | awk '/^\[GNUPG:\] VALIDSIG /{print $3; exit}')"
+# reject an EMPTY VALIDSIG fpr explicitly — otherwise a malformed allowlist with adjacent
+# spaces (e.g. "A  B") could match the empty value in the case below. (GOODSIG above already
+# implies a VALIDSIG in practice, so this is defense-in-depth on the STATED policy.)
+[ -n "$vsfpr" ] || { echo "verify-inrelease: no VALIDSIG fingerprint in status output" >&2; exit 1; }
 case " $FPRS " in
   *" $vsfpr "*) : ;;
   *) echo "verify-inrelease: not signed by an allowed S_apt subkey ($vsfpr)" >&2; exit 1 ;;
@@ -1176,7 +1195,7 @@ echo "apt Release re-signed (fresh Date/Valid-Until, pool commitments preserved)
 - [ ] **Step 9: Run the resign test to verify it passes**
 
 Run: `sh deploy/apt/resign_test.sh`
-Expected: `resign_test PASSED` (valid / tampered / expired / revoked / wrong-signer-via-pin / cold-start / rotation-overlap).
+Expected: `resign_test PASSED` (valid / tampered / expired / revoked / wrong-signer-via-pin / cold-start / rotation-cutover).
 
 - [ ] **Step 10: shellcheck**
 
@@ -1187,7 +1206,7 @@ Expected: clean.
 
 ```bash
 git add deploy/apt/apt-ftparchive.conf deploy/apt/build.sh deploy/apt/e2e_test.sh deploy/apt/verify-inrelease.sh deploy/apt/resign.sh deploy/apt/resign_test.sh
-git commit -m "$(printf 'feat(cli): signed apt repo builder + hermetic apt e2e + policy-verified dates-only resign\n\napt-ftparchive generate (Tree{} per-arch, DoByHash) + a computed Valid-Until,\nsigned InRelease + Release.gpg by S_apt. e2e_test.sh builds+signs with a\nthrowaway key, serves over localhost, apt installs mathion, and rejects a\ncontent-tampered InRelease. verify-inrelease.sh is the apt-channel policy gate:\nit parses --status-fd (GOODSIG + pinned S_apt fpr + reject EXP/REV) against the\ntrusted committed keyring, because gpg exit code is 0 for an expired/revoked\nsignature. resign.sh does a policy-verified dates-only Release refresh that\nnever re-reads the pool, so the unattended job cannot launder pool state OR\nre-sign an expired/revoked/wrong-signer Release. verify-inrelease.sh pins\nVALIDSIG to a space-separated allowlist (the outgoing+incoming pair during a\nrotation overlap), requires gpg exit 0, and stages the body until accepted.\nresign_test.sh proves the pool hash commitment is byte-identical and drives all\nseven policy cases (incl. wrong-signer-via-pin + rotation-overlap cutover).\nSlice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
+git commit -m "$(printf 'feat(cli): signed apt repo builder + hermetic apt e2e + policy-verified dates-only resign\n\napt-ftparchive generate (Tree{} per-arch, DoByHash) + a computed Valid-Until,\nsigned InRelease + Release.gpg by S_apt. e2e_test.sh builds+signs with a\nthrowaway key, serves over localhost, apt installs mathion, and rejects a\ncontent-tampered InRelease. verify-inrelease.sh is the apt-channel policy gate:\nit parses --status-fd (gpg exit 0 + GOODSIG + a VALIDSIG fpr in the allowed S_apt\nset + reject EXP/REV) against the trusted committed keyring, because gpg exit\ncode alone is 0 for an expired/revoked signature. resign.sh does a policy-verified dates-only Release refresh that\nnever re-reads the pool, so the unattended job cannot launder pool state OR\nre-sign an expired/revoked/wrong-signer Release. verify-inrelease.sh pins\nVALIDSIG to a space-separated allowlist (the outgoing+incoming pair during a\nrotation overlap), requires gpg exit 0, and stages the body until accepted.\nresign_test.sh proves the pool hash commitment is byte-identical and drives all\nseven policy cases (incl. wrong-signer-via-pin + rotation cutover).\nSlice 4a.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>')"
 ```
 
 ---
@@ -1615,3 +1634,7 @@ git commit -m "$(printf 'docs: apt install instructions + PATH-precedence guidan
 - **IMPORTANT (folded):** `verify-inrelease.sh` discarded gpg's exit code (`… || true`) and wrote `--output` **before** policy acceptance. FIX: capture the exit code and require **rc == 0** *in addition to* the status policy (a non-zero exit fails closed even with a stray `GOODSIG`; exit-0-alone stays insufficient per round-3 → necessary-AND-sufficient, not a regression), and **stage** the extracted body, copying it to `<out-body>` only after full acceptance. Probes confirm a tampered/garbage `InRelease` is refused at the rc gate and leaves `<out-body>` unwritten.
 - **MINOR (folded):** (1) `resign_test` case 5 now exercises the **fpr pin** (keyring holds BOTH signers, `InRelease` carries a real `GOODSIG` by the non-allowlisted one → rejected at the allowlist, not at "no GOODSIG"); (2) prereq-1 export verification rewritten to a **named** throwaway homedir with a runnable one-`ssb` assert, and the stale "Task 5" cross-ref corrected to "Task 7 Step 1(a)"; (3) spec §6.2 `signs.stdin:` → `stdin:` under the `signs` entry, and Task 2's commit message now lists the **expired** case.
 - **Verified SOUND by codex (unchanged):** status rejection/pinning for a single active fingerprint, clean trusted-keyring boundary, all 3-arg `resign.sh` call sites + arg order, dates-only hash-block preservation, isolation `awk` extraction + placement, `S_REL_FPR`/`S_APT_FPR` prereqs, `!`-scoped export semantics, passphrase fd-0 path, no-pool-reread design, accumulated-pool residual scope, amd64 toolchain, scalar `EXPECTED_SIGNING_FPR`, T6 renumbering + git-add lists.
+
+**Review round 5 (post-round-4-fold re-review, 2026-08-14):** codex (high) re-reviewed the round-4 fold and returned **implementation-ready** — **0 CRITICAL, 0 IMPORTANT**, 4 MINOR (test-fidelity + a stated-policy edge + doc drift). All four folded, the two test rewrites re-validated against real gpg 2.5 (7-case `resign_test` extracted verbatim from the plan still passes, shellcheck-clean):
+- **MINOR (folded):** (1) `verify-inrelease.sh` now explicitly rejects an **empty `VALIDSIG` fpr** (`[ -n "$vsfpr" ] || exit 1`) so a malformed allowlist with adjacent spaces can't match the empty value — defense-in-depth on the stated policy (GOODSIG already implies a VALIDSIG in practice). (2) `resign_test` **case 7 is now the actual cutover** — one primary with two sign subkeys, re-sign an outgoing-signed `InRelease` with the **incoming** subkey under allowlist `"out in"`, and assert the result's `VALIDSIG` == incoming (was: overlap acceptance re-signing with outgoing, two separate primaries). (3) `resign_test` **case 5's sanity check** now imports the combined keyring into a **clean home** and greps `--status-fd` for `GOODSIG` (via a `goodsig_under` helper), genuinely proving the pin-rejection is the allowlist and not a missing-pubkey path (was: an ordinary verify in the signer's own home). (4) spec §7.2 doc drift — the scheduled invocation now shows `[<verify-allowlist-fprs>]` and "allowed S_apt fingerprint(s)", matching §11.4/Task 6.
+- **Verified SOUND by codex:** allowlist bounded by the clean S_apt-only trusted keyring + exact space-delimited matching (rejects partial fprs, no word-splitting); `VALIDSIG` field-3 is the signing fpr incl. for subkeys; rc==0 is an added necessary gate that does **not** reintroduce the round-3 hole (expired/revoked exit-0 still rejected by status parsing); staged output published only after acceptance + `$vh` trap-cleaned; the 4-step rotation wiring (outgoing signs during overlap → cutover flips signing to incoming while both accepted → steady-state falls back to incoming alone); unset Actions vars are empty/falsy so `S_APT_VERIFY_FPRS || S_APT_FPR` falls back correctly; all `resign.sh` arg order + `${4:-$2}` steady-state default; no regression in isolation assertions, dates-only, fd-0 passphrase, accumulated-pool scope, amd64 toolchain, scalar `EXPECTED_SIGNING_FPR`, numbering, git-add lists. **Verdict: implementation-ready.**

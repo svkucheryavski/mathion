@@ -345,8 +345,9 @@ which mixes arches and emits no by-hash) over the git-tracked `pool/`:
 5. Publish to `gh-pages` (§11.3).
 
 **Freshness (dates-only resign):** `Valid-Until` bounds replay/freeze. Because it
-expires, a scheduled job (§11.4) runs `resign.sh <repo-root> <S_apt-fpr>
-<trusted-apt-keyring.asc>`, which **verifies the existing S_apt-signed `InRelease`
+expires, a scheduled job (§11.4) runs `resign.sh <repo-root> <signing-S_apt-fpr>
+<trusted-apt-keyring.asc> [<verify-allowlist-fprs>]`, which **verifies the existing
+S_apt-signed `InRelease`
 and extracts its authenticated payload** via the shared `verify-inrelease.sh` gate,
 replaces **only** `Date`/`Valid-Until`, and re-signs. The gate does **not** trust
 gpg's exit code: `gpg --decrypt`/`--verify` **return 0 on an expired (`EXPKEYSIG`) or
@@ -369,7 +370,8 @@ re-read possibly-tampered bytes — dates-only avoids both.)
   re-signs only the *already-authenticated* Release payload with fresh dates and never
   re-reads/re-indexes `pool/`, the genuinely-unattended job cannot launder tampered
   pool/Packages state into a signed `Release`. The `verify-inrelease.sh` status-fd
-  policy gate (GOODSIG + pinned S_apt fpr + reject EXP/REV) fails closed on a
+  policy gate (gpg exit 0 + GOODSIG + `VALIDSIG` fpr among the allowed S_apt
+  fingerprint(s) + reject EXP/REV) fails closed on a
   broken/expired/revoked/wrong-signer `InRelease`, and no-ops on cold start — so the
   job can only extend the validity window of a genuinely S_apt-authenticated Release.
 - **Publish (§11.3) — verify-before-index + scoped residual.** The tag-triggered job
