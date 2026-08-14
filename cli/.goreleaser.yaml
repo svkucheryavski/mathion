@@ -63,5 +63,26 @@ snapshot:
 checksum:
   name_template: "checksums.txt"
 
+signs:
+  - id: checksums
+    artifacts: checksum
+    signature: "${artifact}.asc"
+    stdin: "{{ .Env.GPG_PASSPHRASE }}"
+    args:
+      - "--batch"
+      - "--pinentry-mode"
+      - "loopback"
+      - "--passphrase-fd"
+      - "0"
+      - "--armor"
+      - "--digest-algo"
+      - "SHA256"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
 release:
   disable: true   # goreleaser must NOT create the GitHub release; gh does (workflow)
