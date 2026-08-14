@@ -1,0 +1,27 @@
+.TH MATHION 1 "2026-08-13" "mathion" "Mathion CLI Manual"
+.SH NAME
+mathion \- self-host and manage a Mathion deployment
+.SH SYNOPSIS
+.B mathion
+[\fIcommand\fR] [\fIflags\fR]
+.SH DESCRIPTION
+.B mathion
+installs, updates, backs up, and operates a self-hosted Mathion stack
+(FastAPI + PostgreSQL + Svelte) via Docker Compose.
+.SH COMMANDS
+.TP
+.B install
+Install and start a Mathion deployment.
+.TP
+.B start\fR, \fBstop\fR, \fBstatus\fR, \fBlogs
+Operate the running stack.
+.TP
+.B backup\fR, \fBrestore\fR, \fBupdate
+Back up, restore, and update the deployment.
+.TP
+.B superuser\fR, \fBpin\fR, \fBversion\fR, \fBuninstall
+Manage the superuser, pin the image, print versions, remove the deployment.
+.SH SEE ALSO
+Project documentation: https://github.com/svkucheryavski/mathion
+.SH AUTHOR
+Sergey Kucheryavskiy

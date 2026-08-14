@@ -1,0 +1,5 @@
+mathion (0.2.0) stable; urgency=medium
+
+  * Initial apt release: signed .deb + apt repository (Phase 9-D Slice 4a).
+
+ -- Sergey Kucheryavskiy <svkucheryavski@gmail.com>  Thu, 13 Aug 2026 00:00:00 +0000
