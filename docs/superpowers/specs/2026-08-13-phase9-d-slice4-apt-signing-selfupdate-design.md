@@ -149,7 +149,7 @@ and a leaked S_rel cannot forge apt metadata.
 | `cli/cmd/root.go` | modify | register `newSelfUpdateCmd` |
 | `deploy/install.sh` | modify | verify `checksums.txt.asc` against the **literally-embedded** primary+S_rel pubkey via `--status-fd` (GOODSIG + `VALIDSIG` **first** field == S_rel subkey `EXPECTED_SIGNING_FPR` + last field == primary; reject EXP/REVKEYSIG + wrong-channel S_apt), exactly-one checksum line, before sha256; align latest-tag resolution with self-update |
 | `deploy/man/mathion.1` | create | man page; packaged pre-gzipped (`gzip -9n`) as `mathion.1.gz` |
-| `deploy/apt/` | create | `apt-ftparchive` config (`Tree{}`, `DoByHash`); `build.sh` (publish: copy new debs, index, sign) + `Valid-Until` computation; **`verify-inrelease.sh`** (shared status-fd S_apt policy gate — GOODSIG + pinned fpr + reject EXP/REV, in a clean keyring; gpg exit code alone is 0 on expired/revoked); **`resign.sh`** (dates-only Release refresh — `verify-inrelease.sh` extracts the signed `InRelease` payload, bump `Date`/`Valid-Until`, re-sign; never re-reads the pool → laundering-proof) + `resign_test.sh` |
+| `deploy/apt/` | create | `apt-ftparchive` config (`Tree{}`, `DoByHash`); `build.sh` (publish: copy new debs, index, sign) + `Valid-Until` computation; **`verify-inrelease.sh`** (shared status-fd S_apt policy gate — require gpg exit 0 AND GOODSIG AND VALIDSIG fpr in a space-separated **allowlist** (outgoing+incoming during a rotation overlap) AND reject EXP/REV, in a clean keyring; gpg exit code alone is 0 on expired/revoked; stages the body until accepted); **`resign.sh`** (dates-only Release refresh — `verify-inrelease.sh` extracts the signed `InRelease` payload, bump `Date`/`Valid-Until`, re-sign; never re-reads the pool → laundering-proof) + `resign_test.sh` |
 | `.github/workflows/release-cli.yml` | modify | `release` env for secrets; `upload-artifact` debs; `apt-publish` job (download-artifact, **verify**, `build.sh` generate, two-checkout push, **`contents: read`** — gh-pages push uses `PAGES_DEPLOY_TOKEN`, concurrency, rebase/retry) |
 | `.github/workflows/apt-resign.yml` | create | scheduled **dates-only** re-sign (`resign.sh`, no pool re-index, no apt-utils) in a **separate unattended** env |
 | `README.md` | modify | apt install (package-managed keyring), fingerprint, self-update usage, PATH-precedence note |
@@ -231,7 +231,15 @@ and a leaked S_rel cannot forge apt metadata.
     `/usr/share/keyrings/mathion-archive-keyring.gpg`; `sources.list` `signed-by`
     points there). A rotation ships in the next `.deb` release, so `apt upgrade`
     refreshes the keyring with the new subkey — no manual re-add. (Steady-state
-    only; cold-start bootstrap still installs the key manually — §7.3.)
+    only; cold-start bootstrap still installs the key manually — §7.3.) **Publish/resign
+    verification is a bounded fingerprint allowlist, NOT a single pin:** during the
+    overlap the maintainer sets the repo variable `S_APT_VERIFY_FPRS` = "outgoing
+    incoming" so `verify-inrelease.sh` accepts the still-outgoing-signed `InRelease`
+    while `S_APT_FPR` keeps *signing* with the outgoing subkey; cutover then flips
+    `S_APT_FPR`/secret to the incoming subkey (the next publish re-signs with it), and
+    once every `Release` is incoming-signed the allowlist drops back to the single fpr.
+    A single-fingerprint pin would make the outgoing→incoming transition impossible
+    (it rejects the outgoing-signed `InRelease` before it can be re-signed).
   - **self-update:** rotation runs during an **overlap grace window** in which
     releases and repo metadata stay signed by the **outgoing** subkey (whose
     published keyring already carries the incoming subkey), so a binary embedding
@@ -253,9 +261,9 @@ and a leaked S_rel cannot forge apt metadata.
 - goreleaser `signs:` MUST set **`artifacts: checksum`** (default is `none` → a
   silent no-op producing no `.asc`), plus **S_rel**'s exact fingerprint with a
   trailing `!` (`--local-user <S_rel-fpr>!`), `${artifact}.asc`, `--armor`,
-  `--batch --pinentry-mode loopback`, and the passphrase fed on **fd 0**:
-  `signs.stdin: "{{ .Env.GPG_PASSPHRASE }}"` supplies the bytes **and**
-  `--passphrase-fd 0` MUST appear in `signs.args` to consume them — `stdin`
+  `--batch --pinentry-mode loopback`, and the passphrase fed on **fd 0**: under the
+  `signs:` entry, `stdin: "{{ .Env.GPG_PASSPHRASE }}"` supplies the bytes **and**
+  `--passphrase-fd 0` MUST appear in `args` to consume them — `stdin`
   without the flag (or `loopback` alone) reads nothing, so a **protected** key
   fails cold (verified against gpg 2.5: signing fails without `--passphrase-fd 0`,
   succeeds with it). Signs `checksums.txt` (which pins every artifact incl. the
@@ -344,8 +352,12 @@ replaces **only** `Date`/`Valid-Until`, and re-signs. The gate does **not** trus
 gpg's exit code: `gpg --decrypt`/`--verify` **return 0 on an expired (`EXPKEYSIG`) or
 revoked (`REVKEYSIG`) key** — VALIDSIG is emitted but not GOODSIG. So the gate parses
 `--status-fd` in a **clean `GNUPGHOME` populated only from the trusted committed apt
-keyring** and requires `GOODSIG` + a `VALIDSIG` pinned to the S_apt fpr + the
-**absence** of `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG`. Every hash block
+keyring** and requires gpg **exit 0** (a non-zero exit — tampered/no-pubkey/operational —
+fails closed even with a stray `GOODSIG`) AND `GOODSIG` AND a `VALIDSIG` fpr **in the
+allowed S_apt set** (a space-separated allowlist — one fpr steady-state, the
+outgoing+incoming pair during a rotation overlap so cutover is possible — §6.1) AND the
+**absence** of `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG`; the extracted body is
+**staged** and published only after acceptance. Every hash block
 (the `pool/` commitment) is preserved verbatim. `resign.sh` does **not** run
 `apt-ftparchive` or re-read `pool/` at all — so it needs no `apt-utils`, and it
 structurally cannot introduce new content. (Re-clearsigning the raw file unchanged
@@ -584,8 +596,11 @@ No path is ever deleted automatically.
   == the pinned `S_APT_FPR` — §6.1) so a leaky export can't arm the S_rel channel here.
 - **Anti-laundering (partial, scoped — §7.2):** if an `InRelease` already exists on
   `gh-pages`, verify it with the shared **`verify-inrelease.sh`** S_apt status-fd
-  policy (GOODSIG + pinned S_apt fpr + reject EXP/REV — a bare `gpg --verify` exit code
-  is 0 on an expired/revoked signature) and **refuse** if it fails, before mutating.
+  policy (gpg exit 0 + GOODSIG + `VALIDSIG` fpr in the `S_APT_VERIFY_FPRS` allowlist +
+  reject EXP/REV — a bare `gpg --verify` exit code is 0 on an expired/revoked signature)
+  and **refuse** if it fails, before mutating. The allowlist accepts the outgoing-signed
+  prior `InRelease` at a rotation cutover; `build.sh` still signs the new `Release` with
+  the single `S_APT_FPR`.
   This does **not** re-verify each accumulated pool `.deb` against the signed
   `Packages` before re-indexing; that residual is scoped to `PAGES_DEPLOY_TOKEN` ==
   repo write (out of scope, §1.1). Dearmor the published keyring deterministically from
@@ -614,15 +629,18 @@ Uses the **same two-checkout layout as §11.3** (the `deploy/apt` script lives o
 `main`, not on `gh-pages`): default-branch script tree + `gh-pages` state into
 `./pages`. After importing S_apt it **asserts channel isolation** (exactly one secret
 subkey, fpr == the pinned `S_APT_FPR` — §6.1), then runs **`resign.sh <repo-root>
-<S_apt-fpr> <trusted-apt-keyring.asc>` (dates-only)** — `verify-inrelease.sh` extracts
-the S_apt-authenticated `InRelease` payload, bump only `Date`/`Valid-Until`, re-sign
-`InRelease`+`Release.gpg` with **S_apt** — so it **never re-reads or re-indexes
-`pool/`** and needs **no `apt-utils`/`apt-ftparchive`**. This makes the
-genuinely-unattended job **laundering-proof by construction** (§7.2): the
-`verify-inrelease.sh` status-fd policy gate (GOODSIG + pinned S_apt fpr + reject
-EXP/REV — **not** a bare gpg exit code, which is 0 on an expired/revoked signature)
-*is* the anti-laundering gate (fail-closed on a bad/expired/revoked/wrong-signer
-`InRelease`), and it no-ops gracefully on cold start (no `InRelease` yet). Triggers a
+<signing-S_apt-fpr> <trusted-apt-keyring.asc> <verify-allowlist-fprs>` (dates-only)** —
+`verify-inrelease.sh` extracts the S_apt-authenticated `InRelease` payload, bump only
+`Date`/`Valid-Until`, re-sign `InRelease`+`Release.gpg` with the single **S_apt** signing
+fpr — so it **never re-reads or re-indexes `pool/`** and needs **no
+`apt-utils`/`apt-ftparchive`**. This makes the genuinely-unattended job
+**laundering-proof by construction** (§7.2): the `verify-inrelease.sh` status-fd policy
+gate (gpg exit 0 + GOODSIG + `VALIDSIG` fpr in the `S_APT_VERIFY_FPRS` allowlist +
+reject EXP/REV — **not** a bare gpg exit code, which is 0 on an expired/revoked
+signature) *is* the anti-laundering gate (fail-closed on a bad/expired/revoked/
+wrong-signer `InRelease`), and it no-ops gracefully on cold start (no `InRelease` yet).
+The allowlist accepts the outgoing-signed `InRelease` during a rotation overlap while
+the job keeps signing with the outgoing fpr (§6.1). Triggers a
 Pages rebuild (§11.3) via `PAGES_DEPLOY_TOKEN`; same concurrency group as
 `apt-publish`; push with rebase/retry.
 
@@ -653,10 +671,15 @@ with the production subkey happens only on `cli-v*` tags + the schedule.
   **wrong-channel** (S_apt-signed `checksums.txt`) rejection, `gpg`-absent abort,
   **expired**- and **revoked**-key rejection (status-fd), and the greatest-stable
   resolver skipping a prerelease/lower tag.
-- **`deploy/apt/resign_test.sh`:** the dates-only resign over a throwaway-key repo —
-  valid refresh (Valid-Until advances, pool hash block byte-identical), plus
-  `verify-inrelease.sh` fail-closed on tampered / **expired** / **revoked** /
-  **wrong-signer** `InRelease`, and cold-start no-op.
+- **`deploy/apt/resign_test.sh`:** the dates-only resign over a throwaway-key repo,
+  seven cases — valid refresh (Valid-Until advances, pool hash block byte-identical);
+  `verify-inrelease.sh` fail-closed on tampered (non-zero gpg exit) / **expired** /
+  **revoked**; **wrong-signer exercising the fpr pin** (keyring holds both signers, the
+  `InRelease` carries a real `GOODSIG` by the non-allowlisted one → rejected at the
+  `VALIDSIG` allowlist, not at "no GOODSIG"); cold-start no-op; and **rotation overlap**
+  (outgoing-signed `InRelease` + allowlist "outgoing incoming" → accepted and re-signed,
+  proving the §6.1 cutover). Focused probes also assert a rejected verify leaves
+  `<out-body>` unwritten (staged output).
 - **Package structure:** assert the keyring ships as ordinary data and is **absent
   from `DEBIAN/conffiles`**; `dpkg-deb -f mathion_*.deb Version` == `0.2.0`; a first
   install cleanly overwrites an admin-placed
@@ -703,7 +726,10 @@ revocation/compromise procedure.
    `mathion-apt-keyring.asc` = primary + S_apt (CI dearmors it to the apt keyring in
    the `.deb` + on Pages). Record `EXPECTED_PRIMARY_FPR`, `EXPECTED_SIGNING_FPR`
    (S_rel subkey — install.sh pins it), and create env/repo **variables** `S_REL_FPR`
-   + `S_APT_FPR`.
+   + `S_APT_FPR`. Leave `S_APT_VERIFY_FPRS` **unset** in steady state (publish/resign
+   fall back to `S_APT_FPR`); during an S_apt rotation overlap set it to
+   `"<outgoing-fpr> <incoming-fpr>"` so the outgoing-signed `InRelease` verifies at
+   cutover (§6.1).
 2. Create an empty `gh-pages` branch; enable **GitHub Pages** (source = `gh-pages`).
    Create a fine-grained PAT / GitHub-App token with `contents:write` on this repo and
    store it as **`PAGES_DEPLOY_TOKEN`** in **both** environments — the gh-pages push
