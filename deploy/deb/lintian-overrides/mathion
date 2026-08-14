@@ -1,2 +1,5 @@
 # mathion is a statically-linked Go binary by design (CGO_ENABLED=0).
 mathion: statically-linked-binary [usr/bin/mathion]
+# Third-party (non-Debian) package: the Bugs field intentionally points at the
+# upstream GitHub issue tracker, not Debian's BTS.
+mathion: bugs-field-does-not-refer-to-debian-infrastructure

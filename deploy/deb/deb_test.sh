@@ -15,15 +15,18 @@ deb="$(ls mathion_*_amd64.deb 2>/dev/null | head -1)"
 [ -n "$deb" ] || { echo "FAIL: no amd64 .deb built"; exit 1; }
 # version must be 0.2.0 (cli-v stripped)
 v="$(dpkg-deb -f "$deb" Version)"; [ "$v" = "0.2.0" ] || { echo "FAIL: deb Version=$v want 0.2.0"; exit 1; }
-# binary at /usr/bin, keyring shipped, man+copyright present
-dpkg-deb -c "$deb" | grep -q ' ./usr/bin/mathion$' || { echo "FAIL: /usr/bin/mathion missing"; exit 1; }
-dpkg-deb -c "$deb" | grep -q ' ./usr/share/keyrings/mathion-archive-keyring.gpg$' || { echo "FAIL: keyring missing"; exit 1; }
-dpkg-deb -c "$deb" | grep -q ' ./usr/share/man/man1/mathion.1.gz$' || { echo "FAIL: man page missing"; exit 1; }
-dpkg-deb -c "$deb" | grep -q ' ./usr/share/doc/mathion/copyright$' || { echo "FAIL: copyright missing"; exit 1; }
-# keyring must NOT be a conffile
-if dpkg-deb -e "$deb" ctrl 2>/dev/null && [ -f ctrl/conffiles ] && grep -q mathion-archive-keyring ctrl/conffiles; then
+# capture the file listing once so grep -q doesn't SIGPIPE dpkg-deb's tar on each check
+listing="$(dpkg-deb -c "$deb")"
+printf '%s\n' "$listing" | grep -q ' ./usr/bin/mathion$' || { echo "FAIL: /usr/bin/mathion missing"; exit 1; }
+printf '%s\n' "$listing" | grep -q ' ./usr/share/keyrings/mathion-archive-keyring.gpg$' || { echo "FAIL: keyring missing"; exit 1; }
+printf '%s\n' "$listing" | grep -q ' ./usr/share/man/man1/mathion.1.gz$' || { echo "FAIL: man page missing"; exit 1; }
+printf '%s\n' "$listing" | grep -q ' ./usr/share/doc/mathion/copyright$' || { echo "FAIL: copyright missing"; exit 1; }
+# keyring must NOT be a conffile. Extraction is a REQUIRED step: under set -e a
+# dpkg-deb -e failure aborts (fail-closed) instead of skipping the check.
+dpkg-deb -e "$deb" ctrl
+if [ -f ctrl/conffiles ] && grep -q mathion-archive-keyring ctrl/conffiles; then
   echo "FAIL: keyring is a conffile"; exit 1; fi
+rm -rf ctrl
 # Recommends must NOT pull docker (Suggests or none only)
 dpkg-deb -f "$deb" Recommends | grep -qi docker && { echo "FAIL: docker in Recommends"; exit 1; } || true
-rm -rf ctrl
 echo "deb_test PASSED"
