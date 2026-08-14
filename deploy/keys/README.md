@@ -12,7 +12,7 @@ key prereq replaces them:
 | File | Contents | Consumed by |
 | --- | --- | --- |
 | `mathion-pubkey.asc` | primary **+ `S_rel` only** | embedded in `deploy/install.sh` and compiled into the 4b self-update binary; verifies `checksums.txt` |
-| `mathion-apt-keyring.asc` | primary **+ `S_apt` only** | CI dearmors it to `/usr/share/keyrings/mathion-archive-keyring.gpg`; `signed-by=` enforces `S_apt` on the apt repo |
+| `mathion-apt-keyring.asc` | primary **+ `S_apt` only** | CI dearmors it to the published `mathion-archive-keyring.gpg`; the apt setup / `.deb` installs that keyring to `/usr/share/keyrings/` on the client, where `signed-by=` enforces `S_apt` on the apt repo |
 
 **Channel separation is the whole point:** the binary-download channel
 (`S_rel`) and the apt channel (`S_apt`) are signed by *different* subkeys of
@@ -84,9 +84,12 @@ both exist and the re-import check above has passed.
 
 ## 2. Export the two trimmed PUBLIC keyrings (channel separation)
 
-Each shipped public keyring must contain the primary **and exactly one**
-signing subkey — never both. Use per-subkey export syntax (`<fpr>!`) so only
-the named subkey is included.
+In the **steady state**, each shipped public keyring must contain the primary
+**and exactly one** signing subkey. "Exactly one" is the steady-state
+invariant; the single documented exception is a transient two-`S_apt`-subkey
+`mathion-apt-keyring.asc` during an apt rotation grace window (see "During an
+S_apt rotation grace window" below and §5). Use per-subkey export syntax
+(`<fpr>!`) so only the named subkey is included.
 
 ```bash
 # mathion-pubkey.asc  = primary + S_rel  (install.sh + 4b binary)
@@ -115,6 +118,37 @@ check_one_sub() {  # $1 = keyring file, $2 = expected signing-subkey fpr
 check_one_sub mathion-pubkey.asc      "<S_rel-fpr>"
 check_one_sub mathion-apt-keyring.asc "<S_apt-fpr>"
 ```
+
+`mathion-pubkey.asc` (the `S_rel` channel) is **never** in overlap — `install.sh`
+is fetched fresh, so it is always primary + exactly one subkey and is always
+validated by `check_one_sub`. The two-subkey exception below applies to the apt
+keyring **only**, transiently, during a documented §5 grace window.
+
+### During an S_apt rotation grace window (see §5)
+
+For the keyring-first `S_apt` rotation in §5, `mathion-apt-keyring.asc` must
+**temporarily** carry the primary + **both** the outgoing and incoming `S_apt`
+subkeys. Export and validate it against exactly that two-subkey set (not
+`check_one_sub`, which would correctly FAIL a two-subkey keyring):
+
+```bash
+# OVERLAP export — S_apt rotation grace window ONLY: primary + BOTH S_apt subkeys.
+gpg --armor --export "<primary-fpr>!" "<outgoing-S_apt-fpr>!" "<incoming-S_apt-fpr>!" \
+    > mathion-apt-keyring.asc
+
+# OVERLAP validation: must be primary + EXACTLY the outgoing and incoming S_apt subkeys.
+h="$(mktemp -d)"; gpg --homedir "$h" --import mathion-apt-keyring.asc >/dev/null 2>&1
+got="$(gpg --homedir "$h" --with-colons --list-keys \
+        | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; s=0}' | sort | tr '\n' ' ')"
+rm -rf "$h"
+want="$(printf '%s\n' "<outgoing-S_apt-fpr>" "<incoming-S_apt-fpr>" | sort | tr '\n' ' ')"
+[ "$got" = "$want" ] || { echo "FAIL: overlap keyring subs [$got] != [$want]"; exit 1; }
+echo "OK: apt overlap keyring = primary + {outgoing, incoming} S_apt"
+```
+
+Once the grace window closes and a later `.deb` prunes the outgoing subkey, the
+keyring returns to primary + exactly one `S_apt` and is validated again by
+`check_one_sub`.
 
 Commit the two replaced `.asc` files. These are the only key files that ever
 enter the repository.
@@ -207,15 +241,18 @@ Subkeys expire; rotate each channel independently, from the offline primary:
 
 ### `S_apt` rotation is keyring-first, signer-second
 
-The apt public keyring is **cached on installed clients** — the `.deb` dearmors
-it to `/usr/share/keyrings/mathion-archive-keyring.gpg` and it is **not**
-re-fetched on every `apt update`. A hard `S_apt` cutover therefore strands every
-client still holding the outgoing keyring: their `apt update` fails signature
+The apt public keyring is **cached on installed clients** — the apt setup /
+`.deb` installs it as `/usr/share/keyrings/mathion-archive-keyring.gpg` (CI
+produced it by dearmoring `mathion-apt-keyring.asc`) and it is **not** re-fetched
+on every `apt update`. A hard `S_apt` cutover therefore strands every client
+still holding the outgoing keyring: their `apt update` fails signature
 verification. Rotate `S_apt` **keyring-first, signer-second**:
 
-1. Ship a `.deb` whose keyring carries **both** the outgoing **and** incoming
-   `S_apt` public subkeys, while the repo `Release`/`InRelease` is **still
-   signed by the OUTGOING `S_apt`**. Installed clients upgrade and cache both.
+1. Ship a `.deb` whose `mathion-apt-keyring.asc` carries **both** the outgoing
+   **and** incoming `S_apt` public subkeys (produced + validated by the overlap
+   export in §2, "During an S_apt rotation grace window"), while the repo
+   `Release`/`InRelease` is **still signed by the OUTGOING `S_apt`**. Installed
+   clients upgrade and cache both.
 2. After a grace window long enough for clients to have upgraded, cut the CI
    signer over to the **incoming** `S_apt` (`resign.sh` signs with the incoming
    subkey). During the overlap the apt-Release verify allowlist
@@ -240,11 +277,30 @@ verification. Rotate `S_apt` **keyring-first, signer-second**:
 
 ## 6. Compromise / revocation
 
-If a **signing subkey** is compromised: from the offline primary, revoke that
-subkey, generate a fresh replacement subkey for the affected channel, and ship
-the updated channel-specific keyring plus re-signed artifacts exactly as in the
-rotation procedure. Only that channel is affected; the other subkey and the
-primary are untouched.
+A compromised **signing subkey** is an emergency, **not** a planned rotation: the
+graceful §5 overlap deliberately keeps the outgoing key signing during the
+grace window, which you can no longer trust once it is compromised. Handle it by
+channel, and **never sign anything with the compromised key**:
+
+- **`S_rel` compromise:** from the offline primary, revoke `S_rel`, issue a new
+  `S_rel`, then update `EXPECTED_SIGNING_FPR` and re-sign the latest
+  `checksums.txt` with the **new** subkey together, and ship a fresh
+  `mathion-pubkey.asc`. Because `install.sh` is fetched fresh, clients get the
+  new pin + key on their next install — **no overlap is needed**, and the
+  compromised key is simply revoked, never used to sign the transition.
+
+- **`S_apt` compromise (EMERGENCY — do NOT use the graceful §5 overlap):** the
+  keyring-first/signer-second overlap relies on the outgoing key still signing,
+  which is exactly what you cannot trust here. Instead: revoke the compromised
+  `S_apt` immediately; issue a new `S_apt`; sign the repo `Release`/`InRelease`
+  with the **new `S_apt` ONLY**; and narrow `S_APT_VERIFY_FPRS` to the new fpr —
+  the compromised fpr **must NOT** be in the allowlist. Clients still holding
+  only the compromised keyring will **FAIL `apt update`** — that is the **safe**
+  failure. They must obtain the new keyring **out of band**: re-run the apt
+  setup / reinstall over the `S_rel`-verified release channel (`curl | sh`
+  install), or apply a signed out-of-band keyring announcement. Accept that
+  un-upgraded apt clients are broken until they re-key out of band; never sign
+  the transition with the compromised key.
 
 If the **primary** is compromised: publish the offline revocation certificate
 (`primary.rev`), stand up a new primary + both subkeys, and re-issue both
