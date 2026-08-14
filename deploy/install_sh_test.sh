@@ -113,10 +113,9 @@ if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: re
 if ( PATH=""; verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt" ) 2>/dev/null; then
   echo "FAIL: verify_sig did not fail closed without gpg"; exit 1; fi
 
-# ---- greatest-stable resolver (mirrors install.sh) ----
-resolve_latest() { printf '%s\n' "$1" | grep -E '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1; }
+# ---- greatest-stable resolver (drives install.sh's sourced resolve_latest_stable) ----
 TAGS="$(printf '%s\n' cli-v0.2.0 cli-v0.10.0 cli-v0.2.0-rc1 cli-v0.9.0 v0.2.0)"
-got="$(resolve_latest "$TAGS")"
+got="$(resolve_latest_stable "$TAGS")"
 [ "$got" = "cli-v0.10.0" ] || { echo "FAIL: resolver picked '$got', want cli-v0.10.0"; exit 1; }
 echo "install_sh authenticity+resolver PASSED"
 

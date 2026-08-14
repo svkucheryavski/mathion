@@ -38,7 +38,10 @@ verify_sig() {
   if ! GNUPGHOME="$_vh" gpg --batch --no-tty --import "${_vh}/key.asc" >/dev/null 2>&1; then
     rm -rf "$_vh"; echo "failed to import the embedded signing key" >&2; return 1
   fi
-  _st="$(GNUPGHOME="$_vh" gpg --batch --no-tty --status-fd 1 --verify "$1" "$2" 2>/dev/null)"
+  # status-fd is the gate; ignore gpg's exit status (GOODSIG presence + the pins
+  # decide). `|| true` keeps set -e from aborting here on a bad sig, so cleanup
+  # + the policy greps always run even if a caller invokes verify_sig bare.
+  _st="$(GNUPGHOME="$_vh" gpg --batch --no-tty --status-fd 1 --verify "$1" "$2" 2>/dev/null || true)"
   rm -rf "$_vh"
   printf '%s\n' "$_st" | grep -q '^\[GNUPG:\] GOODSIG' || { echo "signature verification FAILED (no GOODSIG)" >&2; return 1; }
   if printf '%s\n' "$_st" | grep -Eq '^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG|EXPSIG|ERRSIG|BADSIG)'; then
@@ -47,6 +50,13 @@ verify_sig() {
   printf '%s\n' "$_st" | grep -q "^\[GNUPG:\] VALIDSIG ${EXPECTED_SIGNING_FPR} " || { echo "signature is not from the expected Mathion release key" >&2; return 1; }
   printf '%s\n' "$_st" | grep -q "^\[GNUPG:\] VALIDSIG .* ${EXPECTED_PRIMARY_FPR}\$" || { echo "signature primary key mismatch" >&2; return 1; }
   return 0
+}
+
+# resolve_latest_stable <newline-separated tag names> -> greatest STABLE cli-vX.Y.Z.
+# Skips prereleases by NAME convention (-rc/-beta suffixes fail the strict pattern);
+# release-cli.yml guarantees clean cli-vX.Y.Z tags are never published --prerelease.
+resolve_latest_stable() {
+  printf '%s\n' "$1" | grep -E '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
 }
 
 main() {
@@ -74,10 +84,20 @@ main() {
       { [ -z "$body" ] || [ "$body" = "[]" ]; } && break
       all="${all}
 $(printf '%s' "$body" | grep -oE '"tag_name": *"cli-v[^"]*"' | sed -E 's/.*"(cli-v[^"]*)".*/\1/')"
+      # short page (<100 release objects) => no more pages; a full page 10 means
+      # the greatest release may lie beyond the cap — fail rather than mislead.
+      count="$(printf '%s' "$body" | grep -c '"tag_name":' || true)"
+      [ "$count" -lt 100 ] && break
+      if [ "$page" -eq 10 ]; then
+        echo "release list exceeds the 1000-release pagination cap; pass an explicit cli-vX.Y.Z version" >&2
+        exit 1
+      fi
       page=$((page + 1))
     done
-    # greatest STABLE cli-vX.Y.Z (skip prereleases); sort -V exists on Debian/Ubuntu
-    TAG="$(printf '%s\n' "$all" | grep -E '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+    # greatest STABLE cli-vX.Y.Z; prereleases are skipped by name convention
+    # (-rc/-beta fail the strict pattern) + the release-cli.yml no-prerelease
+    # guarantee, NOT by GitHub's prerelease flag (Task 8 workflow guard).
+    TAG="$(resolve_latest_stable "$all")"
   fi
   [ -n "$TAG" ] || { echo "no stable cli-v* release found" >&2; exit 1; }
 
