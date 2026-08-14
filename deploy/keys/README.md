@@ -29,7 +29,9 @@ primary key is **certification-only** (`SC` is avoided — use cert-only `C`);
 it signs nothing but the subkeys and stays offline forever.
 
 ```bash
-export GNUPGHOME="$(mktemp -d)"        # throwaway keyring for generation
+export GNUPGHOME="$(mktemp -d)"        # generation keyring — disposable ONLY after
+                                       # primary-secret.asc + primary.rev are backed
+                                       # up offline (see the backup step below)
 chmod 700 "$GNUPGHOME"
 
 # Primary: certification-only, no expiry on the primary itself.
@@ -58,6 +60,26 @@ Generate and **store offline** a revocation certificate for the primary:
 gpg --output primary.rev --gen-revoke "$PRIMARY_FPR"   # keep offline, never commit
 ```
 
+Now back up the **full primary secret key** to encrypted, air-gapped media
+**before** the generation homedir is discarded. This is the root of trust:
+without the primary secret you can never rotate a subkey or revoke anything
+again, so losing it is unrecoverable. Verify you can re-import the backup into a
+fresh `--homedir`, and only THEN wipe `$GNUPGHOME`:
+
+```bash
+# Back up the FULL primary secret key to ENCRYPTED, air-gapped offline media
+# BEFORE discarding the generation homedir. NEVER commit it.
+gpg --armor --export-secret-keys "$PRIMARY_FPR" > primary-secret.asc   # OFFLINE + ENCRYPTED
+# Confirm the backup re-imports cleanly, then the homedir is safe to wipe:
+h="$(mktemp -d)"; gpg --homedir "$h" --import primary-secret.asc && \
+  gpg --homedir "$h" --list-secret-keys "$PRIMARY_FPR" >/dev/null && echo "primary backup OK"
+rm -rf "$h"
+```
+
+Store `primary-secret.asc` and `primary.rev` together on encrypted, air-gapped
+media — never in the repository. The generation homedir may be wiped only once
+both exist and the re-import check above has passed.
+
 ---
 
 ## 2. Export the two trimmed PUBLIC keyrings (channel separation)
@@ -75,14 +97,23 @@ gpg --armor --export "<primary-fpr>!" "<S_apt-fpr>!" > mathion-apt-keyring.asc
 ```
 
 Verify each keyring imports to the primary + **exactly one** signing subkey
-before committing it (a stray `sub` from the wrong channel breaks separation):
+**and that the one subkey is the CORRECT channel's fingerprint** before
+committing it — a count-only check would pass even if a maintainer fpr typo
+shipped the wrong channel's subkey (a stray `sub` from the wrong channel breaks
+separation):
 
 ```bash
-for f in mathion-pubkey.asc mathion-apt-keyring.asc; do
-  h="$(mktemp -d)"; gpg --homedir "$h" --import "$f" >/dev/null 2>&1
-  echo "== $f =="; gpg --homedir "$h" --list-keys --with-colons | grep -c '^sub:'  # must print 1
+check_one_sub() {  # $1 = keyring file, $2 = expected signing-subkey fpr
+  h="$(mktemp -d)"; gpg --homedir "$h" --import "$1" >/dev/null 2>&1
+  subs="$(gpg --homedir "$h" --with-colons --list-keys \
+          | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; s=0}')"
   rm -rf "$h"
-done
+  [ "$(printf '%s\n' "$subs" | grep -c .)" = 1 ] || { echo "FAIL $1: not exactly one subkey"; return 1; }
+  [ "$subs" = "$2" ] || { echo "FAIL $1: subkey $subs != expected $2"; return 1; }
+  echo "OK $1: primary + $2 only"
+}
+check_one_sub mathion-pubkey.asc      "<S_rel-fpr>"
+check_one_sub mathion-apt-keyring.asc "<S_apt-fpr>"
 ```
 
 Commit the two replaced `.asc` files. These are the only key files that ever
@@ -158,7 +189,8 @@ received. Never rely solely on the copy shipped in the repo.
 
 Subkeys expire; rotate each channel independently, from the offline primary:
 
-1. Boot the offline machine, restore the primary keyring.
+1. Boot the offline machine and restore the primary keyring by importing the
+   offline `primary-secret.asc` backup (Section 1) into a fresh `--homedir`.
 2. Issue a **new** subkey for the affected channel
    (`gpg --quick-add-key "<primary-fpr>" ed25519 sign 2y`) during an **overlap
    grace window** in which the outgoing subkey is still valid and still signs.
@@ -173,11 +205,36 @@ Subkeys expire; rotate each channel independently, from the offline primary:
 5. Rotate the CI secret (`GPG_S_REL_PRIVATE` / `GPG_S_APT_PRIVATE`) to the new
    subkey's private export (Section 3), re-running the one-`ssb` assertion.
 
-**Dual-accept overlap** — accepting signatures from both the outgoing and the
-incoming subkey during the grace window — is a concern **only** for the 4b
-self-update binary, which has its verification key **compiled in** and cannot be
-re-fetched. `install.sh` needs no dual-accept because it is always fetched fresh
-and therefore only ever pins the single current `S_rel`.
+### `S_apt` rotation is keyring-first, signer-second
+
+The apt public keyring is **cached on installed clients** — the `.deb` dearmors
+it to `/usr/share/keyrings/mathion-archive-keyring.gpg` and it is **not**
+re-fetched on every `apt update`. A hard `S_apt` cutover therefore strands every
+client still holding the outgoing keyring: their `apt update` fails signature
+verification. Rotate `S_apt` **keyring-first, signer-second**:
+
+1. Ship a `.deb` whose keyring carries **both** the outgoing **and** incoming
+   `S_apt` public subkeys, while the repo `Release`/`InRelease` is **still
+   signed by the OUTGOING `S_apt`**. Installed clients upgrade and cache both.
+2. After a grace window long enough for clients to have upgraded, cut the CI
+   signer over to the **incoming** `S_apt` (`resign.sh` signs with the incoming
+   subkey). During the overlap the apt-Release verify allowlist
+   `S_APT_VERIFY_FPRS` (`verify-inrelease.sh`, Tasks 6–8) carries
+   `"<outgoing-S_apt-fpr> <incoming-S_apt-fpr>"`; after the grace window it
+   narrows back to the single incoming fpr.
+3. A later `.deb` prunes the outgoing subkey from the shipped keyring.
+
+### Which channels need a dual-accept overlap
+
+- **`S_apt` (apt channel): YES** — its keyring **caches on clients** (much like
+  the 4b compiled-in key), so it needs the keyring-first overlap above; both
+  subkeys must verify during the grace window.
+- **4b self-update binary: YES** — its verification key is **compiled in** and
+  cannot be re-fetched, so it must accept both the outgoing and incoming subkey
+  during the overlap.
+- **`S_rel` via `install.sh`: NO** — `install.sh` is always **fetched fresh** and
+  only ever pins the single **current** `S_rel` scalar, so it needs no
+  dual-accept. This is the only overlap-free channel.
 
 ---
 
