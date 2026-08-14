@@ -8,6 +8,8 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,12 +30,42 @@ var versionRunningProbe = probeRunningVersion
 // never hangs on a wedged or firewalled app port.
 const versionProbeTimeout = 2 * time.Second
 
+const (
+	aptBinPath  = "/usr/bin/mathion"
+	curlBinPath = "/usr/local/bin/mathion"
+)
+
+// Seams so version_test.go stays hermetic (no dependence on the test host's
+// installed binaries or PATH).
+var (
+	binExists = func(p string) bool { _, err := os.Stat(p); return err == nil }
+	lookPath  = exec.LookPath
+)
+
+// maybeWarnDualInstall emits a non-fatal warning when mathion is installed via
+// BOTH channels (apt -> /usr/bin, curl|sh -> /usr/local/bin). /usr/local/bin
+// precedes /usr/bin on the default PATH, so `apt upgrade` can update a binary
+// the shell never runs. Never deletes anything.
+func maybeWarnDualInstall(w io.Writer) {
+	if !(binExists(aptBinPath) && binExists(curlBinPath)) {
+		return
+	}
+	active := curlBinPath + " (PATH precedence)"
+	if p, err := lookPath("mathion"); err == nil {
+		active = p
+	}
+	fmt.Fprintf(w, "warning: mathion is installed via BOTH apt (%s) and curl|sh (%s).\n", aptBinPath, curlBinPath)
+	fmt.Fprintf(w, "         your shell runs: %s\n", active)
+	fmt.Fprintln(w, "         use one channel only — remove the other (see README).")
+}
+
 func newVersionCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the CLI version and the pinned/running image version",
 		RunE: func(c *cobra.Command, _ []string) error {
 			fmt.Fprintf(app.Out, "mathion %s\n", buildVersion)
+			maybeWarnDualInstall(app.Err)
 			m, err := versionEnvReader(app.CfgDir)
 			switch {
 			case errors.Is(err, fs.ErrNotExist):

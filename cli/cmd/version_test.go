@@ -168,3 +168,29 @@ func TestVersionProbeRunningHTTP(t *testing.T) {
 		}
 	})
 }
+
+func TestMaybeWarnDualInstall(t *testing.T) {
+	origExists, origLook := binExists, lookPath
+	t.Cleanup(func() { binExists, lookPath = origExists, origLook })
+
+	// both channels present -> warn, naming the PATH-resolved binary
+	binExists = func(p string) bool { return p == aptBinPath || p == curlBinPath }
+	lookPath = func(string) (string, error) { return curlBinPath, nil }
+	var buf bytes.Buffer
+	maybeWarnDualInstall(&buf)
+	out := buf.String()
+	if !strings.Contains(out, aptBinPath) || !strings.Contains(out, curlBinPath) {
+		t.Fatalf("warning should name both paths; got %q", out)
+	}
+	if !strings.Contains(out, "your shell runs: "+curlBinPath) {
+		t.Fatalf("warning should name the PATH-resolved binary; got %q", out)
+	}
+
+	// only one channel -> silent
+	binExists = func(p string) bool { return p == curlBinPath }
+	buf.Reset()
+	maybeWarnDualInstall(&buf)
+	if buf.Len() != 0 {
+		t.Fatalf("no warning expected for a single install; got %q", buf.String())
+	}
+}
