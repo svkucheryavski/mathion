@@ -29,8 +29,13 @@ gpg_sign() {   # mirrors build.sh: feed the passphrase on fd 0 when set (prod), 
     gpg --batch --pinentry-mode loopback --local-user "${FPR}!" --digest-algo SHA256 "$@"
   fi
 }
-cp "$tmp/new" "$D/Release"
-rm -f "$D/InRelease" "$D/Release.gpg"
-gpg_sign --clearsign -o "$D/InRelease" "$D/Release"
-gpg_sign -abs        -o "$D/Release.gpg" "$D/Release"
+# sign the NEW dated body into temp files first; nothing in the live repo dir is
+# mutated until BOTH signatures exist, then publish via atomic same-dir rename
+# (InRelease LAST) so a transient signing failure leaves the previous valid
+# InRelease/Release intact.
+gpg_sign --clearsign -o "$tmp/InRelease"   "$tmp/new"
+gpg_sign -abs        -o "$tmp/Release.gpg" "$tmp/new"
+cp "$tmp/new"         "$D/Release.tmp"      && mv -f "$D/Release.tmp"      "$D/Release"
+cp "$tmp/Release.gpg" "$D/Release.gpg.tmp"  && mv -f "$D/Release.gpg.tmp"  "$D/Release.gpg"
+cp "$tmp/InRelease"   "$D/InRelease.tmp"    && mv -f "$D/InRelease.tmp"    "$D/InRelease"
 echo "apt Release re-signed (fresh Date/Valid-Until, pool commitments preserved) by $FPR"

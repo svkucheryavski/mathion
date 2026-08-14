@@ -4,6 +4,13 @@ set -eu
 command -v apt-ftparchive >/dev/null 2>&1 || { echo "SKIP: apt-utils not installed"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root for apt"; exit 0; }
 WORK="$(mktemp -d)"; export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+cleanup() {
+  [ -f "$WORK/pid" ] && kill "$(cat "$WORK/pid")" 2>/dev/null || true
+  apt-get remove -y mathion >/dev/null 2>&1 || true
+  rm -f /etc/apt/sources.list.d/mathion-test.list /usr/share/keyrings/mathion-test.gpg
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 cat > "$GNUPGHOME/kp" <<'P'
 %no-protection
 Key-Type: eddsa
@@ -32,10 +39,19 @@ test -d "$WORK/site/deb/dists/stable/main/binary-amd64/by-hash/SHA256" || { echo
 grep -q '^Valid-Until:' "$WORK/site/deb/dists/stable/InRelease" || { echo "FAIL: no Valid-Until in InRelease"; exit 1; }
 
 # serve + configure apt
-( cd "$WORK/site" && python3 -m http.server 8778 >/dev/null 2>&1 & echo $! > "$WORK/pid" )
-sleep 1
+PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+( cd "$WORK/site" && python3 -m http.server "$PORT" >/dev/null 2>&1 & echo $! > "$WORK/pid" )
+python3 - "$PORT" <<'PY'
+import socket,sys,time
+p=int(sys.argv[1])
+for _ in range(50):
+    try:
+        socket.create_connection(("127.0.0.1",p),0.1).close(); sys.exit(0)
+    except OSError: time.sleep(0.1)
+sys.exit(1)
+PY
 install -m0644 "$WORK/keyring.gpg" /usr/share/keyrings/mathion-test.gpg
-echo "deb [signed-by=/usr/share/keyrings/mathion-test.gpg] http://127.0.0.1:8778/deb stable main" \
+echo "deb [signed-by=/usr/share/keyrings/mathion-test.gpg] http://127.0.0.1:$PORT/deb stable main" \
   > /etc/apt/sources.list.d/mathion-test.list
 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
   -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
@@ -55,8 +71,4 @@ if apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.l
   echo "FAIL: apt accepted a tampered InRelease"; exit 1
 fi
 
-# cleanup
-kill "$(cat "$WORK/pid")" 2>/dev/null || true
-apt-get remove -y mathion || true
-rm -f /etc/apt/sources.list.d/mathion-test.list /usr/share/keyrings/mathion-test.gpg
 echo "apt e2e PASSED"

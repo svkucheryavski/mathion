@@ -61,12 +61,16 @@ if GNUPGHOME="$KH" sh "$DIR/resign.sh" "$ROOT" "$SUB" "$KR" 2>/dev/null; then ec
 mkkey 20200101T000000 2; EKH="$MK_HOME"; EPR="$MK_PRIMARY"; ESUB="$MK_SUB"
 EKR="$(mktemp).asc"; GNUPGHOME="$EKH" gpg --batch --export --armor "$EPR" > "$EKR"
 mkrepo "$EKH" "$ESUB" 20200101T000000; EROOT="$MK_ROOT"
+GNUPGHOME="$EKH" gpg --batch --status-fd 1 --verify "$EROOT/deb/dists/stable/InRelease" 2>/dev/null \
+  | grep -q '^\[GNUPG:\] EXPKEYSIG' || { echo "FAIL: setup — expired InRelease should report EXPKEYSIG"; exit 1; }
 if GNUPGHOME="$EKH" sh "$DIR/resign.sh" "$EROOT" "$ESUB" "$EKR" 2>/dev/null; then echo "FAIL: resigned an EXPIRED-key InRelease"; exit 1; fi
 # 4) REVOKED S_apt sig -> refuse (gpg exit 0 but REVKEYSIG)
 mkkey ""; RKH="$MK_HOME"; RPR="$MK_PRIMARY"; RSUB="$MK_SUB"
 mkrepo "$RKH" "$RSUB" ""; RROOT="$MK_ROOT"
 sed 's/^://' "$RKH/openpgp-revocs.d/$RPR.rev" | GNUPGHOME="$RKH" gpg --batch --yes --import >/dev/null 2>&1
 RKR="$(mktemp).asc"; GNUPGHOME="$RKH" gpg --batch --export --armor "$RPR" > "$RKR"
+GNUPGHOME="$RKH" gpg --batch --status-fd 1 --verify "$RROOT/deb/dists/stable/InRelease" 2>/dev/null \
+  | grep -q '^\[GNUPG:\] REVKEYSIG' || { echo "FAIL: setup — revoked InRelease should report REVKEYSIG"; exit 1; }
 if GNUPGHOME="$RKH" sh "$DIR/resign.sh" "$RROOT" "$RSUB" "$RKR" 2>/dev/null; then echo "FAIL: resigned a REVOKED-key InRelease"; exit 1; fi
 # 5) WRONG signer, exercising the FPR PIN: keyring holds BOTH signers, InRelease signed by
 #    the NON-allowlisted one, allowlist pins to the OTHER -> reject at the VALIDSIG pin.
