@@ -41,8 +41,10 @@ gpg_sign() {
     gpg --batch --pinentry-mode loopback --local-user "${FPR}!" --digest-algo SHA256 "$@"
   fi
 }
-# sign into temp files, then publish atomically (InRelease LAST) so a signing
-# failure cannot delete the last valid InRelease and leave the repo unsigned.
+# clear any stale temp sigs left by a previously-interrupted run so batch gpg
+# won't refuse to overwrite them; then sign into temp files and publish
+# atomically (InRelease LAST) so a signing failure can't leave the repo unsigned.
+rm -f dists/stable/InRelease.tmp dists/stable/Release.gpg.tmp
 gpg_sign --clearsign -o dists/stable/InRelease.tmp   dists/stable/Release
 gpg_sign -abs        -o dists/stable/Release.gpg.tmp dists/stable/Release
 mv -f dists/stable/Release.gpg.tmp dists/stable/Release.gpg

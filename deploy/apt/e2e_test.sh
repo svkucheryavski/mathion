@@ -3,7 +3,7 @@
 set -eu
 command -v apt-ftparchive >/dev/null 2>&1 || { echo "SKIP: apt-utils not installed"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root for apt"; exit 0; }
-WORK="$(mktemp -d)"; export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+WORK="$(mktemp -d)"
 cleanup() {
   [ -f "$WORK/pid" ] && kill "$(cat "$WORK/pid")" 2>/dev/null || true
   apt-get remove -y mathion >/dev/null 2>&1 || true
@@ -11,6 +11,7 @@ cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
 cat > "$GNUPGHOME/kp" <<'P'
 %no-protection
 Key-Type: eddsa
