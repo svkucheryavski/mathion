@@ -181,20 +181,29 @@ packet + its primary binding signature in the keyring; a primary-only export fai
 
 ---
 
-## 6. Signing — one key (offline primary + CI subkey), both channels
+## 6. Signing — one offline primary + two channel-specific subkeys (separation enforced)
 
 ### 6.1 Key material & lifecycle
-- **Offline primary** (Ed25519, or RSA ≥ 3072), never in CI; users' keyrings and
-  the CLI/install.sh embed the **full public key including both signing subkeys**.
+- **Offline primary** (Ed25519, or RSA ≥ 3072), never in CI. **Channel separation
+  is enforced on the verify side — no verifier holds both subkeys.** Export **two
+  trimmed public keyrings** from the one primary: `deploy/keys/mathion-pubkey.asc`
+  = **primary + S_rel** (embedded verbatim in install.sh + the self-update binary —
+  the only keys that verify `checksums.txt`), and
+  `deploy/keys/mathion-apt-keyring.asc` = **primary + S_apt** (dearmored to
+  `/usr/share/keyrings/mathion-archive-keyring.gpg`, so apt's `signed-by=<keyring>`
+  accepts **only** S_apt). Each keyring carries only its own channel's outgoing +
+  incoming subkey during a rotation overlap.
 - **Two channel-specific signing subkeys** under the one primary (each with a set
   expiry, e.g. 2 years): **S_rel** signs `checksums.txt` (curl|sh + self-update)
   and **S_apt** signs the apt `Release`. Rationale (§11.1): the always-on
   *unattended* re-sign job holds **only S_apt**, so a compromise of that weak
-  automation can forge apt metadata but **cannot** forge the root-executed
-  self-update binary — self-update pins S_rel's fingerprint and rejects an
-  S_apt-signed `checksums.txt`. Only the relevant subkey secret enters each
-  environment. Pin digest algos (`--digest-algo SHA256`+, `--cert-digest-algo
-  SHA256`+) so nothing falls back to SHA-1 on an old gpg.
+  automation can forge apt metadata but **cannot** forge the curl|sh/self-update
+  channel — self-update **and install.sh** both pin **S_rel's subkey** fingerprint
+  (VALIDSIG's first field) and reject an S_apt-signed `checksums.txt`; conversely
+  the apt keyring holds only S_apt, so apt rejects an S_rel-signed `Release`. Only
+  the relevant subkey secret enters each environment. Pin digest algos
+  (`--digest-algo SHA256`+, `--cert-digest-algo SHA256`+) so nothing falls back to
+  SHA-1 on an old gpg.
 - **Rotation is NOT free — the "no re-add" benefit is bounded.** A `signed-by`
   keyring is a one-time snapshot; verifiers holding only the *old* subkey cannot
   verify a *new* subkey's signatures. Mechanics that make rotation safe:
@@ -234,22 +243,30 @@ packet + its primary binding signature in the keyring; a primary-only export fai
   SHA-pinned import action is acceptable in lieu of hand-rolling.
 
 ### 6.3 Verification (anchors pinned only post-bootstrap — §1.1)
-- `self-update`: **`armor.Decode`** the `.asc` first (require a `PGP SIGNATURE`
-  block — goreleaser emits ASCII armor, which `CheckDetachedSignatureAndHash` will
-  **not** accept raw), then `CheckDetachedSignatureAndHash(keyring, checksums,
-  body, [SHA256,SHA384,SHA512])` against the **compile-time-embedded** pubkey; use
-  the returned signer to require it is **S_rel** (reject an S_apt-signed
-  `checksums.txt`); then require **exactly one** matching sha256 line for the
-  archive.
-- `install.sh`: verify against the **literally-embedded** pubkey (here-doc, never a
-  downloaded key) in a private `GNUPGHOME` (0700), `--batch --no-tty --status-fd 1`.
-  Accept only a `GOODSIG`/`VALIDSIG` for the **expected fingerprint** with the
-  **absence** of `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG` — a bare
-  `VALIDSIG` is emitted *alongside* `EXPKEYSIG`/`REVKEYSIG`, so it does not by
-  itself reject an expired or revoked key (nor does the exit code, which can be 0).
-  Explicit one-line count (`[ "$(grep -c …)" = 1 ]`). Fail closed if `gnupg` is
-  absent.
-- apt: verifies against `/usr/share/keyrings/mathion-archive-keyring.gpg`.
+- `self-update` (4b): **`armor.Decode`** the `.asc` first (require a `PGP SIGNATURE`
+  block — goreleaser emits ASCII armor, which the go-crypto verify will **not**
+  accept raw), then verify against the **compile-time-embedded** pubkey (primary +
+  S_rel only) over `[SHA256,SHA384,SHA512]`. **Enforcing S_rel requires the exact
+  signing subkey, not the parent entity:** `CheckDetachedSignatureAndHash` returns
+  the primary `*Entity` (both subkeys resolve to the same parent, so an entity-
+  fingerprint compare cannot reject an S_apt signature). Use
+  **`VerifyDetachedSignatureAndHash`** and require the returned signature packet's
+  **issuer fingerprint == S_rel**, or build the verifying keyring from primary +
+  S_rel only. Then require **exactly one** matching sha256 line for the archive.
+  (Since the embedded keyring is already primary + S_rel only, the keyring itself is
+  the primary enforcement; the issuer check is defense in depth.)
+- `install.sh`: verify against the **literally-embedded** pubkey (here-doc, primary +
+  S_rel, never a downloaded key) in a private `GNUPGHOME` (0700), `--batch --no-tty
+  --status-fd 1`, via a **sourceable `verify_sig` function** (the test drives the
+  real function, it is not re-implemented). Accept only a `GOODSIG` whose `VALIDSIG`
+  **first field == `EXPECTED_SIGNING_FPR`** (the S_rel subkey) **and** last field ==
+  `EXPECTED_PRIMARY_FPR`, with the **absence** of
+  `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG` — a bare `VALIDSIG` is emitted
+  *alongside* `EXPKEYSIG`/`REVKEYSIG`, so it does not by itself reject an expired or
+  revoked key (nor does the exit code, which can be 0). Explicit one-line count
+  (`[ "$(grep -c …)" = 1 ]`). Fail closed if `gnupg` is absent.
+- apt: verifies `Release` against `/usr/share/keyrings/mathion-archive-keyring.gpg`
+  (primary + S_apt only — `signed-by` thus enforces S_apt).
 - Equivalence: signing `checksums.txt` ≡ signing each artifact **iff** consumers
   require exactly one matching sha256 line — now enforced explicitly on both paths.
 
@@ -261,7 +278,7 @@ packet + its primary binding signature in the keyring; a primary-only export fai
 ```
 .nojekyll                                     (at the PUBLISHING-SOURCE / branch ROOT — NOT under deb/ — disables Jekyll)
 deb/
-  mathion-archive-keyring.gpg                 (dearmored, for the cold-start bootstrap)
+  mathion-archive-keyring.gpg                 (dearmored primary + S_apt; for the cold-start bootstrap)
   pool/main/m/mathion/mathion_<ver>_<arch>.deb   (accumulate)
   dists/stable/
     Release  InRelease  Release.gpg
@@ -273,25 +290,37 @@ deb/
 Build with **`apt-ftparchive generate <config>`** (NOT standalone `packages`,
 which mixes arches and emits no by-hash) over the git-tracked `pool/`:
 
-1. Copy new release `.deb`s into `pool/main/m/mathion/`.
+1. Copy new release `.deb`s into `pool/main/m/mathion/` — **guarded**: when the
+   input dir already *is* the pool (the resign case), skip the copy (GNU `cp` of a
+   file onto itself aborts).
 2. `generate` config with a `Tree { … Architectures "amd64 arm64"; Sections
    "main"; }` block (filters each `binary-<arch>/Packages` to that arch) and
    `APT::FTPArchive::DoByHash "true"` (creates the `by-hash/SHA256/` files;
    retain current + previous). `Filename:` paths are relative to `/deb`.
 3. `apt-ftparchive release dists/stable` (auto-emits the `MD5Sum`/`SHA256`
-   per-index sections apt requires) with explicit `Origin`, `Label`, `Suite`
-   (`stable`), `Codename` (`stable`), `Components` (`main`), `Architectures`
-   (`amd64 arm64`), `Date`, `Acquire-By-Hash: yes`, and a bounded **`Valid-Until`**
-   computed by the script (`date -R -u -d '+N days'` — apt-ftparchive won't emit it
-   reliably on its own).
-4. Sign with **S_apt** non-interactively: `gpg … --clearsign -o InRelease Release`
-   and `gpg … -abs -o Release.gpg Release`.
+   per-index sections apt requires **and a fresh `Date`**) with explicit `Origin`,
+   `Label`, `Suite` (`stable`), `Codename` (`stable`), `Components` (`main`),
+   `Architectures` (`amd64 arm64`), `Acquire-By-Hash: yes`. Then **append only** a
+   bounded **`Valid-Until`** (`date -R -u -d '+N days'`); do NOT append a second
+   `Date` (apt-ftparchive already emits one — a duplicate `Date` is malformed
+   deb822). deb822 is field-order-independent, so appending after the hash blocks is
+   safe.
+4. Sign with **S_apt** non-interactively (passphrase fed on fd 0): `gpg …
+   --clearsign -o InRelease Release` and `gpg … -abs -o Release.gpg Release`.
 5. Publish to `gh-pages` (§11.3).
 
 **Freshness:** `Valid-Until` bounds replay/freeze. Because it expires, a scheduled
 job (§11.4) **regenerates** `Release` (fresh `Date`/`Valid-Until` over the
 unchanged committed `pool/`) then re-signs — re-clearsigning the *existing* bytes
 would preserve the stale dates and refresh nothing.
+
+**Anti-laundering:** both the publish (§11.3) and resign (§11.4) jobs **verify the
+existing `InRelease` with S_apt before mutating**, and refuse to re-sign a repo
+whose current metadata does not verify — so a tampered `gh-pages` state cannot be
+laundered into a freshly-signed `Release`. (This does not defend against a malicious
+`main`-branch workflow change, which scheduled jobs execute as latest-default-branch
+code — that residual needs a dedicated repo or an external/HSM signer, out of scope
+for this slice.)
 
 ### 7.3 User-facing install (package-managed keyring)
 Cold-start bootstrap (TOFU) installs the key to the package-managed path so later
@@ -321,16 +350,21 @@ the last N minor versions, or monitor). Documented, not automated this slice.
 
 ## 8. `install.sh` authenticity upgrade
 
-Before the existing sha256 step: download `checksums.txt` + `checksums.txt.asc`;
-in a private `GNUPGHOME` (0700) import the **literally-embedded** pubkey (here-doc,
-never downloaded), `gpg --batch --no-tty --import`, then verify with
-`--status-fd 1`. Accept only a `GOODSIG`/`VALIDSIG` for the **expected
-fingerprint** with **no** `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG` (a
-bare `VALIDSIG` accompanies expired/revoked keys, and the exit code can be 0 for
-them). Require exactly one checksum line for the asset (`grep -c`). Abort if
-`gnupg` is absent. Additionally, **align install.sh's tag resolution with
-self-update's rule** — select the greatest **stable** `cli-vX.Y.Z` (skip
-prereleases), not the first API-ordered match. The "Integrity only … signing is
+**Fetch + verify the signed checksums before downloading the archive** (never pull
+an unauthenticated blob from an untrusted origin first): download `checksums.txt` +
+`checksums.txt.asc`; in a private `GNUPGHOME` (0700) import the **literally-embedded**
+pubkey (here-doc = **primary + S_rel**, never downloaded), `gpg --batch --no-tty
+--import`, verify with `--status-fd 1`. Accept only a `GOODSIG` whose `VALIDSIG`
+**first field == the S_rel subkey** (`EXPECTED_SIGNING_FPR`) **and** last field ==
+`EXPECTED_PRIMARY_FPR`, with **no** `EXPKEYSIG`/`REVKEYSIG`/`EXPSIG`/`ERRSIG`/`BADSIG`
+(a bare `VALIDSIG` accompanies expired/revoked keys, and the exit code can be 0 for
+them). The verify lives in a **sourceable `verify_sig` function** (with a test-
+overridable `mathion_embedded_key`) so the test drives the real code — good /
+tampered / wrong-channel (S_apt) / revoked / gpg-absent — not a re-implementation.
+Then download the archive and require exactly one checksum line for the asset
+(`grep -c`). Abort if `gnupg` is absent. Additionally, **align install.sh's tag
+resolution with self-update's rule** — select the greatest **stable** `cli-vX.Y.Z`
+(skip prereleases), not the first API-ordered match. The "Integrity only … signing is
 Slice 4" comment is removed.
 
 ---
@@ -391,6 +425,36 @@ New command; new `cli/internal/selfupdate` package.
 `ProtonMail/go-crypto/openpgp` (+ `openpgp/armor`), `golang.org/x/mod/semver`, and
 direct `golang.org/x/sys/unix` for the `*at` swap (M2), pinned.
 
+### 9.3 Plan-review corrections (2026-08-13) — MUST fold into the 4b plan
+Found in the 4a plan review (codex, high effort) against §9; they are 4b-scope so
+they were routed here rather than into the 4a plan:
+1. **Enforce S_rel via the signature packet, not the entity (step 6).**
+   `CheckDetachedSignatureAndHash` returns the primary `*Entity`; both subkeys share
+   it, so an entity-fingerprint compare cannot reject an S_apt signature. Use
+   **`VerifyDetachedSignatureAndHash`** and require the issuer fingerprint == S_rel,
+   or build the verifying keyring from primary + S_rel only (the embedded keyring is
+   already trimmed to that — §6.1 — so it is the primary enforcement). Add an
+   explicit "S_apt-signed checksums rejected" test.
+2. **Verify-until-verifiable, not greatest-tag-once (steps 3+6).** The §6.1 overlap
+   rotation requires self-update to pick the **greatest release it can actually
+   verify**: order eligible `cli-vX.Y.Z > current` descending and attempt
+   verification until one passes (so a K1 client crosses via the K1-signed
+   transition even when `latest` is K2-only). Document that crossing may take two
+   invocations; add K1→transition(K1, embeds K2)→latest(K2) integration coverage.
+3. **fd-relative execution + writable-ancestry refusal (steps 4+7).** Running the
+   staged binary's `version --short` by pathname re-resolves ancestors (reintroduces
+   the race step 4 closes), and a user-writable target parent lets the staged file be
+   swapped between assertion and `renameat`. Execute through an inherited fd
+   (`/proc/self/fd/…` or `execveat`), and refuse targets whose parent/ancestry is not
+   root-owned and non-group/world-writable — or restrict standalone self-update to
+   `/usr/local/bin/mathion`.
+4. **Bound downloads; fetch+verify checksums before the archive (steps 5–6).** Fetch
+   the (small) `checksums.txt` + `.asc` first, verify, then download the archive with
+   explicit size + time limits. Bound the API JSON, signature, archive, and extracted
+   binary sizes so a hostile origin cannot exhaust `/tmp`/root before verification.
+   (install.sh's 4a analogue — verify checksums before the archive — is already
+   folded into §8/Task 2.)
+
 ---
 
 ## 10. Dual-install detection & PATH precedence
@@ -439,18 +503,31 @@ No path is ever deleted automatically.
   version comment.
 
 ### 11.2 `release-cli.yml` — release job (`environment: release`)
-- Import **S_rel** (goreleaser signs `checksums.txt` with it — §6.2 runner setup).
+- Import **S_rel only** (goreleaser signs `checksums.txt` with it — §6.2 runner
+  setup; `apt-publish` re-imports S_apt in its own homedir).
+- **Prepare nfpm inputs** (gitignored/generated): gzip the man/changelog/notices and
+  `gpg --dearmor` `mathion-apt-keyring.asc` → the packaged keyring, **before**
+  goreleaser (else the tagged build aborts on missing `contents.src`).
+- **Strictly validate** the `cli-vX.Y.Z` tag and **assert** `dpkg-deb -f … Version`
+  == the stripped version after the build (nfpm's `file_name_template` uses
+  `.Version`, so the stale "no template uses .Version" comment is replaced by this
+  assertion).
 - goreleaser emits `.deb` + `checksums.txt.asc`; `gh release create` uploads
   `dist/*.tar.gz dist/*.deb dist/checksums.txt dist/checksums.txt.asc`.
 - **`upload-artifact`** the `dist/*.deb` + `checksums.txt`/`.asc` for `apt-publish`.
 
 ### 11.3 `release-cli.yml` — new `apt-publish` job (`needs: [release]`, tags only, `environment: release`)
-- `permissions: contents: write` (top-level is `read`; needed to push `gh-pages`).
+- `permissions: contents: read` (the `gh-pages` push authenticates with the deploy
+  PAT/App token, not `GITHUB_TOKEN`).
+- Install `apt-utils` (`apt-ftparchive` is not preinstalled).
 - **`download-artifact`** the same-run debs + checksums (do **not** re-download from
   Releases — that re-opens the origin-tamper window). Then **verify**
-  `checksums.txt.asc` against the pinned pubkey and each `.deb`'s sha256 against its
-  single checksum line **before** indexing/signing (never sign what wasn't
-  verified).
+  `checksums.txt.asc` with the full acceptance rule (GOODSIG, `VALIDSIG` first field
+  == S_rel, reject EXP/REV, exactly-one-line) and each `.deb`'s sha256 against its
+  single checksum line **before** indexing/signing (never sign what wasn't verified).
+- **Anti-laundering:** if an `InRelease` already exists on `gh-pages`, verify it with
+  S_apt and **refuse** if it fails, before mutating. Dearmor the published keyring
+  deterministically from `mathion-apt-keyring.asc` (never a per-job export).
 - Sign the `Release` with **S_apt**.
 - **Two checkouts** (avoids the "tag's `deploy/apt` script is absent on gh-pages"
   problem): tag tree into the default path, `gh-pages` into `./pages`; run the
@@ -470,13 +547,15 @@ No path is ever deleted automatically.
   `cancel-in-progress: false`; push with rebase/retry.
 
 ### 11.4 `apt-resign.yml` (scheduled, `environment: pages-resign`)
-Periodic (well inside `Valid-Until`), unattended. Uses the **same two-checkout
-layout as §11.3** (the `deploy/apt` script lives on `main`, not on `gh-pages`):
-default-branch script tree + `gh-pages` state into `./pages`. **Regenerates**
-`Release` (fresh `Date`/`Valid-Until` over the committed `pool/`), re-signs
-`InRelease`+`Release.gpg` with **S_apt**, and triggers a Pages rebuild (§11.3) —
-same concurrency group as `apt-publish`. No-ops gracefully if
-`dists/stable/Release` doesn't exist yet.
+Periodic (well inside `Valid-Until`), unattended, `permissions: contents: read`.
+Uses the **same two-checkout layout as §11.3** (the `deploy/apt` script lives on
+`main`, not on `gh-pages`): default-branch script tree + `gh-pages` state into
+`./pages`. Installs `apt-utils`; **anti-laundering** verifies the existing
+`InRelease` with S_apt before mutating and refuses if it fails; then **regenerates**
+`Release` (fresh `Date`/`Valid-Until` over the committed `pool/` — `build.sh`'s
+self-copy is **guarded** since input == pool dir), re-signs `InRelease`+`Release.gpg`
+with **S_apt**, and triggers a Pages rebuild (§11.3) — same concurrency group as
+`apt-publish`. No-ops gracefully if `dists/stable/Release` doesn't exist yet.
 
 ### 11.5 PRs & the hermetic e2e
 PRs run unit + static validation **plus** the secretless hermetic apt e2e (§12) —
@@ -533,16 +612,21 @@ guidance; and in `deploy/keys/README.md` the key generation, subkey rotation
 
 ## 14. Manual prerequisites (one-time, maintainer)
 
-1. Generate the offline **primary** (Ed25519 / RSA ≥ 3072) + **two signing subkeys
-   S_rel and S_apt** (with expiry) + a revocation certificate (offline). Export
-   **S_rel + S_apt** into the `release` environment and **only S_apt** into
-   `pages-resign`; commit the **full public key** (primary + both subkeys) to
-   `deploy/keys/mathion-pubkey.asc` (+ the in-package copy), and place the dearmored
-   keyring at the Pages `deb/` root for cold-start.
+1. Generate the offline **primary** (Ed25519 / RSA ≥ 3072, cert-only) + **two
+   signing subkeys S_rel and S_apt** (with expiry) + a revocation certificate
+   (offline). Put the **private** subkeys into the environments: **S_rel + S_apt**
+   in `release`, **only S_apt** in `pages-resign`. Commit **two trimmed public
+   keyrings** (channel separation — never one full key): `mathion-pubkey.asc` =
+   primary + S_rel (embedded in install.sh + the 4b binary), and
+   `mathion-apt-keyring.asc` = primary + S_apt (CI dearmors it to the apt keyring in
+   the `.deb` + on Pages). Record `EXPECTED_PRIMARY_FPR`, `EXPECTED_SIGNING_FPR`
+   (S_rel subkey — install.sh pins it), and create env/repo **variables** `S_REL_FPR`
+   + `S_APT_FPR`.
 2. Create an empty `gh-pages` branch; enable **GitHub Pages** (source = `gh-pages`).
-3. Configure the two protected environments (`release` tag-scoped;
-   `pages-resign` main-scoped, unattended), `cli-v*` tag protection, and SHA-pin the
-   release/publish/resign actions.
+3. Configure the two protected environments (`release` tag-scoped, rule = branches
+   AND tags with `cli-v*`; `pages-resign` main-scoped, unattended), `cli-v*` tag
+   protection, and SHA-pin the release/publish/resign actions. Note: scheduled
+   workflows auto-disable after 60 days of repo inactivity — monitor apt freshness.
 
 ---
 
@@ -575,10 +659,12 @@ index in `apt-publish` (§11.3), split CI environments (§11.1), hermetic apt e2
 |---------|-----------|---------------------------|
 | apt (steady state) | `Packages` sha256 | `Release`/`InRelease` signed by **S_apt** w/ `Valid-Until`, verified via package-managed `/usr/share/keyrings/mathion-archive-keyring.gpg` (subkey rotation refreshed by `apt upgrade`) |
 | apt (bootstrap) | — | **TOFU** — key added over HTTPS from Pages; verify fingerprint out-of-band (independent channel) |
-| curl\|sh install.sh (bootstrap) | sha256 vs `checksums.txt` | `GOODSIG`+fingerprint, no `EXP/REVKEYSIG` (status-fd), vs **embedded** pubkey — but the key ships **with** the script → TOFU / origin trust |
-| `mathion self-update` (steady state) | sha256 vs `checksums.txt` | `checksums.txt.asc` (armor-decoded, signer pinned to **S_rel**, non-expired/revoked) vs **compile-time-embedded** pubkey — genuinely pinned; forward-only + pre-swap version assertion. **No signed freshness bound** → an origin attacker can freeze (documented) |
+| curl\|sh install.sh (bootstrap) | sha256 vs `checksums.txt` | `GOODSIG` + **S_rel subkey** fpr (VALIDSIG first field) + primary fpr, no `EXP/REVKEYSIG` (status-fd), vs **embedded primary+S_rel** pubkey — channel-enforced (an S_apt compromise can't forge it), but the key ships **with** the script → first-install TOFU / origin trust |
+| `mathion self-update` (steady state) | sha256 vs `checksums.txt` | `checksums.txt.asc` (armor-decoded, issuer pinned to **S_rel** via `VerifyDetachedSignatureAndHash`, non-expired/revoked) vs **compile-time-embedded primary+S_rel** pubkey — genuinely pinned; forward-only + pre-swap version assertion. **No signed freshness bound** → an origin attacker can freeze (documented) |
 
 One offline primary + two rotating CI signing subkeys (**S_rel** for
-checksums/self-update, **S_apt** for apt metadata). One canonical committed public
-source of truth. Post-bootstrap anchors are pinned; the design does **not** claim
-the first-install bootstrap is cryptographically self-authenticating.
+checksums/self-update, **S_apt** for apt metadata), **channel separation enforced on
+the verify side** — each verifier embeds only its channel's subkey (install.sh/4b →
+primary+S_rel; apt → primary+S_apt). Two trimmed committed public keyrings. Post-
+bootstrap anchors are pinned; the design does **not** claim the first-install
+bootstrap is cryptographically self-authenticating.
