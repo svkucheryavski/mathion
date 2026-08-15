@@ -98,6 +98,47 @@ transit, but does not prove who built it. Signed artifacts are planned for a
 future release; until then, inspect the script and pin a known release tag
 (`sudo sh install.sh cli-v0.1.0`) if that distinction matters to you.
 
+**Install via apt (Debian/Ubuntu, alternative to `curl | sh`).** This adds
+Mathion's apt repository so `mathion` upgrades with `apt upgrade` alongside the
+rest of the system. The keyring bootstrap below is **trust-on-first-use (TOFU)**:
+the first keyring fetch is trusted exactly as received, so verify its fingerprint
+out of band (see below) before relying on it.
+
+```bash
+sudo install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://svkucheryavski.github.io/mathion/deb/mathion-archive-keyring.gpg \
+  | sudo tee /usr/share/keyrings/mathion-archive-keyring.gpg >/dev/null
+sudo chmod 0644 /usr/share/keyrings/mathion-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/mathion-archive-keyring.gpg] \
+  https://svkucheryavski.github.io/mathion/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/mathion.list
+sudo apt update && sudo apt install mathion
+```
+
+*Verify the key fingerprint (out of band).* Because the first fetch is TOFU, the
+maintainer publishes the primary key **fingerprint** so you can confirm the
+keyring you received is genuine before trusting it. Display the fingerprint of
+the keyring you just installed:
+
+```bash
+gpg --show-keys /usr/share/keyrings/mathion-archive-keyring.gpg
+```
+
+and compare it against the published fingerprint (`<primary-key-fingerprint>`).
+The **source of truth** for the published fingerprint(s) is
+[`deploy/keys/README.md`](deploy/keys/README.md) (§4, "Record the fingerprints") —
+that document is where the maintainer records the real primary fingerprint once
+the offline key exists. Only proceed if the two match.
+
+*Use one channel, not both.* apt installs the binary to `/usr/bin/mathion`, while
+the `curl | sh` installer above installs to `/usr/local/bin/mathion`. On the
+default Debian/Ubuntu `PATH`, `/usr/local/bin` comes **before** `/usr/bin`, so a
+`curl | sh` binary **shadows** the apt-managed one — you would run the
+hand-installed copy while apt silently updates a binary that never appears on
+`PATH`. Pick **one channel** and stick with it. The `.deb` guards against the
+mix: its postinst emits a warning (`… will shadow this apt package`) when it
+detects a pre-existing `/usr/local/bin/mathion`.
+
 **Stand up the deployment.** The `mathion` commands manage Docker containers, so
 run them as root — prefix each with `sudo`. Pass the deployment **domain** and
 **admin email** as flags (both are required):
