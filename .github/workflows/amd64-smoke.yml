@@ -37,7 +37,7 @@ jobs:
     env:
       IMAGE_REPO: ghcr.io/svkucheryavski/mathion
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install the mathion CLI (real amd64 archive, checksum-verified)
         env:
@@ -63,6 +63,30 @@ jobs:
               *) echo "FAIL: CLI is not a release build (got: '${first}')"; exit 1 ;;
             esac
           fi
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.24"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          version: "~> v2"
+          install-only: true
+      - name: Local .deb install + dual-install warning
+        run: |
+          set -euo pipefail
+          # goreleaser needs the same gitignored nfpm inputs the prod build creates
+          # (gz man/changelog/notices + a keyring file — a placeholder is fine here,
+          # since --skip=sign and this leg only exercises install/postinst).
+          ( cd cli && gzip -9nkf ../deploy/man/mathion.1 && gzip -9nkf ../deploy/deb/changelog.Debian \
+            && gzip -9nkf ../deploy/deb/THIRD_PARTY_NOTICES \
+            && printf placeholder > ../deploy/keys/mathion-archive-keyring.gpg \
+            && CLI_TAG=cli-v0.2.0 APP_IMAGE=v0.2.0 GORELEASER_CURRENT_TAG=v0.2.0 \
+               goreleaser release --clean --skip=publish,sign --snapshot )
+          out="$(sudo apt-get install -y ./cli/dist/mathion_0.2.0_amd64.deb 2>&1)"
+          echo "$out" | grep -q "will shadow this apt package" \
+            || { echo "FAIL: postinst dual-install warning missing"; exit 1; }
+          test -x /usr/bin/mathion
+          sudo apt-get remove -y mathion
 
       - name: Deploy app + assert amd64 running image, health, /version, superuser
         env:

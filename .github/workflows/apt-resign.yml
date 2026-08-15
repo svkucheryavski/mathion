@@ -1,0 +1,65 @@
+name: apt resign
+on:
+  schedule:
+    - cron: "0 3 */10 * *"   # every ~10 days, well inside Valid-Until (30d)
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  resign:
+    runs-on: ubuntu-latest
+    environment: pages-resign
+    permissions:
+      contents: read          # gh-pages push uses PAGES_DEPLOY_TOKEN, not GITHUB_TOKEN
+    concurrency:
+      group: mathion-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7  (default branch — deploy/apt script)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: gh-pages
+          path: pages
+          token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+      - name: Re-sign Release (dates-only, S_apt)
+        env:
+          S_APT: ${{ secrets.GPG_S_APT_PRIVATE }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          GH="$(mktemp -d)"; export GNUPGHOME="$GH"; chmod 700 "$GH"
+          echo "allow-loopback-pinentry" > "$GH/gpg-agent.conf"; gpgconf --kill gpg-agent || true
+          printf '%s' "$S_APT" | gpg --batch --import
+          # Channel-isolation assertion: this unattended job must hold ONLY the S_apt
+          # signing subkey secret — never S_rel. A leaky "export all subkeys" would put
+          # both channels' signing power in the pages-resign environment. Assert exactly
+          # one secret subkey fingerprint, equal to the pinned S_apt fpr (see prereq 1 export).
+          secsubs="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="ssb"{s=1;next} s&&$1=="fpr"{print $10;s=0}')"
+          { [ "$(printf '%s\n' "$secsubs" | grep -c .)" = 1 ] && printf '%s\n' "$secsubs" | grep -qx "${{ vars.S_APT_FPR }}"; } \
+            || { echo "GPG_S_APT_PRIVATE must contain exactly the S_apt signing subkey secret (see prereq 1 export)"; exit 1; }
+          # also assert the PRIMARY secret is an offline stub (`sec` field 15 == '#',
+          # GnuPG protect-mode 1001 = secret material NOT present) — reject a full
+          # --export-secret-keys that would arm a usable primary in this unattended env
+          # (spec §11.1). A usable primary yields field 15 '+'.
+          secprim="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="sec"{print $15}')"
+          { [ "$(printf '%s\n' "$secprim" | grep -c .)" = 1 ] && [ "$secprim" = "#" ]; } \
+            || { echo "GPG_S_APT_PRIVATE must be an --export-secret-subkeys export (offline/stub primary), never a full secret key"; exit 1; }
+          # resign.sh is DATES-ONLY: it verifies + extracts the S_apt-signed InRelease
+          # payload, bumps Date/Valid-Until, and re-signs — it NEVER re-reads or
+          # re-indexes the pool. So this unattended job cannot launder tampered pool
+          # state into a freshly-signed Release (it can only extend the validity window
+          # of an already-authenticated Release), and needs no apt-utils. resign.sh's
+          # verify-inrelease.sh gate enforces the full status-fd policy (GOODSIG +
+          # reject EXPKEYSIG/REVKEYSIG/EXPSIG/ERRSIG/BADSIG + pin VALIDSIG to the S_apt
+          # fpr) against a clean keyring — a bare `gpg --decrypt` exit-0 is NOT trusted,
+          # because gpg returns 0 on expired/revoked-key signatures. Fail-closed; it
+          # no-ops gracefully when there is no InRelease yet (cold start).
+          # SIGNS with the single S_APT_FPR; ACCEPTS the allowlist (outgoing+incoming during
+          # a rotation overlap, else the single fpr via the Actions `||` fallback) so a
+          # still-outgoing-signed InRelease verifies at cutover (§6.1).
+          sh deploy/apt/resign.sh "$PWD/pages" "${{ vars.S_APT_FPR }}" deploy/keys/mathion-apt-keyring.asc "${{ vars.S_APT_VERIFY_FPRS || vars.S_APT_FPR }}"
+      - name: Publish
+        run: |
+          cd pages
+          git config user.name "mathion-ci"; git config user.email "ci@example.invalid"
+          git add -A && git commit -m "apt: scheduled resign" || echo "no changes"
+          git push || { git fetch origin gh-pages && git rebase origin/gh-pages && git push; }

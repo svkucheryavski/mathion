@@ -17,8 +17,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version: "1.24" }
       - name: Unit
         working-directory: cli
@@ -28,7 +28,7 @@ jobs:
         run: |
           bash -n integration_test.sh
           shellcheck integration_test.sh
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: "~> v2"
           install-only: true
@@ -39,31 +39,165 @@ jobs:
     needs: [test]
     if: startsWith(github.ref, 'refs/tags/cli-v')
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version: "1.24" }
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: "~> v2"
           install-only: true
-      - name: Build (goreleaser, build-only on sanitized semver)
+      - name: Import S_rel + enable loopback
+        env:
+          S_REL: ${{ secrets.GPG_S_REL_PRIVATE }}
+        run: |
+          GNUPGHOME="$(mktemp -d)"; export GNUPGHOME; echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          chmod 700 "$GNUPGHOME"
+          echo "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"
+          gpgconf --kill gpg-agent || true
+          printf '%s' "$S_REL" | gpg --batch --import
+          # channel isolation: assert ONLY the S_rel signing subkey carries secret
+          # material. A leaky `--export-secret-subkeys` that also exported S_apt would
+          # let this env forge the apt channel, collapsing the split — fail closed.
+          secsubs="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="ssb"{s=1;next} s&&$1=="fpr"{print $10;s=0}')"
+          { [ "$(printf '%s\n' "$secsubs" | grep -c .)" = 1 ] && printf '%s\n' "$secsubs" | grep -qx "${{ vars.S_REL_FPR }}"; } \
+            || { echo "GPG_S_REL_PRIVATE must contain exactly the S_rel signing subkey secret (see prereq 1 export)"; exit 1; }
+          # also assert the PRIMARY secret is an offline stub: the `sec` record's field 15 is
+          # '#' (GnuPG protect-mode 1001 = "simple stub", secret material NOT present). A full
+          # --export-secret-keys would ship a USABLE primary alongside the correct subkey and
+          # yield field 15 '+'; refuse it so CI can never wield the primary (spec §11.1).
+          secprim="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="sec"{print $15}')"
+          { [ "$(printf '%s\n' "$secprim" | grep -c .)" = 1 ] && [ "$secprim" = "#" ]; } \
+            || { echo "GPG_S_REL_PRIVATE must be an --export-secret-subkeys export (offline/stub primary), never a full secret key"; exit 1; }
+      - name: Prepare .deb assets
+        run: |
+          gzip -9nkf deploy/man/mathion.1
+          gzip -9nkf deploy/deb/changelog.Debian
+          gzip -9nkf deploy/deb/THIRD_PARTY_NOTICES
+          # apt keyring = primary + S_apt, dearmored deterministically from the committed file
+          gpg --dearmor < deploy/keys/mathion-apt-keyring.asc > deploy/keys/mathion-archive-keyring.gpg
+      - name: Build + sign (goreleaser)
         working-directory: cli
         env:
-          CLI_TAG: ${{ github.ref_name }}          # cli-v0.1.0 -> main.version
-          APP_IMAGE: v0.2.0                          # recommended app image (hand-maintained)
+          CLI_TAG: ${{ github.ref_name }}
+          APP_IMAGE: v0.2.0
+          GPG_FINGERPRINT: ${{ vars.S_REL_FPR }}!
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          SEMVER="v${CLI_TAG#cli-v}"                 # cli-v0.1.0 -> v0.1.0
-          # skip=validate: the CLI tag is cli-v*, but goreleaser's git-state check
-          # looks up a tag literally named "$SEMVER" (e.g. v0.1.1) and requires it on
-          # HEAD — which collides with the app's own v* release tag on another commit.
-          # CI checks out the exact cli-v* tag on a clean tree, and none of our output
-          # templates use goreleaser's .Version, so the validation is safe to skip.
+          echo "$CLI_TAG" | grep -Eq '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "refusing to release a non cli-vX.Y.Z tag: $CLI_TAG" >&2; exit 1; }
+          SEMVER="v${CLI_TAG#cli-v}"                 # cli-v0.2.0 -> v0.2.0
+          # skip=validate: goreleaser's git-state check looks up a tag literally named
+          # "$SEMVER" on HEAD, which collides with the app's own v* tag. We pass
+          # GORELEASER_CURRENT_TAG explicitly and assert the stripped .Version below.
           GORELEASER_CURRENT_TAG="$SEMVER" goreleaser release --clean --skip=publish,validate
+          debs=(dist/mathion_*_amd64.deb); [ "${#debs[@]}" -eq 1 ] || { echo "expected exactly one amd64 deb, got ${#debs[@]}: ${debs[*]}" >&2; exit 1; }; deb="${debs[0]}"
+          v="$(dpkg-deb -f "$deb" Version)"
+          [ "$v" = "${CLI_TAG#cli-v}" ] || { echo "deb Version $v != ${CLI_TAG#cli-v}" >&2; exit 1; }
       - name: Publish release
         working-directory: cli
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/*.tar.gz dist/checksums.txt --title "${{ github.ref_name }}" --notes "Mathion CLI ${{ github.ref_name }}"
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/*.tar.gz dist/*.deb dist/checksums.txt dist/checksums.txt.asc --title "$TAG" --notes "Mathion CLI $TAG"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deb-dist
+          path: |
+            cli/dist/mathion_*.deb
+            cli/dist/checksums.txt
+            cli/dist/checksums.txt.asc
+          retention-days: 1
+
+  apt-publish:
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/cli-v')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read          # gh-pages push uses PAGES_DEPLOY_TOKEN, not GITHUB_TOKEN
+    concurrency:
+      group: mathion-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7  (tag tree — provides deploy/apt + committed keyrings)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: gh-pages
+          path: pages
+          token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { name: deb-dist, path: dist }
+      - name: Install apt-utils
+        run: sudo apt-get update && sudo apt-get install -y apt-utils
+      - name: Verify debs against the signed checksums (verify-before-index)
+        run: |
+          GNUPGHOME="$(mktemp -d)"; export GNUPGHOME; chmod 700 "$GNUPGHOME"
+          gpg --batch --import deploy/keys/mathion-pubkey.asc      # primary + S_rel
+          st="$(gpg --batch --status-fd 1 --verify dist/checksums.txt.asc dist/checksums.txt 2>/dev/null)"
+          printf '%s\n' "$st" | grep -q '^\[GNUPG:\] GOODSIG' || { echo "no GOODSIG on checksums"; exit 1; }
+          if printf '%s\n' "$st" | grep -Eq '^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG|EXPSIG|ERRSIG|BADSIG)'; then
+            echo "checksums signed by an expired/revoked/bad key"; exit 1; fi
+          printf '%s\n' "$st" | grep -q "^\[GNUPG:\] VALIDSIG ${{ vars.S_REL_FPR }} " || { echo "checksums not signed by S_rel"; exit 1; }
+          cd dist && for d in mathion_*.deb; do
+            n="$(grep -c " $d\$" checksums.txt || true)"; [ "$n" = 1 ] || { echo "expected one checksum line for $d (got $n)"; exit 1; }
+            grep " $d\$" checksums.txt | sha256sum -c - || { echo "FAIL: $d checksum"; exit 1; }
+          done
+      - name: Import S_apt, verify existing repo, build + sign
+        env:
+          S_APT: ${{ secrets.GPG_S_APT_PRIVATE }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          GNUPGHOME="$(mktemp -d)"; export GNUPGHOME; chmod 700 "$GNUPGHOME"
+          echo "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"; gpgconf --kill gpg-agent || true
+          printf '%s' "$S_APT" | gpg --batch --import
+          # channel isolation: assert ONLY the S_apt signing subkey carries secret material
+          secsubs="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="ssb"{s=1;next} s&&$1=="fpr"{print $10;s=0}')"
+          { [ "$(printf '%s\n' "$secsubs" | grep -c .)" = 1 ] && printf '%s\n' "$secsubs" | grep -qx "${{ vars.S_APT_FPR }}"; } \
+            || { echo "GPG_S_APT_PRIVATE must contain exactly the S_apt signing subkey secret (see prereq 1 export)"; exit 1; }
+          # also assert the PRIMARY secret is an offline stub (`sec` field 15 == '#',
+          # protect-mode 1001 = no secret material) — reject a full --export-secret-keys that
+          # would arm a usable primary in CI (spec §11.1).
+          secprim="$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="sec"{print $15}')"
+          { [ "$(printf '%s\n' "$secprim" | grep -c .)" = 1 ] && [ "$secprim" = "#" ]; } \
+            || { echo "GPG_S_APT_PRIVATE must be an --export-secret-subkeys export (offline/stub primary), never a full secret key"; exit 1; }
+          mkdir -p pages/deb
+          # anti-laundering (partial): refuse to publish over an existing InRelease that
+          # fails the FULL S_apt policy (gpg exit 0 + GOODSIG + VALIDSIG in the allowed
+          # S_apt set + reject EXP/REV — a bare `gpg --verify` returns 0 for an
+          # expired/revoked signature). This catches
+          # a replaced/broken/expired/revoked-signed InRelease. It does NOT re-verify each
+          # accumulated pool .deb against the signed Packages before apt-ftparchive
+          # re-indexes them — so a pool .deb tampered in place (old valid InRelease left
+          # over the old Packages) would be re-indexed and signed. Scoped residual:
+          # tampering the gh-pages pool requires the PAGES_DEPLOY_TOKEN, a per-repo PAT
+          # that also grants `main` write — i.e. the attacker could subvert the pipeline
+          # directly (out of scope, §1.1). The genuinely-unattended weak link is the
+          # scheduled resign, which Task 8 makes dates-only + policy-verified.
+          # allowlist = the outgoing+incoming pair during a rotation overlap, else the
+          # single current signing fpr (vars.S_APT_VERIFY_FPRS is unset outside overlap →
+          # Actions `||` falls back to S_APT_FPR). build.sh still SIGNS with the single
+          # S_APT_FPR; only the pre-check ACCEPTS either allowed fpr (so a legitimately
+          # outgoing-signed InRelease verifies at cutover — §6.1).
+          if [ -f pages/deb/dists/stable/InRelease ]; then
+            sh deploy/apt/verify-inrelease.sh pages/deb/dists/stable/InRelease \
+               deploy/keys/mathion-apt-keyring.asc "${{ vars.S_APT_VERIFY_FPRS || vars.S_APT_FPR }}" /dev/null \
+              || { echo "existing InRelease fails S_apt policy — refusing to publish over tampered/expired state"; exit 1; }
+          fi
+          # published keyring = primary + S_apt, dearmored from the committed file (matches the .deb's)
+          gpg --dearmor < deploy/keys/mathion-apt-keyring.asc > pages/deb/mathion-archive-keyring.gpg
+          touch pages/.nojekyll
+          sh deploy/apt/build.sh "$PWD/dist" "$PWD/pages" "${{ vars.S_APT_FPR }}"
+      - name: Publish to gh-pages (triggers a Pages build)
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd pages
+          git config user.name "mathion-ci"; git config user.email "ci@example.invalid"
+          git add -A && git commit -m "apt: publish $TAG" || echo "no changes"
+          # concurrency serializes publish/resign, so the only racer is an external
+          # gh-pages push; bounded rebase/retry (spec §11.3) rather than a hard fail.
+          git push || { git fetch origin gh-pages && git rebase origin/gh-pages && git push; }

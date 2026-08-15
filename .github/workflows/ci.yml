@@ -28,8 +28,8 @@ jobs:
     env:
       MATHION_TEST_DATABASE_URL: postgresql+psycopg://mathion:mathion@localhost:5432/mathion_test
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.13"
       - name: Install backend + dev deps
@@ -40,8 +40,8 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
       - name: Install
@@ -54,15 +54,15 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Stack smoke (builds the prod image, boots the stack, asserts)
         run: bash deploy/smoke.sh
 
   cli-unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.24"
       - name: Vet + unit tests
@@ -70,3 +70,46 @@ jobs:
         run: |
           go vet ./...
           go test ./...
+
+  apt-scripts:
+    # Non-root coverage for the signing + packaging + anti-laundering resign
+    # scripts (resign.sh/verify-inrelease.sh's only automated coverage). Kept a
+    # separate job from the root-requiring apt-e2e for clean failure attribution.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.24"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          version: "~> v2"
+          install-only: true
+      - name: Shellcheck apt/deb scripts
+        run: shellcheck deploy/apt/*.sh deploy/deb/*.sh
+      # gpg (preinstalled) + goreleaser/go (above) are all these need; resign_test
+      # is gpg-only and deb_test inspects with dpkg-deb (preinstalled), so no
+      # apt-utils/apt-ftparchive and no root are required here.
+      - name: Signing + package + dates-only resign tests (throwaway keys)
+        run: |
+          sh deploy/deb/sign_test.sh
+          sh deploy/deb/deb_test.sh
+          sh deploy/apt/resign_test.sh
+
+  apt-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.24"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          version: "~> v2"
+          install-only: true
+      - name: Install apt-utils
+        run: sudo apt-get update && sudo apt-get install -y apt-utils
+      - name: Hermetic apt e2e (throwaway key)
+        # secure_path in ubuntu-latest sudoers would drop the setup-go/goreleaser
+        # tool-cache dirs; forward the runner PATH so root can find go/goreleaser.
+        run: sudo -E env "PATH=$PATH" sh deploy/apt/e2e_test.sh

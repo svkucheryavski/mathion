@@ -18,8 +18,71 @@ archives:
     name_template: "mathion_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
 
+nfpms:
+  - id: mathion
+    package_name: mathion
+    file_name_template: "mathion_{{ .Version }}_{{ .Arch }}"
+    vendor: Mathion
+    homepage: https://github.com/svkucheryavski/mathion
+    maintainer: Sergey Kucheryavskiy <svkucheryavski@gmail.com>
+    description: |
+      Self-host and manage a Mathion deployment.
+      CLI to install, update, back up, and operate a Mathion stack via Docker Compose.
+    section: admin
+    priority: optional
+    formats: [deb]
+    bindir: /usr/bin
+    suggests:
+      - docker.io
+    contents:
+      - src: ../deploy/keys/mathion-archive-keyring.gpg
+        dst: /usr/share/keyrings/mathion-archive-keyring.gpg
+        file_info: { mode: 0644 }
+      - src: ../deploy/man/mathion.1.gz
+        dst: /usr/share/man/man1/mathion.1.gz
+      - src: ../deploy/deb/copyright
+        dst: /usr/share/doc/mathion/copyright
+      - src: ../deploy/deb/changelog.Debian.gz
+        dst: /usr/share/doc/mathion/changelog.Debian.gz
+      - src: ../deploy/deb/THIRD_PARTY_NOTICES.gz
+        dst: /usr/share/doc/mathion/THIRD_PARTY_NOTICES.gz
+      - src: ../deploy/deb/lintian-overrides/mathion
+        dst: /usr/share/lintian/overrides/mathion
+    scripts:
+      postinstall: ../deploy/deb/postinst.sh
+    deb:
+      fields:
+        Bugs: https://github.com/svkucheryavski/mathion/issues
+
+snapshot:
+  # Local snapshot builds (deb_test.sh) must carry the plain release version so
+  # the packaged .deb matches what prod CI ships. Prod release runs WITHOUT
+  # --snapshot (release-cli.yml), so this template is inert there.
+  version_template: "{{ .Version }}"
+
 checksum:
   name_template: "checksums.txt"
+
+signs:
+  - id: checksums
+    artifacts: checksum
+    signature: "${artifact}.asc"
+    stdin: "{{ .Env.GPG_PASSPHRASE }}"
+    args:
+      - "--batch"
+      - "--pinentry-mode"
+      - "loopback"
+      - "--passphrase-fd"
+      - "0"
+      - "--armor"
+      - "--digest-algo"
+      - "SHA256"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
 
 release:
   disable: true   # goreleaser must NOT create the GitHub release; gh does (workflow)
