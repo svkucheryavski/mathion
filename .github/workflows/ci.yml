@@ -71,6 +71,31 @@ jobs:
           go vet ./...
           go test ./...
 
+  apt-scripts:
+    # Non-root coverage for the signing + packaging + anti-laundering resign
+    # scripts (resign.sh/verify-inrelease.sh's only automated coverage). Kept a
+    # separate job from the root-requiring apt-e2e for clean failure attribution.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.24"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          version: "~> v2"
+          install-only: true
+      - name: Shellcheck apt/deb scripts
+        run: shellcheck deploy/apt/*.sh deploy/deb/*.sh
+      # gpg (preinstalled) + goreleaser/go (above) are all these need; resign_test
+      # is gpg-only and deb_test inspects with dpkg-deb (preinstalled), so no
+      # apt-utils/apt-ftparchive and no root are required here.
+      - name: Signing + package + dates-only resign tests (throwaway keys)
+        run: |
+          sh deploy/deb/sign_test.sh
+          sh deploy/deb/deb_test.sh
+          sh deploy/apt/resign_test.sh
+
   apt-e2e:
     runs-on: ubuntu-latest
     steps:

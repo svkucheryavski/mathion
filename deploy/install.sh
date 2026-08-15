@@ -38,11 +38,17 @@ verify_sig() {
   if ! GNUPGHOME="$_vh" gpg --batch --no-tty --import "${_vh}/key.asc" >/dev/null 2>&1; then
     rm -rf "$_vh"; echo "failed to import the embedded signing key" >&2; return 1
   fi
-  # status-fd is the gate; ignore gpg's exit status (GOODSIG presence + the pins
-  # decide). `|| true` keeps set -e from aborting here on a bad sig, so cleanup
-  # + the policy greps always run even if a caller invokes verify_sig bare.
-  _st="$(GNUPGHOME="$_vh" gpg --batch --no-tty --status-fd 1 --verify "$1" "$2" 2>/dev/null || true)"
+  # Capture gpg's exit code WITHOUT letting set -e abort before cleanup: the
+  # assignment's status IS the command substitution's status, so `|| _rc=$?`
+  # records gpg's exit while keeping the statement's own status 0. rc==0 is now a
+  # REQUIRED gate ALONGSIDE the status policy below (mirrors verify-inrelease.sh):
+  # gpg exits 0 for EXPKEYSIG/REVKEYSIG (caught by the status greps), but a
+  # NONZERO exit from a malformed/operational failure must fail closed even if a
+  # stray GOODSIG is present. Cleanup + the policy greps still run on failure.
+  _rc=0
+  _st="$(GNUPGHOME="$_vh" gpg --batch --no-tty --status-fd 1 --verify "$1" "$2" 2>/dev/null)" || _rc=$?
   rm -rf "$_vh"
+  [ "$_rc" = 0 ] || { echo "signature verification FAILED (gpg exit $_rc)" >&2; return 1; }
   printf '%s\n' "$_st" | grep -q '^\[GNUPG:\] GOODSIG' || { echo "signature verification FAILED (no GOODSIG)" >&2; return 1; }
   if printf '%s\n' "$_st" | grep -Eq '^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG|EXPSIG|ERRSIG|BADSIG)'; then
     echo "signature verification FAILED (expired/revoked/bad key)" >&2; return 1

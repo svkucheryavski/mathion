@@ -92,11 +92,16 @@ less install.sh          # review what it does
 sudo sh install.sh
 ```
 
-The installer verifies **integrity** (sha256 against `checksums.txt`), not
-**authenticity** — it confirms the archive wasn't corrupted or truncated in
-transit, but does not prove who built it. Signed artifacts are planned for a
-future release; until then, inspect the script and pin a known release tag
-(`sudo sh install.sh cli-v0.1.0`) if that distinction matters to you.
+The installer verifies the release **signature** (authenticity) before the
+**checksum** (integrity). It fetches `checksums.txt.asc` — a detached GPG
+signature over `checksums.txt` made by Mathion's release subkey (`S_rel`) — and
+rejects the download unless that signature validates against the installer's
+embedded release key, pinned to the expected signing and primary fingerprints.
+Only then does it verify each artifact's sha256 against the now-authenticated
+`checksums.txt`. The signing key and its fingerprints are documented in
+[`deploy/keys/README.md`](deploy/keys/README.md). You can still inspect the
+script and pin a known release tag (`sudo sh install.sh cli-v0.1.0`) for a
+reproducible install.
 
 **Install via apt (Debian/Ubuntu, alternative to `curl | sh`).** This adds
 Mathion's apt repository so `mathion` upgrades with `apt upgrade` alongside the
@@ -125,17 +130,20 @@ gpg --show-keys /usr/share/keyrings/mathion-archive-keyring.gpg
 ```
 
 and compare it against the published fingerprint (`<primary-key-fingerprint>`).
-The **source of truth** for the published fingerprint(s) is
-[`deploy/keys/README.md`](deploy/keys/README.md) (§4, "Record the fingerprints") —
-that document is where the maintainer records the real primary fingerprint once
-the offline key exists. Only proceed if the two match.
+The maintainer **records** the fingerprint in
+[`deploy/keys/README.md`](deploy/keys/README.md) (§4, "Record the fingerprints")
+once the offline key exists, but that file lives in this same repository — the
+same origin as the keyring — so it is bookkeeping, not an independent check.
+Confirm the fingerprint against a genuinely **independent channel** (the project
+website or a signed announcement) before trusting the keyring, and only proceed
+if the values match.
 
 *Use one channel, not both.* apt installs the binary to `/usr/bin/mathion`, while
 the `curl | sh` installer above installs to `/usr/local/bin/mathion`. On the
 default Debian/Ubuntu `PATH`, `/usr/local/bin` comes **before** `/usr/bin`, so a
 `curl | sh` binary **shadows** the apt-managed one — you would run the
-hand-installed copy while apt silently updates a binary that never appears on
-`PATH`. Pick **one channel** and stick with it. The `.deb` guards against the
+hand-installed copy while apt silently updates a binary that normal PATH lookup
+never selects. Pick **one channel** and stick with it. The `.deb` guards against the
 mix: its postinst emits a warning (`… will shadow this apt package`) when it
 detects a pre-existing `/usr/local/bin/mathion`.
 
