@@ -1,0 +1,298 @@
+# Phase 9-D Slice 4b — `mathion self-update` — Design
+
+**Status:** design (brainstormed 2026-08-15; hardened across six review gates — 5 reviewers → codex → 4 reviewers → codex → codex → Fable, all xhigh — all findings folded, one refuted on source verification)
+**Parent epic:** Phase 9-D deployment (self-hosting tooling for Mathion)
+**Predecessor:** Slice 4a (apt packaging + release signing + install.sh authenticity + dual-install detection), merged main `a31aa58` + apt CI-fix `15578b9`; signing go-live still pending maintainer keygen.
+**Source-of-truth for the epic:** `docs/superpowers/specs/2026-08-13-phase9-d-slice4-apt-signing-selfupdate-design.md` (the combined 4a+4b spec). This document is the **4b-only** consolidation the implementation plan is built from; where the two disagree, this document governs for 4b. It folds in the two brainstorm decisions (2026-08-15), the four §9.3 plan-review corrections the combined spec routed here, and the dual-gate review findings.
+
+---
+
+## 1. Goal
+
+Add `mathion self-update`: a dedicated command that upgrades the **`mathion` CLI binary itself** (not the app image / database — that is `mathion update`). It is channel-aware: an apt-managed binary is left to apt (we only print the apt command); a curl|sh-managed binary is verified against 4a's **S_rel-signed `checksums.txt`** and forward-only swapped in place.
+
+Also add the small `version --short` flag (§10 of the combined spec) that self-update needs as its pre-swap assertion oracle.
+
+**Non-goals (out of scope for 4b):**
+- App-image / DB update — that is `mathion update` (Slice 3, shipped).
+- Downgrades / arbitrary version pinning — self-update is forward-only to the greatest release it can verify (§4.3, §6.2).
+- Windows/macOS — the CLI ships Linux-only; the swap uses raw `*at` syscalls (`x/sys/unix`).
+- apt repo signing / key management — Slice 4a.
+- Auto-update on a timer / daemon — self-update is explicitly user-invoked.
+
+**Accepted limitation (freshness):** because the eligible-release set comes from an origin-controlled `/releases` list and self-update selects the greatest release it can *verify*, a MITM/hostile origin can pin self-update to any *genuine, S_rel-signed, forward* release between current and latest (not merely freeze at current). Every reachable target is authentic and forward — no forgery and no downgrade — but "always reaches the newest release" is not guaranteed against a hostile origin. This is the same freshness limitation §1.1 of the combined spec accepts for install.sh.
+
+---
+
+## 2. Brainstorm decisions (2026-08-15)
+
+Two items the combined spec left open; both resolved with the user:
+
+1. **Swap-target safety model (§9.3 correction 3's explicit fork).** → **Restrict to `/usr/local/bin/mathion`** (the canonical curl|sh install path) **and** additionally assert that directory plus its full ancestry from `/` is root-owned and not group/world-writable before swapping. A resolved binary anywhere else is refused with a reinstall hint. Chosen over the general "any path with safe ancestry" walk: simpler, matches the installer exactly, smallest surface for a subtle check bug. The fd-relative `*at` swap mechanism is required either way; this only bounds which target is *eligible*.
+
+2. **Interactive UX.** → **Prompt + `--yes` + `--check`.** self-update prints an `old → new` plan and asks `y/N` before swapping (mirrors `mathion update`); `--yes` skips the prompt. **`--check`** reports whether a newer **installable** (verifiable **and** guard-eligible — §4.3) release exists and exits **without** requiring root, downloading the archive, or swapping — it *does* fetch and S_rel-verify the small `checksums.txt`/`.asc` (never the archive), so its answer matches what a real run would install (see §4.3). "Reports availability" must not lie about a phantom unverifiable tag.
+
+---
+
+## 3. Surface & package layout
+
+### 3.1 Command wiring — `cli/cmd/self_update.go`
+Cobra command only; no business logic. Mirrors `newUpdateCmd`'s shape but far smaller (no backup engine, no migrate, no compose) — but it **does** take a lightweight self-update mutation lock so the forward-only/no-downgrade guarantee holds under concurrent invocations (§4.2 step 4b):
+
+- Flags: `--yes` (skip the confirmation prompt), `--check` (report-only dry-run, §4.3).
+- `requireRoot()` is called **only** on the curl-managed mutation path, **after** channel detection and release resolution — never for `--check`, never for the apt-managed defer (both exit without mutating). This deliberately differs from `update.go`, which calls `requireRoot()` first; here `--check` and the apt-defer must work unprivileged.
+- Registered in `cli/cmd/root.go` alongside the other 12 commands (`root.AddCommand(newSelfUpdateCmd(app))`).
+- Delegates to `internal/selfupdate`. Output/error/input come from `*App` (`app.Out`/`app.Err`/`app.In`) so tests stay hermetic, same as every other command.
+- Exit codes reuse `cmd`'s existing `exitCode` convention (0 success/no-op/cancel, 1 failure). self-update introduces **no** new exit code (unlike `update`'s rollback-failed 3 — self-update has no rollback; its single atomic mutation is the `renameat`).
+
+### 3.2 Logic package — `cli/internal/selfupdate/`
+All channel detection, release resolution, verification, staged swap, and the durable rename live here, split by responsibility into focused files (final split is the plan's call; indicative):
+- release resolution + forward-gate (GitHub `/releases` pagination, semver filter),
+- signature + checksum verification (openpgp, keyring-membership enforcement),
+- channel detection (`dpkg -S`),
+- the fd-relative staged swap (`*at` syscalls),
+- the orchestrator that sequences §4.2's steps.
+
+**Seams (all injected so unit tests need no network, no root, no real dpkg, no real `/usr/local/bin`, no real exec):**
+- HTTP base URL + the four download URLs (releases-list JSON, `checksums.txt`, `checksums.txt.asc`, `mathion_linux_<GOARCH>.tar.gz`).
+- The HTTP **transport + TLS trust root**, base URL, and the **per-request timeout, overall verify-loop wall-clock budget, redirect-depth cap, `PAGE_CAP`, the top-N candidate cap, and the archive-download idle/stall + overall-deadline bounds as injected values** — so a test uses an `httptest.NewTLSServer` with injected trust and sets a tiny budget/`PAGE_CAP` for fast, hermetic deadline and 1000-vs-1001 tests (`http.Client.Timeout` is per-request, so the loop-wide wall-clock budget is a *separate* injected value, not the client timeout). Production constructs the client with its own `CheckRedirect` that **follows redirects but rejects any non-https hop and caps depth** (GitHub asset URLs 302 to `objects.githubusercontent.com`) and applies the size cap to the **final** response body (`io.LimitReader(cap+1)`); that redirect policy is exposed as a **pure predicate** so it is unit-tested directly, not only through an injected client.
+- `dpkg` exec as a func-var.
+- `os.Executable` / `filepath.EvalSymlinks` as func-vars (source of the resolved *path* for the step-4 eligibility compare and channel detection — **not** the anti-downgrade identity).
+- **The running-image identity capture** — a func-var that opens `/proc/self/exe` with `O_PATH|O_CLOEXEC` and `fstat`s the fd for the *executing* image's device+inode (§4.2 step 1) — and the **mutation lock + running-identity re-check** as two higher-level seams: `acquireMutationLock` (`flock(LOCK_EX|LOCK_NB)` on the retained parent-dir fd) and `recheckRunningIdentity` (fd-relative `openat`+`fstat` of the target compared against the captured running-image identity). Seaming these over `openat`/`fstat`/`flock` makes the concurrent-downgrade branches — lock contended, and on-disk target ≠ running image — unit-testable without root or a real second process. (Distinct from the ancestry walk below, whose *pure decision function* is unit-tested and whose real `openat`/`fstat` walk is integration-tested.)
+- **The canonical swap-target path as a func-var/parameter** (default `/usr/local/bin/mathion`). The step-4 equality check compares the *seamed resolved-self* against *this seam*, and the ancestry walk starts from *this seam's* parent — so a hermetic test can point both at a temp tree and reach the refusal path. The **ancestry check is factored as a pure decision function** over the per-component `(uid, mode)` sequence, so safe-accept and every rejection are unit-testable deterministically without a uid-0 dir; only the real `openat`/`fstat` walk that produces those inputs is integration-tested.
+- **A staged-version getter as a func-var** — returns the staged binary's `version --short` output. The default implementation does the real inherited-fd exec (§4.2 step 7); a unit test substitutes it to cover only the compare/abort branch. The real inherited-fd exec is exercised in integration (§9.2).
+- The embedded verifying keyring (primary + S_rel) as an injectable keyring so a test can substitute throwaway keys.
+- The filesystem mutation ops (`renameat`, directory `fsync`, `close`, `unlink`) behind func-vars so a unit test can drive the post-rename failure branches of §5.3 (a `renameat` that fails → target unchanged; a directory `fsync` that fails *after* a successful rename → installed-but-durability-uncertain).
+- **A build-tag-gated test-endpoint override** (compiled only under a `mathion_selfupdate_test` build tag) that lets an integration harness point a *real, shell-launched* binary at a throwaway release server — the in-process URL/keyring func-vars above cannot reach a binary that self-update has swapped in and that then re-launches in a fresh process (§9.2, correction to the rotation test).
+- `osExit` already exists as a package seam in `cmd`. `requireRoot` (`guard.go`) is a plain func whose **actual** seam is the package-level `geteuid` var — so the §9.1 "`--check` never invokes `requireRoot`" assertion records calls through a `geteuid` recorder (or the plan introduces a `requireRootFn` var in `selfupdate`); `requireRoot` is not itself a rebindable seam.
+
+### 3.3 Dependencies (pinned in `cli/go.mod`)
+- `github.com/ProtonMail/go-crypto/openpgp` (+ `openpgp/armor`) — detached-signature verification with issuer-fingerprint access (upstream `x/crypto/openpgp` is deprecated and lacks it). Transitively pulls `github.com/cloudflare/circl`, `golang.org/x/crypto`, `golang.org/x/sys`.
+- `golang.org/x/mod/semver` — release comparison.
+- `golang.org/x/sys/unix` — `openat`/`fstatat`/`fchmod`/`renameat`/`fsync` for the TOCTOU-safe swap (Go 1.24's `os.Root` has no `Rename` — that landed in 1.25 — and `os.Rename` re-resolves paths; see §5.2).
+
+These three are new (the module currently depends only on cobra/pflag/mousetrap); no version conflict. Adding them changes the module graph, so the `.deb`'s DEP-5 `copyright` / third-party notices (a 4a file) must be regenerated to enumerate the new `golang.org/x/*` + circl deps (§10).
+
+---
+
+## 4. Flow
+
+### 4.1 Current-version baseline
+`buildVersion` (baked via `-X main.version=<CLI_TAG>`; `CLI_TAG` is validated `^cli-v[0-9]+\.[0-9]+\.[0-9]+$`, so the baked value is the **full tag** `cli-vX.Y.Z`; `dev` in a local build) is the current version, exposed via `root.go`'s `SetBuildInfo`. It is the same value `mathion version` prints and the value `version --short` emits (§7).
+
+**Normalization rule (load-bearing):** for the forward-gate, `buildVersion` is normalized the *same way* as release tags before any `semver.Compare` — strip the `cli-` prefix to `vX.Y.Z`; a non-semver `dev` build sorts **below every release** (so it always proceeds). The **selected tag** retains its full `cli-vX.Y.Z` form (its GitHub `tag_name`); the step-7 assertion compares the staged `version --short` output (also full `cli-vX.Y.Z`) against it verbatim.
+
+### 4.2 Steps
+1. **Resolve self.** `os.Executable()` → `filepath.EvalSymlinks` → absolute *resolved* path. The resolved path is the swap target — renaming an unresolved symlink would orphan the real binary. The resolved path is used only for the step-4 eligibility compare and channel detection; every security-critical filesystem op goes through the fd-relative walk. **Capture the *running executable's* identity here** — open `/proc/self/exe` with `O_PATH|O_CLOEXEC` and `fstat` the fd for its device+inode. This is the identity of the image this process is *executing*, **not** a re-stat of the resolved pathname: a concurrent self-update could have already replaced the on-disk `mathion` *before* this step runs, and a pathname re-stat would then capture that newer inode — masking that we are running a now-superseded binary and defeating the downgrade check. `/proc/self/exe` resolves to the running inode even after the path is swapped, so it is the correct anchor. Step 4b compares the fd-relative target against this running-image identity under the lock to refuse a concurrent-update downgrade. (`os.Executable`/`EvalSymlinks` remain the source for the resolved *path*; only the anti-downgrade identity comes from `/proc/self/exe`.) Go's `os.Executable` **trims** a trailing `" (deleted)"` from the `/proc/self/exe` readlink (verified in the stdlib: `os/executable_procfs.go`), so after a concurrent replace it returns the *bare* path — which `EvalSymlinks` resolves to the **new** on-disk inode, while the `O_PATH` fstat above still pins our **running** (now-unlinked) inode; that divergence is exactly what step 4b flags, so a swap that completed *before* step 1 surfaces **there**, with the normal "updated by another process" abort, not as a step-1 resolution error. (Should `os.Executable`/`EvalSymlinks` themselves fail — e.g. the binary was `rm`'d mid-run, not replaced — step 1 aborts fail-closed, exit 1; no swap.)
+
+2. **Detect channel (fail-closed, exhaustive).** `LC_ALL=C dpkg -S <resolved path>` via the exec seam. The leading `pkg` field is parsed tolerating an optional `:arch` qualifier (`dpkg` renders `mathion:amd64: /usr/bin/mathion` on a multiarch host). Classification:
+   - exit 0 **and** parsed pkg == `mathion` → **apt-managed**: print `sudo apt update && sudo apt install --only-upgrade mathion`, exit 0. **No root, no swap.** (Under `--check`, print the same defer message and exit 0.)
+   - exit 1 with stderr containing `no path found matching pattern`, **or** `dpkg` absent (`exec.ErrNotFound`) → **curl-managed**, continue.
+   - **everything else** — including a clean exit 0 whose pkg ≠ `mathion` (a foreign package owns the path: local `.deb`, dpkg diversion), any other nonzero, or unparseable stderr → **abort** (never fall through to a swap of a dpkg-owned path, and never `apt install --only-upgrade mathion` against a path some other package owns).
+
+3. **Resolve eligible releases + forward-gate.** GET the `/releases` list **across pages** (`per_page=100`, iterate `page=1..PAGE_CAP` (default 10 → ≤1000 releases), each page body size-bounded — §6.4). Detect cap-exhaustion by a genuine `(PAGE_CAP+1)`-th page via the `Link: rel="next"` header (or a page-`(PAGE_CAP+1)` probe) — **not** by `install.sh`'s "the final page came back full" heuristic, which would abort at *exactly* 1000 releases; a full final page with no `next` link means exactly `PAGE_CAP×100` releases and is **not** an error. Accumulate the **complete** set of tags matching `cli-v*`; **do not** stop at one body (the repo publishes both `cli-v*` and app `v*` releases interleaved by date, so the greatest `cli-v*` — or a lower *transition* release §6.2 needs — can sit on page 2+). If the cap is exceeded, **abort fail-closed** ("release list exceeds the pagination cap"), never truncate. Skip drafts/prereleases (we never use `/releases/latest`, which can return an *app* `v*` release). Strip `cli-`, require `semver.IsValid`, canonical 3-component form, and no semantic prerelease. Keep the eligible set `> buildVersion` (normalized per §4.1); sort **descending**. Empty → print "already up to date", exit 0.
+   - `--check` continues into §4.3 instead of the mutation path.
+
+4. **Guard — a non-mutating eligibility guard, then the root gate.**
+   - **4a — eligibility guard (read-only, no root).** Enforce the resolved self path **== the configured swap-target** (default `/usr/local/bin/mathion`); otherwise refuse: *"self-update manages only the standard /usr/local/bin/mathion install; reinstall via the curl|sh installer."* Then walk the configured target's **parent directory** component-by-component from `/` with `openat(O_DIRECTORY|O_NOFOLLOW)`, and for **every** opened component (including `/usr/local/bin` itself) **`fstat` the returned fd** (not a path) and require it is **root-owned (uid 0)** and **not group- or world-writable**; a refusal names the offending component. These are read-only stats, so they need **no root** — `--check` (§4.3) runs 4a so its "installable" answer accounts for the guard. Retain the opened parent-dir fd — opened **`O_RDONLY|O_DIRECTORY|O_NOFOLLOW`, not `O_PATH`**, because step 4b's `flock` needs a normal descriptor (`flock` fails `EBADF` on an `O_PATH` fd).
+   - **4b — root gate + mutation lock.** `requireRoot()`, then take a **non-blocking exclusive `flock` on the retained parent-dir fd** (`LOCK_EX|LOCK_NB`); if another self-update holds it → abort *"another self-update is in progress; retry shortly."* Hold it through step 8's `fsync(dir)`, then release. **Under the lock, re-`openat`+`fstat` the target `mathion` fd-relative and require its device+inode == the running-image identity captured in step 1 (from `/proc/self/exe`)**; if it differs, the on-disk binary is not the image we are executing — a concurrent self-update already replaced it (whether *before* step 1 or racing between step 1 and here) → abort *"the binary was updated by another process; rerun to update from the new version."* Anchoring on the running image rather than a pathname re-stat is what catches a swap that completed **before** this process reached step 1, not only one that races the two steps. This is what makes the forward-only/no-downgrade guarantee hold under concurrency: two v1 processes that select v3 and v2 can no longer race the two renames — the loser sees the changed inode (or the held lock) and refuses instead of downgrading. All subsequent *mutating* ops (`openat` create, `fchmod`, `renameat`) are **fd-relative** off the retained parent-dir fd — never re-resolve pathnames (an attacker-writable *ancestor* defeats an immediate-parent-only stat, and a re-resolved pathname reopens the race §5.2 closes).
+
+5. **Verify-until-verifiable (select the release; checksums only)** (corrections 1, 2, 4). Iterate the eligible set **descending**, bounded to the top **N candidates** (default 16) and an overall wall-clock budget (§6.4) — abort with "no verifiable newer release within N attempts" if the bound is hit (fail-closed; a hostile origin cannot force unbounded fetch/verify cycles as root). For each candidate release:
+   - Download that release's `checksums.txt` and `checksums.txt.asc` (both small, size-bounded — §6.4).
+   - `armor.Decode` the `.asc`; **`VerifyDetachedSignatureAndHash`** over `checksums.txt` **against the embedded verifying keyring (primary + S_rel only)** — see §6.1. Verification succeeds **iff** the signature was made by a key in that trimmed keyring (i.e. an S_rel subkey); enforcement is **keyring membership**, not a separately-hardcoded scalar. §6.1 gives the full verification contract (armor block type, allowed digest set, and the present/full-length/member issuer-fingerprint checks).
+   - If verification fails, try the next-lower candidate. The first that verifies is the **selected release** (this lets a K1-era client cross a key rotation via the K1-signed *transition* release even when `latest` is K2-only; crossing may take two invocations — §6.2).
+   - Once selected: from the verified `checksums.txt`, **select the line for asset `mathion_linux_<GOARCH>.tar.gz` by a whitespace-delimited exact filename match** (as `install.sh` does — `grep " ${ASSET}$"` — so a substring or a `.sig`/`.asc` sibling line cannot match), require **exactly one** such line (reject zero or duplicate), and remember its expected sha256. The archive bytes themselves are downloaded and sha256-matched later, in step 7 (after the confirm) — selection needs only the checksums, so a declined run never pays for the archive.
+   - If no eligible release verifies within the bound → abort with a clear "no verifiable newer release" error.
+
+6. **Confirm** (decision B). Unless `--yes`: print the `old → new` plan and read `y/N` from `app.In` (same reader idiom as `mathion update`). A non-`y`/`yes` answer → `Fprintln(app.Out, "self-update cancelled")` and **return nil (exit 0)** — a deliberate deviation from `update.go`'s error-returning cancel (which maps to exit 1); a user-declined self-update is not a failure.
+
+7. **Download + stage + pre-swap assertion (before the live binary is replaced).** Now download `mathion_linux_<GOARCH>.tar.gz` under explicit **size + time limits** (§6.4 — a dedicated idle/stall + overall-deadline bound, **separate** from the verify-loop budget, since this download runs while the mutation flock is held) and require the bytes' sha256 == the step-5 selected line's expected value (mismatch → abort, touch nothing). Extract the archive accepting **exactly one regular file** named `mathion` (reject symlinks, hardlinks, dirs, devices/fifos, extra members, path traversal; bound the extracted size — §6.4). Write it to a **randomly-named** `O_EXCL` temp file **in the target's own directory** (same filesystem → the final rename cannot `EXDEV`), created **fd-relative** off the step-4 parent-dir fd; `fchmod 0755`; check every write/close/chmod. Then, in this order (avoids `ETXTBSY` — see §5.3):
+   `fsync(temp fd)` → **close the writable temp fd** → `openat(dirfd, tempname, O_RDONLY)` an exec fd → run the staged binary's **`version --short`** through that **inherited fd** (`/proc/self/fd/N` or `fexecve`/`execveat` — **never by pathname**, which re-resolves ancestors and reopens the race) → **trim trailing whitespace** from its output and require it **== the selected full tag `cli-vX.Y.Z`**. This defeats a relabeled older-but-signed bundle before the swap — the honest baked version is itself covered by the signature; a validly-signed bundle whose internal tag ≠ selected tag **aborts** (fail-closed, no fallback). The signature check (step 5) **and** the archive sha256 match (above) both complete **before** the staged bytes are executed, so what runs as root is already authenticated. On any abort, **attempt** to unlink the temp file, reporting a cleanup failure rather than assuming the unlink cannot fail.
+
+8. **Swap (durable order).** `renameat(dirfd, tempname, dirfd, "mathion")` → `fsync(parent dir fd)` → **only then** print `old → new`. (The temp fd was already fsync'd in step 7 before it was closed, so its bytes are durable before the rename; fsync-ing the directory persists the rename itself.) Linux atomically replaces the running executable; there is no `ETXTBSY` for the *target* because the rename never opens the busy inode for write. Two failure states past step 7 (see §5.3, §6.5): a `renameat` failure leaves the target **unchanged** (report a plain error, unlink the temp); a `renameat` that succeeds but whose following `fsync(dir)` fails means the **new binary is already installed but its crash-durability is uncertain** — return a *dedicated* error saying exactly that (do **not** claim "nothing changed" and do **not** roll back), and do not print the success line.
+
+### 4.3 `--check` (report-only)
+`--check` runs steps 1–3 **and step 4a** (the read-only eligibility guard — path-equality + ancestry, no root), then runs the **checksums-only** verify-until-verifiable loop of step 5 (fetch each candidate's `checksums.txt` + `.asc`, S_rel-verify, **never** download the archive; same top-N + wall-clock bound). It never calls `requireRoot()`, downloads the archive, or swaps. Three distinct outcomes (so `--check` never lies about what a real run would do):
+- **no eligible newer tags** → "already up to date", exit 0;
+- **a verifiable release that also passes step 4a** → `cli-vX.Y.Z installable (current …)`, exit 0;
+- **eligible newer tags exist but none verifies within the bound, or step 4a refuses (relocated binary / unsafe ancestry), or the wall-clock/attempt bound is hit** → an explicit verification-or-guard failure message, **exit 1**.
+
+Reporting the greatest *verifiable, guard-eligible* release (not merely the greatest eligible tag) means `--check`'s answer matches what a real run would install — including surfacing the two-run rotation case, where the greatest *installable* release for a pre-rotation client is the transition release, not the post-cutover latest.
+
+---
+
+## 5. Key mechanisms
+
+### 5.1 Channel detection is authoritative and fail-closed
+`dpkg -S` is the single source of truth for "is this an apt install?". We do **not** infer channel from the path. Any ambiguous, foreign-package, or error result never proceeds to a swap (step 2). The apt-managed branch is purely advisory output — self-update never invokes apt itself (deferring keeps a single updater per channel and avoids privilege/context assumptions).
+
+### 5.2 Why raw `*at` syscalls, not `os.Root`
+The swap must (a) not re-resolve pathnames after the ancestry check, and (b) atomically rename within one directory. Go 1.24's `os.Root` (used by Slice 2's purge hardening) has **no `Rename`** method (added in Go 1.25, above our floor), and `os.Rename` re-resolves both operands through normal path lookup — either would reintroduce the TOCTOU an attacker-writable ancestor exploits. The build is Linux-only, so the direct `unix.Openat`/`unix.Renameat`/`unix.Fchmod`/`unix.Fsync` family is the correct primitive. Every component from `/` is opened `O_NOFOLLOW|O_DIRECTORY` and **fstat-checked on the fd**; the retained parent-dir fd anchors the `O_EXCL` staged-file create, the `fchmod`, the exec-fd open, and the final `renameat`.
+
+### 5.3 Durability and `ETXTBSY`
+Discipline mirrors `config.AtomicWrite` / `varlib.WriteJournal` (`f.Sync()` → rename → `fsyncDir`): the temp file's bytes are fsync'd before the rename, and the directory is fsync'd after, so a crash leaves either the old binary (rename not durable) or the new binary (rename durable) — never a truncated file.
+
+**Failure after the rename commits.** `renameat` is the commit point, but `fsync(parent dir)` can still fail *after* the binary has already been replaced — so it is **not** true that every failure occurs before mutation. self-update models three post-stage outcomes: (1) `renameat` fails → target unchanged, plain error; (2) `renameat` succeeds and `fsync(dir)` succeeds → success, printed last; (3) `renameat` succeeds but `fsync(dir)` fails → the new binary **is** installed but crash-durability is uncertain → a dedicated error that says exactly that, with **no** rollback and **no** "nothing changed" claim. The `renameat`/`fsync`/`close`/`unlink` ops are seamed (§3.2) so these branches are unit-testable.
+
+Two distinct `ETXTBSY` facts matter, and step 7's ordering respects both:
+- **The staged file we self-exec:** Linux `execve`/`execveat` fails `ETXTBSY` if the target inode has *any* open-for-write fd (`i_writecount > 0`) — including our own. So the writable temp fd is **fsync'd and closed** before we open a read-only exec fd and run `version --short`. (fsync happens before the close, so durability is unaffected.)
+- **The running target we replace:** replacing `/usr/local/bin/mathion` via `renameat` never opens the busy inode for write, so the atomic replace of the running executable does not hit `ETXTBSY`.
+
+---
+
+## 6. Security model
+
+### 6.1 S_rel enforcement via a trimmed keyring + an explicit verification contract (correction 1)
+The go-crypto helper `CheckDetachedSignatureAndHash` returns only the primary `*Entity` (both the S_rel and S_apt subkeys share that primary), so an entity-fingerprint compare **cannot** reject an S_apt-produced signature — which is why 4b uses **`VerifyDetachedSignatureAndHash`** (which returns the verifying `*packet.Signature`, exposing `IssuerFingerprint`), not `CheckDetachedSignatureAndHash`. We verify against an **embedded keyring trimmed to primary + S_rel** — **in the steady state** the same trust anchor `install.sh` embeds (`deploy/keys/mathion-pubkey.asc`, "primary + S_rel"), which the rotation runbook keeps at **primary + exactly one S_rel subkey** (`deploy/keys/README.md` §2). During a key rotation this canonical asset and the binary `go:embed` move to the **incoming** subkey while `install.sh` (its literal embedded key **and** its `EXPECTED_SIGNING_FPR` scalar) stays pinned to the **outgoing** one until a successor release is signed by the incoming key — a deliberate, transient divergence spelled out as a hard task in §10 and deferred to rotation time in §12. Because the keyring contains **only** the current S_rel signing subkey, a signature verifies **iff** it was made by that subkey — the trimmed keyring *is* the enforcement. An S_apt signature has no verifying key in it and is rejected. There is **no** separately-hardcoded issuer scalar: enforcement is keyring membership, so nothing must be updated in lockstep across a rotation, and a compiled binary simply embeds whichever single S_rel subkey was current at build time (crossing to a newer key is handled by §6.2's transition release, not by a dual-accept keyring).
+
+**Explicit verification contract** (so an implementer cannot subtly weaken it):
+- `armor.Decode` the `.asc` and require `block.Type == openpgp.SignatureType` — reject any other armor block.
+- Call `VerifyDetachedSignatureAndHash` with the allowed digest set **exactly** `[]crypto.Hash{crypto.SHA256, crypto.SHA384, crypto.SHA512}` (reject SHA-1/MD5-signed signatures).
+- From the returned `*packet.Signature`, require the `IssuerFingerprint` subpacket is **present (non-empty)** and **equal to** a fingerprint in the dynamically-built set of **signing-capable S_rel subkeys of the injected trimmed keyring** (equality already implies the correct length — no version-specific 20-byte literal that would wrongly reject a future v5/v6 key) — never the primary's fingerprint, and never a separately-compiled current-subkey scalar.
+- Any failure → reject, fail closed.
+
+*Rationale:* self-update is the root-executed channel. S_apt lives in the weaker, unattended `pages-resign` CI environment (combined §11). If self-update accepted S_apt, a compromise of that weak environment would forge binaries, not merely apt metadata. The subkey split is the whole point of 4a's channel separation. There is an explicit unit test that an **S_apt-signed `checksums.txt` is rejected**.
+
+**Embedded keyring asset + drift guard:** the package embeds `cli/internal/selfupdate/mathion-pubkey.asc` via `go:embed` (a byte-identical copy of `deploy/keys/mathion-pubkey.asc`). A unit test asserts byte-identity against the canonical `deploy/keys/mathion-pubkey.asc`, and a CI `cmp` guard fails the build on drift — so the embedded trust anchor can never silently diverge from the released one (security-relevant across a rotation).
+
+### 6.2 Verify-until-verifiable + the transition-release rotation model (correction 2)
+self-update's compiled-in keyring cannot be re-fetched, so a key rotation is crossed with a **transition release**, not a dual-accept keyring. The model (matching combined §9.3 correction 2 and keeping every shipped `mathion-pubkey.asc` at a single S_rel subkey — README §2):
+- Each binary embeds the single S_rel subkey current at its build time — a pre-rotation client embeds K1; a post-rotation client embeds K2.
+- To rotate K1→K2, the maintainer publishes a **transition release** that is **signed by the still-valid outgoing K1** (so a K1 client can verify it) but whose **bundled binary embeds K2** (the post-rotation single-subkey keyring). The post-cutover `latest` is signed by K2 only.
+- self-update orders eligible `cli-vX.Y.Z > current` **descending** and verifies each against its embedded keyring until one passes; the first that verifies is selected. A K1 client cannot verify the K2-signed `latest`, so it descends to the K1-signed transition release, verifies and installs it — and that new binary embeds K2, so the **next** invocation reaches the K2-only `latest`. **Crossing a rotation takes two invocations.** A client that missed the entire overlap (its embedded key is no longer any published release's signer) fails closed ("no verifiable newer release"). Integration exercises **K1 → transition(signed K1, embeds K2) → latest(K2)** (§9.2).
+
+**Reconciliation with `deploy/keys/README.md` (a required §10 edit).** README §2 (line 122) says `mathion-pubkey.asc` is *never* in overlap (always primary + one subkey), yet README §5 (lines 264-271) currently says the *4b compiled-in binary must dual-accept both subkeys during an overlap*. Those conflict. This design resolves to the transition-release model above (authoritative per combined §9.3 correction 2), under which `mathion-pubkey.asc` stays single-subkey and `install.sh`'s single-scalar pin is untouched. `deploy/keys/README.md` §5 "Which channels need a dual-accept overlap" must therefore be corrected: **the 4b self-update binary is NO (transition-release crossing), not YES (dual-accept)**; only S_apt keeps its keyring-first dual-accept overlap (its keyring is cached on clients and re-signed in place, a genuinely different situation).
+
+**Bounding the descending loop, and the crossing invariant.** The loop is bounded to the top **N = 16** eligible candidates plus a wall-clock budget (§6.4) so a hostile origin cannot drive unbounded root-side fetch/verify work. That bound is safe for honest crossing **only under a release-process invariant: during any rotation's recovery window, the outgoing-key-verifiable transition release must remain within the top-N eligible candidates** — i.e. the maintainer must not publish more than N−1 higher K2-only releases before pre-rotation stragglers have crossed. A **release-CI guard enforces this** (fail the release if the greatest outgoing-key-verifiable release is not within the first N eligible), and a boundary test covers 15/16 higher incoming-only releases before the transition. PAGE_CAP=10 (≤1000 releases) is a long-horizon limit — old clients are expected to have crossed well before the repo reaches it; cap-exhaustion is detected via GitHub's `Link: rel="next"` header (or a page-(cap+1) probe), so "a full tenth page" (exactly 1000) is distinguished from a genuine 1001st page, and only the latter aborts.
+
+### 6.3 fd-relative execution + writable-ancestry refusal (correction 3)
+Running the staged binary's `version --short` **by pathname** re-resolves ancestors (reintroducing the race step 4 closes), and a user-writable target parent lets the staged file be swapped between assertion and `renameat`. Mitigations, both applied: (a) execute through an **inherited fd** (`/proc/self/fd/…` or `fexecve`/`execveat`), with the writable fd already closed (§5.3); (b) restrict standalone self-update to **`/usr/local/bin/mathion`** and additionally refuse if the target's parent directory or any ancestor from `/` is not root-owned / is group- or world-writable (decision 1). The restriction is the simple case that matches the installer; the ancestry assertion is the defense-in-depth a bare path check would miss. Verified on the target platforms (Debian 12/13, Ubuntu 24.04): `/usr/local` and `/usr/local/bin` are `root:root 0755`, so the strict check passes; a host that made `/usr/local/bin` group-writable is refused (fail-closed, error names the component) — including Debian hosts carrying `/etc/staff-group-for-usr-local` (an upgrade-path default), where `base-files` sets `/usr/local{,/bin}` to `root:staff 2775` (group-writable, non-root group). Such hosts are *permanently* refused (fail-closed, so no security exposure); the refusal message and the README give the remediation — `chgrp root /usr/local/bin && chmod 0755 /usr/local/bin` (removing `/etc/staff-group-for-usr-local` alone does **not** re-permission an already-created dir; it only stops *future* creations from being staff-owned) — rather than implying the state is anomalous.
+
+### 6.4 Bound every download; checksums before the archive (correction 4)
+A hostile origin must not exhaust `/tmp` or root's filesystem before verification, nor drive unbounded work. Order matters: fetch and **verify** the small `checksums.txt` + `.asc` **first** (to select the release), then — after the confirm, in step 7 — download the (larger) archive under size+time limits and match its sha256. Concrete caps (defaults the plan may tune; they are floors/ceilings, not magic):
+
+| Input | Size cap | Notes |
+|---|---|---|
+| `/releases` JSON, per page | 8 MiB/page | `per_page=100`, PAGE_CAP=10 → ≤1000 releases; cap-exhaustion detected via `Link: rel="next"` (or a page-11 probe) so exactly-1000 is distinguished from a genuine 1001st page — only the latter aborts |
+| `checksums.txt` | 64 KiB | a handful of lines |
+| `checksums.txt.asc` | 16 KiB | one detached signature |
+| archive `.tar.gz` | 64 MiB | Go binary, compressed |
+| extracted binary | 200 MiB | gzip-bomb bound before/while untar (`LimitReader(cap+1)`) |
+| verify loop | top-N = 16 candidates | + overall wall-clock budget (default 120 s), per-request timeout 30 s |
+| archive download (step 7) | (64 MiB, above) | **time**-bounded independently of the verify loop: an **idle/stall timeout** (abort if no bytes for 60 s) + an overall ceiling (default 300 s). Runs **under the mutation flock**, so this bound caps the **origin-driven** portion of the lock hold — a slowloris origin cannot pin the lock or hang the root process (the only unbounded hold is the interactive confirm at step 6, a human decision) |
+
+All HTTP is https-only across redirects with the size cap applied to the **final** body (§3.2).
+
+### 6.5 Fail-closed everywhere
+Every failure mode **through step 7** aborts before **the live binary is replaced** — step 7 stages only a *temp* file in the target directory and never touches the live `mathion`: unparseable/foreign-package channel, no verifiable release (incl. loop-bound hit), bad/absent signature, S_apt signer, any size overrun, archive sha256 mismatch, zero-or-duplicate checksum line, single-file extraction violation, unsafe ancestry, target ≠ configured swap-target, a concurrent self-update (lock held, or the on-disk target no longer matches the running-image identity under the lock — step 4b), staged `version --short` ≠ selected tag. The staged temp file's unlink is **attempted** (and any cleanup failure reported) on any abort, so no partially-written or wrong-version binary replaces the live one. The **one** post-mutation failure state is a `fsync(dir)` failure *after* a successful `renameat` (§5.3): the new binary is installed but its crash-durability is uncertain; self-update reports that precisely rather than claiming "nothing changed," and does not roll back. A `renameat` that itself fails leaves the target unchanged (temp cleanup attempted). **Scope of the lock:** the parent-dir `flock` + running-image re-check serialize concurrent **self-updates** only. A concurrent `curl|sh` `install.sh` run, an `apt` upgrade, or a manual root `cp` takes no such lock and could still replace the target between step 4b's re-check and step 8's `renameat` — but every such writer is necessarily root (the ancestry guard proves the directory is root-only), so this is the administrator racing themselves, an accepted limitation rather than a privilege boundary.
+
+---
+
+## 7. `version --short` (§10)
+
+Add a `--short` bool flag to `newVersionCmd`. When set, `mathion version --short` prints **only** `buildVersion` (the baked full tag, e.g. `cli-v0.2.0`, or `dev`) and returns nil immediately — **no** `.env` read, **no** `/version` HTTP probe, **no** dual-install warning. When unset, the existing full behavior (pinned/running image versions + dual-install warning) is unchanged.
+
+This is self-update step 7's assertion oracle: a clean, side-effect-free echo of the staged binary's own baked identity, compared like-for-like (full `cli-vX.Y.Z`) against the selected tag. (§10's dual-install *warning* already shipped in Slice 4a as `maybeWarnDualInstall` in `version.go`; only `--short` is new here.)
+
+---
+
+## 8. Error handling & UX summary
+
+| Situation | Behavior |
+|---|---|
+| apt-managed | Print `sudo apt update && sudo apt install --only-upgrade mathion`, exit 0 (no root) |
+| Channel unparseable / foreign package / dpkg other-error | Abort (exit 1) |
+| `--check`, no eligible newer tags | Print "already up to date", exit 0 (short-circuits at step 3 — fetches only the releases list) |
+| `--check`, verifiable + guard-eligible release | Print `cli-vX.Y.Z installable (current …)`, exit 0 (no root; downloads only checksums, never the archive) |
+| `--check`, eligible exist but none verify / guard refuses / bound hit | Explicit verification-or-guard failure, exit 1 |
+| Already latest (mutation path) | Print "already up to date", exit 0 |
+| Release list exceeds pagination cap | Abort (exit 1) |
+| Not root (curl mutation path) | `requireRoot()` error (exit 1) |
+| Target ≠ configured swap-target | Refuse with reinstall hint (exit 1) |
+| Unsafe ancestry (names offending component) | Refuse (exit 1) |
+| No verifiable newer release (incl. loop-bound hit) | Abort (exit 1) |
+| S_apt-signed / bad / absent signature | Abort (exit 1) |
+| Archive sha256 mismatch | Abort (exit 1) |
+| Zero / duplicate checksum line for the archive | Abort (exit 1) |
+| Size overrun / multi-file / traversal / non-regular member | Abort (exit 1) |
+| Staged `version --short` ≠ selected tag | Abort (exit 1) |
+| User answers non-`y` at prompt | "self-update cancelled", **exit 0** (return nil) |
+| Another self-update holds the lock | Abort "another self-update in progress; retry", exit 1 |
+| On-disk binary ≠ running-image identity under the lock (concurrent swap, incl. one completed before step 1) | Abort "binary updated by another process; rerun", exit 1 |
+| `renameat` fails | Target unchanged; plain error (temp cleanup attempted), exit 1 |
+| `renameat` OK but `fsync(dir)` fails | Installed-but-durability-uncertain: dedicated error (no rollback, no "nothing changed"), exit 1 |
+| Success | staged → `fsync→close→exec-assert→renameat→fsync(dir)`, print `old → new`, exit 0 |
+
+---
+
+## 9. Testing
+
+### 9.1 Unit (hermetic — seams from §3.2, no network/root/dpkg/real FS/real exec)
+- **Channel detect:** apt-managed (pkg==mathion, incl. `mathion:amd64` multiarch), curl-managed (dpkg exit-1 "no path found"), dpkg absent, exit-0-but-pkg≠mathion → abort, other-error → abort.
+- **Forward-gate:** greatest eligible selection; `buildVersion` normalization (strip `cli-`; `dev` proceeds; raw `cli-vX.Y.Z` never fed to `semver.Compare`); prerelease and invalid tags rejected; app `v*` tags ignored.
+- **Pagination:** eligible `cli-v*` found on page 2+ is included; `Link: rel="next"` cap-exhaustion distinguishes exactly-1000 (ok) from 1001 (abort, never truncate).
+- **Verify-until-verifiable:** descending order; first-verifiable selected; a greater but unverifiable tag skipped in favor of a lower verifiable one; loop bounded to top-N (large fake list → "no verifiable release within N attempts", not unbounded fetch); **crossing-invariant boundary** — a transition release at candidate 16 is reached, at candidate 17 is not.
+- **Signature negatives (fail-closed):** S_apt-signed rejected; wrong-key; expired key; revoked key; tampered `checksums.txt` (bad hash line); tampered signature (`.asc` corrupted); missing issuer subpacket.
+- **Checksum line:** exactly-one-line-for-`mathion_linux_<GOARCH>.tar.gz` required — zero-match rejected, duplicate-line rejected; archive-sha256 mismatch rejected.
+- **Bounded downloads:** each of the **five** capped inputs (four downloads + the extracted binary) aborts past its limit.
+- **Guard:** resolved-self ≠ configured target (via the canonical-path seam) → refuse. The **ancestry decision is a pure function** over the per-component `(uid, mode, name)` sequence, unit-tested deterministically: safe-accept; a non-root-owned component → refuse (names it); a group/world-writable component → refuse (names it) — no dependence on the host's real `/usr/local` ownership. (The real `openat`/`fstat` walk that feeds it is integration — §9.2.)
+- **Extraction:** exactly-one-regular-file-named-`mathion`; reject extra member, symlink, hardlink, dir, device/fifo, traversal, over-size.
+- **Pre-swap assertion (via the staged-version-getter seam — compare/abort branch only):** staged `version --short` ≠ selected tag → abort, no swap. (The real inherited-fd exec is integration — §9.2.)
+- **HTTP client:** the redirect policy (pure predicate) rejects an HTTPS→HTTP hop and enforces the depth cap; a legit HTTPS→HTTPS redirect is **followed** and the size cap binds the **post-redirect** body; a non-200 response aborts; the injected (small) wall-clock **budget** aborts a slow origin; `PAGE_CAP` is injected small so the 1000-vs-1001 pagination test runs fast; the injected archive idle/stall + overall bounds abort a byte-starved and a slow-drip archive download respectively, asserting neither pins the mutation flock.
+- **Post-rename failure (seamed FS ops):** `renameat` failure → target unchanged, plain error; `renameat` OK + `fsync(dir)` failure → dedicated durability-uncertain error (exit 1), no rollback.
+- **Concurrent self-update (seamed `acquireMutationLock` + `recheckRunningIdentity`):** a second invocation whose parent-dir flock is contended aborts ("in progress"); an invocation whose on-disk target ≠ the captured running-image identity aborts ("updated by another process") — covering **both** a target swapped *between* step 1 and the post-lock re-check **and** a target that **already differed when step 1 ran** (the running-image anchor from `/proc/self/exe`, not a pathname re-stat, is what makes the pre-step-1 swap detectable). Neither path downgrades the binary.
+- **Keyring drift:** embedded `mathion-pubkey.asc` is byte-identical to `deploy/keys/mathion-pubkey.asc`.
+- **UX:** `--check` reports+exits asserting `requireRoot` is **never** invoked and the **archive** URL is **never** fetched (record-on-call seams), while checksums *are* fetched+verified; `--yes` skips prompt; a non-`y` prompt answer returns nil (exit 0).
+- **`version --short`** prints only `buildVersion`, no `.env`/HTTP/dual-install side effects.
+
+### 9.2 Integration (Linux, root-required — same harness family as the backup/restore/update legs in `cli/integration_test.sh`; the throwaway-**openpgp-key** generation is a **new** leg modeled on `deploy/apt/e2e_test.sh` — `integration_test.sh` today uses throwaway Docker tags, not signing keys)
+- Real openpgp keys generated per-run: throwaway primary + S_rel + S_apt subkeys.
+- **Rotation crossing (real swapped binaries, not in-process seams):** the harness builds **three** temporary `mathion` binaries — each from an **independent throwaway copy of the package tree** whose copied `mathion-pubkey.asc` is overwritten with the throwaway K1/K2 keyring, so the tracked asset is never mutated and the §6.1 drift guard is not tripped — with distinct baked `cli-v*` tags: a K1 client, a transition binary (signed-by-K1 release, embeds K2), and a K2 `latest`, pointed at a throwaway release server via the build-tag-gated test-endpoint override (§3.2), because in-process URL/keyring func-vars cannot reach a binary that has been swapped in and re-launched in a fresh process. Run 1 invokes the K1 binary → it installs the transition binary; run 2 invokes the **replaced** binary → it reaches the K2-only `latest`. Asserts the documented two-invocation crossing.
+- apt-managed defer: a dpkg-owned binary → self-update prints the apt command and does not swap.
+- **Full curl-managed happy path** on a real root-owned `/usr/local/bin`-style target dir: real inherited-fd `version --short` exec assertion, staged swap, durability (new bytes present, mode 0755, atomic replacement), and `version --short` on the new binary reports the selected tag. This is the leg that exercises the real exec + the safe-ancestry **accept** path (both un-runnable hermetically).
+- S_apt-signed checksums rejected end-to-end.
+
+---
+
+## 10. Files
+
+**Create**
+- `cli/internal/selfupdate/*.go` — the logic package (split per §3.2) + `*_test.go`.
+- `cli/internal/selfupdate/mathion-pubkey.asc` — `go:embed`ed verifying keyring (byte-identical copy of `deploy/keys/mathion-pubkey.asc`; §6.1 drift guard).
+- `cli/cmd/self_update.go` — command wiring + `self_update_test.go`.
+
+**Modify**
+- `cli/cmd/root.go` — register `newSelfUpdateCmd(app)`.
+- `cli/cmd/version.go` + `cli/cmd/version_test.go` — add `--short`.
+- `cli/go.mod` / `cli/go.sum` — add the three pinned deps (§3.3).
+- `cli/.goreleaser.yaml` — pin the `mathion` archive to **binary-only** with a **non-matching glob** (`archives: [{ id: mathion, files: [ "none*" ] }]`); an **empty** `files: []` is treated as *unset* and re-applies GoReleaser's default `README*`/`LICENSE*` globs, so it must be a non-matching pattern, not empty. This guarantees the strict single-member extractor's precondition at the producer; add a release/test assertion that each `mathion_linux_<arch>.tar.gz` contains exactly the single member `mathion`.
+- `deploy/keys/README.md` — correct §5 "Which channels need a dual-accept overlap": the **4b self-update binary is NO (transition-release crossing)**, not YES (dual-accept), and reconcile the line-122-vs-line-269 contradiction (§6.2). `mathion-pubkey.asc` stays primary + one S_rel subkey; the S_rel-to-binary rotation is the transition release, not a two-subkey keyring. **Spell out the transition choreography as a hard task:** at the **transition release build** the committed `mathion-pubkey.asc` is the **incoming K2** (so the binary embeds K2 and the drift guard passes), while that same release's `checksums.txt` is **signed by the outgoing K1** (so pre-rotation clients can still verify it), and the transition stays within the top-N eligible window until stragglers cross. Getting the sign-vs-embed backwards strands every pre-rotation client into manual reinstall. **This choreography is not executable with the current release workflow (a rotation-time task — §12):** `release-cli.yml` today drives a single `S_REL_FPR` for both the goreleaser signing key (`:87`) and the apt-publish verify against the committed `mathion-pubkey.asc` (`:144`), so a transition (sign K1, commit K2) needs **separate inputs** — a signing fpr (K1) distinct from the committed/embedded keyring (K2), with the transition's K1 signature verified against the **outgoing** public key supplied out-of-band rather than the committed K2 keyring. `install.sh` stays pinned to K1 until a K2-signed successor release exists, then flips to K2 (a documented transition-only divergence from the binary's K2 keyring). Concretely the transition has a **three-way key state** that a naive "regenerate everything from `mathion-pubkey.asc`" would break: **(a)** `deploy/keys/mathion-pubkey.asc` + the binary `go:embed` = **incoming K2** (primary + K2, single subkey); **(b)** the transition release's `checksums.txt` = **signed by outgoing K1**, verified out-of-band against the outgoing primary+K1 public key; **(c)** `install.sh`'s `mathion_embedded_key()` literal key **and** `EXPECTED_SIGNING_FPR` = **outgoing K1** — because the fresh installer resolves the *greatest* stable release, which during the window is the K1-signed transition release (`EXPECTED_PRIMARY_FPR` never changes: only the S_rel *subkey* rotates). **Do not regenerate `install.sh`'s literal key from the K2 `mathion-pubkey.asc` at the transition build** — that strands every fresh install until the successor ships. Flip `install.sh`'s literal **and** scalar to K2 **in the same change that publishes** the first K2-signed successor — atomically (README §5 step 4's "together, in the same change" idiom), never *after*, or every fresh install fail-closed-rejects in the gap between the K2 release and a late installer flip. A release/CI guard asserts `EXPECTED_SIGNING_FPR` is a subkey actually present in `mathion_embedded_key()`'s output, so the scalar and literal cannot silently drift apart. The crossing-invariant CI guard consumes the same outgoing-key metadata. (Maintainer-facing runbook change — see §12.) Additionally add a **4b-aware sentence to README §6** (S_rel *compromise* recovery, which predates 4b): because self-update's keyring is **compiled in** and a compromised outgoing key can never sign a transition release, every deployed pre-rotation self-update binary fails closed into **manual reinstall** on an S_rel compromise (the safe failure) — state it explicitly, mirroring §6's apt-compromise paragraph.
+- `deploy/deb/*` third-party notices / DEP-5 `copyright` — regenerate (e.g. go-licenses) to enumerate the new `golang.org/x/*` + circl deps (license/lintian correctness).
+- CI (`ci.yml` and/or `release-cli.yml`) — add the `cmp` guard asserting `cli/internal/selfupdate/mathion-pubkey.asc` == `deploy/keys/mathion-pubkey.asc`, **and** the §6.2 crossing-invariant guard (fail a release whose greatest outgoing-key-verifiable release is not within the first N eligible candidates during a rotation window). Also assert the shipped release binary is built with **no** `mathion_selfupdate_test` tag (a stray `-tags` in release CI would let an env var redirect a root-executed updater's origin).
+- `README` (deploy/CLI docs) — a `mathion self-update` section: what it does, channel behavior (apt vs curl|sh), `--check`/`--yes`, the forward-only + signature-verified guarantees, and the rotation "may take two runs" note.
+- `deploy/man/mathion.1` — add a one-line `self-update` entry (and `version --short`) under `.SH COMMANDS` (the packaged man page already lists all 12 commands there, grouped into `.TP` blocks — add `self-update` and note `version --short` alongside them).
+- `cli/integration_test.sh` (or a sibling harness) — a new self-update leg (§9.2), gated root-required.
+
+**Create (test/build support)**
+- A build-tag-gated test-endpoint override (`cli/internal/selfupdate/endpoint_testtag.go` behind `//go:build mathion_selfupdate_test`) **paired with a default `//go:build !mathion_selfupdate_test` file** defining the same endpoint symbols (so the normal build has exactly one definition — no duplicate-symbol break) + the integration fixture builder that produces the three keyed, tagged binaries the rotation-crossing leg needs (§9.2, §3.2).
+
+---
+
+## 11. Interfaces consumed from prior slices
+
+- **4a S_rel-signed `checksums.txt` + `checksums.txt.asc` and the release archive `mathion_linux_<GOARCH>.tar.gz`** on each `cli-v*` GitHub release — the artifacts self-update verifies and installs. Produced by the `release` CI environment (S_rel signs checksums; goreleaser builds the archive), combined §11.
+- **The canonical verifying keyring `deploy/keys/mathion-pubkey.asc` (primary + S_rel)** — self-update embeds a byte-identical copy (`cli/internal/selfupdate/mathion-pubkey.asc`, §6.1) for offline verification; injectable in tests. This byte-identity between the canonical asset and the binary is permanent (drift guard); its equality with `install.sh`'s embedded literal holds only in **steady state** — a rotation transiently diverges them (§10 three-way state, §12).
+- **`requireRoot()`, `osExit`, `exitCode`, `*App` (Out/Err/In), the `cmd` command-registration + func-var seam patterns** — existing CLI infrastructure (Slices 2-3; `guard.go`, `root.go`, `update.go`, `version.go`).
+- **`buildVersion` ldflag + `SetBuildInfo`** (`root.go`/`main.go`, baked from validated `CLI_TAG`) — the current-version baseline and the `version --short` payload.
+- **The durability idiom** (`config.AtomicWrite`/`varlib.WriteJournal`: fsync → rename → fsync-dir) — the pattern §5.3 mirrors with raw `*at` syscalls.
+
+---
+
+## 12. Open questions / deferred
+
+- **Live go-live still gated on 4a maintainer prerequisites** (GPG keygen: offline primary + S_rel/S_apt subkeys; GitHub Environments/secrets/Pages; fill install.sh placeholder key+fpr pins; cut a signed release). self-update's real end-to-end path can only be exercised against a signed release once those land — the integration harness uses throwaway keys to prove the logic in the meantime, exactly as 4a's apt e2e does.
+- **First signed `cli-v*` release must carry `checksums.txt` + `.asc`** for self-update to have anything to verify; that is a release-process item (already true for the release CI job), not 4b code.
+- **4a go-live cross-check: the checksums-signing subkey pin.** `release-cli.yml:87` **already** appends the `!` selector (`GPG_FINGERPRINT: ${{ vars.S_REL_FPR }}!`), and `:66` asserts the imported `GPG_S_REL_PRIVATE` holds **exactly one** `ssb` (the S_rel subkey) — so mis-subkey signing is already **doubly** mitigated. The only residual go-live check is that the filled `vars.S_REL_FPR` value itself carries **no stray `!`** (the workflow supplies the selector). This still gates whether self-update can verify anything: a wrong subkey pin would make self-update fail-closed-reject **every** release.
+- **The transition-release rotation needs release-workflow changes at rotation time.** `release-cli.yml`'s single `S_REL_FPR` cannot express "sign with the outgoing K1 while committing the incoming K2 keyring"; a real rotation must add separate signing-vs-embedded S_rel inputs + an out-of-band outgoing verifier, and keep `install.sh` (**both** its literal embedded key and its `EXPECTED_SIGNING_FPR` scalar — not the scalar alone) pinned to the outgoing key until a K2-signed successor exists — the §10 **three-way key state**, plus a release/CI guard that `EXPECTED_SIGNING_FPR` is present in `mathion_embedded_key()`'s output. These are **rotation-time** tasks (no keys exist yet), **not** 4b runtime code — the 4b verify-until-verifiable logic is correct regardless — but the runbook (§10) documents the executable procedure so the first rotation isn't run against a workflow that can't express it.
+- **The embedded `mathion-pubkey.asc` inherits 4a's placeholder-until-keygen state.** Until the maintainer fills the real key (a 4a go-live prerequisite), the embedded keyring is the same placeholder `install.sh` carries; self-update against a real signed release only works once the real key is embedded. The drift guard (§6.1) keeps the two copies in lockstep regardless.
+- **The rotation-model reconciliation edits `deploy/keys/README.md` (a 4a operational runbook).** 4b adopts the transition-release crossing (combined §9.3 correction 2) and corrects the README's conflicting "4b binary dual-accept: YES" to "NO." This maintainer-facing runbook change is **confirmed by the maintainer (2026-08-15)**: the transition-release procedure — publish a transition release **signed by the outgoing key** whose **binary embeds the incoming key**, and keep it within the top-N eligible window until stragglers cross — is adopted, and `deploy/keys/README.md` §5 is corrected to "4b: NO dual-accept" when the real keygen lands.
