@@ -97,8 +97,8 @@ The installer verifies the release **signature** (authenticity) before the
 signature over `checksums.txt` made by Mathion's release subkey (`S_rel`) — and
 rejects the download unless that signature validates against the installer's
 embedded release key, pinned to the expected signing and primary fingerprints.
-Only then does it verify each artifact's sha256 against the now-authenticated
-`checksums.txt`. The signing key and its fingerprints are documented in
+Only then does it verify the selected artifact's SHA-256 against the
+now-authenticated `checksums.txt`. The signing key and its fingerprints are documented in
 [`deploy/keys/README.md`](deploy/keys/README.md). You can still inspect the
 script and pin a known release tag (`sudo sh install.sh cli-v0.1.0`) for a
 reproducible install.

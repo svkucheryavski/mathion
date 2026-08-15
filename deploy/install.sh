@@ -44,7 +44,8 @@ verify_sig() {
   # REQUIRED gate ALONGSIDE the status policy below (mirrors verify-inrelease.sh):
   # gpg exits 0 for EXPKEYSIG/REVKEYSIG (caught by the status greps), but a
   # NONZERO exit from a malformed/operational failure must fail closed even if a
-  # stray GOODSIG is present. Cleanup + the policy greps still run on failure.
+  # stray GOODSIG is present. Cleanup always runs; the policy greps run only
+  # after the rc gate passes (a nonzero rc returns before them).
   _rc=0
   _st="$(GNUPGHOME="$_vh" gpg --batch --no-tty --status-fd 1 --verify "$1" "$2" 2>/dev/null)" || _rc=$?
   rm -rf "$_vh"
