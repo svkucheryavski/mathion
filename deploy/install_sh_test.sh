@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
-# Build local artifacts (mirrors release-cli.yml).
-cd "$(dirname "$0")/../cli"
+# Build local artifacts (mirrors release-cli.yml). Resolve the repo root ONCE,
+# up front, as an absolute path — BEFORE any cd — so a relative $0 (the form
+# release-cli.yml uses: `sh deploy/install_sh_test.sh`) still resolves after we
+# cd into cli/ (and later dist/) below.
+# shellcheck disable=SC1007  # CDPATH= is a deliberate one-command env prefix (empty CDPATH), not a typo
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT_DIR/cli"
 CLI_TAG=cli-v0.0.0-test APP_IMAGE=v0.1.1 GORELEASER_CURRENT_TAG=v0.0.0-test \
   goreleaser release --clean --skip=publish,sign,nfpm --snapshot
 test -f dist/mathion_linux_amd64.tar.gz || { echo "FAIL: amd64 archive missing"; exit 1; }
@@ -34,8 +39,6 @@ cd ..
 
 # ---- authenticity: drive install.sh's REAL verify_sig with a throwaway key ----
 command -v gpg >/dev/null 2>&1 || { echo "SKIP: gpg not present"; exit 0; }
-# shellcheck disable=SC1007  # CDPATH= is a deliberate one-command env prefix (empty CDPATH), not a typo
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TKH="$(mktemp -d)"; export GNUPGHOME="$TKH"; chmod 700 "$TKH"
 # throwaway: primary (cert-only) + sub_rel (the pinned channel); sub_apt added below.
 cat > "$TKH/kp" <<'PARAMS'
