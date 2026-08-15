@@ -5,7 +5,7 @@ command -v apt-ftparchive >/dev/null 2>&1 || { echo "SKIP: apt-utils not install
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root for apt"; exit 0; }
 WORK="$(mktemp -d)"
 cleanup() {
-  [ -f "$WORK/pid" ] && kill "$(cat "$WORK/pid")" 2>/dev/null || true
+  if [ -f "$WORK/pid" ]; then kill "$(cat "$WORK/pid")" 2>/dev/null || true; fi
   apt-get remove -y mathion >/dev/null 2>&1 || true
   rm -f /etc/apt/sources.list.d/mathion-test.list /usr/share/keyrings/mathion-test.gpg
   rm -rf "$WORK"
@@ -59,15 +59,22 @@ apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list
 apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion
 test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
 
-# tamper-negative: a corrupted, non-fallbackable Release must be REJECTED by apt.
-# Modify a byte INSIDE the signed body (the Suite field), NOT a trailing append —
-# gpg/gpgv process only the first OpenPGP message and ignore bytes past the signature
-# block, so `printf 'x' >> InRelease` can slip through. A body edit breaks the
-# clearsigned digest -> gpgv rejects -> apt refuses the repo.
+# tamper-negative: a corrupted Release must be REJECTED by apt. Modify a byte INSIDE
+# the signed body (the Suite field), NOT a trailing append — gpg/gpgv process only the
+# first OpenPGP message and ignore bytes past the signature block, so
+# `printf 'x' >> InRelease` can slip through. A body edit breaks the clearsigned digest
+# -> gpgv reports BADSIG. Point this update at a FRESH empty lists dir: apt detects the
+# bad signature either way, but with the earlier good `apt-get update` still CACHED it
+# only WARNS, reuses the old index, and exits 0 ("old ones used instead") — so the
+# rejection would be invisible to a `$?` check. With no cache to fall back to it hard-
+# fails ("repository is not signed", exit 100); the fresh dir is what makes the rejection
+# observable as a nonzero exit.
 rm -f "$WORK/site/deb/dists/stable/Release" "$WORK/site/deb/dists/stable/Release.gpg"
 sed 's/^Suite: stable/Suite: tampered/' "$WORK/site/deb/dists/stable/InRelease" > "$WORK/ir.tampered" \
   && mv "$WORK/ir.tampered" "$WORK/site/deb/dists/stable/InRelease"
-if apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
+mkdir -p "$WORK/freshlists/partial"
+if apt-get update -o Dir::State::Lists="$WORK/freshlists" \
+     -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
      -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 >/dev/null 2>&1; then
   echo "FAIL: apt accepted a tampered InRelease"; exit 1
 fi

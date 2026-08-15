@@ -28,5 +28,5 @@ if [ -f ctrl/conffiles ] && grep -q mathion-archive-keyring ctrl/conffiles; then
   echo "FAIL: keyring is a conffile"; exit 1; fi
 rm -rf ctrl
 # Recommends must NOT pull docker (Suggests or none only)
-dpkg-deb -f "$deb" Recommends | grep -qi docker && { echo "FAIL: docker in Recommends"; exit 1; } || true
+if dpkg-deb -f "$deb" Recommends | grep -qi docker; then echo "FAIL: docker in Recommends"; exit 1; fi
 echo "deb_test PASSED"

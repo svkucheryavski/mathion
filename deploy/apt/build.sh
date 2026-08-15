@@ -33,6 +33,30 @@ apt-ftparchive \
 # after the hash blocks is safe.
 echo "Valid-Until: $(date -u -R -d "+${VALID_DAYS} days")" >> dists/stable/Release
 
+# Materialize by-hash indexes. The Release above advertises Acquire-By-Hash: yes, so apt
+# clients fetch <dir>/by-hash/SHA256/<hash> FIRST — but apt-ftparchive (2.8.x) does NOT
+# create those dirs from DoByHash. Create them ourselves for EVERY index the Release
+# lists (Packages* for `apt install`; Contents-* for `apt-file`), driven off Release's
+# own SHA256 block so the set can never drift from what clients ask for: each entry is
+# "<sha256> <size> <relpath>" (relative to dists/stable), so drop a byte-identical copy
+# at dists/stable/<dir relpath>/by-hash/SHA256/<sha256>. A client fetching by hash then
+# gets a consistent index even mid-update (the guarantee Acquire-By-Hash exists for).
+# Done AFTER `release` so the hashes match what it emitted and `release` can't recurse
+# into by-hash/; the indexes are unchanged since `generate`. The appended Valid-Until:
+# line ends the SHA256 block for the parser (any header line flips it off). Restrict to
+# sub-paths ($3 has a '/'): apt fetches the top-level Release/InRelease DIRECTLY, never by
+# hash, and the shell truncates dists/stable/Release before `release` scans it, so the
+# block carries a stale self-entry for `Release` whose listed hash no longer matches its
+# final bytes — materializing that would be a by-hash file whose name lies about content.
+awk '/^[A-Za-z0-9-]+:/{s=($0=="SHA256:")?1:0; next} s && NF>=3 && $3 ~ "/" {print $1, $3}' dists/stable/Release |
+  while read -r _h _rel; do
+    _f="dists/stable/$_rel"
+    [ -f "$_f" ] || continue
+    _bhd="dists/stable/$(dirname "$_rel")/by-hash/SHA256"
+    mkdir -p "$_bhd"
+    cp -f "$_f" "$_bhd/$_h"
+  done
+
 # sign with S_apt; feed the passphrase on fd 0 when set (prod), skip when empty (throwaway).
 gpg_sign() {
   if [ -n "$PASS" ]; then
