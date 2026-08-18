@@ -586,8 +586,10 @@ import (
 	"bytes"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 // newSigner returns a throwaway entity with a signing subkey and its public keyring.
@@ -600,6 +602,13 @@ func newSigner(t *testing.T) (*openpgp.Entity, openpgp.EntityList) {
 	if err := e.AddSigningSubkey(nil); err != nil {
 		t.Fatal(err)
 	}
+	return e, entityKeyring(t, e)
+}
+
+// entityKeyring serializes e's PUBLIC half and reads it back as a keyring (what
+// self-update verifies against). Shared by the expired/revoked cases below.
+func entityKeyring(t *testing.T, e *openpgp.Entity) openpgp.EntityList {
+	t.Helper()
 	var pub bytes.Buffer
 	if err := e.Serialize(&pub); err != nil { // public entity only
 		t.Fatal(err)
@@ -608,16 +617,36 @@ func newSigner(t *testing.T) (*openpgp.Entity, openpgp.EntityList) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return e, kr
+	return kr
 }
 
 func armoredSig(t *testing.T, signer *openpgp.Entity, msg []byte) []byte {
+	return armoredSigConfig(t, signer, msg, nil)
+}
+
+// armoredSigConfig signs with an explicit config — needed to sign AS-OF a past
+// time for the expired-key case, when the key was still valid.
+func armoredSigConfig(t *testing.T, signer *openpgp.Entity, msg []byte, cfg *packet.Config) []byte {
 	t.Helper()
 	var asc bytes.Buffer
-	if err := openpgp.ArmoredDetachSign(&asc, signer, bytes.NewReader(msg), nil); err != nil {
+	if err := openpgp.ArmoredDetachSign(&asc, signer, bytes.NewReader(msg), cfg); err != nil {
 		t.Fatal(err)
 	}
 	return asc.Bytes()
+}
+
+// signingSubkey returns the index of e's signing-capable subkey. NewEntity adds
+// an ENCRYPTION subkey at index 0, so the signer is not necessarily Subkeys[0] —
+// revoking the wrong subkey silently passes verification (learned empirically).
+func signingSubkey(t *testing.T, e *openpgp.Entity) int {
+	t.Helper()
+	for i := range e.Subkeys {
+		if s := e.Subkeys[i].Sig; s != nil && s.FlagsValid && s.FlagSign {
+			return i
+		}
+	}
+	t.Fatal("no signing subkey")
+	return -1
 }
 
 func TestVerifyChecksums(t *testing.T) {
@@ -638,6 +667,48 @@ func TestVerifyChecksums(t *testing.T) {
 	bad[len(bad)/2] ^= 0xFF // corrupt the armored signature
 	if err := verifyChecksums(relKR, sums, bad); err == nil {
 		t.Fatal("a corrupted .asc must be rejected")
+	}
+}
+
+// §9.1 signature negatives beyond wrong-key/tampered. go-crypto's
+// VerifyDetachedSignatureAndHash rejects BOTH expired and revoked signing subkeys
+// NATIVELY ("key expired" / "signature made by revoked key") — verifyChecksums
+// needs NO membership-loop change; the tests just have to target the SIGNING subkey.
+func TestVerifyChecksums_ExpiredKey(t *testing.T) {
+	sums := []byte("abc123  mathion_linux_amd64.tar.gz\n")
+	past := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := &packet.Config{Time: func() time.Time { return past }, KeyLifetimeSecs: 3600}
+	e, err := openpgp.NewEntity("Expired", "", "e@example.invalid", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddSigningSubkey(cfg); err != nil {
+		t.Fatal(err)
+	}
+	kr := entityKeyring(t, e)
+	sig := armoredSigConfig(t, e, sums, cfg) // signed when the key was still valid
+	if err := verifyChecksums(kr, sums, sig); err == nil {
+		t.Fatal("a signature by an expired signing subkey must be rejected")
+	}
+}
+
+func TestVerifyChecksums_RevokedKey(t *testing.T) {
+	sums := []byte("abc123  mathion_linux_amd64.tar.gz\n")
+	e, err := openpgp.NewEntity("Revoked", "", "r@example.invalid", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddSigningSubkey(nil); err != nil {
+		t.Fatal(err)
+	}
+	i := signingSubkey(t, e)
+	sig := armoredSig(t, e, sums) // sign BEFORE revoking
+	if err := e.RevokeSubkey(&e.Subkeys[i], packet.NoReason, "rotated out", nil); err != nil {
+		t.Fatal(err)
+	}
+	kr := entityKeyring(t, e)
+	if err := verifyChecksums(kr, sums, sig); err == nil {
+		t.Fatal("a signature by a revoked signing subkey must be rejected")
 	}
 }
 
@@ -1531,6 +1602,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1632,6 +1704,128 @@ func TestDownloadArchive_SHAMismatch(t *testing.T) {
 	}
 	if _, err := downloadArchive(context.Background(), cfg, "cli-v0.3.0", "00"); err == nil {
 		t.Fatal("sha mismatch must abort")
+	}
+}
+
+// §9.1 "bounded downloads": the archive path (getArchive/readIdleBounded) has its
+// own size cap + idle/stall + overall-deadline bounds, separate from getLimited.
+// All three abort promptly under tiny injected bounds (empirically verified).
+func TestGetArchive_SizeCapAborts(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 1000))
+	}))
+	defer srv.Close()
+	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 100,
+		archiveIdleTO: time.Second, archiveOverallTO: 5 * time.Second}
+	if _, err := getArchive(context.Background(), cfg, srv.URL+"/a.tgz"); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("over-cap archive must abort with a size error, got %v", err)
+	}
+}
+
+func TestGetArchive_IdleStallAborts(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte{'x'})
+		w.(http.Flusher).Flush()
+		<-release // stall indefinitely after the first byte
+	}))
+	defer srv.Close()
+	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 1 << 20,
+		archiveIdleTO: 100 * time.Millisecond, archiveOverallTO: 10 * time.Second}
+	start := time.Now()
+	if _, err := getArchive(context.Background(), cfg, srv.URL+"/a.tgz"); err == nil {
+		t.Fatal("an idle-stalled archive must abort")
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("idle abort took %v — the overall deadline fired, not the idle timer", d)
+	}
+}
+
+func TestGetArchive_OverallDeadlineAborts(t *testing.T) {
+	stop := make(chan struct{})
+	defer close(stop)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fl := w.(http.Flusher)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			w.Write([]byte{'x'})
+			fl.Flush()
+			time.Sleep(30 * time.Millisecond) // always progressing (< idle) but never EOF
+		}
+	}))
+	defer srv.Close()
+	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 1 << 30,
+		archiveIdleTO: 500 * time.Millisecond, archiveOverallTO: 300 * time.Millisecond}
+	start := time.Now()
+	if _, err := getArchive(context.Background(), cfg, srv.URL+"/a.tgz"); err == nil {
+		t.Fatal("a slow-drip archive must hit the overall deadline")
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("overall abort took too long: %v", d)
+	}
+}
+
+// §9.1: the injected (small) verify-loop wall-clock budget aborts a slow origin.
+func TestSelectRelease_BudgetAborts(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		fmt.Fprint(w, "deadbeef  "+archiveName()+"\n")
+	}))
+	defer srv.Close()
+	_, relKR := newSigner(t)
+	cfg := config{dlBase: srv.URL, client: newHTTPClient(srv.Client().Transport, 5), perReqTO: 5 * time.Second,
+		capChecksums: 1 << 20, capAsc: 1 << 20, verifyBudget: 100 * time.Millisecond, topN: 16}
+	if _, _, err := selectRelease(context.Background(), cfg, relKR, []string{"cli-v0.9.0", "cli-v0.8.0", "cli-v0.7.0"}); err == nil {
+		t.Fatal("a slow origin must exhaust the verify budget")
+	}
+}
+
+// §9.1 crossing-invariant boundary: candidate 16 (index 15) is reached, candidate
+// 17 (index 16) is not, at topN=16. Only `verifiableTag` carries a real signature.
+func TestSelectRelease_CrossingBoundary(t *testing.T) {
+	relEntity, relKR := newSigner(t)
+	aptEntity, _ := newSigner(t)
+	sums := []byte(fmt.Sprintf("deadbeef  %s\n", archiveName()))
+	newServer := func(verifiableTag string) *httptest.Server {
+		return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/checksums.txt"):
+				w.Write(sums)
+			case strings.HasSuffix(r.URL.Path, "/checksums.txt.asc"):
+				if strings.Contains(r.URL.Path, verifiableTag+"/") {
+					w.Write(armoredSig(t, relEntity, sums))
+				} else {
+					w.Write(armoredSig(t, aptEntity, sums)) // unverifiable
+				}
+			default:
+				w.WriteHeader(404)
+			}
+		}))
+	}
+	var tags []string
+	for i := 20; i >= 1; i-- {
+		tags = append(tags, fmt.Sprintf("cli-v0.%d.0", i))
+	}
+	at16, at17 := tags[15], tags[16]
+
+	s16 := newServer(at16)
+	defer s16.Close()
+	cfg := config{dlBase: s16.URL, client: newHTTPClient(s16.Client().Transport, 5), perReqTO: 2 * time.Second,
+		capChecksums: 1 << 20, capAsc: 1 << 20, verifyBudget: 10 * time.Second, topN: 16}
+	if tag, _, err := selectRelease(context.Background(), cfg, relKR, tags); err != nil || tag != at16 {
+		t.Fatalf("candidate 16 must be reached: tag=%q err=%v", tag, err)
+	}
+
+	s17 := newServer(at17)
+	defer s17.Close()
+	cfg.dlBase, cfg.client = s17.URL, newHTTPClient(s17.Client().Transport, 5)
+	if tag, _, err := selectRelease(context.Background(), cfg, relKR, tags); err == nil {
+		t.Fatalf("candidate 17 must NOT be reached at topN=16, but selected %q", tag)
 	}
 }
 ```
@@ -1880,7 +2074,9 @@ import (
 // returns a real fd to the temp dir with SYNTHETIC root-safe components (a real
 // t.TempDir ancestry is 1777 world-writable and would fail ancestrySafe).
 // stagedVersion is stubbed (real exec is Task 13); the stage+commit swap is REAL.
-func harness(t *testing.T, currentVersion string) (Params, *bool, func()) {
+// The returned *int counts archive-endpoint hits (for the --check no-fetch assert);
+// it is race-clean — only the happy path writes it, only the --check test reads it.
+func harness(t *testing.T, currentVersion string) (Params, *bool, *int, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "mathion")
@@ -1896,6 +2092,7 @@ func harness(t *testing.T, currentVersion string) (Params, *bool, func()) {
 	bin := tgz(t, map[string]tarMember{"mathion": {tar.TypeReg, []byte("newbin")}})
 	sum := sha256.Sum256(bin)
 	sums := []byte(fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset))
+	archiveHits := 0 // declared BEFORE srv so the handler closure can capture it
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -1906,6 +2103,7 @@ func harness(t *testing.T, currentVersion string) (Params, *bool, func()) {
 		case strings.HasSuffix(r.URL.Path, "/checksums.txt.asc"):
 			w.Write(armoredSig(t, relEntity, sums))
 		case strings.HasSuffix(r.URL.Path, asset):
+			archiveHits++
 			w.Write(bin)
 		default:
 			w.WriteHeader(404)
@@ -1944,11 +2142,11 @@ func harness(t *testing.T, currentVersion string) (Params, *bool, func()) {
 	cfg.verifyBudget, cfg.perReqTO = 5*time.Second, 2*time.Second
 	cfg.archiveIdleTO, cfg.archiveOverallTO = 2*time.Second, 5*time.Second
 	return Params{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}, In: strings.NewReader("y\n"),
-		Cfg: cfg, CurrentVersion: currentVersion}, &rootCalled, cleanup
+		Cfg: cfg, CurrentVersion: currentVersion}, &rootCalled, &archiveHits, cleanup
 }
 
 func TestRun_HappyPath_Swaps(t *testing.T) {
-	p, _, done := harness(t, "cli-v0.2.0")
+	p, _, _, done := harness(t, "cli-v0.2.0")
 	defer done()
 	p.Yes = true
 	var out bytes.Buffer
@@ -1966,7 +2164,7 @@ func TestRun_HappyPath_Swaps(t *testing.T) {
 }
 
 func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
-	p, rootCalled, done := harness(t, "cli-v0.2.0")
+	p, rootCalled, archiveHits, done := harness(t, "cli-v0.2.0")
 	defer done()
 	p.Check = true
 	var out bytes.Buffer
@@ -1977,6 +2175,9 @@ func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
 	if *rootCalled {
 		t.Fatal("--check must NOT require root")
 	}
+	if *archiveHits != 0 {
+		t.Fatalf("--check must NOT fetch the archive, but hit it %d time(s)", *archiveHits)
+	}
 	if got, _ := os.ReadFile(p.Cfg.swapTarget); string(got) != "old" {
 		t.Fatal("--check must NOT swap the binary")
 	}
@@ -1986,7 +2187,7 @@ func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
 }
 
 func TestRun_AptManaged_Defers(t *testing.T) {
-	p, rootCalled, done := harness(t, "cli-v0.2.0")
+	p, rootCalled, _, done := harness(t, "cli-v0.2.0")
 	defer done()
 	dpkgSearch = func(context.Context, string) dpkgResult {
 		return dpkgResult{stdout: []byte("mathion: /usr/bin/mathion\n"), exitCode: 0}
@@ -2005,7 +2206,7 @@ func TestRun_AptManaged_Defers(t *testing.T) {
 }
 
 func TestRun_Decline_ReturnsNil(t *testing.T) {
-	p, _, done := harness(t, "cli-v0.2.0")
+	p, _, _, done := harness(t, "cli-v0.2.0")
 	defer done()
 	p.In = strings.NewReader("n\n")
 	var out bytes.Buffer
@@ -2524,11 +2725,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ### Task 13: integration leg (real swapped binaries) + test-tag endpoint override
 
-Spec: §9.2, §3.2. A root-required Linux leg with throwaway OpenPGP keys and REAL shell-launched binaries (the in-process seams can't reach a binary self-update swapped in and re-launched). Covers: curl-managed happy path (real inherited-fd exec + swap), apt-managed defer, S_apt-signed rejection, and the two-invocation rotation crossing. Adds the paired build-tag endpoint override.
+Spec: §9.2, §3.2. A root-required Linux leg with throwaway OpenPGP keys and REAL shell-launched binaries (the in-process seams can't reach a binary self-update swapped in and re-launched). Covers ALL four §9.2 scenarios: curl-managed happy path (real inherited-fd exec + swap), the two-invocation rotation crossing (K1 client → K1-signed transition embedding K2 → K2-only latest), apt-managed defer (a real dpkg-owned path), and S_apt-signed rejection. Adds the paired build-tag endpoint override.
 
 **Files:**
 - Create: `cli/internal/selfupdate/endpoints_testtag.go`, `cli/selfupdate_integration_test.sh`
-- Modify: `cli/integration_test.sh` (invoke the new leg when run as root), if that harness drives the suite
+
+This is a **standalone** leg (like `deploy/apt/e2e_test.sh`), gated behind `MATHION_SELFUPDATE_E2E=1` so it never mutates a real install by accident; it is NOT wired into `cli/integration_test.sh`.
 
 **Interfaces:** `endpointAPIBase`/`endpointDLBase` overridden from env under `mathion_selfupdate_test`.
 
@@ -2553,20 +2755,29 @@ func endpointDLBase() string  { return os.Getenv("MATHION_SELFUPDATE_DL_BASE") }
 Run: `cd cli && go build ./... && go build -tags mathion_selfupdate_test ./...`
 Expected: both succeed (exactly one definition of `endpointAPIBase`/`endpointDLBase` per build).
 
-- [ ] **Step 3: Write the integration leg** — `cli/selfupdate_integration_test.sh` (modeled on `deploy/apt/e2e_test.sh`; skips unless root + gpg):
+- [ ] **Step 3: Write the integration leg** — `cli/selfupdate_integration_test.sh` (modeled on `deploy/apt/e2e_test.sh`). Two throwaway keys (K1, K2), four binaries built from throwaway tree-copies with the embedded keyring overwritten (the tracked asset is never touched — §6.1/§9.2), and a local release server. Requires root + gpg + python3 + dpkg + go; **skips unless `MATHION_SELFUPDATE_E2E=1`** (it mutates `/usr/local/bin/mathion` and `/usr/bin/mathion`):
 
 ```sh
 #!/bin/sh
-# self-update integration: throwaway keys + REAL shell-launched binaries.
+# self-update integration: throwaway OpenPGP keys + REAL shell-launched binaries.
+# Covers all four §9.2 scenarios: happy path, rotation crossing, apt defer, S_apt reject.
 set -eu
-command -v gpg >/dev/null 2>&1 || { echo "SKIP: gpg required"; exit 0; }
+[ "${MATHION_SELFUPDATE_E2E:-}" = 1 ] || { echo "SKIP: set MATHION_SELFUPDATE_E2E=1 (mutates /usr/local/bin/mathion + /usr/bin/mathion)"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root (swap + ancestry guard)"; exit 0; }
-CLI_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
-export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+for t in gpg python3 dpkg go; do command -v "$t" >/dev/null 2>&1 || { echo "SKIP: $t required"; exit 0; }; done
 
-# 1) throwaway primary + S_rel signing subkey (K1). (Rotation leg also adds K2.)
-cat > "$GNUPGHOME/kp" <<'P'
+CLI_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORK="$(mktemp -d)"
+SERVER_PID=""
+cleanup() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$WORK"; }
+trap cleanup EXIT INT TERM
+export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+SITE="$WORK/site"; mkdir -p "$SITE"
+ASSET="mathion_linux_$(go env GOARCH).tar.gz"
+
+# --- helpers ---------------------------------------------------------------
+gen_key() { # <email> -> prints the PRIMARY fingerprint (cert primary + sign subkey)
+  cat > "$WORK/kp" <<EOF
 %no-protection
 Key-Type: eddsa
 Key-Curve: ed25519
@@ -2574,86 +2785,124 @@ Key-Usage: cert
 Subkey-Type: eddsa
 Subkey-Curve: ed25519
 Subkey-Usage: sign
-Name-Real: Mathion SelfUpdate Test
-Name-Email: su@example.invalid
+Name-Real: Mathion Test $1
+Name-Email: $1
 Expire-Date: 0
 %commit
-P
-gpg --batch --gen-key "$GNUPGHOME/kp" >/dev/null 2>&1
-PRIMARY="$(gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10; exit}')"
-gpg --batch --armor --export "$PRIMARY" > "$WORK/k1-pub.asc"   # primary + S_rel
-
-# 2) build a throwaway package-tree copy whose embedded keyring is the throwaway
-#    key (never mutate the tracked asset -> §6.1 drift guard stays intact).
-cp -a "$CLI_DIR" "$WORK/cli"
-cp "$WORK/k1-pub.asc" "$WORK/cli/internal/selfupdate/mathion-pubkey.asc"
-
-build() { # <tag> <out>
-  ( cd "$WORK/cli" && CGO_ENABLED=0 go build -tags mathion_selfupdate_test \
-      -ldflags "-X main.version=$1" -o "$2" . )
+EOF
+  gpg --batch --gen-key "$WORK/kp" >/dev/null 2>&1
+  gpg --batch --with-colons --list-keys "$1" | awk -F: '/^fpr:/{print $10; exit}'
 }
-build cli-v0.2.0 "$WORK/mathion_old"        # the running (curl-managed) binary
-build cli-v0.9.0 "$WORK/mathion_new"        # what the release ships
 
-# 3) release server: /releases + /<tag>/checksums.txt(.asc) + the archive.
-SITE="$WORK/site"; mkdir -p "$SITE/cli-v0.9.0"
-ASSET="mathion_linux_$(go env GOARCH).tar.gz"
-tar -C "$WORK" -czf "$SITE/cli-v0.9.0/$ASSET" -T /dev/null 2>/dev/null || true
-tar -C "$WORK" --transform 's,mathion_new,mathion,' -czf "$SITE/cli-v0.9.0/$ASSET" mathion_new
-SHA="$(sha256sum "$SITE/cli-v0.9.0/$ASSET" | awk '{print $1}')"
-printf '%s  %s\n' "$SHA" "$ASSET" > "$SITE/cli-v0.9.0/checksums.txt"
-gpg --batch --armor --detach-sign -o "$SITE/cli-v0.9.0/checksums.txt.asc" "$SITE/cli-v0.9.0/checksums.txt"
-printf '[{"tag_name":"cli-v0.9.0"},{"tag_name":"cli-v0.2.0"}]' > "$SITE/releases"
+build_bin() { # <baked-tag> <embed-pubkey.asc> <out-path>
+  tree="$WORK/tree-$(basename "$3")"
+  cp -a "$CLI_DIR" "$tree"
+  cp "$2" "$tree/internal/selfupdate/mathion-pubkey.asc"   # overwrite the EMBED, not the tracked asset
+  ( cd "$tree" && CGO_ENABLED=0 go build -tags mathion_selfupdate_test \
+      -ldflags "-X main.version=$1" -o "$3" . )
+  rm -rf "$tree"
+}
 
+publish() { # <tag> <binary> <signer-primary-fpr>
+  d="$SITE/$1"; mkdir -p "$d"
+  root="$WORK/pkgroot"; rm -rf "$root"; mkdir -p "$root"
+  install -m0755 "$2" "$root/mathion"
+  tar -C "$root" -czf "$d/$ASSET" mathion              # single regular member "mathion"
+  sha="$(sha256sum "$d/$ASSET" | awk '{print $1}')"
+  printf '%s  %s\n' "$sha" "$ASSET" > "$d/checksums.txt"
+  gpg --batch --yes --armor --digest-algo SHA256 --local-user "$3" \
+    --detach-sign -o "$d/checksums.txt.asc" "$d/checksums.txt"   # signs with the SIGN subkey
+}
+
+# --- keys + binaries -------------------------------------------------------
+K1="$(gen_key k1@example.invalid)"; gpg --batch --armor --export "$K1" > "$WORK/k1.asc"
+K2="$(gen_key k2@example.invalid)"; gpg --batch --armor --export "$K2" > "$WORK/k2.asc"
+
+build_bin cli-v0.2.0 "$WORK/k1.asc" "$WORK/client_k1"      # curl client, trusts K1
+build_bin cli-v0.9.0 "$WORK/k1.asc" "$WORK/rel090_k1"      # happy-path release payload
+build_bin cli-v0.5.0 "$WORK/k2.asc" "$WORK/trans050_k2"    # transition payload: embeds K2
+build_bin cli-v0.9.0 "$WORK/k2.asc" "$WORK/latest090_k2"   # rotation latest payload
+
+# --- release server --------------------------------------------------------
 PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
-( cd "$SITE" && python3 -m http.server "$PORT" >/dev/null 2>&1 & echo $! > "$WORK/pid" )
+( cd "$SITE" && exec python3 -m http.server "$PORT" >/dev/null 2>&1 ) & SERVER_PID=$!
 sleep 1
 BASE="http://127.0.0.1:$PORT"
 export MATHION_SELFUPDATE_API_BASE="$BASE" MATHION_SELFUPDATE_DL_BASE="$BASE"
+# plain HTTP is fine: the https-only policy binds redirect hops, not the injected endpoint.
 
-# 4) HAPPY PATH: install the old binary at a root-owned /usr/local/bin, run it.
-install -m0755 "$WORK/mathion_old" /usr/local/bin/mathion
+verset() { printf '%s' "$1" > "$SITE/releases"; }   # <releases-json>
+
+# === LEG 1: HAPPY PATH (curl-managed, K1-signed) ===========================
+verset '[{"tag_name":"cli-v0.9.0"},{"tag_name":"cli-v0.2.0"}]'
+publish cli-v0.9.0 "$WORK/rel090_k1" "$K1"
+install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
 /usr/local/bin/mathion self-update --yes
-NEWVER="$(/usr/local/bin/mathion version --short)"
-[ "$NEWVER" = "cli-v0.9.0" ] || { echo "FAIL: expected cli-v0.9.0 after swap, got $NEWVER"; exit 1; }
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.9.0" ] || { echo "FAIL(happy): want cli-v0.9.0, got $v"; exit 1; }
 
-# 5) S_apt REJECTION: re-sign checksums with a DIFFERENT key not in the keyring.
-gpg --batch --gen-key "$GNUPGHOME/kp" >/dev/null 2>&1   # a second, foreign key
-FOREIGN="$(gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10}' | tail -1)"
-gpg --batch --yes --armor --detach-sign --local-user "$FOREIGN" \
-  -o "$SITE/cli-v0.9.0/checksums.txt.asc" "$SITE/cli-v0.9.0/checksums.txt"
-install -m0755 "$WORK/mathion_old" /usr/local/bin/mathion
-if /usr/local/bin/mathion self-update --yes; then
-  echo "FAIL: a foreign-key signature must be rejected"; exit 1
-fi
+# === LEG 2: S_apt REJECTION (re-sign with K2, which the K1 client does not trust) ==
+publish cli-v0.9.0 "$WORK/rel090_k1" "$K2"    # foreign signature
+install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
+if /usr/local/bin/mathion self-update --yes; then echo "FAIL(reject): foreign-key sig accepted"; exit 1; fi
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(reject): binary changed to $v"; exit 1; }
 
-# 6) APT DEFER: a dpkg-owned path must print the apt command and not swap.
-#    (Assert via a curl path that dpkg -S resolves — covered in the unit suite;
-#    here confirm --check on the installed curl binary reports installable.)
-install -m0755 "$WORK/mathion_old" /usr/local/bin/mathion
-gpg --batch --yes --armor --detach-sign --local-user "$PRIMARY" \
-  -o "$SITE/cli-v0.9.0/checksums.txt.asc" "$SITE/cli-v0.9.0/checksums.txt"
-/usr/local/bin/mathion self-update --check | grep -q 'installable' \
-  || { echo "FAIL: --check should report installable"; exit 1; }
+# === LEG 3: APT DEFER (a real dpkg-owned path) =============================
+# Register /usr/bin/mathion in dpkg's file db so `dpkg -S` reports it mathion-owned.
+mkdir -p /var/lib/dpkg/info
+printf '/usr/bin/mathion\n' > /var/lib/dpkg/info/mathion.list
+install -m0755 "$WORK/client_k1" /usr/bin/mathion
+publish cli-v0.9.0 "$WORK/rel090_k1" "$K1"    # a valid update EXISTS; defer must still win
+out="$(/usr/bin/mathion self-update --yes)"
+printf '%s' "$out" | grep -q 'apt install --only-upgrade mathion' || { echo "FAIL(apt): no defer message: $out"; exit 1; }
+v="$(/usr/bin/mathion version --short)"
+[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(apt): dpkg-owned binary was swapped to $v"; exit 1; }
+rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion
 
-kill "$(cat "$WORK/pid")" 2>/dev/null || true
-echo "self-update integration PASSED"
+# === LEG 4: ROTATION CROSSING (two invocations) ============================
+# cli-v0.5.0: signed by OUTGOING K1, payload embeds INCOMING K2 (the transition).
+# cli-v0.9.0: signed by INCOMING K2 only (the K1 client cannot verify it yet).
+verset '[{"tag_name":"cli-v0.9.0"},{"tag_name":"cli-v0.5.0"},{"tag_name":"cli-v0.2.0"}]'
+publish cli-v0.5.0 "$WORK/trans050_k2" "$K1"
+publish cli-v0.9.0 "$WORK/latest090_k2" "$K2"
+install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
+# Run 1: K1 client skips the K2-signed 0.9.0 (unverifiable) and installs the K1-signed transition.
+/usr/local/bin/mathion self-update --yes
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.5.0" ] || { echo "FAIL(rotate run1): want cli-v0.5.0, got $v"; exit 1; }
+# Run 2: the now-installed transition binary embeds K2 and reaches the K2-signed latest.
+/usr/local/bin/mathion self-update --yes
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.9.0" ] || { echo "FAIL(rotate run2): want cli-v0.9.0, got $v"; exit 1; }
+
+rm -f /usr/local/bin/mathion
+echo "self-update integration PASSED (happy + reject + apt-defer + rotation-crossing)"
 ```
 
-> **Rotation-crossing leg (§9.2, add to the script):** after step 4, generate a second subkey set (K2), build a **transition** binary baked `cli-v0.5.0` whose copied `mathion-pubkey.asc` embeds **K2** but whose release `checksums.txt` is **signed by K1**, and a `cli-v0.9.0` `latest` signed by **K2** only. Run 1 (the K1 client) must install the transition; run 2 (the now-K2 binary) must reach `cli-v0.9.0`. Assert the two-invocation crossing. (Build each binary from its own throwaway tree copy with the appropriate embedded key, per §9.2.)
+- [ ] **Step 4: Run the leg (root, Linux container)** — macOS can't run it (Linux swap syscalls + dpkg). Use a Debian-based Go container with gpg + python3:
 
-- [ ] **Step 4: Run the leg (as root, on Linux)**
-
-Run: `sudo sh cli/selfupdate_integration_test.sh`
-Expected: `self-update integration PASSED` (or `SKIP:` off-root/no-gpg). On macOS it SKIPs; run in a Linux container (e.g. `debian:12` with go+gpg+python3) for real coverage, as the apt e2e does.
+Run: `docker run --rm -e MATHION_SELFUPDATE_E2E=1 -v "$(git rev-parse --show-toplevel)":/w -w /w golang:1.24 sh -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends gnupg python3 >/dev/null && sh cli/selfupdate_integration_test.sh'`
+Expected: `self-update integration PASSED (happy + reject + apt-defer + rotation-crossing)`. Without `MATHION_SELFUPDATE_E2E=1` (or off-root / missing tool) it prints `SKIP:` and exits 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cli/internal/selfupdate/endpoints_testtag.go cli/selfupdate_integration_test.sh cli/integration_test.sh
-git commit -m "test(cli): self-update integration leg (real swapped binaries) + test-tag endpoints
+chmod +x cli/selfupdate_integration_test.sh
+git add cli/internal/selfupdate/endpoints_testtag.go cli/selfupdate_integration_test.sh
+git commit -m "test(cli): self-update integration leg (happy/reject/apt-defer/rotation) + test-tag endpoints
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
+
+## Review ledger — accepted minors & conscious deviations
+
+Recorded so the SDD per-task reviewer and the final whole-branch review don't re-litigate them:
+
+- **S_apt-rejected test uses a foreign key, not a same-primary second subkey (accepted).** `verifyChecksums` enforces membership by issuer *fingerprint*, which is absent from the trimmed keyring in BOTH the foreign-key and same-primary-second-subkey cases — so the foreign-key unit test (`TestVerifyChecksums`) is behaviorally equivalent and sound. A same-primary variant was empirically found delicate to construct cleanly (signing through a filtered keyring view mis-selects the key) and adds no coverage; the integration leg (LEG 4) exercises real distinct keys end-to-end.
+- **Rotation-time CI crossing-invariant guard is deferred (§6.2/§12, Task 11 note).** It requires real rotation keys that don't exist yet; defensible until a rotation is actually scheduled.
+- **§6.1 "CI `cmp` drift guard" is realized as a Go test, not a shell `cmp`** (`TestEmbeddedKeyringMatchesCanonical`, Task 4). Acceptable: `ci.yml`'s `cli-unit` job runs `go test ./...` on ubuntu, so the drift assertion runs in CI on every push.
+- **Task 12's README section is a content outline, not verbatim text.** The man-page and `deploy/keys/README.md` edits ARE exact; the README prose is detailed enough to write without ambiguity and depends on surrounding file content the implementer will read.
+- **`verifyChecksums` needs NO revocation/expiry code (empirically verified).** go-crypto's `VerifyDetachedSignatureAndHash` rejects expired ("key expired") and revoked ("signature made by revoked key") signing subkeys natively; the §9.1 negatives are test-only additions (Task 4).
