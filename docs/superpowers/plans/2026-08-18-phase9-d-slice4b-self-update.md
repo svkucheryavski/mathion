@@ -43,8 +43,8 @@
 - `ancestry_linux.go` ✱ — the real fd-relative `openat`/`fstat` walk (`walkAncestry`, `closeFD`). (Task 6)
 - `swap.go` ✱ — running-image identity capture, parent-dir open, non-blocking flock, staged `O_EXCL` temp write, `fchmod`, inherited-fd exec, `renameat`, `fsync(dir)`, post-rename branches. (Task 7)
 - `artifact.go` — verify-until-verifiable selection + bounded archive download + single-binary extraction (untagged; pure + HTTP). (Task 8)
-- `selfupdate.go` — untagged orchestrator API: `Params`, `config` consumers, `DefaultConfig`, `ensureRoot`. (Task 9)
-- `run_linux.go` ✱ — the real `Run` (steps 1–8) + its seams (`osExecutable`, `evalSymlinks`, `geteuid`, `loadKeyringFn`, `captureRunningImageFn`, `walkAncestryFn`). (Task 9)
+- `selfupdate.go` — untagged orchestrator API only: `Params`, `DefaultConfig` (nothing OS-specific, so `cmd` compiles on macOS). (Task 9)
+- `run_linux.go` ✱ — the real `Run` (steps 1–8), `ensureRoot`, and ALL orchestrator seams (`osExecutable`, `evalSymlinks`, `geteuid`, `loadKeyringFn`, `captureRunningImageFn`, `walkAncestryFn`) — `geteuid` lives here (Linux-tagged), NOT in untagged `selfupdate.go`. (Task 9)
 - `run_other.go` (`//go:build !linux`) — stub `Run` returning "self-update is supported only on Linux" so macOS/Windows dev builds compile. (Task 9)
 - `endpoints_default.go` (`//go:build !mathion_selfupdate_test`) + `endpoints_testtag.go` (`//go:build mathion_selfupdate_test`) — endpoint base URL override seam (both untagged w.r.t. OS). (Tasks 9/13)
 - `mathion-pubkey.asc` — `go:embed`ed keyring, byte-identical copy of `deploy/keys/mathion-pubkey.asc`. (Task 4)
@@ -52,7 +52,7 @@
 
 **New command:** `cli/cmd/self_update.go` + `cli/cmd/self_update_test.go`. (Task 10)
 
-**Modified:** `cli/cmd/version.go`+`version_test.go` (Task 1); `cli/cmd/root.go` (Task 10); `cli/go.mod`/`go.sum` (Task 2); `cli/.goreleaser.yaml` + CI (Task 11); `README.md`, `deploy/man/mathion.1`, `deploy/keys/README.md`, `deploy/deb/copyright`+`THIRD_PARTY_NOTICES` (Task 12); `cli/integration_test.sh` (Task 13).
+**Modified:** `cli/cmd/version.go`+`version_test.go` (Task 1); `cli/cmd/root.go` (Task 10); `cli/go.mod`/`go.sum` (deps added in Tasks 3/4/6 — all PINNED to keep the `go 1.24` floor); `cli/.goreleaser.yaml` + CI (Task 11); `README.md`, `deploy/man/mathion.1`, `deploy/keys/README.md`, `deploy/deb/copyright`+`THIRD_PARTY_NOTICES` (Task 12); `cli/integration_test.sh` (Task 13).
 
 ---
 
@@ -336,12 +336,13 @@ Spec: §4.1 (normalization), §4.2 step 3, §6.4 (pagination cap). Fetch the `/r
   - `func fetchReleases(ctx context.Context, cfg config) ([]release, error)`.
   - `type config struct { ... }` (first defined here; later tasks add fields — see the running definition in Task 8).
 
-- [ ] **Step 1: Add the dep**
+- [ ] **Step 1: Add the dep — PINNED (do not use bare `go get`).** `x/mod@latest` (≥ v0.34.0) declares `go 1.25.0`, which `go get` would write into `go.mod`, bumping the module off the **1.24 floor** and breaking both the container gate and CI (`setup-go go-version: "1.24"`). `v0.33.0` is the last `go 1.24.0`-floor release:
 
 ```bash
-cd cli && go get golang.org/x/mod/semver && go mod tidy
+cd cli && go get golang.org/x/mod@v0.33.0 && go mod tidy
+grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
 ```
-Expected: `go.mod` gains `golang.org/x/mod`; `go.sum` updated.
+Expected: `go.mod` gains `golang.org/x/mod v0.33.0`; the `go 1.24` directive is unchanged; `go.sum` updated.
 
 - [ ] **Step 2: Write the failing tests** — `cli/internal/selfupdate/releases_test.go`:
 
@@ -571,9 +572,10 @@ Spec: §6.1. Verify `checksums.txt` against a `go:embed`ed keyring trimmed to pr
 
 ```bash
 cd cli && go get github.com/ProtonMail/go-crypto@v1.4.1 && go mod tidy
+grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
 cp ../deploy/keys/mathion-pubkey.asc internal/selfupdate/mathion-pubkey.asc
 ```
-Expected: `go.mod` gains `github.com/ProtonMail/go-crypto` (+ transitive `cloudflare/circl`, `golang.org/x/crypto`); the asset is a byte-identical copy of the canonical placeholder.
+Expected: `go.mod` gains `github.com/ProtonMail/go-crypto v1.4.1` (+ transitive `cloudflare/circl`, `golang.org/x/crypto` — all `go 1.24`-floor-compatible); the `go 1.24` directive is unchanged; the asset is a byte-identical copy of the canonical placeholder. (go-crypto v1.4.1's floor is go 1.23, so it does not bump the module — verified.)
 
 - [ ] **Step 2: Write the failing tests** — `cli/internal/selfupdate/verify_test.go`:
 
@@ -967,11 +969,13 @@ Spec: §4.2 step 4a, §6.3. Refuse unless the resolved self path equals the conf
   - `var closeFD = unix.Close`
   - `func walkAncestry(targetPath string) (comps []component, parentFD int, err error)` — parentFD opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW`, caller closes.
 
-- [ ] **Step 1: Add the dep**
+- [ ] **Step 1: Add the dep — PINNED (do not use bare `go get`).** `x/sys@latest` (≥ v0.42.0) declares `go 1.25.0`; `v0.41.0` is the last `go 1.24.0`-floor release:
 
 ```bash
-cd cli && go get golang.org/x/sys/unix && go mod tidy
+cd cli && go get golang.org/x/sys@v0.41.0 && go mod tidy
+grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
 ```
+Expected: `go.mod` gains `golang.org/x/sys v0.41.0`; the `go 1.24` directive is unchanged.
 
 - [ ] **Step 2: Write the failing tests.** Pure decisions → `cli/internal/selfupdate/ancestry_test.go` (untagged, runs on macOS):
 
@@ -1019,17 +1023,13 @@ And the fd-walk smoke → `cli/internal/selfupdate/ancestry_linux_test.go` (`//g
 
 package selfupdate
 
-import (
-	"os"
-	"testing"
-)
+import "testing"
 
 // walkAncestry is exercised for real on a root-owned tree in integration (Task 13);
-// here just prove it walks a temp tree and returns a usable parent fd + components.
+// here just prove it walks a real tree and returns a usable parent fd + components.
+// It asserts STRUCTURE, not ownership, so it runs fine as root (the golang:1.24
+// container runs as root) — do NOT skip under root, or the walk is never exercised.
 func TestWalkAncestry_Smoke(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("ownership assertions are integration-tested; skip under root")
-	}
 	comps, fd, err := walkAncestry("/usr/bin/mathion") // real dirs, read-only stats
 	if err != nil {
 		t.Skipf("environment lacks /usr/bin: %v", err)
@@ -1437,7 +1437,7 @@ func stageBinary(parentFD int, data []byte) (string, error) {
 // substitutes it to cover only the compare/abort branch (§3.2); the real exec is
 // integration (§9.2). §4.2 step7.
 var stagedVersion = func(parentFD int, tempName string) (string, error) {
-	rofd, err := unix.Openat(parentFD, tempName, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	rofd, err := unix.Openat(parentFD, tempName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return "", fmt.Errorf("open staged binary: %w", err)
 	}
@@ -1447,10 +1447,10 @@ var stagedVersion = func(parentFD int, tempName string) (string, error) {
 	// binary — an fexecve-equivalent that never re-resolves the pathname.
 	cmd := exec.Command("/proc/self/fd/3", "version", "--short")
 	cmd.ExtraFiles = []*os.File{f}
-	var out bytes.Buffer
-	cmd.Stdout = &out
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("exec staged version --short: %w", err)
+		return "", fmt.Errorf("exec staged version --short: %w (stderr: %s)", err, strings.TrimSpace(errOut.String()))
 	}
 	return strings.TrimSpace(out.String()), nil
 }
@@ -2405,12 +2405,13 @@ archives:
 
 ```sh
 #!/bin/sh
-# self-update release guards: (1) the release config must NOT carry the
-# mathion_selfupdate_test build tag (it would let an env var redirect a
-# root-executed updater's origin); (2) each built archive must contain exactly the
-# single member "mathion".
+# self-update release guards:
+#  (1) the release config must NOT carry the mathion_selfupdate_test build tag
+#      (it would let an env var redirect a root-executed updater's origin);
+#  (2) each built archive must contain EXACTLY the single member "mathion"
+#      (the strict single-binary extractor in extractSingleBinary depends on it).
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.."   # -> cli/
 
 # (1) no test tag anywhere in the release/build config
 if grep -rn 'mathion_selfupdate_test' .goreleaser.yaml ../.github/workflows/release-cli.yml; then
@@ -2418,32 +2419,43 @@ if grep -rn 'mathion_selfupdate_test' .goreleaser.yaml ../.github/workflows/rele
   exit 1
 fi
 
-# (2) build a snapshot and assert single-member archives
+# (2) build a REAL snapshot and assert single-member archives.
+# `goreleaser build` only compiles binaries (it produces NO archives), so the
+# archive assertion requires `goreleaser release --snapshot` — which also runs
+# nfpm, whose `contents:` inputs (the .gz variants + a placeholder keyring) are
+# not in git. Materialize them first, exactly as deploy/deb/deb_test.sh does.
+gzip -9nkf ../deploy/man/mathion.1
+gzip -9nkf ../deploy/deb/changelog.Debian
+gzip -9nkf ../deploy/deb/THIRD_PARTY_NOTICES
+[ -f ../deploy/keys/mathion-archive-keyring.gpg ] || printf 'placeholder' > ../deploy/keys/mathion-archive-keyring.gpg
+
 CLI_TAG=cli-v0.0.0 APP_IMAGE=v0.0.0 GORELEASER_CURRENT_TAG=v0.0.0 \
-  goreleaser build --clean --snapshot >/dev/null 2>&1 || \
-  CLI_TAG=cli-v0.0.0 APP_IMAGE=v0.0.0 GORELEASER_CURRENT_TAG=v0.0.0 \
-  goreleaser release --clean --skip=publish,sign,validate --snapshot >/dev/null
+  goreleaser release --clean --skip=publish,sign --snapshot >/dev/null
+
+n=0
 for a in dist/mathion_linux_*.tar.gz; do
-  members="$(tar tzf "$a" | sed '/\/$/d')"     # drop dir entries
+  [ -e "$a" ] || { echo "FAIL: no linux archive produced (glob did not match)" >&2; exit 1; }
+  n=$((n + 1))
+  members="$(tar tzf "$a" | sed '/\/$/d')"     # drop any dir entries
   if [ "$members" != "mathion" ]; then
     echo "FAIL: $a is not binary-only (members: $members)" >&2
     exit 1
   fi
 done
-echo "self-update CI guards PASSED"
+echo "self-update CI guards PASSED ($n binary-only archive(s))"
 ```
 
-- [ ] **Step 3: Wire into CI** — add to `.github/workflows/ci.yml` (in the job that already has Go + goreleaser available; place after the existing `go test` step):
+- [ ] **Step 3: Wire into CI** — add to the **`apt-scripts`** job in `.github/workflows/ci.yml` (it is the only job with BOTH `setup-go` and the goreleaser action, and it already runs shell-script tests — `cli-unit` has `go test` but no goreleaser). Place after the existing "Signing + package + dates-only resign tests" step:
 
 ```yaml
       - name: self-update release guards
         run: sh cli/scripts/selfupdate-ci-guards.sh
 ```
 
-- [ ] **Step 4: Verify locally** (macOS has goreleaser via brew):
+- [ ] **Step 4: Verify locally** (macOS has goreleaser via brew; the run writes untracked `.gz` + placeholder keyring under `deploy/`, exactly like `deb_test.sh`):
 
 Run: `chmod +x cli/scripts/selfupdate-ci-guards.sh && sh cli/scripts/selfupdate-ci-guards.sh`
-Expected: `self-update CI guards PASSED`.
+Expected: `self-update CI guards PASSED (2 binary-only archive(s))` (amd64 + arm64).
 
 - [ ] **Step 5: Commit**
 
