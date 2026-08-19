@@ -336,13 +336,12 @@ Spec: §4.1 (normalization), §4.2 step 3, §6.4 (pagination cap). Fetch the `/r
   - `func fetchReleases(ctx context.Context, cfg config) ([]release, error)`.
   - `type config struct { ... }` (first defined here; later tasks add fields — see the running definition in Task 8).
 
-- [ ] **Step 1: Add the dep — PINNED (do not use bare `go get`).** `x/mod@latest` (≥ v0.34.0) declares `go 1.25.0`, which `go get` would write into `go.mod`, bumping the module off the **1.24 floor** and breaking both the container gate and CI (`setup-go go-version: "1.24"`). `v0.33.0` is the last `go 1.24.0`-floor release:
+- [ ] **Step 1: Add the dep — PINNED, and do NOT `go mod tidy` yet.** `x/mod@latest` (≥ v0.34.0) declares `go 1.25.0`, which bare `go get` would write into `go.mod`, bumping the module off the **1.24 floor** and breaking the container gate + CI (`setup-go go-version: "1.24"`). `v0.33.0` is the last `go 1.24.0`-floor release. Crucially, **`go mod tidy` here would PRUNE the require** (nothing imports `x/mod` until Step 4), and the failure's suggested recovery re-resolves to `@latest` → `go 1.25.0`, recreating the bug. Plain pinned `go get` persists the require + `go.sum`:
 
 ```bash
-cd cli && go get golang.org/x/mod@v0.33.0 && go mod tidy
-grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
+cd cli && go get golang.org/x/mod@v0.33.0
 ```
-Expected: `go.mod` gains `golang.org/x/mod v0.33.0`; the `go 1.24` directive is unchanged; `go.sum` updated.
+Expected: `go.mod` gains `require golang.org/x/mod v0.33.0`; the `go 1.24` directive is unchanged (tidy + floor-check run in Step 5, after `releases.go` imports it).
 
 - [ ] **Step 2: Write the failing tests** — `cli/internal/selfupdate/releases_test.go`:
 
@@ -537,10 +536,14 @@ func fetchReleases(ctx context.Context, cfg config) ([]release, error) {
 }
 ```
 
-- [ ] **Step 5: Run — expect PASS**, plus `go vet`.
+- [ ] **Step 5: Tidy (now that `releases.go` imports `x/mod`), assert the floor, then run — expect PASS**, plus `go vet`. `go mod tidy` is safe here — the import exists, so tidy keeps the require instead of pruning it — and the grep guards against any transitive `go 1.25.0` floor-bump:
 
-Run: `cd cli && go test ./internal/selfupdate/ -v && go vet ./internal/selfupdate/`
-Expected: PASS.
+```bash
+cd cli && go mod tidy
+grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
+go test ./internal/selfupdate/ -v && go vet ./internal/selfupdate/
+```
+Expected: `go.mod` still pins `golang.org/x/mod v0.33.0`, the `go 1.24` directive is unchanged, tests PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -568,14 +571,13 @@ Spec: §6.1. Verify `checksums.txt` against a `go:embed`ed keyring trimmed to pr
   - `func verifyChecksums(kr openpgp.EntityList, checksums, sigASC []byte) error` — nil iff a valid detached sig by an S_rel subkey.
   - `func checksumFor(checksums []byte, asset string) (string, error)` — the single hex sha256 for `asset`.
 
-- [ ] **Step 1: Add the dep + copy the keyring asset**
+- [ ] **Step 1: Add the dep (PINNED, no `go mod tidy` yet) + copy the keyring asset.** As in Task 3, defer `go mod tidy` to Step 5 — nothing imports go-crypto until `verify.go` exists, so tidying now would prune the require and the recovery could re-resolve a floor-bumping version. `go-crypto@v1.4.1`'s floor is go 1.23 (verified), so the pin itself does not bump the module:
 
 ```bash
-cd cli && go get github.com/ProtonMail/go-crypto@v1.4.1 && go mod tidy
-grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
+cd cli && go get github.com/ProtonMail/go-crypto@v1.4.1
 cp ../deploy/keys/mathion-pubkey.asc internal/selfupdate/mathion-pubkey.asc
 ```
-Expected: `go.mod` gains `github.com/ProtonMail/go-crypto v1.4.1` (+ transitive `cloudflare/circl`, `golang.org/x/crypto` — all `go 1.24`-floor-compatible); the `go 1.24` directive is unchanged; the asset is a byte-identical copy of the canonical placeholder. (go-crypto v1.4.1's floor is go 1.23, so it does not bump the module — verified.)
+Expected: `go.mod` gains `require github.com/ProtonMail/go-crypto v1.4.1` (+ transitive `cloudflare/circl`, `golang.org/x/crypto` — all `go 1.24`-floor-compatible); the `go 1.24` directive is unchanged (tidy + floor-check run in Step 5); the asset is a byte-identical copy of the canonical placeholder.
 
 - [ ] **Step 2: Write the failing tests** — `cli/internal/selfupdate/verify_test.go`:
 
@@ -839,9 +841,14 @@ func checksumFor(checksums []byte, asset string) (string, error) {
 
 > Note on the "missing issuer subpacket" negative (§9.1): go-crypto always emits the issuer-fingerprint subpacket for v4+ keys, so it cannot be produced from `ArmoredDetachSign`; the `len(sig.IssuerFingerprint)==0` guard is defense-in-depth and is not forced by a unit test.
 
-- [ ] **Step 5: Run — expect PASS**
+- [ ] **Step 5: Tidy (now that `verify.go` imports go-crypto), assert the floor, then run — expect PASS.** The import exists, so `go mod tidy` keeps the require; the grep guards the floor:
 
-Run: `cd cli && go test ./internal/selfupdate/ -v`
+```bash
+cd cli && go mod tidy
+grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
+go test ./internal/selfupdate/ -v
+```
+Expected: `go.mod` still pins `github.com/ProtonMail/go-crypto v1.4.1`, the `go 1.24` directive is unchanged, tests PASS.
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -1040,13 +1047,12 @@ Spec: §4.2 step 4a, §6.3. Refuse unless the resolved self path equals the conf
   - `var closeFD = unix.Close`
   - `func walkAncestry(targetPath string) (comps []component, parentFD int, err error)` — parentFD opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW`, caller closes.
 
-- [ ] **Step 1: Add the dep — PINNED (do not use bare `go get`).** `x/sys@latest` (≥ v0.42.0) declares `go 1.25.0`; `v0.41.0` is the last `go 1.24.0`-floor release:
+- [ ] **Step 1: Add the dep — PINNED, and do NOT `go mod tidy` yet.** `x/sys@latest` (≥ v0.42.0) declares `go 1.25.0`; `v0.41.0` is the last `go 1.24.0`-floor release. As in Tasks 3/4, defer tidy to Step 5 — `x/sys/unix` isn't imported until `ancestry_linux.go` exists, so tidying now would prune the require and the recovery could re-resolve `@latest` → `go 1.25.0`:
 
 ```bash
-cd cli && go get golang.org/x/sys@v0.41.0 && go mod tidy
-grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
+cd cli && go get golang.org/x/sys@v0.41.0
 ```
-Expected: `go.mod` gains `golang.org/x/sys v0.41.0`; the `go 1.24` directive is unchanged.
+Expected: `go.mod` gains `require golang.org/x/sys v0.41.0`; the `go 1.24` directive is unchanged (tidy + floor-check run in Step 5).
 
 - [ ] **Step 2: Write the failing tests.** Pure decisions → `cli/internal/selfupdate/ancestry_test.go` (untagged, runs on macOS):
 
@@ -1229,11 +1235,15 @@ func splitAbs(p string) []string {
 }
 ```
 
-- [ ] **Step 5: Run — expect PASS.** Pure tests on macOS, then the full package (incl. the `//go:build linux` walk test) in a container:
+- [ ] **Step 5: Tidy + assert the floor, then run — expect PASS.** `ancestry_linux.go` now imports `x/sys/unix`; `go mod tidy` walks all build-tag/platform combos (so it sees the `//go:build linux` import even from the macOS host) and keeps the require. Pure tests on macOS, then the full package (incl. the `//go:build linux` walk test) in a container:
 
-Run: `cd cli && go test ./internal/selfupdate/ -run 'Ancestry|GuardTarget' -v && go vet ./internal/selfupdate/`
+```bash
+cd cli && go mod tidy
+grep -qE '^go 1\.24(\.[0-9]+)?$' go.mod || { echo "FAIL: go directive bumped off the 1.24 floor"; exit 1; }
+go test ./internal/selfupdate/ -run 'Ancestry|GuardTarget' -v && go vet ./internal/selfupdate/
+```
 Then (Linux, exercises `TestWalkAncestry_Smoke`): `docker run --rm -v "$(git rev-parse --show-toplevel)":/w -w /w/cli golang:1.24 go test ./internal/selfupdate/...`
-Expected: PASS.
+Expected: `go.mod` still pins `golang.org/x/sys v0.41.0`, the `go 1.24` directive is unchanged, tests PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1724,13 +1734,16 @@ func TestGetArchive_SizeCapAborts(t *testing.T) {
 
 func TestGetArchive_IdleStallAborts(t *testing.T) {
 	release := make(chan struct{})
-	defer close(release)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte{'x'})
 		w.(http.Flusher).Flush()
 		<-release // stall indefinitely after the first byte
 	}))
+	// Defers run LIFO: srv.Close() (registered first) runs LAST, so close(release)
+	// (registered last) runs FIRST and unblocks the handler before Close() waits on it.
+	// The reverse order deadlocks (httptest.Server.Close waits for the stuck handler).
 	defer srv.Close()
+	defer close(release)
 	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 1 << 20,
 		archiveIdleTO: 100 * time.Millisecond, archiveOverallTO: 10 * time.Second}
 	start := time.Now()
@@ -1744,7 +1757,6 @@ func TestGetArchive_IdleStallAborts(t *testing.T) {
 
 func TestGetArchive_OverallDeadlineAborts(t *testing.T) {
 	stop := make(chan struct{})
-	defer close(stop)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fl := w.(http.Flusher)
 		for {
@@ -1758,7 +1770,9 @@ func TestGetArchive_OverallDeadlineAborts(t *testing.T) {
 			time.Sleep(30 * time.Millisecond) // always progressing (< idle) but never EOF
 		}
 	}))
+	// LIFO: srv.Close() runs last; close(stop) runs first to end the handler loop.
 	defer srv.Close()
+	defer close(stop)
 	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 1 << 30,
 		archiveIdleTO: 500 * time.Millisecond, archiveOverallTO: 300 * time.Millisecond}
 	start := time.Now()
@@ -2646,7 +2660,7 @@ done
 echo "self-update CI guards PASSED ($n binary-only archive(s))"
 ```
 
-- [ ] **Step 3: Wire into CI** — add to the **`apt-scripts`** job in `.github/workflows/ci.yml` (it is the only job with BOTH `setup-go` and the goreleaser action, and it already runs shell-script tests — `cli-unit` has `go test` but no goreleaser). Place after the existing "Signing + package + dates-only resign tests" step:
+- [ ] **Step 3: Wire into CI** — add to the **`apt-scripts`** job in `.github/workflows/ci.yml`. It already has BOTH `setup-go` and the goreleaser action (so does `apt-e2e`, but that job is scoped to the apt end-to-end leg), AND it already runs the shell-script package tests — the natural home for one more guard script. `cli-unit` has `go test` but no goreleaser, so it can't host this. Place after the existing "Signing + package + dates-only resign tests" step:
 
 ```yaml
       - name: self-update release guards
@@ -2849,15 +2863,24 @@ v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(reject): binary changed to $v"; exit 1; }
 
 # === LEG 3: APT DEFER (a real dpkg-owned path) =============================
-# Register /usr/bin/mathion in dpkg's file db so `dpkg -S` reports it mathion-owned.
+# Make `dpkg -S /usr/bin/mathion` report the file as mathion-owned. A `.list`
+# file ALONE is not enough — dpkg's search only reports files for packages that
+# have a stanza in the status DB, so we must ALSO append a minimal
+# `Status: install ok installed` stanza to /var/lib/dpkg/status (this is what a
+# real apt install leaves behind: both the .list file and the status stanza).
+# Back up the status DB first and restore it in cleanup — we are mutating the
+# container's real dpkg database.
 mkdir -p /var/lib/dpkg/info
+cp /var/lib/dpkg/status "$WORK/status.bak"
 printf '/usr/bin/mathion\n' > /var/lib/dpkg/info/mathion.list
+printf '\nPackage: mathion\nStatus: install ok installed\nPriority: optional\nSection: admin\nMaintainer: Mathion Test <t@example.invalid>\nArchitecture: %s\nVersion: 0.2.0\nDescription: apt-defer test stub\n' "$(dpkg --print-architecture)" >> /var/lib/dpkg/status
 install -m0755 "$WORK/client_k1" /usr/bin/mathion
 publish cli-v0.9.0 "$WORK/rel090_k1" "$K1"    # a valid update EXISTS; defer must still win
 out="$(/usr/bin/mathion self-update --yes)"
 printf '%s' "$out" | grep -q 'apt install --only-upgrade mathion' || { echo "FAIL(apt): no defer message: $out"; exit 1; }
 v="$(/usr/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(apt): dpkg-owned binary was swapped to $v"; exit 1; }
+cp "$WORK/status.bak" /var/lib/dpkg/status
 rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion
 
 # === LEG 4: ROTATION CROSSING (two invocations) ============================
