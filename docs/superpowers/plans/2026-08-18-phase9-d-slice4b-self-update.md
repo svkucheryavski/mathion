@@ -22,8 +22,9 @@
 - **Forward-only, no downgrade, no arbitrary pinning.** Select the greatest release that *verifies*; a rotation is crossed with a transition release, never a dual-accept keyring (§6.2).
 - **Swap target is exactly `/usr/local/bin/mathion`** (a seam defaulting to it) AND every ancestor from `/` must be root-owned (uid 0) and not group- or world-writable, else refuse (§4.2 step 4a, §6.3).
 - **Anti-downgrade anchor is the RUNNING IMAGE**, captured via `open("/proc/self/exe", O_PATH|O_CLOEXEC)`+`fstat` — NOT a re-stat of the resolved pathname (§4.2 step 1). Re-checked under a non-blocking `flock(LOCK_EX|LOCK_NB)` on the retained parent-dir fd at step 4b.
-- **Parent-dir fd opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW`, never `O_PATH`** (flock EBADFs on O_PATH). All swap-phase fs ops are fd-relative off it (§4.2 step 4a/4b).
-- **Durable ordering:** `fsync(temp)` → close writable fd → open RO exec fd → exec `version --short` via the inherited fd (never by pathname) → `renameat` → `fsync(dir)` (§5.3). Post-rename: `renameat` fail → target unchanged; `renameat` OK + `fsync(dir)` fail → dedicated "installed-but-durability-uncertain" error, no rollback, no "nothing changed".
+- **Parent-dir fd opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`, never `O_PATH`** (flock EBADFs on O_PATH). The `O_CLOEXEC` is load-bearing (correction 6): the flock lives on the open file description, so an fd copy inherited across `execve` shares the lock and holds it until that copy also closes — every self-update fd is `O_CLOEXEC` so none leaks into the staged exec. All swap-phase fs ops are fd-relative off this fd (§4.2 step 4a/4b).
+- **Explicit lock release on the normal path:** `flock(LOCK_UN)` before the parent-dir fd is closed (`releaseMutationLock`); the `O_CLOEXEC` close is the crash/abnormal-exit backstop (correction 6, §4.2 step 4b).
+- **Durable ordering:** `fsync(temp)` → close writable fd → open RO exec fd → exec `version --short` via the inherited fd (never by pathname), **bounded + fork-safe** (own process group + `kill(-pgid)` on deadline/output-overrun + nonzero `Cmd.WaitDelay`, so a hung/flooding/fork-and-orphan staged binary cannot pin the flock — §4.2 step 7, correction 6) → `renameat` → `fsync(dir)` (§5.3). Post-rename: `renameat` fail → target unchanged; `renameat` OK + `fsync(dir)` fail → dedicated "installed-but-durability-uncertain" error, no rollback, no "nothing changed".
 - **Bound every download** (size + time — §6.4 caps table). Archive download runs under the flock, so it carries its own idle/stall + overall-deadline bound, separate from the verify-loop budget.
 - **All HTTP https-only across redirects**, size cap on the final body, redirect policy a pure predicate.
 - **goreleaser archive is binary-only** via a non-matching glob `files: ["none*"]` (empty `[]` re-applies default README*/LICENSE* globs).
@@ -41,18 +42,19 @@
 - `channel.go` — `dpkg -S` classification (exec seam; compiles cross-platform). (Task 5)
 - `ancestry.go` — the PURE ancestry decision (`ancestrySafe`, `guardTarget`, `component`); untagged. (Task 6)
 - `ancestry_linux.go` ✱ — the real fd-relative `openat`/`fstat` walk (`walkAncestry`, `closeFD`). (Task 6)
-- `swap.go` ✱ — running-image identity capture, parent-dir open, non-blocking flock, staged `O_EXCL` temp write, `fchmod`, inherited-fd exec, `renameat`, `fsync(dir)`, post-rename branches. (Task 7)
+- `swap.go` ✱ — running-image identity capture, parent-dir open, non-blocking flock (+ explicit `LOCK_UN` release), staged `O_EXCL` temp write, `fchmod`, bounded fork-safe inherited-fd exec (`cappedBuffer`, Setpgid + `kill(-pgid)` + `WaitDelay`), `renameat`, `fsync(dir)`, post-rename branches. (Task 7)
 - `artifact.go` — verify-until-verifiable selection + bounded archive download + single-binary extraction (untagged; pure + HTTP). (Task 8)
 - `selfupdate.go` — untagged orchestrator API only: `Params`, `DefaultConfig` (nothing OS-specific, so `cmd` compiles on macOS). (Task 9)
 - `run_linux.go` ✱ — the real `Run` (steps 1–8), `ensureRoot`, and ALL orchestrator seams (`osExecutable`, `evalSymlinks`, `geteuid`, `loadKeyringFn`, `captureRunningImageFn`, `walkAncestryFn`) — `geteuid` lives here (Linux-tagged), NOT in untagged `selfupdate.go`. (Task 9)
 - `run_other.go` (`//go:build !linux`) — stub `Run` returning "self-update is supported only on Linux" so macOS/Windows dev builds compile. (Task 9)
 - `endpoints_default.go` (`//go:build !mathion_selfupdate_test`) + `endpoints_testtag.go` (`//go:build mathion_selfupdate_test`) — endpoint base URL override seam (both untagged w.r.t. OS). (Tasks 9/13)
+- `execbounds_testtag.go` (`//go:build linux && mathion_selfupdate_test`) — `init()` that injects the staged-exec deadline/output-cap from env for the §9.2 integration legs (no paired default file: it only MUTATES swap.go's package vars). (Task 13)
 - `mathion-pubkey.asc` — `go:embed`ed keyring, byte-identical copy of `deploy/keys/mathion-pubkey.asc`. (Task 4)
 - `*_test.go` per file; syscall tests (`swap`, `ancestry_linux`, orchestrator `run_linux`) are `*_linux_test.go`.
 
 **New command:** `cli/cmd/self_update.go` + `cli/cmd/self_update_test.go`. (Task 10)
 
-**Modified:** `cli/cmd/version.go`+`version_test.go` (Task 1); `cli/cmd/root.go` (Task 10); `cli/go.mod`/`go.sum` (deps added in Tasks 3/4/6 — all PINNED to keep the `go 1.24` floor); `cli/.goreleaser.yaml` + CI (Task 11); `README.md`, `deploy/man/mathion.1`, `deploy/keys/README.md`, `deploy/deb/copyright`+`THIRD_PARTY_NOTICES` (Task 12); `cli/integration_test.sh` (Task 13).
+**Modified:** `cli/cmd/version.go`+`version_test.go` (Task 1); `cli/cmd/root.go` (Task 10); `cli/go.mod`/`go.sum` (deps added in Tasks 3/4/6 — all PINNED to keep the `go 1.24` floor); `cli/.goreleaser.yaml` + `cli/scripts/selfupdate-ci-guards.sh` + `.github/workflows/ci.yml` (Task 11); `README.md`, `deploy/man/mathion.1`, `deploy/keys/README.md`, `deploy/deb/copyright`+`THIRD_PARTY_NOTICES` (Task 12). **New standalone integration harness** `cli/selfupdate_integration_test.sh` + `endpoints_testtag.go`/`execbounds_testtag.go` (Task 13; a sibling of `deploy/apt/e2e_test.sh`, NOT wired into `cli/integration_test.sh`).
 
 ---
 
@@ -587,6 +589,7 @@ package selfupdate
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -714,6 +717,29 @@ func TestVerifyChecksums_RevokedKey(t *testing.T) {
 	}
 }
 
+// §6.1 correction 5: an untrimmed keyring carrying TWO signing subkeys (e.g. a full
+// export that swept in S_apt) must be refused before any signature check — the
+// assertSingleSigningSubkey guard fires first, so even a bogus .asc never reaches
+// armor.Decode. NewEntity adds an ENCRYPTION subkey at index 0; two AddSigningSubkey
+// calls give exactly two SIGNING subkeys.
+func TestVerifyChecksums_RejectsMultipleSigningSubkeys(t *testing.T) {
+	e, err := openpgp.NewEntity("Untrimmed", "", "u@example.invalid", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddSigningSubkey(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddSigningSubkey(nil); err != nil {
+		t.Fatal(err)
+	}
+	kr := entityKeyring(t, e)
+	err = verifyChecksums(kr, []byte("abc  mathion_linux_amd64.tar.gz\n"), []byte("not-a-real-signature"))
+	if err == nil || !strings.Contains(err.Error(), "exactly one signing subkey") {
+		t.Fatalf("want single-subkey rejection before signature check, got %v", err)
+	}
+}
+
 func TestChecksumFor(t *testing.T) {
 	body := []byte("deadbeef  mathion_linux_amd64.tar.gz\nfeedface  other\n")
 	got, err := checksumFor(body, "mathion_linux_amd64.tar.gz")
@@ -771,9 +797,18 @@ var allowedHashes = []crypto.Hash{crypto.SHA256, crypto.SHA384, crypto.SHA512}
 
 // loadKeyring parses the embedded primary + S_rel keyring. Returns an error while
 // mathion-pubkey.asc is the placeholder (keygen is a 4a go-live prereq, §12); the
-// injectable keyring seam (Task 8) is what tests and integration use.
+// injectable keyring seam (Task 8) is what tests and integration use. The
+// single-signing-subkey assertion (§6.1 correction 5) rejects an untrimmed asset
+// at load time — before any signature is ever checked against it.
 func loadKeyring() (openpgp.EntityList, error) {
-	return openpgp.ReadArmoredKeyRing(bytes.NewReader(embeddedKeyring))
+	kr, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(embeddedKeyring))
+	if err != nil {
+		return nil, err
+	}
+	if err := assertSingleSigningSubkey(kr); err != nil {
+		return nil, err
+	}
+	return kr, nil
 }
 
 // srelSubkeyFingerprints collects the fingerprints of signing-capable subkeys in
@@ -791,10 +826,27 @@ func srelSubkeyFingerprints(kr openpgp.EntityList) [][]byte {
 	return fps
 }
 
+// assertSingleSigningSubkey enforces §6.1 correction 5: the verifying keyring must
+// carry EXACTLY ONE signing-capable non-primary subkey. Zero means an unusable
+// keyring; two or more means an untrimmed asset (e.g. a full `gpg --export` that
+// swept in S_apt) that would silently widen the accepted-signer set. Called both at
+// load (embedded asset) AND at the top of verifyChecksums, so an injected keyring
+// (Task 8 seam) is guarded on the same path a signature is checked.
+func assertSingleSigningSubkey(kr openpgp.EntityList) error {
+	if n := len(srelSubkeyFingerprints(kr)); n != 1 {
+		return fmt.Errorf("verifying keyring must have exactly one signing subkey, found %d", n)
+	}
+	return nil
+}
+
 // verifyChecksums returns nil iff sigASC is a valid detached signature over
 // checksums, made by a signing subkey present in kr. Fails closed on any deviation
-// (wrong armor block, disallowed digest, bad/absent signature, non-member issuer).
+// (untrimmed keyring, wrong armor block, disallowed digest, bad/absent signature,
+// non-member issuer).
 func verifyChecksums(kr openpgp.EntityList, checksums, sigASC []byte) error {
+	if err := assertSingleSigningSubkey(kr); err != nil {
+		return err
+	}
 	block, err := armor.Decode(bytes.NewReader(sigASC))
 	if err != nil {
 		return fmt.Errorf("armor decode: %w", err)
@@ -1044,7 +1096,7 @@ Spec: §4.2 step 4a, §6.3. Refuse unless the resolved self path equals the conf
   - `func guardTarget(resolved, configured string) error`
 - Produces (`//go:build linux`, `ancestry_linux.go`):
   - `var closeFD = unix.Close`
-  - `func walkAncestry(targetPath string) (comps []component, parentFD int, err error)` — parentFD opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW`, caller closes.
+  - `func walkAncestry(targetPath string) (comps []component, parentFD int, err error)` — parentFD opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` (the `O_CLOEXEC` is load-bearing: this fd carries Task 7's mutation flock, and correction 6 requires it not leak into the staged exec), caller closes.
 
 - [ ] **Step 1: Add the dep — PINNED, and do NOT `go mod tidy` yet.** `x/sys@latest` (≥ v0.42.0) declares `go 1.25.0`; `v0.41.0` is the last `go 1.24.0`-floor release. As in Tasks 3/4, defer tidy to Step 5 — `x/sys/unix` isn't imported until `ancestry_linux.go` exists, so tidying now would prune the require and the recovery could re-resolve `@latest` → `go 1.25.0`:
 
@@ -1073,8 +1125,15 @@ func TestAncestrySafe(t *testing.T) {
 		t.Fatalf("non-root component must be named: %v", err)
 	}
 	groupW := []component{{"/", 0, 0o755}, {"/usr/local/bin", 0, 0o775}}
-	if err := ancestrySafe(groupW); err == nil || !strings.Contains(err.Error(), "/usr/local/bin") {
+	err := ancestrySafe(groupW)
+	if err == nil || !strings.Contains(err.Error(), "/usr/local/bin") {
 		t.Fatalf("group-writable component must be named: %v", err)
+	}
+	// §6.3 MINOR-1: the refusal carries the both-components remediation, since a
+	// staff-group host makes /usr/local group-writable too and fixing only the leaf
+	// leaves the parent refused.
+	if !strings.Contains(err.Error(), "chmod 0755 /usr/local /usr/local/bin") {
+		t.Fatalf("refusal must give the both-components remediation: %v", err)
 	}
 	worldW := []component{{"/usr/local/bin", 0, 0o757}}
 	if err := ancestrySafe(worldW); err == nil {
@@ -1138,15 +1197,23 @@ type component struct {
 	mode os.FileMode // permission bits only
 }
 
+// ancestryRemediation is the fix appended to every ancestry refusal (§6.3). The walk
+// aborts on the FIRST offending component, but a Debian staff-group host
+// (/etc/staff-group-for-usr-local → base-files sets /usr/local{,/bin} to root:staff
+// 2775) makes BOTH group-writable; fixing only the leaf leaves /usr/local refused, so
+// the hint names every standard-install component to repair, not just the one flagged.
+const ancestryRemediation = "repair every offending component (on a Debian staff-group host both /usr/local and /usr/local/bin): chgrp root /usr/local /usr/local/bin && chmod 0755 /usr/local /usr/local/bin"
+
 // ancestrySafe returns nil iff EVERY component is root-owned (uid 0) and not
-// group- or world-writable; else an error naming the first offender. §4.2 step 4a.
+// group- or world-writable; else an error naming the first offender AND the §6.3
+// remediation covering both standard-install components. §4.2 step 4a.
 func ancestrySafe(comps []component) error {
 	for _, c := range comps {
 		if c.uid != 0 {
-			return fmt.Errorf("%s is not root-owned (uid %d)", c.name, c.uid)
+			return fmt.Errorf("%s is not root-owned (uid %d); %s", c.name, c.uid, ancestryRemediation)
 		}
 		if c.mode&0o022 != 0 {
-			return fmt.Errorf("%s is group- or world-writable (mode %04o)", c.name, c.mode)
+			return fmt.Errorf("%s is group- or world-writable (mode %04o); %s", c.name, c.mode, ancestryRemediation)
 		}
 	}
 	return nil
@@ -1266,6 +1333,7 @@ Spec: §4.2 steps 1/4b/7/8, §5.2, §5.3, §6.3. Capture the running-image ident
 - Produces:
   - `func captureRunningImage() (dev, ino uint64, err error)`
   - `func acquireMutationLock(parentFD int) error` (→ `errLockContended`)
+  - `func releaseMutationLock(parentFD int)` — explicit `flock(LOCK_UN)` on the normal path (correction 6); the parent-dir fd's `O_CLOEXEC` is the crash backstop.
   - `func recheckRunningIdentity(parentFD int, targetName string, wantDev, wantIno uint64) error` (→ `errBinaryChanged`)
   - `func stageBinary(parentFD int, data []byte) (tempName string, err error)`
   - `var stagedVersion func(parentFD int, tempName string) (string, error)` (exec seam)
@@ -1314,6 +1382,30 @@ func TestAcquireMutationLock_Contended(t *testing.T) {
 	}
 	if err := acquireMutationLock(openDir(t, dir)); !errors.Is(err, errLockContended) {
 		t.Fatalf("second (separate OFD) lock must be contended: %v", err)
+	}
+}
+
+func TestReleaseMutationLock_FreesForNextOFD(t *testing.T) {
+	dir := t.TempDir()
+	fd1 := openDir(t, dir)
+	if err := acquireMutationLock(fd1); err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	releaseMutationLock(fd1) // explicit LOCK_UN (correction 6) — not the fd close
+	// A separate open-file description must now be able to take the lock.
+	if err := acquireMutationLock(openDir(t, dir)); err != nil {
+		t.Fatalf("after explicit release, a fresh-OFD lock must succeed: %v", err)
+	}
+}
+
+func TestCappedBuffer(t *testing.T) {
+	under := &cappedBuffer{cap: 8}
+	if n, _ := under.Write([]byte("abc")); n != 3 || under.overflow || under.String() != "abc" {
+		t.Fatalf("under-cap: n=%d overflow=%v s=%q", n, under.overflow, under.String())
+	}
+	over := &cappedBuffer{cap: 4}
+	if n, _ := over.Write([]byte("abcdefgh")); n != 8 || !over.overflow || over.String() != "abcd" {
+		t.Fatalf("over-cap must report full write, flag overflow, keep only cap bytes: n=%d overflow=%v s=%q", n, over.overflow, over.String())
 	}
 }
 
@@ -1387,7 +1479,7 @@ func TestCommitSwap_PostRenameBranches(t *testing.T) {
 
 - [ ] **Step 2: Run — expect FAIL** (undefined symbols). These are `//go:build linux` tests, so run them in a Linux container (natively on macOS they compile out and report "no tests to run", which is NOT the failing state you want to see):
 
-Run: `docker run --rm -v "$(git rev-parse --show-toplevel)":/w -w /w/cli golang:1.24 go test ./internal/selfupdate/ -run 'Capture|Acquire|Recheck|StageAndCommit|CommitSwap' -v`
+Run: `docker run --rm -v "$(git rev-parse --show-toplevel)":/w -w /w/cli golang:1.24 go test ./internal/selfupdate/ -run 'Capture|Acquire|Release|Recheck|StageAndCommit|CommitSwap|CappedBuffer' -v`
 Expected: FAIL (build: undefined `captureRunningImage`, `acquireMutationLock`, …).
 
 - [ ] **Step 3: Implement** — `cli/internal/selfupdate/swap.go`:
@@ -1405,6 +1497,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -1414,6 +1508,18 @@ var (
 	fsRenameat = unix.Renameat
 	fsFsync    = unix.Fsync
 	fsUnlinkat = unix.Unlinkat
+)
+
+// Staged-exec bounds (§4.2 step 7, §6.4). Package VARS, not consts, so the integration
+// build (Task 13, mathion_selfupdate_test tag only) can inject a longer deadline from
+// env to park the updater for §9.2 leg (ii); the shipped release lacks that tag and
+// uses these defaults. An honest `version --short` prints ~one short line in
+// milliseconds, so these are orders of magnitude over the honest case yet finite —
+// a hung, output-flooding, or fork-and-orphan staged binary cannot pin the flock.
+var (
+	stagedExecTimeout   = 30 * time.Second
+	stagedExecOutputCap = int64(64 << 10) // 64 KiB
+	stagedExecWaitDelay = 2 * time.Second // force-close inherited pipes so Wait can't hang on a forked pipe-holder
 )
 
 var (
@@ -1457,6 +1563,16 @@ func acquireMutationLock(parentFD int) error {
 		return fmt.Errorf("flock parent dir: %w", err)
 	}
 	return nil
+}
+
+// releaseMutationLock explicitly drops the flock on the normal path (§4.2 step 4b,
+// correction 6). Closing the O_CLOEXEC parent-dir fd would also release it — that is
+// the crash/abnormal-exit backstop — but an EXPLICIT LOCK_UN at a known point is what
+// §9.2 leg (i) asserts (orderly release), and it frees the lock before the fd's other
+// teardown. Never called before commitSwap's fsync completes (the lock is held through
+// step 8). Best-effort: a failed unlock still releases on the subsequent close.
+func releaseMutationLock(parentFD int) {
+	_ = unix.Flock(parentFD, unix.LOCK_UN)
 }
 
 // recheckRunningIdentity re-opens the target fd-relative and requires its dev+inode
@@ -1512,10 +1628,49 @@ func stageBinary(parentFD int, data []byte) (string, error) {
 	return name, nil
 }
 
-// stagedVersion runs the staged binary's `version --short` through an INHERITED
-// fd (never by pathname, which would re-resolve ancestors). Seam: a unit test
-// substitutes it to cover only the compare/abort branch (§3.2); the real exec is
-// integration (§9.2). §4.2 step7.
+// cappedBuffer accumulates up to cap bytes and flags overflow; bytes past the cap are
+// discarded, and Write NEVER errors (so os/exec's copy goroutine keeps draining the
+// pipe and the child cannot block on a full pipe). This bounds MEMORY; the deadline,
+// not the cap, bounds LIVENESS. Read only after Cmd.Wait returns (which synchronizes
+// the copy goroutines), so the fields need no locking.
+type cappedBuffer struct {
+	cap      int64
+	buf      bytes.Buffer
+	overflow bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if room := c.cap - int64(c.buf.Len()); room > 0 {
+		if int64(len(p)) > room {
+			c.buf.Write(p[:room])
+			c.overflow = true
+		} else {
+			c.buf.Write(p)
+		}
+	} else if len(p) > 0 {
+		c.overflow = true
+	}
+	return len(p), nil // report full acceptance so io.Copy keeps draining
+}
+
+func (c *cappedBuffer) String() string { return c.buf.String() }
+
+// stagedVersion runs the staged binary's `version --short` through an INHERITED fd
+// (never by pathname, which would re-resolve ancestors). This runs while the mutation
+// flock is held (§6.4), so the exec is BOUNDED and FORK-SAFE:
+//   - the exec fd is handed over ONLY via Cmd.ExtraFiles (fd 3 in the child →
+//     /proc/self/fd/3, an fexecve-equivalent); every other fd — the flock-bearing
+//     parent-dir fd included — stays O_CLOEXEC and is NOT inherited, so no forked
+//     descendant can retain the mutation lock (correction 6);
+//   - the staged binary runs in its OWN process group (Setpgid); on deadline or output
+//     overrun the WHOLE group is SIGKILLed (kill(-pgid)), so a child the binary forked
+//     cannot survive;
+//   - a nonzero Cmd.WaitDelay force-closes the inherited stdout/stderr pipe ends so Wait
+//     returns even if a grandchild double-forked (setsid) out of the group still holding
+//     a write end — a plain Cmd.Wait reaps only the direct child and would block forever.
+//
+// Seam: a unit test substitutes the whole var to cover only the compare/abort branch
+// (§3.2); the real bounded/fork-safe exec is exercised in integration (§9.2). §4.2 step7.
 var stagedVersion = func(parentFD int, tempName string) (string, error) {
 	rofd, err := unix.Openat(parentFD, tempName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -1523,14 +1678,39 @@ var stagedVersion = func(parentFD int, tempName string) (string, error) {
 	}
 	f := os.NewFile(uintptr(rofd), tempName)
 	defer f.Close()
-	// ExtraFiles[0] becomes fd 3 in the child; /proc/self/fd/3 there is the staged
-	// binary — an fexecve-equivalent that never re-resolves the pathname.
+
 	cmd := exec.Command("/proc/self/fd/3", "version", "--short")
-	cmd.ExtraFiles = []*os.File{f}
-	var out, errOut bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errOut
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("exec staged version --short: %w (stderr: %s)", err, strings.TrimSpace(errOut.String()))
+	cmd.ExtraFiles = []*os.File{f}                          // → fd 3 in the child
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}  // own process group (pgid == pid)
+	cmd.WaitDelay = stagedExecWaitDelay                    // force-close inherited pipes if a grandchild holds them
+	out := &cappedBuffer{cap: stagedExecOutputCap}
+	errOut := &cappedBuffer{cap: stagedExecOutputCap}
+	cmd.Stdout, cmd.Stderr = out, errOut
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start staged version --short: %w", err)
+	}
+	pgid := cmd.Process.Pid // Setpgid makes the child a group leader: pgid == pid
+	killGroup := func() { _ = unix.Kill(-pgid, unix.SIGKILL) }
+	defer killGroup() // final sweep of any non-setsid group straggler on every return path
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(stagedExecTimeout)
+	defer timer.Stop()
+
+	select {
+	case werr := <-done:
+		if werr != nil {
+			return "", fmt.Errorf("exec staged version --short: %w (stderr: %s)", werr, strings.TrimSpace(errOut.String()))
+		}
+	case <-timer.C:
+		killGroup()
+		<-done // Wait returns after WaitDelay force-closes the inherited pipes
+		return "", fmt.Errorf("staged version --short exceeded the %s exec deadline", stagedExecTimeout)
+	}
+	if out.overflow || errOut.overflow {
+		return "", fmt.Errorf("staged version --short exceeded the %d-byte output cap", stagedExecOutputCap)
 	}
 	return strings.TrimSpace(out.String()), nil
 }
@@ -2372,7 +2552,7 @@ func Run(ctx context.Context, p Params) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = closeFD(parentFD) }() // also releases the flock
+	defer func() { _ = closeFD(parentFD) }() // O_CLOEXEC close = crash/abnormal-exit backstop for the flock (correction 6)
 	if err := ancestrySafe(comps); err != nil {
 		return err
 	}
@@ -2399,6 +2579,10 @@ func Run(ctx context.Context, p Params) error {
 	if err := acquireMutationLock(parentFD); err != nil {
 		return err
 	}
+	// Explicit LOCK_UN on the normal path (correction 6, §4.2 step 4b); the O_CLOEXEC
+	// close defer above is the crash backstop. Registered AFTER the close defer, so it
+	// runs FIRST (LIFO): unlock, then close. Only registered once the lock is held.
+	defer releaseMutationLock(parentFD)
 	if err := recheckRunningIdentity(parentFD, filepath.Base(p.Cfg.swapTarget), dev, ino); err != nil {
 		return err
 	}
@@ -2596,7 +2780,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ### Task 11: goreleaser binary-only archive + CI guards
 
-Spec: §10. Pin the `mathion` archive to binary-only via a **non-matching glob** (empty `[]` re-applies GoReleaser's default README*/LICENSE* globs, breaking the strict single-member extractor's precondition). Add CI guards: the embedded-keyring drift cmp (a Go test already exists — Task 4's `TestEmbeddedKeyringMatchesCanonical`), a single-member archive assertion, and a no-test-tag assertion.
+Spec: §10, §6.1. Pin the `mathion` archive to binary-only via a **non-matching glob** (empty `[]` re-applies GoReleaser's default README*/LICENSE* globs, breaking the strict single-member extractor's precondition). Add CI guards: the embedded-keyring drift cmp (a Go test already exists — Task 4's `TestEmbeddedKeyringMatchesCanonical`), a single-member archive assertion, a no-test-tag assertion, and the **§6.1 build-time fingerprint pin** (assert the committed keyring's single signing subkey equals the expected S_rel fingerprint — catches a *wrong* single subkey that runtime membership alone would accept; gated on the fpr env being set, so it skips pre-keygen exactly like 4a's `S_APT_VERIFY_FPRS`).
 
 **Files:**
 - Modify: `cli/.goreleaser.yaml` (archives entry)
@@ -2623,7 +2807,11 @@ archives:
 #  (1) the release config must NOT carry the mathion_selfupdate_test build tag
 #      (it would let an env var redirect a root-executed updater's origin);
 #  (2) each built archive must contain EXACTLY the single member "mathion"
-#      (the strict single-binary extractor in extractSingleBinary depends on it).
+#      (the strict single-binary extractor in extractSingleBinary depends on it);
+#  (3) the committed keyring's single signing subkey fingerprint must equal the
+#      expected S_rel fpr (§6.1 build-time pin) — catches a WRONG single subkey that
+#      runtime membership + the load-time single-subkey assertion cannot. Gated on the
+#      fpr env being set, so it skips the pre-keygen placeholder (like 4a's fpr pins).
 set -eu
 cd "$(dirname "$0")/.."   # -> cli/
 
@@ -2656,6 +2844,36 @@ for a in dist/mathion_linux_*.tar.gz; do
     exit 1
   fi
 done
+
+# (3) fingerprint pin (§6.1). Only enforced once maintainer keys exist: when S_REL_FPR
+# (steady) or S_REL_EMBEDDED_FPR (transition — the INCOMING key the asset embeds, which
+# during a rotation differs from the outgoing signing key) is set. Pre-keygen the asset
+# is a placeholder that cannot be parsed as a keyring, so skip — the go-live caveat.
+EXPECT="${S_REL_EMBEDDED_FPR:-${S_REL_FPR:-}}"
+if [ -n "$EXPECT" ]; then
+  command -v gpg >/dev/null 2>&1 || { echo "FAIL: gpg required for the fingerprint pin" >&2; exit 1; }
+  ringdir="$(mktemp -d)"; ring="$ringdir/ring.gpg"
+  trap 'rm -rf "$ringdir"' EXIT
+  gpg --no-default-keyring --keyring "$ring" --quiet --import ../deploy/keys/mathion-pubkey.asc 2>/dev/null \
+    || { echo "FAIL: deploy/keys/mathion-pubkey.asc is not a parseable OpenPGP keyring" >&2; exit 1; }
+  prim="$(gpg --no-default-keyring --keyring "$ring" --with-colons --list-keys | awk -F: '$1=="pub"{n++} END{print n+0}')"
+  [ "$prim" = 1 ] || { echo "FAIL: keyring must hold exactly one primary key, found $prim" >&2; exit 1; }
+  # Pair each signing-capable subkey (colon field 12 contains lowercase 's') with the
+  # fpr line that follows it; assert exactly one, equal to EXPECT (uppercase, no spaces).
+  sigfprs="$(gpg --no-default-keyring --keyring "$ring" --with-colons --with-fingerprint --list-keys \
+    | awk -F: '$1=="sub" && $12 ~ /s/ {want=1; next} $1=="fpr" && want {print $10; want=0}')"
+  cnt="$(printf '%s\n' "$sigfprs" | grep -c . || true)"
+  [ "$cnt" = 1 ] || { echo "FAIL: keyring must hold exactly one signing subkey, found $cnt" >&2; exit 1; }
+  want="$(printf '%s' "$EXPECT" | tr -d ' ' | tr 'a-z' 'A-Z')"   # normalize: strip spaces, uppercase
+  if [ "$sigfprs" != "$want" ]; then
+    echo "FAIL: embedded signing-subkey fpr $sigfprs != expected S_rel $want" >&2
+    exit 1
+  fi
+  echo "fingerprint pin OK ($sigfprs)"
+else
+  echo "SKIP fingerprint pin: neither S_REL_FPR nor S_REL_EMBEDDED_FPR set (pre-keygen placeholder)"
+fi
+
 echo "self-update CI guards PASSED ($n binary-only archive(s))"
 ```
 
@@ -2664,12 +2882,17 @@ echo "self-update CI guards PASSED ($n binary-only archive(s))"
 ```yaml
       - name: self-update release guards
         run: sh cli/scripts/selfupdate-ci-guards.sh
+        env:
+          # Wired now, empty until keygen -> the fpr pin (guard 3) skips. At rotation time
+          # the maintainer sets these repo vars (S_REL_EMBEDDED_FPR only during a crossing).
+          S_REL_FPR: ${{ vars.S_REL_FPR }}
+          S_REL_EMBEDDED_FPR: ${{ vars.S_REL_EMBEDDED_FPR }}
 ```
 
 - [ ] **Step 4: Verify locally** (macOS has goreleaser via brew; the run writes untracked `.gz` + placeholder keyring under `deploy/`, exactly like `deb_test.sh`):
 
 Run: `chmod +x cli/scripts/selfupdate-ci-guards.sh && sh cli/scripts/selfupdate-ci-guards.sh`
-Expected: `self-update CI guards PASSED (2 binary-only archive(s))` (amd64 + arm64).
+Expected: `SKIP fingerprint pin: neither S_REL_FPR nor S_REL_EMBEDDED_FPR set (pre-keygen placeholder)` then `self-update CI guards PASSED (2 binary-only archive(s))` (amd64 + arm64). To exercise the pin locally post-keygen: `S_REL_FPR=<fpr> sh cli/scripts/selfupdate-ci-guards.sh` → `fingerprint pin OK (<fpr>)`.
 
 - [ ] **Step 5: Commit**
 
@@ -2705,11 +2928,11 @@ Use \fB\-\-check\fR to report availability without changing anything, \fB\-\-yes
 
 And extend the `version` group line to mention `--short` (append to its description sentence): `Add \fB\-\-short\fR to print only the CLI version (the self-update oracle).`
 
-- [ ] **Step 2: README** — add a `## Updating the CLI (`mathion self-update`)` section to `README.md` (near the install section). Content: what it does (upgrades the `mathion` binary, not the app/DB — that is `mathion update`); channel behavior (apt-managed → prints the apt command; curl|sh → verified + swapped); `--check` (report-only, no root) and `--yes`; the guarantees (forward-only, S_rel-signature-verified); and the note "a key rotation may take two runs" (§6.2). Also mention the Debian staff-group caveat from §6.3 (if `/usr/local/bin` is `root:staff 2775`, self-update refuses; remediate with `chgrp root /usr/local/bin && chmod 0755 /usr/local/bin`).
+- [ ] **Step 2: README** — add a `## Updating the CLI (`mathion self-update`)` section to `README.md` (near the install section). Content: what it does (upgrades the `mathion` binary, not the app/DB — that is `mathion update`); channel behavior (apt-managed → prints the apt command; curl|sh → verified + swapped); `--check` (report-only, no root) and `--yes`; the guarantees (forward-only, S_rel-signature-verified); and the note "a key rotation may take two runs" (§6.2). Also mention the Debian staff-group caveat from §6.3 (if `/usr/local` and `/usr/local/bin` are `root:staff 2775` — the `/etc/staff-group-for-usr-local` default — self-update refuses; because the ancestry walk refuses *any* group-writable component and fixing only the leaf leaves `/usr/local` refused, remediate **both**: `chgrp root /usr/local /usr/local/bin && chmod 0755 /usr/local /usr/local/bin`).
 
 - [ ] **Step 3: Key runbook reconciliation** — in `deploy/keys/README.md`, apply the §6.2/§10 corrections exactly:
   - In §5 ("Which channels need a dual-accept overlap"), change the **4b self-update binary** row from **YES** to **NO (transition-release crossing)**, resolving the line-122-vs-line-269 contradiction; `mathion-pubkey.asc` stays primary + one S_rel subkey.
-  - Add the **transition choreography** as a hard task (the three-way key state from spec §10): at the transition build, `mathion-pubkey.asc` + the binary embed the **incoming K2**, while that release's `checksums.txt` is **signed by the outgoing K1**; `install.sh`'s literal key **and** `EXPECTED_SIGNING_FPR` stay **outgoing K1** (with `EXPECTED_PRIMARY_FPR` invariant) until a K2-signed successor, then both flip **in the same change that publishes it**. Do NOT regenerate `install.sh`'s literal from the K2 `mathion-pubkey.asc` at the transition build. Note that `release-cli.yml`'s single `S_REL_FPR` cannot express sign-K1/commit-K2 today (rotation-time workflow change).
+  - Add the **transition choreography** as a hard task (the three-way key state from spec §10): at the transition build, `mathion-pubkey.asc` + the binary embed the **incoming K2**, while that release's `checksums.txt` is **signed by the outgoing K1**; `install.sh`'s literal key **and** `EXPECTED_SIGNING_FPR` stay **outgoing K1** (with `EXPECTED_PRIMARY_FPR` invariant) until a K2-signed successor, then both flip **together with publishing** that successor. Do NOT regenerate `install.sh`'s literal from the K2 `mathion-pubkey.asc` at the transition build. **State that this flip is NOT delivery-atomic (MINOR-2):** `install.sh` is served from raw `main` (CDN-cached) while release assets publish through a separate workflow/endpoint, so whichever becomes visible first opens a brief window where a fresh install sees one but not the other and **fail-closed-rejects** — a **safe, retryable** outcome (re-run succeeds once both are visible), never a forgery or downgrade. Do NOT call the flip "atomic": keep the two publications as close in time as possible and **smoke a fresh `curl|sh` install once both are visible** before treating the rotation as live. Note that `release-cli.yml`'s single `S_REL_FPR` cannot express sign-K1/commit-K2 today (rotation-time workflow change), and that the §6.1 CI fingerprint pin (Task 11) consumes `S_REL_EMBEDDED_FPR` (= the incoming K2, distinct from the outgoing signing key) during a crossing.
   - Add a **4b-aware sentence to §6** (S_rel *compromise* recovery): because self-update's keyring is compiled in and a compromised outgoing key can never sign a transition release, every deployed pre-rotation self-update binary fails closed into **manual reinstall** on an S_rel compromise (the safe failure), mirroring the apt-compromise paragraph.
 
 - [ ] **Step 4: .deb third-party notices** — regenerate for the new deps. If `go-licenses` is available:
@@ -2738,10 +2961,10 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ### Task 13: integration leg (real swapped binaries) + test-tag endpoint override
 
-Spec: §9.2, §3.2. A root-required Linux leg with throwaway OpenPGP keys and REAL shell-launched binaries (the in-process seams can't reach a binary self-update swapped in and re-launched). Covers ALL four §9.2 scenarios: curl-managed happy path (real inherited-fd exec + swap), the two-invocation rotation crossing (K1 client → K1-signed transition embedding K2 → K2-only latest), apt-managed defer (a real dpkg-owned path), and S_apt-signed rejection. Adds the paired build-tag endpoint override.
+Spec: §9.2, §3.2, §6.4. A root-required Linux leg with throwaway OpenPGP keys and REAL shell-launched binaries (the in-process seams can't reach a binary self-update swapped in and re-launched). Covers ALL §9.2 scenarios: curl-managed happy path (real inherited-fd exec + swap), the two-invocation rotation crossing (K1 client → K1-signed transition embedding K2 → K2-only latest), apt-managed defer (a real dpkg-owned path), S_apt-signed rejection, and the **staged-exec bound + fd-hygiene legs (correction 6)** — a past-deadline abort plus the two fork-orphan legs (i) `Wait`-unblock + orderly release and (ii) fd-hygiene backstop (kill the parked updater before its `LOCK_UN`, then require a fresh-OFD `flock` succeeds → proves the flock fd was `O_CLOEXEC`). Adds the paired build-tag endpoint override and the build-tag-gated exec-bound env injection.
 
 **Files:**
-- Create: `cli/internal/selfupdate/endpoints_testtag.go`, `cli/selfupdate_integration_test.sh`
+- Create: `cli/internal/selfupdate/endpoints_testtag.go`, `cli/internal/selfupdate/execbounds_testtag.go`, `cli/selfupdate_integration_test.sh`
 
 This is a **standalone** leg (like `deploy/apt/e2e_test.sh`), gated behind `MATHION_SELFUPDATE_E2E=1` so it never mutates a real install by accident; it is NOT wired into `cli/integration_test.sh`.
 
@@ -2763,10 +2986,43 @@ func endpointAPIBase() string { return os.Getenv("MATHION_SELFUPDATE_API_BASE") 
 func endpointDLBase() string  { return os.Getenv("MATHION_SELFUPDATE_DL_BASE") }
 ```
 
-- [ ] **Step 2: Confirm the pairing compiles both ways**
+- [ ] **Step 1b: Build-tag-gated exec-bound injection** — `cli/internal/selfupdate/execbounds_testtag.go`. This is `linux && mathion_selfupdate_test` (the bounds live in `swap.go`, which is `//go:build linux`). No paired default file is needed — `init()` only MUTATES existing package vars (unlike the endpoint symbols, it defines nothing), so the production build simply keeps `swap.go`'s defaults:
 
-Run: `cd cli && go build ./... && go build -tags mathion_selfupdate_test ./...`
-Expected: both succeed (exactly one definition of `endpointAPIBase`/`endpointDLBase` per build).
+```go
+//go:build linux && mathion_selfupdate_test
+
+package selfupdate
+
+import (
+	"os"
+	"strconv"
+	"time"
+)
+
+// Under the integration build tag ONLY, the staged-exec bounds can be injected from env
+// so §9.2's staged-exec legs can (a) force a FAST deadline for the basic past-deadline
+// abort and (b) inject a LONG deadline that parks the updater inside step 7 long enough
+// to SIGKILL it before its LOCK_UN (leg ii). The shipped release lacks this tag
+// (CI-asserted, Task 11), so production always uses swap.go's defaults.
+func init() {
+	if v := os.Getenv("MATHION_SELFUPDATE_EXEC_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			stagedExecTimeout = d
+		}
+	}
+	if v := os.Getenv("MATHION_SELFUPDATE_OUTPUT_CAP"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			stagedExecOutputCap = n
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Confirm the pairing compiles both ways** (incl. the linux-tagged exec-bound file)
+
+Run (macOS host, proves the untagged + all-OS-tagged builds): `cd cli && go build ./... && go build -tags mathion_selfupdate_test ./...`
+Run (Linux container, proves the `linux && mathion_selfupdate_test` file compiles): `docker run --rm -v "$(git rev-parse --show-toplevel)":/w -w /w/cli golang:1.24 go build -tags mathion_selfupdate_test ./...`
+Expected: all succeed (exactly one definition of `endpointAPIBase`/`endpointDLBase` per build; `execbounds_testtag.go` compiles only under `linux && mathion_selfupdate_test`).
 
 - [ ] **Step 3: Write the integration leg** — `cli/selfupdate_integration_test.sh` (modeled on `deploy/apt/e2e_test.sh`). Two throwaway keys (K1, K2), four binaries built from throwaway tree-copies with the embedded keyring overwritten (the tracked asset is never touched — §6.1/§9.2), and a local release server. Requires root + gpg + python3 + dpkg + go; **skips unless `MATHION_SELFUPDATE_E2E=1`** (it mutates `/usr/local/bin/mathion` and `/usr/bin/mathion`):
 
@@ -2897,22 +3153,140 @@ v="$(/usr/local/bin/mathion version --short)"
 /usr/local/bin/mathion self-update --yes
 v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.9.0" ] || { echo "FAIL(rotate run2): want cli-v0.9.0, got $v"; exit 1; }
-
 rm -f /usr/local/bin/mathion
-echo "self-update integration PASSED (happy + reject + apt-defer + rotation-crossing)"
+
+# === LEG 5: STAGED-EXEC BOUND + fd HYGIENE under the flock (§9.2 correction 6) =======
+# A "forky" staged payload whose `version --short` double-forks a setsid orphan that
+# INHERITS stdout and outlives the exec deadline. Behavior switches on FORKY_MODE:
+#   sleep -> no fork; just sleep past a SHORT injected deadline (basic past-deadline abort)
+#   exit  -> spawn orphan, then the DIRECT child EXITS  (leg i: WaitDelay must unblock Wait)
+#   block -> spawn orphan, signal alive, then BLOCK     (leg ii: parked updater, killed pre-LOCK_UN)
+# The client is the K1 curl client; the selected release's archive IS forky, K1-signed,
+# so verification passes and the client reaches step 7 (stage + inherited-fd exec).
+cat > "$WORK/forky.go" <<'EOF'
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"syscall"
+	"time"
+)
+
+func main() {
+	if len(os.Args) < 3 || os.Args[1] != "version" || os.Args[2] != "--short" {
+		os.Exit(2)
+	}
+	mode := os.Getenv("FORKY_MODE")
+	alive := os.Getenv("FORKY_ALIVE")
+	if os.Getenv("FORKY_CHILD") == "1" {
+		// We are the double-forked orphan: a NEW SESSION (escaped the updater's
+		// kill(-pgid)) still holding the inherited stdout. Signal alive, then outlive
+		// the exec window. Bounded so no process lingers after the harness finishes.
+		if alive != "" {
+			_ = os.WriteFile(alive, []byte("1"), 0o644)
+		}
+		time.Sleep(15 * time.Second)
+		os.Exit(0)
+	}
+	if mode == "sleep" {
+		time.Sleep(15 * time.Second) // no fork; the updater's deadline+group-kill must reach this
+		os.Exit(0)
+	}
+	// Spawn the orphan in a new session that inherits our stdout pipe.
+	child := exec.Command("/proc/self/exe", "version", "--short")
+	child.Env = append(os.Environ(), "FORKY_CHILD=1")
+	child.Stdout = os.Stdout // inherit the exec'd stdout -> keeps the updater's io.Copy blocked
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := child.Start(); err != nil {
+		os.Exit(3)
+	}
+	if mode == "block" {
+		time.Sleep(15 * time.Second) // leg ii: park (the harness kills the updater within ~1s)
+		os.Exit(0)
+	}
+	// leg i: print a bogus tag and EXIT; the orphan lives on holding stdout, so the
+	// updater's Wait must rely on WaitDelay (a direct-child-only reap would hang).
+	fmt.Println("cli-v0.0.0-forky")
+	os.Exit(0)
+}
+EOF
+( cd "$WORK" && go mod init forkyhelper >/dev/null 2>&1 && go build -o "$WORK/forky_bin" forky.go )
+
+publish_forky() { # <tag> -- archive member "mathion" IS forky, K1-signed
+  d="$SITE/$1"; mkdir -p "$d"
+  root="$WORK/forkyroot"; rm -rf "$root"; mkdir -p "$root"
+  install -m0755 "$WORK/forky_bin" "$root/mathion"
+  tar -C "$root" -czf "$d/$ASSET" mathion
+  sha="$(sha256sum "$d/$ASSET" | awk '{print $1}')"
+  printf '%s  %s\n' "$sha" "$ASSET" > "$d/checksums.txt"
+  gpg --batch --yes --armor --digest-algo SHA256 --local-user "$K1" \
+    --detach-sign -o "$d/checksums.txt.asc" "$d/checksums.txt"
+}
+# A fresh open-file description must be able to LOCK_EX|LOCK_NB the locked parent dir.
+lock_free() { flock -n /usr/local/bin -c true; }   # exit 0 = free, 1 = still held
+
+verset '[{"tag_name":"cli-v0.9.0"},{"tag_name":"cli-v0.2.0"}]'
+publish_forky cli-v0.9.0
+
+# --- LEG 5a: basic bound -- a staged binary that sleeps past a SHORT deadline aborts, no swap.
+install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
+rc=0
+FORKY_MODE=sleep MATHION_SELFUPDATE_EXEC_TIMEOUT=1s \
+  timeout 30 /usr/local/bin/mathion self-update --yes >/dev/null 2>&1 || rc=$?
+[ "$rc" = 124 ] && { echo "FAIL(bound): updater hung past the deadline (group-kill/WaitDelay broken)"; exit 1; }
+[ "$rc" = 0 ]   && { echo "FAIL(bound): a past-deadline staged exec must abort self-update"; exit 1; }
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(bound): live binary was swapped to $v"; exit 1; }
+lock_free || { echo "FAIL(bound): mutation lock not released after a deadline abort"; exit 1; }
+
+# --- LEG 5b: fork-orphan (i) -- direct child exits; WaitDelay must unblock Wait + orderly release.
+install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
+rm -f "$WORK/alive_i"
+rc=0
+FORKY_MODE=exit FORKY_ALIVE="$WORK/alive_i" MATHION_SELFUPDATE_EXEC_TIMEOUT=60s \
+  timeout 30 /usr/local/bin/mathion self-update --yes >/dev/null 2>&1 || rc=$?
+[ "$rc" = 124 ] && { echo "FAIL(fork-i): Wait hung on the inherited pipe -> WaitDelay did not force-close it"; exit 1; }
+[ "$rc" = 0 ]   && { echo "FAIL(fork-i): must abort (forky reports a bogus tag), not swap"; exit 1; }
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(fork-i): live binary swapped to $v"; exit 1; }
+lock_free || { echo "FAIL(fork-i): orderly LOCK_UN did not release the lock"; exit 1; }
+
+# --- LEG 5c: fork-orphan (ii) -- kill the PARKED updater BEFORE its LOCK_UN; O_CLOEXEC must free the lock.
+install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
+rm -f "$WORK/alive_ii"
+FORKY_MODE=block FORKY_ALIVE="$WORK/alive_ii" MATHION_SELFUPDATE_EXEC_TIMEOUT=300s \
+  /usr/local/bin/mathion self-update --yes >/dev/null 2>&1 &
+UPD=$!
+# Wait until the orphan signals alive: the updater is now PARKED inside step-7 exec,
+# holding the lock, before any swap / LOCK_UN / abort-cleanup.
+i=0
+while [ ! -f "$WORK/alive_ii" ] && [ "$i" -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
+[ -f "$WORK/alive_ii" ] || { echo "FAIL(fork-ii): orphan never signaled alive"; kill -9 "$UPD" 2>/dev/null || true; exit 1; }
+kill -9 "$UPD"; wait "$UPD" 2>/dev/null || true   # SIGKILL before LOCK_UN; wait -> updater fds fully closed
+# The lock frees on the updater's death IFF the setsid orphan never inherited the flock
+# fd (i.e. it was O_CLOEXEC). A leaked fd keeps the shared-OFD lock held through the
+# still-alive orphan, so a fresh-OFD LOCK_EX|LOCK_NB would FAIL.
+lock_free || { echo "FAIL(fork-ii): lock still held after killing the updater -> flock fd leaked into the setsid orphan (missing O_CLOEXEC)"; exit 1; }
+v="$(/usr/local/bin/mathion version --short)"
+[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(fork-ii): live binary changed to $v"; exit 1; }
+rm -f /usr/local/bin/mathion /usr/local/bin/.mathion-selfupdate-*.tmp
+
+echo "self-update integration PASSED (happy + reject + apt-defer + rotation-crossing + staged-exec-bound + fd-hygiene i/ii)"
 ```
 
 - [ ] **Step 4: Run the leg (root, Linux container)** — macOS can't run it (Linux swap syscalls + dpkg). Use a Debian-based Go container with gpg + python3:
 
 Run: `docker run --rm -e MATHION_SELFUPDATE_E2E=1 -v "$(git rev-parse --show-toplevel)":/w -w /w golang:1.24 sh -c 'apt-get update >/dev/null && apt-get install -y --no-install-recommends gnupg python3 >/dev/null && sh cli/selfupdate_integration_test.sh'`
-Expected: `self-update integration PASSED (happy + reject + apt-defer + rotation-crossing)`. Without `MATHION_SELFUPDATE_E2E=1` (or off-root / missing tool) it prints `SKIP:` and exits 0.
+Expected: `self-update integration PASSED (happy + reject + apt-defer + rotation-crossing + staged-exec-bound + fd-hygiene i/ii)`. Without `MATHION_SELFUPDATE_E2E=1` (or off-root / missing tool) it prints `SKIP:` and exits 0. (`flock`, `timeout`, GNU `sleep` are all present in the Debian-based `golang:1.24` image the staged-exec legs use.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 chmod +x cli/selfupdate_integration_test.sh
-git add cli/internal/selfupdate/endpoints_testtag.go cli/selfupdate_integration_test.sh
-git commit -m "test(cli): self-update integration leg (happy/reject/apt-defer/rotation) + test-tag endpoints
+git add cli/internal/selfupdate/endpoints_testtag.go cli/internal/selfupdate/execbounds_testtag.go cli/selfupdate_integration_test.sh
+git commit -m "test(cli): self-update integration leg (happy/reject/apt-defer/rotation/staged-exec-bound) + test-tag endpoints
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
