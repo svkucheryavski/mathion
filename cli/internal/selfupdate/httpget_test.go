@@ -7,6 +7,8 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -20,6 +22,9 @@ func TestRedirectAllowed(t *testing.T) {
 	}
 	if err := redirectAllowed("https", 6, 5); err == nil {
 		t.Fatal("over-depth must be rejected")
+	}
+	if err := redirectAllowed("https", 5, 5); err != nil {
+		t.Fatalf("boundary depth == maxDepth must be allowed: %v", err)
 	}
 }
 
@@ -51,7 +56,9 @@ func TestGetLimited_CapStatus(t *testing.T) {
 }
 
 func TestGetLimited_FollowsHTTPSRedirect_CapsPostRedirectBody(t *testing.T) {
+	var reachedFinal atomic.Bool
 	final := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reachedFinal.Store(true)
 		w.Write(bytes.Repeat([]byte("y"), 50)) // 50 bytes AFTER the redirect
 	}))
 	defer final.Close()
@@ -66,7 +73,16 @@ func TestGetLimited_FollowsHTTPSRedirect_CapsPostRedirectBody(t *testing.T) {
 	c := newHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}, 5)
 
 	// cap 10 < 50: the post-redirect body must be the one that trips the cap.
-	if _, _, err := getLimited(context.Background(), c, front.URL+"/dl", 10, time.Second); err == nil {
+	_, _, err := getLimited(context.Background(), c, front.URL+"/dl", 10, time.Second)
+	if err == nil {
 		t.Fatal("post-redirect body over cap must error (proves cap binds the FINAL body)")
+	}
+	// Discriminate: the error must come from the FINAL body cap, not from a rejected
+	// redirect or an unreached final server (either would also produce a non-nil err).
+	if !reachedFinal.Load() {
+		t.Fatal("redirect was not followed to the final server — error did not originate from the final-body cap")
+	}
+	if !strings.Contains(err.Error(), "body exceeds 10 bytes") {
+		t.Fatalf("want final-body cap error, got %v", err)
 	}
 }
