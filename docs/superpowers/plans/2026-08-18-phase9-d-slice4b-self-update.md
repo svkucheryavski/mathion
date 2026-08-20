@@ -1197,20 +1197,23 @@ type component struct {
 	mode os.FileMode // permission bits only
 }
 
-// ancestryRemediation is the fix appended to every ancestry refusal (§6.3). The walk
-// aborts on the FIRST offending component, but a Debian staff-group host
-// (/etc/staff-group-for-usr-local → base-files sets /usr/local{,/bin} to root:staff
-// 2775) makes BOTH group-writable; fixing only the leaf leaves /usr/local refused, so
-// the hint names every standard-install component to repair, not just the one flagged.
+// ancestryRemediation is the §6.3 fix for a GROUP-WRITABLE component — the Debian
+// staff-group case (/etc/staff-group-for-usr-local → base-files sets /usr/local{,/bin}
+// to root:staff 2775), where the owner is already root and only the group + mode are
+// wrong, so `chgrp root` is correct. The walk aborts on the FIRST offender, but a
+// staff-group host makes BOTH /usr/local and /usr/local/bin group-writable; fixing only
+// the leaf leaves /usr/local refused, so the hint names every standard-install component.
 const ancestryRemediation = "repair every offending component (on a Debian staff-group host both /usr/local and /usr/local/bin): chgrp root /usr/local /usr/local/bin && chmod 0755 /usr/local /usr/local/bin"
 
-// ancestrySafe returns nil iff EVERY component is root-owned (uid 0) and not
-// group- or world-writable; else an error naming the first offender AND the §6.3
-// remediation covering both standard-install components. §4.2 step 4a.
+// ancestrySafe returns nil iff EVERY component is root-owned (uid 0) and not group- or
+// world-writable; else an error naming the first offender with a remediation matched to
+// the actual fault (ownership vs group/mode). §4.2 step 4a, §6.3.
 func ancestrySafe(comps []component) error {
 	for _, c := range comps {
 		if c.uid != 0 {
-			return fmt.Errorf("%s is not root-owned (uid %d); %s", c.name, c.uid, ancestryRemediation)
+			// A non-root OWNER needs chown, NOT the §6.3 chgrp remediation (which fixes
+			// only the group). Far more anomalous than the staff-group mode case.
+			return fmt.Errorf("%s is not root-owned (uid %d); repair ownership so every ancestor is root:root and 0755, e.g. chown root:root %s && chmod 0755 %s", c.name, c.uid, c.name, c.name)
 		}
 		if c.mode&0o022 != 0 {
 			return fmt.Errorf("%s is group- or world-writable (mode %04o); %s", c.name, c.mode, ancestryRemediation)
@@ -1403,9 +1406,20 @@ func TestCappedBuffer(t *testing.T) {
 	if n, _ := under.Write([]byte("abc")); n != 3 || under.overflow || under.String() != "abc" {
 		t.Fatalf("under-cap: n=%d overflow=%v s=%q", n, under.overflow, under.String())
 	}
-	over := &cappedBuffer{cap: 4}
+	overCh := make(chan struct{}, 1)
+	over := &cappedBuffer{cap: 4, notify: overCh}
 	if n, _ := over.Write([]byte("abcdefgh")); n != 8 || !over.overflow || over.String() != "abcd" {
 		t.Fatalf("over-cap must report full write, flag overflow, keep only cap bytes: n=%d overflow=%v s=%q", n, over.overflow, over.String())
+	}
+	select {
+	case <-overCh: // first overrun must poke the shared notify channel
+	default:
+		t.Fatal("overflow must signal the notify channel so the exec loop can kill the group")
+	}
+	// A second overrun must NOT block or double-signal (nonblocking, once).
+	over.Write([]byte("more"))
+	if len(overCh) != 0 {
+		t.Fatal("notify must fire only once")
 	}
 }
 
@@ -1630,27 +1644,45 @@ func stageBinary(parentFD int, data []byte) (string, error) {
 
 // cappedBuffer accumulates up to cap bytes and flags overflow; bytes past the cap are
 // discarded, and Write NEVER errors (so os/exec's copy goroutine keeps draining the
-// pipe and the child cannot block on a full pipe). This bounds MEMORY; the deadline,
-// not the cap, bounds LIVENESS. Read only after Cmd.Wait returns (which synchronizes
-// the copy goroutines), so the fields need no locking.
+// pipe and the child cannot block on a full pipe). This bounds MEMORY. On the FIRST
+// overrun it also pokes the shared notify channel so the exec loop can kill the group
+// IMMEDIATELY — spec §4.2 step 7 requires a kill "on deadline OR output overrun", not
+// only at the deadline. Fields are read only after Cmd.Wait returns (which synchronizes
+// the copy goroutines) and each buffer is written by a single copy goroutine, so no locking.
 type cappedBuffer struct {
 	cap      int64
 	buf      bytes.Buffer
 	overflow bool
+	notify   chan struct{} // shared, buffered(1): a nonblocking signal on FIRST overflow
 }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
 	if room := c.cap - int64(c.buf.Len()); room > 0 {
 		if int64(len(p)) > room {
 			c.buf.Write(p[:room])
-			c.overflow = true
+			c.signalOverflow()
 		} else {
 			c.buf.Write(p)
 		}
 	} else if len(p) > 0 {
-		c.overflow = true
+		c.signalOverflow()
 	}
 	return len(p), nil // report full acceptance so io.Copy keeps draining
+}
+
+// signalOverflow flags the first overrun and pokes the shared notify channel (nonblocking,
+// once) so the exec loop kills the group at cap-crossing rather than at the deadline.
+func (c *cappedBuffer) signalOverflow() {
+	if c.overflow {
+		return
+	}
+	c.overflow = true
+	if c.notify != nil {
+		select {
+		case c.notify <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (c *cappedBuffer) String() string { return c.buf.String() }
@@ -1683,8 +1715,9 @@ var stagedVersion = func(parentFD int, tempName string) (string, error) {
 	cmd.ExtraFiles = []*os.File{f}                          // → fd 3 in the child
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}  // own process group (pgid == pid)
 	cmd.WaitDelay = stagedExecWaitDelay                    // force-close inherited pipes if a grandchild holds them
-	out := &cappedBuffer{cap: stagedExecOutputCap}
-	errOut := &cappedBuffer{cap: stagedExecOutputCap}
+	overCh := make(chan struct{}, 1) // shared: either capped buffer signals its first overrun here
+	out := &cappedBuffer{cap: stagedExecOutputCap, notify: overCh}
+	errOut := &cappedBuffer{cap: stagedExecOutputCap, notify: overCh}
 	cmd.Stdout, cmd.Stderr = out, errOut
 
 	if err := cmd.Start(); err != nil {
@@ -1704,12 +1737,16 @@ var stagedVersion = func(parentFD int, tempName string) (string, error) {
 		if werr != nil {
 			return "", fmt.Errorf("exec staged version --short: %w (stderr: %s)", werr, strings.TrimSpace(errOut.String()))
 		}
+	case <-overCh:
+		killGroup() // output overrun: kill the whole group NOW, do not wait for the deadline
+		<-done      // drain: Wait returns after the group dies / WaitDelay force-closes the pipes
+		return "", fmt.Errorf("staged version --short exceeded the %d-byte output cap", stagedExecOutputCap)
 	case <-timer.C:
 		killGroup()
 		<-done // Wait returns after WaitDelay force-closes the inherited pipes
 		return "", fmt.Errorf("staged version --short exceeded the %s exec deadline", stagedExecTimeout)
 	}
-	if out.overflow || errOut.overflow {
+	if out.overflow || errOut.overflow { // overran but the child also exited before we selected overCh
 		return "", fmt.Errorf("staged version --short exceeded the %d-byte output cap", stagedExecOutputCap)
 	}
 	return strings.TrimSpace(out.String()), nil
@@ -2860,8 +2897,12 @@ if [ -n "$EXPECT" ]; then
   [ "$prim" = 1 ] || { echo "FAIL: keyring must hold exactly one primary key, found $prim" >&2; exit 1; }
   # Pair each signing-capable subkey (colon field 12 contains lowercase 's') with the
   # fpr line that follows it; assert exactly one, equal to EXPECT (uppercase, no spaces).
-  sigfprs="$(gpg --no-default-keyring --keyring "$ring" --with-colons --with-fingerprint --list-keys \
-    | awk -F: '$1=="sub" && $12 ~ /s/ {want=1; next} $1=="fpr" && want {print $10; want=0}')"
+  # --with-subkey-fingerprint is REQUIRED for subkey fpr records in colon mode on GnuPG
+  # < 2.6 (a single --with-fingerprint emits only the PRIMARY's fpr → the pairing would
+  # see zero subkey fprs). The awk resets `want` on EVERY sub line so a following
+  # non-signing subkey clears it.
+  sigfprs="$(gpg --no-default-keyring --keyring "$ring" --with-colons --with-fingerprint --with-subkey-fingerprint --list-keys \
+    | awk -F: '$1=="sub"{want=($12 ~ /s/); next} $1=="fpr" && want {print $10; want=0}')"
   cnt="$(printf '%s\n' "$sigfprs" | grep -c . || true)"
   [ "$cnt" = 1 ] || { echo "FAIL: keyring must hold exactly one signing subkey, found $cnt" >&2; exit 1; }
   want="$(printf '%s' "$EXPECT" | tr -d ' ' | tr 'a-z' 'A-Z')"   # normalize: strip spaces, uppercase
@@ -3029,7 +3070,8 @@ Expected: all succeed (exactly one definition of `endpointAPIBase`/`endpointDLBa
 ```sh
 #!/bin/sh
 # self-update integration: throwaway OpenPGP keys + REAL shell-launched binaries.
-# Covers all four §9.2 scenarios: happy path, rotation crossing, apt defer, S_apt reject.
+# Covers the §9.2 scenarios: happy path, rotation crossing, apt defer, S_apt reject,
+# and the staged-exec bound + fd-hygiene legs (past-deadline abort + fork-orphan i/ii).
 set -eu
 [ "${MATHION_SELFUPDATE_E2E:-}" = 1 ] || { echo "SKIP: set MATHION_SELFUPDATE_E2E=1 (mutates /usr/local/bin/mathion + /usr/bin/mathion)"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root (swap + ancestry guard)"; exit 0; }
@@ -3038,7 +3080,13 @@ for t in gpg python3 dpkg go; do command -v "$t" >/dev/null 2>&1 || { echo "SKIP
 CLI_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 SERVER_PID=""
-cleanup() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true; rm -rf "$WORK"; }
+# cleanup reaps the release server + any long-lived forky orphan/parent (leg 5) BEFORE
+# removing WORK, so a bare-host run leaves nothing behind (docker --rm handles the rest).
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+  [ -f "$WORK/forky_pids" ] && { xargs -r kill -9 <"$WORK/forky_pids" 2>/dev/null || true; }
+  rm -rf "$WORK"
+}
 trap cleanup EXIT INT TERM
 export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
 SITE="$WORK/site"; mkdir -p "$SITE"
@@ -3178,20 +3226,33 @@ func main() {
 	if len(os.Args) < 3 || os.Args[1] != "version" || os.Args[2] != "--short" {
 		os.Exit(2)
 	}
+	// Record our PID so cleanup() can reap the long-lived orphan/parent on bare-host
+	// runs (the documented `docker run --rm` reaps them at container exit regardless).
+	if pf := os.Getenv("FORKY_PIDS"); pf != "" {
+		if f, err := os.OpenFile(pf, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			fmt.Fprintf(f, "%d\n", os.Getpid())
+			f.Close()
+		}
+	}
 	mode := os.Getenv("FORKY_MODE")
 	alive := os.Getenv("FORKY_ALIVE")
+	// Sleeps MUST exceed the harness `timeout 30` wrappers AND leg 5b's 60s injected
+	// deadline, so the orphan genuinely "stays alive past the exec deadline" (§9.2) and
+	// the rc=124 hang-detectors actually fire on a buggy (no-WaitDelay / no-deadline)
+	// impl instead of the payload self-clearing early and masking the bug.
+	const hold = 120 * time.Second
 	if os.Getenv("FORKY_CHILD") == "1" {
 		// We are the double-forked orphan: a NEW SESSION (escaped the updater's
 		// kill(-pgid)) still holding the inherited stdout. Signal alive, then outlive
-		// the exec window. Bounded so no process lingers after the harness finishes.
+		// the exec window.
 		if alive != "" {
 			_ = os.WriteFile(alive, []byte("1"), 0o644)
 		}
-		time.Sleep(15 * time.Second)
+		time.Sleep(hold)
 		os.Exit(0)
 	}
 	if mode == "sleep" {
-		time.Sleep(15 * time.Second) // no fork; the updater's deadline+group-kill must reach this
+		time.Sleep(hold) // no fork; the updater's deadline+group-kill must reach this
 		os.Exit(0)
 	}
 	// Spawn the orphan in a new session that inherits our stdout pipe.
@@ -3203,7 +3264,7 @@ func main() {
 		os.Exit(3)
 	}
 	if mode == "block" {
-		time.Sleep(15 * time.Second) // leg ii: park (the harness kills the updater within ~1s)
+		time.Sleep(hold) // leg ii: park (the harness kills the updater within ~1s of the alive signal)
 		os.Exit(0)
 	}
 	// leg i: print a bogus tag and EXIT; the orphan lives on holding stdout, so the
@@ -3226,6 +3287,9 @@ publish_forky() { # <tag> -- archive member "mathion" IS forky, K1-signed
 }
 # A fresh open-file description must be able to LOCK_EX|LOCK_NB the locked parent dir.
 lock_free() { flock -n /usr/local/bin -c true; }   # exit 0 = free, 1 = still held
+# §9.2: an abort must leave NO staged temp behind (live binary untouched, temp cleaned).
+assert_no_temp() { for t in /usr/local/bin/.mathion-selfupdate-*.tmp; do if [ -e "$t" ]; then echo "FAIL($1): staged temp not cleaned up: $t"; exit 1; fi; done; }
+export FORKY_PIDS="$WORK/forky_pids"   # forky appends its PID here; cleanup() reaps stragglers
 
 verset '[{"tag_name":"cli-v0.9.0"},{"tag_name":"cli-v0.2.0"}]'
 publish_forky cli-v0.9.0
@@ -3240,6 +3304,7 @@ FORKY_MODE=sleep MATHION_SELFUPDATE_EXEC_TIMEOUT=1s \
 v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(bound): live binary was swapped to $v"; exit 1; }
 lock_free || { echo "FAIL(bound): mutation lock not released after a deadline abort"; exit 1; }
+assert_no_temp bound
 
 # --- LEG 5b: fork-orphan (i) -- direct child exits; WaitDelay must unblock Wait + orderly release.
 install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
@@ -3252,6 +3317,7 @@ FORKY_MODE=exit FORKY_ALIVE="$WORK/alive_i" MATHION_SELFUPDATE_EXEC_TIMEOUT=60s 
 v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(fork-i): live binary swapped to $v"; exit 1; }
 lock_free || { echo "FAIL(fork-i): orderly LOCK_UN did not release the lock"; exit 1; }
+assert_no_temp fork-i
 
 # --- LEG 5c: fork-orphan (ii) -- kill the PARKED updater BEFORE its LOCK_UN; O_CLOEXEC must free the lock.
 install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
@@ -3264,7 +3330,7 @@ UPD=$!
 i=0
 while [ ! -f "$WORK/alive_ii" ] && [ "$i" -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
 [ -f "$WORK/alive_ii" ] || { echo "FAIL(fork-ii): orphan never signaled alive"; kill -9 "$UPD" 2>/dev/null || true; exit 1; }
-kill -9 "$UPD"; wait "$UPD" 2>/dev/null || true   # SIGKILL before LOCK_UN; wait -> updater fds fully closed
+kill -9 "$UPD" 2>/dev/null || true; wait "$UPD" 2>/dev/null || true   # SIGKILL before LOCK_UN; wait -> updater fds fully closed (|| true: it may already be gone)
 # The lock frees on the updater's death IFF the setsid orphan never inherited the flock
 # fd (i.e. it was O_CLOEXEC). A leaked fd keeps the shared-OFD lock held through the
 # still-alive orphan, so a fresh-OFD LOCK_EX|LOCK_NB would FAIL.
@@ -3302,3 +3368,4 @@ Recorded so the SDD per-task reviewer and the final whole-branch review don't re
 - **§6.1 "CI `cmp` drift guard" is realized as a Go test, not a shell `cmp`** (`TestEmbeddedKeyringMatchesCanonical`, Task 4). Acceptable: `ci.yml`'s `cli-unit` job runs `go test ./...` on ubuntu, so the drift assertion runs in CI on every push.
 - **Task 12's README section is a content outline, not verbatim text.** The man-page and `deploy/keys/README.md` edits ARE exact; the README prose is detailed enough to write without ambiguity and depends on surrounding file content the implementer will read.
 - **`verifyChecksums` needs NO revocation/expiry code (empirically verified).** go-crypto's `VerifyDetachedSignatureAndHash` rejects expired ("key expired") and revoked ("signature made by revoked key") signing subkeys natively; the §9.1 negatives are test-only additions (Task 4).
+- **The correction-5 single-subkey assert is unit-tested via `verifyChecksums`, not `loadKeyring` (Task 4).** The embedded asset is the pre-keygen placeholder, which fails `ReadArmoredKeyRing` *before* `loadKeyring` reaches the assert, so a load-path unit test can't exercise the guard hermetically. Testing through `verifyChecksums` (the injected-keyring seam) covers the identical `assertSingleSigningSubkey` on the path a signature is actually checked — strictly stronger than spec §9.1's load-only phrasing. The `loadKeyring` call site is exercised end-to-end once real keys exist (integration).
