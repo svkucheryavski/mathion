@@ -19,12 +19,18 @@ SERVER_PID=""
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
   [ -f "$WORK/forky_pids" ] && { xargs -r kill -9 <"$WORK/forky_pids" 2>/dev/null || true; }
-  # LEG 3 mutates the real dpkg DB; restore it here on ANY abort (a mid-LEG-3
-  # failure skips the inline restore). The success path removes status.bak to
-  # disarm this. Idempotent: restoring the same backup twice is harmless.
+  # LEG 3 mutates the real dpkg DB. status.bak is written atomically (temp+rename),
+  # so it exists ONLY as a COMPLETE pre-mutation copy — restoring it is always safe
+  # (a no-op if the mutation had not run yet, a correct revert if it had). The success
+  # path removes status.bak to disarm this. On the rare event that the restore cp
+  # itself fails, keep WORK (and the backup) for manual recovery rather than losing it.
   if [ -f "$WORK/status.bak" ]; then
-    cp "$WORK/status.bak" /var/lib/dpkg/status 2>/dev/null || true
-    rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion 2>/dev/null || true
+    if cp "$WORK/status.bak" /var/lib/dpkg/status; then
+      rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion 2>/dev/null || true
+    else
+      echo "WARN: dpkg status restore failed; complete backup preserved at $WORK/status.bak" >&2
+      return   # keep WORK + backup; do NOT rm -rf on a failed restore
+    fi
   fi
   rm -rf "$WORK"
 }
@@ -118,7 +124,8 @@ v="$(/usr/local/bin/mathion version --short)"
 # status.bak to disarm the trap), while cleanup() restores it on any mid-leg abort
 # — we are mutating the container's real dpkg database.
 mkdir -p /var/lib/dpkg/info
-cp /var/lib/dpkg/status "$WORK/status.bak"
+cp /var/lib/dpkg/status "$WORK/status.bak.partial"
+mv "$WORK/status.bak.partial" "$WORK/status.bak"   # atomic-arm: status.bak appears ONLY as a COMPLETE copy
 printf '/usr/bin/mathion\n' > /var/lib/dpkg/info/mathion.list
 printf '\nPackage: mathion\nStatus: install ok installed\nPriority: optional\nSection: admin\nMaintainer: Mathion Test <t@example.invalid>\nArchitecture: %s\nVersion: 0.2.0\nDescription: apt-defer test stub\n' "$(dpkg --print-architecture)" >> /var/lib/dpkg/status
 install -m0755 "$WORK/client_k1" /usr/bin/mathion
