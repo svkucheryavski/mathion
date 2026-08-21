@@ -203,6 +203,33 @@ func TestGetArchive_OverallDeadlineAborts(t *testing.T) {
 	}
 }
 
+// §9.1: the idle timer must RESET on each progress chunk, so a healthy stream that
+// always makes progress within idleTO (but takes longer than idleTO overall) completes
+// successfully. Locks artifact.go's timer.Reset(idleTO): delete that reset and the
+// once-armed idle timer fires mid-stream and kills this healthy download.
+func TestGetArchive_IdleResetAllowsHealthySlowStream(t *testing.T) {
+	const drips = 8
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fl := w.(http.Flusher)
+		for i := 0; i < drips; i++ {
+			w.Write([]byte{'x'})
+			fl.Flush()
+			time.Sleep(40 * time.Millisecond) // 40ms << 200ms idle: a working reset keeps the idle timer from firing
+		}
+		// handler returns -> EOF
+	}))
+	defer srv.Close()
+	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 1 << 20,
+		archiveIdleTO: 200 * time.Millisecond, archiveOverallTO: 10 * time.Second}
+	got, err := getArchive(context.Background(), cfg, srv.URL+"/a.tgz")
+	if err != nil {
+		t.Fatalf("a healthy stream progressing within the idle window must succeed (idle reset broken?): %v", err)
+	}
+	if len(got) != drips {
+		t.Fatalf("expected %d bytes, got %d", drips, len(got))
+	}
+}
+
 // §9.1: the injected (small) verify-loop wall-clock budget aborts a slow origin.
 func TestSelectRelease_BudgetAborts(t *testing.T) {
 	relEntity, relKR := newSigner(t)
