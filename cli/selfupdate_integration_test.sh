@@ -5,16 +5,27 @@
 set -eu
 [ "${MATHION_SELFUPDATE_E2E:-}" = 1 ] || { echo "SKIP: set MATHION_SELFUPDATE_E2E=1 (mutates /usr/local/bin/mathion + /usr/bin/mathion)"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root (swap + ancestry guard)"; exit 0; }
-for t in gpg python3 dpkg go; do command -v "$t" >/dev/null 2>&1 || { echo "SKIP: $t required"; exit 0; }; done
+for t in gpg python3 dpkg go timeout flock; do command -v "$t" >/dev/null 2>&1 || { echo "SKIP: $t required"; exit 0; }; done
+for p in /usr/local/bin/mathion /usr/bin/mathion; do
+  [ -e "$p" ] && { echo "SKIP: $p already exists — refusing to overwrite a real install (run in a disposable container)"; exit 0; }
+done
 
 CLI_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 SERVER_PID=""
-# cleanup reaps the release server + any long-lived forky orphan/parent (leg 5) BEFORE
-# removing WORK, so a bare-host run leaves nothing behind (docker --rm handles the rest).
+# cleanup reaps the release server + any long-lived forky orphan/parent (leg 5) and
+# restores the dpkg DB mutated by LEG 3 (on any abort) BEFORE removing WORK, so a
+# bare-host run leaves nothing behind (docker --rm handles the rest).
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
   [ -f "$WORK/forky_pids" ] && { xargs -r kill -9 <"$WORK/forky_pids" 2>/dev/null || true; }
+  # LEG 3 mutates the real dpkg DB; restore it here on ANY abort (a mid-LEG-3
+  # failure skips the inline restore). The success path removes status.bak to
+  # disarm this. Idempotent: restoring the same backup twice is harmless.
+  if [ -f "$WORK/status.bak" ]; then
+    cp "$WORK/status.bak" /var/lib/dpkg/status 2>/dev/null || true
+    rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion 2>/dev/null || true
+  fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
@@ -87,6 +98,8 @@ install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
 /usr/local/bin/mathion self-update --yes
 v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.9.0" ] || { echo "FAIL(happy): want cli-v0.9.0, got $v"; exit 1; }
+m="$(stat -c %a /usr/local/bin/mathion)"
+[ "$m" = 755 ] || { echo "FAIL(happy): installed mode $m != 755"; exit 1; }
 
 # === LEG 2: S_apt REJECTION (re-sign with K2, which the K1 client does not trust) ==
 publish cli-v0.9.0 "$WORK/rel090_k1" "$K2"    # foreign signature
@@ -101,8 +114,9 @@ v="$(/usr/local/bin/mathion version --short)"
 # have a stanza in the status DB, so we must ALSO append a minimal
 # `Status: install ok installed` stanza to /var/lib/dpkg/status (this is what a
 # real apt install leaves behind: both the .list file and the status stanza).
-# Back up the status DB first and restore it in cleanup — we are mutating the
-# container's real dpkg database.
+# Back up the status DB first; the success path restores it inline (and removes
+# status.bak to disarm the trap), while cleanup() restores it on any mid-leg abort
+# — we are mutating the container's real dpkg database.
 mkdir -p /var/lib/dpkg/info
 cp /var/lib/dpkg/status "$WORK/status.bak"
 printf '/usr/bin/mathion\n' > /var/lib/dpkg/info/mathion.list
@@ -114,7 +128,7 @@ printf '%s' "$out" | grep -q 'apt install --only-upgrade mathion' || { echo "FAI
 v="$(/usr/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(apt): dpkg-owned binary was swapped to $v"; exit 1; }
 cp "$WORK/status.bak" /var/lib/dpkg/status
-rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion
+rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion "$WORK/status.bak"
 
 # === LEG 4: ROTATION CROSSING (two invocations) ============================
 # cli-v0.5.0: signed by OUTGOING K1, payload embeds INCOMING K2 (the transition).
@@ -244,6 +258,7 @@ FORKY_MODE=exit FORKY_ALIVE="$WORK/alive_i" MATHION_SELFUPDATE_EXEC_TIMEOUT=60s 
   timeout 30 /usr/local/bin/mathion self-update --yes >/dev/null 2>&1 || rc=$?
 [ "$rc" = 124 ] && { echo "FAIL(fork-i): Wait hung on the inherited pipe -> WaitDelay did not force-close it"; exit 1; }
 [ "$rc" = 0 ]   && { echo "FAIL(fork-i): must abort (forky reports a bogus tag), not swap"; exit 1; }
+[ -f "$WORK/alive_i" ] || { echo "FAIL(fork-i): orphan never spawned (WaitDelay path not exercised)"; exit 1; }
 v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(fork-i): live binary swapped to $v"; exit 1; }
 lock_free || { echo "FAIL(fork-i): orderly LOCK_UN did not release the lock"; exit 1; }
