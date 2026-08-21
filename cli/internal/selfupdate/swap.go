@@ -115,7 +115,7 @@ func stageBinary(parentFD int, data []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fd, err := unix.Openat(parentFD, name, unix.O_CREAT|unix.O_EXCL|unix.O_WRONLY|unix.O_CLOEXEC, 0o755)
+	fd, err := unix.Openat(parentFD, name, unix.O_CREAT|unix.O_EXCL|unix.O_WRONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o755)
 	if err != nil {
 		return "", fmt.Errorf("create staged temp: %w", err)
 	}
