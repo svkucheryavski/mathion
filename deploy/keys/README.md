@@ -263,15 +263,85 @@ verification. Rotate `S_apt` **keyring-first, signer-second**:
 
 ### Which channels need a dual-accept overlap
 
-- **`S_apt` (apt channel): YES** — its keyring **caches on clients** (much like
-  the 4b compiled-in key), so it needs the keyring-first overlap above; both
+- **`S_apt` (apt channel): YES** — its keyring **caches on clients** and is
+  **re-signed in place** (the same cached keyring must verify a repo `Release`
+  signed by either subkey), so it needs the keyring-first overlap above; both
   subkeys must verify during the grace window.
-- **4b self-update binary: YES** — its verification key is **compiled in** and
-  cannot be re-fetched, so it must accept both the outgoing and incoming subkey
-  during the overlap.
+- **4b self-update binary: NO (transition-release crossing)** — its verifying key
+  is **compiled in** and cannot be re-fetched, but it is deliberately **not** made
+  to dual-accept two subkeys. Every shipped `mathion-pubkey.asc` stays primary +
+  **exactly one** `S_rel` subkey (§2, line 122), so a compiled binary embeds
+  whichever single `S_rel` subkey was current at its build time. A rotation is
+  crossed with a **transition release** — signed by the still-valid outgoing
+  subkey but bundling a binary that embeds the incoming subkey — **not** a
+  two-subkey keyring (see "Transition choreography for the 4b binary" below). This
+  is what resolves the apparent contradiction with line 122: because the binary
+  never dual-accepts, `mathion-pubkey.asc` (the `S_rel` channel) is **never** in
+  overlap, exactly as §2 states.
 - **`S_rel` via `install.sh`: NO** — `install.sh` is always **fetched fresh** and
   only ever pins the single **current** `S_rel` scalar, so it needs no
-  dual-accept. This is the only overlap-free channel.
+  dual-accept.
+
+Only the `S_apt` apt channel takes a dual-accept overlap; both `S_rel` consumers
+(`install.sh` and the compiled-in 4b keyring) are overlap-free.
+
+### Transition choreography for the 4b binary (`S_rel` rotation)
+
+Because the 4b binary embeds a single `S_rel` subkey and cannot re-fetch it, an
+`S_rel` rotation (K1 → K2) is crossed with a **transition release**, not a
+two-subkey keyring. Get the sign-vs-embed direction right: the transition release
+is **signed by the outgoing K1** (so pre-rotation clients can still verify it) but
+its bundled binary **embeds the incoming K2**. Getting it backwards strands every
+pre-rotation client into manual reinstall. Self-update orders eligible releases
+descending and installs the first it can verify, so a K1 client crosses in **two
+invocations**: run 1 installs the transition release (verifiable with K1, embeds
+K2); the replaced binary now trusts K2 and run 2 reaches the K2-only `latest`. The
+transition release must stay within the top-N eligible window until stragglers
+cross (the §6.1 crossing-invariant CI guard enforces this — Task 11).
+
+At the **transition build** there is a deliberate **three-way key state** that a
+naïve "regenerate everything from `mathion-pubkey.asc`" would break:
+
+- **(a) `deploy/keys/mathion-pubkey.asc` + the binary `go:embed` = incoming K2**
+  (primary + K2, still a single subkey — the drift guard keeps the two copies
+  byte-identical). The binary therefore embeds K2.
+- **(b) the transition release's `checksums.txt` = signed by the outgoing K1**,
+  verified out-of-band against the outgoing primary + K1 public key (not the
+  committed K2 keyring), so pre-rotation clients can still verify it.
+- **(c) `install.sh`'s `mathion_embedded_key()` literal key AND its
+  `EXPECTED_SIGNING_FPR` scalar = outgoing K1** (with `EXPECTED_PRIMARY_FPR`
+  invariant — only the `S_rel` *subkey* rotates, never the primary). A fresh
+  installer resolves the *greatest* stable release, which during the window is the
+  K1-signed transition release, so it must still pin K1.
+
+**Do not regenerate `install.sh`'s literal key from the K2 `mathion-pubkey.asc` at
+the transition build** — that strands every fresh install until a successor ships.
+Flip `install.sh`'s literal **and** its scalar to K2 **together with publishing**
+the first K2-signed successor release (the §5 step 4 "together, in the same
+change" idiom), and do not leave `install.sh` pinned to the outgoing key long
+after that successor ships (the gap only grows).
+
+**This flip is NOT delivery-atomic.** `install.sh` is served from raw `main`
+(CDN-cached) while release assets publish through a **separate workflow/endpoint**,
+so — whichever becomes visible first — there is a brief window where a fresh
+`curl | sh` install sees one but not the other and **fail-closed-rejects**. That
+is a **safe, retryable** outcome (the user re-runs and succeeds once both are
+visible), never a forgery or downgrade. GitHub provides no cross-resource
+atomicity between raw `main` and Release assets, so do **not** call this flip
+"atomic": keep the two publications as close in time as possible, and **smoke a
+fresh `curl | sh` install once both are visible** before treating the rotation as
+live.
+
+**Workflow limitation (rotation-time task).** `release-cli.yml` today drives a
+single `S_REL_FPR` for both the goreleaser signing key and the apt-publish verify
+against the committed `mathion-pubkey.asc`, so it **cannot** express "sign with the
+outgoing K1 while committing the incoming K2 keyring". A real rotation must add
+**separate signing-vs-embedded `S_rel` inputs** plus an out-of-band outgoing
+verifier — a rotation-time workflow change, not something the steady-state
+workflow can do today. Correspondingly, the §6.1 CI fingerprint pin (Task 11)
+consumes **`S_REL_EMBEDDED_FPR`** (= the **incoming K2**, distinct from the
+outgoing signing `S_REL_FPR` = K1) during a crossing; `S_REL_EMBEDDED_FPR` is
+unset in steady state and defaults to `S_REL_FPR` via the Actions `||` idiom.
 
 ---
 
@@ -287,7 +357,14 @@ channel, and **never sign anything with the compromised key**:
   `checksums.txt` with the **new** subkey together, and ship a fresh
   `mathion-pubkey.asc`. Because `install.sh` is fetched fresh, clients get the
   new pin + key on their next install — **no overlap is needed**, and the
-  compromised key is simply revoked, never used to sign the transition.
+  compromised key is simply revoked, never used to sign the transition. The 4b
+  self-update binary cannot re-fetch its compiled-in keyring, and a compromised
+  outgoing key can **never** sign a transition release (the whole point of a
+  compromise is that you no longer sign with that key), so every deployed
+  pre-rotation self-update binary **fails closed into manual reinstall** on an
+  `S_rel` compromise — the safe failure, exactly mirroring the stranded-apt-client
+  outcome below. Those users re-key by reinstalling over the freshly-fetched,
+  new-`S_rel`-verified `curl | sh` channel.
 
 - **`S_apt` compromise (EMERGENCY — do NOT use the graceful §5 overlap):** the
   keyring-first/signer-second overlap relies on the outgoing key still signing,

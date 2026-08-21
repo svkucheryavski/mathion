@@ -19,8 +19,14 @@ Operate the running stack.
 .B backup\fR, \fBrestore\fR, \fBupdate
 Back up, restore, and update the deployment.
 .TP
+.B self\-update
+Update the mathion CLI binary itself. curl|sh installs are verified against the
+signed release checksums and swapped in place; apt installs are deferred to apt.
+Use \fB\-\-check\fR to report availability without changing anything, \fB\-\-yes\fR to skip the prompt.
+.TP
 .B superuser\fR, \fBpin\fR, \fBversion\fR, \fBuninstall
 Manage the superuser, pin the image, print versions, remove the deployment.
+Add \fB\-\-short\fR to print only the CLI version (the self-update oracle).
 .SH SEE ALSO
 Project documentation: https://github.com/svkucheryavski/mathion
 .SH AUTHOR

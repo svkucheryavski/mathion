@@ -3,8 +3,12 @@ Upstream-Name: mathion
 Source: https://github.com/svkucheryavski/mathion
 Comment: The mathion binary is statically linked (CGO_ENABLED=0) and incorporates
  the Go modules github.com/spf13/cobra and github.com/inconshreveable/mousetrap
- (Apache-2.0) and github.com/spf13/pflag (BSD-3-Clause). Their verbatim license
- texts are shipped in /usr/share/doc/mathion/THIRD_PARTY_NOTICES.gz.
+ (Apache-2.0); github.com/spf13/pflag, github.com/ProtonMail/go-crypto,
+ github.com/cloudflare/circl, golang.org/x/crypto, golang.org/x/mod, and
+ golang.org/x/sys (BSD-3-Clause). The ProtonMail/go-crypto and golang.org/x/*
+ modules additionally carry the Go project's patent grant. Their verbatim license
+ texts (and those patent grants) are shipped in
+ /usr/share/doc/mathion/THIRD_PARTY_NOTICES.gz.
 
 Files: *
 Copyright: 2026 Sergey Kucheryavskiy
