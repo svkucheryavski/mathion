@@ -236,6 +236,16 @@ Subkeys expire; rotate each channel independently, from the offline primary:
    `checksums.txt` with the new subkey together, in the same change** — the two
    must move as a unit so a freshly fetched installer always matches the
    artifact it verifies.
+
+   **Note — the compiled-in 4b binary changes this for `S_rel`.** Because the
+   self-update binary embeds `S_rel` and cannot re-fetch it, the single-step flip
+   above is replaced by the two-phase **transition choreography** below: the
+   release that first ships the new keyring stays signed by the **outgoing**
+   subkey (so pre-rotation self-update clients can still cross), and `install.sh`'s
+   literal key + `EXPECTED_SIGNING_FPR` — and the first K2-signed `checksums.txt` —
+   move only with a later K2-signed **successor** release. For an `S_rel`
+   rotation, follow "Transition choreography for the 4b binary" rather than this
+   step's single-change flip.
 5. Rotate the CI secret (`GPG_S_REL_PRIVATE` / `GPG_S_APT_PRIVATE`) to the new
    subkey's private export (Section 3), re-running the one-`ssb` assertion.
 
@@ -297,7 +307,9 @@ descending and installs the first it can verify, so a K1 client crosses in **two
 invocations**: run 1 installs the transition release (verifiable with K1, embeds
 K2); the replaced binary now trusts K2 and run 2 reaches the K2-only `latest`. The
 transition release must stay within the top-N eligible window until stragglers
-cross (the §6.1 crossing-invariant CI guard enforces this — Task 11).
+cross (a **§6.2** crossing-invariant CI guard is meant to enforce this, but it is a
+**deferred** rotation-time task — until it exists, manually verify the transition
+release stays within the top-N eligible window).
 
 At the **transition build** there is a deliberate **three-way key state** that a
 naïve "regenerate everything from `mathion-pubkey.asc`" would break:
@@ -353,9 +365,12 @@ grace window, which you can no longer trust once it is compromised. Handle it by
 channel, and **never sign anything with the compromised key**:
 
 - **`S_rel` compromise:** from the offline primary, revoke `S_rel`, issue a new
-  `S_rel`, then update `EXPECTED_SIGNING_FPR` and re-sign the latest
-  `checksums.txt` with the **new** subkey together, and ship a fresh
-  `mathion-pubkey.asc`. Because `install.sh` is fetched fresh, clients get the
+  `S_rel`, then update **both** `install.sh`'s `mathion_embedded_key()` literal
+  **and** its `EXPECTED_SIGNING_FPR` scalar to the new key, and re-sign the latest
+  `checksums.txt` with the new subkey — all together — and ship a fresh
+  `mathion-pubkey.asc`. (Unlike a graceful §5 rotation there is no transition
+  release here, so the installer's literal moves immediately with the scalar.)
+  Because `install.sh` is fetched fresh, clients get the
   new pin + key on their next install — **no overlap is needed**, and the
   compromised key is simply revoked, never used to sign the transition. The 4b
   self-update binary cannot re-fetch its compiled-in keyring, and a compromised

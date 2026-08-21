@@ -320,8 +320,12 @@ How it behaves depends on how the binary was installed:
 than the one you are running and never downgrades or pins an arbitrary version.
 It installs a release **only** after that release's `checksums.txt` signature
 verifies against the compiled-in `S_rel` release key **and** the downloaded
-binary's checksum matches; any failure aborts before the live binary is touched
-(fail-closed). The signing key and its fingerprints are documented in
+binary's checksum matches; any verification, download, or staging failure aborts
+**before the running binary is touched** (fail-closed). The one exception is a
+rare post-swap durability-uncertain case: the replacement is already in place but
+a directory `fsync` did not confirm — self-update reports that explicitly rather
+than claiming a clean success or implying nothing changed. The signing key and its
+fingerprints are documented in
 [`deploy/keys/README.md`](deploy/keys/README.md).
 
 **A key rotation may take two runs.** The verifying key is compiled into the
@@ -329,8 +333,10 @@ binary, so crossing a maintainer key rotation uses a *transition release* rather
 than a re-fetched keyring: your current binary first updates to the transition
 release (still signed by the key it already trusts, but carrying the new key),
 and a **second** `mathion self-update` then reaches the release signed by the new
-key. If a run reports "already up to date" right after a rotation, run it once
-more.
+key. Run `mathion self-update` again **after a run that installs the transition
+release** to pick up the new-key release. If a run instead reports **"already up
+to date"** during a rotation window, the new-key successor is likely not published
+yet — retry **later** rather than immediately.
 
 **Debian staff-group hosts (`/usr/local` remediation).** Before swapping,
 self-update requires `/usr/local/bin` and every ancestor up to `/` to be
