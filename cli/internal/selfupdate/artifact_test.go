@@ -51,6 +51,7 @@ func TestExtractSingleBinary(t *testing.T) {
 		"dir member":     tgz(t, map[string]tarMember{"mathion": {tar.TypeDir, nil}}),
 		"wrong name":     tgz(t, map[string]tarMember{"notmathion": {tar.TypeReg, []byte("a")}}),
 		"traversal":      tgz(t, map[string]tarMember{"../mathion": {tar.TypeReg, []byte("a")}}),
+		"empty":          tgz(t, map[string]tarMember{}),
 	} {
 		if _, err := extractSingleBinary(arc, 1<<20); err == nil {
 			t.Errorf("%s must be rejected", name)
@@ -58,6 +59,26 @@ func TestExtractSingleBinary(t *testing.T) {
 	}
 	if _, err := extractSingleBinary(ok, 2); err == nil {
 		t.Error("over-size extraction must be rejected")
+	}
+}
+
+func TestExtractSingleBinary_RejectsSecondMathion(t *testing.T) {
+	var raw bytes.Buffer
+	gz := gzip.NewWriter(&raw)
+	tw := tar.NewWriter(gz)
+	for _, body := range []string{"a", "b"} {
+		hdr := &tar.Header{Name: "mathion", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tw.Close()
+	gz.Close()
+	if _, err := extractSingleBinary(raw.Bytes(), 1<<20); err == nil || !strings.Contains(err.Error(), "more than one member") {
+		t.Fatalf("two mathion members must be rejected with the >1-member error, got %v", err)
 	}
 }
 
@@ -172,24 +193,29 @@ func TestGetArchive_OverallDeadlineAborts(t *testing.T) {
 	defer srv.Close()
 	defer close(stop)
 	cfg := config{client: newHTTPClient(srv.Client().Transport, 5), capArchive: 1 << 30,
-		archiveIdleTO: 500 * time.Millisecond, archiveOverallTO: 300 * time.Millisecond}
+		archiveIdleTO: 2 * time.Second, archiveOverallTO: 200 * time.Millisecond}
 	start := time.Now()
 	if _, err := getArchive(context.Background(), cfg, srv.URL+"/a.tgz"); err == nil {
 		t.Fatal("a slow-drip archive must hit the overall deadline")
 	}
-	if d := time.Since(start); d > 3*time.Second {
-		t.Fatalf("overall abort took too long: %v", d)
+	if d := time.Since(start); d > 1*time.Second {
+		t.Fatalf("overall abort took too long (idle timer may have fired instead): %v", d)
 	}
 }
 
 // §9.1: the injected (small) verify-loop wall-clock budget aborts a slow origin.
 func TestSelectRelease_BudgetAborts(t *testing.T) {
+	relEntity, relKR := newSigner(t)
+	sums := []byte("deadbeef  " + archiveName() + "\n")
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
-		fmt.Fprint(w, "deadbeef  "+archiveName()+"\n")
+		if strings.HasSuffix(r.URL.Path, ".asc") {
+			w.Write(armoredSig(t, relEntity, sums))
+			return
+		}
+		w.Write(sums)
 	}))
 	defer srv.Close()
-	_, relKR := newSigner(t)
 	cfg := config{dlBase: srv.URL, client: newHTTPClient(srv.Client().Transport, 5), perReqTO: 5 * time.Second,
 		capChecksums: 1 << 20, capAsc: 1 << 20, verifyBudget: 100 * time.Millisecond, topN: 16}
 	if _, _, err := selectRelease(context.Background(), cfg, relKR, []string{"cli-v0.9.0", "cli-v0.8.0", "cli-v0.7.0"}); err == nil {
