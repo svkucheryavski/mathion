@@ -85,8 +85,8 @@ jobs:
         with:
           version: "~> v2"
           install-only: true
-      - name: Shellcheck apt/deb scripts
-        run: shellcheck deploy/apt/*.sh deploy/deb/*.sh
+      - name: Shellcheck apt/deb + cli scripts
+        run: shellcheck deploy/apt/*.sh deploy/deb/*.sh cli/scripts/*.sh cli/*.sh
       # gpg (preinstalled) + goreleaser/go (above) are all these need; resign_test
       # is gpg-only and deb_test inspects with dpkg-deb (preinstalled), so no
       # apt-utils/apt-ftparchive and no root are required here.
@@ -95,6 +95,13 @@ jobs:
           sh deploy/deb/sign_test.sh
           sh deploy/deb/deb_test.sh
           sh deploy/apt/resign_test.sh
+      - name: self-update release guards
+        run: sh cli/scripts/selfupdate-ci-guards.sh
+        env:
+          # Wired now, empty until keygen -> the fpr pin (guard 3) skips. At rotation time
+          # the maintainer sets these repo vars (S_REL_EMBEDDED_FPR only during a crossing).
+          S_REL_FPR: ${{ vars.S_REL_FPR }}
+          S_REL_EMBEDDED_FPR: ${{ vars.S_REL_EMBEDDED_FPR }}
 
   apt-e2e:
     runs-on: ubuntu-latest

@@ -17,6 +17,7 @@ archives:
   - id: mathion
     name_template: "mathion_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
+    files: ["none*"]   # non-matching glob -> binary-only. Empty [] would re-add README*/LICENSE*.
 
 nfpms:
   - id: mathion

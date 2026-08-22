@@ -236,3 +236,26 @@ func TestVersionCmdDualInstallWarningRouting(t *testing.T) {
 		t.Fatalf("dual-install warning must appear on stderr; got %q", se)
 	}
 }
+
+func TestVersionShort_PrintsOnlyBuildVersion(t *testing.T) {
+	// Fail the side-effect seams so the test proves --short never touches them.
+	oldEnv, oldProbe, oldBin := versionEnvReader, versionRunningProbe, binExists
+	t.Cleanup(func() { versionEnvReader, versionRunningProbe, binExists = oldEnv, oldProbe, oldBin })
+	versionEnvReader = func(string) (map[string]string, error) { t.Fatal(".env must NOT be read under --short"); return nil, nil }
+	versionRunningProbe = func(context.Context) string { t.Fatal("/version must NOT be probed under --short"); return "" }
+	binExists = func(string) bool { t.Fatal("dual-install check must NOT run under --short"); return false }
+
+	var out, errb bytes.Buffer
+	app := &App{Out: &out, Err: &errb}
+	cmd := newVersionCmd(app)
+	cmd.SetArgs([]string{"--short"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got, want := out.String(), buildVersion+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if errb.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errb.String())
+	}
+}

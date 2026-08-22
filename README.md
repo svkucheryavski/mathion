@@ -284,3 +284,73 @@ join the compose network and target `http://app:8000`, or use host networking.
   (`docker compose -f docker-compose.prod.yml run --rm app alembic upgrade head`) →
   `up -d --wait` → restart the proxy. (`/health` does no DB check, so migrating
   before serving avoids running new code on the old schema.)
+
+## Updating the CLI (`mathion self-update`)
+
+`mathion self-update` upgrades the **`mathion` CLI binary itself** — and nothing
+else. It does **not** touch your deployment, its containers, or the database;
+updating the running Mathion **stack** is a separate command, `mathion update`.
+
+How it behaves depends on how the binary was installed:
+
+- **apt-managed** (`/usr/bin/mathion`, from the apt repository) — self-update does
+  **not** replace the binary. apt owns it, so self-update just prints the apt
+  command to run and exits (this is also what `--check` does on an apt host):
+
+  ```bash
+  sudo apt update && sudo apt install --only-upgrade mathion
+  ```
+
+- **`curl | sh`** (`/usr/local/bin/mathion`, from `install.sh`) — self-update
+  resolves the newest verifiable `cli-v*` release, downloads its `checksums.txt`,
+  verifies the detached signature against the binary's compiled-in release key
+  (`S_rel`), checks the downloaded binary's SHA-256 against the now-authenticated
+  checksums, and swaps it into place.
+
+**Flags.**
+
+- `--check` reports whether a newer installable release exists and exits
+  **without changing anything**. It needs **no root** and performs no swap — safe
+  to run as any user or from a scheduled check.
+- `--yes` skips the confirmation prompt for scripted upgrades. The swap writes to
+  `/usr/local/bin`, so the update itself still requires root
+  (`sudo mathion self-update`).
+
+**Guarantees.** self-update is **forward-only**: it moves to a release *greater*
+than the one you are running and never downgrades or pins an arbitrary version.
+It installs a release **only** after that release's `checksums.txt` signature
+verifies against the compiled-in `S_rel` release key **and** the downloaded
+binary's checksum matches; any verification, download, or staging failure aborts
+**before the running binary is touched** (fail-closed). The one exception is a
+rare post-swap durability-uncertain case: the replacement is already in place but
+a directory `fsync` did not confirm — self-update reports that explicitly rather
+than claiming a clean success or implying nothing changed. The signing key and its
+fingerprints are documented in
+[`deploy/keys/README.md`](deploy/keys/README.md).
+
+**A key rotation may take two runs.** The verifying key is compiled into the
+binary, so crossing a maintainer key rotation uses a *transition release* rather
+than a re-fetched keyring: your current binary first updates to the transition
+release (still signed by the key it already trusts, but carrying the new key),
+and a **second** `mathion self-update` then reaches the release signed by the new
+key. Run `mathion self-update` again **after a run that installs the transition
+release** to pick up the new-key release. If a run instead reports **"already up
+to date"** during a rotation window, the new-key successor is likely not published
+yet — retry **later** rather than immediately.
+
+**Debian staff-group hosts (`/usr/local` remediation).** Before swapping,
+self-update requires `/usr/local/bin` and every ancestor up to `/` to be
+root-owned and neither group- nor world-writable. Debian hosts that carry
+`/etc/staff-group-for-usr-local` (an upgrade-path default) have `base-files` set
+**both** `/usr/local` and `/usr/local/bin` to `root:staff 2775` — group-writable
+— so self-update fail-closed-refuses and names the offending component. The
+ancestry walk rejects **any** group-writable component from `/`, so fixing only
+the leaf (`/usr/local/bin`) leaves `/usr/local` still refused; repair **both**:
+
+```bash
+sudo chgrp root /usr/local /usr/local/bin && sudo chmod 0755 /usr/local /usr/local/bin
+```
+
+Removing `/etc/staff-group-for-usr-local` alone does **not** re-permission an
+already-created directory — it only stops *future* directories from being
+staff-owned — so the `chgrp`/`chmod` above is what actually clears the refusal.

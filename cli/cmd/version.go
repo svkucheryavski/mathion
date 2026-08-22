@@ -60,10 +60,15 @@ func maybeWarnDualInstall(w io.Writer) {
 }
 
 func newVersionCmd(app *App) *cobra.Command {
-	return &cobra.Command{
+	var short bool
+	c := &cobra.Command{
 		Use:   "version",
 		Short: "Print the CLI version and the pinned/running image version",
 		RunE: func(c *cobra.Command, _ []string) error {
+			if short {
+				fmt.Fprintln(app.Out, buildVersion)
+				return nil
+			}
 			fmt.Fprintf(app.Out, "mathion %s\n", buildVersion)
 			maybeWarnDualInstall(app.Err)
 			m, err := versionEnvReader(app.CfgDir)
@@ -88,6 +93,8 @@ func newVersionCmd(app *App) *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&short, "short", false, "print only the CLI version and exit")
+	return c
 }
 
 // probeRunningVersion GETs /version and returns the running image's reported version, or
