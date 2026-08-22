@@ -137,12 +137,10 @@ func Run(ctx context.Context, p Params) error {
 	}
 	staged, err := stagedVersion(parentFD, tempName)
 	if err != nil {
-		_ = cleanupTemp(parentFD, tempName)
-		return err
+		return errors.Join(err, cleanupTemp(parentFD, tempName))
 	}
 	if staged != tag {
-		_ = cleanupTemp(parentFD, tempName)
-		return fmt.Errorf("staged binary reports %q, expected %q; refusing", staged, tag)
+		return errors.Join(fmt.Errorf("staged binary reports %q, expected %q; refusing", staged, tag), cleanupTemp(parentFD, tempName))
 	}
 
 	// Step 8: swap (§4.2 step 8).
@@ -151,8 +149,8 @@ func Run(ctx context.Context, p Params) error {
 		if errors.As(err, &due) {
 			return err // installed-but-durability-uncertain: no cleanup, no success line
 		}
-		_ = cleanupTemp(parentFD, tempName) // rename failed -> target unchanged
-		return err
+		// rename failed -> target unchanged; surface any cleanup failure alongside err
+		return errors.Join(err, cleanupTemp(parentFD, tempName))
 	}
 	fmt.Fprintf(p.Out, "%s → %s\n", p.CurrentVersion, tag)
 	return nil

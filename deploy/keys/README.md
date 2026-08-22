@@ -355,6 +355,17 @@ consumes **`S_REL_EMBEDDED_FPR`** (= the **incoming K2**, distinct from the
 outgoing signing `S_REL_FPR` = K1) during a crossing; `S_REL_EMBEDDED_FPR` is
 unset in steady state and defaults to `S_REL_FPR` via the Actions `||` idiom.
 
+**Go-live task — gate publication with the self-update guard.**
+`cli/scripts/selfupdate-ci-guards.sh` runs in main CI (`ci.yml`) but does **not**
+yet gate the release publish job. At go-live — when the first signed release
+ships — add a step running `sh cli/scripts/selfupdate-ci-guards.sh` (with
+`S_REL_FPR` / `S_REL_EMBEDDED_FPR` in its env, exactly as `ci.yml` passes them)
+to `.github/workflows/release-cli.yml`'s `release` job **before** the
+Build+sign step, and verify it with that first signed release — so the guard
+gates publication, not only main CI. Until keygen the fingerprint pin skips (the
+go-live caveat), so there is no signed release to exercise the gate against
+before then.
+
 ---
 
 ## 6. Compromise / revocation

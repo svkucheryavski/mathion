@@ -121,9 +121,7 @@ func stageBinary(parentFD int, data []byte) (string, error) {
 	}
 	f := os.NewFile(uintptr(fd), name)
 	fail := func(op string, e error) (string, error) {
-		_ = f.Close()
-		_ = fsUnlinkat(parentFD, name, 0)
-		return "", fmt.Errorf("%s staged temp: %w", op, e)
+		return "", errors.Join(fmt.Errorf("%s staged temp: %w", op, e), f.Close(), fsUnlinkat(parentFD, name, 0))
 	}
 	if _, err := f.Write(data); err != nil {
 		return fail("write", err)
@@ -135,8 +133,7 @@ func stageBinary(parentFD int, data []byte) (string, error) {
 		return fail("fsync", err)
 	}
 	if err := f.Close(); err != nil { // close writable fd -> no ETXTBSY on exec
-		_ = fsUnlinkat(parentFD, name, 0)
-		return "", fmt.Errorf("close staged temp: %w", err)
+		return "", errors.Join(fmt.Errorf("close staged temp: %w", err), fsUnlinkat(parentFD, name, 0))
 	}
 	return name, nil
 }

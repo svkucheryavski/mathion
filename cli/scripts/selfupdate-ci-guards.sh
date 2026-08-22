@@ -30,16 +30,51 @@ gzip -9nkf ../deploy/deb/THIRD_PARTY_NOTICES
 CLI_TAG=cli-v0.0.0 APP_IMAGE=v0.0.0 GORELEASER_CURRENT_TAG=v0.0.0 \
   goreleaser release --clean --skip=publish,sign --snapshot >/dev/null
 
+# Expected linux archs: mirror cli/.goreleaser.yaml builds[].goarch for goos linux.
+# Kept as an explicit list here (not derived) so a DROPPED or ADDED arch in the
+# config is caught by the arch-set assertion after the loop.
+expected_archs="amd64 arm64"
+
 n=0
+seen_archs=""
 for a in dist/mathion_linux_*.tar.gz; do
   [ -e "$a" ] || { echo "FAIL: no linux archive produced (glob did not match)" >&2; exit 1; }
   n=$((n + 1))
-  members="$(tar tzf "$a" | sed '/\/$/d')"     # drop any dir entries
-  if [ "$members" != "mathion" ]; then
-    echo "FAIL: $a is not binary-only (members: $members)" >&2
+
+  # arch from the archive name: mathion_linux_<arch>.tar.gz
+  arch="${a##*/mathion_linux_}"; arch="${arch%.tar.gz}"
+  seen_archs="$seen_archs $arch"
+
+  # Enforce extractSingleBinary's ACTUAL contract: the archive must hold EXACTLY ONE
+  # member, and that member must be a REGULAR file named "mathion". The extractor
+  # rejects directories, symlinks, and hardlinks, so a name-only check (which a
+  # symlink or a dir+mathion pair would pass) is too weak. `tar -tvzf` prints a
+  # verbose long-listing whose first column carries the type char: '-' regular,
+  # 'd' dir, 'l' symlink, 'h' hardlink.
+  listing="$(tar -tvzf "$a")"
+  count="$(printf '%s\n' "$listing" | grep -c .)"
+  if [ "$count" != 1 ]; then
+    echo "FAIL: $a must contain exactly one member, found $count:" >&2
+    printf '%s\n' "$listing" >&2
+    exit 1
+  fi
+  type_char="$(printf '%s\n' "$listing" | cut -c1)"      # column 1: file type
+  member="$(printf '%s\n' "$listing" | awk '{print $NF}')" # last field: member name
+  if [ "$type_char" != "-" ] || [ "$member" != "mathion" ]; then
+    echo "FAIL: $a member must be a regular file named 'mathion' (got type '$type_char', name '$member'):" >&2
+    printf '%s\n' "$listing" >&2
     exit 1
   fi
 done
+
+# Assert the produced linux archive set is EXACTLY the expected archs — catches a
+# dropped arch (missing archive) or an unexpected one (config drift).
+norm_seen="$(printf '%s' "$seen_archs" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+norm_expected="$(printf '%s' "$expected_archs" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+if [ "$norm_seen" != "$norm_expected" ]; then
+  echo "FAIL: linux archive archs [$norm_seen] != expected [$norm_expected] (see cli/.goreleaser.yaml)" >&2
+  exit 1
+fi
 
 # (3) fingerprint pin (§6.1). Only enforced once maintainer keys exist: when S_REL_FPR
 # (steady) or S_REL_EMBEDDED_FPR (transition — the INCOMING key the asset embeds, which
@@ -64,7 +99,7 @@ if [ -n "$EXPECT" ]; then
     | awk -F: '$1=="sub"{want=($12 ~ /s/); next} $1=="fpr" && want {print $10; want=0}')"
   cnt="$(printf '%s\n' "$sigfprs" | grep -c . || true)"
   [ "$cnt" = 1 ] || { echo "FAIL: keyring must hold exactly one signing subkey, found $cnt" >&2; exit 1; }
-  want="$(printf '%s' "$EXPECT" | tr -d ' ' | tr 'a-z' 'A-Z')"   # normalize: strip spaces, uppercase
+  want="$(printf '%s' "$EXPECT" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"   # normalize: strip spaces, uppercase
   if [ "$sigfprs" != "$want" ]; then
     echo "FAIL: embedded signing-subkey fpr $sigfprs != expected S_rel $want" >&2
     exit 1
