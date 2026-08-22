@@ -384,13 +384,17 @@ channel, and **never sign anything with the compromised key**:
   Because `install.sh` is fetched fresh, clients get the
   new pin + key on their next install — **no overlap is needed**, and the
   compromised key is simply revoked, never used to sign the transition. The 4b
-  self-update binary cannot re-fetch its compiled-in keyring, and a compromised
-  outgoing key can **never** sign a transition release (the whole point of a
-  compromise is that you no longer sign with that key), so every deployed
-  pre-rotation self-update binary **fails closed into manual reinstall** on an
-  `S_rel` compromise — the safe failure, exactly mirroring the stranded-apt-client
-  outcome below. Those users re-key by reinstalling over the freshly-fetched,
-  new-`S_rel`-verified `curl | sh` channel.
+  self-update binary cannot re-fetch its compiled-in keyring **and does not consult
+  revocation**, so a deployed pre-rotation binary keeps trusting the stolen `S_rel`.
+  It will **reject the legitimate new-key-only `latest`** (fail-closed against the
+  good release), but it is **not** protected against the compromised key itself: an
+  attacker able to place an `S_rel`-signed asset at the release origin would still
+  be trusted by pre-rotation binaries. Treat every deployed pre-rotation self-update
+  binary as **requiring manual reinstall** over the freshly-fetched,
+  new-`S_rel`-verified `curl | sh` channel, and understand it **remains exposed to
+  the compromised embedded key until that reinstall**. Incident response must
+  therefore **also secure the release origin and remove any malicious assets** —
+  publishing a revocation elsewhere does not update the embedded keyrings.
 
 - **`S_apt` compromise (EMERGENCY — do NOT use the graceful §5 overlap):** the
   keyring-first/signer-second overlap relies on the outgoing key still signing,
@@ -408,6 +412,16 @@ channel, and **never sign anything with the compromised key**:
 If the **primary** is compromised: publish the offline revocation certificate
 (`primary.rev`), stand up a new primary + both subkeys, and re-issue both
 keyrings and all artifacts. Announce the new primary fingerprint out of band.
+
+**Activating `primary.rev`.** GnuPG's auto-generated revocation certificate (what
+`gen-signing-keys.sh` ships, and what §1's `--gen-revoke` writes to
+`openpgp-revocs.d/`) is deliberately **not** import-ready: it carries an
+explanatory header and a `:` inserted before the `-----BEGIN` armor line as a
+"kill switch" guard. To use it in an emergency, remove **only** that leading colon
+(the file documents this itself), import it into a keyring that already holds the
+public key (`gpg --import primary.rev`), confirm the primary now shows as revoked,
+then export and publish that revoked public key/keyring alongside the out-of-band
+announcement. A raw import of the unedited file reports "no valid OpenPGP data".
 
 Store the revocation certificate and the `s_*.private.asc` exports **offline
 and encrypted**. None of that material is ever committed to this repository.
