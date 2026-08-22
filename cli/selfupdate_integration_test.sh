@@ -17,7 +17,7 @@ SERVER_PID=""
 # restores the dpkg DB mutated by LEG 3 (on any abort) BEFORE removing WORK, so a
 # bare-host run leaves nothing behind (docker --rm handles the rest).
 cleanup() {
-  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+  [ -n "$SERVER_PID" ] && { kill "$SERVER_PID" 2>/dev/null || true; }
   [ -f "$WORK/forky_pids" ] && { xargs -r kill -9 <"$WORK/forky_pids" 2>/dev/null || true; }
   # LEG 3 mutates the real dpkg DB. status.bak is written atomically (temp+rename),
   # so it exists ONLY as a COMPLETE pre-mutation copy — restoring it is always safe
