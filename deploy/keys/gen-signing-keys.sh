@@ -146,17 +146,18 @@ echo "    S_apt fpr:   $S_APT_FPR  (apt)"
 # ── 2. Revocation certificate for the primary ────────────────────────────────
 echo "==> Recording the primary revocation certificate ..."
 # GnuPG 2.1+ auto-generates a revocation certificate at key-creation time under
-# $GNUPGHOME/openpgp-revocs.d/<FPR>.rev. Use it directly — robust and scripting-safe,
-# unlike driving the interactive --gen-revoke prompt. NOTE: this file is copied
-# verbatim and is self-documenting; it carries a deliberate ':' before the armor
-# ("kill switch" guard) that must be removed before it can be imported/published.
+# $GNUPGHOME/openpgp-revocs.d/<FPR>.rev (robust + scripting-safe, unlike driving the
+# interactive --gen-revoke prompt). That file carries explanatory prose and a ':'
+# guard before the armor; strip both so primary.rev is a CLEAN, directly-importable
+# certificate (equivalent to an explicit `gpg --gen-revoke --output`).
 AUTO_REV="$GNUPGHOME/openpgp-revocs.d/${PRIMARY_FPR}.rev"
 if [ -s "$AUTO_REV" ]; then
-  cp "$AUTO_REV" "$OUTDIR/primary.rev"
+  awk '/-----BEGIN PGP/{p=1} p' "$AUTO_REV" | sed '1s/^://' > "$OUTDIR/primary.rev"
 else
   die "no auto-generated revocation cert at $AUTO_REV (GnuPG < 2.1?) — generate one manually with: gpg --output primary.rev --gen-revoke $PRIMARY_FPR"
 fi
 [ -s "$OUTDIR/primary.rev" ] || die "primary.rev is empty."
+head -n1 "$OUTDIR/primary.rev" | grep -q '^-----BEGIN PGP' || die "primary.rev is not a clean armored certificate."
 
 # ── 3. Back up the primary secret under an INDEPENDENT backup passphrase ──────
 echo "==> Exporting + wrapping + verifying the offline primary-secret backup ..."
@@ -254,9 +255,7 @@ cat <<EOF
   A) ROOT-OF-TRUST BACKUP — copy to at least TWO independently-encrypted media
      (ideally kept in separate locations); this never goes online or to CI:
        $OUTDIR/primary-secret.asc.gpg   (wrapped with the BACKUP passphrase)
-       $OUTDIR/primary.rev              (revocation cert; strip the leading ':'
-                                          before the armor before importing — the
-                                          file explains this itself)
+       $OUTDIR/primary.rev              (revocation cert — clean, imports as-is)
      Store the KEY and BACKUP passphrases SEPARATELY (a password manager), and
      record which is which. Losing the primary backup is unrecoverable.
 

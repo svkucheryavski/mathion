@@ -28,23 +28,38 @@ Do this on an air-gapped (or at minimum offline, freshly-booted) machine. The
 primary key is **certification-only** (`SC` is avoided — use cert-only `C`);
 it signs nothing but the subkeys and stays offline forever.
 
+> **Fastest path:** `bash deploy/keys/gen-signing-keys.sh` runs every step in
+> §§1–4 with these safety checks inline, prompting for the two passphrases
+> introduced below. The manual commands here document what it does (for auditing
+> and rotation).
+
+The procedure uses **two DISTINCT passphrases** (never reuse one for the other):
+
+- **KEY** — protects the key material and the CI subkey exports (becomes the
+  `GPG_PASSPHRASE` CI secret).
+- **BACKUP** — an independent outer layer on the offline primary backup only, so a
+  leak of the CI KEY passphrase alone can never open the offline root of trust.
+
 ```bash
 export GNUPGHOME="$(mktemp -d)"        # generation keyring — disposable ONLY after
-                                       # primary-secret.asc + primary.rev are backed
-                                       # up offline (see the backup step below)
+                                       # primary-secret.asc.gpg + primary.rev are
+                                       # backed up offline (see the backup step below)
 chmod 700 "$GNUPGHOME"
 
+# Keep the KEY passphrase in a mode-600 file so it never lands on the command line.
+kp="$GNUPGHOME/kp"; (umask 077; printf '%s' 'CHOOSE-A-KEY-PASSPHRASE' > "$kp")
+
 # Primary: certification-only, no expiry on the primary itself.
-gpg --batch --quick-generate-key \
+gpg --batch --pinentry-mode loopback --passphrase-file "$kp" --quick-generate-key \
     "Mathion Release Signing <svkucheryavski@gmail.com>" \
     ed25519 cert never
 
 PRIMARY_FPR="$(gpg --list-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')"
 
 # S_rel — signs binary release artifacts (checksums.txt). Set an expiry.
-gpg --batch --quick-add-key "$PRIMARY_FPR" ed25519 sign 2y
+gpg --batch --pinentry-mode loopback --passphrase-file "$kp" --quick-add-key "$PRIMARY_FPR" ed25519 sign 2y
 # S_apt — signs the apt Release file. Set an expiry.
-gpg --batch --quick-add-key "$PRIMARY_FPR" ed25519 sign 2y
+gpg --batch --pinentry-mode loopback --passphrase-file "$kp" --quick-add-key "$PRIMARY_FPR" ed25519 sign 2y
 ```
 
 Record the two subkey fingerprints (the second and third `fpr` lines under the
@@ -60,25 +75,39 @@ Generate and **store offline** a revocation certificate for the primary:
 gpg --output primary.rev --gen-revoke "$PRIMARY_FPR"   # keep offline, never commit
 ```
 
-Now back up the **full primary secret key** to encrypted, air-gapped media
-**before** the generation homedir is discarded. This is the root of trust:
-without the primary secret you can never rotate a subkey or revoke anything
-again, so losing it is unrecoverable. Verify you can re-import the backup into a
-fresh `--homedir`, and only THEN wipe `$GNUPGHOME`:
+Now back up the primary secret to encrypted, air-gapped media **before** the
+generation homedir is discarded. This is the root of trust: without the primary
+secret you can never rotate a subkey or revoke anything again, so losing it is
+unrecoverable. Export it (KEY-passphrase protected), then add an **independent
+outer layer** with the BACKUP passphrase; keep only the wrapped `.gpg`, and verify
+it decrypts + re-imports into a fresh `--homedir` before wiping `$GNUPGHOME`:
 
 ```bash
-# Back up the FULL primary secret key to ENCRYPTED, air-gapped offline media
-# BEFORE discarding the generation homedir. NEVER commit it.
-gpg --armor --export-secret-keys "$PRIMARY_FPR" > primary-secret.asc   # OFFLINE + ENCRYPTED
-# Confirm the backup re-imports cleanly, then the homedir is safe to wipe:
-h="$(mktemp -d)"; gpg --homedir "$h" --import primary-secret.asc && \
-  gpg --homedir "$h" --list-secret-keys "$PRIMARY_FPR" >/dev/null && echo "primary backup OK"
+# Keep the BACKUP passphrase (distinct from KEY) in its own mode-600 file.
+bp="$GNUPGHOME/bp"; (umask 077; printf '%s' 'CHOOSE-A-DIFFERENT-BACKUP-PASSPHRASE' > "$bp")
+
+# Export the FULL primary secret (KEY-passphrase protected) ...
+gpg --batch --pinentry-mode loopback --passphrase-file "$kp" \
+    --armor --export-secret-keys "$PRIMARY_FPR" > primary-secret.asc
+# ... then wrap it in an INDEPENDENT symmetric (BACKUP-passphrase) layer and keep
+# ONLY the wrapped file. NEVER commit either file.
+gpg --batch --pinentry-mode loopback --passphrase-file "$bp" \
+    --cipher-algo AES256 --symmetric --output primary-secret.asc.gpg primary-secret.asc
+rm -f primary-secret.asc
+
+# Confirm it decrypts (BACKUP) and re-imports + is usable (KEY) before wiping:
+h="$(mktemp -d)"
+gpg --batch --pinentry-mode loopback --passphrase-file "$bp" --decrypt primary-secret.asc.gpg \
+  | gpg --homedir "$h" --batch --pinentry-mode loopback --passphrase-file "$kp" --import
+gpg --homedir "$h" --list-secret-keys "$PRIMARY_FPR" >/dev/null && echo "primary backup OK"
 rm -rf "$h"
 ```
 
-Store `primary-secret.asc` and `primary.rev` together on encrypted, air-gapped
-media — never in the repository. The generation homedir may be wiped only once
-both exist and the re-import check above has passed.
+Store `primary-secret.asc.gpg` and `primary.rev` on encrypted, air-gapped media
+(keep at least two independent copies) — never in the repository. Store the KEY and
+BACKUP passphrases **separately** — from the media and from each other. The
+generation homedir may be wiped only once both files exist and the
+decrypt + re-import check above has passed.
 
 ---
 
@@ -223,8 +252,9 @@ received. Never rely solely on the copy shipped in the repo.
 
 Subkeys expire; rotate each channel independently, from the offline primary:
 
-1. Boot the offline machine and restore the primary keyring by importing the
-   offline `primary-secret.asc` backup (Section 1) into a fresh `--homedir`.
+1. Boot the offline machine and restore the primary keyring: decrypt the offline
+   `primary-secret.asc.gpg` backup with the **BACKUP** passphrase and import the
+   result under the **KEY** passphrase into a fresh `--homedir` (Section 1).
 2. Issue a **new** subkey for the affected channel
    (`gpg --quick-add-key "<primary-fpr>" ed25519 sign 2y`) during an **overlap
    grace window** in which the outgoing subkey is still valid and still signs.
@@ -413,15 +443,16 @@ If the **primary** is compromised: publish the offline revocation certificate
 (`primary.rev`), stand up a new primary + both subkeys, and re-issue both
 keyrings and all artifacts. Announce the new primary fingerprint out of band.
 
-**Activating `primary.rev`.** GnuPG's auto-generated revocation certificate (what
-`gen-signing-keys.sh` ships, and what §1's `--gen-revoke` writes to
-`openpgp-revocs.d/`) is deliberately **not** import-ready: it carries an
-explanatory header and a `:` inserted before the `-----BEGIN` armor line as a
-"kill switch" guard. To use it in an emergency, remove **only** that leading colon
-(the file documents this itself), import it into a keyring that already holds the
-public key (`gpg --import primary.rev`), confirm the primary now shows as revoked,
-then export and publish that revoked public key/keyring alongside the out-of-band
-announcement. A raw import of the unedited file reports "no valid OpenPGP data".
+**Activating `primary.rev`.** `primary.rev` — whether produced by
+`gen-signing-keys.sh` or by §1's `gpg --output primary.rev --gen-revoke` — is a
+clean, directly-importable armored revocation certificate. In an emergency, import
+it into a keyring that already holds the public key (`gpg --import primary.rev`),
+confirm the primary now shows as revoked, then export and publish that revoked
+public key/keyring alongside the out-of-band announcement. (GnuPG's *raw*
+auto-generated file under `openpgp-revocs.d/<fpr>.rev` is **not** import-ready — it
+carries explanatory prose and a `:` guard before the `-----BEGIN` armor line — but
+`gen-signing-keys.sh` strips both before writing `primary.rev`, so the shipped cert
+imports as-is.)
 
 Store the revocation certificate and the `s_*.private.asc` exports **offline
 and encrypted**. None of that material is ever committed to this repository.
