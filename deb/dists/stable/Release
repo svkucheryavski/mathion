@@ -1,0 +1,49 @@
+Acquire-By-Hash: yes
+Architectures: amd64 arm64
+Codename: stable
+Components: main
+Date: Sun, 23 Aug 2026 11:38:15 +0000
+Label: Mathion
+Origin: Mathion
+Suite: stable
+MD5Sum:
+ 0fafa23fe414b56418004d215030ad97              165 Release
+ d41d8cd98f00b204e9800998ecf8427e                0 main/Contents-amd64
+ e62ff0123a74adfc6903d59a449cbdb0               40 main/Contents-amd64.gz
+ d41d8cd98f00b204e9800998ecf8427e                0 main/Contents-arm64
+ e62ff0123a74adfc6903d59a449cbdb0               40 main/Contents-arm64.gz
+ 258b0ee361850f1935ad7fc8b48aa0f7              829 main/binary-amd64/Packages
+ 20adbc706c66c61222211deacec64cb9              563 main/binary-amd64/Packages.gz
+ 950eb4cc5e74c6e95c485d06d672f311              799 main/binary-arm64/Packages
+ e8e7bd42ead74fca5bf3ec30df0de96d              553 main/binary-arm64/Packages.gz
+SHA1:
+ 2ae81c5fbe45da1470b196f0915bc83117ea939b              165 Release
+ da39a3ee5e6b4b0d3255bfef95601890afd80709                0 main/Contents-amd64
+ e3f4c61a216c2c9613cd3bdd1420dde095b296b3               40 main/Contents-amd64.gz
+ da39a3ee5e6b4b0d3255bfef95601890afd80709                0 main/Contents-arm64
+ e3f4c61a216c2c9613cd3bdd1420dde095b296b3               40 main/Contents-arm64.gz
+ fe80b8055c4c78bd71c5629b70da65b0d0e271ee              829 main/binary-amd64/Packages
+ b879086dd661c52ea7c4fcad8739a9d82a871690              563 main/binary-amd64/Packages.gz
+ 16f08f9b75805b167e674290e8fee809b5a5593a              799 main/binary-arm64/Packages
+ 827b3d8cd396529f57110d219cdea760afff6cf3              553 main/binary-arm64/Packages.gz
+SHA256:
+ a94b922483e4fdc906d1f5e50d722c9f2e0bc2545e6232c3809ef3d2217d6410              165 Release
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 main/Contents-amd64
+ e7ab72b8f37c7c9c9f6386fb8e3dfa40bf6fe4b67876703c5927e47cb8664ce4               40 main/Contents-amd64.gz
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 main/Contents-arm64
+ e7ab72b8f37c7c9c9f6386fb8e3dfa40bf6fe4b67876703c5927e47cb8664ce4               40 main/Contents-arm64.gz
+ 53efe5465f914149d60efd514bb2829e67bb2f603b5ada782b743fb2cedfd19e              829 main/binary-amd64/Packages
+ 48522104596d62662ded4d145b57077c8dc56bbfedc65d500ea787d36c4485ff              563 main/binary-amd64/Packages.gz
+ d49075581a0d9b1a883918b917397958e60cb930dc0ccfbb0ed5502c6fab9d3b              799 main/binary-arm64/Packages
+ 735a54a03bb38783595fa9267bf9cf5a50e9979c6291d93ca3388ab6b849e78b              553 main/binary-arm64/Packages.gz
+SHA512:
+ 56d575e4b1018a233e2ac48d15ca7772f7673fccec6ce34bb37cea67e24eedd1b2ac9e2f8934a0a42f8cd85562bd0b858182ccce679cfe0690fddfc4ced4a275              165 Release
+ cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 main/Contents-amd64
+ 4837cb0c747b88cd66d2e8a7cb7fe2808a8fd9f967e467810a0dddfee9befdef8891f3be5c26e319d2ac8a869cb9e39d5ba1fb484db73231cec9fd66d1d5df33               40 main/Contents-amd64.gz
+ cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 main/Contents-arm64
+ 4837cb0c747b88cd66d2e8a7cb7fe2808a8fd9f967e467810a0dddfee9befdef8891f3be5c26e319d2ac8a869cb9e39d5ba1fb484db73231cec9fd66d1d5df33               40 main/Contents-arm64.gz
+ 26107975b65f14aff26c016dc69cbf939512c56ad0629b665e8439becfd4377a75d16e500cccb38064012b52713559bbcf0e05f60e3c1a9fad33b89c6cdbdb10              829 main/binary-amd64/Packages
+ 23bff2a415e45f8676852eb4fa5d17b1692488919f7c38547387e9b659f1634b3a0621e9c52b0d2a93ad57efe15e275a84178bafdac904566e00283f70b7aed0              563 main/binary-amd64/Packages.gz
+ 294acf998fa4074ed996f476f5bd4a1893bfc2070b3417aae878db44fdb7485f0a3f568521f49d7f47e1336c4ddebc74c0967c9b7b5724787f3d7077fda2cf6f              799 main/binary-arm64/Packages
+ 08791cefd1c2b14afcbcbe3f01d06feaf0322133359e4e68146647e95f91dec85f798960df22f25538b1497ee2c005b104119746a68c6af9013e3efd20a5a0c2              553 main/binary-arm64/Packages.gz
+Valid-Until: Tue, 22 Sep 2026 11:38:15 +0000

@@ -1,0 +1,19 @@
+Package: mathion
+Architecture: arm64
+Version: 0.3.0
+Priority: optional
+Section: admin
+Maintainer: Sergey Kucheryavskiy <svkucheryavski@gmail.com>
+Bugs: https://github.com/svkucheryavski/mathion/issues
+Installed-Size: 9159
+Suggests: docker.io
+Filename: pool/main/m/mathion/mathion_0.3.0_arm64.deb
+Size: 3766332
+MD5sum: 3374040692dedc2bfaa0bf602d5a25ad
+SHA1: 7a6cd084118cb4e47bdb8574551d883152b665df
+SHA256: fd64bf88e5fb715e931b561d5b565cf79b17794aad0d085818aa1bcff7518cd8
+SHA512: 35306064b04386b9e9e4d85acefeef1d42acdd7a4813918c558e4743bcadab400f63f492be75c8408f00835f539bccca2b8ae0324d69f9493cace1590fc6ad20
+Homepage: https://github.com/svkucheryavski/mathion
+Description: Self-host and manage a Mathion deployment.
+ CLI to install, update, back up, and operate a Mathion stack via Docker Compose.
+
