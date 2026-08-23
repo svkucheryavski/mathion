@@ -105,6 +105,8 @@ jobs:
       # Catch a drifted/misconfigured embedded key on every push, not only at release
       # tag time (skips automatically pre-keygen while the pins are still placeholders).
       - name: Embedded-key authenticity guard (go-live pins)
+        env:
+          S_REL_FPR: ${{ vars.S_REL_FPR }}   # assert install.sh's pin == the release signer
         run: sh cli/scripts/release-embedded-key-guard.sh
 
   apt-e2e:

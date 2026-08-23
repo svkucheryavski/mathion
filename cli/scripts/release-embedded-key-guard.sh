@@ -30,11 +30,14 @@ CLI_COPY="cli/internal/selfupdate/mathion-pubkey.asc"
 # shellcheck disable=SC1090  # sourced path is resolved at runtime (post-cd), not statically
 MATHION_INSTALL_LIB=1 . "./$INSTALL_SH"
 
-case "${EXPECTED_PRIMARY_FPR:-}" in
-  ''|REPLACE_WITH*)
-    echo "SKIP embedded-key guard: EXPECTED_PRIMARY_FPR unset/placeholder (pre-keygen)"
-    exit 0 ;;
-esac
+# Pre-keygen SKIP — ONLY when BOTH pins are still the REPLACE_WITH_* placeholders. A
+# HALF-filled go-live (one real/garbage pin + one placeholder) instead falls through
+# and is ENFORCED, so it FAILS on the placeholder-vs-keyring mismatch, never skips.
+is_placeholder() { case "$1" in REPLACE_WITH*) return 0 ;; *) return 1 ;; esac; }
+if is_placeholder "${EXPECTED_PRIMARY_FPR:-}" && is_placeholder "${EXPECTED_SIGNING_FPR:-}"; then
+  echo "SKIP embedded-key guard: both pins are pre-keygen placeholders (no real fingerprint set)"
+  exit 0
+fi
 
 command -v gpg >/dev/null 2>&1 || { echo "FAIL: gpg is required for the embedded-key guard" >&2; exit 1; }
 
@@ -73,6 +76,22 @@ cnt="$(printf '%s\n' "$sigfprs" | grep -c . || true)"
 [ "$cnt" = 1 ] || { echo "FAIL: keyring must hold exactly one signing subkey, found $cnt" >&2; fail=1; }
 [ "$sigfprs" = "$EXPECTED_SIGNING_FPR" ] \
   || { echo "FAIL: embedded signing subkey $sigfprs != EXPECTED_SIGNING_FPR $EXPECTED_SIGNING_FPR" >&2; fail=1; }
+
+# (3) Cross-check: the key the INSTALLER trusts must equal the key the release is
+# SIGNED with. install.sh's verify_sig requires a VALIDSIG from EXPECTED_SIGNING_FPR,
+# while goreleaser signs with GPG_FINGERPRINT=vars.S_REL_FPR (passed here as
+# $S_REL_FPR); per deploy/keys/README.md §5 those two "move as a unit". Without this a
+# release could be signed by a key the shipped installer rejects — a broken PUBLIC
+# release. Enforced whenever the signer fpr is provided (CI/release always set it); a
+# bare local run without it notes the skip.
+if [ -n "${S_REL_FPR:-}" ]; then
+  want_sign="$(printf '%s' "$S_REL_FPR" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
+  have_sign="$(printf '%s' "$EXPECTED_SIGNING_FPR" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
+  [ "$have_sign" = "$want_sign" ] \
+    || { echo "FAIL: EXPECTED_SIGNING_FPR $have_sign != release signer S_REL_FPR $want_sign (installer would reject its own release)" >&2; fail=1; }
+else
+  echo "NOTE: S_REL_FPR not provided — skipping installer-vs-signer cross-check (CI sets it)"
+fi
 
 [ "$fail" = 0 ] || { echo "embedded-key guard FAILED" >&2; exit 1; }
 echo "embedded-key guard OK: primary $prim, S_rel $sigfprs (install.sh == keyring == cli copy)"
