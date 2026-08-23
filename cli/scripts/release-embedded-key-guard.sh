@@ -15,9 +15,9 @@
 # The import runs in an ISOLATED temp GNUPGHOME (never the runner's default keyring;
 # robust against a local use-keyboxd config that ignores --no-default-keyring).
 #
-# Pre-keygen the pins are still the REPLACE_WITH placeholder and the keyring is a
-# non-parseable stub, so the guard SKIPS — mirroring selfupdate-ci-guards.sh's
-# fpr-pin gate, so this stays green until the maintainer completes go-live.
+# The guard SKIPS only in the genuine PRE-KEYGEN state — both pins still the
+# REPLACE_WITH_* placeholders AND no S_REL_FPR configured — so it stays green before
+# go-live. Once go-live has begun (S_REL_FPR set) or either pin is real, it enforces.
 set -eu
 cd "$(dirname "$0")/../.."   # cli/scripts -> repo root
 
@@ -30,12 +30,15 @@ CLI_COPY="cli/internal/selfupdate/mathion-pubkey.asc"
 # shellcheck disable=SC1090  # sourced path is resolved at runtime (post-cd), not statically
 MATHION_INSTALL_LIB=1 . "./$INSTALL_SH"
 
-# Pre-keygen SKIP — ONLY when BOTH pins are still the REPLACE_WITH_* placeholders. A
-# HALF-filled go-live (one real/garbage pin + one placeholder) instead falls through
-# and is ENFORCED, so it FAILS on the placeholder-vs-keyring mismatch, never skips.
+# Pre-keygen SKIP — ONLY when BOTH pins are still REPLACE_WITH_* placeholders AND no
+# S_REL_FPR is configured. Once the maintainer sets the S_REL_FPR repo var (go-live has
+# begun) OR either pin is real, the guard ENFORCES — so a PARTIAL go-live (repo var +
+# secret set, but install.sh pins not yet filled) can NEVER skip and ship a release the
+# placeholder-pinned installer would reject.
 is_placeholder() { case "$1" in REPLACE_WITH*) return 0 ;; *) return 1 ;; esac; }
-if is_placeholder "${EXPECTED_PRIMARY_FPR:-}" && is_placeholder "${EXPECTED_SIGNING_FPR:-}"; then
-  echo "SKIP embedded-key guard: both pins are pre-keygen placeholders (no real fingerprint set)"
+if [ -z "${S_REL_FPR:-}" ] \
+   && is_placeholder "${EXPECTED_PRIMARY_FPR:-}" && is_placeholder "${EXPECTED_SIGNING_FPR:-}"; then
+  echo "SKIP embedded-key guard: pre-keygen (both pins placeholder, no S_REL_FPR configured)"
   exit 0
 fi
 
@@ -85,8 +88,8 @@ cnt="$(printf '%s\n' "$sigfprs" | grep -c . || true)"
 # release. Enforced whenever the signer fpr is provided (CI/release always set it); a
 # bare local run without it notes the skip.
 if [ -n "${S_REL_FPR:-}" ]; then
-  want_sign="$(printf '%s' "$S_REL_FPR" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
-  have_sign="$(printf '%s' "$EXPECTED_SIGNING_FPR" | tr -d ' ' | tr '[:lower:]' '[:upper:]')"
+  want_sign="$(printf '%s' "$S_REL_FPR" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+  have_sign="$(printf '%s' "$EXPECTED_SIGNING_FPR" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
   [ "$have_sign" = "$want_sign" ] \
     || { echo "FAIL: EXPECTED_SIGNING_FPR $have_sign != release signer S_REL_FPR $want_sign (installer would reject its own release)" >&2; fail=1; }
 else
