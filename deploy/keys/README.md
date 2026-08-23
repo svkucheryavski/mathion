@@ -239,6 +239,12 @@ the repo where they are consumed:
 - `<S_apt-fpr>` — the apt-signing subkey; recorded so the apt channel and any
   audit can confirm `signed-by=` resolves to `S_apt`.
 
+**Recorded values for the current key** (public — safe to publish anywhere):
+
+- `EXPECTED_PRIMARY_FPR` = `F00602DFE1BF8CD2B321FC72AD21D4AD294C31A0`
+- `EXPECTED_SIGNING_FPR` = `06AAFF0CB03A5678149093D42243DC4FF7FDFF35` (`S_rel`)
+- `S_apt` subkey = `B96396FB8A670875A061BBAF8D08B9B5E27BB19A`
+
 `deploy/install.sh` is always fetched fresh at install time, so it pins the
 **current** `S_rel` scalar in `EXPECTED_SIGNING_FPR`.
 

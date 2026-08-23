@@ -83,11 +83,15 @@ fi
 EXPECT="${S_REL_EMBEDDED_FPR:-${S_REL_FPR:-}}"
 if [ -n "$EXPECT" ]; then
   command -v gpg >/dev/null 2>&1 || { echo "FAIL: gpg required for the fingerprint pin" >&2; exit 1; }
-  ringdir="$(mktemp -d)"; ring="$ringdir/ring.gpg"
-  trap 'rm -rf "$ringdir"' EXIT
-  gpg --no-default-keyring --keyring "$ring" --quiet --import ../deploy/keys/mathion-pubkey.asc 2>/dev/null \
+  # Import into an ISOLATED temp GNUPGHOME rather than --no-default-keyring --keyring,
+  # which a local use-keyboxd config silently ignores (imports would leak to the
+  # default keyring). CI's Ubuntu has no keyboxd, but this is robust either way.
+  ghdir="$(mktemp -d)"; chmod 700 "$ghdir"
+  trap 'rm -rf "$ghdir"' EXIT
+  GNUPGHOME="$ghdir"; export GNUPGHOME
+  gpg --batch --quiet --import ../deploy/keys/mathion-pubkey.asc 2>/dev/null \
     || { echo "FAIL: deploy/keys/mathion-pubkey.asc is not a parseable OpenPGP keyring" >&2; exit 1; }
-  prim="$(gpg --no-default-keyring --keyring "$ring" --with-colons --list-keys | awk -F: '$1=="pub"{n++} END{print n+0}')"
+  prim="$(gpg --with-colons --list-keys | awk -F: '$1=="pub"{n++} END{print n+0}')"
   [ "$prim" = 1 ] || { echo "FAIL: keyring must hold exactly one primary key, found $prim" >&2; exit 1; }
   # Pair each signing-capable subkey (colon field 12 contains lowercase 's') with the
   # fpr line that follows it; assert exactly one, equal to EXPECT (uppercase, no spaces).
@@ -95,7 +99,7 @@ if [ -n "$EXPECT" ]; then
   # < 2.6 (a single --with-fingerprint emits only the PRIMARY's fpr → the pairing would
   # see zero subkey fprs). The awk resets `want` on EVERY sub line so a following
   # non-signing subkey clears it.
-  sigfprs="$(gpg --no-default-keyring --keyring "$ring" --with-colons --with-fingerprint --with-subkey-fingerprint --list-keys \
+  sigfprs="$(gpg --with-colons --with-fingerprint --with-subkey-fingerprint --list-keys \
     | awk -F: '$1=="sub"{want=($12 ~ /s/); next} $1=="fpr" && want {print $10; want=0}')"
   cnt="$(printf '%s\n' "$sigfprs" | grep -c . || true)"
   [ "$cnt" = 1 ] || { echo "FAIL: keyring must hold exactly one signing subkey, found $cnt" >&2; exit 1; }

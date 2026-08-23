@@ -129,7 +129,8 @@ the keyring you just installed:
 gpg --show-keys /usr/share/keyrings/mathion-archive-keyring.gpg
 ```
 
-and compare it against the published fingerprint (`<primary-key-fingerprint>`).
+and compare it against the published primary fingerprint
+`F006 02DF E1BF 8CD2 B321  FC72 AD21 D4AD 294C 31A0`.
 The maintainer **records** the fingerprint in
 [`deploy/keys/README.md`](deploy/keys/README.md) (§4, "Record the fingerprints")
 once the offline key exists, but that file lives in this same repository — the

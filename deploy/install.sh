@@ -12,8 +12,8 @@ DEST="/usr/local/bin/mathion"
 
 # Authenticity (Slice 4a). EXPECTED_SIGNING_FPR pins the S_rel SUBKEY (VALIDSIG's
 # first field), so a compromise of the apt-only S_apt cannot forge this channel.
-EXPECTED_PRIMARY_FPR="REPLACE_WITH_40_HEX_PRIMARY_FINGERPRINT"
-EXPECTED_SIGNING_FPR="REPLACE_WITH_40_HEX_S_REL_SUBKEY_FINGERPRINT"
+EXPECTED_PRIMARY_FPR="F00602DFE1BF8CD2B321FC72AD21D4AD294C31A0"
+EXPECTED_SIGNING_FPR="06AAFF0CB03A5678149093D42243DC4FF7FDFF35"
 
 # HTTPS-only, even across redirects — a redirect can never downgrade to http.
 dl() { curl -fsSL --proto '=https' --proto-redir '=https' "$@"; }
@@ -23,7 +23,21 @@ dl() { curl -fsSL --proto '=https' --proto-redir '=https' "$@"; }
 mathion_embedded_key() {
   cat <<'MATHION_PUBKEY'
 -----BEGIN PGP PUBLIC KEY BLOCK-----
-REPLACE_WITH_deploy/keys/mathion-pubkey.asc_CONTENTS
+
+mDMEaoqWFhYJKwYBBAHaRw8BAQdAzZgCCSO90JSPx4ufQSUqzvsVZ2aS8qTTDdBs
+kMDtHOy0Mk1hdGhpb24gUmVsZWFzZSBTaWduaW5nIDxzdmt1Y2hlcnlhdnNraUBn
+bWFpbC5jb20+iK8EExYKAFcWIQTwBgLf4b+M0rMh/HKtIdStKUwxoAUCaoqWFhsU
+gAAAAAAEAA5tYW51MiwyLjUrMS4xMiwwLDMCGwEFCwkIBwICIgIGFQoJCAsCBBYC
+AwECHgcCF4AACgkQrSHUrSlMMaAjoAD7BHvV3DCJ7hpg3ZmWAiVrOuDkdLrJip4w
+B08Q8bJ4bA4A/ipt35/1idfDULNl5UcsBSswYmPFzMlb1cMV0sOFPh4JuDMEaoqW
+FhYJKwYBBAHaRw8BAQdAbt34x5IGYb2+uI43EBKr8jrLftPosQYWa74huVqzzxKJ
+AREEGBYKAEIWIQTwBgLf4b+M0rMh/HKtIdStKUwxoAUCaoqWFhsUgAAAAAAEAA5t
+YW51MiwyLjUrMS4xMiwwLDMCGwIFCQPCZwAAgQkQrSHUrSlMMaB2IAQZFgoAHRYh
+BAaq/wywOlZ4FJCT1CJD3E/3/f81BQJqipYWAAoJECJD3E/3/f81Hw0BAKLJbjlm
+Erx5Byg+O44fPlYwHkaB2xodEEb7Bsqfy5b5AP9eoCfaDv/xjq67RVsxo/Uj8Jwc
+i1O8790QaqK+t6HGB4riAP4wml+l1HZCc+P5KJ98a7VDbbsxSVdevaZh39/zdepw
+ZAD/aQSIIB6oY7D8kzhOovNzwT92vXJqcSFtG4G+CtuN3A4=
+=TZN3
 -----END PGP PUBLIC KEY BLOCK-----
 MATHION_PUBKEY
 }
