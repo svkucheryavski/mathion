@@ -1,6 +1,6 @@
 # Phase 9-D Slice 5 — Bundled auto-TLS reverse proxy (`mathion tls`)
 
-**Status:** Design (rev 3 — dual-gate round 2 folded) — pending re-gate + user approval
+**Status:** Design (rev 4 — dual-gate round 3 folded) — pending re-gate + user approval
 **Date:** 2026-08-23
 **Phase:** 9-D (Deployment), Slice 5
 **Depends on:** Slices 1–4b (prod image, compose, `mathion` CLI, signed releases) — all shipped.
@@ -8,7 +8,8 @@
 > **Revision history.**
 > - **Rev 1** reviewed by independent reviewer + codex@high → BLOCK (2 Crit: proxy secret-leak via `env_file`, unverified cleartext/redirect; + Importants).
 > - **Rev 2** folded rev-1. Re-review: codex BLOCK / independent SHIP-WITH-CHANGES — both confirmed all rev-1 findings RESOLVED and the network topology sound, but surfaced NEW issues: stale on-disk compose on upgrade, an email→secret interpolation leak, a risky db network-migration, an infeasible in-container healthcheck (the reproxy image is `FROM scratch`), proxy-runs-as-root, and restore/update rollback coupling.
-> - **Rev 3 (this):** folds all rev-2 findings. Notably **simplifies the network split** (one `frontend` network; db stays on `default`) to eliminate the db-migration risk while keeping proxy↔db isolation; **replaces the container healthcheck with a host-side CLI readiness poll** (scratch image has no shell/curl); adds compose re-materialization on enable, strict interpolation-safe domain/email validation, non-root proxy hardening, and restore/update proxy decoupling.
+> - **Rev 3:** folded all rev-2 findings — simplified the network split (one `frontend` network; db stays on `default`), replaced the container healthcheck with a host-side CLI readiness poll, added compose re-materialization on enable, strict domain/email validation, non-root proxy, restore/update decoupling.
+> - **Rev 4 (this):** round-3 re-review (codex BLOCK / independent SHIP-WITH-CHANGES) confirmed the design sound and all rev-2/3 findings resolved. Folds the remaining refinements: **operation-sensitive `--profile tls`** (always for stop/down/rm/ps so `mathion stop`/`uninstall` can't orphan the running proxy); a **`proxy-init` chown one-shot** so the non-root proxy can write a fresh (root-owned) ACME volume; corrected the interpolation *test* (Compose recursively expands `.env` values, so the input validator is the real defense — the test asserts rejection); proper DNS-label validation; enable reuses the install identity guard and allows image pull; restore/update proxy-up is `--pull never --no-deps` + bounded + rollback-exempt; redirect is 307.
 
 ---
 
@@ -49,7 +50,10 @@ A single `proxy` service in both prod compose copies with `profiles: ["tls"]`. A
 Rev-1's "process-env `COMPOSE_PROFILES`" idea is replaced (it left host poisoning possible and `Output`/`Stream` do not carry per-call env). Instead:
 
 - **Strip `COMPOSE_PROFILES`, `MATHION_TLS_DOMAIN`, `MATHION_TLS_EMAIL`** from the child env (add to `strippedEnvKeys`, `runner.go`). This blocks an ambient `COMPOSE_PROFILES=tls` from activating the proxy, and makes `--env-file .env` authoritative for the `${MATHION_TLS_*}` interpolation (host env otherwise overrides `--env-file`).
-- **Add one `--profile tls`** to the central `composeArgs` builder (`cli/cmd/root.go:32`, through which *every* compose invocation flows) **when TLS is enabled.** "TLS enabled" is derived from `MATHION_TLS_DOMAIN` non-empty in `.env`. The `App` reads this at startup into a `tlsEnabled` field **fail-safe** (a missing/corrupt `.env` — e.g. any command before `install` — reads as `false`, never a hard error); `SetTLS`/`ClearTLS` update the field so that within the `enable` process (which mutates `.env` before `up`) `composeArgs` reflects the new state. This makes the profiled `proxy` visible to `up`, `down`, `ps`, `rm`, `update`, and `restore` uniformly — no per-subcommand `--profile` flags, no compose-file branching.
+- **Add `--profile tls`** in the central `composeArgs` builder (`cli/cmd/root.go:32`, through which *every* compose invocation flows), **operation-sensitively**:
+  - **Containment / removal / inspection** (`down`, `stop`, `rm`, `ps`, `logs`) → **always** include `--profile tls`. This is essential: a profiled service is out of scope for a command run without its profile, so a plain `mathion stop`/`uninstall` (`stop`/`down`) would otherwise **leave the internet-facing proxy and ports 80/443 running** while stopping app+db. Including the profile is harmless when no proxy exists.
+  - **Start** (`up`, `start`, `create`, `run`) → include `--profile tls` **only when TLS is enabled**, so the proxy is never started on a non-TLS deployment.
+- "TLS enabled" is derived from `MATHION_TLS_DOMAIN` non-empty in `.env`. The `App` reads this at startup into a `tlsEnabled` field **fail-safe** (a missing/corrupt `.env` — e.g. any command before `install` — reads as `false`, never a hard error); `SetTLS`/`ClearTLS` update the field so that within the `enable` process (which mutates `.env` before `up`) `composeArgs` reflects the new state. `composeArgs` sees the subcommand (`sub[0]`) already, so the start-vs-containment split lives in that one place — no per-call-site flags. Because containment always carries the profile, `tls disable` also removes an actually-running proxy even if `.env` already reads disabled.
 
 ### 4.4 Network segmentation (blast-radius containment) — minimal one-network form
 The internet-facing proxy must **not** be able to reach Postgres. Rev-2 review showed the two-network form (moving `db` onto a separate `internal` network) forces a **risky migration of the running `db`** off `mathion_prod_default` — stranding `app`↔`db` during `update`'s in-place migration one-off (`update.go:312` `run --no-deps app`) and introducing a multi-network default-gateway ambiguity for `app`'s egress. Rev 3 uses the **minimal** form that achieves the same isolation without moving `db`:
@@ -69,14 +73,27 @@ The internet-facing proxy must **not** be able to reach Postgres. Rev-2 review s
 Added identically to `docker-compose.prod.yml` and `cli/internal/compose/docker-compose.yml`. **No `env_file: .env`** on the proxy — it receives only explicit vars; domain/email arrive via `${…}` interpolation from `--env-file .env`:
 
 ```yaml
+  # One-shot: make the fresh (root-owned) ACME volume writable by the non-root proxy, then exit.
+  # Required because the reproxy image is FROM scratch (no chown/shell) and cannot self-fix ownership.
+  proxy-init:
+    image: busybox@sha256:<PINNED_DIGEST>        # pinned; tiny; only used under the tls profile
+    profiles: ["tls"]
+    command: ["sh", "-c", "chown -R 1001:1001 /srv/acme"]
+    volumes:
+      - mathion_acme:/srv/acme
+    network_mode: none
+    restart: "no"
+
   proxy:
     image: ghcr.io/umputun/reproxy@sha256:<PINNED_DIGEST>   # digest chosen + behavior-verified at implementation
     profiles: ["tls"]
     depends_on:
       app:
         condition: service_healthy
+      proxy-init:
+        condition: service_completed_successfully     # ACME dir is chowned before the proxy (uid 1001) starts
     ports:
-      - "80:8080"     # reproxy HTTP: ACME HTTP-01 challenge + 301/302 redirect to HTTPS (see §8)
+      - "80:8080"     # reproxy HTTP: ACME HTTP-01 challenge + a temporary redirect to HTTPS (see §8)
       - "443:8443"    # reproxy HTTPS (Docker listen defaults: http 8080 / ssl 8443)
     environment:
       SSL_TYPE: auto
@@ -92,7 +109,8 @@ Added identically to `docker-compose.prod.yml` and `cli/internal/compose/docker-
     user: "1001:1001"                       # image defaults to root (for docker-socket discovery we don't use); drop it
     cap_drop: [ ALL ]
     security_opt: [ "no-new-privileges:true" ]
-    read_only: true                          # scratch rootfs; only /srv/acme (a volume) needs writes — verify at impl
+    read_only: true                          # scratch rootfs; only /srv/acme (a volume) is written
+    tmpfs: [ /tmp ]                           # in case reproxy needs scratch space under read_only (verify at impl)
     # NO container healthcheck: the image is FROM scratch (no shell/curl/wget), so an in-container probe is impossible.
     # Liveness is checked host-side by the CLI after `up` (see §6.1 step 8 / §6.3). `up --wait` waits for "started".
     restart: unless-stopped
@@ -112,7 +130,7 @@ volumes:
   mathion_acme: {}     # NEW — persisted ACME cert store (survives restarts; no re-issue)
 ```
 
-**Confirmed reproxy facts** (README + source inspection of `app/proxy/ssl.go` + `app/main.go` + the Dockerfile, 2026-08-23): env vars `SSL_TYPE`, `SSL_ACME_EMAIL`, `SSL_ACME_FQDN`, `SSL_ACME_LOCATION`, `SSL_HTTP_PORT`, `STATIC_ENABLED`, `STATIC_RULES`, `LISTEN`, `MAX_SIZE` (flag `--max`, default `64K`); Docker listen defaults `0.0.0.0:8080`/`0.0.0.0:8443`; rule format `server,src,dest`; the final image is `FROM scratch` (binary-only, implicit root, no HEALTHCHECK). **Implementation must verify against the pinned digest:** that the `/srv/acme` volume is writable by uid 1001 (a fresh named volume is root-owned — may need an ownership step or a matching uid), that `read_only: true` is compatible, that the `STATIC_RULES` src `/` matches **all** paths (`/api/…`, `/courses/…`), and the redirect/HSTS behavior (§8).
+**Confirmed reproxy facts** (README + source inspection of `app/proxy/ssl.go` + `app/main.go` + the Dockerfile, 2026-08-23): env vars `SSL_TYPE`, `SSL_ACME_EMAIL`, `SSL_ACME_FQDN`, `SSL_ACME_LOCATION`, `SSL_HTTP_PORT`, `STATIC_ENABLED`, `STATIC_RULES`, `LISTEN`, `MAX_SIZE` (flag `--max`, default `64K`); Docker listen defaults `0.0.0.0:8080`/`0.0.0.0:8443`; rule format `server,src,dest`; the final image is `FROM scratch` (binary-only, implicit root, no HEALTHCHECK) — hence the non-root proxy + the `proxy-init` chown one-shot (the image can't self-fix volume ownership). **Implementation must verify against the pinned digests:** that reproxy (uid 1001) can write `/srv/acme` after the init chown and that `read_only: true` + `tmpfs:/tmp` cover all of reproxy's write paths; that `busybox` is a suitable pinned init image; that the `STATIC_RULES` src `/` matches **all** paths (`/api/…`, `/courses/…`); and the redirect/HSTS behavior (§8).
 
 ## 6. The `mathion tls` command group
 
@@ -121,14 +139,14 @@ New `cli/cmd/tls.go`, registered in `root.go`.
 ### 6.1 `mathion tls enable --domain <fqdn> --email <addr>`
 Both flags required. Runs under **`lockAndGuard`** (root check + operation lock + worker sweep + breadcrumb entry-check); `enable` is added to the breadcrumb **refuse set** in `classify()` (it brings services up on top of a possibly-unverified deployment).
 
-1. Require an installed stack (`.env` + compose present/valid); else guide to `mathion install`.
-2. **Validate `--domain`:** a strict, normalized ASCII FQDN with ≥1 dot; reject empty, `localhost`, IP literals, **and any character outside the legal FQDN charset** (`[a-z0-9.-]`) — in particular `$`, `{`, `}`, quotes, backslashes, whitespace, and control chars, so a value can never carry dotenv/Compose interpolation syntax.
-3. **Validate `--email`:** non-empty, single `@`, dotted domain, **and reject `$`, `{`, `}`, quotes, backslashes, whitespace, and control chars.** (The current `ValidateEmail` at `cli/internal/config/validate.go:68` is too loose — `${POSTGRES_PASSWORD}@x.y` passes it; because `.env` values are Compose-interpolated, that would expand the DB password into `SSL_ACME_EMAIL` and send it to Let's Encrypt. The strict charset closes this.)
-4. **Re-materialize the on-disk compose (CRITICAL for upgraders):** `update`/`self_update`/`restore` never rewrite `<CfgDir>/docker-compose.yml`, so after a CLI upgrade the on-disk copy predates Slice 5 (no `proxy` service, no `frontend` network) and `up … proxy` would fail with `no such service: proxy`. Under the lock, before mutating `.env`, `AtomicWrite(<CfgDir>/docker-compose.yml, composeBytes())` (exactly as install's resume path does) to bring the on-disk compose to the embedded revision.
+1. **Require a valid, installed deployment** — reuse the same installed-deployment identity/state guard install-resume uses (`install.go:59` — a present, regular, private `.env` on the expected project), not merely "files exist"; else guide to `mathion install`. (Downgrade note: this guard does not add a compose-schema version allowlist, so running an **older** CLI's `tls enable` against a newer install would rewrite the on-disk compose with the older embed. That newer→older path is unsupported and documented; a schema-revision allowlist is a deferred hardening, not built in this slice.)
+2. **Validate `--domain`:** a proper **DNS name** — lowercase ASCII, labels of 1–63 chars matching `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, total ≤253, ≥2 labels; reject empty, `localhost`, IP literals, empty/leading/trailing-dot forms (`a..b`, `-a.example`, `a-.example`), and — implied by the charset — anything with `$ { } " ' \` whitespace or control chars, so a value can never carry dotenv/Compose interpolation syntax.
+3. **Validate `--email`:** single `@`, a local part, and a domain validated by the same DNS-label routine; **reject `$ { } " ' \` whitespace and control chars.** (The current `ValidateEmail` at `cli/internal/config/validate.go:68` is too loose — `${POSTGRES_PASSWORD}@x.y` passes it, and because Compose **recursively interpolates** `.env` values that would expand the DB password into `SSL_ACME_EMAIL` and send it to Let's Encrypt. Rejecting `$` at the input boundary is the sole real defense — see §10.)
+4. **Re-materialize the on-disk compose (CRITICAL for upgraders):** `update`/`self_update`/`restore` never rewrite `<CfgDir>/docker-compose.yml`, so after a CLI upgrade the on-disk copy predates Slice 5 (no `proxy` service, no `frontend` network) and `up … proxy` would fail with `no such service: proxy`. Under the lock, after the identity guard and before mutating `.env`, `AtomicWrite(<CfgDir>/docker-compose.yml, composeBytes())` (exactly as install's resume path does) to bring the on-disk compose to the embedded revision.
 5. **Port preflight (only when the project's `proxy` container is not already running):** require host 80 + 443 bindable (test wildcard IPv4/IPv6 bindability rather than mere connectivity; Docker's own bind remains the authoritative backstop). Skipping keys off *actual proxy-running state*, not merely a non-empty domain.
 6. **DNS preflight (warn, non-blocking):** best-effort A/AAAA lookup; warn that issuance waits until DNS points here; proceed.
 7. **`SetTLS(domain, email)`** — atomic, validate-before-write, then reread + assert postcondition (mirrors `RepinVersion`, `env.go`): writes `MATHION_TLS_DOMAIN`, `MATHION_TLS_EMAIL`, `MATHION_BASE_URL` (built via `BuildBaseURL` for validator-consistency), `MATHION_COOKIE_SECURE=1`. Pair invariant: TLS fields are both-empty or both-valid; when enabled, `MATHION_BASE_URL == https://<domain>` and secure-cookie true. Sets `App.tlsEnabled=true`.
-8. **Full-project `up -d --wait`** (profile now active) — a whole-project up (not service-scoped) so `app` is recreated to join `frontend` and pick up the new env, and the `proxy` is created; `db` (unchanged config) is not recreated. Then **poll readiness host-side** (the container has no healthcheck): the CLI best-effort TCP-dials `127.0.0.1:443` for a short bounded window and reports — non-fatal (issuance/DNS may still be pending).
+8. **Full-project `up -d --wait`** (profile now active; **pull allowed** — unlike `start`/`update`/`restore` this omits `--pull never` so the reproxy + busybox images are fetched on first enable; the app image is not re-resolved because its tag is unchanged). A whole-project up (not service-scoped) so `app` is recreated to join `frontend` and pick up the new env, `proxy-init` chowns the ACME volume, and the `proxy` is created; `db` (unchanged config) is not recreated. Then **poll readiness host-side** (the container has no healthcheck): the CLI best-effort TCP-dials `127.0.0.1:443` for a short bounded window and reports — non-fatal (issuance/DNS may still be pending).
 9. **Report:** enabled for `https://<fqdn>`; cert obtained automatically shortly after start; if not HTTPS yet, check `mathion tls status` / `mathion logs`; ensure the firewall opens 80 + 443 and DNS points here. First enable briefly recreates `app` (db stays up). **A failed/timed-out enable leaves TLS enabled in `.env`** (with a possibly-unhealthy proxy); remedy is re-run `enable` or `mathion tls disable`.
 
 Idempotent/update-capable: re-running with a new domain updates all four vars and recreates.
@@ -152,7 +170,7 @@ Read-only (no lock, like `status`). Prints enabled/disabled (from `.env`, read f
 
 ## 8. HTTP listener behavior — resolved by source inspection
 
-reproxy source (`app/proxy/ssl.go`) shows that in `ssl.type=auto` the HTTP (port-80) server's handler is the challenge router: it serves ACME HTTP-01 challenges and **redirects all other requests to HTTPS** (a temporary redirect). The static proxy rules (app content) are bound **exclusively to the HTTPS listener** (`ListenAndServeTLS`). **Therefore there is no cleartext path to application content** — the "no plain HTTP in production" rule holds by the proxy's construction, not merely by assumption. (This behavior is against upstream `master`; the pinned digest is re-verified at implementation.)
+reproxy source (`app/proxy/ssl.go`) shows that in `ssl.type=auto` the HTTP (port-80) server's handler is the challenge router: it serves ACME HTTP-01 challenges and **redirects all other requests to HTTPS** (upstream `master` uses `http.StatusTemporaryRedirect`, i.e. 307). The static proxy rules (app content) are bound **exclusively to the HTTPS listener** (`ListenAndServeTLS`). **Therefore there is no cleartext path to application content** — the "no plain HTTP in production" rule holds by the proxy's construction, not merely by assumption. (Behavior verified against upstream `master`; the exact status and this handler wiring are re-verified against the pinned digest at implementation.)
 
 Residual (UX, not security): the exact redirect status code is version-dependent and **not** a security concern.
 
@@ -160,8 +178,8 @@ Residual (UX, not security): the exact redirect status code is version-dependent
 
 ## 9. Configuration surface (`.env`) & docs
 
-- Add `MATHION_TLS_DOMAIN`, `MATHION_TLS_EMAIL` to `GenerateEnv`/`RenderEnv` (emitted with **empty active assignments**, e.g. `MATHION_TLS_DOMAIN=`) — a commented form would break the generated-vs-example parity test (`env_test.go:201`, which ignores comments). Optional in `ValidateEnvComplete` (empty valid); add the **conditional pair-consistency** check from §6.1-7.
-- **Strict, interpolation-safe validators** in `cli/internal/config/validate.go` (tighten/replace the loose `ValidateEmail:68`) — the domain and email charsets exclude `$ { } " ' \\` whitespace and control chars (§6.1 steps 2–3), so a value can never carry dotenv/Compose interpolation syntax.
+- Add `MATHION_TLS_DOMAIN`, `MATHION_TLS_EMAIL` to `GenerateEnv`/`RenderEnv` (emitted with **empty active assignments**, e.g. `MATHION_TLS_DOMAIN=`) — a commented form would break the generated-vs-example parity test (`env_test.go:201`, which ignores comments). Optional in `ValidateEnvComplete` (empty valid); the **conditional pair-consistency** check (§6.1-7) runs the **strict validators on the `.env`-resident values** (not just non-empty), so `update`/resume catch a hand-edited `.env` that smuggled interpolation syntax into `MATHION_TLS_EMAIL`.
+- **Strict, interpolation-safe validators** in `cli/internal/config/validate.go` (tighten/replace the loose `ValidateEmail:68`) — proper DNS-label validation for the domain (and the email's domain part) plus rejection of `$ { } " ' \` whitespace and control chars (§6.1 steps 2–3), so a value can never carry dotenv/Compose interpolation syntax.
 - `SetTLS`/`ClearTLS` helpers in `env.go` (siblings of `RepinVersion`): validate → atomic write → reread → assert.
 - `deploy/.env.prod.example`: document both vars (empty active assignments + explanatory comments pointing at `mathion tls enable`).
 - `README.md`: "Bundled HTTPS (`mathion tls`)" as the easy path; keep the external-proxy section; document firewall (open 80 + 443) + DNS requirements.
@@ -172,31 +190,31 @@ Residual (UX, not security): the exact redirect status code is version-dependent
 
 ### Automated (CI)
 - **`tls_test.go`** (hermetic via seams): strict domain/email validation (incl. rejecting `${POSTGRES_PASSWORD}@x.y` and other `$`/`{`/quote inputs); `SetTLS` writes all four vars + asserts postcondition; `ClearTLS` clears domain/email and **preserves** base-url/cookie; pair-consistency validation; `enable` requires both flags; `enable` re-materializes the on-disk compose before `up`; port preflight only when proxy not running; `status` output per state.
-- **Interpolation-injection regression:** `docker compose config` with `MATHION_TLS_EMAIL=${POSTGRES_PASSWORD}@x.y` in `.env` proves **no** secret appears in the `proxy` environment (belt-and-suspenders beside the strict validator).
+- **Interpolation-injection regression (validator is the defense, not compose):** Compose *recursively expands* `.env` values, so a `.env` literally holding `MATHION_TLS_EMAIL=${POSTGRES_PASSWORD}@x.y` **would** leak the secret into `SSL_ACME_EMAIL` — `docker compose config` does not neutralize it. The test therefore asserts the **input is rejected**: `tls enable`/`SetTLS` with that payload returns an error and leaves `.env` **byte-identical**; a *separate* documentation test may show that raw Compose *would* expand the sentinel (proving why the `$`-rejecting validator is mandatory).
 - **Runner env-strip test** (`runner_test.go`): `COMPOSE_PROFILES`, `MATHION_TLS_DOMAIN`, `MATHION_TLS_EMAIL` stripped from the child env; ambient `COMPOSE_PROFILES=tls` does **not** leak through.
-- **`composeArgs` profile test** (`root` test): `--profile tls` present iff `tlsEnabled`; verified after an in-process `SetTLS`; and `tlsEnabled` reads **fail-safe** (missing/corrupt `.env` → false, not an error).
-- **Compose sync test:** extend `embed_test.go` coverage to the `proxy` service, the `frontend` network + `app`'s dual membership, and the `mathion_acme` volume; pin the reproxy image line.
-- **`docker compose config`** parses cleanly without the profile and with `--profile tls`; assert `proxy` is on `frontend` only, `db` on `default` only (shares no network with `proxy`), `app` on both `default` and `frontend`.
-- **Purge test:** `uninstall --purge` targets `<project>_mathion_acme` **and** `<project>_frontend` (keeps `<project>_default`); acme is **excluded** from the fresh-install refuse-guard (teardown_test + install-guard test).
+- **`composeArgs` profile test** (`root` test): `--profile tls` present on start commands (`up`/`start`) **iff** `tlsEnabled`, and **always** present on containment/inspection (`down`/`stop`/`rm`/`ps`) regardless of `tlsEnabled` (so `stop`/`uninstall` reach the proxy); verified after an in-process `SetTLS`; `tlsEnabled` reads **fail-safe** (missing/corrupt `.env` → false).
+- **Compose sync test:** extend `embed_test.go` coverage to the `proxy` + `proxy-init` services, the `frontend` network + `app`'s dual membership, and the `mathion_acme` volume; pin both the reproxy and busybox image lines.
+- **`docker compose config`** parses cleanly without the profile and with `--profile tls`; assert `proxy`/`proxy-init` are on `frontend`/none, `db` on `default` only (shares no network with `proxy`), `app` on both `default` and `frontend`.
+- **Purge test:** `uninstall --purge` removes `<project>_frontend` and `<project>_mathion_acme` **in addition to** the `<project>_default` network + pgdata/assets it already removes; and acme is **excluded** from the fresh-install refuse-guard (teardown_test + install-guard test).
 
 ### On-host integration (CI where dockerable; else documented manual)
 - **HTTP-serves-no-app-content** (§8 acceptance) — bootable in a container without a public domain by hitting the HTTP listener directly.
 - **>64 KiB upload** through the proxy succeeds (guards the `MAX_SIZE` fix).
 - **Upgrade migration:** from a **pre-Slice-5 compose fixture** (app/db on `default`, no proxy), `tls enable` re-materializes compose and brings the stack onto `default`+`frontend` without stranding app↔db.
-- **restore/update with TLS enabled** brings the proxy back up as a **non-gating** step (proxy health never fails the deployment gate or a rollback — §11).
+- **restore/update with TLS enabled** brings the proxy back up as a **non-gating, bounded** step (`up -d proxy --pull never --no-deps` under a short independent timeout, forward-path only, errors demoted to a warning). Hermetic tests: the **rollback** path (`restoreEngine`) issues **no** proxy-up; and a Runner whose proxy-up call **blocks until context cancellation** must not delay the app gate or the rollback (assert the timeout cancels it, not merely that an eventual error is demoted).
 - **Real Let's Encrypt issuance** needs a public domain + DNS → **documented manual on-host verification** (same class as the amd64 cloud smoke), not a silent gap: install → `tls enable` → valid cert on `https://domain` → login works → `http://domain` returns no app content → SMTP notification still sends (app egress intact) → `tls disable` preserves posture → `status` reflects each state.
 
 ## 11. Files touched
 
-- `docker-compose.prod.yml` + `cli/internal/compose/docker-compose.yml` — `proxy` service (non-root hardened), `frontend` network + `app`'s dual membership (db unchanged on `default`), `mathion_acme` volume (synced byte-for-byte).
-- `cli/internal/compose/embed_test.go` — extend sync coverage + image pin.
-- `cli/cmd/tls.go` **(new)** + `cli/cmd/tls_test.go` **(new)** — the command group; enable re-materializes the on-disk compose via `composeBytes()`/`AtomicWrite`.
-- `cli/cmd/root.go` — register `tls`; `App.tlsEnabled` (read fail-safe at startup); `--profile tls` in `composeArgs`.
-- `cli/internal/config/validate.go` (+test) — strict interpolation-safe domain + email validators.
-- `cli/internal/config/env.go` (+`env_test.go`) — two optional vars; `SetTLS`/`ClearTLS`; pair-consistency in `ValidateEnvComplete`.
+- `docker-compose.prod.yml` + `cli/internal/compose/docker-compose.yml` — `proxy` (non-root hardened) + `proxy-init` (acme-volume chown one-shot) services, `frontend` network + `app`'s dual membership (db unchanged on `default`), `mathion_acme` volume (synced byte-for-byte).
+- `cli/internal/compose/embed_test.go` — extend sync coverage + pin reproxy **and** busybox image lines.
+- `cli/cmd/tls.go` **(new)** + `cli/cmd/tls_test.go` **(new)** — the command group; enable reuses the install-resume identity guard, then re-materializes the on-disk compose via `composeBytes()`/`AtomicWrite`.
+- `cli/cmd/root.go` — register `tls`; `App.tlsEnabled` (read fail-safe at startup); **operation-sensitive** `--profile tls` in `composeArgs` (always for containment/inspection; start only when enabled).
+- `cli/internal/config/validate.go` (+test) — strict DNS-label + interpolation-safe domain/email validators.
+- `cli/internal/config/env.go` (+`env_test.go`) — two optional vars; `SetTLS`/`ClearTLS`; pair-consistency in `ValidateEnvComplete` (runs the strict validators on `.env` values).
 - `cli/internal/compose/runner.go` (+`runner_test.go`) — add the three keys to `strippedEnvKeys`.
-- `cli/cmd/restore.go` and `cli/cmd/update.go` — when TLS is enabled, bring the proxy up as a **separate, non-gating** step (`up -d proxy`, errors demoted to a warning) **after** the existing app-gated `up --wait app`; the auto-rollback path (`restoreEngine`, `update.go:113`) must **not** wait on proxy health. Tests for TLS-enabled restore/update + rollback-not-blocked-by-proxy.
-- `cli/internal/dockerx/teardown.go` (+test) and `cli/cmd/uninstall.go` — `Purge` also removes `<project>_mathion_acme` and `<project>_frontend` (keep `<project>_default`); confirmation text updated. **acme is NOT added to the fresh-install refuse-guard** (`install.go:88`) — it holds only re-issuable certs, so a leftover acme volume must not block reinstall (auto-clean/ignore instead).
+- `cli/cmd/restore.go` and `cli/cmd/update.go` — when TLS is enabled, bring the proxy up as a **separate, non-gating, bounded** step (`up -d proxy --pull never --no-deps` under a short independent timeout, errors demoted) **after** the app-gated `up --wait app`; the auto-rollback path (`restoreEngine`, `update.go:113`) issues **no** proxy-up. Tests: TLS-enabled restore/update restarts the proxy; a blocking proxy-up call never delays the app gate or the rollback.
+- `cli/internal/dockerx/teardown.go` (+test) and `cli/cmd/uninstall.go` — `Purge` removes `<project>_mathion_acme` and `<project>_frontend` **in addition to** the `<project>_default` network + volumes it already removes; confirmation text updated. **acme is NOT added to the fresh-install refuse-guard** (`install.go:88`) — it holds only re-issuable certs, so a leftover acme volume must not block reinstall (auto-clean/ignore instead).
 - `cli/cmd/install.go` — `nextSteps` HTTPS hint.
 - `deploy/.env.prod.example`, `README.md`, `deploy/man/mathion.1`.
 
@@ -205,9 +223,9 @@ No `deploy/proxy/` directory — reproxy needs no config file.
 ## 12. Security considerations
 
 - **Proxy holds no app/DB secrets** — no `env_file: .env`; only `SSL_*`/`STATIC_*`/`MAX_SIZE` (§5).
-- **No secret-via-interpolation** — strict domain/email validators reject `$`/`{`/quotes so a crafted value can't expand a `.env` secret into `SSL_ACME_EMAIL` (§6.1 steps 2–3); a `docker compose config` regression test proves it (§10).
+- **No secret-via-interpolation** — because Compose recursively expands `.env` values, the load-bearing defense is the **input validator** rejecting `$ { } " ' \` so a crafted domain/email can never reach `.env` and expand a secret into `SSL_ACME_EMAIL` (§6.1 steps 2–3); the regression test asserts the input is *rejected* (not that compose neutralizes it) (§10).
 - **Network segmentation** — a compromised internet-facing proxy shares no network with `db` and cannot reach Postgres (`proxy` on `frontend`; `db` on `default`; they never share a network) (§4.4).
-- **Proxy runs non-root + least-privilege** — `user: "1001:1001"`, `cap_drop: [ALL]`, `no-new-privileges`, `read_only` rootfs (§5).
+- **Proxy runs non-root + least-privilege** — `user: "1001:1001"` (made writable by the `proxy-init` chown one-shot), `cap_drop: [ALL]`, `no-new-privileges`, `read_only` rootfs + `tmpfs:/tmp` (§5).
 - **reproxy image pinned by digest.**
 - **No cleartext app content** — port 80 serves ACME challenges + a redirect to HTTPS only; app content is HTTPS-listener-only (§8); `STATIC_RULES` scoped to the FQDN; HSTS on HTTPS if supported.
 - **Ports 80/443 exposed publicly** — intended; documented firewall requirement.
@@ -218,8 +236,8 @@ No `deploy/proxy/` directory — reproxy needs no config file.
 
 ## 13. Open items / risks (implementation must close, verified against the pinned digest)
 
-1. **Pinned digest + live behavior** — choose the reproxy digest and verify: the §8 HTTP redirect / no-app-over-HTTP behavior; that `STATIC_RULES` src `/` matches **all** app paths (`/api/…`, `/courses/…`), not just root; `MAX_SIZE=25M` effect; and HSTS support.
-2. **Non-root + read-only compatibility** — confirm the `FROM scratch` image runs as `user: "1001:1001"` with `read_only: true`, and that the fresh `mathion_acme` named volume is **writable by uid 1001** (may need an ownership step or matching the binary's default uid). Fall back to a documented minimal relaxation only if required.
+1. **Pinned digests + live behavior** — choose the reproxy **and busybox** digests and verify: the §8 HTTP redirect / no-app-over-HTTP behavior; that reproxy serves the ACME HTTP-01 challenge on its HTTP listener (host `80`→`8080`) so port-80 validation resolves (`SSL_HTTP_PORT` left at the Docker default — confirm, set explicitly if needed); that `STATIC_RULES` src `/` matches **all** app paths (`/api/…`, `/courses/…`), not just root; `MAX_SIZE=25M` effect; and HSTS support.
+2. **Non-root + read-only compatibility** — confirm the ownership mechanism works end-to-end: the `proxy-init` one-shot chowns `mathion_acme` so reproxy (uid 1001) can write it under `read_only: true`, and that `tmpfs:/tmp` covers any other reproxy write path (else widen the writable set). Confirm busybox is an acceptable pinned init image (or substitute a smaller pinned one).
 3. **Host-side readiness (replaces the impossible container healthcheck)** — the CLI polls `127.0.0.1:443` after `up` (§6.1 step 8); confirm `up --wait` treats the healthcheck-less proxy as ready on "started" and the poll is non-fatal/ACME-independent.
 4. **App env pickup + migration on enable** — confirm the full-project `up` recreates `app` onto `default`+`frontend` and it picks up the new `.env` (secure cookie + base-url); confirm the pre-Slice-5 → Slice-5 compose migration (§10 upgrade test) and that SMTP egress survives (app stays on `default`, an egress bridge).
 5. **restore/update proxy decoupling** — confirm the proxy is brought up as a **non-gating** step and that a slow/unhealthy proxy can never fail the deployment gate or the auto-rollback (§11 tests).
