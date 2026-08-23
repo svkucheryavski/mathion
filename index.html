@@ -1,0 +1,325 @@
+<title>Mathion — self-hosted teaching platform</title>
+<meta name="description" content="Mathion is a self-hosted platform for courses and student work, installed from your terminal with signed, verifiable releases." />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<!--
+  Mathion project site + release-key fingerprint (published out of band).
+  Drop this file at the ROOT of the gh-pages branch as index.html.
+  Edit the tagline/intro copy freely — the install command and the key
+  fingerprint block are the parts that must stay exact.
+-->
+
+<style>
+  :root {
+    --ground:  #F4F6F5;
+    --surface: #FFFFFF;
+    --ink:     #14211F;
+    --muted:   #55635F;
+    --faint:   #7C8A87;
+    --line:    #DBE3E1;
+    --accent:  #0A6E70;
+    --accent-strong: #085458;
+    --accent-wash: #E6F0EE;
+    /* terminal panel — dark in both themes */
+    --term-bg:     #0E1817;
+    --term-ink:    #DCE7E4;
+    --term-muted:  #7F918D;
+    --term-prompt: #4BC7B5;
+    --term-line:   #21302D;
+    --focus:   #0A6E70;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --measure: 66ch;
+    --radius: 10px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:  #0B1211;
+      --surface: #111A18;
+      --ink:     #E7ECEA;
+      --muted:   #9DADA9;
+      --faint:   #6E7E7B;
+      --line:    #223129;
+      --accent:  #47C8B7;
+      --accent-strong: #7CD8CC;
+      --accent-wash: #12211E;
+      --term-bg:     #070D0C;
+      --term-ink:    #DCE7E4;
+      --term-muted:  #7F918D;
+      --term-prompt: #4BC7B5;
+      --term-line:   #1A2624;
+      --focus:   #47C8B7;
+    }
+  }
+  /* Explicit toggle overrides the media query in both directions */
+  :root[data-theme="light"] {
+    --ground:#F4F6F5; --surface:#FFFFFF; --ink:#14211F; --muted:#55635F; --faint:#7C8A87;
+    --line:#DBE3E1; --accent:#0A6E70; --accent-strong:#085458; --accent-wash:#E6F0EE;
+    --term-bg:#0E1817; --term-ink:#DCE7E4; --term-muted:#7F918D; --term-prompt:#4BC7B5; --term-line:#21302D; --focus:#0A6E70;
+  }
+  :root[data-theme="dark"] {
+    --ground:#0B1211; --surface:#111A18; --ink:#E7ECEA; --muted:#9DADA9; --faint:#6E7E7B;
+    --line:#223129; --accent:#47C8B7; --accent-strong:#7CD8CC; --accent-wash:#12211E;
+    --term-bg:#070D0C; --term-ink:#DCE7E4; --term-muted:#7F918D; --term-prompt:#4BC7B5; --term-line:#1A2624; --focus:#47C8B7;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .wrap { width: 100%; max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 3px; }
+
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+
+  /* ---- header ---- */
+  header { border-bottom: 1px solid var(--line); }
+  .bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-top: 20px; padding-bottom: 20px; gap: 16px;
+  }
+  .wordmark {
+    font-family: var(--font-mono);
+    font-weight: 600; font-size: 1.05rem; letter-spacing: -0.01em;
+    color: var(--ink); display: inline-flex; align-items: baseline; gap: 0.05em;
+  }
+  .wordmark .caret { color: var(--accent); font-weight: 700; }
+  .bar nav { display: flex; gap: 22px; font-size: 0.9rem; }
+  .bar nav a { color: var(--muted); }
+  .bar nav a:hover { color: var(--accent); text-decoration: none; }
+
+  /* ---- eyebrow ---- */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.16em;
+    color: var(--accent); margin: 0 0 14px;
+  }
+
+  /* ---- hero ---- */
+  .hero { padding: 76px 0 60px; }
+  .hero h1 {
+    font-size: clamp(2.1rem, 6.2vw, 3.35rem);
+    line-height: 1.06; letter-spacing: -0.025em; font-weight: 700;
+    margin: 0 0 20px; text-wrap: balance;
+  }
+  .lede { font-size: 1.2rem; color: var(--muted); margin: 0 0 34px; max-width: 60ch; }
+
+  /* ---- section rhythm ---- */
+  section { padding: 44px 0; border-top: 1px solid var(--line); }
+  section h2 {
+    font-size: 1.45rem; letter-spacing: -0.02em; font-weight: 650;
+    margin: 0 0 8px; text-wrap: balance;
+  }
+  section > .wrap > p { max-width: var(--measure); color: var(--ink); }
+  .sub { color: var(--muted); max-width: var(--measure); margin-top: 0; }
+
+  /* ---- feature list ---- */
+  .feats { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 2px; }
+  .feats li { padding: 16px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0,15ch) 1fr; gap: 8px 28px; align-items: baseline; }
+  .feats li:last-child { border-bottom: 1px solid var(--line); }
+  .feats .k { font-family: var(--font-mono); font-size: 0.82rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+  .feats .v { color: var(--ink); }
+  @media (max-width: 540px) { .feats li { grid-template-columns: 1fr; gap: 4px; } }
+
+  /* ---- terminal / command block ---- */
+  .term {
+    background: var(--term-bg); color: var(--term-ink);
+    border: 1px solid var(--term-line); border-radius: var(--radius);
+    margin: 18px 0; overflow: hidden;
+  }
+  .term-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; border-bottom: 1px solid var(--term-line);
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--term-muted);
+  }
+  .term-head .label { display: inline-flex; align-items: center; gap: 8px; }
+  .term-head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--term-prompt); opacity: 0.85; }
+  .copy {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--term-muted); background: transparent; border: 1px solid var(--term-line);
+    border-radius: 6px; padding: 4px 9px; cursor: pointer; transition: color .15s, border-color .15s;
+  }
+  .copy:hover { color: var(--term-ink); border-color: var(--term-prompt); }
+  .copy[data-done="1"] { color: var(--term-prompt); border-color: var(--term-prompt); }
+  .term pre {
+    margin: 0; padding: 15px 16px; overflow-x: auto;
+    font-family: var(--font-mono); font-size: 0.86rem; line-height: 1.6;
+  }
+  .term pre code { white-space: pre; }
+  .term .cmt { color: var(--term-muted); }
+
+  /* ---- key / fingerprint card ---- */
+  .keycard {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 22px 22px 20px; margin: 22px 0 0;
+  }
+  .keycard .fplabel {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 10px;
+  }
+  .fp {
+    font-family: var(--font-mono); font-size: clamp(0.86rem, 2.8vw, 1.12rem);
+    font-weight: 600; letter-spacing: 0.02em; color: var(--ink);
+    background: var(--accent-wash); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .keycard .why { color: var(--muted); font-size: 0.95rem; margin: 16px 0 0; max-width: var(--measure); }
+
+  /* ---- footer ---- */
+  footer { border-top: 1px solid var(--line); padding: 34px 0 60px; color: var(--faint); font-size: 0.9rem; }
+  footer .row { display: flex; flex-wrap: wrap; gap: 6px 20px; align-items: baseline; justify-content: space-between; }
+  footer .fpmini { font-family: var(--font-mono); font-size: 0.8rem; color: var(--faint); }
+  footer a { color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header>
+  <div class="wrap bar">
+    <span class="wordmark"><span class="caret">$&nbsp;</span>mathion</span>
+    <nav>
+      <a href="https://github.com/svkucheryavski/mathion">GitHub</a>
+      <a href="#verify">Verify key</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Self-hosted · Open source</p>
+      <!-- Edit this headline + lede to match how you describe Mathion -->
+      <h1>Run your own teaching platform.</h1>
+      <p class="lede">Mathion hosts your courses, assignments, and student work on a server you control — installed and kept up to date from the terminal, with releases you can cryptographically verify.</p>
+      <div class="term">
+        <div class="term-head">
+          <span class="label"><span class="dot"></span>install</span>
+          <button class="copy" type="button" data-copy aria-label="Copy install command">Copy</button>
+        </div>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">What it is</p>
+      <h2>Your platform, on your server.</h2>
+      <ul class="feats">
+        <li><span class="k">Yours to host</span><span class="v">Runs on your own machine with Docker. Your students and their data stay with you.</span></li>
+        <li><span class="k">One command</span><span class="v">The <code>mathion</code> CLI installs, backs up, restores, and updates the whole stack.</span></li>
+        <li><span class="k">Verifiable</span><span class="v">Every release is GPG-signed; the installer checks the signature before it installs anything.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">Install</p>
+      <h2>Two ways to install.</h2>
+      <p class="sub">The one-liner above downloads the latest release, verifies its signature and checksum, and installs <code>mathion</code> to <code>/usr/local/bin</code>. Prefer to read before you run:</p>
+      <div class="term">
+        <div class="term-head">
+          <span class="label"><span class="dot"></span>inspect, then run</span>
+          <button class="copy" type="button" data-copy aria-label="Copy inspect-then-run commands">Copy</button>
+        </div>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh -o install.sh
+less install.sh          <span class="cmt"># review what it does</span>
+sudo sh install.sh</code></pre>
+      </div>
+      <p class="sub" style="margin-top:26px">On Debian/Ubuntu you can instead add the apt repository, so <code>mathion</code> upgrades with the rest of the system. The first keyring fetch is trust-on-first-use — <a href="#verify">verify its fingerprint</a> before relying on it.</p>
+      <div class="term">
+        <div class="term-head">
+          <span class="label"><span class="dot"></span>apt setup</span>
+          <button class="copy" type="button" data-copy aria-label="Copy apt setup commands">Copy</button>
+        </div>
+        <pre><code>sudo install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://svkucheryavski.github.io/mathion/deb/mathion-archive-keyring.gpg \
+  | sudo tee /usr/share/keyrings/mathion-archive-keyring.gpg >/dev/null
+sudo chmod 0644 /usr/share/keyrings/mathion-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/mathion-archive-keyring.gpg] \
+  https://svkucheryavski.github.io/mathion/deb stable main" \
+  | sudo tee /etc/apt/sources.list.d/mathion.list
+sudo apt update && sudo apt install mathion</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="verify">
+    <div class="wrap">
+      <p class="eyebrow">Trust</p>
+      <h2>Verify the release key.</h2>
+      <p class="sub">Mathion's releases are signed by an offline key. Because the first keyring you receive is trusted as-is, confirm it against the fingerprint published here — an independent source from the download itself — before you rely on it. They must match exactly.</p>
+      <div class="keycard">
+        <p class="fplabel">Primary key fingerprint</p>
+        <div class="fp">F006&nbsp;02DF&nbsp;E1BF&nbsp;8CD2&nbsp;B321&nbsp;&nbsp;FC72&nbsp;AD21&nbsp;D4AD&nbsp;294C&nbsp;31A0</div>
+        <div class="term" style="margin-bottom:0">
+          <div class="term-head">
+            <span class="label"><span class="dot"></span>check it</span>
+            <button class="copy" type="button" data-copy aria-label="Copy verification command">Copy</button>
+          </div>
+          <pre><code>gpg --show-keys /usr/share/keyrings/mathion-archive-keyring.gpg</code></pre>
+        </div>
+        <p class="why">If the fingerprint printed by that command doesn't match the one above, stop — do not trust the keyring. The fingerprint is also recorded in the repository, but that copy shares an origin with the download, so this page (and any other channel you trust) is the independent check.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap row">
+    <span>Mathion · self-hosted teaching platform</span>
+    <span><a href="https://github.com/svkucheryavski/mathion">github.com/svkucheryavski/mathion</a></span>
+  </div>
+  <div class="wrap" style="margin-top:10px">
+    <span class="fpmini">key F006 02DF E1BF 8CD2 B321 · FC72 AD21 D4AD 294C 31A0</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btns = document.querySelectorAll('.copy[data-copy]');
+    btns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var block = btn.closest('.term');
+        var code = block ? block.querySelector('pre code') : null;
+        if (!code) return;
+        var text = code.innerText.replace(/ /g, ' ');
+        var done = function () {
+          var prev = btn.textContent;
+          btn.textContent = 'Copied';
+          btn.setAttribute('data-done', '1');
+          setTimeout(function () { btn.textContent = prev; btn.removeAttribute('data-done'); }, 1600);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(function () { fallback(text, done); });
+        } else {
+          fallback(text, done);
+        }
+      });
+    });
+    function fallback(text, done) {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', '');
+      ta.style.position = 'absolute'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  })();
+</script>
