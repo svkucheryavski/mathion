@@ -85,8 +85,8 @@ jobs:
         with:
           version: "~> v2"
           install-only: true
-      - name: Shellcheck apt/deb + cli scripts
-        run: shellcheck deploy/apt/*.sh deploy/deb/*.sh cli/scripts/*.sh cli/*.sh
+      - name: Shellcheck apt/deb + keys + cli scripts
+        run: shellcheck deploy/apt/*.sh deploy/deb/*.sh deploy/keys/*.sh cli/scripts/*.sh cli/*.sh
       # gpg (preinstalled) + goreleaser/go (above) are all these need; resign_test
       # is gpg-only and deb_test inspects with dpkg-deb (preinstalled), so no
       # apt-utils/apt-ftparchive and no root are required here.
