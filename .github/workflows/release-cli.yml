@@ -50,6 +50,10 @@ jobs:
         with:
           version: "~> v2"
           install-only: true
+      # Fail the release BEFORE importing any signing secret if install.sh's embedded
+      # key / pins are not self-consistent with the shipped keyring (go-live guard).
+      - name: Embedded-key authenticity guard (go-live pins)
+        run: sh cli/scripts/release-embedded-key-guard.sh
       - name: Import S_rel + enable loopback
         env:
           S_REL: ${{ secrets.GPG_S_REL_PRIVATE }}
