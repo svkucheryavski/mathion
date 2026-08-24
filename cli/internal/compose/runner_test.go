@@ -334,3 +334,21 @@ func TestFakeRunnerStreamHooks(t *testing.T) {
 		t.Fatalf("StreamInFunc reader = %q, want %q", gotIn, "dump")
 	}
 }
+
+// TestSanitizedEnvironStripsTLSKeys locks in that COMPOSE_PROFILES and the
+// MATHION_TLS_* pair never reach a compose child: an ambient
+// COMPOSE_PROFILES=tls must not activate the bundled proxy, and --env-file .env
+// must stay authoritative for the ${MATHION_TLS_*} interpolation.
+func TestSanitizedEnvironStripsTLSKeys(t *testing.T) {
+	for _, k := range []string{"COMPOSE_PROFILES", "MATHION_TLS_DOMAIN", "MATHION_TLS_EMAIL"} {
+		t.Setenv(k, "poison")
+	}
+	got := sanitizedEnviron()
+	for _, kv := range got {
+		key, _, _ := strings.Cut(kv, "=")
+		switch key {
+		case "COMPOSE_PROFILES", "MATHION_TLS_DOMAIN", "MATHION_TLS_EMAIL":
+			t.Errorf("child env must not carry %s (ambient COMPOSE_PROFILES=tls must never activate the proxy)", key)
+		}
+	}
+}

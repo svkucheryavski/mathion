@@ -54,11 +54,17 @@ func (e *ExitError) Error() string {
 
 // strippedEnvKeys are removed from the child environment by sanitizedEnviron so
 // a poisoned host env cannot influence the image version or DB credentials.
+// COMPOSE_PROFILES and the MATHION_TLS_* pair are stripped so an ambient
+// `COMPOSE_PROFILES=tls` cannot activate the bundled proxy and `--env-file .env`
+// stays authoritative for `${MATHION_TLS_*}` interpolation.
 var strippedEnvKeys = map[string]struct{}{
-	"MATHION_VERSION":   {},
-	"POSTGRES_USER":     {},
-	"POSTGRES_PASSWORD": {},
-	"POSTGRES_DB":       {},
+	"MATHION_VERSION":    {},
+	"POSTGRES_USER":      {},
+	"POSTGRES_PASSWORD":  {},
+	"POSTGRES_DB":        {},
+	"COMPOSE_PROFILES":   {},
+	"MATHION_TLS_DOMAIN": {},
+	"MATHION_TLS_EMAIL":  {},
 }
 
 // sanitizedEnviron returns os.Environ() with the strippedEnvKeys removed. The
