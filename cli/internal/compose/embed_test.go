@@ -18,33 +18,34 @@ func TestEmbeddedComposeMatchesRepoRoot(t *testing.T) {
 	}
 }
 
-// dependsOnCond is the long-form depends_on entry (service → {condition: ...}).
-type dependsOnCond struct {
-	Condition string `yaml:"condition"`
-}
-
 // composeService is a minimal typed view of the fields Slice 5 must guarantee.
 // env_file is a yaml.Node so we can assert PRESENCE/ABSENCE regardless of whether
 // it is written as a string or a list — a substring match could not distinguish
 // `env_file: secrets.env` or list syntax from real absence.
+//
+// DependsOn is a raw nested map (service → nested-key → node) rather than a typed
+// {condition} struct: a typed struct would silently ignore extra nested keys, so a
+// `required: false` alongside `condition:` would make the dependency optional while
+// every check still passed. The raw form lets the assertions fail closed on ANY
+// nested key other than `condition` (the same discipline as the top-level allowlist).
 type composeService struct {
-	Image       string                   `yaml:"image"`
-	Profiles    []string                 `yaml:"profiles"`
-	Networks    []string                 `yaml:"networks"`
-	NetworkMode string                   `yaml:"network_mode"`
-	EnvFile     yaml.Node                `yaml:"env_file"`
-	Environment map[string]string        `yaml:"environment"`
-	Command     []string                 `yaml:"command"`
-	Volumes     []string                 `yaml:"volumes"`
-	Ports       []string                 `yaml:"ports"`
-	Tmpfs       []string                 `yaml:"tmpfs"`
-	DependsOn   map[string]dependsOnCond `yaml:"depends_on"`
-	CapDrop     []string                 `yaml:"cap_drop"`
-	CapAdd      []string                 `yaml:"cap_add"`
-	SecurityOpt []string                 `yaml:"security_opt"`
-	User        string                   `yaml:"user"`
-	ReadOnly    bool                     `yaml:"read_only"`
-	Restart     string                   `yaml:"restart"`
+	Image       string                          `yaml:"image"`
+	Profiles    []string                        `yaml:"profiles"`
+	Networks    []string                        `yaml:"networks"`
+	NetworkMode string                          `yaml:"network_mode"`
+	EnvFile     yaml.Node                       `yaml:"env_file"`
+	Environment map[string]string               `yaml:"environment"`
+	Command     []string                        `yaml:"command"`
+	Volumes     []string                        `yaml:"volumes"`
+	Ports       []string                        `yaml:"ports"`
+	Tmpfs       []string                        `yaml:"tmpfs"`
+	DependsOn   map[string]map[string]yaml.Node `yaml:"depends_on"`
+	CapDrop     []string                        `yaml:"cap_drop"`
+	CapAdd      []string                        `yaml:"cap_add"`
+	SecurityOpt []string                        `yaml:"security_opt"`
+	User        string                          `yaml:"user"`
+	ReadOnly    bool                            `yaml:"read_only"`
+	Restart     string                          `yaml:"restart"`
 }
 
 type composeFile struct {
@@ -191,11 +192,17 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		"proxy-init": "service_completed_successfully",
 	}
 	if len(proxy.DependsOn) != len(wantDeps) {
-		t.Errorf("proxy depends_on = %v, want %v", proxy.DependsOn, wantDeps)
+		t.Errorf("proxy depends_on services = %v, want %v", proxy.DependsOn, wantDeps)
 	}
 	for svc, cond := range wantDeps {
-		if proxy.DependsOn[svc].Condition != cond {
-			t.Errorf("proxy depends_on[%s].condition = %q, want %q", svc, proxy.DependsOn[svc].Condition, cond)
+		dep := proxy.DependsOn[svc]
+		// Exactly one nested key, `condition`: a second key such as `required: false`
+		// would silently make the dependency optional and un-gate startup ordering.
+		if len(dep) != 1 {
+			t.Errorf("proxy depends_on[%s] has %d nested keys, want exactly 1 (condition); an extra key like required:false would weaken the startup gate: %v", svc, len(dep), dep)
+		}
+		if dep["condition"].Value != cond {
+			t.Errorf("proxy depends_on[%s].condition = %q, want %q", svc, dep["condition"].Value, cond)
 		}
 	}
 
