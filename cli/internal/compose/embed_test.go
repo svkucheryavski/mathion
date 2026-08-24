@@ -30,9 +30,14 @@ type composeService struct {
 	EnvFile     yaml.Node         `yaml:"env_file"`
 	Environment map[string]string `yaml:"environment"`
 	Command     []string          `yaml:"command"`
+	Volumes     []string          `yaml:"volumes"`
 	CapDrop     []string          `yaml:"cap_drop"`
 	CapAdd      []string          `yaml:"cap_add"`
 	SecurityOpt []string          `yaml:"security_opt"`
+	Privileged  bool              `yaml:"privileged"`
+	Pid         string            `yaml:"pid"`
+	Ipc         string            `yaml:"ipc"`
+	UsernsMode  string            `yaml:"userns_mode"`
 	User        string            `yaml:"user"`
 	ReadOnly    bool              `yaml:"read_only"`
 	Restart     string            `yaml:"restart"`
@@ -204,6 +209,23 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 	}
 	if proxyInit.Restart != "no" {
 		t.Errorf("proxy-init restart = %q, want %q", proxyInit.Restart, "no")
+	}
+
+	// --- No privilege- or namespace-escape on EITHER TLS container. cap_drop:[ALL]
+	// is worthless if a single line re-grants everything: privileged:true restores all
+	// capabilities; a host pid/ipc namespace or userns share breaks isolation; and a
+	// stray bind-mount (e.g. the docker socket) is a direct host escape. Assert the
+	// exact minimal volume set so only the acme volume is mounted. ---
+	for name, svc := range map[string]composeService{"proxy": proxy, "proxy-init": proxyInit} {
+		if svc.Privileged {
+			t.Errorf("%s must not set privileged:true (it re-grants every capability, voiding cap_drop:[ALL])", name)
+		}
+		if svc.Pid != "" || svc.Ipc != "" || svc.UsernsMode != "" {
+			t.Errorf("%s must not share a host/other namespace (pid=%q ipc=%q userns_mode=%q)", name, svc.Pid, svc.Ipc, svc.UsernsMode)
+		}
+		if !slices.Equal(svc.Volumes, []string{"mathion_acme:/srv/acme"}) {
+			t.Errorf("%s volumes = %v, want exactly [mathion_acme:/srv/acme] (a stray bind-mount such as the docker socket would be a host escape)", name, svc.Volumes)
+		}
 	}
 
 	// --- Top-level frontend network + mathion_acme volume declared ---
