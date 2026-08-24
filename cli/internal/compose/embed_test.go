@@ -18,25 +18,33 @@ func TestEmbeddedComposeMatchesRepoRoot(t *testing.T) {
 	}
 }
 
+// dependsOnCond is the long-form depends_on entry (service → {condition: ...}).
+type dependsOnCond struct {
+	Condition string `yaml:"condition"`
+}
+
 // composeService is a minimal typed view of the fields Slice 5 must guarantee.
 // env_file is a yaml.Node so we can assert PRESENCE/ABSENCE regardless of whether
 // it is written as a string or a list — a substring match could not distinguish
 // `env_file: secrets.env` or list syntax from real absence.
 type composeService struct {
-	Image       string            `yaml:"image"`
-	Profiles    []string          `yaml:"profiles"`
-	Networks    []string          `yaml:"networks"`
-	NetworkMode string            `yaml:"network_mode"`
-	EnvFile     yaml.Node         `yaml:"env_file"`
-	Environment map[string]string `yaml:"environment"`
-	Command     []string          `yaml:"command"`
-	Volumes     []string          `yaml:"volumes"`
-	CapDrop     []string          `yaml:"cap_drop"`
-	CapAdd      []string          `yaml:"cap_add"`
-	SecurityOpt []string          `yaml:"security_opt"`
-	User        string            `yaml:"user"`
-	ReadOnly    bool              `yaml:"read_only"`
-	Restart     string            `yaml:"restart"`
+	Image       string                   `yaml:"image"`
+	Profiles    []string                 `yaml:"profiles"`
+	Networks    []string                 `yaml:"networks"`
+	NetworkMode string                   `yaml:"network_mode"`
+	EnvFile     yaml.Node                `yaml:"env_file"`
+	Environment map[string]string        `yaml:"environment"`
+	Command     []string                 `yaml:"command"`
+	Volumes     []string                 `yaml:"volumes"`
+	Ports       []string                 `yaml:"ports"`
+	Tmpfs       []string                 `yaml:"tmpfs"`
+	DependsOn   map[string]dependsOnCond `yaml:"depends_on"`
+	CapDrop     []string                 `yaml:"cap_drop"`
+	CapAdd      []string                 `yaml:"cap_add"`
+	SecurityOpt []string                 `yaml:"security_opt"`
+	User        string                   `yaml:"user"`
+	ReadOnly    bool                     `yaml:"read_only"`
+	Restart     string                   `yaml:"restart"`
 }
 
 type composeFile struct {
@@ -143,9 +151,14 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		t.Error("app is expected to declare env_file: .env (guards the negative assertion above)")
 	}
 
-	// --- Proxy env: EXACTLY the explicit SSL_*/STATIC_*/MAX_SIZE keys ---
+	// --- Proxy env: EXACTLY these 7 keys, each with its EXACT value. The email/domain
+	// come only from ${MATHION_TLS_EMAIL}/${MATHION_TLS_DOMAIN}: asserting the exact
+	// interpolation token (not mere presence) is what stops a DB secret from being piped
+	// into the proxy env via e.g. `SSL_ACME_EMAIL: ${POSTGRES_PASSWORD}`. ---
 	for k, want := range map[string]string{
 		"SSL_TYPE":          "auto",
+		"SSL_ACME_EMAIL":    "${MATHION_TLS_EMAIL}",
+		"SSL_ACME_FQDN":     "${MATHION_TLS_DOMAIN}",
 		"SSL_ACME_LOCATION": "/srv/acme",
 		"STATIC_ENABLED":    "true",
 		"STATIC_RULES":      "${MATHION_TLS_DOMAIN},/,http://app:8000/",
@@ -155,15 +168,35 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 			t.Errorf("proxy env %s = %q, want %q", k, proxy.Environment[k], want)
 		}
 	}
-	for _, k := range []string{"SSL_ACME_EMAIL", "SSL_ACME_FQDN"} {
-		if _, ok := proxy.Environment[k]; !ok {
-			t.Errorf("proxy env missing %s", k)
-		}
-	}
 	// Exactly these 7 keys — an injected extra (e.g. another SSL_* var) could alter
 	// proxy behavior and must trip the wire.
 	if len(proxy.Environment) != 7 {
 		t.Errorf("proxy has %d env keys, want exactly 7; extra keys are a red flag: %v", len(proxy.Environment), proxy.Environment)
+	}
+
+	// --- Proxy publishes EXACTLY 80/443 (the only ports an internet TLS terminator
+	// needs) — an extra published port would widen the host exposure surface. ---
+	if !slices.Equal(proxy.Ports, []string{"80:8080", "443:8443"}) {
+		t.Errorf("proxy ports = %v, want exactly [80:8080 443:8443]", proxy.Ports)
+	}
+	// --- tmpfs is the ONLY writable surface on the read_only proxy; pin it to /tmp so a
+	// writable mount over a sensitive path (e.g. /etc:mode=1777) cannot weaken read_only. ---
+	if !slices.Equal(proxy.Tmpfs, []string{"/tmp"}) {
+		t.Errorf("proxy tmpfs = %v, want exactly [/tmp]", proxy.Tmpfs)
+	}
+	// --- depends_on gates startup: proxy waits for app healthy AND the proxy-init chown
+	// to complete (so the acme volume is 1001-owned before the non-root proxy writes to it). ---
+	wantDeps := map[string]string{
+		"app":        "service_healthy",
+		"proxy-init": "service_completed_successfully",
+	}
+	if len(proxy.DependsOn) != len(wantDeps) {
+		t.Errorf("proxy depends_on = %v, want %v", proxy.DependsOn, wantDeps)
+	}
+	for svc, cond := range wantDeps {
+		if proxy.DependsOn[svc].Condition != cond {
+			t.Errorf("proxy depends_on[%s].condition = %q, want %q", svc, proxy.DependsOn[svc].Condition, cond)
+		}
 	}
 
 	// --- Proxy hardening (EXACT, so added privileges are caught, not just removed) ---
