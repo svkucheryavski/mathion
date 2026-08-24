@@ -2,6 +2,7 @@ package compose
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -25,10 +26,10 @@ type composeService struct {
 	Image       string            `yaml:"image"`
 	Profiles    []string          `yaml:"profiles"`
 	Networks    []string          `yaml:"networks"`
+	NetworkMode string            `yaml:"network_mode"`
 	EnvFile     yaml.Node         `yaml:"env_file"`
 	Environment map[string]string `yaml:"environment"`
 	Command     []string          `yaml:"command"`
-	NetworkMode string            `yaml:"network_mode"`
 	CapDrop     []string          `yaml:"cap_drop"`
 	CapAdd      []string          `yaml:"cap_add"`
 	SecurityOpt []string          `yaml:"security_opt"`
@@ -64,9 +65,10 @@ func effectiveNetworks(n []string) []string {
 
 // TestEmbeddedComposeTLSTopology parses the embedded compose and asserts the exact
 // Slice-5 topology and hardening — a real regression tripwire (unlike a substring
-// scan): it fails if db gains a shared network with the proxy, a service loses its
-// tls profile, the proxy gains an env_file (in any syntax), a digest changes, or the
-// proxy/proxy-init hardening is weakened.
+// scan). Hardening is asserted with EXACT matches (not `contains`) so ADDED privileges
+// (an extra cap_add, an unconfined security_opt, a network_mode namespace-share) are
+// caught, not just removals: for an internet-facing proxy, defense-in-depth must fail
+// closed on additive weakening too.
 func TestEmbeddedComposeTLSTopology(t *testing.T) {
 	const (
 		reproxyImg = "ghcr.io/umputun/reproxy@sha256:456d9d2ac7321e2bbb729a5580259d4fc6b52d0310c6cb79c1e30350dd6ba0f7"
@@ -121,6 +123,15 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 			t.Errorf("proxy and db must share NO network, but both are on %q (proxy=%v db=%v)", pn, proxy.Networks, db.Networks)
 		}
 	}
+	// A network_mode: service:<x> / container:<x> would share another container's
+	// network namespace, bypassing the networks-based segmentation above. proxy and db
+	// must NOT use one (proxy-init legitimately uses network_mode: none, asserted below).
+	if db.NetworkMode != "" {
+		t.Errorf("db network_mode = %q, want empty (a shared namespace would bypass network segmentation)", db.NetworkMode)
+	}
+	if proxy.NetworkMode != "" {
+		t.Errorf("proxy network_mode = %q, want empty (it must use networks:[frontend], not another container's namespace)", proxy.NetworkMode)
+	}
 
 	// --- The proxy must carry NO env_file (no DB secret may reach it) ---
 	if proxy.EnvFile.Kind != 0 {
@@ -131,7 +142,7 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		t.Error("app is expected to declare env_file: .env (guards the negative assertion above)")
 	}
 
-	// --- Proxy env: only the explicit SSL_*/STATIC_*/MAX_SIZE keys, exact values ---
+	// --- Proxy env: EXACTLY the explicit SSL_*/STATIC_*/MAX_SIZE keys ---
 	for k, want := range map[string]string{
 		"SSL_TYPE":          "auto",
 		"SSL_ACME_LOCATION": "/srv/acme",
@@ -148,10 +159,21 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 			t.Errorf("proxy env missing %s", k)
 		}
 	}
+	// Exactly these 7 keys — an injected extra (e.g. another SSL_* var) could alter
+	// proxy behavior and must trip the wire.
+	if len(proxy.Environment) != 7 {
+		t.Errorf("proxy has %d env keys, want exactly 7; extra keys are a red flag: %v", len(proxy.Environment), proxy.Environment)
+	}
 
-	// --- Proxy hardening ---
-	if !contains(proxy.CapDrop, "ALL") {
-		t.Errorf("proxy cap_drop = %v, want to contain ALL", proxy.CapDrop)
+	// --- Proxy hardening (EXACT, so added privileges are caught, not just removed) ---
+	if !slices.Equal(proxy.CapDrop, []string{"ALL"}) {
+		t.Errorf("proxy cap_drop = %v, want exactly [ALL]", proxy.CapDrop)
+	}
+	if len(proxy.CapAdd) != 0 {
+		t.Errorf("proxy cap_add = %v, want none (the internet-facing proxy needs no added capability)", proxy.CapAdd)
+	}
+	if !slices.Equal(proxy.SecurityOpt, []string{"no-new-privileges:true"}) {
+		t.Errorf("proxy security_opt = %v, want exactly [no-new-privileges:true]", proxy.SecurityOpt)
 	}
 	if proxy.User != "1001:1001" {
 		t.Errorf("proxy user = %q, want 1001:1001", proxy.User)
@@ -159,33 +181,26 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 	if !proxy.ReadOnly {
 		t.Error("proxy must be read_only")
 	}
-	if !contains(proxy.SecurityOpt, "no-new-privileges:true") {
-		t.Errorf("proxy security_opt = %v, want to contain no-new-privileges:true", proxy.SecurityOpt)
+	if proxy.Restart != "unless-stopped" {
+		t.Errorf("proxy restart = %q, want unless-stopped", proxy.Restart)
 	}
 
-	// --- proxy-init hardening: non-recursive chown, CHOWN-only, no network, no restart ---
+	// --- proxy-init hardening (EXACT): non-recursive chown, CHOWN-ONLY, no network ---
 	wantCmd := []string{"chown", "1001:1001", "/srv/acme"}
-	if len(proxyInit.Command) != len(wantCmd) {
+	if !slices.Equal(proxyInit.Command, wantCmd) {
 		t.Errorf("proxy-init command = %v, want %v", proxyInit.Command, wantCmd)
-	} else {
-		for i := range wantCmd {
-			if proxyInit.Command[i] != wantCmd[i] {
-				t.Errorf("proxy-init command = %v, want %v", proxyInit.Command, wantCmd)
-				break
-			}
-		}
 	}
 	if proxyInit.NetworkMode != "none" {
 		t.Errorf("proxy-init network_mode = %q, want none", proxyInit.NetworkMode)
 	}
-	if !contains(proxyInit.CapDrop, "ALL") {
-		t.Errorf("proxy-init cap_drop = %v, want to contain ALL", proxyInit.CapDrop)
+	if !slices.Equal(proxyInit.CapDrop, []string{"ALL"}) {
+		t.Errorf("proxy-init cap_drop = %v, want exactly [ALL]", proxyInit.CapDrop)
 	}
-	if !contains(proxyInit.CapAdd, "CHOWN") {
-		t.Errorf("proxy-init cap_add = %v, want to contain CHOWN", proxyInit.CapAdd)
+	if !slices.Equal(proxyInit.CapAdd, []string{"CHOWN"}) {
+		t.Errorf("proxy-init cap_add = %v, want exactly [CHOWN] (CHOWN-only)", proxyInit.CapAdd)
 	}
-	if !contains(proxyInit.SecurityOpt, "no-new-privileges:true") {
-		t.Errorf("proxy-init security_opt = %v, want no-new-privileges:true", proxyInit.SecurityOpt)
+	if !slices.Equal(proxyInit.SecurityOpt, []string{"no-new-privileges:true"}) {
+		t.Errorf("proxy-init security_opt = %v, want exactly [no-new-privileges:true]", proxyInit.SecurityOpt)
 	}
 	if proxyInit.Restart != "no" {
 		t.Errorf("proxy-init restart = %q, want %q", proxyInit.Restart, "no")
