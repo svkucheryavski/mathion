@@ -68,3 +68,54 @@ func TestValidateOCITag(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateDomain(t *testing.T) {
+	good := []string{"example.edu", "learn.example.edu", "a.b.c.example.com", "x-y.example.io"}
+	for _, s := range good {
+		if err := ValidateDomain(s); err != nil {
+			t.Errorf("ValidateDomain(%q) = %v, want nil", s, err)
+		}
+	}
+	bad := []string{
+		"", "localhost", "example", // <2 labels
+		"Example.edu",  // uppercase
+		"a..b",         // empty label
+		"-a.example",   // leading hyphen
+		"a-.example",   // trailing hyphen
+		".example.edu", // leading dot
+		"example.edu.", // trailing dot
+		"1.2.3.4",      // IPv4 literal (numeric TLD)
+		"a b.example",  // whitespace
+		"a$b.example",  // interpolation meta
+		"${X}.example", // interpolation
+		`a".example`,   // quote
+	}
+	for _, s := range bad {
+		if err := ValidateDomain(s); err == nil {
+			t.Errorf("ValidateDomain(%q) = nil, want error", s)
+		}
+	}
+}
+
+func TestValidateTLSEmail(t *testing.T) {
+	good := []string{"admin@example.edu", "ops.team@learn.example.edu"}
+	for _, s := range good {
+		if err := ValidateTLSEmail(s); err != nil {
+			t.Errorf("ValidateTLSEmail(%q) = %v, want nil", s, err)
+		}
+	}
+	// The load-bearing case: an interpolation payload must be rejected at input.
+	bad := []string{
+		"", "no-at-sign", "a@@b.com", "@example.edu", "admin@localhost",
+		"${POSTGRES_PASSWORD}@x.y", // the DB-password leak payload
+		"a$b@example.edu",
+		`a"@example.edu`,
+		"a b@example.edu", // whitespace
+		"admin@ex ample.edu",
+	}
+	for _, s := range bad {
+		if err := ValidateTLSEmail(s); err == nil {
+			t.Errorf("ValidateTLSEmail(%q) = nil, want error", s)
+		}
+	}
+}
