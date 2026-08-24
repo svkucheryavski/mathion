@@ -34,10 +34,6 @@ type composeService struct {
 	CapDrop     []string          `yaml:"cap_drop"`
 	CapAdd      []string          `yaml:"cap_add"`
 	SecurityOpt []string          `yaml:"security_opt"`
-	Privileged  bool              `yaml:"privileged"`
-	Pid         string            `yaml:"pid"`
-	Ipc         string            `yaml:"ipc"`
-	UsernsMode  string            `yaml:"userns_mode"`
 	User        string            `yaml:"user"`
 	ReadOnly    bool              `yaml:"read_only"`
 	Restart     string            `yaml:"restart"`
@@ -211,20 +207,50 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		t.Errorf("proxy-init restart = %q, want %q", proxyInit.Restart, "no")
 	}
 
-	// --- No privilege- or namespace-escape on EITHER TLS container. cap_drop:[ALL]
-	// is worthless if a single line re-grants everything: privileged:true restores all
-	// capabilities; a host pid/ipc namespace or userns share breaks isolation; and a
-	// stray bind-mount (e.g. the docker socket) is a direct host escape. Assert the
-	// exact minimal volume set so only the acme volume is mounted. ---
+	// --- Each TLS service mounts EXACTLY the acme volume: the exact-match makes a stray
+	// second bind-mount (e.g. the docker socket) fail even though `volumes` is allowed. ---
 	for name, svc := range map[string]composeService{"proxy": proxy, "proxy-init": proxyInit} {
-		if svc.Privileged {
-			t.Errorf("%s must not set privileged:true (it re-grants every capability, voiding cap_drop:[ALL])", name)
-		}
-		if svc.Pid != "" || svc.Ipc != "" || svc.UsernsMode != "" {
-			t.Errorf("%s must not share a host/other namespace (pid=%q ipc=%q userns_mode=%q)", name, svc.Pid, svc.Ipc, svc.UsernsMode)
-		}
 		if !slices.Equal(svc.Volumes, []string{"mathion_acme:/srv/acme"}) {
 			t.Errorf("%s volumes = %v, want exactly [mathion_acme:/srv/acme] (a stray bind-mount such as the docker socket would be a host escape)", name, svc.Volumes)
+		}
+	}
+
+	// --- Fail closed on ANY unmodeled compose key on the two internet-adjacent TLS
+	// containers. The typed assertions above validate the VALUES of expected keys, but a
+	// single unmodeled line can re-grant privilege while every typed check still passes:
+	// privileged, use_api_socket, volumes_from, devices, device_cgroup_rules, sysctls,
+	// group_add, cgroup, pid/ipc/userns_mode host-shares, ... Blocklisting that open-ended
+	// set never ends; instead require every key on proxy/proxy-init to be in a reviewed
+	// allowlist, so a NEW key trips the wire and must be consciously vetted as safe here
+	// before being added. (Removal of a critical key is caught by the value assertions
+	// above; the small overlap with those checks is deliberate defense-in-depth.) ---
+	var raw struct {
+		Services map[string]map[string]yaml.Node `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(ComposeYAML, &raw); err != nil {
+		t.Fatalf("embedded compose is not valid YAML: %v", err)
+	}
+	proxyAllowedKeys := map[string]bool{
+		"image": true, "profiles": true, "depends_on": true, "ports": true,
+		"environment": true, "volumes": true, "networks": true, "user": true,
+		"cap_drop": true, "security_opt": true, "read_only": true, "tmpfs": true,
+		"restart": true,
+	}
+	proxyInitAllowedKeys := map[string]bool{
+		"image": true, "profiles": true, "command": true, "volumes": true,
+		"network_mode": true, "cap_drop": true, "cap_add": true,
+		"security_opt": true, "restart": true,
+	}
+	for svc, allowed := range map[string]map[string]bool{"proxy": proxyAllowedKeys, "proxy-init": proxyInitAllowedKeys} {
+		keys, ok := raw.Services[svc]
+		if !ok {
+			t.Errorf("raw parse missing service %q", svc)
+			continue
+		}
+		for k := range keys {
+			if !allowed[k] {
+				t.Errorf("%s carries unreviewed compose key %q — a hardening escape must not slip in unmodeled; if the key is legitimate, add it to the allowlist after reviewing it is safe on an internet-adjacent least-privilege container", svc, k)
+			}
 		}
 	}
 
