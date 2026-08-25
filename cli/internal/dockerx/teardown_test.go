@@ -66,24 +66,31 @@ func TestPurgeDiscoversAndRemovesInOrder(t *testing.T) {
 		psIDs: "abc123\ndef456\n",
 		existing: map[string]bool{
 			"mathion_prod_default":        true,
+			"mathion_prod_frontend":       true,
 			"mathion_prod_mathion_pgdata": true,
 			"mathion_prod_mathion_assets": true,
+			"mathion_prod_mathion_acme":   true,
 		},
 	}
 	if err := Purge(context.Background(), f, "mathion_prod"); err != nil {
 		t.Fatal(err)
 	}
 	// Assert the EXACT ordered sequence: discovery -> rm -f -> each resource is
-	// existence-checked immediately before it is removed, network before volumes.
+	// existence-checked immediately before it is removed, networks (default,
+	// frontend) before volumes (pgdata, assets, acme).
 	want := [][]string{
 		{"ps", "-aq", "--filter", "label=com.docker.compose.project=mathion_prod"},
 		{"rm", "-f", "abc123", "def456"},
 		{"network", "ls", "--filter", "name=^mathion_prod_default$", "--quiet"},
 		{"network", "rm", "mathion_prod_default"},
+		{"network", "ls", "--filter", "name=^mathion_prod_frontend$", "--quiet"},
+		{"network", "rm", "mathion_prod_frontend"},
 		{"volume", "ls", "--filter", "name=^mathion_prod_mathion_pgdata$", "--quiet"},
 		{"volume", "rm", "mathion_prod_mathion_pgdata"},
 		{"volume", "ls", "--filter", "name=^mathion_prod_mathion_assets$", "--quiet"},
 		{"volume", "rm", "mathion_prod_mathion_assets"},
+		{"volume", "ls", "--filter", "name=^mathion_prod_mathion_acme$", "--quiet"},
+		{"volume", "rm", "mathion_prod_mathion_acme"},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Fatalf("call sequence mismatch:\n got %v\nwant %v", f.Calls, want)
@@ -144,5 +151,40 @@ func TestPurgeVolumeInUseFailsTeardown(t *testing.T) {
 	}
 	if err := Purge(context.Background(), f, "mathion_prod"); err == nil {
 		t.Fatal("a volume-rm failure on an existing volume must fail teardown")
+	}
+}
+
+func TestPurgeRemovesFrontendAndAcme(t *testing.T) {
+	var calls [][]string
+	fr := &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			// container list empty; every `<kind> ls` reports the resource present.
+			if len(args) > 0 && args[0] == "ps" {
+				return "", nil
+			}
+			return "found\n", nil
+		},
+		RunFunc: func(args []string) error { calls = append(calls, args); return nil },
+	}
+	if err := Purge(context.Background(), fr, "mathion_prod"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"network mathion_prod_frontend":    false,
+		"volume mathion_prod_mathion_acme": false,
+	}
+	for _, c := range calls {
+		j := strings.Join(c, " ")
+		for k := range want {
+			// removeIfPresent issues `<kind> rm <name>`.
+			if strings.Contains(j, "rm "+strings.Fields(k)[1]) {
+				want[k] = true
+			}
+		}
+	}
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("Purge must remove %s; calls=%v", k, calls)
+		}
 	}
 }
