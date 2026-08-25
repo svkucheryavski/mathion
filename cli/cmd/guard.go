@@ -71,7 +71,7 @@ const (
 // own late flow, stop which contains the stack, and any unknown command) proceeds.
 func classify(cmd string) entryOutcome {
 	switch cmd {
-	case "update", "start", "install", "backup":
+	case "update", "start", "install", "backup", "tls-enable":
 		return outcomeRefuse
 	default:
 		return outcomeProceed
