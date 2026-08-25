@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -88,5 +89,71 @@ func TestTLSDisableReapsThenClears(t *testing.T) {
 	}
 	if m["MATHION_BASE_URL"] != "https://learn.example.edu" || m["MATHION_COOKIE_SECURE"] != "1" {
 		t.Fatalf("disable must preserve https posture; base=%q secure=%q", m["MATHION_BASE_URL"], m["MATHION_COOKIE_SECURE"])
+	}
+}
+
+func TestTLSDisableAbortsOnNonToleratedExitError(t *testing.T) {
+	dir := writeEnabledEnv(t)
+	var out bytes.Buffer
+	fr := &compose.FakeRunner{
+		StreamFunc: func(_ io.Writer, _ []string) error {
+			return &compose.ExitError{Code: 1, Stderr: []byte("permission denied while trying to connect to the Docker daemon socket")}
+		},
+	}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: &out, Err: &out, tlsEnabled: true}
+	if err := app.tlsDisable(context.Background()); err == nil {
+		t.Fatal("disable must return an error when the reap fails for a non-tolerated reason")
+	}
+	if !app.tlsEnabled {
+		t.Error("tlsEnabled must stay true after an aborted disable")
+	}
+	m, _ := config.ReadEnvFile(dir)
+	if m["MATHION_TLS_DOMAIN"] != "learn.example.edu" {
+		t.Fatalf("a failed reap must NOT clear TLS state; domain=%q", m["MATHION_TLS_DOMAIN"])
+	}
+	if m["MATHION_TLS_EMAIL"] != "admin@example.edu" {
+		t.Fatalf("a failed reap must NOT clear TLS email; email=%q", m["MATHION_TLS_EMAIL"])
+	}
+}
+
+func TestTLSDisableAbortsOnPlainErrorEvenWithPhrase(t *testing.T) {
+	dir := writeEnabledEnv(t)
+	var out bytes.Buffer
+	fr := &compose.FakeRunner{
+		StreamFunc: func(_ io.Writer, _ []string) error {
+			return errors.New("no such service: proxy") // plain error, NOT *compose.ExitError
+		},
+	}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: &out, Err: &out, tlsEnabled: true}
+	if err := app.tlsDisable(context.Background()); err == nil {
+		t.Fatal("a plain (non-ExitError) reap error must abort even if its message contains the phrase")
+	}
+	m, _ := config.ReadEnvFile(dir)
+	if m["MATHION_TLS_DOMAIN"] != "learn.example.edu" {
+		t.Fatalf("plain-error abort must NOT clear TLS state; domain=%q", m["MATHION_TLS_DOMAIN"])
+	}
+}
+
+func TestTLSDisableToleratesNoSuchServiceThenClears(t *testing.T) {
+	dir := writeEnabledEnv(t)
+	var out bytes.Buffer
+	fr := &compose.FakeRunner{
+		StreamFunc: func(_ io.Writer, _ []string) error {
+			return &compose.ExitError{Code: 1, Stderr: []byte("no such service: proxy")}
+		},
+	}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: &out, Err: &out, tlsEnabled: true}
+	if err := app.tlsDisable(context.Background()); err != nil {
+		t.Fatalf("a `no such service: proxy` reap must be tolerated: %v", err)
+	}
+	if app.tlsEnabled {
+		t.Error("tlsEnabled must be false after a successful disable")
+	}
+	m, _ := config.ReadEnvFile(dir)
+	if m["MATHION_TLS_DOMAIN"] != "" || m["MATHION_TLS_EMAIL"] != "" {
+		t.Fatalf("tolerated reap must still clear TLS vars; domain=%q email=%q", m["MATHION_TLS_DOMAIN"], m["MATHION_TLS_EMAIL"])
+	}
+	if m["MATHION_BASE_URL"] != "https://learn.example.edu" || m["MATHION_COOKIE_SECURE"] != "1" {
+		t.Fatalf("posture must survive disable; base=%q secure=%q", m["MATHION_BASE_URL"], m["MATHION_COOKIE_SECURE"])
 	}
 }
