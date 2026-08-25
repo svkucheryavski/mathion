@@ -112,6 +112,9 @@ func TestValidateTLSEmail(t *testing.T) {
 		`a"@example.edu`,
 		"a b@example.edu", // whitespace
 		"admin@ex ample.edu",
+		"a@example.edu",    // C1 control (the bypass)
+		"a\x00@example.edu", // NUL (C0)
+		"a\nb@example.edu",  // newline
 	}
 	for _, s := range bad {
 		if err := ValidateTLSEmail(s); err == nil {

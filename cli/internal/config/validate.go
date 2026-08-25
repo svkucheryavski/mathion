@@ -128,13 +128,22 @@ func ValidateDomain(s string) error {
 }
 
 // hasInterpolationMeta reports whether s carries any dotenv/Compose interpolation
-// metacharacter ($ { } " ' \), whitespace, or control char — none of which may appear
-// in a value interpolated into .env / a compose environment.
+// metacharacter ($ { } " ' \), any Unicode control character (unicode.IsControl covers
+// the C0, C1, and DEL ranges), or whitespace — none of which may appear in a value
+// interpolated into .env / a compose environment. It does not delegate to
+// hasCtrlOrSpace, which only catches C0/DEL and so would miss the C1 range
+// (U+0080–U+009F).
 func hasInterpolationMeta(s string) bool {
-	if hasCtrlOrSpace(s) {
-		return true
+	for _, r := range s {
+		switch r {
+		case '$', '{', '}', '"', '\'', '\\':
+			return true
+		}
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			return true
+		}
 	}
-	return strings.ContainsAny(s, "${}\"'\\")
+	return false
 }
 
 // ValidateTLSEmail validates the Let's Encrypt contact email that lands in
