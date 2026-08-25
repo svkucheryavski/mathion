@@ -211,3 +211,68 @@ func TestEnvKeyParityWithExample(t *testing.T) {
 		}
 	}
 }
+
+func TestSetAndClearTLS(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(dir+"/.env", []byte(RenderEnv(gen())), 0o600)
+
+	if err := SetTLS(dir, "learn.example.edu", "admin@example.edu"); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := ReadEnvFile(dir)
+	if m["MATHION_TLS_DOMAIN"] != "learn.example.edu" || m["MATHION_TLS_EMAIL"] != "admin@example.edu" {
+		t.Fatalf("TLS vars not set: %q / %q", m["MATHION_TLS_DOMAIN"], m["MATHION_TLS_EMAIL"])
+	}
+	if m["MATHION_BASE_URL"] != "https://learn.example.edu" {
+		t.Fatalf("base-url not repinned: %q", m["MATHION_BASE_URL"])
+	}
+	if m["MATHION_COOKIE_SECURE"] != "1" {
+		t.Fatalf("cookie-secure = %q, want 1", m["MATHION_COOKIE_SECURE"])
+	}
+	if err := ValidateEnvComplete(m); err != nil {
+		t.Fatalf("post-SetTLS .env must validate: %v", err)
+	}
+
+	// A hostile input must be rejected BEFORE any write (file byte-identical).
+	before, _ := os.ReadFile(dir + "/.env")
+	if err := SetTLS(dir, "learn.example.edu", "${POSTGRES_PASSWORD}@x.y"); err == nil {
+		t.Fatal("SetTLS must reject an interpolation payload")
+	}
+	after, _ := os.ReadFile(dir + "/.env")
+	if string(before) != string(after) {
+		t.Fatal("a rejected SetTLS must leave .env byte-identical")
+	}
+
+	if err := ClearTLS(dir); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = ReadEnvFile(dir)
+	if m["MATHION_TLS_DOMAIN"] != "" || m["MATHION_TLS_EMAIL"] != "" {
+		t.Fatalf("ClearTLS left TLS vars: %q / %q", m["MATHION_TLS_DOMAIN"], m["MATHION_TLS_EMAIL"])
+	}
+	// Disable never downgrades: base-url + cookie-secure survive.
+	if m["MATHION_BASE_URL"] != "https://learn.example.edu" || m["MATHION_COOKIE_SECURE"] != "1" {
+		t.Fatalf("ClearTLS must preserve https posture: %q / %q", m["MATHION_BASE_URL"], m["MATHION_COOKIE_SECURE"])
+	}
+}
+
+func TestValidateEnvCompleteTLSPair(t *testing.T) {
+	base := ParseEnv(RenderEnv(gen())) // both TLS keys empty -> valid (disabled)
+	if err := ValidateEnvComplete(base); err != nil {
+		t.Fatalf("a fresh .env (TLS empty) must validate: %v", err)
+	}
+	// Half-set pair -> reject.
+	half := ParseEnv(RenderEnv(gen()))
+	half["MATHION_TLS_DOMAIN"] = "learn.example.edu"
+	if err := ValidateEnvComplete(half); err == nil {
+		t.Error("a half-set TLS pair must be rejected")
+	}
+	// Interpolation payload smuggled into the email -> reject.
+	bad := ParseEnv(RenderEnv(gen()))
+	bad["MATHION_TLS_DOMAIN"] = "learn.example.edu"
+	bad["MATHION_TLS_EMAIL"] = "${POSTGRES_PASSWORD}@x.y"
+	bad["MATHION_BASE_URL"] = "https://learn.example.edu"
+	if err := ValidateEnvComplete(bad); err == nil {
+		t.Error("an interpolation payload in MATHION_TLS_EMAIL must be rejected by an update/resume")
+	}
+}
