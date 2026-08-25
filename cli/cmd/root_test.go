@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
@@ -78,5 +79,59 @@ func TestUpdateCmdFlags(t *testing.T) {
 		if c.Flags().Lookup(fl) == nil {
 			t.Errorf("missing --%s flag", fl)
 		}
+	}
+}
+
+func hasProfile(args []string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--profile" && args[i+1] == "tls" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestComposeArgsProfileSplit(t *testing.T) {
+	app := &App{CfgDir: "/etc/mathion", Project: "mathion_prod", Runner: &compose.FakeRunner{}}
+
+	// Containment / inspection: ALWAYS carries the profile, regardless of tlsEnabled.
+	for _, sub := range [][]string{{"down"}, {"stop"}, {"rm", "-sf", "proxy"}, {"ps", "-q", "proxy"}, {"logs"}} {
+		app.tlsEnabled = false
+		if !hasProfile(app.composeArgs(sub...)) {
+			t.Errorf("containment %v must carry --profile tls even when disabled", sub)
+		}
+	}
+
+	// Start: profile ONLY when enabled.
+	for _, sub := range [][]string{{"up", "-d", "--wait"}, {"start"}, {"create"}, {"run", "--rm"}} {
+		app.tlsEnabled = false
+		if hasProfile(app.composeArgs(sub...)) {
+			t.Errorf("start %v must NOT carry the profile when disabled", sub)
+		}
+		app.tlsEnabled = true
+		if !hasProfile(app.composeArgs(sub...)) {
+			t.Errorf("start %v must carry the profile when enabled", sub)
+		}
+	}
+
+	// Everything else: NEVER, regardless of tlsEnabled.
+	for _, sub := range [][]string{{"pull"}, {"exec", "-T", "app", "sh"}, {"config"}} {
+		for _, en := range []bool{false, true} {
+			app.tlsEnabled = en
+			if hasProfile(app.composeArgs(sub...)) {
+				t.Errorf("non-start/non-containment %v must never carry the profile (tlsEnabled=%v)", sub, en)
+			}
+		}
+	}
+
+	// Empty sub: no panic, no profile.
+	app.tlsEnabled = true
+	got := app.composeArgs()
+	if hasProfile(got) {
+		t.Errorf("empty sub must not carry the profile: %v", got)
+	}
+	// The base flags are still present and ordered.
+	if !slices.Equal(got[:3], []string{"compose", "-p", "mathion_prod"}) {
+		t.Errorf("base args malformed: %v", got)
 	}
 }

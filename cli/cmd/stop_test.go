@@ -18,7 +18,7 @@ func TestStopArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The sweep is call 0; find the `stop` and assert its exact argv.
-	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "stop"}
+	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "--profile", "tls", "stop"}
 	if i := idxOfCall(f.Calls, func(a []string) bool { return reflect.DeepEqual(a, want) }); i < 0 {
 		t.Fatalf("stop must issue `... stop`, got %v", f.Calls)
 	}
@@ -38,7 +38,7 @@ func TestStopContainmentRetainsBreadcrumbAndHints(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "stop"}
+	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "--profile", "tls", "stop"}
 	if !hasCall(f.Calls, func(a []string) bool { return reflect.DeepEqual(a, want) }) {
 		t.Fatalf("containment stop must still stop the stack; calls=%v", f.Calls)
 	}

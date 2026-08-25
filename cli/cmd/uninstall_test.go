@@ -34,7 +34,7 @@ func TestUninstallPlainIsComposeDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The preamble sweep is call 0; find the `down` and assert its exact argv.
-	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "down"}
+	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "--profile", "tls", "down"}
 	if i := idxOfCall(f.Calls, func(a []string) bool { return reflect.DeepEqual(a, want) }); i < 0 {
 		t.Fatalf("plain uninstall must issue `... down`, got %v", f.Calls)
 	}
