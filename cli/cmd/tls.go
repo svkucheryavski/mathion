@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/dockerx"
 )
 
 // probeHTTPS best-effort reports whether something accepts TCP on 127.0.0.1:443.
@@ -122,12 +124,151 @@ func (a *App) tlsDisable(ctx context.Context) error {
 	return nil
 }
 
-// newTLSEnableCmd is fully implemented in Task 7.
-func newTLSEnableCmd(app *App) *cobra.Command {
-	return &cobra.Command{
-		Use:    "enable",
-		Short:  "Enable bundled auto-HTTPS for one public domain (Let's Encrypt)",
-		Hidden: true,
-		RunE:   func(c *cobra.Command, _ []string) error { return errors.New("not yet implemented") },
-	}
+type tlsEnableOpts struct {
+	Domain, Email string
 }
+
+func newTLSEnableCmd(app *App) *cobra.Command {
+	var o tlsEnableOpts
+	c := &cobra.Command{
+		Use:   "enable",
+		Short: "Enable bundled auto-HTTPS for one public domain (Let's Encrypt)",
+		RunE: func(c *cobra.Command, _ []string) error {
+			release, proceed, err := lockAndGuard(c.Context(), app, "tls-enable")
+			defer release()
+			if err != nil || !proceed {
+				return err
+			}
+			return app.tlsEnable(c.Context(), o)
+		},
+	}
+	c.Flags().StringVar(&o.Domain, "domain", "", "public FQDN to serve over HTTPS (required)")
+	c.Flags().StringVar(&o.Email, "email", "", "contact email for Let's Encrypt (required)")
+	return c
+}
+
+// Package seams so unit tests avoid real port binds / DNS lookups.
+var (
+	portBindable = dockerx.PortBindable
+	dnsLookup    = net.LookupHost
+)
+
+func swapBindable(fn func(string) error) func() {
+	prev := portBindable
+	portBindable = fn
+	return func() { portBindable = prev }
+}
+
+func swapLookup(fn func(string) ([]string, error)) func() {
+	prev := dnsLookup
+	dnsLookup = fn
+	return func() { dnsLookup = prev }
+}
+
+func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
+	// 1. Both flags required.
+	if o.Domain == "" || o.Email == "" {
+		return fmt.Errorf("tls enable requires --domain and --email")
+	}
+	// 2-3. Strict, interpolation-safe validation (rejects $ { } " ' \ + whitespace).
+	if err := config.ValidateDomain(o.Domain); err != nil {
+		return err
+	}
+	email := config.NormalizeEmail(o.Email)
+	if err := config.ValidateTLSEmail(email); err != nil {
+		return err
+	}
+	// 1 (identity): require a valid, installed deployment (same guard install-resume uses).
+	if err := a.requireInstalledDeployment(); err != nil {
+		return err
+	}
+	// 4. Re-materialize the on-disk compose to the embedded (Slice-5) revision so
+	// `up … proxy` finds the service after a CLI upgrade.
+	if err := config.EnsureConfigDir(a.CfgDir); err != nil {
+		return err
+	}
+	if err := config.AtomicWrite(a.CfgDir+"/docker-compose.yml", composeBytes(), 0o644); err != nil {
+		return err
+	}
+	// 5. Port preflight — only when the proxy is not already running.
+	if !a.proxyRunning(ctx) {
+		for _, addr := range []string{":80", ":443"} {
+			if err := portBindable(addr); err != nil {
+				return fmt.Errorf("port preflight: %w (free it, or use your own external proxy on the non-TLS path)", err)
+			}
+		}
+	}
+	// 6. DNS preflight (warn, non-blocking; dnsLookup is a seam for hermetic tests).
+	if _, err := dnsLookup(o.Domain); err != nil {
+		fmt.Fprintf(a.Err, "warning: DNS lookup for %s failed (%v); Let's Encrypt issuance waits until DNS points at this host.\n", o.Domain, err)
+	}
+	// 7. SetTLS: atomic, validate-before-write, reread + assert; then reflect the new
+	// state so composeArgs adds --profile tls to the `up` below.
+	if err := config.SetTLS(a.CfgDir, o.Domain, email); err != nil {
+		return err
+	}
+	a.tlsEnabled = true
+	// 8. Full-project up (profile now active; pull ALLOWED so reproxy + busybox are
+	// fetched on first enable — this omits --pull never, unlike start/update/restore).
+	if err := a.compose(ctx, "up", "-d", "--wait"); err != nil {
+		return err
+	}
+	// Readiness (non-fatal): the container has no healthcheck.
+	a.reportHTTPSReadiness()
+	// 9. Report.
+	fmt.Fprintf(a.Out, "bundled TLS enabled for https://%s.\n"+
+		"A Let's Encrypt certificate is obtained automatically shortly after start.\n"+
+		"Ensure the firewall opens ports 80 and 443 and DNS points at this host.\n"+
+		"If HTTPS is not up yet, check `mathion tls status` / `mathion logs`.\n", o.Domain)
+	return nil
+}
+
+// requireInstalledDeployment reuses the install-resume identity/state guard
+// (install.go:59) — a present, regular, private .env on a valid, complete install.
+func (a *App) requireInstalledDeployment() error {
+	envPath := a.CfgDir + "/.env"
+	fi, err := os.Lstat(envPath)
+	if err != nil {
+		return fmt.Errorf("no installed deployment at %s (%v); run `mathion install` first", a.CfgDir, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf(".env at %s is not a regular file; repair it or run `mathion install`", envPath)
+	}
+	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf(".env at %s is group/world-accessible (%v); it holds secrets — fix with `chmod 600 %s`", envPath, perm, envPath)
+	}
+	if _, err := config.ReadState(a.CfgDir); err != nil {
+		return fmt.Errorf("install-state is missing or invalid (%w); run `mathion install`", err)
+	}
+	m, err := config.ReadEnvFile(a.CfgDir)
+	if err != nil {
+		return fmt.Errorf(".env is unreadable (%w); repair it or run `mathion install`", err)
+	}
+	if err := config.ValidateEnvComplete(m); err != nil {
+		return fmt.Errorf(".env is incomplete or inconsistent (%w); repair it or run `mathion install`", err)
+	}
+	return nil
+}
+
+// proxyRunning reports whether the project's proxy container is up (best-effort).
+func (a *App) proxyRunning(ctx context.Context) bool {
+	out, err := a.Runner.Output(ctx, a.composeArgs("ps", "-q", "proxy")...)
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
+// reportHTTPSReadiness prints a single bounded best-effort readiness line. Bounded by
+// httpsPollAttempts probes spaced by sleepBetweenPolls (both package seams so tests
+// stay fast). Never fatal — issuance/DNS may still be pending.
+func (a *App) reportHTTPSReadiness() {
+	for i := 0; i < httpsPollAttempts; i++ {
+		if probeHTTPS() {
+			fmt.Fprintln(a.Out, "  https listener up on 127.0.0.1:443.")
+			return
+		}
+		sleepBetweenPolls()
+	}
+	fmt.Fprintln(a.Out, "  https listener not yet reachable — issuance/DNS may still be pending; check `mathion tls status`.")
+}
+
+var httpsPollAttempts = 6
+var sleepBetweenPolls = func() { time.Sleep(500 * time.Millisecond) }

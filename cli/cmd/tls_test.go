@@ -134,6 +134,73 @@ func TestTLSDisableAbortsOnPlainErrorEvenWithPhrase(t *testing.T) {
 	}
 }
 
+func TestTLSEnableRequiresBothFlags(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(dir+"/.env", []byte(config.RenderEnv(config.GenerateEnv("https://x.example.edu", "v0.1.1", "s", "p"))), 0o600)
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: io.Discard, Err: io.Discard}
+	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu"}); err == nil {
+		t.Error("enable must require --email")
+	}
+	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Email: "a@b.edu"}); err == nil {
+		t.Error("enable must require --domain")
+	}
+}
+
+func TestTLSEnableRejectsInterpolationPayload(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(dir+"/.env", []byte(config.RenderEnv(config.GenerateEnv("https://x.example.edu", "v0.1.1", "s", "p"))), 0o600)
+	before, _ := os.ReadFile(dir + "/.env")
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: io.Discard, Err: io.Discard}
+	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu", Email: "${POSTGRES_PASSWORD}@x.y"}); err == nil {
+		t.Fatal("enable must reject an interpolation payload before any write")
+	}
+	after, _ := os.ReadFile(dir + "/.env")
+	if string(before) != string(after) {
+		t.Fatal("a rejected enable must leave .env byte-identical")
+	}
+}
+
+func TestTLSEnableHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	// A valid installed deployment: .env (0600) + install-state.
+	os.WriteFile(dir+"/.env", []byte(config.RenderEnv(config.GenerateEnv("https://x.example.edu", "v0.1.1", "s", "p"))), 0o600)
+	if err := config.WriteState(dir, config.State{Schema: 1, AdminEmail: "admin@example.edu"}); err != nil {
+		t.Fatal(err)
+	}
+	// docker-compose.yml must exist for AtomicWrite target dir; EnsureConfigDir/AtomicWrite create files.
+	var out bytes.Buffer
+	var calls [][]string
+	fr := &compose.FakeRunner{
+		RunFunc:    func(args []string) error { calls = append(calls, args); return nil },
+		OutputFunc: func(args []string) (string, error) { return "", nil }, // ps -q proxy => not running
+	}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: &out, Err: &out}
+	defer swapProbe(func() bool { return true })()
+	defer swapBindable(func(string) error { return nil })()                                // don't touch real 80/443 in tests
+	defer swapLookup(func(string) ([]string, error) { return []string{"1.2.3.4"}, nil })() // no live DNS in unit tests
+	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu", Email: "admin@example.edu"}); err != nil {
+		t.Fatal(err)
+	}
+	// .env now enabled with https posture.
+	m, _ := config.ReadEnvFile(dir)
+	if m["MATHION_TLS_DOMAIN"] != "learn.example.edu" || m["MATHION_BASE_URL"] != "https://learn.example.edu" {
+		t.Fatalf("enable did not set TLS vars: %v", m)
+	}
+	// A whole-project `up -d --wait` (profile active) must have been issued.
+	var upped bool
+	for _, c := range calls {
+		if len(c) >= 2 && c[0] == "compose" {
+			j := strings.Join(c, " ")
+			if strings.Contains(j, "--profile tls") && strings.Contains(j, "up -d --wait") {
+				upped = true
+			}
+		}
+	}
+	if !upped {
+		t.Fatalf("enable must issue a profiled whole-project up; calls=%v", calls)
+	}
+}
+
 func TestTLSDisableToleratesNoSuchServiceThenClears(t *testing.T) {
 	dir := writeEnabledEnv(t)
 	var out bytes.Buffer
