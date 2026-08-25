@@ -202,7 +202,7 @@ func TestMaybeWarnDualInstall_NilWriter(t *testing.T) {
 	orig := binExists
 	t.Cleanup(func() { binExists = orig })
 	binExists = func(string) bool { return true } // simulate dual-install
-	maybeWarnDualInstall(nil)                      // must not panic
+	maybeWarnDualInstall(nil)                     // must not panic
 }
 
 // TestVersionCmdDualInstallWarningRouting drives newVersionCmd's RunE with the
@@ -241,7 +241,10 @@ func TestVersionShort_PrintsOnlyBuildVersion(t *testing.T) {
 	// Fail the side-effect seams so the test proves --short never touches them.
 	oldEnv, oldProbe, oldBin := versionEnvReader, versionRunningProbe, binExists
 	t.Cleanup(func() { versionEnvReader, versionRunningProbe, binExists = oldEnv, oldProbe, oldBin })
-	versionEnvReader = func(string) (map[string]string, error) { t.Fatal(".env must NOT be read under --short"); return nil, nil }
+	versionEnvReader = func(string) (map[string]string, error) {
+		t.Fatal(".env must NOT be read under --short")
+		return nil, nil
+	}
 	versionRunningProbe = func(context.Context) string { t.Fatal("/version must NOT be probed under --short"); return "" }
 	binExists = func(string) bool { t.Fatal("dual-install check must NOT run under --short"); return false }
 
