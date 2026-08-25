@@ -147,16 +147,57 @@ func TestTLSEnableRequiresBothFlags(t *testing.T) {
 }
 
 func TestTLSEnableRejectsInterpolationPayload(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(dir+"/.env", []byte(config.RenderEnv(config.GenerateEnv("https://x.example.edu", "v0.1.1", "s", "p"))), 0o600)
-	before, _ := os.ReadFile(dir + "/.env")
-	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: io.Discard, Err: io.Discard}
-	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu", Email: "${POSTGRES_PASSWORD}@x.y"}); err == nil {
-		t.Fatal("enable must reject an interpolation payload before any write")
+	// A hostile domain OR email must be rejected BEFORE any write. The fixture is a
+	// VALID installed deployment, so the identity guard passes and validation — not a
+	// missing install-state — is the operative gate. docker-compose.yml is seeded with
+	// a sentinel: a regression that re-materialized it (or wrote .env) before validating
+	// would be caught here.
+	const sentinel = "SENTINEL-COMPOSE-DO-NOT-REWRITE\n"
+	cases := []struct {
+		name, domain, email string
+	}{
+		{"hostile-email", "learn.example.edu", "${POSTGRES_PASSWORD}@x.y"},
+		{"hostile-domain", "${INJECT}.example.edu", "admin@example.edu"},
 	}
-	after, _ := os.ReadFile(dir + "/.env")
-	if string(before) != string(after) {
-		t.Fatal("a rejected enable must leave .env byte-identical")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(dir+"/.env", []byte(config.RenderEnv(config.GenerateEnv("https://x.example.edu", "v0.1.1", "s", "p"))), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := config.WriteState(dir, config.State{Schema: 1, AdminEmail: "admin@example.edu"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dir+"/docker-compose.yml", []byte(sentinel), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			envBefore, _ := os.ReadFile(dir + "/.env")
+
+			var calls [][]string
+			fr := &compose.FakeRunner{
+				RunFunc:    func(args []string) error { calls = append(calls, args); return nil },
+				OutputFunc: func(args []string) (string, error) { calls = append(calls, args); return "", nil },
+				StreamFunc: func(_ io.Writer, args []string) error { calls = append(calls, args); return nil },
+			}
+			app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: io.Discard, Err: io.Discard}
+			// Hermetic: on correct code these are never reached (validation rejects first),
+			// but stub them so a regression can't touch real ports/DNS.
+			defer swapBindable(func(string) error { return nil })()
+			defer swapLookup(func(string) ([]string, error) { return []string{"1.2.3.4"}, nil })()
+
+			if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: tc.domain, Email: tc.email}); err == nil {
+				t.Fatal("enable must reject an interpolation payload")
+			}
+			if envAfter, _ := os.ReadFile(dir + "/.env"); string(envAfter) != string(envBefore) {
+				t.Fatal("a rejected enable must leave .env byte-identical")
+			}
+			if composeAfter, _ := os.ReadFile(dir + "/docker-compose.yml"); string(composeAfter) != sentinel {
+				t.Fatal("a rejected enable must NOT re-materialize docker-compose.yml (validation precedes the compose write)")
+			}
+			if len(calls) != 0 {
+				t.Fatalf("a rejected enable must issue no compose commands; got %v", calls)
+			}
+		})
 	}
 }
 

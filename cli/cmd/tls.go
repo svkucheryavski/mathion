@@ -265,7 +265,9 @@ func (a *App) reportHTTPSReadiness() {
 			fmt.Fprintln(a.Out, "  https listener up on 127.0.0.1:443.")
 			return
 		}
-		sleepBetweenPolls()
+		if i+1 < httpsPollAttempts {
+			sleepBetweenPolls()
+		}
 	}
 	fmt.Fprintln(a.Out, "  https listener not yet reachable — issuance/DNS may still be pending; check `mathion tls status`.")
 }
