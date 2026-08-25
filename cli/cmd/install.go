@@ -141,6 +141,17 @@ func (a *App) resume(ctx context.Context, st config.State) error {
 			return err
 		}
 	}
+	// TLS-enabled resume: the whole-project up below is --pull never and now includes
+	// the profiled proxy/proxy-init, so on a new host / after a proxy digest bump / on
+	// the pgdata-present fast-path (which skipped the app pull) the proxy image may be
+	// absent. Bounded best-effort targeted pull first; the up stays authoritative.
+	if a.tlsEnabled {
+		pctx, pcancel := context.WithTimeout(ctx, tlsProxyPullTimeout)
+		if err := a.compose(pctx, "pull", "--policy", "missing", "proxy", "proxy-init"); err != nil {
+			fmt.Fprintf(a.Err, "note: could not pre-pull the bundled proxy images (%v); continuing with cached images\n", err)
+		}
+		pcancel()
+	}
 	if err := a.compose(ctx, "up", "-d", "--wait", "--pull", "never"); err != nil {
 		return err
 	}
@@ -207,7 +218,7 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 	}
 
 	// 8. Next steps (no secrets printed).
-	fmt.Fprintf(a.Out, nextSteps, o.Domain, email)
+	fmt.Fprintf(a.Out, nextSteps, o.Domain, o.Domain, email)
 	return nil
 }
 
@@ -215,7 +226,10 @@ func composeBytes() []byte { return compose.ComposeYAML }
 
 const nextSteps = `
 Deployment up. Next:
-  1. Put a TLS-terminating reverse proxy in front (see README "Self-hosting").
+  1. Front it with HTTPS. Easiest — bundled auto-TLS (opens 80+443, obtains a
+     Let's Encrypt cert):
+         sudo mathion tls enable --domain %s --email you@example.org
+     Or run your own TLS proxy (see README "Self-hosting").
   2. Log in at https://%s — NOT http://127.0.0.1:8000 (the Secure session cookie
      won't persist over plain HTTP).
   3. Issue your first-login PIN:  sudo mathion pin %s
