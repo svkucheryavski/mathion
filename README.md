@@ -237,6 +237,35 @@ docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser p
 docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser activate
 ```
 
+### Bundled HTTPS (`mathion tls`) — the easy path
+
+If your server has a public domain and ports 80 + 443 open, Mathion can run its
+own TLS-terminating reverse proxy and obtain a Let's Encrypt certificate for you —
+no cert files to manage:
+
+    sudo mathion tls enable --domain learn.example.edu --email you@example.org
+
+This stands up a bundled, network-segmented reproxy (it shares no network with the
+database), obtains and auto-renews the certificate, and serves the app over HTTPS.
+Check state any time with `mathion tls status`; stop it with `mathion tls disable`.
+
+**Requirements:** DNS for the domain must point at this host, and the firewall must
+allow inbound TCP 80 (ACME HTTP-01 challenge + redirect) and 443 (HTTPS).
+
+**Production is HTTPS-only.** `mathion tls disable` stops the bundled proxy but does
+**not** downgrade to plain HTTP — the app keeps `Secure` cookies and its
+`https://…` base URL, so put your own TLS proxy in front (or re-enable) to reach it.
+
+**Upload limit:** the bundled proxy allows request bodies up to 25 MiB (covers the
+default 20 MiB upload cap). If you raise `MATHION_MAX_FILE_SIZE` above ~24 MiB, raise
+the proxy's `MAX_SIZE` in the compose file to match.
+
+**Downgrade caveat:** running an **older** `mathion` CLI's `tls enable` against a
+**newer** install rewrites the on-disk compose with the older embedded copy. That
+newer→older path is unsupported — upgrade the CLI first (`mathion self-update`).
+
+Prefer your own external proxy? That path is unchanged — see below.
+
 ### TLS / reverse proxy (external)
 
 Primary — **reproxy** (host-run; pin a specific release and verify the flags):
