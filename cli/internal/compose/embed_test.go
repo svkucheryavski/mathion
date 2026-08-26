@@ -183,6 +183,15 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		t.Errorf("proxy has %d env keys, want exactly 7; extra keys are a red flag: %v", len(proxy.Environment), proxy.Environment)
 	}
 
+	// --- HSTS: reproxy has no env binding for --header, so it is passed as a command
+	// arg (verified against the pinned image; it lands on client responses). Assert the
+	// EXACT flag so a removal or weakening (shorter max-age, dropped directive) trips the
+	// wire. Living on this tls-profile-only service, HSTS is emitted only when the bundled
+	// proxy terminates HTTPS. ---
+	if !slices.Equal(proxy.Command, []string{"--header=Strict-Transport-Security:max-age=31536000"}) {
+		t.Errorf("proxy command = %v, want exactly [--header=Strict-Transport-Security:max-age=31536000]", proxy.Command)
+	}
+
 	// --- Proxy publishes EXACTLY 80/443 (the only ports an internet TLS terminator
 	// needs) — an extra published port would widen the host exposure surface. ---
 	if !slices.Equal(proxy.Ports, []string{"80:8080", "443:8443"}) {
@@ -280,9 +289,9 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 	}
 	proxyAllowedKeys := map[string]bool{
 		"image": true, "profiles": true, "depends_on": true, "ports": true,
-		"environment": true, "volumes": true, "networks": true, "user": true,
-		"cap_drop": true, "security_opt": true, "read_only": true, "tmpfs": true,
-		"restart": true,
+		"environment": true, "command": true, "volumes": true, "networks": true,
+		"user": true, "cap_drop": true, "security_opt": true, "read_only": true,
+		"tmpfs": true, "restart": true,
 	}
 	proxyInitAllowedKeys := map[string]bool{
 		"image": true, "profiles": true, "command": true, "volumes": true,

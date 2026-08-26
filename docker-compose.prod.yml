@@ -76,6 +76,11 @@ services:
       STATIC_ENABLED: "true"
       STATIC_RULES: "${MATHION_TLS_DOMAIN},/,http://app:8000/"
       MAX_SIZE: "25M"
+    # HSTS. reproxy's --header flag has no env binding, so it is passed as a
+    # command arg; it is added to client responses (verified against the pinned
+    # image). Living on this tls-profile-only service, the header is present only
+    # when the bundled proxy is terminating HTTPS.
+    command: ["--header=Strict-Transport-Security:max-age=31536000"]
     volumes:
       - mathion_acme:/srv/acme
     networks: [frontend]
