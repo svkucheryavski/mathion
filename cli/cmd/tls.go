@@ -48,12 +48,12 @@ func newTLSStatusCmd(app *App) *cobra.Command {
 		Use:   "status",
 		Short: "Show bundled-TLS state (enabled/disabled, domain, proxy running)",
 		RunE: func(c *cobra.Command, _ []string) error {
-			m, _ := config.ReadEnvFile(app.CfgDir) // fail-safe: nil map => disabled
-			domain := strings.TrimSpace(m["MATHION_TLS_DOMAIN"])
-			if domain == "" {
+			if !tlsEnabledFromEnv(app.CfgDir) {
 				fmt.Fprintln(app.Out, "bundled TLS: disabled")
 				return nil
 			}
+			m, _ := config.ReadEnvFile(app.CfgDir) // validated above; re-read for display
+			domain := strings.TrimSpace(m["MATHION_TLS_DOMAIN"])
 			fmt.Fprintf(app.Out, "bundled TLS: enabled\n  domain: %s\n  email:  %s\n",
 				domain, strings.TrimSpace(m["MATHION_TLS_EMAIL"]))
 			out, err := app.Runner.Output(c.Context(), app.composeArgs("ps", "-q", "proxy")...)
@@ -174,10 +174,14 @@ func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
 	if err := config.ValidateDomain(o.Domain); err != nil {
 		return err
 	}
-	email := config.NormalizeEmail(o.Email)
-	if err := config.ValidateTLSEmail(email); err != nil {
+	// Validate the RAW flag first so leading/trailing whitespace is rejected, not
+	// silently trimmed away (NormalizeEmail would hide it). ValidateTLSEmail accepts
+	// mixed case (it lowercases the domain part itself), so this never rejects a
+	// legitimate email that only needs normalizing.
+	if err := config.ValidateTLSEmail(o.Email); err != nil {
 		return err
 	}
+	email := config.NormalizeEmail(o.Email)
 	// 1 (identity): require a valid, installed deployment (same guard install-resume uses).
 	if err := a.requireInstalledDeployment(); err != nil {
 		return err

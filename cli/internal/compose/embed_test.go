@@ -128,6 +128,14 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 	if !contains(app.Networks, "default") || !contains(app.Networks, "frontend") {
 		t.Errorf("app networks = %v, want both default and frontend", app.Networks)
 	}
+	// Exact membership (not just containment): an ADDITIVE network on app or db must
+	// trip this tripwire, so a future edit cannot quietly widen connectivity.
+	if appNets := effectiveNetworks(app.Networks); !(len(appNets) == 2 && contains(appNets, "default") && contains(appNets, "frontend")) {
+		t.Errorf("app networks = %v, want EXACTLY [default frontend]", appNets)
+	}
+	if dbNets := effectiveNetworks(db.Networks); !(len(dbNets) == 1 && dbNets[0] == "default") {
+		t.Errorf("db networks = %v, want EXACTLY [default]", dbNets)
+	}
 	for _, pn := range effectiveNetworks(proxy.Networks) {
 		if contains(effectiveNetworks(db.Networks), pn) {
 			t.Errorf("proxy and db must share NO network, but both are on %q (proxy=%v db=%v)", pn, proxy.Networks, db.Networks)

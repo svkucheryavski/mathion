@@ -1351,6 +1351,17 @@ func TestRestoreProxy_DisabledIssuesNothing(t *testing.T) {
 	}
 }
 
+func TestRestoreProxy_PoisonedEnvIssuesNothing(t *testing.T) {
+	dir := writePoisonedTLSEnv(t)
+	var calls [][]string
+	fr := &compose.FakeRunner{RunFunc: func(a []string) error { calls = append(calls, a); return nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: os.Stderr, Err: os.Stderr}
+	app.restoreProxyIfEnabled(context.Background(), restoreOpts{WriteBreadcrumb: true})
+	if len(calls) != 0 {
+		t.Fatalf("an inconsistent .env must issue no proxy commands; saw %v", joinAll(calls))
+	}
+}
+
 func TestRestoreProxy_EnabledOrder(t *testing.T) {
 	dir := tlsEnvDir(t, true)
 	var calls [][]string

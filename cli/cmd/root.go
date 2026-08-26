@@ -68,14 +68,21 @@ func (a *App) tlsProfileWanted(sub []string) bool {
 	}
 }
 
-// tlsEnabledFromEnv reads MATHION_TLS_DOMAIN fail-safe: a missing/corrupt/absent .env
-// (any command before install) reads as disabled, never a hard error.
+// tlsEnabledFromEnv reports whether bundled TLS is active for this deployment. It
+// FAILS CLOSED: an unreadable, incomplete, or internally inconsistent .env — including
+// one that smuggled a Compose interpolation payload into a TLS value — reads as
+// DISABLED, so no start-path command ever activates --profile tls over a .env that
+// Compose would expand a secret from. (enable/disable only ever write validated state;
+// this guards a hand-edited, partially-written, or restored .env on every start.)
 func tlsEnabledFromEnv(cfgDir string) bool {
 	m, err := config.ReadEnvFile(cfgDir)
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(m["MATHION_TLS_DOMAIN"]) != ""
+	if strings.TrimSpace(m["MATHION_TLS_DOMAIN"]) == "" {
+		return false
+	}
+	return config.ValidateEnvComplete(m) == nil
 }
 
 func (a *App) compose(ctx context.Context, sub ...string) error {

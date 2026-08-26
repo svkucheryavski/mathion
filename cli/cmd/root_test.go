@@ -91,6 +91,19 @@ func hasProfile(args []string) bool {
 	return false
 }
 
+func TestTLSEnabledFromEnvFailsClosedOnPoisonedEnv(t *testing.T) {
+	dir := writePoisonedTLSEnv(t)
+	if tlsEnabledFromEnv(dir) {
+		t.Fatal("a .env with an interpolation payload in a TLS value must read as DISABLED (fail closed)")
+	}
+	// And the start path must therefore add no --profile tls.
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}}
+	app.tlsEnabled = tlsEnabledFromEnv(dir) // mirrors Execute()
+	if hasProfile(app.composeArgs("up", "-d", "--wait")) {
+		t.Fatal("start must NOT add --profile tls when the .env is inconsistent")
+	}
+}
+
 func TestComposeArgsProfileSplit(t *testing.T) {
 	app := &App{CfgDir: "/etc/mathion", Project: "mathion_prod", Runner: &compose.FakeRunner{}}
 

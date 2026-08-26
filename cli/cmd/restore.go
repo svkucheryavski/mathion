@@ -430,9 +430,8 @@ func (a *App) restoreProxyIfEnabled(ctx context.Context, opts restoreOpts) {
 	if !opts.WriteBreadcrumb {
 		return // rollback path: never bring the proxy up
 	}
-	m, err := config.ReadEnvFile(a.CfgDir)
-	if err != nil || strings.TrimSpace(m["MATHION_TLS_DOMAIN"]) == "" {
-		return // TLS not enabled
+	if !tlsEnabledFromEnv(a.CfgDir) {
+		return // TLS not enabled, or .env inconsistent — fail closed (never up a proxy over a poisoned .env)
 	}
 	a.tlsEnabled = true // so composeArgs adds --profile tls to the start commands below
 
