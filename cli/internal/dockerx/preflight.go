@@ -30,6 +30,19 @@ func PortFree(addr string) error {
 	return nil
 }
 
+// PortBindable returns an error if addr cannot be bound (already in use or not
+// permitted). Unlike PortFree (which only dials), this attempts an actual listen, so
+// a preflight matches what Docker's own bind will need. addr like ":80" binds the
+// wildcard IPv4+IPv6; Docker's own bind remains the authoritative backstop.
+func PortBindable(addr string) error {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("cannot bind %s: %w", addr, err)
+	}
+	_ = l.Close()
+	return nil
+}
+
 // VolumeExists reports whether a docker volume named exactly `name` exists.
 // It fails CLOSED: a daemon/CLI error propagates (never read as "absent"), so
 // the install volume-guard can never regenerate secrets over initialized data

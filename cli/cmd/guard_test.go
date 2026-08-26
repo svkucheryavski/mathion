@@ -24,6 +24,7 @@ func TestGuardEntryRouting(t *testing.T) {
 	cases := map[string]bool{ // command -> expected proceed
 		"restore": true, "uninstall": true, "stop": true,
 		"update": false, "start": false, "install": false, "backup": false,
+		"tls-enable": false,
 	}
 	for cmd, wantProceed := range cases {
 		var out bytes.Buffer

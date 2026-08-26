@@ -11,6 +11,7 @@ services:
       - mathion_assets:/data/mathion/assets
     ports:
       - "127.0.0.1:8000:8000"
+    networks: [default, frontend]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
       interval: 5s
@@ -35,6 +36,60 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # One-shot: make the fresh (root-owned) mathion_acme volume writable by the
+  # non-root proxy (uid 1001), then exit. Required because the reproxy image is
+  # FROM scratch (no chown/shell) and cannot self-fix ownership. NON-recursive
+  # chown (not -R) so CAP_CHOWN alone suffices — no directory traversal into
+  # reproxy's 0700 subtree. Only instantiated under the `tls` profile.
+  proxy-init:
+    image: busybox@sha256:7a3ebe5bfd1a4a19797d20b0c0bb39d44393e9a03fd852c0865b0f540d868df0
+    profiles: ["tls"]
+    command: ["chown", "1001:1001", "/srv/acme"]
+    volumes:
+      - mathion_acme:/srv/acme
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
+  # Bundled auto-HTTPS reverse proxy (Let's Encrypt). Dormant unless the `tls`
+  # profile is active (`mathion tls enable`). NO env_file: it receives ONLY the
+  # explicit SSL_*/STATIC_*/MAX_SIZE vars; domain/email arrive via ${...}
+  # interpolation from --env-file .env, so no app/DB secret is ever in its env.
+  proxy:
+    image: ghcr.io/umputun/reproxy@sha256:456d9d2ac7321e2bbb729a5580259d4fc6b52d0310c6cb79c1e30350dd6ba0f7
+    profiles: ["tls"]
+    depends_on:
+      app:
+        condition: service_healthy
+      proxy-init:
+        condition: service_completed_successfully
+    ports:
+      - "80:8080"
+      - "443:8443"
+    environment:
+      SSL_TYPE: auto
+      SSL_ACME_EMAIL: ${MATHION_TLS_EMAIL}
+      SSL_ACME_FQDN: ${MATHION_TLS_DOMAIN}
+      SSL_ACME_LOCATION: /srv/acme
+      STATIC_ENABLED: "true"
+      STATIC_RULES: "${MATHION_TLS_DOMAIN},/,http://app:8000/"
+      MAX_SIZE: "25M"
+    volumes:
+      - mathion_acme:/srv/acme
+    networks: [frontend]
+    user: "1001:1001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+networks:
+  frontend: {}
+
 volumes:
   mathion_assets:
   mathion_pgdata:
+  mathion_acme:

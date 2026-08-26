@@ -31,6 +31,8 @@ func GenerateEnv(baseURL, version, secretKey, pgPassword string) Env {
 		{"MATHION_MAX_FILE_SIZE", "20971520"},
 		{"MATHION_MAX_COURSE_SIZE", "524288000"},
 		{"MATHION_VERSION", version},
+		{"MATHION_TLS_DOMAIN", ""},
+		{"MATHION_TLS_EMAIL", ""},
 	}
 }
 
@@ -231,5 +233,130 @@ func ValidateEnvComplete(m map[string]string) error {
 	if u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("MATHION_DATABASE_URL must not carry query or fragment parameters")
 	}
+	// Bundled-TLS pair invariant (spec §9): both empty (disabled) or both present and
+	// valid. When present, run the SAME strict interpolation-safe validators the
+	// `tls enable` input path uses, so a hand-edited .env that smuggled interpolation
+	// syntax into a TLS value fails an update/resume closed; and the https posture
+	// (base-url + secure cookie) must be coherent.
+	tlsDomain := strings.TrimSpace(m["MATHION_TLS_DOMAIN"])
+	tlsEmail := strings.TrimSpace(m["MATHION_TLS_EMAIL"])
+	if (tlsDomain == "") != (tlsEmail == "") {
+		return fmt.Errorf("MATHION_TLS_DOMAIN and MATHION_TLS_EMAIL must be both set or both empty")
+	}
+	if tlsDomain != "" {
+		if err := ValidateDomain(tlsDomain); err != nil {
+			return fmt.Errorf("MATHION_TLS_DOMAIN is invalid")
+		}
+		if err := ValidateTLSEmail(tlsEmail); err != nil {
+			return fmt.Errorf("MATHION_TLS_EMAIL is invalid")
+		}
+		if m["MATHION_BASE_URL"] != "https://"+tlsDomain {
+			return fmt.Errorf("MATHION_BASE_URL must equal https://<MATHION_TLS_DOMAIN> when TLS is enabled")
+		}
+		if strings.TrimSpace(m["MATHION_COOKIE_SECURE"]) != "1" {
+			return fmt.Errorf("MATHION_COOKIE_SECURE must be 1 when TLS is enabled")
+		}
+	}
 	return nil
+}
+
+// envUpdate is one key/value change for rewriteEnv.
+type envUpdate struct{ Key, Value string }
+
+// rewriteEnv applies each update to <cfgdir>/.env line-orientedly (like
+// RepinVersion, but for multiple keys): the FIRST matching line is rewritten,
+// later exact-key duplicates are dropped, keys never seen are appended (in the
+// given order) before any trailing newline, and every other line passes through
+// verbatim. It writes atomically at 0o600, then re-reads and asserts every update
+// took AND the whole file still passes ValidateEnvComplete, so a rewrite can never
+// leave a corrupt or inconsistent .env. Error messages never echo values.
+func rewriteEnv(cfgdir string, updates []envUpdate) error {
+	raw, err := os.ReadFile(cfgdir + "/.env")
+	if err != nil {
+		return fmt.Errorf("update .env: read: %w", err)
+	}
+	want := make(map[string]string, len(updates))
+	for _, u := range updates {
+		want[u.Key] = u.Value
+	}
+	lines := strings.Split(string(raw), "\n")
+	out := make([]string, 0, len(lines)+len(updates))
+	seen := map[string]bool{}
+	for _, line := range lines {
+		k := envLineKey(line)
+		if v, ok := want[k]; ok {
+			if seen[k] {
+				continue // collapse duplicates
+			}
+			out = append(out, k+"="+v)
+			seen[k] = true
+			continue
+		}
+		out = append(out, line)
+	}
+	var missing []string
+	for _, u := range updates {
+		if !seen[u.Key] {
+			missing = append(missing, u.Key+"="+u.Value)
+		}
+	}
+	if len(missing) > 0 {
+		if n := len(out); n > 0 && out[n-1] == "" {
+			out = out[:n-1]
+			out = append(out, missing...)
+			out = append(out, "")
+		} else {
+			out = append(out, missing...)
+		}
+	}
+	if err := AtomicWrite(cfgdir+"/.env", []byte(strings.Join(out, "\n")), 0o600); err != nil {
+		return fmt.Errorf("update .env: write: %w", err)
+	}
+	m, err := ReadEnvFile(cfgdir)
+	if err != nil {
+		return fmt.Errorf("update .env: re-read: %w", err)
+	}
+	for _, u := range updates {
+		if strings.TrimSpace(m[u.Key]) != strings.TrimSpace(u.Value) {
+			return fmt.Errorf("update .env: %s did not take effect", u.Key)
+		}
+	}
+	if err := ValidateEnvComplete(m); err != nil {
+		return fmt.Errorf("update produced an invalid .env: %w", err)
+	}
+	return nil
+}
+
+// SetTLS enables bundled TLS: it writes MATHION_TLS_DOMAIN, MATHION_TLS_EMAIL,
+// MATHION_BASE_URL (https://<domain>), and MATHION_COOKIE_SECURE=1, preserving every
+// unrelated line. Inputs are validated with the strict interpolation-safe validators
+// BEFORE any read or write, so a hostile value never touches the file.
+func SetTLS(cfgdir, domain, email string) error {
+	if err := ValidateDomain(domain); err != nil {
+		return err
+	}
+	if err := ValidateTLSEmail(email); err != nil {
+		return err
+	}
+	// ValidateDomain already rejected any ':'/port, so BuildBaseURL yields https://<domain>.
+	baseURL, err := BuildBaseURL(domain)
+	if err != nil {
+		return err
+	}
+	return rewriteEnv(cfgdir, []envUpdate{
+		{"MATHION_TLS_DOMAIN", domain},
+		{"MATHION_TLS_EMAIL", email},
+		{"MATHION_BASE_URL", baseURL},
+		{"MATHION_COOKIE_SECURE", "1"},
+	})
+}
+
+// ClearTLS disables bundled TLS: it clears MATHION_TLS_DOMAIN and MATHION_TLS_EMAIL
+// and DELIBERATELY leaves MATHION_BASE_URL (https) and MATHION_COOKIE_SECURE=1 —
+// production stays HTTPS-only; disable never downgrades.
+func ClearTLS(cfgdir string) error {
+	return rewriteEnv(cfgdir, []envUpdate{
+		{"MATHION_TLS_DOMAIN", ""},
+		{"MATHION_TLS_EMAIL", ""},
+	})
 }

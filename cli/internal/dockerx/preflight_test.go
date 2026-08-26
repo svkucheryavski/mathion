@@ -44,3 +44,19 @@ func TestPortFree(t *testing.T) {
 		t.Fatal("PortFree should fail when the port is in use")
 	}
 }
+
+func TestPortBindable(t *testing.T) {
+	// A free high port is bindable.
+	if err := PortBindable("127.0.0.1:0"); err != nil {
+		t.Fatalf("a free port must be bindable: %v", err)
+	}
+	// A port we are actively listening on is NOT bindable.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if err := PortBindable(l.Addr().String()); err == nil {
+		t.Fatal("a port in use must not be bindable")
+	}
+}

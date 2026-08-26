@@ -24,6 +24,15 @@ Update the mathion CLI binary itself. curl|sh installs are verified against the
 signed release checksums and swapped in place; apt installs are deferred to apt.
 Use \fB\-\-check\fR to report availability without changing anything, \fB\-\-yes\fR to skip the prompt.
 .TP
+.B tls enable\fR, \fBtls disable\fR, \fBtls status
+Manage the bundled auto-HTTPS reverse proxy (Let's Encrypt) for one public domain.
+\fBtls enable \-\-domain <fqdn> \-\-email <addr>\fR stands up a digest-pinned reproxy that
+obtains and auto-renews a certificate; \fBtls disable\fR stops the proxy (production stays
+HTTPS-only \- it never downgrades); \fBtls status\fR reports state. Requires ports 80 and 443
+open at the firewall and DNS pointing at this host. NOTE: running an OLDER CLI's
+\fBtls enable\fR against a NEWER install rewrites the on-disk compose with the older embed
+(unsupported \- upgrade the CLI first).
+.TP
 .B superuser\fR, \fBpin\fR, \fBversion\fR, \fBuninstall
 Manage the superuser, pin the image, print versions, remove the deployment.
 Add \fB\-\-short\fR to print only the CLI version (the self-update oracle).

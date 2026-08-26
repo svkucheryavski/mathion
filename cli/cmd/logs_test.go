@@ -14,7 +14,7 @@ func TestLogsArgvFollowService(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "logs", "--follow", "app"}
+	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "--profile", "tls", "logs", "--follow", "app"}
 	if len(f.Calls) != 1 || !reflect.DeepEqual(f.Calls[0], want) {
 		t.Fatalf("argv = %v, want %v", f.Calls, want)
 	}

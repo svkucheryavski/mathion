@@ -28,10 +28,12 @@ func Purge(ctx context.Context, r compose.Runner, project string) error {
 			return fmt.Errorf("removing containers: %w", err)
 		}
 	}
-	if err := removeIfPresent(ctx, r, "network", project+"_default"); err != nil {
-		return err
+	for _, netName := range []string{project + "_default", project + "_frontend"} {
+		if err := removeIfPresent(ctx, r, "network", netName); err != nil {
+			return err
+		}
 	}
-	for _, vol := range []string{project + "_mathion_pgdata", project + "_mathion_assets"} {
+	for _, vol := range []string{project + "_mathion_pgdata", project + "_mathion_assets", project + "_mathion_acme"} {
 		if err := removeIfPresent(ctx, r, "volume", vol); err != nil {
 			return err
 		}

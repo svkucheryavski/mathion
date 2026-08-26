@@ -401,8 +401,68 @@ func restoreEngine(ctx context.Context, a *App, archivePath string, opts restore
 			fmt.Fprintf(a.Err, "restored successfully; remove %s manually (%v)\n", varlib.JournalPath(), err)
 		}
 	}
+	// (11) Bundled proxy: standalone-restore-only, non-gating, bounded, forward-only.
+	a.restoreProxyIfEnabled(ctx, opts)
 	fmt.Fprintf(a.Out, "restored to %s from %s\n", manifest.MathionVersion, filepath.Base(archivePath))
 	return nil
+}
+
+// tlsProxyPullTimeout / tlsProxyStepTimeout bound each best-effort proxy-restore
+// step so a slow/unhealthy proxy can never fail the (already-complete) restore gate
+// or the auto-rollback.
+const tlsProxyPullTimeout = 60 * time.Second
+const tlsProxyStepTimeout = 60 * time.Second
+
+// restoreProxyIfEnabled brings the bundled proxy back after a STANDALONE restore
+// (opts.WriteBreadcrumb) when TLS is enabled in .env — a non-gating, bounded,
+// forward-only step. Every error is demoted to a warning so it can never fail the
+// restore's own gate. The auto-rollback caller (update.go:113, WriteBreadcrumb:false)
+// returns immediately here, so a rollback issues NO proxy-up. Order (spec §10):
+//  1. bounded best-effort `pull --policy missing proxy proxy-init` (present for a
+//     new-host / post-`--purge` restore; --policy missing skips the registry when
+//     the images are already cached);
+//  2. chown one-shot synchronously via the one-off worker idiom `run … -T proxy-init`
+//     (returns the TRUE exit code — not `up --wait proxy-init`, which returns rc=1 on
+//     a one-shot that exits), mandatory --name/--label + forceRemoveWorker on
+//     error/timeout before continuing;
+//  3. `up -d proxy --pull never --no-deps` (chown already ran; app/db undisturbed).
+func (a *App) restoreProxyIfEnabled(ctx context.Context, opts restoreOpts) {
+	if !opts.WriteBreadcrumb {
+		return // rollback path: never bring the proxy up
+	}
+	if !tlsEnabledFromEnv(a.CfgDir) {
+		return // TLS not enabled, or .env inconsistent — fail closed (never up a proxy over a poisoned .env)
+	}
+	a.tlsEnabled = true // so composeArgs adds --profile tls to the start commands below
+
+	// 1. Bounded best-effort targeted pull.
+	pctx, pcancel := context.WithTimeout(ctx, tlsProxyPullTimeout)
+	if err := a.compose(pctx, "pull", "--policy", "missing", "proxy", "proxy-init"); err != nil {
+		fmt.Fprintf(a.Err, "note: could not pre-pull the bundled proxy images (%v); continuing with cached images\n", err)
+	}
+	pcancel()
+
+	// 2. Chown one-shot, synchronously. Mandatory name/label => reapable.
+	name := fmt.Sprintf("mathion_proxyinit_%d", os.Getpid())
+	ictx, icancel := context.WithTimeout(ctx, tlsProxyStepTimeout)
+	ierr := a.Runner.Run(ictx, a.composeArgs(
+		"run", "--rm", "--no-deps", "--pull", "never",
+		"--name", name, "--label", "io.mathion.worker=1",
+		"-T", "proxy-init",
+	)...)
+	icancel()
+	if ierr != nil {
+		fmt.Fprintf(a.Err, "note: bundled-proxy ACME-dir chown did not complete (%v); the proxy may be unable to write certs — check `mathion tls status`\n", ierr)
+		forceRemoveWorker(context.WithoutCancel(ctx), a.Runner, name)
+		return // do not start the proxy over a half-done chown
+	}
+
+	// 3. Start ONLY the proxy.
+	uctx, ucancel := context.WithTimeout(ctx, tlsProxyStepTimeout)
+	if err := a.compose(uctx, "up", "-d", "proxy", "--pull", "never", "--no-deps"); err != nil {
+		fmt.Fprintf(a.Err, "note: could not start the bundled proxy after restore (%v); re-run `mathion tls enable` if HTTPS is down\n", err)
+	}
+	ucancel()
 }
 
 // forceRemoveWorker best-effort force-removes a named one-off worker and confirms it

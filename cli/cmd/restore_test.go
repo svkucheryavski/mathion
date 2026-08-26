@@ -1306,3 +1306,114 @@ func TestRestoreGateRemoveWarns(t *testing.T) {
 		t.Fatalf("expected a non-fatal remove warning naming the journal path; got %q", w)
 	}
 }
+
+func tlsEnvDir(t *testing.T, enabled bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	os.WriteFile(dir+"/.env", []byte(config.RenderEnv(config.GenerateEnv("https://learn.example.edu", "v0.1.1", "s", "abc123hex"))), 0o600)
+	if enabled {
+		if err := config.SetTLS(dir, "learn.example.edu", "admin@example.edu"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func joinAll(calls [][]string) []string {
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = strings.Join(c, " ")
+	}
+	return out
+}
+
+func TestRestoreProxy_RollbackIssuesNothing(t *testing.T) {
+	dir := tlsEnvDir(t, true)
+	var calls [][]string
+	fr := &compose.FakeRunner{RunFunc: func(a []string) error { calls = append(calls, a); return nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: os.Stderr, Err: os.Stderr}
+	app.restoreProxyIfEnabled(context.Background(), restoreOpts{WriteBreadcrumb: false}) // rollback path
+	for _, j := range joinAll(calls) {
+		if strings.Contains(j, "proxy") {
+			t.Fatalf("rollback (WriteBreadcrumb:false) must issue no proxy commands; saw %q", j)
+		}
+	}
+}
+
+func TestRestoreProxy_DisabledIssuesNothing(t *testing.T) {
+	dir := tlsEnvDir(t, false)
+	var calls [][]string
+	fr := &compose.FakeRunner{RunFunc: func(a []string) error { calls = append(calls, a); return nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: os.Stderr, Err: os.Stderr}
+	app.restoreProxyIfEnabled(context.Background(), restoreOpts{WriteBreadcrumb: true})
+	if len(calls) != 0 {
+		t.Fatalf("TLS-disabled restore must issue no proxy commands; saw %v", joinAll(calls))
+	}
+}
+
+func TestRestoreProxy_PoisonedEnvIssuesNothing(t *testing.T) {
+	dir := writePoisonedTLSEnv(t)
+	var calls [][]string
+	fr := &compose.FakeRunner{RunFunc: func(a []string) error { calls = append(calls, a); return nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: os.Stderr, Err: os.Stderr}
+	app.restoreProxyIfEnabled(context.Background(), restoreOpts{WriteBreadcrumb: true})
+	if len(calls) != 0 {
+		t.Fatalf("an inconsistent .env must issue no proxy commands; saw %v", joinAll(calls))
+	}
+}
+
+func TestRestoreProxy_EnabledOrder(t *testing.T) {
+	dir := tlsEnvDir(t, true)
+	var calls [][]string
+	fr := &compose.FakeRunner{RunFunc: func(a []string) error { calls = append(calls, a); return nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: os.Stderr, Err: os.Stderr}
+	app.restoreProxyIfEnabled(context.Background(), restoreOpts{WriteBreadcrumb: true})
+	all := joinAll(calls)
+	var iPull, iInit, iUp int = -1, -1, -1
+	for i, j := range all {
+		switch {
+		case strings.Contains(j, "pull --policy missing proxy proxy-init"):
+			iPull = i
+		case strings.Contains(j, "run --rm --no-deps --pull never") && strings.Contains(j, "proxy-init"):
+			iInit = i
+		case strings.Contains(j, "up -d proxy --pull never --no-deps"):
+			iUp = i
+		}
+	}
+	if iPull < 0 || iInit < 0 || iUp < 0 {
+		t.Fatalf("missing a step: pull=%d init=%d up=%d; calls=%v", iPull, iInit, iUp, all)
+	}
+	if !(iPull < iInit && iInit < iUp) {
+		t.Fatalf("steps out of order: pull=%d init=%d up=%d", iPull, iInit, iUp)
+	}
+}
+
+func TestRestoreProxy_InitFailureSkipsUpAndReaps(t *testing.T) {
+	dir := tlsEnvDir(t, true)
+	var calls [][]string
+	fr := &compose.FakeRunner{RunFunc: func(a []string) error {
+		calls = append(calls, a)
+		if strings.Contains(strings.Join(a, " "), "-T proxy-init") {
+			return &compose.ExitError{Code: 1}
+		}
+		return nil
+	}}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: os.Stderr, Err: os.Stderr}
+	app.restoreProxyIfEnabled(context.Background(), restoreOpts{WriteBreadcrumb: true})
+	all := joinAll(calls)
+	for _, j := range all {
+		if strings.Contains(j, "up -d proxy") {
+			t.Fatalf("a failed chown must skip `up proxy`; saw %q", j)
+		}
+	}
+	// forceRemoveWorker must have force-removed the named proxy-init worker.
+	var reaped bool
+	for _, j := range all {
+		if strings.HasPrefix(j, "rm -f mathion_proxyinit_") {
+			reaped = true
+		}
+	}
+	if !reaped {
+		t.Fatalf("a failed chown must forceRemoveWorker the proxy-init one-off; calls=%v", all)
+	}
+}

@@ -4,18 +4,21 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 )
 
 type App struct {
-	CfgDir  string
-	Project string
-	Runner  compose.Runner
-	Out     io.Writer
-	Err     io.Writer
-	In      io.Reader
+	CfgDir     string
+	Project    string
+	Runner     compose.Runner
+	Out        io.Writer
+	Err        io.Writer
+	In         io.Reader
+	tlsEnabled bool // read fail-safe at startup; toggled by tls enable/disable
 }
 
 // buildVersion / buildDefaultImage are overridden by main via SetBuildInfo,
@@ -35,7 +38,51 @@ func (a *App) composeArgs(sub ...string) []string {
 		"-f", a.CfgDir + "/docker-compose.yml",
 		"--env-file", a.CfgDir + "/.env",
 	}
+	if a.tlsProfileWanted(sub) {
+		base = append(base, "--profile", "tls")
+	}
 	return append(base, sub...)
+}
+
+// tlsProfileWanted decides whether `--profile tls` is added, keyed on the subcommand
+// sub[0] — the three-way split (spec §4.3):
+//   - containment / inspection (down/stop/rm/ps/logs): ALWAYS, so `mathion stop`/
+//     `uninstall`/`tls disable` reach a running proxy; harmless no-op when the on-disk
+//     compose declares no tls profile (verified: rc=0 on Compose v5.1.2).
+//   - start (up/start/create/run): ONLY when TLS is enabled, so the proxy is never
+//     started on a non-TLS deployment.
+//   - everything else (pull/exec/config/…) and an empty sub: NEVER — install's
+//     whole-project `compose pull` must not fetch the proxy images (would fail in
+//     air-gapped registries); TLS resume/restore pull the proxy images explicitly.
+func (a *App) tlsProfileWanted(sub []string) bool {
+	if len(sub) == 0 {
+		return false
+	}
+	switch sub[0] {
+	case "down", "stop", "rm", "ps", "logs":
+		return true
+	case "up", "start", "create", "run":
+		return a.tlsEnabled
+	default:
+		return false
+	}
+}
+
+// tlsEnabledFromEnv reports whether bundled TLS is active for this deployment. It
+// FAILS CLOSED: an unreadable, incomplete, or internally inconsistent .env — including
+// one that smuggled a Compose interpolation payload into a TLS value — reads as
+// DISABLED, so no start-path command ever activates --profile tls over a .env that
+// Compose would expand a secret from. (enable/disable only ever write validated state;
+// this guards a hand-edited, partially-written, or restored .env on every start.)
+func tlsEnabledFromEnv(cfgDir string) bool {
+	m, err := config.ReadEnvFile(cfgDir)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(m["MATHION_TLS_DOMAIN"]) == "" {
+		return false
+	}
+	return config.ValidateEnvComplete(m) == nil
 }
 
 func (a *App) compose(ctx context.Context, sub ...string) error {
@@ -67,7 +114,7 @@ func newRootCmd(app *App) *cobra.Command {
 		newInstallCmd(app), newStartCmd(app), newStopCmd(app), newStatusCmd(app),
 		newLogsCmd(app), newPinCmd(app), newSuperuserCmd(app), newVersionCmd(app),
 		newUninstallCmd(app), newBackupCmd(app), newRestoreCmd(app), newUpdateCmd(app),
-		newSelfUpdateCmd(app),
+		newSelfUpdateCmd(app), newTLSCmd(app),
 	)
 	return root
 }
@@ -79,6 +126,7 @@ func Execute() {
 		Runner:  compose.ExecRunner{},
 		Out:     os.Stdout, Err: os.Stderr, In: os.Stdin,
 	}
+	app.tlsEnabled = tlsEnabledFromEnv(app.CfgDir)
 	if err := newRootCmd(app).ExecuteContext(context.Background()); err != nil {
 		app.Err.Write([]byte("error: " + err.Error() + "\n"))
 		osExit(exitCode(err))
