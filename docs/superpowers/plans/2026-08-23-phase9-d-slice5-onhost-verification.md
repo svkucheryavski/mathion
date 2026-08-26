@@ -46,5 +46,13 @@ busybox sha256:7a3ebe5bfd1a4a19797d20b0c0bb39d44393e9a03fd852c0865b0f540d868df0.
   -> `mathion tls status` reflects each state.
 
 ## Sign-off
-- [ ] Items 0–4 PASS on <host / date>.
-- [ ] Item 5 PASS on <domain / date> (or explicitly deferred, like the amd64 cloud smoke).
+- [x] Items 0–4 PASS on Ubuntu 24.04 host `mathion` (amd64, Docker CE + compose v2.x) / 2026-08-26.
+- [x] Item 5 PASS on `test.mathion.org` / 2026-08-26 — real Let's Encrypt production cert
+  (issuer `O=Let's Encrypt, CN=YE1`, TLSv1.3/h2, `ssl_verify=0`), PIN login over HTTPS,
+  HTTP:80 → 307 (no app content), `tls disable` preserved `MATHION_BASE_URL=https://…` +
+  `MATHION_COOKIE_SECURE=1` (no downgrade). Item 3 migration reused the cert (no re-issuance);
+  4a restore left the proxy undisturbed; 4b app-recreate left the proxy `StartedAt` unchanged.
+- Delivered as `cli-v0.4.0` (signed release + apt); reached the host via both `apt upgrade`
+  and `mathion self-update` (Slice 4b path verified E2E against a real signed release).
+- Not exercised: SMTP send (no SMTP configured on the test deploy; app on `default` net,
+  egress path intact). Minor future hardening: no HSTS header on HTTPS responses.
