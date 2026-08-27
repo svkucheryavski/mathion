@@ -387,9 +387,10 @@ staff-owned — so the `chgrp`/`chmod` above is what actually clears the refusal
 
 ### Applying a stack-definition change after a CLI upgrade
 
-`mathion self-update` and `apt upgrade mathion` update only the CLI binary. If a
-release changes the bundled stack definition (for example a reverse-proxy or
-security-header change), apply it to your running deployment with:
+`mathion self-update` and `apt upgrade mathion` update the CLI, not the running
+deployment — neither applies the bundled stack definition to the containers you
+already have running. If a release changes that definition (for example a
+reverse-proxy or security-header change), apply it with:
 
 ```
 sudo mathion reconcile
