@@ -384,3 +384,18 @@ sudo chgrp root /usr/local /usr/local/bin && sudo chmod 0755 /usr/local /usr/loc
 Removing `/etc/staff-group-for-usr-local` alone does **not** re-permission an
 already-created directory — it only stops *future* directories from being
 staff-owned — so the `chgrp`/`chmod` above is what actually clears the refusal.
+
+### Applying a stack-definition change after a CLI upgrade
+
+`mathion self-update` and `apt upgrade mathion` update the CLI, not the running
+deployment — neither applies the bundled stack definition to the containers you
+already have running. If a release changes that definition (for example a
+reverse-proxy or security-header change), apply it with:
+
+```
+sudo mathion reconcile
+```
+
+`mathion reconcile` re-materializes the bundled Docker Compose and recreates only
+the services whose configuration changed (a brief interruption of those services).
+`mathion status` tells you when a reconcile is needed.

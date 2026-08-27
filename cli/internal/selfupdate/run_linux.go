@@ -153,5 +153,12 @@ func Run(ctx context.Context, p Params) error {
 		return errors.Join(err, cleanupTemp(parentFD, tempName))
 	}
 	fmt.Fprintf(p.Out, "%s → %s\n", p.CurrentVersion, tag)
+	// Unconditional nudge (NOT a byte-compare): this process is still the OLD binary
+	// (commitSwap renamed the staged temp over the target; the running process stays
+	// on its pre-swap inode), so its embedded compose is stale. `mathion status`,
+	// running as the NEW binary, is the authoritative drift detector; this only points
+	// the operator at it. Fires ONLY here — the confirmed-swap path — not apt-defer,
+	// not up-to-date, not --check/cancelled/durability-uncertain (all return earlier).
+	fmt.Fprintln(p.Out, "if this release updated the stack definition, apply it with: sudo mathion reconcile")
 	return nil
 }

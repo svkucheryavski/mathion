@@ -63,6 +63,13 @@ func newUninstallCmd(app *App) *cobra.Command {
 			if err := varlib.RemoveJournal(); err != nil {
 				fmt.Fprintf(app.Err, "note: could not remove the recovery breadcrumb at %s (%v)\n", varlib.JournalPath(), err)
 			}
+			// Purge succeeded, so the deployment is gone — clear the apply-pending marker
+			// too (spec §9). Only safe post-teardown: a failed Purge returned above, keeping
+			// the marker while the deployment's config survives. A failed remove is a
+			// non-fatal note (purge stays re-runnable).
+			if err := varlib.RemoveMarker(); err != nil {
+				fmt.Fprintf(app.Err, "note: could not remove the apply-pending marker at %s (%v)\n", varlib.MarkerPath(), err)
+			}
 			// Remove <cfgdir> ONLY if it is a directory mathion recognizes — that is
 			// what keeps a mis-set MATHION_CONFIG_DIR ("/", "$HOME", a symlink) from
 			// being blown away by RemoveAll. recognizedCfgDir returns the CLEANED path

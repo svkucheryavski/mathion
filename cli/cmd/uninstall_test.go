@@ -393,3 +393,59 @@ func TestPurgeOrphanStateStillTearsDown(t *testing.T) {
 		t.Fatalf("expected a note about the missing config dir, got %q", errBuf.String())
 	}
 }
+
+func TestUninstallPurgeClearsMarker(t *testing.T) {
+	rootedVarlib(t)
+	if err := varlib.EnsureBackupsDir(); err != nil {
+		t.Fatal(err)
+	}
+	if err := varlib.WriteMarker(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	seedInstall(t, dir)        // install-state marker + .env, so --purge proceeds to teardown
+	f := &compose.FakeRunner{} // default: Purge succeeds cleanly
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("uninstall --purge: %v", err)
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Error("a successful --purge must clear the apply-pending marker")
+	}
+}
+
+func TestUninstallPurgeFailedRetainsMarker(t *testing.T) {
+	rootedVarlib(t)
+	if err := varlib.EnsureBackupsDir(); err != nil {
+		t.Fatal(err)
+	}
+	if err := varlib.WriteMarker(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	seedInstall(t, dir)
+	// Make dockerx.Purge fail using the EXISTING "teardown-fail" idiom (mirrors
+	// TestUninstallPurgeClearsBreadcrumbAfterTeardown/teardown-fail-retains): every `ps`
+	// call — the lockAndGuard preamble sweep, dockerx.SweepWorkers, AND dockerx.Purge's
+	// own container-list — succeeds with an empty list; every OTHER Output (`network ls`)
+	// errors, so Purge fails at its network step. That is AFTER SweepWorkers passes inside
+	// lockAndGuard, so the failure is specifically the purge, and it returns BEFORE
+	// RemoveJournal/RemoveMarker.
+	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return "", nil
+		}
+		return "", &noSuch{}
+	}}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
+	cmd := newUninstallCmd(app)
+	cmd.SetArgs([]string{"--purge"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("a failed purge must return an error")
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Error("a failed purge must RETAIN the marker (deployment config survives, so the drift signal must too)")
+	}
+}
