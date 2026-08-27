@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -208,5 +209,39 @@ func TestRun_UpToDate_NoNudge(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "sudo mathion reconcile") {
 		t.Fatalf("up-to-date must NOT print the reconcile nudge; got %q", out.String())
+	}
+}
+
+// TestRun_DurabilityUncertain_NoNudge closes the last spec §8 test-13 absence
+// case: on the installed-but-durability-uncertain swap (rename committed, dir
+// fsync failed), Run returns the durabilityUncertainError at run_linux.go:150 —
+// BEFORE the success line and the reconcile nudge — so neither prints. Driven via
+// the existing fsFsync seam (its only production call site is commitSwap's dir
+// fsync at swap.go:258; staging's own fsync is a separate call), so overriding it
+// exercises only the durability-uncertain branch.
+func TestRun_DurabilityUncertain_NoNudge(t *testing.T) {
+	p, _, _, done := harness(t, "cli-v0.2.0")
+	defer done()
+	p.Yes = true
+	orig := fsFsync
+	fsFsync = func(int) error { return errors.New("fsync boom") }
+	defer func() { fsFsync = orig }()
+	var out bytes.Buffer
+	p.Out = &out
+	err := Run(context.Background(), p)
+	if err == nil {
+		t.Fatal("a durability-uncertain swap must surface an error, not exit 0")
+	}
+	var due *durabilityUncertainError
+	if !errors.As(err, &due) {
+		t.Fatalf("expected a durabilityUncertainError, got %v", err)
+	}
+	// The rename DID commit — the binary is swapped — but the process returns
+	// before the success line and the nudge.
+	if got, _ := os.ReadFile(p.Cfg.swapTarget); string(got) != "newbin" {
+		t.Fatalf("a durability-uncertain swap still renames the new binary into place; got %q", got)
+	}
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("a durability-uncertain self-update must NOT print the reconcile nudge; got %q", out.String())
 	}
 }
