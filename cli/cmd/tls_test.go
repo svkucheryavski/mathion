@@ -345,6 +345,11 @@ func TestTLSEnableRefusesOnIncompleteInstall(t *testing.T) {
 	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu", Email: "admin@example.edu"}); err == nil {
 		t.Fatal("tls enable must refuse on an incomplete install")
 	}
+	// spec §5: the gate precedes the compose re-materialize (tls.go AtomicWrite), so a
+	// refusal must leave the stale installedDeployment seed in place, not the embed.
+	if got, _ := os.ReadFile(dir + "/docker-compose.yml"); bytes.Equal(got, compose.ComposeYAML) {
+		t.Error("refused tls enable must NOT re-materialize docker-compose.yml")
+	}
 	if hasCall(f.Calls, joinHas("up -d")) {
 		t.Fatalf("tls enable must not bring the stack up on refusal; calls=%v", f.Calls)
 	}

@@ -86,10 +86,22 @@ func TestReconcileRefusesOnIncompleteInstall(t *testing.T) {
 	if err := config.WriteState(dir, config.State{Schema: 2, AdminEmail: "admin@example.edu", Complete: false}); err != nil {
 		t.Fatal(err)
 	}
-	f := &compose.FakeRunner{}
-	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard}
-	if err := app.reconcile(context.Background(), false); err == nil {
-		t.Fatal("reconcile must refuse on an incomplete install")
+	// Make the app appear running so the completeness gate (which sits FIRST, before the
+	// app-not-running gate) is the only thing that can refuse. If the requireInstallComplete
+	// wiring were deleted, reconcile would proceed to write the marker, re-materialize the
+	// compose, and `up` — which the no-mutation assertions below would then catch.
+	f := &compose.FakeRunner{OutputFunc: func([]string) (string, error) { return "appcontainer\n", nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard, In: strings.NewReader("y\n")}
+	err := app.reconcile(context.Background(), true)
+	if err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("reconcile must refuse on an incomplete install with the resume hint; got %v", err)
+	}
+	// spec §5: no mutation on refusal — the stale compose stays, no marker, no up.
+	if got, _ := os.ReadFile(dir + "/docker-compose.yml"); bytes.Equal(got, compose.ComposeYAML) {
+		t.Error("refused reconcile must NOT re-materialize docker-compose.yml")
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Error("refused reconcile must NOT write the apply-pending marker")
 	}
 	if hasCall(f.Calls, joinHas("up -d")) {
 		t.Fatalf("reconcile must not bring the stack up on refusal; calls=%v", f.Calls)
