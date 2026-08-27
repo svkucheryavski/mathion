@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,10 +11,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
 // versionEnvReader is the .env reader seam so the not-installed (ENOENT) vs installed-but-
@@ -57,6 +61,44 @@ func maybeWarnDualInstall(w io.Writer) {
 	fmt.Fprintf(w, "warning: mathion is installed via BOTH apt (%s) and curl|sh (%s).\n", aptBinPath, curlBinPath)
 	fmt.Fprintf(w, "         your shell runs: %s\n", active)
 	fmt.Fprintln(w, "         use one channel only — remove the other (see README).")
+}
+
+// composeDrifted reports whether the on-disk compose at cfgDir differs from this
+// binary's embedded revision, and whether a compose file is present at all. An
+// ErrNotExist file reports (false, false) — the caller treats "absent" as silent
+// (spec §5 precedence rule 1). Any OTHER read error reports (false, true): present
+// but unreadable → fail-quiet on the drift signal, but not "absent".
+func composeDrifted(cfgDir string) (drifted, present bool) {
+	b, err := os.ReadFile(filepath.Join(cfgDir, "docker-compose.yml"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, false
+	}
+	if err != nil {
+		return false, true
+	}
+	return !bytes.Equal(b, compose.ComposeYAML), true
+}
+
+// maybeWarnComposeDrift prints a one-line notice to w when this deployment's stack
+// definition differs from this mathion version's embedded definition, OR a previous
+// reconcile did not finish (an apply-pending marker is present). Precedence (spec §5):
+//  1. compose file absent → silent (checked FIRST, so a stale marker after
+//     `uninstall --purge` cannot nag a host with no deployment);
+//  2. else warn if the marker is present OR the on-disk bytes differ;
+//  3. any read error is fail-quiet for that input only.
+func maybeWarnComposeDrift(w io.Writer, cfgDir string) {
+	if w == nil {
+		return
+	}
+	drifted, present := composeDrifted(cfgDir)
+	if !present {
+		return
+	}
+	markerPresent, merr := varlib.MarkerPresent()
+	if drifted || (merr == nil && markerPresent) {
+		fmt.Fprintln(w, "note: this deployment's stack definition differs from this mathion version's "+
+			"embedded definition (or a previous reconcile did not finish); apply it with: sudo mathion reconcile")
+	}
 }
 
 func newVersionCmd(app *App) *cobra.Command {
