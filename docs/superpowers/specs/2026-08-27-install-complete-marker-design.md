@@ -1,12 +1,14 @@
 # Install-complete marker — refuse operating on a never-finished install
 
-**Status:** design (revision 5 — post dual-gate round 4 [Opus READY-TO-PLAN; codex
-CHANGES-REQUESTED, 0 Important, 1 Minor]: §4.3 broken-marker recovery advice made
-fully accurate — `uninstall --purge` tears down containers+volumes then *leaves* the
-unrecognized config dir (does not "refuse"), and the fresh volume-guard means a
-config-dir removal must follow the purge; both recovery paths now spelled out.
-Revision 4 fixed backup/status citations; revision 3 mandated the restore command-test
-fixture split; revision 2 widened the gate to all five stack-up commands)
+**Status:** design (revision 6 — post dual-gate round 5 [Opus READY-TO-PLAN, zero
+findings; codex 0 Important, 1 trivial precision Minor]: §4.3 teardown phrasing made
+exact — purge removes containers by Compose project label and volumes by
+project-derived name (`dockerx/teardown.go:16,36`). Revision 5 made the §4.3
+broken-marker recovery advice fully accurate [`uninstall --purge` tears down
+containers+volumes then *leaves* the unrecognized config dir; the fresh volume-guard
+means a config-dir removal must follow the purge]; revision 4 fixed backup/status
+citations; revision 3 mandated the restore command-test fixture split; revision 2
+widened the gate to all five stack-up commands)
 **Date:** 2026-08-27
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -213,9 +215,11 @@ lost/corrupted — matching the pre-existing `reconcile`/`tls enable` posture (b
 already `ReadState`-refuse that case via `requireInstalledDeployment`). Recovering a
 genuinely lost/corrupt marker takes a manual step, because neither command self-heals
 it: `install` with `.env` present takes the resume branch and re-refuses the bad marker
-(`install.go:71-74`), while `uninstall --purge` tears down the Docker resources
-(containers **and** volumes, by name — `uninstall.go:56`) but then *leaves* the
-unrecognized config dir in place with a note and returns success (`recognizedCfgDir` →
+(`install.go:71-74`), while `uninstall --purge` tears down the Docker resources —
+containers (by Compose project label) and volumes (by project-derived name), via
+`dockerx.Purge` (`uninstall.go:56`, mechanism in `dockerx/teardown.go:16,36`) — but then
+*leaves* the unrecognized config dir in place with a note and returns success
+(`recognizedCfgDir` →
 `ReadState` fails, `uninstall.go:130`: “refusing to purge it — remove it by hand”). So
 the two real recovery paths are: **(a) keep data** — repair the `install-state` by hand
 so `sudo mathion install` resumes (`up` → migrate → superuser over the surviving
