@@ -1,11 +1,12 @@
 # Install-complete marker — refuse operating on a never-finished install
 
-**Status:** design (revision 4 — post dual-gate round 3 [Opus READY-TO-PLAN;
-codex CHANGES-REQUESTED, 0 Important, 3 Minor wording/citation nits, all folded]:
-broken-marker recovery advice corrected [purge refuses an unrecognized config dir],
-`pg_dump`/backup citations made precise, status fail-quiet example fixed. Revision 3
-mandated the restore command-test fixture split; revision 2 widened the gate to all
-five stack-up commands)
+**Status:** design (revision 5 — post dual-gate round 4 [Opus READY-TO-PLAN; codex
+CHANGES-REQUESTED, 0 Important, 1 Minor]: §4.3 broken-marker recovery advice made
+fully accurate — `uninstall --purge` tears down containers+volumes then *leaves* the
+unrecognized config dir (does not "refuse"), and the fresh volume-guard means a
+config-dir removal must follow the purge; both recovery paths now spelled out.
+Revision 4 fixed backup/status citations; revision 3 mandated the restore command-test
+fixture split; revision 2 widened the gate to all five stack-up commands)
 **Date:** 2026-08-27
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -196,7 +197,7 @@ A single focused helper (new, in `cmd/` beside the other guards):
 func (a *App) requireInstallComplete() error {
 	st, err := config.ReadState(a.CfgDir)
 	if err != nil {
-		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` to set one up, or — if a previous install left a broken marker here — repair its install-state by hand (a missing/corrupt marker is not auto-recognized, so `uninstall --purge` refuses it; remove the config dir by hand to start over)", a.CfgDir, err)
+		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` to set one up. If a previous install left a broken marker here, repair its install-state so install can resume, or run `sudo mathion uninstall --purge` (removes containers and volumes) then remove the config dir by hand before reinstalling", a.CfgDir, err)
 	}
 	if !st.InstallComplete() {
 		return errors.New("this deployment's install did not finish (database not migrated / superuser not created); resume it with `sudo mathion install` before continuing")
@@ -209,12 +210,20 @@ The helper refuses on **two** conditions: a missing/corrupt `install-state`
 (`ReadState` error) and a valid-but-incomplete one. The first branch means `start`,
 `update`, and `restore` now also refuse a deployment whose marker was externally
 lost/corrupted — matching the pre-existing `reconcile`/`tls enable` posture (both
-already `ReadState`-refuse that case via `requireInstalledDeployment`). Recovery for a
-genuinely lost/corrupt marker is to repair the `install-state` by hand (so `install`
-resume can run) or to remove the config dir and reinstall — **not** `uninstall
---purge`, which deliberately refuses an unrecognized config dir (`recognizedCfgDir` →
-`ReadState` fails, `uninstall.go:129`: “refusing to purge it — remove it by hand”).
-The message directs accordingly, matching the existing recognition-error wording.
+already `ReadState`-refuse that case via `requireInstalledDeployment`). Recovering a
+genuinely lost/corrupt marker takes a manual step, because neither command self-heals
+it: `install` with `.env` present takes the resume branch and re-refuses the bad marker
+(`install.go:71-74`), while `uninstall --purge` tears down the Docker resources
+(containers **and** volumes, by name — `uninstall.go:56`) but then *leaves* the
+unrecognized config dir in place with a note and returns success (`recognizedCfgDir` →
+`ReadState` fails, `uninstall.go:130`: “refusing to purge it — remove it by hand”). So
+the two real recovery paths are: **(a) keep data** — repair the `install-state` by hand
+so `sudo mathion install` resumes (`up` → migrate → superuser over the surviving
+volumes); or **(b) clean slate** — `sudo mathion uninstall --purge` to remove
+containers + volumes, then remove the config dir by hand (clearing `.env` + the bad
+marker so the next `install` takes the *fresh* branch — otherwise the surviving volumes
+trip the fresh volume-guard at `install.go:89-97`), then reinstall. The message names
+both paths.
 
 Enforcement — all five stack-up commands, each **after** the command’s existing
 entry gate and **before** any mutation:
