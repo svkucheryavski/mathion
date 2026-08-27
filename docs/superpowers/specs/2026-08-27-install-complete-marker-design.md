@@ -1,7 +1,10 @@
 # Install-complete marker — refuse operating on a never-finished install
 
-**Status:** design (revision 2 — post dual-gate round 1: gate widened to all five
-stack-up commands; test-fixture, compatibility, and completeness corrections folded)
+**Status:** design (revision 3 — post dual-gate round 2 [Opus READY-TO-PLAN;
+codex CHANGES-REQUESTED, 1 Important + 3 Minor, all folded]: restore command-test
+fixture split mandated, gate/citation line refs refreshed, missing-marker message
++ backup + status wording tightened. Revision 2 widened the gate to all five
+stack-up commands)
 **Date:** 2026-08-27
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -39,7 +42,7 @@ host:
 - **`update`** (`update.go`) validates only `.env`, then migrates (`:312-317`) and
   recreates the app (`:328`); it never reads install-state.
 - **standalone `restore`** (`restore.go`) starts the db, destructively reloads it,
-  recreates the app (`:389`), and may start the public TLS proxy (`:429-465`); it
+  recreates the app (`:389`), and may start the public TLS proxy (`:429-466`); it
   never reads install-state.
 
 The reconcile spec §4.6 documented this as an **honest bound shared by
@@ -84,10 +87,11 @@ untouched.
 - **`restore`’s gate sits on the command, not the shared engine.** `restoreEngine`
   (`restore.go:197`) is reused by `update`’s in-process auto-rollback
   (`update.go:113`). The gate is placed in `newRestoreCmd` after its `guardEntry`
-  (`restore.go:63`), **not** inside `restoreEngine`, so `update`’s rollback and
+  (`restore.go:57`), **not** inside `restoreEngine`, so `update`’s rollback and
   `restore`’s breadcrumb exemption are unaffected.
-- **`backup` is intentionally left ungated.** It does not bring the stack up (a
-  one-off `alembic current` + `pg_dump` against the running app); a backup of an
+- **`backup` is intentionally left ungated.** It brings **no** stack service up: it
+  runs `pg_dump` and one-off `alembic current` / asset exports (`--no-deps`) against
+  the already-running deployment (`backup.go:81,103,117`), never `up`. A backup of an
   unmigrated DB is harmless and never masks completeness.
 - **No auto-repair beyond the existing resume.** This slice adds no new migration
   or repair logic; it relies on `mathion install`’s existing idempotent resume
@@ -190,7 +194,7 @@ A single focused helper (new, in `cmd/` beside the other guards):
 func (a *App) requireInstallComplete() error {
 	st, err := config.ReadState(a.CfgDir)
 	if err != nil {
-		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` first", a.CfgDir, err)
+		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` to set one up, or repair install-state / `sudo mathion uninstall --purge` if a previous install left a broken marker", a.CfgDir, err)
 	}
 	if !st.InstallComplete() {
 		return errors.New("this deployment's install did not finish (database not migrated / superuser not created); resume it with `sudo mathion install` before continuing")
@@ -218,11 +222,12 @@ entry gate and **before** any mutation:
 - **`start`** — after `lockAndGuard` and before the `up` (`start.go:14-18`). This is
   `start`’s only new behavior; it gains **only** this check (no `.env`/permission
   validation — that stays reconcile/tls’s `requireInstalledDeployment`).
-- **`update`** — in `newUpdateCmd` after `guardEntry(app, "update")` succeeds and
-  while the lock is held (`update.go:157`), before `runUpdate` / any pull. `update`
-  does **not** stamp.
+- **`update`** — in `newUpdateCmd` after `guardEntry(app, "update")` succeeds
+  (`update.go:153`) and while the lock is held, before `runUpdate` (`:158`) / any
+  pull. `update` does **not** stamp.
 - **standalone `restore`** — in `newRestoreCmd` after `guardEntry(app, "restore")`
-  succeeds (`restore.go:63`), before archive resolution / `restoreEngine`. Placed on
+  succeeds (`restore.go:57`), before archive resolution / `restoreEngine` (`:74`).
+  Placed on
   the command, **not** in `restoreEngine`, so `update`’s auto-rollback
   (`update.go:113`, which calls `restoreEngine` directly) is unaffected. `restore`
   does **not** stamp.
@@ -267,6 +272,25 @@ bump on the existing `install-state` consumers:
   install-state, and confirm `TestStartRefusesOnBreadcrumb` still refuses at the
   breadcrumb first (`lockAndGuard` returns `proceed=false` before the new read).
   New tests seed `Schema 2, complete:false` to exercise refusals.
+- **Exception — `restore_test.go` command-level tests.** The eight tests that invoke
+  `newRestoreCmd` (`TestRestoreCmdLatestResolves` `:977`,
+  `TestRestoreCmdExemptProceedsReplacesBreadcrumb` `:1157`, and their siblings at
+  `:1014,1036,1128,1191,1215,1238`) build their CfgDir via `setupRestoreEnv`
+  (`restore_test.go:246`), which writes **only `.env`** — no install-state — because
+  `restore` read none before this slice. Once the command gate lands, any of these
+  that proceeds past `guardEntry` would hit `requireInstallComplete` and refuse
+  **before** its intended assertion. The plan **must** seed a **complete**
+  install-state (`Schema 2, complete:true`) into those tests’ CfgDir — via a
+  dedicated command-level helper (e.g. `setupRestoreCmdEnv` = `setupRestoreEnv` + a
+  `config.WriteState(cfg, State{Schema: 2, AdminEmail: …, Complete: true})`), **not**
+  by mutating `setupRestoreEnv`. `setupRestoreEnv` **stays markerless** for the ~20
+  engine-level `TestRestoreEngine*` tests that call `restoreEngine(...)` directly:
+  keeping them markerless is a deliberate tripwire — should a gate ever be wrongly
+  added *inside* `restoreEngine` (which would break `update`’s auto-rollback), those
+  markerless engine tests fail loudly. **`update` needs no fixture change:** every
+  existing `update_test.go` test calls `runUpdate(...)` directly (below the
+  `newUpdateCmd` gate), so none reaches `requireInstallComplete`; the update gate’s
+  coverage is a **new** command-level refusal test (below).
 
 ### 4.5 `status` notice (drift-notice pattern)
 
@@ -294,9 +318,10 @@ func maybeWarnInstallIncomplete(w io.Writer, cfgDir string) {
 
 Emitted from `status.go` where `maybeWarnComposeDrift` is already emitted, and
 **before** it (a never-finished install is the more fundamental problem than a
-drifted compose). Root runs status, so `install-state` is readable there; non-root
-`version` fails quiet, matching the compose-drift marker read. This is the one
-trim-able item: dropping it leaves the gate fully functional.
+drifted compose). `newStatusCmd` has no root gate; when `status` is run as root the
+0600 `install-state` is readable and the notice fires, and when it is not the read
+fails quiet (prints nothing) — matching the compose-drift marker read. This is the
+one trim-able item: dropping it leaves the gate fully functional.
 
 ### 4.6 Residual (honest bound)
 
@@ -331,11 +356,19 @@ guarantee. This residual is intentionally accepted.
   standalone `restore` each REFUSE on a seeded `Schema 2, complete:false` host
   (assert no `up`/no compose write/no marker write/no `restoreEngine` mutation — for
   `update`/`restore`, no pull and no stack-up call on the fake runner) and PROCEED on
-  `Schema 2, complete:true` and legacy `Schema 1`. `start`’s proceed case needs a
-  **new** fixture (§4.4); `TestStartRefusesOnBreadcrumb` must still refuse at the
-  breadcrumb before reaching the new read. Confirm `update`’s auto-rollback path
-  (`restoreEngine` via `update.go:113`) is **not** gated (the gate is on
-  `newRestoreCmd`, not the engine).
+  `Schema 2, complete:true` and legacy `Schema 1`.
+  - `start`’s proceed case needs the **new** `t.TempDir()` complete-state fixture
+    (§4.4); `TestStartRefusesOnBreadcrumb` must still refuse at the breadcrumb before
+    reaching the new read.
+  - `update` and standalone `restore` each get a **new** command-level refusal test
+    (`newUpdateCmd` / `newRestoreCmd` on a `Schema 2, complete:false` host): existing
+    `update_test.go` drives `runUpdate` directly and existing `restore` command tests
+    seed no install-state, so neither gate is exercised today. The `restore`
+    command-level proceed cases use the new complete-state helper (§4.4);
+    `setupRestoreEnv`-based `TestRestoreEngine*` tests stay markerless and must keep
+    passing, proving the gate is on `newRestoreCmd`, not `restoreEngine`.
+  - Confirm `update`’s auto-rollback path (`restoreEngine` via `update.go:113`) is
+    **not** gated (the gate is on `newRestoreCmd`, not the engine).
 - **`status` notice** — exercised through `newStatusCmd` (not only the helper):
   emitted for `Schema 2, complete:false`, absent for `Schema 1`/`complete:true`;
   fail-quiet on unreadable install-state.
