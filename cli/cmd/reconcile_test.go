@@ -80,6 +80,22 @@ func TestReconcileRefusesOnBreadcrumb(t *testing.T) {
 	}
 }
 
+func TestReconcileRefusesOnIncompleteInstall(t *testing.T) {
+	dir := installedDeployment(t, false)
+	varlibReady(t)
+	if err := config.WriteState(dir, config.State{Schema: 2, AdminEmail: "admin@example.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard}
+	if err := app.reconcile(context.Background(), false); err == nil {
+		t.Fatal("reconcile must refuse on an incomplete install")
+	}
+	if hasCall(f.Calls, joinHas("up -d")) {
+		t.Fatalf("reconcile must not bring the stack up on refusal; calls=%v", f.Calls)
+	}
+}
+
 func TestReconcileRequiresInstalledDeployment(t *testing.T) {
 	varlibReady(t)
 	dir := t.TempDir() // no .env, no state

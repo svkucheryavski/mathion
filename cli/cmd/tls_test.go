@@ -305,6 +305,51 @@ func TestTLSEnableHappyPath(t *testing.T) {
 	}
 }
 
+func TestRequireInstallComplete(t *testing.T) {
+	// missing marker
+	empty := t.TempDir()
+	if err := (&App{CfgDir: empty}).requireInstallComplete(); err == nil {
+		t.Fatal("missing install-state must refuse")
+	}
+	// incomplete
+	inc := t.TempDir()
+	if err := config.WriteState(inc, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	err := (&App{CfgDir: inc}).requireInstallComplete()
+	if err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("incomplete install must refuse with a resume hint; got %v", err)
+	}
+	// complete + grandfathered
+	for _, s := range []config.State{
+		{Schema: 2, AdminEmail: "a@b.c", Complete: true},
+		{Schema: 1, AdminEmail: "a@b.c"},
+	} {
+		d := t.TempDir()
+		if err := config.WriteState(d, s); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&App{CfgDir: d}).requireInstallComplete(); err != nil {
+			t.Fatalf("%+v must pass; got %v", s, err)
+		}
+	}
+}
+
+func TestTLSEnableRefusesOnIncompleteInstall(t *testing.T) {
+	dir := installedDeployment(t, false) // seeds Schema 1 + .env + compose
+	if err := config.WriteState(dir, config.State{Schema: 2, AdminEmail: "admin@example.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard}
+	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu", Email: "admin@example.edu"}); err == nil {
+		t.Fatal("tls enable must refuse on an incomplete install")
+	}
+	if hasCall(f.Calls, joinHas("up -d")) {
+		t.Fatalf("tls enable must not bring the stack up on refusal; calls=%v", f.Calls)
+	}
+}
+
 func TestTLSDisableToleratesNoSuchServiceThenClears(t *testing.T) {
 	dir := writeEnabledEnv(t)
 	var out bytes.Buffer

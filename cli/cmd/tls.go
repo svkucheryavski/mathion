@@ -186,6 +186,10 @@ func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
 	if err := a.requireInstalledDeployment(); err != nil {
 		return err
 	}
+	// Completeness gate: refuse a never-finished install before compose re-materialize / up (spec §4.3).
+	if err := a.requireInstallComplete(); err != nil {
+		return err
+	}
 	// 4. Re-materialize the on-disk compose to the embedded (Slice-5) revision so
 	// `up … proxy` finds the service after a CLI upgrade.
 	if err := config.EnsureConfigDir(a.CfgDir); err != nil {
@@ -250,6 +254,22 @@ func (a *App) requireInstalledDeployment() error {
 	}
 	if err := config.ValidateEnvComplete(m); err != nil {
 		return fmt.Errorf(".env is incomplete or inconsistent (%w); repair it or run `mathion install`", err)
+	}
+	return nil
+}
+
+// requireInstallComplete refuses when install-state says the install never
+// finished migrating/creating the superuser (Schema 2, complete:false), OR when
+// there is no valid install-state at all (missing/corrupt). Schema 1 is
+// grandfathered complete. It is a separate predicate from requireInstalledDeployment
+// so start/update/restore adopt exactly this one check.
+func (a *App) requireInstallComplete() error {
+	st, err := config.ReadState(a.CfgDir)
+	if err != nil {
+		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` to set one up. If a previous install left a broken marker here, repair its install-state so install can resume, or run `sudo mathion uninstall --purge` (removes containers and volumes) then remove the config dir by hand before reinstalling", a.CfgDir, err)
+	}
+	if !st.InstallComplete() {
+		return errors.New("this deployment's install did not finish (database not migrated / superuser not created); resume it with `sudo mathion install` before continuing")
 	}
 	return nil
 }

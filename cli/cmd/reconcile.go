@@ -50,6 +50,10 @@ func (a *App) reconcile(ctx context.Context, yes bool) error {
 	if err := a.requireInstalledDeployment(); err != nil {
 		return err
 	}
+	// Completeness gate: refuse a never-finished install BEFORE any mutation (spec §4.3).
+	if err := a.requireInstallComplete(); err != nil {
+		return err
+	}
 	// Step 3: re-derive TLS state UNDER THE LOCK — not the pre-lock startup snapshot
 	// (spec §4.1 step 3). tlsEnabledFromEnv fails closed.
 	a.tlsEnabled = tlsEnabledFromEnv(a.CfgDir)
