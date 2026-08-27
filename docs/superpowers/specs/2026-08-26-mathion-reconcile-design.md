@@ -1,6 +1,6 @@
 # `mathion reconcile` — apply an upgraded CLI's stack definition to a running deployment
 
-**Status:** design (revision 4, post dual-gate round 3)
+**Status:** design (revision 5, post dual-gate round 4)
 **Date:** 2026-08-26
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -272,11 +272,13 @@ install brings the stack up (`up -d --wait`, app+db) and health-gates `app`
 database (`backend/mathion/main.py:151-153`), and a fresh install writes no
 recovery breadcrumb. So an install that crashed after `up` but before migrate can
 present a running, "healthy" app with **no** migrated schema, and it would pass
-reconcile's gates. Reconcile runs no migration and changes only compose shape, so
-it does **not itself** worsen such a deployment — the single caveat being §4.3's
-residual (an independently moved local `app` tag, which *any* `up` would recreate
-from; reconcile neither moves nor pulls it) — and it does **not** repair it
-either: it would just report "reconciled" on an already-broken host. This
+reconcile's gates. Reconcile runs **no** migration, so it neither completes nor
+repairs the missing schema, and it does **not** itself change or pull the app/db
+image *reference* — but it is not inert: like any `up` it recreates services whose
+resolved config changed (brief downtime, and a service could come back unhealthy),
+and the full §4.3 image residuals (an independently moved local `app` **or** `db`
+tag) still apply. What it cannot do is *fix* an install that never migrated: it
+would just report "reconciled" on an already-broken host. This
 install-completeness **gap** is **shared with `tls enable` and `start`** — though
 not via identical guards: `start` takes only `lockAndGuard` (`cmd/start.go`) and
 runs `up` directly; `tls enable` calls `requireInstalledDeployment`
@@ -356,16 +358,15 @@ entirely; `status` catches that case on its next invocation.)*
 
 ## 6. Security considerations
 
-- **No new trust surface.** Reconcile writes the same embedded, digest-pinned
-  compose that `install`/`tls enable` already write, and brings the project up
-  through the same `composeArgs` path every other command uses. It introduces no
-  new **trust source beyond the embedded compose**, no new image, and no new
-  privilege — it *does* change service/network shape (that is the point), but
-  only to the digest-pinned, reviewed embedded definition. (It may contact a
-  registry to
-  fetch an **absent** pinned proxy image via the targeted `pull --policy missing`
-  — a missing pinned image can require network access — but it pulls no new
-  *source* and no mutable tag.)
+- **No new trust surface.** Reconcile writes the same embedded compose that
+  `install`/`tls enable` already write, and brings the project up through the same
+  `composeArgs` path every other command uses. It introduces no new **trust
+  source beyond the embedded compose**, no new **unpinned** image, and no new
+  privilege — it *does* change service/network shape (that is the point), but only
+  to the reviewed embedded definition. A newer CLI revision may pin a **new proxy
+  digest**, and reconcile's targeted `pull --policy missing` (step 6c) fetches
+  that absent pinned image (network access) — but it is a reviewed, digest-pinned
+  image, and reconcile pulls no mutable `app`/`db` tag.
 - **Fail-closed against `.env` poisoning is preserved** in two independent
   layers: `requireInstalledDeployment` → `ValidateEnvComplete` aborts before any
   write; and `tlsProfileWanted`→`tlsEnabledFromEnv` (re-derived under the lock,
@@ -390,8 +391,12 @@ Reconcile uses the standard exit mapping (`exitCode`: 0 success, else 1). It has
 no `rollbackFailedError`/exit-3 path — there is no rollback. Failure modes:
 
 - A failure of the marker's **own** atomic write (§4.1 step 6a) aborts *before
-  any container mutation* — nothing changed, so no marker is left, which is
-  correct (there is nothing to detect).
+  any container mutation* — nothing was applied to the stack. Whether a marker
+  file is left depends on where `config.AtomicWrite` failed: a pre-rename failure
+  (temp write/chmod/rename) leaves none; a post-rename directory-fsync failure
+  (`state.go:39-42`) leaves the marker in place with only its durability uncertain.
+  Either way it is harmless — at worst a cosmetic `status` nag the next successful
+  reconcile clears — since the deployment was never mutated.
 - A **later** failure — the compose `AtomicWrite` (6b), the **fatal** pre-pull
   (6c), or the `up --wait` (6d) — returns a plain error (exit 1) with the
   **apply-pending marker left in place**, so `status` keeps warning and the
@@ -451,9 +456,9 @@ The lock is released on every path via `defer`.
 **uninstall (`cmd/uninstall_test.go`):**
 14. `uninstall --purge` removes the apply-pending marker **only after
     `dockerx.Purge` succeeds** (so a later `status` on the purged host does not
-    nag); a fixture where `dockerx.Purge` fails **retains** the marker (the
-    deployment survives, so the signal must too). Belt-and-suspenders alongside
-    the §5 precedence.
+    nag); a fixture where `dockerx.Purge` fails **retains** the marker (teardown
+    did not complete and the on-disk configuration is retained, so the signal must
+    be too). Belt-and-suspenders alongside the §5 precedence.
 
 ## 9. Files
 
@@ -468,8 +473,9 @@ The lock is released on every path via `defer`.
   REFUSE set); `cli/cmd/status.go` (emit the drift notice on both return-nil
   branches); `cli/cmd/uninstall.go` (remove the apply-pending marker on `--purge`
   **only after `dockerx.Purge` succeeds**, alongside `RemoveJournal` at
-  `uninstall.go:63`; removal failure warns and is non-fatal — a failed purge must
-  retain the marker while the deployment survives);
+  `uninstall.go:63`; removal failure warns and is non-fatal — a failed purge
+  (`dockerx.Purge` is sequential and may leave teardown incomplete) must retain
+  the marker while the deployment's configuration is retained);
   `cli/internal/selfupdate/run_linux.go` (unconditional post-success nudge) + its
   test.
 - **Docs:** README "Self-hosting / Upgrading" note that a CLI upgrade which
