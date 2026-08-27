@@ -115,6 +115,12 @@ func TestRun_HappyPath_Swaps(t *testing.T) {
 	if !strings.Contains(out.String(), "cli-v0.9.0") {
 		t.Fatalf("missing old→new line: %q", out.String())
 	}
+	if !strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("a successful self-update must nudge toward reconcile; got %q", out.String())
+	}
+	if si, ni := strings.Index(out.String(), "cli-v0.9.0"), strings.Index(out.String(), "sudo mathion reconcile"); ni < si {
+		t.Fatalf("the reconcile nudge must FOLLOW the success line (spec §8 test 13 ordering); got %q", out.String())
+	}
 }
 
 func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
@@ -138,6 +144,9 @@ func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
 	if !strings.Contains(out.String(), "installable") {
 		t.Fatalf("--check output: %q", out.String())
 	}
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("--check must NOT print the reconcile nudge; got %q", out.String())
+	}
 }
 
 func TestRun_AptManaged_Defers(t *testing.T) {
@@ -157,6 +166,9 @@ func TestRun_AptManaged_Defers(t *testing.T) {
 	if !strings.Contains(out.String(), "apt install --only-upgrade mathion") {
 		t.Fatalf("apt defer output: %q", out.String())
 	}
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("apt-defer must NOT print the reconcile nudge; got %q", out.String())
+	}
 }
 
 func TestRun_Decline_ReturnsNil(t *testing.T) {
@@ -173,5 +185,28 @@ func TestRun_Decline_ReturnsNil(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "cancelled") {
 		t.Fatalf("decline output: %q", out.String())
+	}
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("a cancelled self-update must NOT print the reconcile nudge; got %q", out.String())
+	}
+}
+
+func TestRun_UpToDate_NoNudge(t *testing.T) {
+	p, _, _, done := harness(t, "cli-v0.9.0") // already the newest tag the release list offers
+	defer done()
+	p.Yes = true
+	var out bytes.Buffer
+	p.Out = &out
+	if err := Run(context.Background(), p); err != nil {
+		t.Fatalf("up-to-date must be a clean no-op: %v", err)
+	}
+	if got, _ := os.ReadFile(p.Cfg.swapTarget); string(got) != "old" {
+		t.Fatal("up-to-date must NOT swap the binary")
+	}
+	if !strings.Contains(out.String(), "already up to date") {
+		t.Fatalf("expected the up-to-date line; got %q", out.String())
+	}
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("up-to-date must NOT print the reconcile nudge; got %q", out.String())
 	}
 }
