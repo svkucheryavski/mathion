@@ -92,7 +92,14 @@ func EnsureConfigDir(cfgdir string) error {
 type State struct {
 	Schema     int    `json:"schema"`
 	AdminEmail string `json:"admin_email"`
+	Complete   bool   `json:"complete,omitempty"` // meaningful only for Schema >= 2
 }
+
+// InstallComplete reports whether install finished (migrate + superuser).
+// Schema 1 (written by the pre-marker CLI) is grandfathered complete; Schema 2
+// carries the explicit flag. Assumes the receiver already passed ParseState
+// (Schema is 1 or 2).
+func (s State) InstallComplete() bool { return s.Schema == 1 || s.Complete }
 
 func WriteState(cfgdir string, s State) error {
 	b, err := json.Marshal(s)
@@ -119,7 +126,7 @@ func ParseState(b []byte) (State, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return State{}, fmt.Errorf("install-state is not valid JSON: %w", err)
 	}
-	if s.Schema != 1 || s.AdminEmail == "" {
+	if (s.Schema != 1 && s.Schema != 2) || s.AdminEmail == "" {
 		return State{}, fmt.Errorf("install-state is incomplete or unknown schema (%d)", s.Schema)
 	}
 	return s, nil
