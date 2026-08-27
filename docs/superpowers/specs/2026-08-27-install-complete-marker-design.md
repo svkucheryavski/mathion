@@ -1,10 +1,11 @@
 # Install-complete marker — refuse operating on a never-finished install
 
-**Status:** design (revision 3 — post dual-gate round 2 [Opus READY-TO-PLAN;
-codex CHANGES-REQUESTED, 1 Important + 3 Minor, all folded]: restore command-test
-fixture split mandated, gate/citation line refs refreshed, missing-marker message
-+ backup + status wording tightened. Revision 2 widened the gate to all five
-stack-up commands)
+**Status:** design (revision 4 — post dual-gate round 3 [Opus READY-TO-PLAN;
+codex CHANGES-REQUESTED, 0 Important, 3 Minor wording/citation nits, all folded]:
+broken-marker recovery advice corrected [purge refuses an unrecognized config dir],
+`pg_dump`/backup citations made precise, status fail-quiet example fixed. Revision 3
+mandated the restore command-test fixture split; revision 2 widened the gate to all
+five stack-up commands)
 **Date:** 2026-08-27
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -89,9 +90,10 @@ untouched.
   (`update.go:113`). The gate is placed in `newRestoreCmd` after its `guardEntry`
   (`restore.go:57`), **not** inside `restoreEngine`, so `update`’s rollback and
   `restore`’s breadcrumb exemption are unaffected.
-- **`backup` is intentionally left ungated.** It brings **no** stack service up: it
-  runs `pg_dump` and one-off `alembic current` / asset exports (`--no-deps`) against
-  the already-running deployment (`backup.go:81,103,117`), never `up`. A backup of an
+- **`backup` is intentionally left ungated.** It brings **no** stack service up: after
+  a db-running precondition (`backup.go:81`) it runs `pg_dump` (`exec -T db`,
+  `backup.go:91-95`) plus one-off asset exports and `alembic current`
+  (`run --rm --no-deps`, `backup.go:103-105,117-119`), never `up`. A backup of an
   unmigrated DB is harmless and never masks completeness.
 - **No auto-repair beyond the existing resume.** This slice adds no new migration
   or repair logic; it relies on `mathion install`’s existing idempotent resume
@@ -194,7 +196,7 @@ A single focused helper (new, in `cmd/` beside the other guards):
 func (a *App) requireInstallComplete() error {
 	st, err := config.ReadState(a.CfgDir)
 	if err != nil {
-		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` to set one up, or repair install-state / `sudo mathion uninstall --purge` if a previous install left a broken marker", a.CfgDir, err)
+		return fmt.Errorf("no valid mathion install found at %s (%w); run `sudo mathion install` to set one up, or — if a previous install left a broken marker here — repair its install-state by hand (a missing/corrupt marker is not auto-recognized, so `uninstall --purge` refuses it; remove the config dir by hand to start over)", a.CfgDir, err)
 	}
 	if !st.InstallComplete() {
 		return errors.New("this deployment's install did not finish (database not migrated / superuser not created); resume it with `sudo mathion install` before continuing")
@@ -207,9 +209,12 @@ The helper refuses on **two** conditions: a missing/corrupt `install-state`
 (`ReadState` error) and a valid-but-incomplete one. The first branch means `start`,
 `update`, and `restore` now also refuse a deployment whose marker was externally
 lost/corrupted — matching the pre-existing `reconcile`/`tls enable` posture (both
-already `ReadState`-refuse that case via `requireInstalledDeployment`). Recovery for
-a genuinely lost marker is repair or `uninstall --purge`, exactly as the message and
-the existing recognition errors already direct.
+already `ReadState`-refuse that case via `requireInstalledDeployment`). Recovery for a
+genuinely lost/corrupt marker is to repair the `install-state` by hand (so `install`
+resume can run) or to remove the config dir and reinstall — **not** `uninstall
+--purge`, which deliberately refuses an unrecognized config dir (`recognizedCfgDir` →
+`ReadState` fails, `uninstall.go:129`: “refusing to purge it — remove it by hand”).
+The message directs accordingly, matching the existing recognition-error wording.
 
 Enforcement — all five stack-up commands, each **after** the command’s existing
 entry gate and **before** any mutation:
@@ -301,7 +306,7 @@ A helper beside `maybeWarnComposeDrift`/`maybeWarnDualInstall`
 // maybeWarnInstallIncomplete prints a one-line notice when install-state says the
 // install never finished, so `mathion status` surfaces it before the operator
 // hits a hard refusal. Fail-quiet: an unreadable/absent install-state (e.g.
-// non-root `mathion version`, mode-0600 file) prints nothing.
+// non-root `mathion status`, mode-0600 file) prints nothing.
 func maybeWarnInstallIncomplete(w io.Writer, cfgDir string) {
 	if w == nil {
 		return
