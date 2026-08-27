@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,5 +289,47 @@ func TestInstallRefusesOnBreadcrumb(t *testing.T) {
 	}
 	if _, present, _ := varlib.ReadJournal(); !present {
 		t.Fatal("install must retain the breadcrumb (never clears it)")
+	}
+}
+
+func TestResumeStampsComplete(t *testing.T) {
+	dir := t.TempDir()
+	config.WriteState(dir, config.State{Schema: 2, AdminEmail: "you@example.edu", Complete: false})
+	env := config.GenerateEnv("https://learn.example.edu", "v0.1.1", "S==", "hex")
+	os.WriteFile(filepath.Join(dir, ".env"), []byte(config.RenderEnv(env)), 0o600)
+
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
+	if err := app.runInstall(context.Background(), installOpts{Domain: "ignored", AdminEmail: "ignored@x.edu", Version: "v9"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := config.ReadState(dir)
+	if st.Schema != 2 || !st.Complete {
+		t.Fatalf("a successful resume must stamp Schema 2 complete:true; got %+v", st)
+	}
+	if st.AdminEmail != "you@example.edu" {
+		t.Fatalf("resume must keep the seeded admin email; got %q", st.AdminEmail)
+	}
+}
+
+func TestResumeSuperuserFailLeavesIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	config.WriteState(dir, config.State{Schema: 2, AdminEmail: "you@example.edu", Complete: false})
+	env := config.GenerateEnv("https://learn.example.edu", "v0.1.1", "S==", "hex")
+	os.WriteFile(filepath.Join(dir, ".env"), []byte(config.RenderEnv(env)), 0o600)
+
+	f := &compose.FakeRunner{RunFunc: func(args []string) error {
+		if joinHas("create-superuser")(args) {
+			return errors.New("boom")
+		}
+		return nil
+	}}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
+	if err := app.runInstall(context.Background(), installOpts{Domain: "ignored", AdminEmail: "ignored@x.edu", Version: "v9"}); err == nil {
+		t.Fatal("expected the resume superuser failure to abort")
+	}
+	st, _ := config.ReadState(dir)
+	if st.Schema != 2 || st.Complete {
+		t.Fatalf("a failed resume must leave the seeded incomplete marker; got %+v", st)
 	}
 }

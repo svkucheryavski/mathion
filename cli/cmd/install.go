@@ -160,7 +160,10 @@ func (a *App) resume(ctx context.Context, st config.State) error {
 	if err := a.compose(ctx, "exec", "-T", "app", "alembic", "upgrade", "head"); err != nil {
 		return err
 	}
-	return a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", st.AdminEmail)
+	if err := a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", st.AdminEmail); err != nil {
+		return err
+	}
+	return config.WriteState(a.CfgDir, config.State{Schema: 2, AdminEmail: st.AdminEmail, Complete: true})
 }
 
 func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
@@ -187,7 +190,7 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 	if err := config.AtomicWrite(a.CfgDir+"/docker-compose.yml", composeBytes(), 0o644); err != nil {
 		return err
 	}
-	if err := config.WriteState(a.CfgDir, config.State{Schema: 1, AdminEmail: email}); err != nil {
+	if err := config.WriteState(a.CfgDir, config.State{Schema: 2, AdminEmail: email, Complete: false}); err != nil {
 		return err
 	}
 	secret, err := secrets.SecretKey()
@@ -214,6 +217,9 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 		return err
 	}
 	if err := a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", email); err != nil {
+		return err
+	}
+	if err := config.WriteState(a.CfgDir, config.State{Schema: 2, AdminEmail: email, Complete: true}); err != nil {
 		return err
 	}
 

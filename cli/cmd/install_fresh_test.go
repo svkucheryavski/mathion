@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -60,5 +61,46 @@ func TestFreshInstallWritesConfigAndRuns(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Fatalf("compose calls =\n%v\nwant\n%v", f.Calls, want)
+	}
+}
+
+func TestFreshInstallStampsComplete(t *testing.T) {
+	dir := t.TempDir()
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
+	if err := app.runInstallFresh(context.Background(), installOpts{
+		Domain: "learn.example.edu", AdminEmail: "you@example.edu", Version: "v0.1.1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := config.ReadState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Schema != 2 || !st.Complete || !st.InstallComplete() {
+		t.Fatalf("successful fresh install must stamp Schema 2 complete:true; got %+v", st)
+	}
+}
+
+func TestFreshInstallSuperuserFailLeavesIncomplete(t *testing.T) {
+	dir := t.TempDir()
+	f := &compose.FakeRunner{RunFunc: func(args []string) error {
+		if joinHas("create-superuser")(args) {
+			return errors.New("boom")
+		}
+		return nil
+	}}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
+	if err := app.runInstallFresh(context.Background(), installOpts{
+		Domain: "learn.example.edu", AdminEmail: "you@example.edu", Version: "v0.1.1",
+	}); err == nil {
+		t.Fatal("expected the superuser failure to abort the fresh install")
+	}
+	st, err := config.ReadState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Schema != 2 || st.Complete || st.InstallComplete() {
+		t.Fatalf("a partial fresh install must leave Schema 2 complete:false; got %+v", st)
 	}
 }
