@@ -1,6 +1,6 @@
 # `mathion reconcile` — apply an upgraded CLI's stack definition to a running deployment
 
-**Status:** design (revision 5, post dual-gate round 4)
+**Status:** design (revision 6, post dual-gate round 5)
 **Date:** 2026-08-26
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -392,11 +392,16 @@ no `rollbackFailedError`/exit-3 path — there is no rollback. Failure modes:
 
 - A failure of the marker's **own** atomic write (§4.1 step 6a) aborts *before
   any container mutation* — nothing was applied to the stack. Whether a marker
-  file is left depends on where `config.AtomicWrite` failed: a pre-rename failure
-  (temp write/chmod/rename) leaves none; a post-rename directory-fsync failure
-  (`state.go:39-42`) leaves the marker in place with only its durability uncertain.
-  Either way it is harmless — at worst a cosmetic `status` nag the next successful
-  reconcile clears — since the deployment was never mutated.
+  file remains depends on prior state and where `config.AtomicWrite` failed (it
+  removes only its own temp file, never an existing destination —
+  `state.go:13-42`): if no marker previously existed, a pre-rename failure (temp
+  write/chmod/rename) leaves none; if one did (a retry after an earlier failed
+  apply), that existing marker remains. A post-rename directory-fsync failure
+  (`state.go:39-42`) leaves the newly renamed marker present with only its
+  durability uncertain. In every case the current attempt aborted before
+  mutation, and a retained marker is the correct signal — either a genuine
+  earlier partial apply worth surfacing, or at worst a cosmetic `status` nag the
+  next successful reconcile clears.
 - A **later** failure — the compose `AtomicWrite` (6b), the **fatal** pre-pull
   (6c), or the `up --wait` (6d) — returns a plain error (exit 1) with the
   **apply-pending marker left in place**, so `status` keeps warning and the
