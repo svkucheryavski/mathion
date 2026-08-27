@@ -1,6 +1,6 @@
 # `mathion reconcile` — apply an upgraded CLI's stack definition to a running deployment
 
-**Status:** design (revision 3, post dual-gate round 2)
+**Status:** design (revision 4, post dual-gate round 3)
 **Date:** 2026-08-26
 **Author:** Sergey Kucheryavskiy (with Claude)
 **Area:** Mathion deployment CLI (`cli/`, Go 1.24, cobra)
@@ -61,9 +61,13 @@ notice** that tells operators when to run it.
   current `.env` pins and never rewrites `MATHION_VERSION` (see §4.3 for how it
   avoids pulling mutable tags).
 - **Compatibility constraint on future compose edits (largely enforced by
-  construction).** Because reconcile preserves `MATHION_VERSION`, its `up` runs
-  the **same app image the deployment is already pinned to** — it cannot
-  introduce an app/schema-version mismatch through the app image. Therefore any
+  construction).** Because reconcile preserves `MATHION_VERSION` and pulls no
+  mutable tag (§4.3), its `up` runs the **same app image *reference* the
+  deployment is already pinned to**, and reconcile itself neither moves nor
+  re-pulls that tag — so it cannot *introduce* an app/schema-version mismatch
+  through the app image (the one exception is the documented §4.3 residual: an
+  operator who independently moved+pulled the local `app` tag, which predates and
+  is orthogonal to reconcile). Therefore any
   embedded compose change reconcile is allowed to deliver must be compatible with
   the app/schema version a user could already be running when they upgrade the
   CLI and reconcile (in practice: proxy/header/hardening/network shape, which is
@@ -137,7 +141,9 @@ running project up so Compose reconciles the running containers to it.
    a. **Write the apply-pending marker** — a durable, `varlib`-owned file (e.g.
       `<varlib>/reconcile-pending`, resolved via `varlib.Root()` /
       `MATHION_VARLIB_DIR`, written **atomically** temp+rename+dir-fsync like the
-      journal) BEFORE any container change, so a failed/partial `up` is still
+      journal) BEFORE any container change — an **empty/opaque presence-only
+      file** (its bytes carry no schema; its mere presence is the entire signal,
+      written via `config.AtomicWrite`) — so a failed/partial `up` is still
       detectable afterward (§5, §7).
    b. `config.EnsureConfigDir(CfgDir)` then
       `config.AtomicWrite(CfgDir+"/docker-compose.yml", composeBytes(), 0o644)`
@@ -198,14 +204,18 @@ Whole-project `up` therefore creates/updates `app`+`db` on a non-TLS deployment,
 and `app`+`db`+`proxy`+`proxy-init` when TLS is enabled (the profile-gated
 services join). The pre-pull of `proxy proxy-init` by explicit name in step 6c
 does not need `--profile tls` (naming a service pulls it regardless — `pull`'s
-`tlsProfileWanted` is `false`, `cmd/root.go:66`), matching install/restore.
+`tlsProfileWanted` is `false`, `cmd/root.go:67`), matching install/restore.
 `proxy-init` is an idempotent one-shot chown (non-recursive, CHOWN-only,
 networkless — `docker-compose.yml:39-54`) gated by
 `service_completed_successfully`; re-running it is safe. **No `--remove-orphans`:**
-there is no reachable state where reconcile turns a running proxy into an orphan
-(TLS-enabled `.env`→`--profile tls`→proxy in active set; TLS-disabled→proxy
-already reaped by `tls disable`), so not reaping only suppresses a harmless
-warning; a future removed/renamed service ships with its own migration note (§3).
+there is essentially no reachable state where reconcile turns a running proxy into
+an orphan (TLS-enabled `.env`→`--profile tls`→proxy in active set;
+TLS-disabled→proxy already reaped by `tls disable`). The one out-of-band case — a
+`.env` hand-edited to an empty domain *without* running `tls disable`, leaving the
+proxy container running — makes reconcile's no-`--profile tls` `up` leave that
+proxy as a **harmless un-reaped orphan**; HTTPS is not downgraded, and the absent
+`--remove-orphans` only suppresses the warning. A future removed/renamed service
+ships with its own migration note (§3).
 
 ### 4.3 Image pulls — `--pull never` + targeted pinned pre-pull
 
@@ -234,9 +244,10 @@ operator's docker concern — pre-existing behavior of any `up`.
 Reconcile is forward-only and idempotent within a given CLI binary: it applies
 *this binary's* embedded definition. If nothing changed, step 6d is a fast no-op.
 Because reconcile performs **no** schema migration, image-tag move, or data
-mutation (§3), there is no data state to roll back; a failed `up` (healthcheck
-timeout, a not-yet-present pinned image on an air-gapped host) is simply retried
-by re-running reconcile, and the **apply-pending marker** left behind on failure
+mutation (§3), there is no data state to roll back; a failed `up` (e.g. a
+healthcheck timeout) — or a failed pre-pull (an absent pinned proxy image on an
+air-gapped TLS host, §4.1 step 6c) — is simply retried by re-running reconcile,
+and the **apply-pending marker** left behind on failure
 (§4.1 step 6a, removed only on success) keeps `status` warning until a clean apply
 completes (§5). To *change* the stack definition you change the binary; reconcile
 does not preserve prior compose revisions (they are recoverable deterministically
@@ -255,15 +266,22 @@ tags and has no rollback).
 `requireInstalledDeployment` (step 2) validates the presence/permissions/
 consistency of `.env` + install-state, and step 4 requires the `app` container to
 be running — but **neither proves a fresh install finished migrating.** A fresh
-install starts and health-gates `app` *before* running Alembic and creating the
-superuser (`cmd/install.go:210,213,216`), and `/health` is unconditional and does
-not touch the database (`backend/mathion/main.py:151`), and a fresh install writes
-no recovery breadcrumb. So an install that crashed after `up app` but before
-migrate can present a running, "healthy" app with **no** migrated schema, and it
-would pass reconcile's gates. Reconcile does **not** damage such a deployment (it
-runs no migration and changes only compose shape) and does **not** repair it — it
-would just report "reconciled" on an already-broken host. This gap is **shared
-with `tls enable` and `start`** (same guards), and is out of scope here.
+install brings the stack up (`up -d --wait`, app+db) and health-gates `app`
+*before* running Alembic and creating the superuser
+(`cmd/install.go:210,213,216`), `/health` is unconditional and does not touch the
+database (`backend/mathion/main.py:151-153`), and a fresh install writes no
+recovery breadcrumb. So an install that crashed after `up` but before migrate can
+present a running, "healthy" app with **no** migrated schema, and it would pass
+reconcile's gates. Reconcile runs no migration and changes only compose shape, so
+it does **not itself** worsen such a deployment — the single caveat being §4.3's
+residual (an independently moved local `app` tag, which *any* `up` would recreate
+from; reconcile neither moves nor pulls it) — and it does **not** repair it
+either: it would just report "reconciled" on an already-broken host. This
+install-completeness **gap** is **shared with `tls enable` and `start`** — though
+not via identical guards: `start` takes only `lockAndGuard` (`cmd/start.go`) and
+runs `up` directly; `tls enable` calls `requireInstalledDeployment`
+(`cmd/tls.go:185`) but has no running-app gate. None of the three proves the
+install finished migrating. Closing it is out of scope here.
 
 **Follow-up slice (agreed):** add a shared **install-complete marker** — written
 by `install` only after migrate + superuser setup, with a one-time backfill rule
@@ -341,7 +359,10 @@ entirely; `status` catches that case on its next invocation.)*
 - **No new trust surface.** Reconcile writes the same embedded, digest-pinned
   compose that `install`/`tls enable` already write, and brings the project up
   through the same `composeArgs` path every other command uses. It introduces no
-  new image, network topology, or privilege. (It may contact a registry to
+  new **trust source beyond the embedded compose**, no new image, and no new
+  privilege — it *does* change service/network shape (that is the point), but
+  only to the digest-pinned, reviewed embedded definition. (It may contact a
+  registry to
   fetch an **absent** pinned proxy image via the targeted `pull --policy missing`
   — a missing pinned image can require network access — but it pulls no new
   *source* and no mutable tag.)
@@ -351,7 +372,8 @@ entirely; `status` catches that case on its next invocation.)*
   §4.1 step 3) refuses `--profile tls` over an incomplete/interpolation-bearing
   `.env`. Ambient `COMPOSE_PROFILES`/`MATHION_TLS_*` are stripped from the child
   env (`internal/compose/runner.go:55-68`), and the proxy service declares no
-  `env_file` (`docker-compose.yml:56`), so no DB secret can reach the proxy env.
+  `env_file` (`docker-compose.yml:60-92` — the proxy block has no `env_file`
+  key), so no DB secret can reach the proxy env.
 - **HTTPS-only is never downgraded.** Reconcile does not touch `.env`
   (`MATHION_BASE_URL`, `MATHION_COOKIE_SECURE`, the TLS vars), so it cannot flip
   a production deployment off HTTPS. It only recreates containers to match the
@@ -367,10 +389,13 @@ entirely; `status` catches that case on its next invocation.)*
 Reconcile uses the standard exit mapping (`exitCode`: 0 success, else 1). It has
 no `rollbackFailedError`/exit-3 path — there is no rollback. Failure modes:
 
-- A failed `AtomicWrite`, a **fatal** pre-pull (§4.1 step 6c), or a failed
-  `up --wait` returns a plain error (exit 1); the **apply-pending marker is left
-  in place** so `status` keeps warning, and the operator fixes the condition and
-  re-runs (idempotent, §4.4).
+- A failure of the marker's **own** atomic write (§4.1 step 6a) aborts *before
+  any container mutation* — nothing changed, so no marker is left, which is
+  correct (there is nothing to detect).
+- A **later** failure — the compose `AtomicWrite` (6b), the **fatal** pre-pull
+  (6c), or the `up --wait` (6d) — returns a plain error (exit 1) with the
+  **apply-pending marker left in place**, so `status` keeps warning and the
+  operator fixes the condition and re-runs (idempotent, §4.4).
 - A failed marker **removal after a successful apply** is NOT a reconcile failure
   (§4.1 step 6f): warn, exit 0 — the deployment is healthy and the only
   consequence is a cosmetic, self-healing `status` nag.
@@ -424,9 +449,11 @@ The lock is released on every path via `defer`.
     cancelled, and durability-uncertain paths do not.
 
 **uninstall (`cmd/uninstall_test.go`):**
-14. `uninstall --purge` removes the apply-pending marker (so a later `status` on
-    the purged host does not nag) — belt-and-suspenders alongside the §5
-    precedence.
+14. `uninstall --purge` removes the apply-pending marker **only after
+    `dockerx.Purge` succeeds** (so a later `status` on the purged host does not
+    nag); a fixture where `dockerx.Purge` fails **retains** the marker (the
+    deployment survives, so the signal must too). Belt-and-suspenders alongside
+    the §5 precedence.
 
 ## 9. Files
 
@@ -439,9 +466,12 @@ The lock is released on every path via `defer`.
 - **Modify:** `cli/cmd/root.go` (register `newReconcileCmd(app)` in
   `root.AddCommand`); `cli/cmd/guard.go` (add `"reconcile"` to `classify`'s
   REFUSE set); `cli/cmd/status.go` (emit the drift notice on both return-nil
-  branches); `cli/cmd/uninstall.go` (clear the apply-pending marker on
-  `--purge`); `cli/internal/selfupdate/run_linux.go` (unconditional post-success
-  nudge) + its test.
+  branches); `cli/cmd/uninstall.go` (remove the apply-pending marker on `--purge`
+  **only after `dockerx.Purge` succeeds**, alongside `RemoveJournal` at
+  `uninstall.go:63`; removal failure warns and is non-fatal — a failed purge must
+  retain the marker while the deployment survives);
+  `cli/internal/selfupdate/run_linux.go` (unconditional post-success nudge) + its
+  test.
 - **Docs:** README "Self-hosting / Upgrading" note that a CLI upgrade which
   changes the stack definition is applied to a *running* deployment with
   `mathion reconcile`, and that `mathion status` reports when it is needed.
@@ -450,18 +480,18 @@ The lock is released on every path via `defer`.
 
 ## 10. References (verified against the tree at `5e2e5c1`)
 
-- `cli/cmd/install.go:124,187,225` — embedded-compose writes + `composeBytes`; `:148,150` best-effort targeted proxy pre-pull; `:183,206,210,213,216` install order (files → up app → migrate → superuser).
+- `cli/cmd/install.go:124,187,225` — embedded-compose writes + `composeBytes`; `:148,150` best-effort targeted proxy pre-pull; `:183,206,210,213,216` install order (files → **whole-project `up` (app+db)** `:210` → migrate `:213` → superuser `:216`).
 - `cli/cmd/tls.go:194,217,221,232-255,258,266` — `tls enable` re-materialize + `up` + `reportHTTPSReadiness`; `requireInstalledDeployment`; `proxyRunning`.
 - `cli/cmd/update.go:188,199-210,221,326,328,344` — same-version short-circuit; unverified-image guard; prompt idiom; app-only recreate; `RemoveJournal` failure precedent.
 - `cli/cmd/root.go:35-90,122,129` — `composeArgs`/`tlsProfileWanted`/`tlsEnabledFromEnv`/`compose`; startup `tlsEnabled` snapshot (pre-lock).
 - `cli/cmd/guard.go:21,36,72-79,92-109` — `requireRoot` (def), `lockAndGuard`→`requireRoot` (invoke), `classify` REFUSE set, `guardEntry`.
 - `cli/cmd/version.go:49-60` — `maybeWarnDualInstall` (pattern to mirror).
-- `cli/cmd/status.go:16-28` — top-level `status`: ps-failure returns the *error* (`:16-17`), unhealthy returns `nil` (`:24-25`), healthy returns `nil` (`:27`).
-- `cli/cmd/uninstall.go:63,167` — `--purge` clears the journal + removes `/etc/mathion` files (marker removal to be added).
+- `cli/cmd/status.go:16-28` — top-level `status`: ps-failure returns the *error* (`:16-17`), unhealthy prints + returns `nil` (`:24-25`), healthy prints (`:27`) + returns `nil` (`:28`).
+- `cli/cmd/uninstall.go:56,63,167` — `--purge` destroys Docker resources (`dockerx.Purge`, `:56`) → clears the journal (`RemoveJournal`, `:63`, non-fatal) → removes artifacts from the **configured directory** (`:167`, not necessarily `/etc/mathion`); marker removal joins `:63`, after Purge succeeds.
 - `cli/cmd/restore.go:438,440` — best-effort targeted `pull --policy missing proxy proxy-init` precedent.
 - `cli/internal/config/state.go:60` — `RemoveSync` unlink-then-fsync (marker-removal failure mode).
 - `cli/internal/selfupdate/run_linux.go:54-56,66,155`; `swap.go:53,251` — apt-defer; up-to-date; success line; rename-over-path swap with running process on the pre-swap inode.
 - `cli/internal/compose/runner.go:55-68` — ambient `COMPOSE_PROFILES`/`MATHION_TLS_*` stripped from the child env.
 - `cli/internal/compose/docker-compose.yml:5,25,39-61,63-92` — mutable app/db tags; digest-pinned proxy; proxy-init hardening; proxy has no healthcheck + no env_file.
-- `backend/mathion/main.py:151` — `/health` is unconditional, does not touch the DB.
+- `backend/mathion/main.py:151-153` — `/health` is unconditional, does not touch the DB.
 - `cli/internal/compose/embed.go` — `//go:embed docker-compose.yml` → `ComposeYAML`.
