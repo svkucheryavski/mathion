@@ -312,13 +312,34 @@ func TestReconcileRequiresInstalledDeployment(t *testing.T) {
 	}
 }
 
+func TestReconcileRejectsLoosePermEnv(t *testing.T) {
+	varlibReady(t)
+	dir := installedDeployment(t, false) // writes .env at 0600
+	if err := os.Chmod(dir+"/.env", 0o644); err != nil {
+		t.Fatal(err) // group/world-readable secrets: requireInstalledDeployment rejects (perm&0o077 != 0, tls.go:241)
+	}
+	fr := &compose.FakeRunner{OutputFunc: func([]string) (string, error) { return "c\n", nil }}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: io.Discard, Err: io.Discard, In: strings.NewReader("y\n")}
+	if err := app.reconcile(context.Background(), false); err == nil {
+		t.Fatal("reconcile must reject a group/world-readable .env (spec §8 test 2)")
+	}
+	if len(fr.Calls) != 0 {
+		t.Errorf("no docker calls before the permission gate: %v", fr.Calls)
+	}
+}
+
 func TestReconcileRefusesWhenAppNotRunning(t *testing.T) {
 	varlibReady(t)
 	dir := installedDeployment(t, false)
 	fr := &compose.FakeRunner{OutputFunc: func([]string) (string, error) { return "\n", nil }} // ps -q app => empty
 	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: io.Discard, Err: io.Discard, In: strings.NewReader("y\n")}
-	if err := app.reconcile(context.Background(), false); err == nil {
+	err := app.reconcile(context.Background(), false)
+	if err == nil {
 		t.Fatal("reconcile must refuse when the app container is not running")
+	}
+	// spec §4.1 step 4 / §8 test 4: the refusal must point the operator at BOTH remedies.
+	if !strings.Contains(err.Error(), "mathion start") || !strings.Contains(err.Error(), "mathion install") {
+		t.Errorf("the not-running refusal must name both `mathion start` and `mathion install`; got %v", err)
 	}
 	if idxOfCall(fr.Calls, joinHas("up -d")) >= 0 {
 		t.Error("no up should be issued when the app is not running")
@@ -348,6 +369,12 @@ func TestReconcileNonTLSReMaterializesAndUps(t *testing.T) {
 	i := idxOfCall(fr.Calls, joinHas("up -d --wait --pull never"))
 	if i < 0 {
 		t.Fatalf("no up call; calls=%v", fr.Calls)
+	}
+	// Exact tail: refute a stray trailing service (`... --pull never app`) that a
+	// substring match would accept. composeArgs appends `--profile tls` (if any) BEFORE
+	// the subcommand, so the last five args are always the up subcommand + flags.
+	if c := fr.Calls[i]; len(c) < 5 || strings.Join(c[len(c)-5:], " ") != "up -d --wait --pull never" {
+		t.Errorf("up must end EXACTLY with `up -d --wait --pull never` (no trailing service): %v", c)
 	}
 	if containsArg(fr.Calls[i], "--profile") {
 		t.Errorf("non-TLS up must not carry --profile tls: %v", fr.Calls[i])
@@ -389,6 +416,19 @@ func TestReconcileTLSPrePullsAndUpsWithProfile(t *testing.T) {
 	ui := idxOfCall(fr.Calls, joinHas("up -d --wait --pull never"))
 	if ui < 0 || !containsArg(fr.Calls[ui], "--profile") {
 		t.Fatalf("TLS up must carry --profile tls: %v", fr.Calls)
+	}
+	uc := fr.Calls[ui]
+	if len(uc) < 5 || strings.Join(uc[len(uc)-5:], " ") != "up -d --wait --pull never" {
+		t.Errorf("TLS up must still end EXACTLY with `up -d --wait --pull never`: %v", uc)
+	}
+	profAdjTLS := false
+	for j, a := range uc {
+		if a == "--profile" && j+1 < len(uc) && uc[j+1] == "tls" {
+			profAdjTLS = true
+		}
+	}
+	if !profAdjTLS {
+		t.Errorf("--profile must be immediately followed by `tls`: %v", uc)
 	}
 	if pi > ui {
 		t.Errorf("pre-pull must precede up (pi=%d ui=%d)", pi, ui)
@@ -486,8 +526,8 @@ func TestReconcileMarkerRemovalFailureStillSucceeds(t *testing.T) {
 	if err := app.reconcile(context.Background(), false); err != nil {
 		t.Fatalf("marker-removal failure after a successful apply must NOT fail reconcile: %v", err)
 	}
-	if !strings.Contains(errb.String(), "could not clear the apply-pending marker") {
-		t.Errorf("expected a warning about the marker; got %q", errb.String())
+	if !strings.Contains(errb.String(), "warning:") || !strings.Contains(errb.String(), "could not clear the apply-pending marker") {
+		t.Errorf("expected a WARNING about the marker (spec §4.1 step 6f); got %q", errb.String())
 	}
 	if !strings.Contains(out.String(), "reconciled to this CLI's stack definition") {
 		t.Errorf("success line still expected: %q", out.String())
@@ -548,6 +588,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -599,7 +640,7 @@ func (a *App) reconcile(ctx context.Context, yes bool) error {
 			"(or finish a fresh install with `mathion install`) before reconciling", a.Project)
 	}
 	// Step 5: drift read + confirm (spec §4.1 step 5).
-	composePath := a.CfgDir + "/docker-compose.yml"
+	composePath := filepath.Join(a.CfgDir, "docker-compose.yml")
 	onDisk, _ := os.ReadFile(composePath) // a read error → treat as "differs" and re-materialize anyway
 	differs := !bytes.Equal(onDisk, compose.ComposeYAML)
 	if !yes {
@@ -650,7 +691,7 @@ func (a *App) reconcile(ctx context.Context, yes bool) error {
 	// Step 6f: clear the marker; a removal failure does NOT fail a successful apply
 	// (spec §4.1 step 6f) — warn and exit 0.
 	if err := removeMarkerFn(); err != nil {
-		fmt.Fprintf(a.Err, "note: reconcile succeeded but could not clear the apply-pending marker at %s (%v); "+
+		fmt.Fprintf(a.Err, "warning: reconcile succeeded but could not clear the apply-pending marker at %s (%v); "+
 			"`mathion status` may show a spurious drift notice until the next reconcile\n", varlib.MarkerPath(), err)
 	}
 	// Step 7: report this CLI's stack revision (buildVersion, not the app image tag).
@@ -690,7 +731,7 @@ Edit `cli/cmd/root.go:113-118` — add `newReconcileCmd(app)` to the `root.AddCo
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd cli && go test ./cmd/ -run TestReconcile -v`
-Expected: PASS (all 13 reconcile tests). Also confirm `go test ./cmd/ -run TestGuardEntryRouting` still passes (the routing test enumerates the refuse set but does not assert "reconcile" specifically — it remains green).
+Expected: PASS (all 14 reconcile tests). Also confirm `go test ./cmd/ -run TestGuardEntryRouting` still passes (the routing test enumerates the refuse set but does not assert "reconcile" specifically — it remains green).
 
 - [ ] **Step 6: Commit**
 
@@ -724,7 +765,7 @@ EOF
 - Create: `cli/cmd/status_test.go`
 
 **Interfaces:**
-- Consumes: `compose.ComposeYAML`; `varlib.MarkerPresent` (Task 1); `dockerx.HealthProbe(ctx, url)` (`dockerx/health.go:12`).
+- Consumes: `compose.ComposeYAML`; `varlib.MarkerPresent` (Task 1); `dockerx.HealthProbe(ctx, url)` (`dockerx/health.go:12`). **Test-only, from Task 2:** the package-local fixture `varlibReady(t)` (defined in `reconcile_test.go`); `drift_test.go`/`status_test.go` use it, so **Task 3 must run after Task 2** (dependency-ordered — the reviewer of Task 3's diff will not see `varlibReady`'s definition, which lives in the already-committed Task 2 diff).
 - Produces: `composeDrifted(cfgDir string) (drifted, present bool)`, `maybeWarnComposeDrift(w io.Writer, cfgDir string)`, `healthProbe` seam in `status.go`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -958,7 +999,6 @@ Edit `cli/cmd/status.go` — add a `healthProbe` seam and emit the notice after 
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -967,7 +1007,9 @@ import (
 )
 
 // healthProbe is the /health seam so status_test can force the healthy/unhealthy
-// branches without a live app.
+// branches without a live app. Its inferred type is func(context.Context, string) error,
+// but status.go names no `context` identifier of its own (c.Context() is a method
+// call), so `context` is NOT imported here — an unused import would fail to compile.
 var healthProbe = dockerx.HealthProbe
 
 func newStatusCmd(app *App) *cobra.Command {
@@ -1034,17 +1076,24 @@ EOF
 - Consumes: the existing `Run` success path (`run_linux.go:155`).
 - Produces: an unconditional one-line nudge printed to `p.Out` after the `%s → %s` success line, on the confirmed-swap path only.
 
-- [ ] **Step 1: Extend the existing happy-path test + add a `--check` absence assertion**
+> **Build-tag note (Minor):** `run_linux.go` and `run_linux_test.go` are `//go:build linux`. On the macOS dev host `go test ./...` **silently skips** them, and a cross-compiled `GOOS=linux go test` binary cannot execute on macOS. Compile-check locally with `GOOS=linux go vet ./internal/selfupdate/`; the tests actually RUN in CI (Linux) — see Final Verification. Every `Run` command here is exercised there.
 
-Edit `cli/internal/selfupdate/run_linux_test.go` — in `TestRun_HappyPath_Swaps` (after the existing `old→new line` assertion around line 116), add:
+- [ ] **Step 1: Extend the self-update tests — nudge present+ordered on swap, absent on every non-swap path (spec §8 test 13)**
+
+Edit `cli/internal/selfupdate/run_linux_test.go`. All five non-swap paths return before the `run_linux.go:155` success line, so the nudge is structurally impossible on them (verified: apt-defer :56, up-to-date :67, --check :95, cancel :125, durability-uncertain :150); these tests pin that.
+
+In `TestRun_HappyPath_Swaps` (after the existing `old→new line` assertion around line 116), assert the nudge is present AND strictly follows the success line:
 
 ```go
 	if !strings.Contains(out.String(), "sudo mathion reconcile") {
 		t.Fatalf("a successful self-update must nudge toward reconcile; got %q", out.String())
 	}
+	if si, ni := strings.Index(out.String(), "cli-v0.9.0"), strings.Index(out.String(), "sudo mathion reconcile"); ni < si {
+		t.Fatalf("the reconcile nudge must FOLLOW the success line (spec §8 test 13 ordering); got %q", out.String())
+	}
 ```
 
-And in `TestRun_Check_NoRootNoArchiveNoSwap` (which already captures `p.Out` into `out`), add after the existing assertions:
+In `TestRun_Check_NoRootNoArchiveNoSwap` (already captures `out`), assert the nudge is absent:
 
 ```go
 	if strings.Contains(out.String(), "sudo mathion reconcile") {
@@ -1052,17 +1101,68 @@ And in `TestRun_Check_NoRootNoArchiveNoSwap` (which already captures `p.Out` int
 	}
 ```
 
+In `TestRun_AptManaged_Defers` (already captures `out`), assert the nudge is absent:
+
+```go
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("apt-defer must NOT print the reconcile nudge; got %q", out.String())
+	}
+```
+
+In `TestRun_Decline_ReturnsNil` (already captures `out`), assert the nudge is absent:
+
+```go
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("a cancelled self-update must NOT print the reconcile nudge; got %q", out.String())
+	}
+```
+
+Add a new up-to-date test (current == the newest offered tag → `forwardEligible` returns none → "already up to date" at `run_linux.go:67`, before the success line):
+
+```go
+func TestRun_UpToDate_NoNudge(t *testing.T) {
+	p, _, _, done := harness(t, "cli-v0.9.0") // already the newest tag the release list offers
+	defer done()
+	p.Yes = true
+	var out bytes.Buffer
+	p.Out = &out
+	if err := Run(context.Background(), p); err != nil {
+		t.Fatalf("up-to-date must be a clean no-op: %v", err)
+	}
+	if got, _ := os.ReadFile(p.Cfg.swapTarget); string(got) != "old" {
+		t.Fatal("up-to-date must NOT swap the binary")
+	}
+	if !strings.Contains(out.String(), "already up to date") {
+		t.Fatalf("expected the up-to-date line; got %q", out.String())
+	}
+	if strings.Contains(out.String(), "sudo mathion reconcile") {
+		t.Fatalf("up-to-date must NOT print the reconcile nudge; got %q", out.String())
+	}
+}
+```
+
+The remaining non-swap path — durability-uncertain (`commitSwap` returns a `durabilityUncertainError`) — returns at `run_linux.go:150` BEFORE the :155 success line, so it structurally cannot reach the nudge. The `run_linux_test.go` harness runs the REAL `commitSwap` with no dir-fsync-failure seam (that seam lives in `swap_linux_test.go`), so this leg is covered by the structural guarantee, not a separate `Run`-level test.
+
 - [ ] **Step 2: Run tests to verify the happy-path assertion fails**
 
-Run: `cd cli && go test ./internal/selfupdate/ -run 'TestRun_HappyPath_Swaps|TestRun_Check_NoRootNoArchiveNoSwap'`
-Expected: FAIL — `TestRun_HappyPath_Swaps` missing the nudge string (the `--check` test still passes, since nothing prints it yet).
+Run (Linux/CI — see the build-tag note): `cd cli && go test ./internal/selfupdate/ -run TestRun_`
+Expected: FAIL — `TestRun_HappyPath_Swaps` is missing the nudge string. The absence tests (`--check`, apt-defer, decline, up-to-date) already pass, since nothing prints the nudge yet.
 
 - [ ] **Step 3: Add the nudge**
 
-Edit `cli/internal/selfupdate/run_linux.go` — after the success line at :155 and before `return nil`:
+Edit `cli/internal/selfupdate/run_linux.go` — insert ONLY the two lines below (comment + nudge) BETWEEN the existing success line at `:155` and `return nil` at `:156`. **Do NOT retype the `Fprintf` success line** — it is already there; retyping it would print the `old → new` line twice.
+
+Anchor (the existing lines :155-156 bracket the insertion — leave both as-is):
 
 ```go
-	fmt.Fprintf(p.Out, "%s → %s\n", p.CurrentVersion, tag)
+	fmt.Fprintf(p.Out, "%s → %s\n", p.CurrentVersion, tag) // :155 — EXISTING, do not duplicate
+	// >>> insert the two lines below, right here <<<
+	return nil                                             // :156 — EXISTING
+```
+
+Insert:
+
+```go
 	// Unconditional nudge (NOT a byte-compare): this process is still the OLD binary
 	// (commitSwap renamed the staged temp over the target; the running process stays
 	// on its pre-swap inode), so its embedded compose is stale. `mathion status`,
@@ -1070,13 +1170,12 @@ Edit `cli/internal/selfupdate/run_linux.go` — after the success line at :155 a
 	// the operator at it. Fires ONLY here — the confirmed-swap path — not apt-defer,
 	// not up-to-date, not --check/cancelled/durability-uncertain (all return earlier).
 	fmt.Fprintln(p.Out, "if this release updated the stack definition, apply it with: sudo mathion reconcile")
-	return nil
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd cli && go test ./internal/selfupdate/ -run 'TestRun_HappyPath_Swaps|TestRun_Check_NoRootNoArchiveNoSwap' -v`
-Expected: PASS (both).
+Run (Linux/CI): `cd cli && go test ./internal/selfupdate/ -run TestRun_ -v`
+Expected: PASS (happy-path presence+ordering, plus the four absence paths: --check, apt-defer, decline, up-to-date). On the macOS dev host, compile-check instead with `GOOS=linux go vet ./internal/selfupdate/` (these build-tagged tests do not execute on macOS).
 
 - [ ] **Step 5: Commit**
 
@@ -1110,7 +1209,7 @@ EOF
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `cli/cmd/uninstall_test.go` (a new fixture + two tests; reuse the package's existing `rootedVarlib`/`installedDeployment` helpers):
+Add two tests to `cli/cmd/uninstall_test.go`. They reuse the file's existing `seedInstall` (writes install-state + .env, `uninstall_test.go:19`), `rootedVarlib`, and the package-local `&noSuch{}` error — **no new imports** beyond what the file already has (`bytes`, `errors`, `os`, `strings`, `compose`, `config`, `varlib`); use `cmd.Execute()` (as the neighbouring uninstall tests do), not `ExecuteContext`:
 
 ```go
 func TestUninstallPurgeClearsMarker(t *testing.T) {
@@ -1121,12 +1220,13 @@ func TestUninstallPurgeClearsMarker(t *testing.T) {
 	if err := varlib.WriteMarker(); err != nil {
 		t.Fatal(err)
 	}
-	dir := installedDeployment(t, false) // has a valid install-state marker
-	fr := &compose.FakeRunner{} // default: all docker calls succeed → Purge succeeds
-	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: io.Discard, Err: io.Discard, In: strings.NewReader("mathion_prod\n")}
+	dir := t.TempDir()
+	seedInstall(t, dir) // install-state marker + .env, so --purge proceeds to teardown
+	f := &compose.FakeRunner{} // default: Purge succeeds cleanly
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
 	cmd := newUninstallCmd(app)
 	cmd.SetArgs([]string{"--purge"})
-	if err := cmd.ExecuteContext(context.Background()); err != nil {
+	if err := cmd.Execute(); err != nil {
 		t.Fatalf("uninstall --purge: %v", err)
 	}
 	if present, _ := varlib.MarkerPresent(); present {
@@ -1142,29 +1242,34 @@ func TestUninstallPurgeFailedRetainsMarker(t *testing.T) {
 	if err := varlib.WriteMarker(); err != nil {
 		t.Fatal(err)
 	}
-	dir := installedDeployment(t, false)
-	// Fail dockerx.Purge's container-list (ps -aq --filter ...) so teardown returns
-	// early — BEFORE RemoveJournal/RemoveMarker. SweepWorkers (a different ps filter)
-	// still succeeds so the failure is specifically the purge.
-	fr := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
-		if containsArg(args, "-aq") {
-			return "", errors.New("docker daemon down")
+	dir := t.TempDir()
+	seedInstall(t, dir)
+	// Make dockerx.Purge fail using the EXISTING "teardown-fail" idiom (mirrors
+	// TestUninstallPurgeClearsBreadcrumbAfterTeardown/teardown-fail-retains): every `ps`
+	// call — the lockAndGuard preamble sweep, dockerx.SweepWorkers, AND dockerx.Purge's
+	// own container-list — succeeds with an empty list; every OTHER Output (`network ls`)
+	// errors, so Purge fails at its network step. That is AFTER SweepWorkers passes inside
+	// lockAndGuard, so the failure is specifically the purge, and it returns BEFORE
+	// RemoveJournal/RemoveMarker.
+	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return "", nil
 		}
-		return "", nil
+		return "", &noSuch{}
 	}}
-	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: fr, Out: io.Discard, Err: io.Discard, In: strings.NewReader("mathion_prod\n")}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr, In: strings.NewReader("mathion_prod\n")}
 	cmd := newUninstallCmd(app)
 	cmd.SetArgs([]string{"--purge"})
-	if err := cmd.ExecuteContext(context.Background()); err == nil {
+	if err := cmd.Execute(); err == nil {
 		t.Fatal("a failed purge must return an error")
 	}
 	if present, _ := varlib.MarkerPresent(); !present {
-		t.Error("a failed purge must RETAIN the marker (deployment config survives, so the signal must too)")
+		t.Error("a failed purge must RETAIN the marker (deployment config survives, so the drift signal must too)")
 	}
 }
 ```
 
-> **Note for the implementer:** confirm `uninstall_test.go` imports `context`, `errors`, `io`, `strings`, `compose`, and `varlib`; add any missing. `installedDeployment`, `containsArg`, and `rootedVarlib` already exist in the package (`reconcile_test.go` / `restore_test.go` / `start_test.go`).
+> **Why `args[0]=="ps"` and NOT a `-aq` predicate (folds plan-review I1):** `dockerx.SweepWorkers` (`sweep.go:17`) also lists containers with `ps -aq --filter …`, and it runs INSIDE `lockAndGuard` (`guard.go:50`) BEFORE the command body. A predicate that failed every `-aq` call would abort in `SweepWorkers` and never reach `dockerx.Purge` (`teardown.go:16`) — the test would pass for the wrong reason (marker untouched because teardown never ran), and would even pass a buggy implementation that cleared the marker BEFORE Purge. Keying success on `args[0]=="ps"` lets both `SweepWorkers` and Purge's container-list succeed, so Purge fails at `network ls` and the post-Purge marker gate is genuinely exercised. `&noSuch{}` is the package-local error type the neighbouring teardown-failure tests already use.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -1219,9 +1324,9 @@ EOF
 
 **Interfaces:** none (documentation).
 
-- [ ] **Step 1: Locate the self-hosting / upgrading section**
+- [ ] **Step 1: Locate the "Updating the CLI" section**
 
-Run: `grep -n "self-update\|Upgrading\|## Self-host\|mathion update" README.md` to find the upgrade/self-host section. If a distinct "Upgrading" subsection exists, add to it; otherwise add a short subsection next to the `self-update`/`update` documentation.
+The note's home is the `## Updating the CLI (`mathion self-update`)` section (README.md ~line 318 — confirm with `grep -n "## Updating the CLI" README.md`). Add the new `###` subsection at the END of that section (after the existing self-update guarantees), so a reader who just learned self-update only swaps the binary immediately sees how to apply a stack-definition change.
 
 - [ ] **Step 2: Add the note**
 
@@ -1269,8 +1374,8 @@ EOF
 ## Final verification (after all tasks)
 
 - [ ] `cd cli && gofmt -l .` → empty output (no unformatted files).
-- [ ] `cd cli && go vet ./...` → clean.
-- [ ] `cd cli && go test ./...` → all green (new + existing, including `TestEmbeddedComposeMatchesRepoRoot` and `TestGuardEntryRouting`).
+- [ ] `cd cli && go vet ./...` → clean. **Also** `cd cli && GOOS=linux go vet ./internal/selfupdate/` → clean (Task 4's nudge lives in `//go:build linux` files that `go vet ./...` skips on macOS).
+- [ ] `cd cli && go test ./...` → all green (new + existing, including `TestEmbeddedComposeMatchesRepoRoot` and `TestGuardEntryRouting`). NOTE: on the macOS dev host this SKIPS the `//go:build linux` selfupdate tests (Task 4's `TestRun_*`); those execute in CI (Linux). Do not read a green macOS `go test ./...` as proof Task 4's assertions ran — rely on CI for that.
 - [ ] `git log --oneline` shows six focused commits with the exact trailer.
 
 ## Self-Review (plan author)
@@ -1278,3 +1383,22 @@ EOF
 - **Spec coverage:** §4.1 steps 1-7 → Task 2 `reconcile`; §4.2/§4.3 profile-gating + pull policy → Task 2 (`--profile tls` via existing `composeArgs`, `--pull never` + targeted pre-pull); §4.6 residual → honestly bounded in the spec, no code (correctly out of scope); §5 drift notice + precedence → Task 3; §5.1 status + self-update wiring → Task 3 + Task 4; §7 exit/marker semantics → Task 2 (marker left on later failure, removal-failure warns exit 0); §8 tests 1-14 → Tasks 1-5; §9 files → all tasks; install-complete marker → explicitly deferred (not in this plan).
 - **Type consistency:** `maybeWarnComposeDrift(w io.Writer, cfgDir string)` and `composeDrifted(cfgDir string) (drifted, present bool)` used identically in `version.go`, `status.go`, and `drift_test.go`; `(*App).reconcile(ctx, yes)`, `(*App).appRunning(ctx)`, `removeMarkerFn`, and the four `varlib` marker functions match between definition and every call site.
 - **Placeholder scan:** no TBD/TODO/"implement later"; every code step carries complete code. The only judgement step is Task 6 Step 1 (locate the README section by `grep`), which is inherent to editing prose in an unseen doc, not a code placeholder.
+
+## Plan Review Ledger (dual-gate, 2026-08-27)
+
+Plan-level dual-gate on HEAD `4f4666a`: an independent Opus 4.8 (xhigh) reviewer + codex@high, run in parallel. Both returned CHANGES-REQUESTED and agreed on the two load-bearing items; the union of all findings was folded (this revision). Neither gate found a design or security defect — every item is compile/test/precision.
+
+- **C1 (both gates) — Critical:** Task 3 `status.go` imported `"context"` but never named it → `"context" imported and not used` compile error, breaking `go test ./cmd/...` from Task 3 on. **Folded:** dropped the import (the `healthProbe` seam infers its type without naming `context`; `c.Context()` is a method call) + a comment pinning why.
+- **I1 (both gates) — Important:** Task 5 failed-purge test failed every `-aq` Output, which aborts in `dockerx.SweepWorkers` inside `lockAndGuard` BEFORE `dockerx.Purge` — passing for the wrong reason (and would pass a marker-before-Purge bug). **Folded:** switched to the existing `args[0]=="ps"`/`&noSuch{}` teardown-fail idiom so SweepWorkers + Purge's container-list pass and Purge fails at `network ls`; also switched the fixture from the invented `installedDeployment` to the existing `seedInstall` (resolves Minor-3 for Task 5).
+- **I2 (codex) — Important:** Task 4 Step 3 re-pasted the `run_linux.go:155` success `Fprintf`, so inserting the block "after :155" would print the `old → new` line twice. **Folded:** Step 3 now inserts ONLY the comment + nudge between :155 and :156, with an explicit "do not retype the success line".
+- **I3 (codex) / M1 (Opus) — Important/Minor:** Task 4 nudge coverage was narrower than spec §8 test 13 (asserted only `--check`). **Folded:** happy-path now asserts present + strictly-after-success ordering; absence asserted on `--check`, apt-defer, decline, and a new up-to-date test; durability-uncertain covered structurally (returns at :150 before :155 — no fsync-failure seam in the run harness).
+- **I4a (codex) / M2 (Opus) — Important/Minor:** spec §8 test 2's loose-perm `.env` leg was unplanned. **Folded:** new `TestReconcileRejectsLoosePermEnv` (chmod .env 0644 → `requireInstalledDeployment` rejects at tls.go:241, no docker calls). Reconcile tests 13 → 14.
+- **I4b (codex) — Important:** spec §8 test 4 requires the not-running refusal to name BOTH `mathion start` and `mathion install`, but the test discarded output. **Folded:** the test now captures the returned error and asserts both substrings.
+- **I5 (codex) — Important:** marker-clear failure printed `note:`, but spec §4.1 step 6f mandates a WARNING. **Folded:** message prefix → `warning:` and the test asserts it.
+- **Minor-1 (codex):** `composePath` used string concat; spec §4.1 step 5 calls for `filepath.Join`. **Folded** (+ `path/filepath` import).
+- **Minor-2 (codex):** up-call assertions used substring match (would accept `… --pull never app`). **Folded:** exact last-five-args tail check on both up calls + `--profile`/`tls` adjacency check on the TLS up.
+- **Minor-3 (codex):** cross-task test-fixture coupling. **Folded:** Task 5 now uses the existing `seedInstall` (no Task-2 dependency); Task 3's remaining reliance on Task 2's `varlibReady` is made explicit in its Interfaces (dependency-ordered).
+- **Minor-4 (codex):** Task 4's `//go:build linux` tests don't run under `go test ./...` on macOS. **Folded:** build-tag note in Task 4 + `GOOS=linux go vet` compile-check + a Final-Verification caveat that a green macOS `go test ./...` does not prove Task 4 ran.
+- **M3 (Opus):** Task 6 README target was ambiguous (grep matched several sections). **Folded:** pinned to the `## Updating the CLI (`mathion self-update`)` section (~line 318).
+
+Both gates independently confirmed (no change needed): every Task 2 symbol/signature exists as used; profile gating + `--pull never` + targeted pinned pre-pull; `FakeRunner` Output/Run split drives the tests as asserted; `ValidateEnvComplete` genuinely rejects the poisoned `.env`; root refusal fires before any runner call; marker location + durability; drift precedence (compose-absent first → silent); all edit anchors (guard.go:74, root.go:113, status.go, run_linux.go:155-156, uninstall.go:63-65); `TestGuardEntryRouting` stays green.
