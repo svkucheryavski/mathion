@@ -1075,3 +1075,171 @@ func TestUpdateSameTagStaleMarkerConfirmWording(t *testing.T) {
 		t.Fatalf("want the stale-marker re-apply prompt; got %q", out.String())
 	}
 }
+
+// --- Task 8: real-upgrade post-commit apply (exit-2 committedPending, restore net) ---
+
+func TestUpdateRealUpgradeDriftAppliesWholeProjectAfterGate(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := update21Fake(t)
+	captureGate(t, nil) // both the step-10 commit gate and the re-assert gate pass
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("real-upgrade + drift apply → nil; got %v", err)
+	}
+	if !strings.Contains(out.String(), "updated v0.1.1 → v2.0.0") || !strings.Contains(out.String(), "applied this release's stack definition") {
+		t.Fatalf("want the committed-and-applied line; got %q", out.String())
+	}
+	// the whole-project apply up ran AFTER the app-only recreate.
+	ri := idxOfCall(f.Calls, joinHas("up -d --wait --pull never app")) // step-9 recreate
+	ai := idxOfCall(f.Calls, failsApplyUp)                              // whole-project apply
+	if ri < 0 || ai < 0 || !(ri < ai) {
+		t.Fatalf("recreate (idx %d) must precede the whole-project apply (idx %d); calls=%v", ri, ai, f.Calls)
+	}
+	if got, _ := os.ReadFile(composePath(app)); !bytes.Equal(got, compose.ComposeYAML) {
+		t.Fatalf("on-disk compose must equal the embed after a successful apply")
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("the journal must be cleared (commit happened before the apply)")
+	}
+}
+
+func TestUpdateRealUpgradeNoDriftNoSecondUp(t *testing.T) {
+	cfg := setupUpdateEnv(t) // compose == embed
+	f := update21Fake(t)
+	captureGate(t, nil)
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("no-drift real-upgrade → nil; got %v", err)
+	}
+	if hasCall(f.Calls, failsApplyUp) { // only the step-9 recreate up; NO whole-project apply
+		t.Fatalf("no-drift must not run the whole-project apply up; calls=%v", f.Calls)
+	}
+	if strings.Contains(out.String(), "applied this release's stack definition") {
+		t.Fatalf("no-drift must not claim an apply; got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "updated v0.1.1 → v2.0.0 (backup: ") {
+		t.Fatalf("want the plain commit line; got %q", out.String())
+	}
+}
+
+func TestUpdateRealUpgradeApplyUpFailIsolatedExit2(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := os.ReadFile(composePath(&App{CfgDir: cfg})) // prev == the drifted on-disk bytes
+	f := update21Fake(t)
+	f.RunFunc = func(args []string) error {
+		if failsApplyUp(args) { // fail ONLY the post-commit whole-project apply up
+			return errors.New("apply up failed")
+		}
+		return nil
+	}
+	captureGate(t, nil) // step-10 commit gate passes → the DB commit happens
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if exitCode(err) != 2 {
+		t.Fatalf("post-commit apply failure → exit 2; got %d (%v)", exitCode(err), err)
+	}
+	// ISOLATION: no rollback / restore-engine call — the DB commit stands.
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) || hasCall(f.Calls, joinHas("mathion_restore_assets_")) {
+		t.Fatalf("a post-commit apply failure must NOT roll back the DB; calls=%v", f.Calls)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("previous compose must be restored; got %q want %q", got, prev)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained")
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("journal must be absent (cleared pre-apply at commit)")
+	}
+}
+
+func TestUpdateRealUpgradePostApplyGateFailExit2(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := os.ReadFile(composePath(&App{CfgDir: cfg}))
+	f := update21Fake(t) // all ups (incl. the whole-project apply) succeed
+	// gate: PASS the step-10 commit (1st call), FAIL the post-apply re-assert (2nd call).
+	var n int32
+	prevGate := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error {
+		if atomic.AddInt32(&n, 1) == 1 {
+			return nil
+		}
+		return errors.New("post-apply gate: moved tag")
+	}
+	t.Cleanup(func() { gateFn = prevGate })
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if exitCode(err) != 2 {
+		t.Fatalf("post-apply gate failure → exit 2; got %d (%v)", exitCode(err), err)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("previous compose must be restored on a gate failure; got %q", got)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no DB rollback on a post-commit gate failure; calls=%v", f.Calls)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained")
+	}
+}
+
+func TestUpdateRealUpgradeApplyAndRestoreBothFailExit2(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := update21Fake(t)
+	f.RunFunc = func(args []string) error {
+		// Fail the whole-project apply up AND the bounded restore up (both post-commit),
+		// but NOT the step-9 recreate. All three carry "up -d --wait"; the recreate is the
+		// only one with a trailing `app` token, so exclude it. The restore's --wait-timeout
+		// 120 breaks the contiguous "up -d --wait --pull never", so match the shorter prefix.
+		if joinHas("up -d --wait")(args) && !containsArg(args, "app") {
+			return errors.New("up boom")
+		}
+		return nil
+	}
+	captureGate(t, nil)
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if exitCode(err) != 2 {
+		t.Fatalf("commit done, apply+restore both failed → still exit 2; got %d (%v)", exitCode(err), err)
+	}
+	if !strings.Contains(err.Error(), "runtime may be degraded") {
+		t.Fatalf("want the degraded-runtime message; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no DB rollback; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("journal cleared at commit")
+	}
+}
+
+func TestUpdateRealUpgradeNoReconcileDefersWithReminder(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := update21Fake(t)
+	captureGate(t, nil)
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true, NoReconcile: true}); err != nil {
+		t.Fatalf("--no-reconcile real-upgrade → nil; got %v", err)
+	}
+	if hasCall(f.Calls, failsApplyUp) {
+		t.Fatalf("--no-reconcile must NOT run the whole-project apply up; calls=%v", f.Calls)
+	}
+	if !strings.Contains(out.String(), "was NOT applied (--no-reconcile)") {
+		t.Fatalf("want the deferred-apply reminder; got %q", out.String())
+	}
+}

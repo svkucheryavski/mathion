@@ -291,7 +291,6 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	markerPresent, _ := varlib.MarkerPresent()
 	drift := composeDiffers || markerPresent
 	wantApply := drift && !opts.NoReconcile
-	_ = wantApply // consumed by the apply branches in Tasks 7–8
 
 	// 2. Resolve target + same-tag guard (round-9 #2 — update NEVER pulls the active
 	// tag: pulling imageRepo:<active> would MOVE the live deployment tag before any
@@ -353,6 +352,9 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 			fmt.Fprintln(a.Out, "on failure the stack is left as-is; recover with mathion restore -- <backup>")
 		} else {
 			fmt.Fprintln(a.Out, "auto-rollback on failure")
+		}
+		if composeDiffers {
+			fmt.Fprintln(a.Out, "This release also updates the stack definition; it is applied after the update completes (brief HTTPS interruption if the bundled proxy changed).")
 		}
 		fmt.Fprint(a.Out, "Brief downtime during the update; block external traffic first. Continue? [y/N] ")
 		line, _ := bufio.NewReader(a.In).ReadString('\n')
@@ -482,10 +484,21 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 		return committedPendingError{err: fmt.Errorf("updated %s → %s successfully, but could not remove the recovery breadcrumb %s; the deployment is healthy — verify the app serves %s (running image ID == %s), then remove %s manually: %w",
 			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)}
 	}
-	fmt.Fprintf(a.Out, "updated %s → %s (backup: %s; prune old backups manually)\n", oldTag, target, backupPath)
+	if wantApply {
+		restored, applyErr := a.applyAndGate(ctx, onDisk, A, target)
+		if applyErr != nil {
+			if restored {
+				return committedPendingError{err: fmt.Errorf("updated to %s and it is serving; applying this release's stack definition failed (%w) and the previous definition is in place — the database is intact, re-apply with: sudo mathion reconcile", target, applyErr)}
+			}
+			return committedPendingError{err: fmt.Errorf("updated to %s (database committed and NOT rolled back), but applying this release's stack definition failed (%w) AND restoring the previous definition also failed; the runtime may be degraded — run `mathion status`, then `sudo mathion reconcile`", target, applyErr)}
+		}
+		fmt.Fprintf(a.Out, "updated %s → %s and applied this release's stack definition (%s) (backup: %s; prune old backups manually)\n", oldTag, target, buildVersion, backupPath)
+		return nil
+	}
 	if opts.NoReconcile && drift {
 		fmt.Fprintln(a.Out, "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile")
 	}
+	fmt.Fprintf(a.Out, "updated %s → %s (backup: %s; prune old backups manually)\n", oldTag, target, backupPath)
 	return nil
 }
 
