@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -407,5 +408,44 @@ func TestTLSDisableToleratesNoSuchServiceThenClears(t *testing.T) {
 	}
 	if m["MATHION_BASE_URL"] != "https://learn.example.edu" || m["MATHION_COOKIE_SECURE"] != "1" {
 		t.Fatalf("posture must survive disable; base=%q secure=%q", m["MATHION_BASE_URL"], m["MATHION_COOKIE_SECURE"])
+	}
+}
+
+func TestRequirePrivateEnvRejectsLoosePerm(t *testing.T) {
+	cfg := t.TempDir()
+	envPath := cfg + "/.env"
+	if err := os.WriteFile(envPath, []byte("X=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(envPath, 0o644); err != nil { // umask-independent -rw-r--r-- (the reconcile test's pattern)
+		t.Fatal(err)
+	}
+	err := (&App{CfgDir: cfg}).requirePrivateEnv()
+	want := fmt.Sprintf(".env at %s is group/world-accessible (%v); it holds secrets — fix with `chmod 600 %s`",
+		envPath, os.FileMode(0o644), envPath)
+	if err == nil || err.Error() != want {
+		t.Fatalf("loose-perm error mismatch:\n got: %v\nwant: %s", err, want)
+	}
+}
+
+func TestRequirePrivateEnvRejectsNonRegular(t *testing.T) {
+	cfg := t.TempDir()
+	if err := os.Mkdir(cfg+"/.env", 0o700); err != nil { // a DIR named .env → not regular
+		t.Fatal(err)
+	}
+	err := (&App{CfgDir: cfg}).requirePrivateEnv()
+	want := fmt.Sprintf(".env at %s is not a regular file; repair it or run `mathion install`", cfg+"/.env")
+	if err == nil || err.Error() != want {
+		t.Fatalf("non-regular error mismatch:\n got: %v\nwant: %s", err, want)
+	}
+}
+
+func TestRequirePrivateEnvAcceptsOwnerOnly(t *testing.T) {
+	cfg := t.TempDir()
+	if err := os.WriteFile(cfg+"/.env", []byte("X=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&App{CfgDir: cfg}).requirePrivateEnv(); err != nil {
+		t.Fatalf("owner-only .env must pass; got %v", err)
 	}
 }
