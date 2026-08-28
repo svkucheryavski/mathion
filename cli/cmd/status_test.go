@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 )
 
 // statusWithHealth runs `mathion status` against a drifted on-disk compose with the
@@ -49,5 +50,54 @@ func TestStatusEmitsDriftOnUnhealthyBranch(t *testing.T) {
 	}
 	if !strings.Contains(s, "stack not healthy") {
 		t.Errorf("expected the unhealthy line; got %q", s)
+	}
+}
+
+func TestMaybeWarnInstallIncomplete(t *testing.T) {
+	// incomplete → notice
+	inc := t.TempDir()
+	config.WriteState(inc, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: false})
+	var b bytes.Buffer
+	maybeWarnInstallIncomplete(&b, inc)
+	if !strings.Contains(b.String(), "did not finish") {
+		t.Fatalf("incomplete install must warn; got %q", b.String())
+	}
+	// complete + grandfathered + missing → silent
+	for _, seed := range []func(string){
+		func(d string) { config.WriteState(d, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: true}) },
+		func(d string) { config.WriteState(d, config.State{Schema: 1, AdminEmail: "a@b.c"}) },
+		func(string) {}, // no marker at all
+	} {
+		d := t.TempDir()
+		seed(d)
+		var q bytes.Buffer
+		maybeWarnInstallIncomplete(&q, d)
+		if q.Len() != 0 {
+			t.Fatalf("must be silent; got %q", q.String())
+		}
+	}
+}
+
+func TestStatusEmitsIncompleteNotice(t *testing.T) {
+	cfg := t.TempDir()
+	config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: false})
+	f := &compose.FakeRunner{}
+	var out bytes.Buffer
+	app := &App{CfgDir: cfg, Project: "mathion_prod", Runner: f, Out: &out, Err: &out}
+	// Force the health probe to fail so status returns nil without a live app.
+	prev := healthProbe
+	healthProbe = func(context.Context, string) error { return errors.New("stub") }
+	t.Cleanup(func() { healthProbe = prev })
+	c := newStatusCmd(app)
+	c.SetContext(context.Background())
+	if err := c.RunE(c, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Strengthened assertion: use the fragment UNIQUE to the incomplete-install
+	// notice. The compose-drift notice (called on the same path) also contains
+	// "did not finish", so the bare substring is fragile; this fragment appears
+	// only in maybeWarnInstallIncomplete's output.
+	if !strings.Contains(out.String(), "install did not finish — run `sudo mathion install`") {
+		t.Fatalf("status must surface the incomplete-install notice; got %q", out.String())
 	}
 }

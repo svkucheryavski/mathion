@@ -25,6 +25,7 @@ func newStatusCmd(app *App) *cobra.Command {
 			// Drift notice: orthogonal to /health, so emit it on BOTH return-nil
 			// branches below (spec §5.1). status runs as the NEW binary, so its
 			// embedded bytes are authoritative.
+			maybeWarnInstallIncomplete(app.Out, app.CfgDir)
 			maybeWarnComposeDrift(app.Out, app.CfgDir)
 			img := ""
 			if m, err := config.ReadEnvFile(app.CfgDir); err == nil {

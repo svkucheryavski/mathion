@@ -79,6 +79,23 @@ func composeDrifted(cfgDir string) (drifted, present bool) {
 	return !bytes.Equal(b, compose.ComposeYAML), true
 }
 
+// maybeWarnInstallIncomplete prints a one-line notice when install-state says the
+// install never finished, so `mathion status` surfaces it before the operator
+// hits a hard refusal. Fail-quiet: an unreadable/absent install-state (e.g.
+// non-root `mathion status`, mode-0600 file) prints nothing.
+func maybeWarnInstallIncomplete(w io.Writer, cfgDir string) {
+	if w == nil {
+		return
+	}
+	st, err := config.ReadState(cfgDir)
+	if err != nil {
+		return
+	}
+	if !st.InstallComplete() {
+		fmt.Fprintln(w, "note: this deployment's install did not finish — run `sudo mathion install` to complete it")
+	}
+}
+
 // maybeWarnComposeDrift prints a one-line notice to w when this deployment's stack
 // definition differs from this mathion version's embedded definition, OR a previous
 // reconcile did not finish (an apply-pending marker is present). Precedence (spec §5):
