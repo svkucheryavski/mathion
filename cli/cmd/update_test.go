@@ -727,3 +727,159 @@ func TestUpdateCmdRefusesOnIncompleteInstall(t *testing.T) {
 		t.Fatalf("update must not pull/up on refusal; calls=%v", f.Calls)
 	}
 }
+
+// --- Task 4: applyAndGate mini-transaction + restorePrevCompose + runningAppImageID ---
+
+// failsApplyUp matches ONLY the whole-project apply `up` (up -d --wait --pull never,
+// no trailing `app`, no --wait-timeout) — NOT the app-only recreate (`… app`) nor the
+// restore (`… --wait-timeout 120 …`). a.compose records the FULL argv, so match the join.
+func failsApplyUp(args []string) bool {
+	return joinHas("up -d --wait --pull never")(args) &&
+		!containsArg(args, "app") &&
+		!containsArg(args, "--wait-timeout")
+}
+
+func TestApplyAndGateSuccessClearsMarkerAfterGate(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, nil)
+	restored, err := app.applyAndGate(context.Background(), []byte("old\n"), "sha256:R", "v9.9.9")
+	if err != nil || restored {
+		t.Fatalf("success → (false, nil); got (%v, %v)", restored, err)
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Fatal("marker must be cleared after a passing gate")
+	}
+}
+
+func TestApplyAndGateApplyFailRestoresAndRetainsMarker(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	prev := []byte("PREVIOUS-COMPOSE-BYTES\n")
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), prev, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{RunFunc: func(args []string) error {
+		if failsApplyUp(args) {
+			return errors.New("apply up failed")
+		}
+		return nil
+	}}
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, nil) // gate would pass; the apply `up` fails first
+	restored, err := app.applyAndGate(context.Background(), prev, "sha256:R", "v9.9.9")
+	if err == nil || !restored {
+		t.Fatalf("apply-fail + restore-ok → (true, err); got (%v, %v)", restored, err)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("restore must rewrite prev bytes (applyStack first wrote the embed); got %q", got)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker must be RETAINED on failure")
+	}
+}
+
+func TestApplyAndGateGateFailRestoresBounded(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	prev := []byte("PREV\n")
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), prev, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{} // every up succeeds
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, errors.New("gate: moved tag"))
+	restored, err := app.applyAndGate(context.Background(), prev, "sha256:R", "v9.9.9")
+	if err == nil || !restored {
+		t.Fatalf("gate-fail + restore-ok → (true, err); got (%v, %v)", restored, err)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("restore must rewrite prev bytes; got %q", got)
+	}
+	// spec §7 test 4: the restore `up` is time-bounded (--wait-timeout 120).
+	if !hasCall(f.Calls, joinHas("up -d --wait --wait-timeout 120 --pull never")) {
+		t.Fatalf("restore up must carry --wait-timeout 120; calls=%v", f.Calls)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained on failure")
+	}
+}
+
+func TestApplyAndGateRestoreAlsoFails(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("PREV\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{RunFunc: func(args []string) error {
+		if joinHas("up")(args) {
+			return errors.New("every up fails") // both apply and restore up fail
+		}
+		return nil
+	}}
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, nil)
+	restored, err := app.applyAndGate(context.Background(), []byte("PREV\n"), "sha256:R", "v9.9.9")
+	if err == nil || restored {
+		t.Fatalf("apply-fail + restore-fail → (false, err); got (%v, %v)", restored, err)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained")
+	}
+}
+
+func TestApplyAndGateWriteMarkerFailIsIntact(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	prev := writeMarkerFn
+	writeMarkerFn = func() error { return errors.New("marker fsync failed") }
+	t.Cleanup(func() { writeMarkerFn = prev })
+	restored, err := app.applyAndGate(context.Background(), []byte("PREV\n"), "sha256:R", "v9.9.9")
+	if err == nil || !restored { // nothing was applied → prior state intact
+		t.Fatalf("marker-write fail → (true, err); got (%v, %v)", restored, err)
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("a marker-write failure must touch no container; calls=%v", f.Calls)
+	}
+}
+
+func TestRunningAppImageIDResolvesContainer(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+		if joinHas("ps -q app")(args) {
+			return "cid123\n", nil
+		}
+		if len(args) >= 2 && args[0] == "inspect" && args[1] == "cid123" {
+			return "sha256:RUN\n", nil
+		}
+		return "", nil
+	}}
+	app, _, _ := engineApp(cfg, f, "")
+	id, err := runningAppImageID(context.Background(), app)
+	if err != nil || id != "sha256:RUN" {
+		t.Fatalf("want sha256:RUN, nil; got %q, %v", id, err)
+	}
+}
+
+func TestRunningAppImageIDErrorsNoContainer(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{OutputFunc: func([]string) (string, error) { return "", nil }} // ps -q app → ""
+	app, _, _ := engineApp(cfg, f, "")
+	if _, err := runningAppImageID(context.Background(), app); err == nil {
+		t.Fatal("an empty `ps -q app` must error, not fall back to the tag")
+	}
+}
+
+func TestRestorePrevComposeEmptyPrevGuard(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	if restorePrevCompose(context.Background(), app, nil) {
+		t.Fatal("empty prev must not claim a restore")
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("empty prev must issue no up; calls=%v", f.Calls)
+	}
+}

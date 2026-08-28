@@ -31,6 +31,77 @@ type updateOpts struct {
 // without corrupting the real backups dir.
 var writeJournalFn = varlib.WriteJournal
 
+const (
+	restoreWaitTimeout     = 120 * time.Second
+	restoreWaitTimeoutSecs = "120"
+)
+
+// writeMarkerFn is the apply-pending marker writer; a package seam (like writeJournalFn)
+// so a test can drive the marker-write-failure branch of applyAndGate.
+var writeMarkerFn = varlib.WriteMarker
+
+// applyAndGate writes the marker, materializes+brings up the NEW compose, re-asserts the
+// strict gate against gateID, and clears the marker ONLY after the gate passes. On ANY
+// failure it best-effort restores prev and RETAINS the marker. Lock-free. Returns
+// (restored, err): restored says whether the pre-apply state is back in place. NEVER
+// calls updateFailure/restoreEngine — no DB rollback is reachable here.
+func (a *App) applyAndGate(ctx context.Context, prev []byte, gateID, target string) (bool, error) {
+	if e := writeMarkerFn(); e != nil {
+		// Compose untouched, app unchanged → prior state intact, nothing to restore.
+		return true, fmt.Errorf("could not record the pending stack apply: %w", e)
+	}
+	e := a.applyStack(ctx)
+	if e == nil {
+		e = gateFn(ctx, a, gateID, target, true)
+	}
+	if e != nil {
+		return restorePrevCompose(ctx, a, prev), e // marker RETAINED → status/next-update self-heal
+	}
+	a.clearApplyMarker()
+	return false, nil
+}
+
+// restorePrevCompose best-effort returns the deployment to its pre-apply, gate-proven
+// stack definition. Bounded by a deadline AND --wait-timeout so a wedged restore cannot
+// hold varlib.Lock forever; WithoutCancel so a late signal cannot abort the recovery.
+// Guards an empty prev (writing 0 bytes would be worse than leaving what's there).
+func restorePrevCompose(ctx context.Context, a *App, prev []byte) bool {
+	if len(prev) == 0 {
+		return false
+	}
+	if err := config.AtomicWrite(composePath(a), prev, 0o644); err != nil {
+		return false
+	}
+	a.tlsEnabled = tlsEnabledFromEnv(a.CfgDir)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restoreWaitTimeout)
+	defer cancel()
+	return a.compose(rctx, "up", "-d", "--wait", "--wait-timeout", restoreWaitTimeoutSecs, "--pull", "never") == nil
+}
+
+// runningAppImageID resolves the RUNNING app CONTAINER's image id (compose ps -q app →
+// inspect <cid> --format {{.Image}}), the same anchor gateFn uses (gate.go:44-53). NOT a
+// re-inspection of the tag, which would already reflect an out-of-band tag move. Errors
+// out (no tag fallback) so a run without a resolvable running image aborts before mutating.
+func runningAppImageID(ctx context.Context, a *App) (string, error) {
+	cout, err := a.Runner.Output(ctx, a.composeArgs("ps", "-q", "app")...)
+	if err != nil {
+		return "", fmt.Errorf("resolving the running app container: %w", err)
+	}
+	cid := strings.TrimSpace(cout)
+	if cid == "" {
+		return "", errors.New("no running app container")
+	}
+	raw, err := a.Runner.Output(ctx, "inspect", cid, "--format", "{{.Image}}")
+	if err != nil {
+		return "", fmt.Errorf("inspecting the running app image: %w", err)
+	}
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return "", errors.New("running app container has no image id")
+	}
+	return id, nil
+}
+
 // rollbackFailedError marks the worst update outcome: the update failed AND the auto-
 // rollback to the pre-update backup ALSO failed, so the deployment is left in an unknown
 // state with the recovery breadcrumb intact. exitCode maps it to 3 (distinct from a plain
