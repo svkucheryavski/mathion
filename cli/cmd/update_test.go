@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +18,18 @@ import (
 	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
+
+// setupUpdateEnv is setupRestoreEnv plus a NON-drifted on-disk compose (== the embed),
+// so update tests are not spuriously "drifted" once runUpdate computes composeDiffers.
+// Drift tests overwrite docker-compose.yml (or write the marker) explicitly.
+func setupUpdateEnv(t *testing.T) string {
+	t.Helper()
+	cfg := setupRestoreEnv(t)
+	if err := os.WriteFile(filepath.Join(cfg, "docker-compose.yml"), compose.ComposeYAML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
 
 // TestUpdateGuardPreconditionValidatesEnv: a broken/incomplete .env aborts BEFORE
 // any docker call — ValidateEnvComplete precedes every mutation.
@@ -35,7 +48,7 @@ func TestUpdateGuardPreconditionValidatesEnv(t *testing.T) {
 // TestUpdateGuardSameTagJSONMatch: target == active tag and /version returns the
 // exact JSON {"version":<tag>} → exit 0 "already at <tag>", NO docker pull.
 func TestUpdateGuardSameTagJSONMatch(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"version":"v0.1.1"}`))
@@ -57,7 +70,7 @@ func TestUpdateGuardSameTagJSONMatch(t *testing.T) {
 // legacy 200 text/html SPA shell → strict probe fails → exit 0 "not supported",
 // NO docker pull.
 func TestUpdateGuardSameTagLegacyNotSupported(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
@@ -79,7 +92,7 @@ func TestUpdateGuardSameTagLegacyNotSupported(t *testing.T) {
 // TestUpdatePullDistinctTargetCapturesA: a DISTINCT target pulls then image-inspects
 // for A, in that order with exact args, and NEVER probes /version.
 func TestUpdatePullDistinctTargetCapturesA(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	// Install a counting /version server so any stray probe on a distinct target is
 	// caught; a distinct target must never probe.
 	n := useGateServer(t, func(w http.ResponseWriter, r *http.Request) {})
@@ -117,7 +130,7 @@ func TestUpdatePullDistinctTargetCapturesA(t *testing.T) {
 // TestUpdatePullBadTagAborts: a failed pull aborts before capturing A — no
 // image-inspect for the id is issued, and (trivially) no backup is taken.
 func TestUpdatePullBadTagAborts(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	f := &compose.FakeRunner{RunFunc: func(args []string) error { return errors.New("manifest unknown") }}
 	app, _, _ := engineApp(cfg, f, "")
 	if err := runUpdate(context.Background(), app, updateOpts{Version: "v9.9.9", Yes: true}); err == nil {
@@ -131,7 +144,7 @@ func TestUpdatePullBadTagAborts(t *testing.T) {
 // TestUpdateGuardConfirmDeclined: a distinct target with Yes=false and "n" declines
 // before the pull.
 func TestUpdateGuardConfirmDeclined(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	f := &compose.FakeRunner{}
 	app, _, _ := engineApp(cfg, f, "n\n")
 	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0"}); err == nil {
@@ -146,7 +159,7 @@ func TestUpdateGuardConfirmDeclined(t *testing.T) {
 // --no-rollback (both sub-cases decline so the confirm prints then aborts).
 func TestUpdateGuardConfirmNoRollbackClause(t *testing.T) {
 	t.Run("rollback", func(t *testing.T) {
-		cfg := setupRestoreEnv(t)
+		cfg := setupUpdateEnv(t)
 		f := &compose.FakeRunner{}
 		app, out, _ := engineApp(cfg, f, "n\n")
 		_ = runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0"})
@@ -155,7 +168,7 @@ func TestUpdateGuardConfirmNoRollbackClause(t *testing.T) {
 		}
 	})
 	t.Run("no-rollback", func(t *testing.T) {
-		cfg := setupRestoreEnv(t)
+		cfg := setupUpdateEnv(t)
 		f := &compose.FakeRunner{}
 		app, out, _ := engineApp(cfg, f, "n\n")
 		_ = runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", NoRollback: true})
@@ -203,7 +216,7 @@ func update21Fake(t *testing.T) *compose.FakeRunner {
 // (b) 6a's preflight never retags (no `docker tag` anywhere); (c) the step-6b
 // breadcrumb lands with EXACTLY the 7 fields, target_image_id == the captured A.
 func TestUpdate6HappyOrderingAndBreadcrumb(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	// Steps 7-10 now exist; a PASSING step-10 gate would clear the very breadcrumb this
 	// test inspects. Stub the gate to FAIL so the run stops at step 10 with steps 5-6b
@@ -249,7 +262,7 @@ func TestUpdate6HappyOrderingAndBreadcrumb(t *testing.T) {
 // parent ctx is pre-cancelled, so the start-app must run under context.WithoutCancel
 // (its CtxSnap is LIVE) while the earlier stop-app snapshotted the cancelled parent.
 func TestUpdate6aValidateFailStartsApp(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	// Corrupt the auto-backup's inner assets.tar so 6a's PrescanAssets fails.
 	f.StreamFunc = func(w io.Writer, args []string) error {
@@ -292,7 +305,7 @@ func TestUpdate6aValidateFailStartsApp(t *testing.T) {
 // => ""), so step 6 aborts with "start the stack first". The engine must start app back
 // up and write NO breadcrumb.
 func TestUpdateBackupFailStartsApp(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := &compose.FakeRunner{
 		OutputFunc: func(args []string) (string, error) {
 			if strings.Contains(strings.Join(args, " "), "ps -q db") {
@@ -317,7 +330,7 @@ func TestUpdateBackupFailStartsApp(t *testing.T) {
 // fails (stubbed seam). That is a PRE-mutation abort: the error surfaces (carrying the
 // write failure), app is started back up, and no breadcrumb persists.
 func TestUpdate6bWriteFailStartsApp(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	prev := writeJournalFn
 	writeJournalFn = func(varlib.Journal) error { return errors.New("fsync failed") }
@@ -362,7 +375,7 @@ func captureGate(t *testing.T, ret error) *struct {
 // else; it carries the deterministic --name/--label + --pull never; it precedes the
 // step-9 recreate; and the step-8 re-pin took only after migrate succeeded.
 func TestUpdateMigrateRunEnvTargetOnly(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	captureGate(t, nil) // pass the gate so the whole run completes
 	app, _, _ := engineApp(cfg, f, "")
@@ -408,7 +421,7 @@ func TestUpdateMigrateRunEnvTargetOnly(t *testing.T) {
 // as the target id, the target version, and strictVersion=true; a PASS is the commit
 // point — the breadcrumb is cleared and the success line printed.
 func TestUpdateGatePassCommits(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	c := captureGate(t, nil)
 	app, out, _ := engineApp(cfg, f, "")
@@ -451,7 +464,7 @@ func TestUpdateGatePostRemoveWarns(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("mode 0500 does not block a root unlink")
 	}
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	// Side-effect gate: read-only the backups dir AFTER 6b wrote the breadcrumb and
 	// BEFORE the post-gate unlink, so RemoveJournal's os.Remove fails.
@@ -501,7 +514,7 @@ func strictDiscriminatingGate(t *testing.T) {
 // one-off, reverting .env to the pre-update tag, and clearing the breadcrumb — and
 // returns a plain "rolled back" error (NOT a rollbackFailedError).
 func TestUpdateRollbackOnGateFailRecovers(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	strictDiscriminatingGate(t)
 	app, _, _ := engineApp(cfg, f, "")
@@ -556,7 +569,7 @@ func TestUpdateRollbackOnGateFailRecovers(t *testing.T) {
 // still snapshot a LIVE ctx (Err==nil) — proof the rollback is detached — and the rollback
 // completes (breadcrumb cleared). With the raw ctx that later call would snapshot Canceled.
 func TestUpdateRollbackRunsDetachedFromLateCancel(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	strictDiscriminatingGate(t) // update's strict gate fails → enter the auto-rollback
 	ctx, cancel := context.WithCancel(context.Background())
@@ -587,7 +600,7 @@ func TestUpdateRollbackRunsDetachedFromLateCancel(t *testing.T) {
 // leaves the deployment as-is — no auto-rollback, breadcrumb retained, the manual-
 // recovery hint returned — but the migrate one-off is still reaped.
 func TestUpdateRollbackNoRollbackLeavesState(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	f.RunFunc = func(args []string) error {
 		if strings.Contains(strings.Join(args, " "), "alembic upgrade head") {
@@ -615,7 +628,7 @@ func TestUpdateRollbackNoRollbackLeavesState(t *testing.T) {
 // load ALSO fails → a rollbackFailedError (exit 3) whose message names the UNKNOWN
 // state, with the breadcrumb LEFT IN PLACE (the deployment is unrecovered).
 func TestUpdateRollbackAlsoFailsExit3(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	strictDiscriminatingGate(t)
 	f.StreamInFunc = func(io.Reader, []string) error { return errors.New("restore db boom") }
@@ -639,7 +652,7 @@ func TestUpdateRollbackAlsoFailsExit3(t *testing.T) {
 // rollback. (The FakeRunner ignores ctx, so steps 5-6b still run; the handler's
 // ctx.Err()!=nil branch is the unit under test.)
 func TestUpdateSignalRefusesOnInterrupt(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	f.RunFunc = func(args []string) error {
 		if strings.Contains(strings.Join(args, " "), "alembic upgrade head") {
@@ -707,7 +720,7 @@ func TestUpdateFailureShellQuotesRecoveryHint(t *testing.T) {
 // requireInstallComplete's incomplete-marker branch (not a later /version-probe failure
 // that would ALSO error without pulling); it would trip if the gate wiring were removed.
 func TestUpdateCmdRefusesOnIncompleteInstall(t *testing.T) {
-	cfg := setupRestoreEnv(t) // full .env + a fresh MATHION_VARLIB_DIR
+	cfg := setupUpdateEnv(t) // full .env + a fresh MATHION_VARLIB_DIR
 	asRoot(t)
 	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "a@b.edu", Complete: false}); err != nil {
 		t.Fatal(err)
