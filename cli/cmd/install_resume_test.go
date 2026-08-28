@@ -312,23 +312,37 @@ func TestResumeStampsComplete(t *testing.T) {
 	}
 }
 
+// errSuperuserBoom is the sentinel the fake runner returns for the resume's
+// create-superuser step. The resume path returns that error unwrapped
+// (resume → a.compose → Runner.Run, none of which wrap with %w), so the test
+// asserts sentinel identity via errors.Is rather than accepting any non-nil error.
+var errSuperuserBoom = errors.New("superuser boom")
+
 func TestResumeSuperuserFailLeavesIncomplete(t *testing.T) {
 	dir := t.TempDir()
-	config.WriteState(dir, config.State{Schema: 2, AdminEmail: "you@example.edu", Complete: false})
+	if err := config.WriteState(dir, config.State{Schema: 2, AdminEmail: "you@example.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
 	env := config.GenerateEnv("https://learn.example.edu", "v0.1.1", "S==", "hex")
-	os.WriteFile(filepath.Join(dir, ".env"), []byte(config.RenderEnv(env)), 0o600)
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(config.RenderEnv(env)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	f := &compose.FakeRunner{RunFunc: func(args []string) error {
 		if joinHas("create-superuser")(args) {
-			return errors.New("boom")
+			return errSuperuserBoom
 		}
 		return nil
 	}}
 	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: os.Stdout, Err: os.Stderr}
-	if err := app.runInstall(context.Background(), installOpts{Domain: "ignored", AdminEmail: "ignored@x.edu", Version: "v9"}); err == nil {
-		t.Fatal("expected the resume superuser failure to abort")
+	err := app.runInstall(context.Background(), installOpts{Domain: "ignored", AdminEmail: "ignored@x.edu", Version: "v9"})
+	if !errors.Is(err, errSuperuserBoom) {
+		t.Fatalf("resume must surface the superuser failure (%v); got %v", errSuperuserBoom, err)
 	}
-	st, _ := config.ReadState(dir)
+	st, err := config.ReadState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if st.Schema != 2 || st.Complete {
 		t.Fatalf("a failed resume must leave the seeded incomplete marker; got %+v", st)
 	}

@@ -273,10 +273,13 @@ func setupRestoreCmdEnv(t *testing.T) string {
 // TestRestoreCmdRefusesOnIncompleteInstall proves the install-completeness gate is
 // wired into newRestoreCmd: with an explicit incomplete marker the command refuses
 // BEFORE any engine work. The "did not finish" substring assertion is load-bearing —
-// it originates ONLY in requireInstallComplete's incomplete-marker branch, so it
-// distinguishes the gate's refusal from SelectLatest's "no backups" error (which the
-// markerless empty backups dir would ALSO produce were the gate deleted — a false
-// pass without this check).
+// among the ERRORS reachable on this fixture's restore path it originates only in
+// requireInstallComplete's incomplete-marker branch, so it distinguishes the gate's
+// refusal from SelectLatest's "no backups" error (which the markerless empty backups
+// dir would ALSO produce were the gate deleted — a false pass without this check).
+// The phrase is not globally unique: version.go's install-incomplete and compose-drift
+// notices also contain "did not finish", but those are printed notices, never returned
+// errors, and restore never emits them — so none can reach this err.Error().
 func TestRestoreCmdRefusesOnIncompleteInstall(t *testing.T) {
 	cfg := setupRestoreEnv(t) // markerless; seed incomplete explicitly
 	asRoot(t)

@@ -1,9 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -136,7 +136,14 @@ func TestSchema2IncompleteOmitsCompleteKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), "complete") {
+	// Assert the exact key is ABSENT (not a raw substring: "complete" would also
+	// match e.g. a future "completed_at" field). Unmarshal into a RawMessage map and
+	// check the literal key.
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("state file is not valid JSON: %v (raw %s)", err, b)
+	}
+	if _, ok := m["complete"]; ok {
 		t.Fatalf("complete:false must omit the key; got %s", b)
 	}
 	got, err := ReadState(dir)

@@ -62,14 +62,20 @@ func TestMaybeWarnInstallIncomplete(t *testing.T) {
 	if !strings.Contains(b.String(), "did not finish") {
 		t.Fatalf("incomplete install must warn; got %q", b.String())
 	}
-	// complete + grandfathered + missing → silent
-	for _, seed := range []func(string){
-		func(d string) { config.WriteState(d, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: true}) },
-		func(d string) { config.WriteState(d, config.State{Schema: 1, AdminEmail: "a@b.c"}) },
-		func(string) {}, // no marker at all
+	// complete + grandfathered + missing → silent. Seeds return their WriteState error
+	// so a fixture-creation failure can't make a silence case false-pass (an unwritten
+	// marker would also produce empty output).
+	for _, seed := range []func(string) error{
+		func(d string) error {
+			return config.WriteState(d, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: true})
+		},
+		func(d string) error { return config.WriteState(d, config.State{Schema: 1, AdminEmail: "a@b.c"}) },
+		func(string) error { return nil }, // no marker at all
 	} {
 		d := t.TempDir()
-		seed(d)
+		if err := seed(d); err != nil {
+			t.Fatalf("seed failed: %v", err)
+		}
 		var q bytes.Buffer
 		maybeWarnInstallIncomplete(&q, d)
 		if q.Len() != 0 {

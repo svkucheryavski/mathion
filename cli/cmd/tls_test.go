@@ -306,11 +306,42 @@ func TestTLSEnableHappyPath(t *testing.T) {
 }
 
 func TestRequireInstallComplete(t *testing.T) {
-	// missing marker
+	// missing marker: refuses via the missing/corrupt branch, which carries the
+	// repair / `uninstall --purge` advice — a message DISTINCT from the incomplete
+	// branch's "did not finish" resume hint asserted below.
 	empty := t.TempDir()
-	if err := (&App{CfgDir: empty}).requireInstallComplete(); err == nil {
+	mErr := (&App{CfgDir: empty}).requireInstallComplete()
+	if mErr == nil {
 		t.Fatal("missing install-state must refuse")
 	}
+	for _, want := range []string{"no valid mathion install found", "uninstall --purge"} {
+		if !strings.Contains(mErr.Error(), want) {
+			t.Fatalf("missing-marker refusal must carry the repair advice %q; got %v", want, mErr)
+		}
+	}
+	if strings.Contains(mErr.Error(), "did not finish") {
+		t.Fatalf("missing-marker refusal must be DISTINCT from the incomplete-marker text; got %v", mErr)
+	}
+
+	// corrupt marker: unparseable install-state (ReadState rejects the bytes) refuses
+	// via the SAME repair-advice branch, never the "did not finish" incomplete branch.
+	corrupt := t.TempDir()
+	if err := os.WriteFile(corrupt+"/install-state", []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cErr := (&App{CfgDir: corrupt}).requireInstallComplete()
+	if cErr == nil {
+		t.Fatal("a corrupt install-state must refuse")
+	}
+	for _, want := range []string{"no valid mathion install found", "uninstall --purge"} {
+		if !strings.Contains(cErr.Error(), want) {
+			t.Fatalf("corrupt-marker refusal must carry the repair advice %q; got %v", want, cErr)
+		}
+	}
+	if strings.Contains(cErr.Error(), "did not finish") {
+		t.Fatalf("corrupt-marker refusal must be DISTINCT from the incomplete-marker text; got %v", cErr)
+	}
+
 	// incomplete
 	inc := t.TempDir()
 	if err := config.WriteState(inc, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: false}); err != nil {
