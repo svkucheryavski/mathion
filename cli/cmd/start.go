@@ -12,6 +12,9 @@ func newStartCmd(app *App) *cobra.Command {
 			if err != nil || !proceed {
 				return err
 			}
+			if err := app.requireInstallComplete(); err != nil {
+				return err
+			}
 			// --pull never: start boots the image already pinned in .env; it must
 			// never reach out to a registry (a moved/absent tag would silently swap
 			// the running image).

@@ -305,6 +305,87 @@ func TestTLSEnableHappyPath(t *testing.T) {
 	}
 }
 
+func TestRequireInstallComplete(t *testing.T) {
+	// missing marker: refuses via the missing/corrupt branch, which carries the
+	// repair / `uninstall --purge` advice — a message DISTINCT from the incomplete
+	// branch's "did not finish" resume hint asserted below.
+	empty := t.TempDir()
+	mErr := (&App{CfgDir: empty}).requireInstallComplete()
+	if mErr == nil {
+		t.Fatal("missing install-state must refuse")
+	}
+	for _, want := range []string{"no valid mathion install found", "uninstall --purge"} {
+		if !strings.Contains(mErr.Error(), want) {
+			t.Fatalf("missing-marker refusal must carry the repair advice %q; got %v", want, mErr)
+		}
+	}
+	if strings.Contains(mErr.Error(), "did not finish") {
+		t.Fatalf("missing-marker refusal must be DISTINCT from the incomplete-marker text; got %v", mErr)
+	}
+
+	// corrupt marker: unparseable install-state (ReadState rejects the bytes) refuses
+	// via the SAME repair-advice branch, never the "did not finish" incomplete branch.
+	corrupt := t.TempDir()
+	if err := os.WriteFile(corrupt+"/install-state", []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cErr := (&App{CfgDir: corrupt}).requireInstallComplete()
+	if cErr == nil {
+		t.Fatal("a corrupt install-state must refuse")
+	}
+	for _, want := range []string{"no valid mathion install found", "uninstall --purge"} {
+		if !strings.Contains(cErr.Error(), want) {
+			t.Fatalf("corrupt-marker refusal must carry the repair advice %q; got %v", want, cErr)
+		}
+	}
+	if strings.Contains(cErr.Error(), "did not finish") {
+		t.Fatalf("corrupt-marker refusal must be DISTINCT from the incomplete-marker text; got %v", cErr)
+	}
+
+	// incomplete
+	inc := t.TempDir()
+	if err := config.WriteState(inc, config.State{Schema: 2, AdminEmail: "a@b.c", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	err := (&App{CfgDir: inc}).requireInstallComplete()
+	if err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("incomplete install must refuse with a resume hint; got %v", err)
+	}
+	// complete + grandfathered
+	for _, s := range []config.State{
+		{Schema: 2, AdminEmail: "a@b.c", Complete: true},
+		{Schema: 1, AdminEmail: "a@b.c"},
+	} {
+		d := t.TempDir()
+		if err := config.WriteState(d, s); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&App{CfgDir: d}).requireInstallComplete(); err != nil {
+			t.Fatalf("%+v must pass; got %v", s, err)
+		}
+	}
+}
+
+func TestTLSEnableRefusesOnIncompleteInstall(t *testing.T) {
+	dir := installedDeployment(t, false) // seeds Schema 1 + .env + compose
+	if err := config.WriteState(dir, config.State{Schema: 2, AdminEmail: "admin@example.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard}
+	if err := app.tlsEnable(context.Background(), tlsEnableOpts{Domain: "learn.example.edu", Email: "admin@example.edu"}); err == nil {
+		t.Fatal("tls enable must refuse on an incomplete install")
+	}
+	// spec §5: the gate precedes the compose re-materialize (tls.go AtomicWrite), so a
+	// refusal must leave the stale installedDeployment seed in place, not the embed.
+	if got, _ := os.ReadFile(dir + "/docker-compose.yml"); bytes.Equal(got, compose.ComposeYAML) {
+		t.Error("refused tls enable must NOT re-materialize docker-compose.yml")
+	}
+	if hasCall(f.Calls, joinHas("up -d")) {
+		t.Fatalf("tls enable must not bring the stack up on refusal; calls=%v", f.Calls)
+	}
+}
+
 func TestTLSDisableToleratesNoSuchServiceThenClears(t *testing.T) {
 	dir := writeEnabledEnv(t)
 	var out bytes.Buffer

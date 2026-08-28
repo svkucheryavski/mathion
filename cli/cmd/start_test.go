@@ -5,9 +5,11 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
@@ -44,19 +46,49 @@ func seedBreadcrumb(t *testing.T) {
 
 func TestStartArgv(t *testing.T) {
 	rootedVarlib(t)
+	cfg := t.TempDir()
+	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "you@example.edu", Complete: true}); err != nil {
+		t.Fatal(err)
+	}
 	f := &compose.FakeRunner{}
 	var out, errb bytes.Buffer
-	app := &App{CfgDir: "/etc/mathion", Project: "mathion_prod", Runner: f, Out: &out, Err: &errb}
+	app := &App{CfgDir: cfg, Project: "mathion_prod", Runner: f, Out: &out, Err: &errb}
 	cmd := newStartCmd(app)
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The sweep is call 0; find the `up` and assert its exact argv (now carrying
 	// --pull never).
-	want := []string{"compose", "-p", "mathion_prod", "-f", "/etc/mathion/docker-compose.yml", "--env-file", "/etc/mathion/.env", "up", "-d", "--wait", "--pull", "never"}
+	want := []string{"compose", "-p", "mathion_prod", "-f", cfg + "/docker-compose.yml", "--env-file", cfg + "/.env", "up", "-d", "--wait", "--pull", "never"}
 	i := idxOfCall(f.Calls, joinHas("up -d --wait --pull never"))
 	if i < 0 || !reflect.DeepEqual(f.Calls[i], want) {
 		t.Fatalf("argv = %v, want %v", f.Calls, want)
+	}
+}
+
+// TestStartRefusesOnIncompleteInstall: a valid-but-incomplete marker (Schema 2,
+// complete:false) makes start refuse via requireInstallComplete. Asserting the
+// "did not finish" substring proves the refusal came from the completeness gate
+// (not some other path), so a future deletion of the gate wiring would still trip
+// this test.
+func TestStartRefusesOnIncompleteInstall(t *testing.T) {
+	rootedVarlib(t)
+	cfg := t.TempDir()
+	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "you@example.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app := &App{CfgDir: cfg, Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard}
+	cmd := newStartCmd(app)
+	err := cmd.RunE(cmd, nil)
+	if err == nil {
+		t.Fatal("start must refuse on an incomplete install")
+	}
+	if !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("refusal must come from requireInstallComplete (contain %q); got %v", "did not finish", err)
+	}
+	if hasCall(f.Calls, joinHas("up -d")) {
+		t.Fatalf("start must not bring the stack up on refusal; calls=%v", f.Calls)
 	}
 }
 

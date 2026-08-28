@@ -257,6 +257,57 @@ func setupRestoreEnv(t *testing.T) string {
 	return cfg
 }
 
+// setupRestoreCmdEnv is setupRestoreEnv plus a COMPLETE install-state, for the
+// command-level restore tests that drive newRestoreCmd through the new
+// requireInstallComplete gate. Engine-level tests keep using setupRestoreEnv
+// (markerless) so an accidental gate inside restoreEngine fails them loudly.
+func setupRestoreCmdEnv(t *testing.T) string {
+	t.Helper()
+	cfg := setupRestoreEnv(t)
+	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "admin@example.edu", Complete: true}); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// TestRestoreCmdRefusesOnIncompleteInstall proves the install-completeness gate is
+// wired into newRestoreCmd: with an explicit incomplete marker the command refuses
+// BEFORE any engine work. The "did not finish" substring assertion is load-bearing —
+// among the ERRORS reachable on this fixture's restore path it originates only in
+// requireInstallComplete's incomplete-marker branch, so it distinguishes the gate's
+// refusal from SelectLatest's "no backups" error (which the markerless empty backups
+// dir would ALSO produce were the gate deleted — a false pass without this check).
+// The phrase is not globally unique: version.go's install-incomplete and compose-drift
+// notices also contain "did not finish", but those are printed notices, never returned
+// errors, and restore never emits them — so none can reach this err.Error().
+func TestRestoreCmdRefusesOnIncompleteInstall(t *testing.T) {
+	cfg := setupRestoreEnv(t) // markerless; seed incomplete explicitly
+	asRoot(t)
+	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "a@b.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newRestoreCmd(app)
+	c.SetContext(context.Background())
+	if err := c.Flags().Set("latest", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flags().Set("yes", "true"); err != nil {
+		t.Fatal(err)
+	}
+	err := c.RunE(c, nil)
+	if err == nil {
+		t.Fatal("restore must refuse on an incomplete install")
+	}
+	if !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("restore must refuse via the install-completeness gate (error containing %q); got a different error (e.g. SelectLatest's no-backups): %v", "did not finish", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) || hasCall(f.Calls, isPull) {
+		t.Fatalf("restore must not touch the engine on refusal; calls=%v", f.Calls)
+	}
+}
+
 // stubGate replaces the step-10 deployment gate seam with one returning ret, so a
 // full-engine test can drive the step-10 outcome without a live app + HTTP server
 // (the gate's own logic is covered directly in gate_test.go). Restored on cleanup.
@@ -975,7 +1026,7 @@ func TestRestoreGateFailRetainsBreadcrumb(t *testing.T) {
 // archive in the backups dir, the command resolves the target via SelectLatest and
 // runs the engine end to end (proven by the DB-load one-off being issued).
 func TestRestoreCmdLatestResolves(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	stubGate(t, nil)
 	// Two managed archives: the SECOND written (v2.0.0) is newest by every SelectLatest
@@ -1012,7 +1063,7 @@ func TestRestoreCmdLatestResolves(t *testing.T) {
 // TestRestoreCmdLatestNoBackups: `--latest` against a freshly-ensured (empty)
 // backups dir surfaces SelectLatest's no-backups error and never touches the engine.
 func TestRestoreCmdLatestNoBackups(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	f := &compose.FakeRunner{OutputFunc: recordedIDLocalOutput}
 	app, _, _ := engineApp(cfg, f, "")
@@ -1034,7 +1085,7 @@ func TestRestoreCmdLatestNoBackups(t *testing.T) {
 // makes TierFor pick UntrustedCaps, so the engine's !Yes confirm path prints the
 // untrusted-SQL warning; the typed project name confirms and the restore completes.
 func TestRestoreCmdUntrustedPathWarns(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	stubGate(t, nil)
 	path := writeRestoreArchive(t, t.TempDir(), archive.Manifest{ImageID: "sha256:rec"})
@@ -1126,7 +1177,7 @@ func TestResolveRestoreCapsHonorsManagedOverrides(t *testing.T) {
 // resolution (proving restore, like update, honors managed cap overrides) with NO
 // restore attempted (the destructive DB-load one-off never runs).
 func TestRestoreCmdInvalidManagedCapHardFails(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	t.Setenv("MATHION_RESTORE_MAX_MEMBER_BYTES", "banana")
 	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
@@ -1155,7 +1206,7 @@ func TestRestoreCmdInvalidManagedCapHardFails(t *testing.T) {
 // A stubbed gate failure stops the engine at step 10 with that breadcrumb retained,
 // so this single test pins both "exempt proceeds" and "replaced with kind:restore".
 func TestRestoreCmdExemptProceedsReplacesBreadcrumb(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	if err := varlib.WriteJournal(varlib.Journal{Schema: 1, Kind: "update", TargetTag: "v9.9.9", BackupPath: "/b/x.tar.gz"}); err != nil {
 		t.Fatal(err)
@@ -1189,7 +1240,7 @@ func TestRestoreCmdExemptProceedsReplacesBreadcrumb(t *testing.T) {
 // the command fail closed with the ErrLocked sentinel before any resolution or engine
 // work (the lock is taken right after EnsureBackupsDir). No archive need exist.
 func TestRestoreCmdLockHeld(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	release, err := varlib.Lock()
 	if err != nil {
@@ -1213,7 +1264,7 @@ func TestRestoreCmdLockHeld(t *testing.T) {
 // TestRestoreCmdYesBypassesConfirm: `--yes` skips the destructive confirmation, so an
 // EMPTY In still completes — whereas without --yes the empty In would fail step 5.
 func TestRestoreCmdYesBypassesConfirm(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	stubGate(t, nil)
 	writeRestoreArchive(t, varlib.BackupsDir(), archive.Manifest{ImageID: "sha256:rec"})
@@ -1236,7 +1287,7 @@ func TestRestoreCmdYesBypassesConfirm(t *testing.T) {
 // with no engine work. (a) --latest AND a positional path are mutually exclusive;
 // (b) neither is provided. Fresh command per sub-case.
 func TestRestoreCmdFlagValidation(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupRestoreCmdEnv(t)
 	asRoot(t)
 	// Hold the operation lock for the whole test: usage validation runs BEFORE the
 	// lock, so each bad invocation must return its SPECIFIC validation error — NOT

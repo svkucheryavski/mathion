@@ -681,3 +681,31 @@ func TestUpdateFailureShellQuotesRecoveryHint(t *testing.T) {
 		}
 	})
 }
+
+// TestUpdateCmdRefusesOnIncompleteInstall: the command-level completeness gate in
+// newUpdateCmd refuses on a Schema-2 marker with complete:false — BEFORE any pull/up.
+// Every other update test drives runUpdate directly, below this gate, so this is its
+// only coverage. The "did not finish" substring assertion proves the refusal came from
+// requireInstallComplete's incomplete-marker branch (not a later /version-probe failure
+// that would ALSO error without pulling); it would trip if the gate wiring were removed.
+func TestUpdateCmdRefusesOnIncompleteInstall(t *testing.T) {
+	cfg := setupRestoreEnv(t) // full .env + a fresh MATHION_VARLIB_DIR
+	asRoot(t)
+	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "a@b.edu", Complete: false}); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newUpdateCmd(app)
+	c.SetContext(context.Background())
+	err := c.RunE(c, nil)
+	if err == nil {
+		t.Fatal("update must refuse on an incomplete install")
+	}
+	if !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("refusal must come from the completeness gate (contain %q), not a later failure; got %v", "did not finish", err)
+	}
+	if hasCall(f.Calls, isPull) || hasCall(f.Calls, joinHas("up -d")) {
+		t.Fatalf("update must not pull/up on refusal; calls=%v", f.Calls)
+	}
+}

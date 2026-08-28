@@ -57,6 +57,9 @@ func newRestoreCmd(app *App) *cobra.Command {
 			if proceed, err := guardEntry(app, "restore"); !proceed {
 				return err // restore is exempt; this only trips on a hard read error's fail-closed path
 			}
+			if err := app.requireInstallComplete(); err != nil {
+				return err
+			}
 			// Resolve the target archive (SelectLatest needs the ensured backups dir).
 			path := ""
 			if latest {

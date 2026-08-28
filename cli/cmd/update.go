@@ -153,6 +153,9 @@ func newUpdateCmd(app *App) *cobra.Command {
 			if proceed, err := guardEntry(app, "update"); !proceed {
 				return err
 			}
+			if err := app.requireInstallComplete(); err != nil {
+				return err
+			}
 			ctx, stop := withSignalCancel(c.Context(), osExit)
 			defer stop()
 			return runUpdate(ctx, app, updateOpts{Version: version, NoRollback: noRollback, Yes: yes})
