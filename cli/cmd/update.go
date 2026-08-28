@@ -41,8 +41,17 @@ type rollbackFailedError struct{ err error }
 func (e rollbackFailedError) Error() string { return e.err.Error() }
 func (e rollbackFailedError) Unwrap() error { return e.err }
 
+// committedPendingError: the image/DB update COMMITTED and the DB must NOT be rolled
+// back, but required post-commit work (clear the recovery journal, or apply/verify the
+// stack definition) did not finish. Exit 2 — distinct from 0/1/3.
+type committedPendingError struct{ err error }
+
+func (e committedPendingError) Error() string { return e.err.Error() }
+func (e committedPendingError) Unwrap() error { return e.err }
+
 // exitCode maps a top-level command error to a process exit code: 0 (nil), 3 (a
-// rollbackFailedError anywhere in the chain), else 1. root.go's Execute calls osExit(exitCode(err)).
+// rollbackFailedError anywhere in the chain), 2 (a committedPendingError), else 1.
+// root.go's Execute calls osExit(exitCode(err)).
 func exitCode(err error) int {
 	if err == nil {
 		return 0
@@ -50,6 +59,10 @@ func exitCode(err error) int {
 	var rbf rollbackFailedError
 	if errors.As(err, &rbf) {
 		return 3
+	}
+	var cpe committedPendingError
+	if errors.As(err, &cpe) {
+		return 2
 	}
 	return 1
 }
@@ -345,8 +358,8 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	// (the update is healthy — do NOT roll back / enter the matrix / exit 3); a leftover
 	// breadcrumb would otherwise make the next command refuse.
 	if err := varlib.RemoveJournal(); err != nil {
-		return fmt.Errorf("updated %s → %s successfully, but could not remove the recovery breadcrumb %s; the deployment is healthy — verify the app serves %s (running image ID == %s), then remove %s manually: %w",
-			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)
+		return committedPendingError{err: fmt.Errorf("updated %s → %s successfully, but could not remove the recovery breadcrumb %s; the deployment is healthy — verify the app serves %s (running image ID == %s), then remove %s manually: %w",
+			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)}
 	}
 	fmt.Fprintf(a.Out, "updated %s → %s (backup: %s; prune old backups manually)\n", oldTag, target, backupPath)
 	return nil

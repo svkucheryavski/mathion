@@ -428,6 +428,21 @@ func TestUpdateGatePassCommits(t *testing.T) {
 	}
 }
 
+func TestExitCodeCommittedPending(t *testing.T) {
+	if got := exitCode(committedPendingError{err: errors.New("x")}); got != 2 {
+		t.Fatalf("committedPendingError → 2; got %d", got)
+	}
+	if got := exitCode(nil); got != 0 {
+		t.Fatalf("nil → 0; got %d", got)
+	}
+	if got := exitCode(rollbackFailedError{err: errors.New("x")}); got != 3 {
+		t.Fatalf("rollbackFailedError → 3; got %d", got)
+	}
+	if got := exitCode(errors.New("plain")); got != 1 {
+		t.Fatalf("plain → 1; got %d", got)
+	}
+}
+
 // TestUpdateGatePostRemoveWarns: the gate passes but the post-commit RemoveJournal
 // fails (the gate stub turns the backups dir read-only exactly when it runs). That is a
 // DISTINCT non-rollback warning — the update stays committed (no restore, not exit 3),
@@ -450,6 +465,9 @@ func TestUpdateGatePostRemoveWarns(t *testing.T) {
 	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
 	if err == nil || !strings.Contains(err.Error(), "could not remove the recovery breadcrumb") {
 		t.Fatalf("a failed post-gate breadcrumb clear must warn; got %v", err)
+	}
+	if exitCode(err) != 2 {
+		t.Fatalf("a failed post-commit breadcrumb clear is exit 2 (commit done, cleanup pending); got %d", exitCode(err))
 	}
 	// The unlink failed → the breadcrumb is STILL present (no rollback deleted it).
 	if _, present, _ := varlib.ReadJournal(); !present {
