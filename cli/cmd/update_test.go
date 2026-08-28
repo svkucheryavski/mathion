@@ -896,3 +896,42 @@ func TestRestorePrevComposeEmptyPrevGuard(t *testing.T) {
 		t.Fatalf("empty prev must issue no up; calls=%v", f.Calls)
 	}
 }
+
+// --- Task 6: update preamble (perm gate, drift signal, deferred reminder) ---
+
+func TestUpdateRejectsLoosePermEnv(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.Chmod(cfg+"/.env", 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v9.9.9", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "group/world-accessible") {
+		t.Fatalf("want loose-perm rejection; got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("perm gate must precede any docker call; got %v", f.Calls)
+	}
+}
+
+func TestUpdateNoReconcileDriftPrintsReminderEvenWhenComposeAbsent(t *testing.T) {
+	cfg := setupRestoreEnv(t) // NOTE: no compose file → composeDiffers via read error
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v0.1.1"}`))
+	})
+	f := &compose.FakeRunner{}
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true, NoReconcile: true}); err != nil {
+		t.Fatalf("same-tag --no-reconcile → nil; got %v", err)
+	}
+	// spec §7 test 7: assert the EXACT reminder line (with newline), not just a substring.
+	wantLine := "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile\n"
+	if !strings.Contains(out.String(), wantLine) {
+		t.Fatalf("want the exact deferred-apply reminder line; got %q", out.String())
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("--no-reconcile must NOT apply; got %v", f.Calls)
+	}
+}

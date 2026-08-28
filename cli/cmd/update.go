@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -21,9 +22,10 @@ import (
 )
 
 type updateOpts struct {
-	Version    string
-	NoRollback bool
-	Yes        bool
+	Version     string
+	NoRollback  bool
+	Yes         bool
+	NoReconcile bool
 }
 
 // writeJournalFn is the step-6b breadcrumb writer; a package seam so a test can
@@ -211,7 +213,7 @@ func updateFailure(ctx context.Context, a *App, opts updateOpts, m updateFailMet
 // breadcrumb makes guardEntry refuse.
 func newUpdateCmd(app *App) *cobra.Command {
 	var version string
-	var noRollback, yes bool
+	var noRollback, yes, noReconcile bool
 	c := &cobra.Command{
 		Use:   "update",
 		Short: "Update the deployment to a new version (pull-verify → back up → migrate → health-check, auto-rollback on failure)",
@@ -242,12 +244,13 @@ func newUpdateCmd(app *App) *cobra.Command {
 			}
 			ctx, stop := withSignalCancel(c.Context(), osExit)
 			defer stop()
-			return runUpdate(ctx, app, updateOpts{Version: version, NoRollback: noRollback, Yes: yes})
+			return runUpdate(ctx, app, updateOpts{Version: version, NoRollback: noRollback, Yes: yes, NoReconcile: noReconcile})
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "target version tag (default: the CLI's built-in target)")
 	c.Flags().BoolVar(&noRollback, "no-rollback", false, "on failure leave the deployment as-is instead of auto-rolling-back")
 	c.Flags().BoolVar(&yes, "yes", false, "skip the update confirmation prompt")
+	c.Flags().BoolVar(&noReconcile, "no-reconcile", false, "apply only the image upgrade; defer this release's stack-definition change")
 	return c
 }
 
@@ -259,6 +262,13 @@ func newUpdateCmd(app *App) *cobra.Command {
 // interrupt (ctx cancelled) or --no-rollback instead refuses, leaving the breadcrumb and
 // failed state behind the manual-recovery hint. See updateFailure for the full matrix.
 func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
+	// 0. Refuse a missing/non-regular/group-or-world-accessible .env BEFORE reading or
+	// mutating anything — it holds secrets and, with a bundled TLS proxy, Compose
+	// interpolates it into the proxy env. Shared verbatim with reconcile/tls.
+	if err := a.requirePrivateEnv(); err != nil {
+		return err
+	}
+
 	// 1. Precondition: the STRENGTHENED env validation (ValidateEnvComplete also
 	// ValidateOCITags MATHION_VERSION) BEFORE any docker mutation — so the same-tag
 	// guard compares the target against a canonical .env tag == Compose's effective
@@ -271,6 +281,17 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 		return err
 	}
 	oldTag := env["MATHION_VERSION"]
+
+	// Drift signal: the on-disk compose differs from this CLI's embedded stack, or a
+	// pending-apply marker is present. wantApply folds --no-reconcile into the decision
+	// the apply branches (Tasks 7–8) act on; a compose read error counts as drift so a
+	// missing/unreadable file is reconciled rather than silently skipped.
+	onDisk, readErr := os.ReadFile(composePath(a))
+	composeDiffers := readErr != nil || !bytes.Equal(onDisk, compose.ComposeYAML)
+	markerPresent, _ := varlib.MarkerPresent()
+	drift := composeDiffers || markerPresent
+	wantApply := drift && !opts.NoReconcile
+	_ = wantApply // consumed by the apply branches in Tasks 7–8
 
 	// 2. Resolve target + same-tag guard (round-9 #2 — update NEVER pulls the active
 	// tag: pulling imageRepo:<active> would MOVE the live deployment tag before any
@@ -292,6 +313,9 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 			fmt.Fprintf(a.Out, "already at %s; nothing to do\n", target)
 		} else {
 			fmt.Fprintf(a.Out, "already pinned to %s; a same-version refresh is not supported. To redeploy or repair a broken deployment, use mathion restore or reinstall.\n", target)
+		}
+		if opts.NoReconcile && drift {
+			fmt.Fprintln(a.Out, "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile")
 		}
 		return nil
 	}
@@ -433,6 +457,9 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)}
 	}
 	fmt.Fprintf(a.Out, "updated %s → %s (backup: %s; prune old backups manually)\n", oldTag, target, backupPath)
+	if opts.NoReconcile && drift {
+		fmt.Fprintln(a.Out, "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile")
+	}
 	return nil
 }
 
