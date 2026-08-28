@@ -305,9 +305,35 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 		return err
 	}
 	if target == oldTag {
-		// No pull. strictVersion=true so ONLY an exact JSON {"version":target} is a
-		// match (a); a legacy 200 text/html SPA, a /version mismatch, or an
-		// unreachable app all fall to (b). Reuses the gate's /version classifier.
+		if wantApply {
+			if !a.appRunning(ctx) {
+				return errors.New("this release's stack definition needs applying, but the stack is not running; start it with `sudo mathion start`, then `sudo mathion reconcile` (or re-run update)")
+			}
+			if !opts.Yes {
+				msg := "a previous stack apply did not finish; re-apply this CLI's stack definition now?"
+				if composeDiffers {
+					msg = "this release updates the stack definition; apply it now?"
+				}
+				fmt.Fprintf(a.Out, "%s any changed service is briefly recreated (an HTTPS interruption if the bundled proxy changed). Continue? [y/N] ", msg)
+				line, _ := bufio.NewReader(a.In).ReadString('\n')
+				if ans := strings.ToLower(strings.TrimSpace(line)); ans != "y" && ans != "yes" {
+					return errors.New("update cancelled")
+				}
+			}
+			stID, err := runningAppImageID(ctx, a)
+			if err != nil {
+				return err
+			}
+			restored, applyErr := a.applyAndGate(ctx, onDisk, stID, target)
+			if applyErr != nil {
+				if restored {
+					return fmt.Errorf("applying this CLI's stack definition failed (%w); the previous definition is in place and the stack is running — retry with `sudo mathion reconcile`", applyErr)
+				}
+				return fmt.Errorf("applying this CLI's stack definition failed (%w) AND restoring the previous definition also failed; the runtime may be degraded — run `mathion status`, then `sudo mathion reconcile`", applyErr)
+			}
+			fmt.Fprintf(a.Out, "applied this CLI's stack definition (%s); run `mathion status` to confirm.\n", buildVersion)
+			return nil
+		}
 		pass, _, _ := probeVersionOnce(ctx, target, true)
 		if pass {
 			fmt.Fprintf(a.Out, "already at %s; nothing to do\n", target)

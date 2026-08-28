@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -933,5 +934,144 @@ func TestUpdateNoReconcileDriftPrintsReminderEvenWhenComposeAbsent(t *testing.T)
 	}
 	if hasCall(f.Calls, joinHas("up")) {
 		t.Fatalf("--no-reconcile must NOT apply; got %v", f.Calls)
+	}
+}
+
+// sameTagApplyFake: same-tag runs skip backup/migrate/recreate, so the only Output
+// probes are runningAppImageID's (ps -q app → cid, inspect <cid> → running id) and
+// appRunning's (ps -q app → non-empty). One OutputFunc serves both.
+func sameTagApplyFake(runFn func([]string) error) *compose.FakeRunner {
+	return &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			if joinHas("ps -q app")(args) {
+				return "cid123\n", nil
+			}
+			if len(args) >= 2 && args[0] == "inspect" && args[1] == "cid123" {
+				return "sha256:R\n", nil
+			}
+			return "", nil
+		},
+		RunFunc: runFn,
+	}
+}
+
+func TestUpdateSameTagDriftAppliesAndGates(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := sameTagApplyFake(nil)
+	app, out, _ := engineApp(cfg, f, "")
+	prev := gateFn
+	gateFn = func(_ context.Context, _ *App, id, _ string, strict bool) error {
+		if id != "sha256:R" || !strict {
+			t.Fatalf("gate must use the captured running id, strict; got id=%s strict=%v", id, strict)
+		}
+		return nil
+	}
+	t.Cleanup(func() { gateFn = prev })
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true}); err != nil {
+		t.Fatalf("same-tag apply success → nil; got %v", err)
+	}
+	if hasCall(f.Calls, isPull) {
+		t.Fatalf("same-tag must not pull the target image; got %v", f.Calls)
+	}
+	if !hasCall(f.Calls, failsApplyUp) { // the whole-project apply up ran
+		t.Fatalf("expected the whole-project apply up; got %v", f.Calls)
+	}
+	if !strings.Contains(out.String(), "applied this CLI's stack definition") {
+		t.Fatalf("got %q", out.String())
+	}
+	if got, _ := os.ReadFile(composePath(app)); !bytes.Equal(got, compose.ComposeYAML) {
+		t.Fatalf("on-disk compose must now equal the embed; differs")
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Fatal("marker must be cleared on success")
+	}
+}
+
+func TestUpdateSameTagGateFailRestoresExit1(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	// Drift FIRST, then capture prev == the drifted on-disk bytes runUpdate will read.
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := os.ReadFile(composePath(&App{CfgDir: cfg}))
+	f := sameTagApplyFake(nil) // apply up succeeds; the GATE fails
+	app, _, _ := engineApp(cfg, f, "")
+	prevGate := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error { return errors.New("gate: moved tag") }
+	t.Cleanup(func() { gateFn = prevGate })
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true})
+	if err == nil {
+		t.Fatal("gate failure must error")
+	}
+	if exitCode(err) != 1 {
+		t.Fatalf("same-tag failure is exit 1 (nothing committed); got %d", exitCode(err))
+	}
+	var cpe committedPendingError
+	if errors.As(err, &cpe) {
+		t.Fatal("same-tag failure must NOT be a committedPendingError")
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("previous compose must be restored; got %q want %q", got, prev)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained on failure")
+	}
+}
+
+func TestUpdateSameTagDriftAppNotRunningRefuses(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{} // ps -q app → "" → not running
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("a drifted same-tag with the stack down must refuse; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("a refusal must apply nothing; got %v", f.Calls)
+	}
+}
+
+func TestUpdateSameTagNoDriftUnchanged(t *testing.T) {
+	cfg := setupUpdateEnv(t) // compose == embed → no drift
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v0.1.1"}`))
+	})
+	f := &compose.FakeRunner{}
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true}); err != nil {
+		t.Fatalf("no-drift same-tag → nil; got %v", err)
+	}
+	if !strings.Contains(out.String(), "already at v0.1.1") {
+		t.Fatalf("want the unchanged same-tag message; got %q", out.String())
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("no-drift same-tag must apply nothing; got %v", f.Calls)
+	}
+}
+
+func TestUpdateSameTagStaleMarkerConfirmWording(t *testing.T) {
+	cfg := setupUpdateEnv(t)                     // compose == embed
+	if err := varlib.WriteMarker(); err != nil { // marker-only drift
+		t.Fatal(err)
+	}
+	f := sameTagApplyFake(nil)
+	app, out, _ := engineApp(cfg, f, "n\n") // decline the confirm to inspect its wording
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1"})
+	if err == nil {
+		t.Fatal("declined confirm must abort")
+	}
+	// marker-only (compose matches): the prompt must NOT claim the stack definition changed.
+	if strings.Contains(out.String(), "this release updates the stack definition") {
+		t.Fatalf("marker-only drift must use the re-apply wording; got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "did not finish") {
+		t.Fatalf("want the stale-marker re-apply prompt; got %q", out.String())
 	}
 }
