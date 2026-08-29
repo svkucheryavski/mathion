@@ -347,7 +347,7 @@ func TestPreRunIsReadOnly(t *testing.T) {
 	if b, _ := os.ReadFile(dir + "/docker-compose.yml"); string(b) != "stale: true\n" {
 		t.Error("pre-run must not rewrite the on-disk compose")
 	}
-	if !strings.Contains(e.String(), driftNote) {
-		t.Errorf("pre-run should still have printed the drift note (proving it ran); got %q", e.String())
+	if strings.Count(e.String(), driftNote) != 1 {
+		t.Errorf("pre-run should still have printed exactly one drift note (proving it ran); got %q", e.String())
 	}
 }
