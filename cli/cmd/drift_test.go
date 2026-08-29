@@ -162,7 +162,7 @@ func TestComposeDriftedFifoIsPresentUnreadable(t *testing.T) {
 	}
 	out.Reset()
 	maybeWarnComposeDrift(&out, dir)
-	if !strings.Contains(out.String(), driftNote) {
-		t.Fatalf("FIFO compose + pending marker must warn; got %q", out.String())
+	if n := strings.Count(out.String(), driftNote); n != 1 {
+		t.Fatalf("FIFO compose + pending marker must warn exactly once; got %d in %q", n, out.String())
 	}
 }
