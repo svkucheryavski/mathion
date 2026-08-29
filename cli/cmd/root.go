@@ -103,12 +103,45 @@ func resolveProject() string {
 	return "mathion_prod"
 }
 
+// driftHookExcluded reports whether the compose-drift pre-run notice must be SUPPRESSED
+// for the executing command c (spec §4.1): commands that re-materialize the embedded
+// compose and report their own next-step (reconcile/update/install), teardown (uninstall),
+// self-update (owns its post-swap line), and machine/first-contact surfaces (version
+// --short, the completion machinery by ancestry, help, __complete). --help and
+// non-runnable parents short-circuit to flag.ErrHelp BEFORE the pre-run, so they need no
+// entry here.
+func driftHookExcluded(c *cobra.Command) bool {
+	for p := c; p != nil; p = p.Parent() {
+		if p.Name() == "completion" {
+			return true
+		}
+	}
+	switch c.Name() {
+	case "__complete", "help", "reconcile", "update", "install", "uninstall", "self-update":
+		return true
+	case "version":
+		short, _ := c.Flags().GetBool("short") // flags are parsed before the pre-run runs
+		return short
+	}
+	return false
+}
+
 func newRootCmd(app *App) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mathion",
 		Short:         "Self-host and manage a Mathion deployment",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+	}
+	// Route the precise compose-drift notice to stderr before every non-excluded
+	// management command (spec §4.1). Read-only: it prints or stays silent, then returns
+	// nil — never a non-nil error, never a Docker/compose action. maybeWarnComposeDrift is
+	// FIFO-safe + byte-bounded (Task 1), so this does no unbounded read.
+	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
+		if !driftHookExcluded(c) {
+			maybeWarnComposeDrift(app.Err, app.CfgDir)
+		}
+		return nil
 	}
 	root.AddCommand(
 		newInstallCmd(app), newStartCmd(app), newStopCmd(app), newStatusCmd(app),

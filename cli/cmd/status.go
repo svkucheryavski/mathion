@@ -22,12 +22,12 @@ func newStatusCmd(app *App) *cobra.Command {
 			if err := app.compose(c.Context(), "ps"); err != nil {
 				return err
 			}
-			// Passive pre-health notices: both are orthogonal to /health, so both are
-			// emitted on BOTH return-nil branches below (spec §5.1) — the
-			// install-incomplete notice first, then the compose-drift notice. status
-			// runs as the NEW binary, so its embedded bytes are authoritative.
+			// Passive pre-health notice: install-incomplete is orthogonal to /health,
+			// so it is emitted on BOTH return-nil branches below. The compose-drift
+			// notice is NOT emitted here — the root pre-run (spec §4.1) owns it now and
+			// routes it to stderr on every non-excluded command, so status inherits it
+			// without a second, stdout copy.
 			maybeWarnInstallIncomplete(app.Out, app.CfgDir)
-			maybeWarnComposeDrift(app.Out, app.CfgDir)
 			img := ""
 			if m, err := config.ReadEnvFile(app.CfgDir); err == nil {
 				img = m["MATHION_VERSION"]

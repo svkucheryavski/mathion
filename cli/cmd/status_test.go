@@ -12,9 +12,10 @@ import (
 	"github.com/svkucheryavski/mathion/cli/internal/config"
 )
 
-// statusWithHealth runs `mathion status` against a drifted on-disk compose with the
-// health probe forced to healthErr, and returns captured stdout.
-func statusWithHealth(t *testing.T, healthErr error) string {
+// statusWithHealth runs `mathion status` (through the root, so the drift pre-run fires)
+// against a drifted on-disk compose with the health probe forced to healthErr; it returns
+// captured stdout and stderr separately so the test can prove the drift note is on stderr.
+func statusWithHealth(t *testing.T, healthErr error) (stdout, stderr string) {
 	t.Helper()
 	varlibReady(t)
 	dir := t.TempDir()
@@ -27,29 +28,38 @@ func statusWithHealth(t *testing.T, healthErr error) string {
 	orig := healthProbe
 	healthProbe = func(context.Context, string) error { return healthErr }
 	t.Cleanup(func() { healthProbe = orig })
-	var out bytes.Buffer
-	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &out, Err: &out, In: bytes.NewReader(nil)}
-	cmd := newStatusCmd(app)
-	if err := cmd.RunE(cmd, nil); err != nil {
-		t.Fatalf("status RunE: %v", err)
+	var out, errb bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &out, Err: &errb, In: bytes.NewReader(nil)}
+	root := newRootCmd(app)
+	root.SetArgs([]string{"status"})
+	root.SetOut(&out)
+	root.SetErr(&errb)
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("status via root: %v", err)
 	}
-	return out.String()
+	return out.String(), errb.String()
 }
 
 func TestStatusEmitsDriftOnHealthyBranch(t *testing.T) {
-	s := statusWithHealth(t, nil)
-	if !strings.Contains(s, "apply it with: sudo mathion reconcile") {
-		t.Errorf("healthy status must emit the drift notice; got %q", s)
+	stdout, stderr := statusWithHealth(t, nil)
+	if !strings.Contains(stderr, "apply it with: sudo mathion reconcile") {
+		t.Errorf("healthy status must emit the drift notice on stderr; got stderr=%q", stderr)
+	}
+	if strings.Contains(stdout, "apply it with: sudo mathion reconcile") {
+		t.Errorf("the drift notice must be on stderr, not stdout; got stdout=%q", stdout)
+	}
+	if !strings.Contains(stdout, "healthy") {
+		t.Errorf("the healthy line must be on stdout; got stdout=%q", stdout)
 	}
 }
 
 func TestStatusEmitsDriftOnUnhealthyBranch(t *testing.T) {
-	s := statusWithHealth(t, errors.New("connection refused"))
-	if !strings.Contains(s, "apply it with: sudo mathion reconcile") {
-		t.Errorf("unhealthy status must still emit the drift notice; got %q", s)
+	stdout, stderr := statusWithHealth(t, errors.New("connection refused"))
+	if !strings.Contains(stderr, "apply it with: sudo mathion reconcile") {
+		t.Errorf("unhealthy status must still emit the drift notice on stderr; got stderr=%q", stderr)
 	}
-	if !strings.Contains(s, "stack not healthy") {
-		t.Errorf("expected the unhealthy line; got %q", s)
+	if !strings.Contains(stdout, "stack not healthy") {
+		t.Errorf("expected the unhealthy line on stdout; got stdout=%q", stdout)
 	}
 }
 
