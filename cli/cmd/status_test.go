@@ -42,11 +42,11 @@ func statusWithHealth(t *testing.T, healthErr error) (stdout, stderr string) {
 
 func TestStatusEmitsDriftOnHealthyBranch(t *testing.T) {
 	stdout, stderr := statusWithHealth(t, nil)
-	if !strings.Contains(stderr, "apply it with: sudo mathion reconcile") {
-		t.Errorf("healthy status must emit the drift notice on stderr; got stderr=%q", stderr)
+	if strings.Count(stderr, driftNote) != 1 {
+		t.Errorf("healthy status must emit exactly one drift notice on stderr; got stderr=%q", stderr)
 	}
-	if strings.Contains(stdout, "apply it with: sudo mathion reconcile") {
-		t.Errorf("the drift notice must be on stderr, not stdout; got stdout=%q", stdout)
+	if strings.Count(stdout, driftNote) != 0 {
+		t.Errorf("the drift notice must not appear on stdout; got stdout=%q", stdout)
 	}
 	if !strings.Contains(stdout, "healthy") {
 		t.Errorf("the healthy line must be on stdout; got stdout=%q", stdout)
@@ -55,8 +55,11 @@ func TestStatusEmitsDriftOnHealthyBranch(t *testing.T) {
 
 func TestStatusEmitsDriftOnUnhealthyBranch(t *testing.T) {
 	stdout, stderr := statusWithHealth(t, errors.New("connection refused"))
-	if !strings.Contains(stderr, "apply it with: sudo mathion reconcile") {
-		t.Errorf("unhealthy status must still emit the drift notice on stderr; got stderr=%q", stderr)
+	if strings.Count(stderr, driftNote) != 1 {
+		t.Errorf("unhealthy status must still emit exactly one drift notice on stderr; got stderr=%q", stderr)
+	}
+	if strings.Count(stdout, driftNote) != 0 {
+		t.Errorf("the drift notice must not appear on stdout; got stdout=%q", stdout)
 	}
 	if !strings.Contains(stdout, "stack not healthy") {
 		t.Errorf("expected the unhealthy line on stdout; got stdout=%q", stdout)
