@@ -742,6 +742,28 @@ func TestUpdateCmdRefusesOnIncompleteInstall(t *testing.T) {
 	}
 }
 
+// TestUpdateCmdRejectsLoosePermEnvBeforeAnyDocker: the real `mathion update` command
+// path must refuse a group/world-accessible .env BEFORE EnsureBackupsDir/Lock/SweepWorkers
+// — the perm gate now sits at the command entry, so ZERO runner calls are issued.
+func TestUpdateCmdRejectsLoosePermEnvBeforeAnyDocker(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	asRoot(t)
+	if err := os.Chmod(cfg+"/.env", 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newUpdateCmd(app)
+	c.SetContext(context.Background())
+	err := c.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "group/world-accessible") {
+		t.Fatalf("the command must refuse a loose-perm .env; got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("the perm gate must precede EnsureBackupsDir/Lock/SweepWorkers — zero runner calls; got %v", f.Calls)
+	}
+}
+
 // --- Task 4: applyAndGate mini-transaction + restorePrevCompose + runningAppImageID ---
 
 // failsApplyUp matches ONLY the whole-project apply `up` (up -d --wait --pull never,
@@ -1094,7 +1116,7 @@ func TestUpdateRealUpgradeDriftAppliesWholeProjectAfterGate(t *testing.T) {
 	}
 	// the whole-project apply up ran AFTER the app-only recreate.
 	ri := idxOfCall(f.Calls, joinHas("up -d --wait --pull never app")) // step-9 recreate
-	ai := idxOfCall(f.Calls, failsApplyUp)                              // whole-project apply
+	ai := idxOfCall(f.Calls, failsApplyUp)                             // whole-project apply
 	if ri < 0 || ai < 0 || !(ri < ai) {
 		t.Fatalf("recreate (idx %d) must precede the whole-project apply (idx %d); calls=%v", ri, ai, f.Calls)
 	}

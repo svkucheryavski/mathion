@@ -225,6 +225,9 @@ Exit codes: 0 success; 1 the update failed and was rolled back (or nothing chang
 			if err := requireRoot(); err != nil {
 				return err
 			}
+			if err := app.requirePrivateEnv(); err != nil {
+				return err
+			}
 			if err := varlib.EnsureBackupsDir(); err != nil {
 				return err
 			}
@@ -356,7 +359,7 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 		} else {
 			fmt.Fprintln(a.Out, "auto-rollback on failure")
 		}
-		if composeDiffers {
+		if composeDiffers && !opts.NoReconcile {
 			fmt.Fprintln(a.Out, "This release also updates the stack definition; it is applied after the update completes (brief HTTPS interruption if the bundled proxy changed).")
 		}
 		fmt.Fprint(a.Out, "Brief downtime during the update; block external traffic first. Continue? [y/N] ")
