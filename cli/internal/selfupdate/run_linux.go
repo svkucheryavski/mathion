@@ -153,12 +153,14 @@ func Run(ctx context.Context, p Params) error {
 		return errors.Join(err, cleanupTemp(parentFD, tempName))
 	}
 	fmt.Fprintf(p.Out, "%s → %s\n", p.CurrentVersion, tag)
-	// Unconditional nudge (NOT a byte-compare): this process is still the OLD binary
-	// (commitSwap renamed the staged temp over the target; the running process stays
-	// on its pre-swap inode), so its embedded compose is stale. `mathion status`,
-	// running as the NEW binary, is the authoritative drift detector; this only points
-	// the operator at it. Fires ONLY here — the confirmed-swap path — not apt-defer,
-	// not up-to-date, not --check/cancelled/durability-uncertain (all return earlier).
-	fmt.Fprintln(p.Out, "if this release updated the stack definition, apply it with: sudo mathion reconcile")
+	// Neutral, honest guidance (NOT a byte-compare): this process is still the OLD binary
+	// (commitSwap renamed the staged temp over the target; the running process stays on
+	// its pre-swap inode), so it cannot know whether the new release changed the stack.
+	// The root pre-run (spec §4.1), running as the NEW binary on the operator's next
+	// non-excluded `sudo mathion` command, is the authoritative drift detector; this line
+	// only points there — it makes NO drift claim, killing the old always-fires false
+	// positive. Fires ONLY here (the confirmed-swap path) — not apt-defer, up-to-date,
+	// --check/cancelled/durability-uncertain (all return earlier).
+	fmt.Fprintln(p.Out, "self-update complete — your next `sudo mathion` management command will report whether this release changed the stack (apply changes with `sudo mathion reconcile`).")
 	return nil
 }

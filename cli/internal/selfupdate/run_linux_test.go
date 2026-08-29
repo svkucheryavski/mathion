@@ -122,6 +122,12 @@ func TestRun_HappyPath_Swaps(t *testing.T) {
 	if si, ni := strings.Index(out.String(), "cli-v0.9.0"), strings.Index(out.String(), "sudo mathion reconcile"); ni < si {
 		t.Fatalf("the reconcile nudge must FOLLOW the success line (spec §8 test 13 ordering); got %q", out.String())
 	}
+	if !strings.Contains(out.String(), "will report whether this release changed the stack") {
+		t.Fatalf("self-update must print the neutral next-command line; got %q", out.String())
+	}
+	if strings.Contains(out.String(), "if this release updated the stack definition") {
+		t.Fatalf("the old unconditional nudge phrase must be gone; got %q", out.String())
+	}
 }
 
 func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
