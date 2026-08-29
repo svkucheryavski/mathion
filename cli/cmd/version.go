@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -63,20 +64,42 @@ func maybeWarnDualInstall(w io.Writer) {
 	fmt.Fprintln(w, "         use one channel only — remove the other (see README).")
 }
 
-// composeDrifted reports whether the on-disk compose at cfgDir differs from this
-// binary's embedded revision, and whether a compose file is present at all. An
-// ErrNotExist file reports (false, false) — the caller treats "absent" as silent
-// (spec §5 precedence rule 1). Any OTHER read error reports (false, true): present
-// but unreadable → fail-quiet on the drift signal, but not "absent".
-func composeDrifted(cfgDir string) (drifted, present bool) {
-	b, err := os.ReadFile(filepath.Join(cfgDir, "docker-compose.yml"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, false
-	}
+// driftFromReader reads the compose bytes from r (the opened+fstat'd regular file, or an
+// injected reader in tests) and reports drift vs embed, plus present=true. It bounds the
+// read to len(embed)+1 bytes (the +1 distinguishes embed from embed+extra) and maps ANY
+// read error to (false, true) — present-but-unreadable: fail-quiet on the drift signal,
+// never a false claim (spec §4.3a / §5 rule 3). Factored out so the error→(false,true)
+// mapping is unit-testable with an injected failing reader.
+func driftFromReader(r io.Reader, embed []byte) (drifted, present bool) {
+	buf, err := io.ReadAll(io.LimitReader(r, int64(len(embed))+1))
 	if err != nil {
 		return false, true
 	}
-	return !bytes.Equal(b, compose.ComposeYAML), true
+	return !(len(buf) == len(embed) && bytes.Equal(buf, embed)), true
+}
+
+// composeDrifted reports whether the on-disk compose at cfgDir differs from this binary's
+// embedded revision, and whether a compose file is present at all. Hardened (spec §4.3a)
+// to be FIFO-safe + byte-bounded: a non-blocking open + an fstat on the OPENED fd (no
+// Stat->Open TOCTOU) rejects a non-regular file before any read, and the read is bounded
+// via driftFromReader. absent (ENOENT) -> (false, false); any other open/stat/read error,
+// or a non-regular file -> (false, true) (present but unreadable). NOT wall-clock-bounded
+// against a broken filesystem mount (Linux ignores O_NONBLOCK for regular files); the dpkg
+// path is separately timeout-bounded (spec §4.3b).
+func composeDrifted(cfgDir string) (drifted, present bool) {
+	f, err := os.OpenFile(filepath.Join(cfgDir, "docker-compose.yml"), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, false
+		}
+		return false, true
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		return false, true
+	}
+	return driftFromReader(f, compose.ComposeYAML)
 }
 
 // maybeWarnInstallIncomplete prints a one-line notice when install-state says the
