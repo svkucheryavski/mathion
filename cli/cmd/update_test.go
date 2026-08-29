@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +19,18 @@ import (
 	"github.com/svkucheryavski/mathion/cli/internal/config"
 	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
+
+// setupUpdateEnv is setupRestoreEnv plus a NON-drifted on-disk compose (== the embed),
+// so update tests are not spuriously "drifted" once runUpdate computes composeDiffers.
+// Drift tests overwrite docker-compose.yml (or write the marker) explicitly.
+func setupUpdateEnv(t *testing.T) string {
+	t.Helper()
+	cfg := setupRestoreEnv(t)
+	if err := os.WriteFile(filepath.Join(cfg, "docker-compose.yml"), compose.ComposeYAML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
 
 // TestUpdateGuardPreconditionValidatesEnv: a broken/incomplete .env aborts BEFORE
 // any docker call — ValidateEnvComplete precedes every mutation.
@@ -35,7 +49,7 @@ func TestUpdateGuardPreconditionValidatesEnv(t *testing.T) {
 // TestUpdateGuardSameTagJSONMatch: target == active tag and /version returns the
 // exact JSON {"version":<tag>} → exit 0 "already at <tag>", NO docker pull.
 func TestUpdateGuardSameTagJSONMatch(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"version":"v0.1.1"}`))
@@ -57,7 +71,7 @@ func TestUpdateGuardSameTagJSONMatch(t *testing.T) {
 // legacy 200 text/html SPA shell → strict probe fails → exit 0 "not supported",
 // NO docker pull.
 func TestUpdateGuardSameTagLegacyNotSupported(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
@@ -79,7 +93,7 @@ func TestUpdateGuardSameTagLegacyNotSupported(t *testing.T) {
 // TestUpdatePullDistinctTargetCapturesA: a DISTINCT target pulls then image-inspects
 // for A, in that order with exact args, and NEVER probes /version.
 func TestUpdatePullDistinctTargetCapturesA(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	// Install a counting /version server so any stray probe on a distinct target is
 	// caught; a distinct target must never probe.
 	n := useGateServer(t, func(w http.ResponseWriter, r *http.Request) {})
@@ -117,7 +131,7 @@ func TestUpdatePullDistinctTargetCapturesA(t *testing.T) {
 // TestUpdatePullBadTagAborts: a failed pull aborts before capturing A — no
 // image-inspect for the id is issued, and (trivially) no backup is taken.
 func TestUpdatePullBadTagAborts(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	f := &compose.FakeRunner{RunFunc: func(args []string) error { return errors.New("manifest unknown") }}
 	app, _, _ := engineApp(cfg, f, "")
 	if err := runUpdate(context.Background(), app, updateOpts{Version: "v9.9.9", Yes: true}); err == nil {
@@ -131,7 +145,7 @@ func TestUpdatePullBadTagAborts(t *testing.T) {
 // TestUpdateGuardConfirmDeclined: a distinct target with Yes=false and "n" declines
 // before the pull.
 func TestUpdateGuardConfirmDeclined(t *testing.T) {
-	cfg := setupRestoreEnv(t) // active tag = v0.1.1
+	cfg := setupUpdateEnv(t) // active tag = v0.1.1
 	f := &compose.FakeRunner{}
 	app, _, _ := engineApp(cfg, f, "n\n")
 	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0"}); err == nil {
@@ -146,7 +160,7 @@ func TestUpdateGuardConfirmDeclined(t *testing.T) {
 // --no-rollback (both sub-cases decline so the confirm prints then aborts).
 func TestUpdateGuardConfirmNoRollbackClause(t *testing.T) {
 	t.Run("rollback", func(t *testing.T) {
-		cfg := setupRestoreEnv(t)
+		cfg := setupUpdateEnv(t)
 		f := &compose.FakeRunner{}
 		app, out, _ := engineApp(cfg, f, "n\n")
 		_ = runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0"})
@@ -155,7 +169,7 @@ func TestUpdateGuardConfirmNoRollbackClause(t *testing.T) {
 		}
 	})
 	t.Run("no-rollback", func(t *testing.T) {
-		cfg := setupRestoreEnv(t)
+		cfg := setupUpdateEnv(t)
 		f := &compose.FakeRunner{}
 		app, out, _ := engineApp(cfg, f, "n\n")
 		_ = runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", NoRollback: true})
@@ -203,7 +217,7 @@ func update21Fake(t *testing.T) *compose.FakeRunner {
 // (b) 6a's preflight never retags (no `docker tag` anywhere); (c) the step-6b
 // breadcrumb lands with EXACTLY the 7 fields, target_image_id == the captured A.
 func TestUpdate6HappyOrderingAndBreadcrumb(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	// Steps 7-10 now exist; a PASSING step-10 gate would clear the very breadcrumb this
 	// test inspects. Stub the gate to FAIL so the run stops at step 10 with steps 5-6b
@@ -249,7 +263,7 @@ func TestUpdate6HappyOrderingAndBreadcrumb(t *testing.T) {
 // parent ctx is pre-cancelled, so the start-app must run under context.WithoutCancel
 // (its CtxSnap is LIVE) while the earlier stop-app snapshotted the cancelled parent.
 func TestUpdate6aValidateFailStartsApp(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	// Corrupt the auto-backup's inner assets.tar so 6a's PrescanAssets fails.
 	f.StreamFunc = func(w io.Writer, args []string) error {
@@ -292,7 +306,7 @@ func TestUpdate6aValidateFailStartsApp(t *testing.T) {
 // => ""), so step 6 aborts with "start the stack first". The engine must start app back
 // up and write NO breadcrumb.
 func TestUpdateBackupFailStartsApp(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := &compose.FakeRunner{
 		OutputFunc: func(args []string) (string, error) {
 			if strings.Contains(strings.Join(args, " "), "ps -q db") {
@@ -317,7 +331,7 @@ func TestUpdateBackupFailStartsApp(t *testing.T) {
 // fails (stubbed seam). That is a PRE-mutation abort: the error surfaces (carrying the
 // write failure), app is started back up, and no breadcrumb persists.
 func TestUpdate6bWriteFailStartsApp(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	prev := writeJournalFn
 	writeJournalFn = func(varlib.Journal) error { return errors.New("fsync failed") }
@@ -362,7 +376,7 @@ func captureGate(t *testing.T, ret error) *struct {
 // else; it carries the deterministic --name/--label + --pull never; it precedes the
 // step-9 recreate; and the step-8 re-pin took only after migrate succeeded.
 func TestUpdateMigrateRunEnvTargetOnly(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	captureGate(t, nil) // pass the gate so the whole run completes
 	app, _, _ := engineApp(cfg, f, "")
@@ -408,7 +422,7 @@ func TestUpdateMigrateRunEnvTargetOnly(t *testing.T) {
 // as the target id, the target version, and strictVersion=true; a PASS is the commit
 // point — the breadcrumb is cleared and the success line printed.
 func TestUpdateGatePassCommits(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	c := captureGate(t, nil)
 	app, out, _ := engineApp(cfg, f, "")
@@ -428,6 +442,21 @@ func TestUpdateGatePassCommits(t *testing.T) {
 	}
 }
 
+func TestExitCodeCommittedPending(t *testing.T) {
+	if got := exitCode(committedPendingError{err: errors.New("x")}); got != 2 {
+		t.Fatalf("committedPendingError → 2; got %d", got)
+	}
+	if got := exitCode(nil); got != 0 {
+		t.Fatalf("nil → 0; got %d", got)
+	}
+	if got := exitCode(rollbackFailedError{err: errors.New("x")}); got != 3 {
+		t.Fatalf("rollbackFailedError → 3; got %d", got)
+	}
+	if got := exitCode(errors.New("plain")); got != 1 {
+		t.Fatalf("plain → 1; got %d", got)
+	}
+}
+
 // TestUpdateGatePostRemoveWarns: the gate passes but the post-commit RemoveJournal
 // fails (the gate stub turns the backups dir read-only exactly when it runs). That is a
 // DISTINCT non-rollback warning — the update stays committed (no restore, not exit 3),
@@ -436,7 +465,7 @@ func TestUpdateGatePostRemoveWarns(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("mode 0500 does not block a root unlink")
 	}
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	// Side-effect gate: read-only the backups dir AFTER 6b wrote the breadcrumb and
 	// BEFORE the post-gate unlink, so RemoveJournal's os.Remove fails.
@@ -450,6 +479,9 @@ func TestUpdateGatePostRemoveWarns(t *testing.T) {
 	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
 	if err == nil || !strings.Contains(err.Error(), "could not remove the recovery breadcrumb") {
 		t.Fatalf("a failed post-gate breadcrumb clear must warn; got %v", err)
+	}
+	if exitCode(err) != 2 {
+		t.Fatalf("a failed post-commit breadcrumb clear is exit 2 (commit done, cleanup pending); got %d", exitCode(err))
 	}
 	// The unlink failed → the breadcrumb is STILL present (no rollback deleted it).
 	if _, present, _ := varlib.ReadJournal(); !present {
@@ -483,7 +515,7 @@ func strictDiscriminatingGate(t *testing.T) {
 // one-off, reverting .env to the pre-update tag, and clearing the breadcrumb — and
 // returns a plain "rolled back" error (NOT a rollbackFailedError).
 func TestUpdateRollbackOnGateFailRecovers(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	strictDiscriminatingGate(t)
 	app, _, _ := engineApp(cfg, f, "")
@@ -538,7 +570,7 @@ func TestUpdateRollbackOnGateFailRecovers(t *testing.T) {
 // still snapshot a LIVE ctx (Err==nil) — proof the rollback is detached — and the rollback
 // completes (breadcrumb cleared). With the raw ctx that later call would snapshot Canceled.
 func TestUpdateRollbackRunsDetachedFromLateCancel(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	strictDiscriminatingGate(t) // update's strict gate fails → enter the auto-rollback
 	ctx, cancel := context.WithCancel(context.Background())
@@ -569,7 +601,7 @@ func TestUpdateRollbackRunsDetachedFromLateCancel(t *testing.T) {
 // leaves the deployment as-is — no auto-rollback, breadcrumb retained, the manual-
 // recovery hint returned — but the migrate one-off is still reaped.
 func TestUpdateRollbackNoRollbackLeavesState(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	f.RunFunc = func(args []string) error {
 		if strings.Contains(strings.Join(args, " "), "alembic upgrade head") {
@@ -597,7 +629,7 @@ func TestUpdateRollbackNoRollbackLeavesState(t *testing.T) {
 // load ALSO fails → a rollbackFailedError (exit 3) whose message names the UNKNOWN
 // state, with the breadcrumb LEFT IN PLACE (the deployment is unrecovered).
 func TestUpdateRollbackAlsoFailsExit3(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	strictDiscriminatingGate(t)
 	f.StreamInFunc = func(io.Reader, []string) error { return errors.New("restore db boom") }
@@ -621,7 +653,7 @@ func TestUpdateRollbackAlsoFailsExit3(t *testing.T) {
 // rollback. (The FakeRunner ignores ctx, so steps 5-6b still run; the handler's
 // ctx.Err()!=nil branch is the unit under test.)
 func TestUpdateSignalRefusesOnInterrupt(t *testing.T) {
-	cfg := setupRestoreEnv(t)
+	cfg := setupUpdateEnv(t)
 	f := update21Fake(t)
 	f.RunFunc = func(args []string) error {
 		if strings.Contains(strings.Join(args, " "), "alembic upgrade head") {
@@ -689,7 +721,7 @@ func TestUpdateFailureShellQuotesRecoveryHint(t *testing.T) {
 // requireInstallComplete's incomplete-marker branch (not a later /version-probe failure
 // that would ALSO error without pulling); it would trip if the gate wiring were removed.
 func TestUpdateCmdRefusesOnIncompleteInstall(t *testing.T) {
-	cfg := setupRestoreEnv(t) // full .env + a fresh MATHION_VARLIB_DIR
+	cfg := setupUpdateEnv(t) // full .env + a fresh MATHION_VARLIB_DIR
 	asRoot(t)
 	if err := config.WriteState(cfg, config.State{Schema: 2, AdminEmail: "a@b.edu", Complete: false}); err != nil {
 		t.Fatal(err)
@@ -707,5 +739,529 @@ func TestUpdateCmdRefusesOnIncompleteInstall(t *testing.T) {
 	}
 	if hasCall(f.Calls, isPull) || hasCall(f.Calls, joinHas("up -d")) {
 		t.Fatalf("update must not pull/up on refusal; calls=%v", f.Calls)
+	}
+}
+
+// TestUpdateCmdRejectsLoosePermEnvBeforeAnyDocker: the real `mathion update` command
+// path must refuse a group/world-accessible .env BEFORE EnsureBackupsDir/Lock/SweepWorkers
+// — the perm gate now sits at the command entry, so ZERO runner calls are issued.
+func TestUpdateCmdRejectsLoosePermEnvBeforeAnyDocker(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	asRoot(t)
+	if err := os.Chmod(cfg+"/.env", 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	c := newUpdateCmd(app)
+	c.SetContext(context.Background())
+	err := c.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "group/world-accessible") {
+		t.Fatalf("the command must refuse a loose-perm .env; got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("the perm gate must precede EnsureBackupsDir/Lock/SweepWorkers — zero runner calls; got %v", f.Calls)
+	}
+}
+
+// --- Task 4: applyAndGate mini-transaction + restorePrevCompose + runningAppImageID ---
+
+// failsApplyUp matches ONLY the whole-project apply `up` (up -d --wait --pull never,
+// no trailing `app`, no --wait-timeout) — NOT the app-only recreate (`… app`) nor the
+// restore (`… --wait-timeout 120 …`). a.compose records the FULL argv, so match the join.
+func failsApplyUp(args []string) bool {
+	return joinHas("up -d --wait --pull never")(args) &&
+		!containsArg(args, "app") &&
+		!containsArg(args, "--wait-timeout")
+}
+
+func TestApplyAndGateSuccessClearsMarkerAfterGate(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, nil)
+	restored, err := app.applyAndGate(context.Background(), []byte("old\n"), "sha256:R", "v9.9.9")
+	if err != nil || restored {
+		t.Fatalf("success → (false, nil); got (%v, %v)", restored, err)
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Fatal("marker must be cleared after a passing gate")
+	}
+}
+
+func TestApplyAndGateApplyFailRestoresAndRetainsMarker(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	prev := []byte("PREVIOUS-COMPOSE-BYTES\n")
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), prev, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{RunFunc: func(args []string) error {
+		if failsApplyUp(args) {
+			return errors.New("apply up failed")
+		}
+		return nil
+	}}
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, nil) // gate would pass; the apply `up` fails first
+	restored, err := app.applyAndGate(context.Background(), prev, "sha256:R", "v9.9.9")
+	if err == nil || !restored {
+		t.Fatalf("apply-fail + restore-ok → (true, err); got (%v, %v)", restored, err)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("restore must rewrite prev bytes (applyStack first wrote the embed); got %q", got)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker must be RETAINED on failure")
+	}
+}
+
+func TestApplyAndGateGateFailRestoresBounded(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	prev := []byte("PREV\n")
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), prev, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{} // every up succeeds
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, errors.New("gate: moved tag"))
+	restored, err := app.applyAndGate(context.Background(), prev, "sha256:R", "v9.9.9")
+	if err == nil || !restored {
+		t.Fatalf("gate-fail + restore-ok → (true, err); got (%v, %v)", restored, err)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("restore must rewrite prev bytes; got %q", got)
+	}
+	// spec §7 test 4: the restore `up` is time-bounded (--wait-timeout 120).
+	if !hasCall(f.Calls, joinHas("up -d --wait --wait-timeout 120 --pull never")) {
+		t.Fatalf("restore up must carry --wait-timeout 120; calls=%v", f.Calls)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained on failure")
+	}
+}
+
+func TestApplyAndGateRestoreAlsoFails(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("PREV\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{RunFunc: func(args []string) error {
+		if joinHas("up")(args) {
+			return errors.New("every up fails") // both apply and restore up fail
+		}
+		return nil
+	}}
+	app, _, _ := engineApp(cfg, f, "")
+	stubGate(t, nil)
+	restored, err := app.applyAndGate(context.Background(), []byte("PREV\n"), "sha256:R", "v9.9.9")
+	if err == nil || restored {
+		t.Fatalf("apply-fail + restore-fail → (false, err); got (%v, %v)", restored, err)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained")
+	}
+}
+
+func TestApplyAndGateWriteMarkerFailIsIntact(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	prev := writeMarkerFn
+	writeMarkerFn = func() error { return errors.New("marker fsync failed") }
+	t.Cleanup(func() { writeMarkerFn = prev })
+	restored, err := app.applyAndGate(context.Background(), []byte("PREV\n"), "sha256:R", "v9.9.9")
+	if err == nil || !restored { // nothing was applied → prior state intact
+		t.Fatalf("marker-write fail → (true, err); got (%v, %v)", restored, err)
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("a marker-write failure must touch no container; calls=%v", f.Calls)
+	}
+}
+
+func TestRunningAppImageIDResolvesContainer(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
+		if joinHas("ps -q app")(args) {
+			return "cid123\n", nil
+		}
+		if joinHas("inspect cid123 --format {{.Image}}")(args) {
+			return "sha256:RUN\n", nil
+		}
+		return "", nil
+	}}
+	app, _, _ := engineApp(cfg, f, "")
+	id, err := runningAppImageID(context.Background(), app)
+	if err != nil || id != "sha256:RUN" {
+		t.Fatalf("want sha256:RUN, nil; got %q, %v", id, err)
+	}
+}
+
+func TestRunningAppImageIDErrorsNoContainer(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{OutputFunc: func([]string) (string, error) { return "", nil }} // ps -q app → ""
+	app, _, _ := engineApp(cfg, f, "")
+	if _, err := runningAppImageID(context.Background(), app); err == nil {
+		t.Fatal("an empty `ps -q app` must error, not fall back to the tag")
+	}
+}
+
+func TestRestorePrevComposeEmptyPrevGuard(t *testing.T) {
+	cfg := setupRestoreEnv(t)
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	if restorePrevCompose(context.Background(), app, nil) {
+		t.Fatal("empty prev must not claim a restore")
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("empty prev must issue no up; calls=%v", f.Calls)
+	}
+}
+
+// --- Task 6: update preamble (perm gate, drift signal, deferred reminder) ---
+
+func TestUpdateRejectsLoosePermEnv(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.Chmod(cfg+"/.env", 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{}
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v9.9.9", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "group/world-accessible") {
+		t.Fatalf("want loose-perm rejection; got %v", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Fatalf("perm gate must precede any docker call; got %v", f.Calls)
+	}
+}
+
+func TestUpdateNoReconcileDriftPrintsReminderEvenWhenComposeAbsent(t *testing.T) {
+	cfg := setupRestoreEnv(t) // NOTE: no compose file → composeDiffers via read error
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v0.1.1"}`))
+	})
+	f := &compose.FakeRunner{}
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true, NoReconcile: true}); err != nil {
+		t.Fatalf("same-tag --no-reconcile → nil; got %v", err)
+	}
+	// spec §7 test 7: assert the EXACT reminder line (with newline), not just a substring.
+	wantLine := "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile\n"
+	if !strings.Contains(out.String(), wantLine) {
+		t.Fatalf("want the exact deferred-apply reminder line; got %q", out.String())
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("--no-reconcile must NOT apply; got %v", f.Calls)
+	}
+}
+
+// sameTagApplyFake: same-tag runs skip backup/migrate/recreate, so the only Output
+// probes are runningAppImageID's (ps -q app → cid, inspect <cid> → running id) and
+// appRunning's (ps -q app → non-empty). One OutputFunc serves both.
+func sameTagApplyFake(runFn func([]string) error) *compose.FakeRunner {
+	return &compose.FakeRunner{
+		OutputFunc: func(args []string) (string, error) {
+			if joinHas("ps -q app")(args) {
+				return "cid123\n", nil
+			}
+			if joinHas("inspect cid123 --format {{.Image}}")(args) {
+				return "sha256:R\n", nil
+			}
+			return "", nil
+		},
+		RunFunc: runFn,
+	}
+}
+
+func TestUpdateSameTagDriftAppliesAndGates(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := sameTagApplyFake(nil)
+	app, out, _ := engineApp(cfg, f, "")
+	prev := gateFn
+	gateFn = func(_ context.Context, _ *App, id, _ string, strict bool) error {
+		if id != "sha256:R" || !strict {
+			t.Fatalf("gate must use the captured running id, strict; got id=%s strict=%v", id, strict)
+		}
+		return nil
+	}
+	t.Cleanup(func() { gateFn = prev })
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true}); err != nil {
+		t.Fatalf("same-tag apply success → nil; got %v", err)
+	}
+	if hasCall(f.Calls, isPull) {
+		t.Fatalf("same-tag must not pull the target image; got %v", f.Calls)
+	}
+	if !hasCall(f.Calls, failsApplyUp) { // the whole-project apply up ran
+		t.Fatalf("expected the whole-project apply up; got %v", f.Calls)
+	}
+	if !strings.Contains(out.String(), "applied this CLI's stack definition") {
+		t.Fatalf("got %q", out.String())
+	}
+	if got, _ := os.ReadFile(composePath(app)); !bytes.Equal(got, compose.ComposeYAML) {
+		t.Fatalf("on-disk compose must now equal the embed; differs")
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Fatal("marker must be cleared on success")
+	}
+}
+
+func TestUpdateSameTagGateFailRestoresExit1(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	// Drift FIRST, then capture prev == the drifted on-disk bytes runUpdate will read.
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := os.ReadFile(composePath(&App{CfgDir: cfg}))
+	f := sameTagApplyFake(nil) // apply up succeeds; the GATE fails
+	app, _, _ := engineApp(cfg, f, "")
+	prevGate := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error { return errors.New("gate: moved tag") }
+	t.Cleanup(func() { gateFn = prevGate })
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true})
+	if err == nil {
+		t.Fatal("gate failure must error")
+	}
+	if exitCode(err) != 1 {
+		t.Fatalf("same-tag failure is exit 1 (nothing committed); got %d", exitCode(err))
+	}
+	var cpe committedPendingError
+	if errors.As(err, &cpe) {
+		t.Fatal("same-tag failure must NOT be a committedPendingError")
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("previous compose must be restored; got %q want %q", got, prev)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained on failure")
+	}
+}
+
+func TestUpdateSameTagDriftAppNotRunningRefuses(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &compose.FakeRunner{} // ps -q app → "" → not running
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("a drifted same-tag with the stack down must refuse; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("a refusal must apply nothing; got %v", f.Calls)
+	}
+}
+
+func TestUpdateSameTagNoDriftUnchanged(t *testing.T) {
+	cfg := setupUpdateEnv(t) // compose == embed → no drift
+	useGateServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"v0.1.1"}`))
+	})
+	f := &compose.FakeRunner{}
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1", Yes: true}); err != nil {
+		t.Fatalf("no-drift same-tag → nil; got %v", err)
+	}
+	if !strings.Contains(out.String(), "already at v0.1.1") {
+		t.Fatalf("want the unchanged same-tag message; got %q", out.String())
+	}
+	if hasCall(f.Calls, joinHas("up")) {
+		t.Fatalf("no-drift same-tag must apply nothing; got %v", f.Calls)
+	}
+}
+
+func TestUpdateSameTagStaleMarkerConfirmWording(t *testing.T) {
+	cfg := setupUpdateEnv(t)                     // compose == embed
+	if err := varlib.WriteMarker(); err != nil { // marker-only drift
+		t.Fatal(err)
+	}
+	f := sameTagApplyFake(nil)
+	app, out, _ := engineApp(cfg, f, "n\n") // decline the confirm to inspect its wording
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v0.1.1"})
+	if err == nil {
+		t.Fatal("declined confirm must abort")
+	}
+	// marker-only (compose matches): the prompt must NOT claim the stack definition changed.
+	if strings.Contains(out.String(), "this release updates the stack definition") {
+		t.Fatalf("marker-only drift must use the re-apply wording; got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "did not finish") {
+		t.Fatalf("want the stale-marker re-apply prompt; got %q", out.String())
+	}
+}
+
+// --- Task 8: real-upgrade post-commit apply (exit-2 committedPending, restore net) ---
+
+func TestUpdateRealUpgradeDriftAppliesWholeProjectAfterGate(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := update21Fake(t)
+	captureGate(t, nil) // both the step-10 commit gate and the re-assert gate pass
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("real-upgrade + drift apply → nil; got %v", err)
+	}
+	if !strings.Contains(out.String(), "updated v0.1.1 → v2.0.0") || !strings.Contains(out.String(), "applied this release's stack definition") {
+		t.Fatalf("want the committed-and-applied line; got %q", out.String())
+	}
+	// the whole-project apply up ran AFTER the app-only recreate.
+	ri := idxOfCall(f.Calls, joinHas("up -d --wait --pull never app")) // step-9 recreate
+	ai := idxOfCall(f.Calls, failsApplyUp)                             // whole-project apply
+	if ri < 0 || ai < 0 || !(ri < ai) {
+		t.Fatalf("recreate (idx %d) must precede the whole-project apply (idx %d); calls=%v", ri, ai, f.Calls)
+	}
+	if got, _ := os.ReadFile(composePath(app)); !bytes.Equal(got, compose.ComposeYAML) {
+		t.Fatalf("on-disk compose must equal the embed after a successful apply")
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("the journal must be cleared (commit happened before the apply)")
+	}
+}
+
+func TestUpdateRealUpgradeNoDriftNoSecondUp(t *testing.T) {
+	cfg := setupUpdateEnv(t) // compose == embed
+	f := update21Fake(t)
+	captureGate(t, nil)
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true}); err != nil {
+		t.Fatalf("no-drift real-upgrade → nil; got %v", err)
+	}
+	if hasCall(f.Calls, failsApplyUp) { // only the step-9 recreate up; NO whole-project apply
+		t.Fatalf("no-drift must not run the whole-project apply up; calls=%v", f.Calls)
+	}
+	if strings.Contains(out.String(), "applied this release's stack definition") {
+		t.Fatalf("no-drift must not claim an apply; got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "updated v0.1.1 → v2.0.0 (backup: ") {
+		t.Fatalf("want the plain commit line; got %q", out.String())
+	}
+}
+
+func TestUpdateRealUpgradeApplyUpFailIsolatedExit2(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := os.ReadFile(composePath(&App{CfgDir: cfg})) // prev == the drifted on-disk bytes
+	f := update21Fake(t)
+	f.RunFunc = func(args []string) error {
+		if failsApplyUp(args) { // fail ONLY the post-commit whole-project apply up
+			return errors.New("apply up failed")
+		}
+		return nil
+	}
+	captureGate(t, nil) // step-10 commit gate passes → the DB commit happens
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if exitCode(err) != 2 {
+		t.Fatalf("post-commit apply failure → exit 2; got %d (%v)", exitCode(err), err)
+	}
+	// ISOLATION: no rollback / restore-engine call — the DB commit stands.
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) || hasCall(f.Calls, joinHas("mathion_restore_assets_")) {
+		t.Fatalf("a post-commit apply failure must NOT roll back the DB; calls=%v", f.Calls)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("previous compose must be restored; got %q want %q", got, prev)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained")
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("journal must be absent (cleared pre-apply at commit)")
+	}
+}
+
+func TestUpdateRealUpgradePostApplyGateFailExit2(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev, _ := os.ReadFile(composePath(&App{CfgDir: cfg}))
+	f := update21Fake(t) // all ups (incl. the whole-project apply) succeed
+	// gate: PASS the step-10 commit (1st call), FAIL the post-apply re-assert (2nd call).
+	var n int32
+	prevGate := gateFn
+	gateFn = func(context.Context, *App, string, string, bool) error {
+		if atomic.AddInt32(&n, 1) == 1 {
+			return nil
+		}
+		return errors.New("post-apply gate: moved tag")
+	}
+	t.Cleanup(func() { gateFn = prevGate })
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if exitCode(err) != 2 {
+		t.Fatalf("post-apply gate failure → exit 2; got %d (%v)", exitCode(err), err)
+	}
+	if got, _ := os.ReadFile(composePath(app)); string(got) != string(prev) {
+		t.Fatalf("previous compose must be restored on a gate failure; got %q", got)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no DB rollback on a post-commit gate failure; calls=%v", f.Calls)
+	}
+	if present, _ := varlib.MarkerPresent(); !present {
+		t.Fatal("marker retained")
+	}
+}
+
+func TestUpdateRealUpgradeApplyAndRestoreBothFailExit2(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := update21Fake(t)
+	f.RunFunc = func(args []string) error {
+		// Fail the whole-project apply up AND the bounded restore up (both post-commit),
+		// but NOT the step-9 recreate. All three carry "up -d --wait"; the recreate is the
+		// only one with a trailing `app` token, so exclude it. The restore's --wait-timeout
+		// 120 breaks the contiguous "up -d --wait --pull never", so match the shorter prefix.
+		if joinHas("up -d --wait")(args) && !containsArg(args, "app") {
+			return errors.New("up boom")
+		}
+		return nil
+	}
+	captureGate(t, nil)
+	app, _, _ := engineApp(cfg, f, "")
+	err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true})
+	if exitCode(err) != 2 {
+		t.Fatalf("commit done, apply+restore both failed → still exit 2; got %d (%v)", exitCode(err), err)
+	}
+	if !strings.Contains(err.Error(), "runtime may be degraded") {
+		t.Fatalf("want the degraded-runtime message; got %v", err)
+	}
+	if hasCall(f.Calls, joinHas("mathion_restore_db_")) {
+		t.Fatalf("no DB rollback; calls=%v", f.Calls)
+	}
+	if _, present, _ := varlib.ReadJournal(); present {
+		t.Fatal("journal cleared at commit")
+	}
+}
+
+func TestUpdateRealUpgradeNoReconcileDefersWithReminder(t *testing.T) {
+	cfg := setupUpdateEnv(t)
+	if err := os.WriteFile(composePath(&App{CfgDir: cfg}), []byte("DRIFTED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := update21Fake(t)
+	captureGate(t, nil)
+	app, out, _ := engineApp(cfg, f, "")
+	if err := runUpdate(context.Background(), app, updateOpts{Version: "v2.0.0", Yes: true, NoReconcile: true}); err != nil {
+		t.Fatalf("--no-reconcile real-upgrade → nil; got %v", err)
+	}
+	if hasCall(f.Calls, failsApplyUp) {
+		t.Fatalf("--no-reconcile must NOT run the whole-project apply up; calls=%v", f.Calls)
+	}
+	if !strings.Contains(out.String(), "was NOT applied (--no-reconcile)") {
+		t.Fatalf("want the deferred-apply reminder; got %q", out.String())
 	}
 }

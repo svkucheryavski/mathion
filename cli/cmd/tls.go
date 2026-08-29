@@ -231,9 +231,10 @@ func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
 	return nil
 }
 
-// requireInstalledDeployment reuses the install-resume identity/state guard
-// (install.go:59) — a present, regular, private .env on a valid, complete install.
-func (a *App) requireInstalledDeployment() error {
+// requirePrivateEnv verifies .env exists, is a regular file, and is owner-only
+// (perm&0o077 == 0). Shared verbatim by requireInstalledDeployment (reconcile/tls)
+// and update's pre-apply gate — the error strings MUST NOT change (tests assert them).
+func (a *App) requirePrivateEnv() error {
 	envPath := a.CfgDir + "/.env"
 	fi, err := os.Lstat(envPath)
 	if err != nil {
@@ -244,6 +245,15 @@ func (a *App) requireInstalledDeployment() error {
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
 		return fmt.Errorf(".env at %s is group/world-accessible (%v); it holds secrets — fix with `chmod 600 %s`", envPath, perm, envPath)
+	}
+	return nil
+}
+
+// requireInstalledDeployment reuses the install-resume identity/state guard
+// (install.go:59) — a present, regular, private .env on a valid, complete install.
+func (a *App) requireInstalledDeployment() error {
+	if err := a.requirePrivateEnv(); err != nil {
+		return err
 	}
 	if _, err := config.ReadState(a.CfgDir); err != nil {
 		return fmt.Errorf("install-state is missing or invalid (%w); run `mathion install`", err)

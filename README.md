@@ -387,10 +387,30 @@ staff-owned — so the `chgrp`/`chmod` above is what actually clears the refusal
 
 ### Applying a stack-definition change after a CLI upgrade
 
-`mathion self-update` and `apt upgrade mathion` update the CLI, not the running
-deployment — neither applies the bundled stack definition to the containers you
-already have running. If a release changes that definition (for example a
-reverse-proxy or security-header change), apply it with:
+`mathion self-update` and `apt upgrade mathion` update the CLI binary, not the
+running deployment — neither applies the bundled stack definition to the
+containers you already have running.
+
+`mathion update` (the in-place deployment upgrade) now **also** applies this
+release's embedded stack definition, not just the app image, so a single
+`update` brings the deployment fully up to the CLI release. A few related points:
+
+- `--no-reconcile` applies only the image upgrade and defers the stack change; a
+  drift notice reminds you, and you apply it later with `sudo mathion reconcile`.
+- **Behavior change:** a same-tag `update --yes` on a host whose compose has
+  drifted now applies that drift — a call that used to be a no-op can briefly
+  recreate the bundled TLS proxy, a short HTTPS blip.
+- **Exit code 2** means the image/database update committed but post-commit work
+  or verification is still pending — follow the recovery instructions in the
+  message. Usually that is `sudo mathion reconcile`; if the message instead says
+  the recovery breadcrumb could not be removed, remove it by hand as the message
+  directs (`reconcile` refuses while the breadcrumb remains). The database is never
+  rolled back; in the rare case the restore also failed the runtime may be
+  degraded, so check `mathion status`. A same-tag apply that fails is exit 1
+  (nothing committed).
+
+To apply a stack-definition change on its own — after a CLI-only upgrade, or when
+you deferred it with `--no-reconcile` — use:
 
 ```
 sudo mathion reconcile

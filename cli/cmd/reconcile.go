@@ -54,17 +54,14 @@ func (a *App) reconcile(ctx context.Context, yes bool) error {
 	if err := a.requireInstallComplete(); err != nil {
 		return err
 	}
-	// Step 3: re-derive TLS state UNDER THE LOCK — not the pre-lock startup snapshot
-	// (spec §4.1 step 3). tlsEnabledFromEnv fails closed.
-	a.tlsEnabled = tlsEnabledFromEnv(a.CfgDir)
+	// Step 3 (TLS re-derive UNDER THE LOCK) now lives in applyStack, right before the up.
 	// Step 4: require a running app container (spec §4.1 step 4).
 	if !a.appRunning(ctx) {
 		return fmt.Errorf("no running app container for project %q; start the stack with `mathion start` "+
 			"(or finish a fresh install with `mathion install`) before reconciling", a.Project)
 	}
 	// Step 5: drift read + confirm (spec §4.1 step 5).
-	composePath := filepath.Join(a.CfgDir, "docker-compose.yml")
-	onDisk, _ := os.ReadFile(composePath) // a read error → treat as "differs" and re-materialize anyway
+	onDisk, _ := os.ReadFile(composePath(a)) // a read error → treat as "differs" and re-materialize anyway
 	differs := !bytes.Equal(onDisk, compose.ComposeYAML)
 	if !yes {
 		if differs {
@@ -85,15 +82,32 @@ func (a *App) reconcile(ctx context.Context, yes bool) error {
 	if err := varlib.WriteMarker(); err != nil {
 		return fmt.Errorf("writing the apply-pending marker: %w", err)
 	}
-	// Step 6b: re-materialize the on-disk compose from the embed (the exact write
-	// install/tls enable use).
+	// Steps 6b–6e (shared with update): re-materialize + pre-pull + up + readiness.
+	if err := a.applyStack(ctx); err != nil {
+		return err // marker retained → status nags until a clean apply
+	}
+	// Step 6f: clear the marker (warn-only).
+	a.clearApplyMarker()
+	// Step 7: report.
+	fmt.Fprintf(a.Out, "reconciled to this CLI's stack definition (%s); run `mathion status` to confirm.\n", buildVersion)
+	return nil
+}
+
+// composePath is the on-disk compose location (honors MATHION_CONFIG_DIR via CfgDir).
+func composePath(a *App) string { return filepath.Join(a.CfgDir, "docker-compose.yml") }
+
+// applyStack re-materializes the embedded compose and reconciles the running project
+// to it. LOCK-FREE: the caller holds varlib.Lock, has run the install/complete/running
+// gates + confirmation, has ALREADY written the apply-pending marker, and clears it
+// itself only after its own final validation. Mirrors the old reconcile steps 3 + 6b–6e.
+func (a *App) applyStack(ctx context.Context) error {
+	a.tlsEnabled = tlsEnabledFromEnv(a.CfgDir) // re-derive UNDER the lock, fail-closed
 	if err := config.EnsureConfigDir(a.CfgDir); err != nil {
 		return err
 	}
-	if err := config.AtomicWrite(composePath, composeBytes(), 0o644); err != nil {
+	if err := config.AtomicWrite(composePath(a), composeBytes(), 0o644); err != nil {
 		return err
 	}
-	// Step 6c: targeted pinned-proxy pre-pull, TLS only, FATAL on failure (spec §4.1 step 6c).
 	if a.tlsEnabled {
 		pctx, pcancel := context.WithTimeout(ctx, tlsProxyPullTimeout)
 		err := a.compose(pctx, "pull", "--policy", "missing", "proxy", "proxy-init")
@@ -103,23 +117,23 @@ func (a *App) reconcile(ctx context.Context, yes bool) error {
 				"(check connectivity): %w", err)
 		}
 	}
-	// Step 6d: whole-project bring-up; never pulls a mutable tag; never reaps orphans.
 	if err := a.compose(ctx, "up", "-d", "--wait", "--pull", "never"); err != nil {
 		return err
 	}
-	// Step 6e: bounded HTTPS readiness (TLS only; the proxy has no healthcheck).
 	if a.tlsEnabled {
 		a.reportHTTPSReadiness()
 	}
-	// Step 6f: clear the marker; a removal failure does NOT fail a successful apply
-	// (spec §4.1 step 6f) — warn and exit 0.
+	return nil
+}
+
+// clearApplyMarker removes the apply-pending marker; a removal failure is warn-only.
+// The message PRESERVES the substring "could not clear the apply-pending marker" that
+// reconcile_test.go asserts.
+func (a *App) clearApplyMarker() {
 	if err := removeMarkerFn(); err != nil {
-		fmt.Fprintf(a.Err, "warning: reconcile succeeded but could not clear the apply-pending marker at %s (%v); "+
+		fmt.Fprintf(a.Err, "warning: the stack was applied but could not clear the apply-pending marker at %s (%v); "+
 			"`mathion status` may show a spurious drift notice until the next reconcile\n", varlib.MarkerPath(), err)
 	}
-	// Step 7: report this CLI's stack revision (buildVersion, not the app image tag).
-	fmt.Fprintf(a.Out, "reconciled to this CLI's stack definition (%s); run `mathion status` to confirm.\n", buildVersion)
-	return nil
 }
 
 // appRunning reports whether the project's app container is up (best-effort),

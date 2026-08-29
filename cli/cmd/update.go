@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -21,15 +22,87 @@ import (
 )
 
 type updateOpts struct {
-	Version    string
-	NoRollback bool
-	Yes        bool
+	Version     string
+	NoRollback  bool
+	Yes         bool
+	NoReconcile bool
 }
 
 // writeJournalFn is the step-6b breadcrumb writer; a package seam so a test can
 // drive the pre-mutation 6b-write-failure path (RemoveSync + start app + abort)
 // without corrupting the real backups dir.
 var writeJournalFn = varlib.WriteJournal
+
+const (
+	restoreWaitTimeout     = 120 * time.Second
+	restoreWaitTimeoutSecs = "120"
+)
+
+// writeMarkerFn is the apply-pending marker writer; a package seam (like writeJournalFn)
+// so a test can drive the marker-write-failure branch of applyAndGate.
+var writeMarkerFn = varlib.WriteMarker
+
+// applyAndGate writes the marker, materializes+brings up the NEW compose, re-asserts the
+// strict gate against gateID, and clears the marker ONLY after the gate passes. On ANY
+// failure it best-effort restores prev and RETAINS the marker. Lock-free. Returns
+// (restored, err): restored says whether the pre-apply state is back in place. NEVER
+// calls updateFailure/restoreEngine — no DB rollback is reachable here.
+func (a *App) applyAndGate(ctx context.Context, prev []byte, gateID, target string) (bool, error) {
+	if e := writeMarkerFn(); e != nil {
+		// Compose untouched, app unchanged → prior state intact, nothing to restore.
+		return true, fmt.Errorf("could not record the pending stack apply: %w", e)
+	}
+	e := a.applyStack(ctx)
+	if e == nil {
+		e = gateFn(ctx, a, gateID, target, true)
+	}
+	if e != nil {
+		return restorePrevCompose(ctx, a, prev), e // marker RETAINED → status/next-update self-heal
+	}
+	a.clearApplyMarker()
+	return false, nil
+}
+
+// restorePrevCompose best-effort returns the deployment to its pre-apply, gate-proven
+// stack definition. Bounded by a deadline AND --wait-timeout so a wedged restore cannot
+// hold varlib.Lock forever; WithoutCancel so a late signal cannot abort the recovery.
+// Guards an empty prev (writing 0 bytes would be worse than leaving what's there).
+func restorePrevCompose(ctx context.Context, a *App, prev []byte) bool {
+	if len(prev) == 0 {
+		return false
+	}
+	if err := config.AtomicWrite(composePath(a), prev, 0o644); err != nil {
+		return false
+	}
+	a.tlsEnabled = tlsEnabledFromEnv(a.CfgDir)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restoreWaitTimeout)
+	defer cancel()
+	return a.compose(rctx, "up", "-d", "--wait", "--wait-timeout", restoreWaitTimeoutSecs, "--pull", "never") == nil
+}
+
+// runningAppImageID resolves the RUNNING app CONTAINER's image id (compose ps -q app →
+// inspect <cid> --format {{.Image}}), the same anchor gateFn uses (gate.go:44-53). NOT a
+// re-inspection of the tag, which would already reflect an out-of-band tag move. Errors
+// out (no tag fallback) so a run without a resolvable running image aborts before mutating.
+func runningAppImageID(ctx context.Context, a *App) (string, error) {
+	cout, err := a.Runner.Output(ctx, a.composeArgs("ps", "-q", "app")...)
+	if err != nil {
+		return "", fmt.Errorf("resolving the running app container: %w", err)
+	}
+	cid := strings.TrimSpace(cout)
+	if cid == "" {
+		return "", errors.New("no running app container")
+	}
+	raw, err := a.Runner.Output(ctx, "inspect", cid, "--format", "{{.Image}}")
+	if err != nil {
+		return "", fmt.Errorf("inspecting the running app image: %w", err)
+	}
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return "", errors.New("running app container has no image id")
+	}
+	return id, nil
+}
 
 // rollbackFailedError marks the worst update outcome: the update failed AND the auto-
 // rollback to the pre-update backup ALSO failed, so the deployment is left in an unknown
@@ -41,8 +114,17 @@ type rollbackFailedError struct{ err error }
 func (e rollbackFailedError) Error() string { return e.err.Error() }
 func (e rollbackFailedError) Unwrap() error { return e.err }
 
+// committedPendingError: the image/DB update COMMITTED and the DB must NOT be rolled
+// back, but required post-commit work (clear the recovery journal, or apply/verify the
+// stack definition) did not finish. Exit 2 — distinct from 0/1/3.
+type committedPendingError struct{ err error }
+
+func (e committedPendingError) Error() string { return e.err.Error() }
+func (e committedPendingError) Unwrap() error { return e.err }
+
 // exitCode maps a top-level command error to a process exit code: 0 (nil), 3 (a
-// rollbackFailedError anywhere in the chain), else 1. root.go's Execute calls osExit(exitCode(err)).
+// rollbackFailedError anywhere in the chain), 2 (a committedPendingError), else 1.
+// root.go's Execute calls osExit(exitCode(err)).
 func exitCode(err error) int {
 	if err == nil {
 		return 0
@@ -50,6 +132,10 @@ func exitCode(err error) int {
 	var rbf rollbackFailedError
 	if errors.As(err, &rbf) {
 		return 3
+	}
+	var cpe committedPendingError
+	if errors.As(err, &cpe) {
+		return 2
 	}
 	return 1
 }
@@ -127,13 +213,19 @@ func updateFailure(ctx context.Context, a *App, opts updateOpts, m updateFailMet
 // breadcrumb makes guardEntry refuse.
 func newUpdateCmd(app *App) *cobra.Command {
 	var version string
-	var noRollback, yes bool
+	var noRollback, yes, noReconcile bool
 	c := &cobra.Command{
 		Use:   "update",
 		Short: "Update the deployment to a new version (pull-verify → back up → migrate → health-check, auto-rollback on failure)",
-		Args:  cobra.NoArgs,
+		Long: `Update the deployment to a new version: pull-verify the target image, back up, migrate, health-check, then apply this release's embedded stack definition (auto-rollback on a clean forward-update failure).
+
+Exit codes: 0 success; 1 a pre-commit or same-tag failure — the deployment state is as the error describes (a clean forward-update failure auto-rolls-back, but --no-rollback, an interrupt, or a failed same-tag apply may leave it partly changed); 2 the image/database update committed but post-commit work or verification is still pending — follow the recovery instructions in the message; 3 the update failed AND its auto-rollback also failed (deployment state unknown).`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := requireRoot(); err != nil {
+				return err
+			}
+			if err := app.requirePrivateEnv(); err != nil {
 				return err
 			}
 			if err := varlib.EnsureBackupsDir(); err != nil {
@@ -158,12 +250,13 @@ func newUpdateCmd(app *App) *cobra.Command {
 			}
 			ctx, stop := withSignalCancel(c.Context(), osExit)
 			defer stop()
-			return runUpdate(ctx, app, updateOpts{Version: version, NoRollback: noRollback, Yes: yes})
+			return runUpdate(ctx, app, updateOpts{Version: version, NoRollback: noRollback, Yes: yes, NoReconcile: noReconcile})
 		},
 	}
 	c.Flags().StringVar(&version, "version", "", "target version tag (default: the CLI's built-in target)")
 	c.Flags().BoolVar(&noRollback, "no-rollback", false, "on failure leave the deployment as-is instead of auto-rolling-back")
 	c.Flags().BoolVar(&yes, "yes", false, "skip the update confirmation prompt")
+	c.Flags().BoolVar(&noReconcile, "no-reconcile", false, "apply only the image upgrade; defer this release's stack-definition change")
 	return c
 }
 
@@ -175,6 +268,13 @@ func newUpdateCmd(app *App) *cobra.Command {
 // interrupt (ctx cancelled) or --no-rollback instead refuses, leaving the breadcrumb and
 // failed state behind the manual-recovery hint. See updateFailure for the full matrix.
 func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
+	// 0. Refuse a missing/non-regular/group-or-world-accessible .env BEFORE reading or
+	// mutating anything — it holds secrets and, with a bundled TLS proxy, Compose
+	// interpolates it into the proxy env. Shared verbatim with reconcile/tls.
+	if err := a.requirePrivateEnv(); err != nil {
+		return err
+	}
+
 	// 1. Precondition: the STRENGTHENED env validation (ValidateEnvComplete also
 	// ValidateOCITags MATHION_VERSION) BEFORE any docker mutation — so the same-tag
 	// guard compares the target against a canonical .env tag == Compose's effective
@@ -188,6 +288,16 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	}
 	oldTag := env["MATHION_VERSION"]
 
+	// Drift signal: the on-disk compose differs from this CLI's embedded stack, or a
+	// pending-apply marker is present. wantApply folds --no-reconcile into the decision
+	// the apply branches (Tasks 7–8) act on; a compose read error counts as drift so a
+	// missing/unreadable file is reconciled rather than silently skipped.
+	onDisk, readErr := os.ReadFile(composePath(a))
+	composeDiffers := readErr != nil || !bytes.Equal(onDisk, compose.ComposeYAML)
+	markerPresent, _ := varlib.MarkerPresent()
+	drift := composeDiffers || markerPresent
+	wantApply := drift && !opts.NoReconcile
+
 	// 2. Resolve target + same-tag guard (round-9 #2 — update NEVER pulls the active
 	// tag: pulling imageRepo:<active> would MOVE the live deployment tag before any
 	// backup/breadcrumb exists, so a crash could strand an unverified image that
@@ -200,14 +310,43 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 		return err
 	}
 	if target == oldTag {
-		// No pull. strictVersion=true so ONLY an exact JSON {"version":target} is a
-		// match (a); a legacy 200 text/html SPA, a /version mismatch, or an
-		// unreachable app all fall to (b). Reuses the gate's /version classifier.
+		if wantApply {
+			if !a.appRunning(ctx) {
+				return errors.New("this release's stack definition needs applying, but the stack is not running; start it with `sudo mathion start`, then `sudo mathion reconcile` (or re-run update)")
+			}
+			if !opts.Yes {
+				msg := "a previous stack apply did not finish; re-apply this CLI's stack definition now?"
+				if composeDiffers {
+					msg = "this release updates the stack definition; apply it now?"
+				}
+				fmt.Fprintf(a.Out, "%s any changed service is briefly recreated (an HTTPS interruption if the bundled proxy changed). Continue? [y/N] ", msg)
+				line, _ := bufio.NewReader(a.In).ReadString('\n')
+				if ans := strings.ToLower(strings.TrimSpace(line)); ans != "y" && ans != "yes" {
+					return errors.New("update cancelled")
+				}
+			}
+			stID, err := runningAppImageID(ctx, a)
+			if err != nil {
+				return err
+			}
+			restored, applyErr := a.applyAndGate(ctx, onDisk, stID, target)
+			if applyErr != nil {
+				if restored {
+					return fmt.Errorf("applying this CLI's stack definition failed (%w); the previous definition is in place and the stack is running — retry with `sudo mathion reconcile`", applyErr)
+				}
+				return fmt.Errorf("applying this CLI's stack definition failed (%w) AND restoring the previous definition also failed; the runtime may be degraded — run `mathion status`, then `sudo mathion reconcile`", applyErr)
+			}
+			fmt.Fprintf(a.Out, "applied this CLI's stack definition (%s); run `mathion status` to confirm.\n", buildVersion)
+			return nil
+		}
 		pass, _, _ := probeVersionOnce(ctx, target, true)
 		if pass {
 			fmt.Fprintf(a.Out, "already at %s; nothing to do\n", target)
 		} else {
 			fmt.Fprintf(a.Out, "already pinned to %s; a same-version refresh is not supported. To redeploy or repair a broken deployment, use mathion restore or reinstall.\n", target)
+		}
+		if opts.NoReconcile && drift {
+			fmt.Fprintln(a.Out, "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile")
 		}
 		return nil
 	}
@@ -219,6 +358,9 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 			fmt.Fprintln(a.Out, "on failure the stack is left as-is; recover with mathion restore -- <backup>")
 		} else {
 			fmt.Fprintln(a.Out, "auto-rollback on failure")
+		}
+		if composeDiffers && !opts.NoReconcile {
+			fmt.Fprintln(a.Out, "This release also updates the stack definition; it is applied after the update completes (brief HTTPS interruption if the bundled proxy changed).")
 		}
 		fmt.Fprint(a.Out, "Brief downtime during the update; block external traffic first. Continue? [y/N] ")
 		line, _ := bufio.NewReader(a.In).ReadString('\n')
@@ -345,8 +487,22 @@ func runUpdate(ctx context.Context, a *App, opts updateOpts) error {
 	// (the update is healthy — do NOT roll back / enter the matrix / exit 3); a leftover
 	// breadcrumb would otherwise make the next command refuse.
 	if err := varlib.RemoveJournal(); err != nil {
-		return fmt.Errorf("updated %s → %s successfully, but could not remove the recovery breadcrumb %s; the deployment is healthy — verify the app serves %s (running image ID == %s), then remove %s manually: %w",
-			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)
+		return committedPendingError{err: fmt.Errorf("updated %s → %s successfully, but could not remove the recovery breadcrumb %s; the deployment is healthy — verify the app serves %s (running image ID == %s), then remove %s manually: %w",
+			oldTag, target, varlib.JournalPath(), target, A, varlib.JournalPath(), err)}
+	}
+	if wantApply {
+		restored, applyErr := a.applyAndGate(ctx, onDisk, A, target)
+		if applyErr != nil {
+			if restored {
+				return committedPendingError{err: fmt.Errorf("updated to %s and it is serving; applying this release's stack definition failed (%w) and the previous definition is in place — the database is intact, re-apply with: sudo mathion reconcile", target, applyErr)}
+			}
+			return committedPendingError{err: fmt.Errorf("updated to %s (database committed and NOT rolled back), but applying this release's stack definition failed (%w) AND restoring the previous definition also failed; the runtime may be degraded — run `mathion status`, then `sudo mathion reconcile`", target, applyErr)}
+		}
+		fmt.Fprintf(a.Out, "updated %s → %s and applied this release's stack definition (%s) (backup: %s; prune old backups manually)\n", oldTag, target, buildVersion, backupPath)
+		return nil
+	}
+	if opts.NoReconcile && drift {
+		fmt.Fprintln(a.Out, "note: this release's stack definition was NOT applied (--no-reconcile); apply it later with: sudo mathion reconcile")
 	}
 	fmt.Fprintf(a.Out, "updated %s → %s (backup: %s; prune old backups manually)\n", oldTag, target, backupPath)
 	return nil
