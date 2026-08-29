@@ -217,9 +217,9 @@ func newUpdateCmd(app *App) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "update",
 		Short: "Update the deployment to a new version (pull-verify → back up → migrate → health-check, auto-rollback on failure)",
-		Long: `Update the deployment to a new version: pull-verify the target image, back up, migrate, health-check, then apply this release's embedded stack definition (auto-rollback on failure).
+		Long: `Update the deployment to a new version: pull-verify the target image, back up, migrate, health-check, then apply this release's embedded stack definition (auto-rollback on a clean forward-update failure).
 
-Exit codes: 0 success; 1 the update failed and was rolled back (or nothing changed); 2 the image/database update committed but applying/verifying this release's stack definition is still pending — re-run ` + "`sudo mathion reconcile`" + `; 3 the update failed AND its rollback also failed (deployment state unknown).`,
+Exit codes: 0 success; 1 a pre-commit or same-tag failure — the deployment state is as the error describes (a clean forward-update failure auto-rolls-back, but --no-rollback, an interrupt, or a failed same-tag apply may leave it partly changed); 2 the image/database update committed but post-commit work or verification is still pending — follow the recovery instructions in the message; 3 the update failed AND its auto-rollback also failed (deployment state unknown).`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := requireRoot(); err != nil {

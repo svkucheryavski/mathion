@@ -887,7 +887,7 @@ func TestRunningAppImageIDResolvesContainer(t *testing.T) {
 		if joinHas("ps -q app")(args) {
 			return "cid123\n", nil
 		}
-		if len(args) >= 2 && args[0] == "inspect" && args[1] == "cid123" {
+		if joinHas("inspect cid123 --format {{.Image}}")(args) {
 			return "sha256:RUN\n", nil
 		}
 		return "", nil
@@ -968,7 +968,7 @@ func sameTagApplyFake(runFn func([]string) error) *compose.FakeRunner {
 			if joinHas("ps -q app")(args) {
 				return "cid123\n", nil
 			}
-			if len(args) >= 2 && args[0] == "inspect" && args[1] == "cid123" {
+			if joinHas("inspect cid123 --format {{.Image}}")(args) {
 				return "sha256:R\n", nil
 			}
 			return "", nil

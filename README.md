@@ -400,11 +400,14 @@ release's embedded stack definition, not just the app image, so a single
 - **Behavior change:** a same-tag `update --yes` on a host whose compose has
   drifted now applies that drift — a call that used to be a no-op can briefly
   recreate the bundled TLS proxy, a short HTTPS blip.
-- **Exit code 2** means the image/database update committed but applying or
-  verifying the stack definition is still pending — re-run
-  `sudo mathion reconcile`. The database is never rolled back; in the rare case
-  the restore also failed the runtime may be degraded, so check `mathion status`.
-  A same-tag apply that fails is exit 1 (nothing committed).
+- **Exit code 2** means the image/database update committed but post-commit work
+  or verification is still pending — follow the recovery instructions in the
+  message. Usually that is `sudo mathion reconcile`; if the message instead says
+  the recovery breadcrumb could not be removed, remove it by hand as the message
+  directs (`reconcile` refuses while the breadcrumb remains). The database is never
+  rolled back; in the rare case the restore also failed the runtime may be
+  degraded, so check `mathion status`. A same-tag apply that fails is exit 1
+  (nothing committed).
 
 To apply a stack-definition change on its own — after a CLI-only upgrade, or when
 you deferred it with `--no-reconcile` — use:
