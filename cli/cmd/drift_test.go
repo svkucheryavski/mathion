@@ -111,7 +111,7 @@ func TestDriftFromReaderMapping(t *testing.T) {
 	}{
 		{"equal", []byte("aaaa"), false},
 		{"shorter", []byte("aaa"), true},
-		{"longer", []byte("aaaaa"), true},
+		{"longer", []byte("baaaa"), true},
 		{"prefix-equal-then-extra", []byte("aaaaX"), true},
 		{"same-len-diff", []byte("aaab"), true},
 	}
@@ -140,6 +140,7 @@ func TestDriftFromReaderReadErrorMapsToUnreadable(t *testing.T) {
 // (false,true) WITHOUT hanging on the open, and maybeWarnComposeDrift then warns iff a
 // marker is present.
 func TestComposeDriftedFifoIsPresentUnreadable(t *testing.T) {
+	varlibReady(t) // fresh varlib: no stale marker
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "docker-compose.yml")
 	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
@@ -148,5 +149,20 @@ func TestComposeDriftedFifoIsPresentUnreadable(t *testing.T) {
 	drifted, present := composeDrifted(dir)
 	if drifted != false || present != true {
 		t.Fatalf("a FIFO compose must be (false,true); got (%v,%v)", drifted, present)
+	}
+	// present-but-unreadable precedence (spec §5 rule 3): silent without a marker...
+	var out bytes.Buffer
+	maybeWarnComposeDrift(&out, dir)
+	if out.Len() != 0 {
+		t.Fatalf("FIFO compose + no marker must be silent; got %q", out.String())
+	}
+	// ...but a pending marker still warns.
+	if err := varlib.WriteMarker(); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	maybeWarnComposeDrift(&out, dir)
+	if !strings.Contains(out.String(), driftNote) {
+		t.Fatalf("FIFO compose + pending marker must warn; got %q", out.String())
 	}
 }
