@@ -68,14 +68,14 @@ func TestExecuteExit3Mapping(t *testing.T) {
 }
 
 // TestUpdateCmdFlags: newUpdateCmd registers under "update" with --version,
-// --no-rollback, and --yes.
+// --no-rollback, --yes, and --no-reconcile.
 func TestUpdateCmdFlags(t *testing.T) {
 	app := &App{CfgDir: "/tmp", Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: os.Stdout, Err: os.Stderr, In: os.Stdin}
 	c := newUpdateCmd(app)
 	if c.Name() != "update" {
 		t.Fatalf("cmd name = %q; want update", c.Name())
 	}
-	for _, fl := range []string{"version", "no-rollback", "yes"} {
+	for _, fl := range []string{"version", "no-rollback", "yes", "no-reconcile"} {
 		if c.Flags().Lookup(fl) == nil {
 			t.Errorf("missing --%s flag", fl)
 		}

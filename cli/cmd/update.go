@@ -217,7 +217,10 @@ func newUpdateCmd(app *App) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "update",
 		Short: "Update the deployment to a new version (pull-verify → back up → migrate → health-check, auto-rollback on failure)",
-		Args:  cobra.NoArgs,
+		Long: `Update the deployment to a new version: pull-verify the target image, back up, migrate, health-check, then apply this release's embedded stack definition (auto-rollback on failure).
+
+Exit codes: 0 success; 1 the update failed and was rolled back (or nothing changed); 2 the image/database update committed but applying/verifying this release's stack definition is still pending — re-run ` + "`sudo mathion reconcile`" + `; 3 the update failed AND its rollback also failed (deployment state unknown).`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := requireRoot(); err != nil {
 				return err
