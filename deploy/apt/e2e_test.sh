@@ -3,11 +3,64 @@
 set -eu
 command -v apt-ftparchive >/dev/null 2>&1 || { echo "SKIP: apt-utils not installed"; exit 0; }
 [ "$(id -u)" = 0 ] || { echo "SKIP: needs root for apt"; exit 0; }
+
+# Direct-postinst logic tests (spec §7 (ii)/(iii)): rewrite the two absolute paths to
+# fixtures and run the maintainer script's configure branch. Covers the shadow, timeout,
+# and missing-binary paths without a full apt cycle and without touching real binaries.
+test_postinst_direct() {
+  pdir="$(mktemp -d)"
+  src="$(dirname "$0")/../deb/postinst.sh"
+
+  # (a) shadow present -> shadow warning, NO drift line.
+  : > "$pdir/shadow"          # stands in for /usr/local/bin/mathion
+  : > "$pdir/bin"; chmod +x "$pdir/bin"
+  sed "s#/usr/local/bin/mathion#$pdir/shadow#g; s#/usr/bin/mathion#$pdir/bin#g" "$src" > "$pdir/postinst"
+  out="$(sh "$pdir/postinst" configure 2>&1)"; rc=$?
+  [ "$rc" = 0 ] || { echo "FAIL: postinst shadow-case rc=$rc"; exit 1; }
+  echo "$out" | grep -q "will shadow this apt package" || { echo "FAIL: no shadow warning"; exit 1; }
+  echo "$out" | grep -q "differs from this mathion version" && { echo "FAIL: drift claim in shadow case"; exit 1; }
+
+  # (b) timeout-path: a SIGTERM-ignoring blocker must be SIGKILLed by --kill-after. The
+  #     fixture touches a sentinel first, so we can prove the probe branch actually ran
+  #     (exit-0-under-20s could otherwise false-pass on a skipped probe).
+  rm -f "$pdir/shadow"
+  sent="$pdir/sentinel"
+  cat > "$pdir/bin" <<EOF
+#!/bin/sh
+: > "$sent"
+trap '' TERM
+sleep 30
+EOF
+  chmod +x "$pdir/bin"
+  sed "s#/usr/local/bin/mathion#$pdir/shadow#g; s#/usr/bin/mathion#$pdir/bin#g" "$src" > "$pdir/postinst"
+  start="$(date +%s)"
+  sh "$pdir/postinst" configure >/dev/null 2>&1; rc=$?
+  elapsed=$(( $(date +%s) - start ))
+  [ "$rc" = 0 ] || { echo "FAIL: postinst timeout-path rc=$rc"; exit 1; }
+  [ -f "$sent" ] || { echo "FAIL: probe branch did not run (no sentinel)"; exit 1; }
+  [ "$elapsed" -lt 20 ] || { echo "FAIL: postinst did not bound the SIGTERM-ignorer (${elapsed}s)"; exit 1; }
+
+  # (c) missing /usr/bin/mathion -> configure still exits 0, no probe.
+  rm -f "$pdir/bin"
+  sed "s#/usr/local/bin/mathion#$pdir/shadow#g; s#/usr/bin/mathion#$pdir/bin#g" "$src" > "$pdir/postinst"
+  sh "$pdir/postinst" configure >/dev/null 2>&1 || { echo "FAIL: postinst missing-binary rc nonzero"; exit 1; }
+
+  rm -rf "$pdir"
+  echo "postinst direct-logic tests PASSED"
+}
+test_postinst_direct
+
 WORK="$(mktemp -d)"
 cleanup() {
   if [ -f "$WORK/pid" ]; then kill "$(cat "$WORK/pid")" 2>/dev/null || true; fi
   apt-get remove -y mathion >/dev/null 2>&1 || true
   rm -f /etc/apt/sources.list.d/mathion-test.list /usr/share/keyrings/mathion-test.gpg
+  if [ -f "$WORK/etc_mathion_preexisted" ]; then
+    :  # a real /etc/mathion was here before us — leave it untouched
+  else
+    rm -f /etc/mathion/docker-compose.yml
+    rmdir /etc/mathion 2>/dev/null || true
+  fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -56,7 +109,12 @@ echo "deb [signed-by=/usr/share/keyrings/mathion-test.gpg] http://127.0.0.1:$POR
   > /etc/apt/sources.list.d/mathion-test.list
 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
   -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
-apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion
+# Seed a DRIFTED compose so the postinstall probe emits the precise drift line during
+# configure. Guard a pre-existing real /etc/mathion (never clobber an operator's dir).
+if [ -e /etc/mathion ]; then : > "$WORK/etc_mathion_preexisted"; else mkdir -p /etc/mathion; fi
+printf 'drifted: yes\n' > /etc/mathion/docker-compose.yml
+apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion 2>&1 | tee "$WORK/install.log"
+grep -q "differs from this mathion version" "$WORK/install.log" || { echo "FAIL: no drift line during apt install of a drifted host"; exit 1; }
 test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
 
 # tamper-negative: a corrupted Release must be REJECTED by apt. Modify a byte INSIDE
