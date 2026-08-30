@@ -63,6 +63,9 @@ cleanup() {
   if [ -f "$WORK/etc_mathion_created" ]; then
     rmdir /etc/mathion 2>/dev/null || true                    # remove the dir only if WE created it (rmdir needs it empty)
   fi
+  if [ -f "$WORK/shadow_created" ]; then
+    rm -f /usr/local/bin/mathion                              # remove ONLY the stand-in WE created (never a real curl|sh copy)
+  fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -111,13 +114,43 @@ echo "deb [signed-by=/usr/share/keyrings/mathion-test.gpg] http://127.0.0.1:$POR
   > /etc/apt/sources.list.d/mathion-test.list
 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
   -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
-# Seed a DRIFTED compose so the postinstall probe emits the precise drift line during
-# configure. NEVER clobber a real operator deployment: ATOMICALLY back up an existing
-# compose (cp to .partial then mv, so a partial copy can never satisfy the restore guard)
-# and restore it byte-for-byte in cleanup. The `compose_seeded` marker is written ONLY
-# AFTER we overwrite, and it is what authorizes cleanup to delete the file — so an abort
-# BEFORE seeding can never remove an operator's compose. Only remove /etc/mathion if WE
-# created the dir.
+# --- REAL install -> upgrade sequence (spec §7 (i)). First install a BASELINE package with
+#     NO drift present (we have not seeded /etc/mathion yet, so the postinst probe stays
+#     silent); then publish a STRICTLY NEWER package and run an actual apt UPGRADE with drift
+#     seeded, asserting the precise advisory fires during dpkg configure and the upgrade lands.
+apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/install-base.log" 2>&1
+# A clean host (no compose) must NOT cry drift on a first install. Guard the assertion on
+# "no compose present" so a dev host with a REAL /etc/mathion/docker-compose.yml (which may
+# legitimately differ) does not false-fail here.
+if [ ! -e /etc/mathion/docker-compose.yml ]; then
+  grep -q "differs from this mathion version" "$WORK/install-base.log" \
+    && { echo "FAIL: drift line on a clean baseline install (no compose seeded)"; cat "$WORK/install-base.log"; exit 1; }
+fi
+test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
+
+# Publish a STRICTLY NEWER package by re-stamping the built .deb(s) to 9999.0.0 with dpkg-deb
+# (no second goreleaser run): -R extracts control+data, we bump ONLY Version, --build repacks.
+# build.sh copies it into the SAME pool and re-indexes the whole pool, so the repo now offers
+# both the baseline version and 9999.0.0.
+NEWDEBS="$WORK/newdebs"; mkdir -p "$NEWDEBS"
+for _deb in "$DEBS"/mathion_*.deb; do
+  _ex="$WORK/ex_$(basename "$_deb" .deb)"
+  dpkg-deb -R "$_deb" "$_ex"
+  sed 's/^Version: .*/Version: 9999.0.0/' "$_ex/DEBIAN/control" > "$_ex/DEBIAN/control.new"
+  mv "$_ex/DEBIAN/control.new" "$_ex/DEBIAN/control"
+  _arch="$(awk -F': ' '/^Architecture:/{print $2; exit}' "$_ex/DEBIAN/control")"
+  dpkg-deb --build "$_ex" "$NEWDEBS/mathion_9999.0.0_${_arch}.deb" >/dev/null
+done
+sh "$(dirname "$0")/build.sh" "$NEWDEBS" "$WORK/site" "$FPR"
+apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
+  -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+
+# Seed a DRIFTED compose so the UPGRADE's postinstall probe emits the precise drift line during
+# configure. NEVER clobber a real operator deployment: ATOMICALLY back up an existing compose
+# (cp to .partial then mv, so a partial copy can never satisfy the restore guard) and restore it
+# byte-for-byte in cleanup. The `compose_seeded` marker is written ONLY AFTER we overwrite, and it
+# is what authorizes cleanup to delete the file — so an abort BEFORE seeding can never remove an
+# operator's compose. Only remove /etc/mathion if WE created the dir.
 if [ -e /etc/mathion/docker-compose.yml ]; then
   cp -p /etc/mathion/docker-compose.yml "$WORK/compose.bak.partial"
   mv "$WORK/compose.bak.partial" "$WORK/compose.bak"
@@ -127,11 +160,34 @@ fi
 mkdir -p /etc/mathion
 printf 'drifted: yes\n' > /etc/mathion/docker-compose.yml
 : > "$WORK/compose_seeded"
-# No pipe: `... | tee` masks apt's exit status under `set -e` (sh has no pipefail), so a
-# hard install failure would slip through to the drift grep. Redirect instead.
-apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/install.log" 2>&1
-grep -q "differs from this mathion version" "$WORK/install.log" || { echo "FAIL: no drift line during apt install of a drifted host"; cat "$WORK/install.log"; exit 1; }
+
+# The REAL upgrade: apt moves mathion baseline -> 9999.0.0, dpkg runs postinst configure on a
+# drifted host, and the precise advisory must appear with a clean exit. No pipe: `... | tee` masks
+# apt's exit status under `set -e` (sh has no pipefail), so a hard failure would slip through to the
+# drift grep. Redirect instead.
+apt-get install -y --only-upgrade -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/upgrade.log" 2>&1
+grep -q "differs from this mathion version" "$WORK/upgrade.log" || { echo "FAIL: no drift line during a real apt UPGRADE of a drifted host"; cat "$WORK/upgrade.log"; exit 1; }
+_upver="$(dpkg-query -W -f='${Version}' mathion)"
+[ "$_upver" = 9999.0.0 ] || { echo "FAIL: upgrade did not land 9999.0.0 (got '$_upver')"; exit 1; }
 test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
+
+# Shadow-through-REAL-apt (spec §7 (i) dual-install): with a curl|sh copy at /usr/local/bin/mathion,
+# a dpkg reconfigure must warn about the shadow and must NOT run the probe (no drift line) even
+# though the host is still drifted. Guard against clobbering a REAL curl|sh install: only stand one
+# in when none exists, mark that WE created it (so cleanup removes it if we abort mid-reinstall), and
+# remove only our own stand-in.
+if [ -e /usr/local/bin/mathion ]; then
+  echo "SKIP shadow-through-apt: a real /usr/local/bin/mathion is present (won't clobber it)"
+else
+  : > /usr/local/bin/mathion
+  : > "$WORK/shadow_created"
+  apt-get install -y --reinstall -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/shadow.log" 2>&1
+  rm -f /usr/local/bin/mathion
+  rm -f "$WORK/shadow_created"
+  grep -q "will shadow this apt package" "$WORK/shadow.log" || { echo "FAIL: no shadow warning during apt reinstall with a curl|sh copy present"; cat "$WORK/shadow.log"; exit 1; }
+  grep -q "differs from this mathion version" "$WORK/shadow.log" \
+    && { echo "FAIL: drift claimed during apt reinstall despite a shadowing curl|sh copy"; cat "$WORK/shadow.log"; exit 1; }
+fi
 
 # tamper-negative: a corrupted Release must be REJECTED by apt. Modify a byte INSIDE
 # the signed body (the Suite field), NOT a trailing append — gpg/gpgv process only the
