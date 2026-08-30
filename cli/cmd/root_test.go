@@ -1,13 +1,18 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
+	"github.com/svkucheryavski/mathion/cli/internal/varlib"
 )
 
 func TestResolveCfgDirDefault(t *testing.T) {
@@ -146,5 +151,203 @@ func TestComposeArgsProfileSplit(t *testing.T) {
 	// The base flags are still present and ordered.
 	if !slices.Equal(got[:3], []string{"compose", "-p", "mathion_prod"}) {
 		t.Errorf("base args malformed: %v", got)
+	}
+}
+
+func findCmd(root *cobra.Command, args ...string) *cobra.Command {
+	c, _, err := root.Find(args)
+	if err != nil {
+		return nil
+	}
+	return c
+}
+
+// The principled exclusion set (spec §4.1): commands that re-materialize the compose and
+// report their own next-step, teardown, self-update, and machine/first-contact surfaces.
+func TestDriftHookExcludedPredicate(t *testing.T) {
+	root := newRootCmd(&App{})
+	for _, name := range []string{"reconcile", "update", "install", "uninstall", "self-update"} {
+		if c := findCmd(root, name); c == nil || !driftHookExcluded(c) {
+			t.Errorf("%q must be excluded", name)
+		}
+	}
+	// version: excluded ONLY with --short.
+	v := findCmd(root, "version")
+	if v == nil || driftHookExcluded(v) {
+		t.Error("bare `version` must NOT be excluded")
+	}
+	if err := v.Flags().Set("short", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !driftHookExcluded(v) {
+		t.Error("`version --short` must be excluded")
+	}
+	// a representative non-excluded management command fires.
+	if s := findCmd(root, "status"); s == nil || driftHookExcluded(s) {
+		t.Error("`status` must NOT be excluded")
+	}
+	// completion is excluded by ANCESTRY, so `completion bash` (leaf named "bash") is caught.
+	parent := &cobra.Command{Use: "completion"}
+	child := &cobra.Command{Use: "bash"}
+	parent.AddCommand(child)
+	if !driftHookExcluded(child) {
+		t.Error("`completion bash` (leaf `bash`, parent `completion`) must be excluded by ancestry")
+	}
+	if driftHookExcluded(&cobra.Command{Use: "somethingelse"}) {
+		t.Error("an unrelated leaf must NOT be excluded")
+	}
+}
+
+// No DESCENDANT may define its own PersistentPreRun* — cobra runs only the most-specific
+// one, so a descendant hook would silently suppress the root's drift pre-run (spec §7).
+func TestNoDescendantDefinesPersistentPreRun(t *testing.T) {
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		for _, sub := range c.Commands() {
+			if sub.PersistentPreRun != nil || sub.PersistentPreRunE != nil {
+				t.Errorf("%q defines a PersistentPreRun* that would suppress the root drift hook", sub.Name())
+			}
+			walk(sub)
+		}
+	}
+	walk(newRootCmd(&App{}))
+}
+
+// TestPreRunRoutesDriftToStderr drives the root drift pre-run across every
+// compose/marker state through a non-excluded, Runner-free command (bare `version`,
+// no Docker) and COUNTS the shared drift string per stream — spec §7 mandates
+// "per-stream + counting ... not global emptiness", not a Contains check.
+func TestPreRunRoutesDriftToStderr(t *testing.T) {
+	rows := []struct {
+		name      string
+		writeFile bool
+		content   string // compose bytes when writeFile is true
+		marker    bool
+		wantErr   int // expected count of driftNote on stderr (stdout is always 0)
+	}{
+		{name: "drifted", writeFile: true, content: "stale: true\n", wantErr: 1},
+		{name: "identical", writeFile: true, content: string(compose.ComposeYAML), wantErr: 0},
+		{name: "absent", writeFile: false, wantErr: 0},
+		{name: "identical+marker", writeFile: true, content: string(compose.ComposeYAML), marker: true, wantErr: 1},
+		{name: "absent+marker", writeFile: false, marker: true, wantErr: 0}, // §5: absent silences even a stale marker
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			varlibReady(t)
+			if r.marker {
+				if err := varlib.WriteMarker(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dir := t.TempDir()
+			if r.writeFile {
+				if err := os.WriteFile(dir+"/docker-compose.yml", []byte(r.content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var o, e bytes.Buffer
+			app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &o, Err: &e, In: bytes.NewReader(nil)}
+			root := newRootCmd(app)
+			root.SetArgs([]string{"version"})
+			root.SetOut(&o)
+			root.SetErr(&e)
+			if err := root.ExecuteContext(context.Background()); err != nil {
+				t.Fatalf("version via root: %v", err)
+			}
+			if got := strings.Count(e.String(), driftNote); got != r.wantErr {
+				t.Errorf("stderr driftNote count = %d, want %d; err=%q", got, r.wantErr, e.String())
+			}
+			if got := strings.Count(o.String(), driftNote); got != 0 {
+				t.Errorf("stdout must never carry the drift note; count = %d, out=%q", got, o.String())
+			}
+		})
+	}
+}
+
+// TestPreRunExcludedCommandsSilent proves every excluded command emits ZERO drift
+// lines with a DRIFTED compose present (spec §7 enumerated set). Two mechanisms:
+// name-gated commands whose RunE would take the lock / hit the Runner
+// (reconcile/update/install/uninstall/self-update) are exercised by invoking the
+// root pre-run DIRECTLY on the registered leaf — no RunE side effects; the flag/
+// ancestry-gated ones (version --short, help, completion bash) run through
+// ExecuteContext so cobra parses --short and lazily materializes help/completion.
+func TestPreRunExcludedCommandsSilent(t *testing.T) {
+	seedDrift := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(dir+"/docker-compose.yml", []byte("stale: true\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	// mechanism A: direct hook on registered, name-excluded leaves.
+	for _, name := range []string{"reconcile", "update", "install", "uninstall", "self-update"} {
+		t.Run("direct/"+name, func(t *testing.T) {
+			varlibReady(t)
+			dir := seedDrift(t)
+			var o, e bytes.Buffer
+			app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &o, Err: &e, In: bytes.NewReader(nil)}
+			root := newRootCmd(app)
+			leaf := findCmd(root, name)
+			if leaf == nil {
+				t.Fatalf("command %q is not registered on the root", name)
+			}
+			if err := root.PersistentPreRunE(leaf, nil); err != nil {
+				t.Fatalf("pre-run must never error; got %v", err)
+			}
+			if c := strings.Count(e.String(), driftNote) + strings.Count(o.String(), driftNote); c != 0 {
+				t.Errorf("excluded %q emitted %d drift line(s); out=%q err=%q", name, c, o.String(), e.String())
+			}
+		})
+	}
+	// mechanism B: through ExecuteContext (flag/ancestry-gated; RunE is print-only).
+	// help/completion may write their OWN text to these streams — assert the absence
+	// of the DRIFT string only, never emptiness (spec §7 line 139).
+	for _, args := range [][]string{{"version", "--short"}, {"help"}, {"completion", "bash"}} {
+		t.Run("exec/"+strings.Join(args, "_"), func(t *testing.T) {
+			varlibReady(t)
+			dir := seedDrift(t)
+			var o, e bytes.Buffer
+			app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &o, Err: &e, In: bytes.NewReader(nil)}
+			root := newRootCmd(app)
+			root.SetArgs(args)
+			root.SetOut(&o)
+			root.SetErr(&e)
+			_ = root.ExecuteContext(context.Background())
+			if c := strings.Count(e.String(), driftNote) + strings.Count(o.String(), driftNote); c != 0 {
+				t.Errorf("excluded %v emitted %d drift line(s); out=%q err=%q", args, c, o.String(), e.String())
+			}
+		})
+	}
+}
+
+// Mutation-safety (spec §6): the hook only READS — invoking it directly performs no
+// Runner call, no marker write, no compose write.
+func TestPreRunIsReadOnly(t *testing.T) {
+	varlibReady(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/docker-compose.yml", []byte("stale: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var e bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &bytes.Buffer{}, Err: &e}
+	root := newRootCmd(app)
+	if err := root.PersistentPreRunE(findCmd(root, "status"), nil); err != nil {
+		t.Fatalf("pre-run must never error; got %v", err)
+	}
+	if fr := app.Runner.(*compose.FakeRunner); len(fr.Calls) != 0 {
+		t.Errorf("pre-run must not invoke the Runner; got %v", fr.Calls)
+	}
+	if present, _ := varlib.MarkerPresent(); present {
+		t.Error("pre-run must not write the apply-pending marker")
+	}
+	if _, err := os.Stat(varlib.LockPath()); !os.IsNotExist(err) {
+		t.Errorf("pre-run must not create the lock file %s (stat err=%v)", varlib.LockPath(), err)
+	}
+	if b, _ := os.ReadFile(dir + "/docker-compose.yml"); string(b) != "stale: true\n" {
+		t.Error("pre-run must not rewrite the on-disk compose")
+	}
+	if strings.Count(e.String(), driftNote) != 1 {
+		t.Errorf("pre-run should still have printed exactly one drift note (proving it ran); got %q", e.String())
 	}
 }
