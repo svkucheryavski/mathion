@@ -141,6 +141,12 @@ for _deb in "$DEBS"/mathion_*.deb; do
   _arch="$(awk -F': ' '/^Architecture:/{print $2; exit}' "$_ex/DEBIAN/control")"
   dpkg-deb --build "$_ex" "$NEWDEBS/mathion_9999.0.0_${_arch}.deb" >/dev/null
 done
+# Force the rebuilt InRelease to a strictly-later whole-second mtime than the baseline one apt
+# already cached. apt sends If-Modified-Since on the second update and Python's http.server
+# truncates mtimes to the second (returns 304 when file-mtime <= IMS); a same-second rebuild
+# would then 304, leave the baseline index cached, and hide 9999.0.0 from the upgrade. A >=1s
+# real gap always advances the truncated mtime by a full second, so apt refetches (200).
+sleep 1
 sh "$(dirname "$0")/build.sh" "$NEWDEBS" "$WORK/site" "$FPR"
 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
   -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
