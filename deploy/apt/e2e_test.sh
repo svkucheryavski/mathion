@@ -57,11 +57,11 @@ cleanup() {
   rm -f /etc/apt/sources.list.d/mathion-test.list /usr/share/keyrings/mathion-test.gpg
   if [ -f "$WORK/compose.bak" ]; then
     cp -p "$WORK/compose.bak" /etc/mathion/docker-compose.yml  # restore the operator's real file byte-for-byte
-  else
-    rm -f /etc/mathion/docker-compose.yml                      # our seeded file -> remove
-    if [ -f "$WORK/etc_mathion_created" ]; then
-      rmdir /etc/mathion 2>/dev/null || true                  # only if WE created the dir
-    fi
+  elif [ -f "$WORK/compose_seeded" ]; then
+    rm -f /etc/mathion/docker-compose.yml                      # only OUR seeded file (no real one existed) -> remove
+  fi
+  if [ -f "$WORK/etc_mathion_created" ]; then
+    rmdir /etc/mathion 2>/dev/null || true                    # remove the dir only if WE created it (rmdir needs it empty)
   fi
   rm -rf "$WORK"
 }
@@ -112,15 +112,21 @@ echo "deb [signed-by=/usr/share/keyrings/mathion-test.gpg] http://127.0.0.1:$POR
 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
   -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
 # Seed a DRIFTED compose so the postinstall probe emits the precise drift line during
-# configure. NEVER clobber a real operator deployment: back up an existing compose and
-# restore it byte-for-byte in cleanup; only remove /etc/mathion if WE created the dir.
+# configure. NEVER clobber a real operator deployment: ATOMICALLY back up an existing
+# compose (cp to .partial then mv, so a partial copy can never satisfy the restore guard)
+# and restore it byte-for-byte in cleanup. The `compose_seeded` marker is written ONLY
+# AFTER we overwrite, and it is what authorizes cleanup to delete the file — so an abort
+# BEFORE seeding can never remove an operator's compose. Only remove /etc/mathion if WE
+# created the dir.
 if [ -e /etc/mathion/docker-compose.yml ]; then
-  cp -p /etc/mathion/docker-compose.yml "$WORK/compose.bak"
+  cp -p /etc/mathion/docker-compose.yml "$WORK/compose.bak.partial"
+  mv "$WORK/compose.bak.partial" "$WORK/compose.bak"
 elif [ ! -d /etc/mathion ]; then
   : > "$WORK/etc_mathion_created"
 fi
 mkdir -p /etc/mathion
 printf 'drifted: yes\n' > /etc/mathion/docker-compose.yml
+: > "$WORK/compose_seeded"
 # No pipe: `... | tee` masks apt's exit status under `set -e` (sh has no pipefail), so a
 # hard install failure would slip through to the drift grep. Redirect instead.
 apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/install.log" 2>&1
