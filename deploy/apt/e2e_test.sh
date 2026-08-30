@@ -154,9 +154,11 @@ apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list
 # Seed a DRIFTED compose so the UPGRADE's postinstall probe emits the precise drift line during
 # configure. NEVER clobber a real operator deployment: ATOMICALLY back up an existing compose
 # (cp to .partial then mv, so a partial copy can never satisfy the restore guard) and restore it
-# byte-for-byte in cleanup. The `compose_seeded` marker is written ONLY AFTER we overwrite, and it
-# is what authorizes cleanup to delete the file — so an abort BEFORE seeding can never remove an
-# operator's compose. Only remove /etc/mathion if WE created the dir.
+# byte-for-byte in cleanup. Operator-data safety rests on compose.bak PRECEDENCE, not on marker
+# ordering: cleanup deletes /etc/mathion/docker-compose.yml ONLY in its `compose_seeded` branch,
+# which is unreachable whenever compose.bak exists — and compose.bak exists whenever a real file
+# was present at backup time (the atomic cp->mv above captures it first). Only remove /etc/mathion
+# if WE created the dir.
 if [ -e /etc/mathion/docker-compose.yml ]; then
   cp -p /etc/mathion/docker-compose.yml "$WORK/compose.bak.partial"
   mv "$WORK/compose.bak.partial" "$WORK/compose.bak"
@@ -164,8 +166,11 @@ elif [ ! -d /etc/mathion ]; then
   : > "$WORK/etc_mathion_created"
 fi
 mkdir -p /etc/mathion
-printf 'drifted: yes\n' > /etc/mathion/docker-compose.yml
+# Marker BEFORE the mutation: a signal landing mid-seed then still authorizes cleanup to remove our
+# seeded compose, so it can never leak past cleanup. Safe by the precedence argument above — this
+# branch only ever deletes a file WE wrote (compose.bak absent => no operator file existed).
 : > "$WORK/compose_seeded"
+printf 'drifted: yes\n' > /etc/mathion/docker-compose.yml
 
 # The REAL upgrade: apt moves mathion baseline -> 9999.0.0, dpkg runs postinst configure on a
 # drifted host, and the precise advisory must appear with a clean exit. No pipe: `... | tee` masks
@@ -185,8 +190,11 @@ test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
 if [ -e /usr/local/bin/mathion ]; then
   echo "SKIP shadow-through-apt: a real /usr/local/bin/mathion is present (won't clobber it)"
 else
-  : > /usr/local/bin/mathion
+  # Marker BEFORE the mutation: the guard above already proved no real copy exists, so authorizing
+  # cleanup to rm /usr/local/bin/mathion can never touch a curl|sh install. Writing it first closes
+  # the signal window where an empty stand-in would otherwise leak past cleanup.
   : > "$WORK/shadow_created"
+  : > /usr/local/bin/mathion
   apt-get install -y --reinstall -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/shadow.log" 2>&1
   rm -f /usr/local/bin/mathion
   rm -f "$WORK/shadow_created"
