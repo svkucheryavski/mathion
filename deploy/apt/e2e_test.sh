@@ -55,11 +55,13 @@ cleanup() {
   if [ -f "$WORK/pid" ]; then kill "$(cat "$WORK/pid")" 2>/dev/null || true; fi
   apt-get remove -y mathion >/dev/null 2>&1 || true
   rm -f /etc/apt/sources.list.d/mathion-test.list /usr/share/keyrings/mathion-test.gpg
-  if [ -f "$WORK/etc_mathion_preexisted" ]; then
-    :  # a real /etc/mathion was here before us — leave it untouched
+  if [ -f "$WORK/compose.bak" ]; then
+    cp -p "$WORK/compose.bak" /etc/mathion/docker-compose.yml  # restore the operator's real file byte-for-byte
   else
-    rm -f /etc/mathion/docker-compose.yml
-    rmdir /etc/mathion 2>/dev/null || true
+    rm -f /etc/mathion/docker-compose.yml                      # our seeded file -> remove
+    if [ -f "$WORK/etc_mathion_created" ]; then
+      rmdir /etc/mathion 2>/dev/null || true                  # only if WE created the dir
+    fi
   fi
   rm -rf "$WORK"
 }
@@ -110,11 +112,19 @@ echo "deb [signed-by=/usr/share/keyrings/mathion-test.gpg] http://127.0.0.1:$POR
 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/mathion-test.list \
   -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
 # Seed a DRIFTED compose so the postinstall probe emits the precise drift line during
-# configure. Guard a pre-existing real /etc/mathion (never clobber an operator's dir).
-if [ -e /etc/mathion ]; then : > "$WORK/etc_mathion_preexisted"; else mkdir -p /etc/mathion; fi
+# configure. NEVER clobber a real operator deployment: back up an existing compose and
+# restore it byte-for-byte in cleanup; only remove /etc/mathion if WE created the dir.
+if [ -e /etc/mathion/docker-compose.yml ]; then
+  cp -p /etc/mathion/docker-compose.yml "$WORK/compose.bak"
+elif [ ! -d /etc/mathion ]; then
+  : > "$WORK/etc_mathion_created"
+fi
+mkdir -p /etc/mathion
 printf 'drifted: yes\n' > /etc/mathion/docker-compose.yml
-apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion 2>&1 | tee "$WORK/install.log"
-grep -q "differs from this mathion version" "$WORK/install.log" || { echo "FAIL: no drift line during apt install of a drifted host"; exit 1; }
+# No pipe: `... | tee` masks apt's exit status under `set -e` (sh has no pipefail), so a
+# hard install failure would slip through to the drift grep. Redirect instead.
+apt-get install -y -o APT::Get::AllowUnauthenticated=false mathion > "$WORK/install.log" 2>&1
+grep -q "differs from this mathion version" "$WORK/install.log" || { echo "FAIL: no drift line during apt install of a drifted host"; cat "$WORK/install.log"; exit 1; }
 test -x /usr/bin/mathion && /usr/bin/mathion version >/dev/null
 
 # tamper-negative: a corrupted Release must be REJECTED by apt. Modify a byte INSIDE
