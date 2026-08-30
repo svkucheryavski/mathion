@@ -1,2 +1,4 @@
 @import './styles/reset.css';
+@import './styles/fonts.css';
+@import './styles/theme-default.css';
 @import './styles/base.css';
