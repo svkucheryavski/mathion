@@ -1,0 +1,179 @@
+/* Mathion — visual refresh. Drop-in replacement for src/styles/base.css.
+   Variable names from the original file are kept, so existing components
+   keep working; new tokens are added below them. */
+
+:root {
+  /* --- surfaces --- */
+  --bg: #FBFBFC;              /* page background */
+  --surface: #FFFFFF;         /* cards, rows, inputs */
+  --surface-2: #F5F6F9;       /* table headers, accordion header strips */
+  --surface-3: #FCFCFD;       /* nested/inset panels */
+
+  /* --- text --- */
+  --text: #16181D;
+  --text-2: #2A2F3A;          /* body copy in reading surfaces */
+  --text-3: #3D4350;          /* form labels, secondary buttons */
+  --muted: #5A616E;           /* ALL functional secondary text — AA on white */
+  --faint: #B4B9C4;           /* disabled glyphs, breadcrumb separators ONLY */
+  --placeholder: #9AA0AC;     /* input placeholders ONLY */
+
+  /* --- lines --- */
+  --border: #E3E5EA;          /* card and section borders */
+  --border-strong: #DDE1E9;   /* interactive controls */
+  --border-soft: #F0F1F4;     /* row separators inside a card */
+  --border-faint: #EDEFF2;    /* disabled control borders */
+
+  /* --- accent --- */
+  --primary: #3F5C77;         /* steel blue */
+  --primary-text: #fff;
+  --primary-soft: #EAEFF4;    /* code badges, current item, hover fills */
+
+  /* --- gold: the logo's second peak, and chrome that marks "you are here" ---
+     Decorative only. It never carries state and never carries body text.     */
+  --gold: #E8A317;            /* logo back peak (2.17:1 — graphic, not text) */
+  --gold-soft: #FDF3D9;       /* active nav pill background */
+  --gold-text: #7A5410;       /* label on --gold-soft (6.6:1) */
+
+  /* --- semantic --- */
+  --danger: #991B1B;
+  --success: #065F46;
+
+  /* --- geometry --- */
+  --radius: 5px;
+  --radius-lg: 8px;
+  --radius-pill: 3px;         /* status badges */
+
+  /* --- control sizing: dense. Values are final — the whole set was
+     tightened after review, so do not restore taller browser defaults. --- */
+  --control-h: 30px;          /* form fields, date inputs, selects */
+  --control-h-sm: 28px;       /* controls inside table rows */
+  --control-pad-x: 9px;
+  --control-pad-textarea: 8px 10px;   /* textareas and markdown code blocks */
+  --control-font: 13px;       /* the VALUE inside a field (labels stay 12.5px) */
+  --btn-pad: 4px 10px;        /* primary and secondary */
+  --btn-pad-sm: 4px 9px;      /* ghost, in-row, segmented */
+  --btn-pad-segment: 3px 0;   /* segmented-control cells (flex:1) */
+  --glyph-btn: 24px;          /* square icon button; 28px in modal headers */
+
+  /* --- destructive button, disabled ---
+     A disabled Force delete stays recognisably destructive: it keeps the red
+     family and only loses saturation. Never grey it out — the operator must
+     still read it as the dangerous button while it is unarmed. */
+  --danger-off-bg: #FFFAFA;
+  --danger-off-border: #F2D9D9;
+  --danger-off-text: #C99B9B;
+
+  /* --- type --- */
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-size-base: 14px;
+
+  /* --- avatars --- */
+  --avatar: 28px;             /* teacher rows */
+  --avatar-bg: #EAEFF4;
+  --avatar-fig: #8FA3B5;      /* the silhouette glyph */
+
+  /* --- space (unchanged) --- */
+  --space-1: .25rem;
+  --space-2: .5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-6: 3rem;
+
+  /* --- progress heatmap: single-hue ramp, replaces the hsl() sweep --- */
+  --surface-muted: #F5F6F9;   /* no data */
+  --heat-1: #E1E8EE;          /* >0–25%  */
+  --heat-2: #C6D3DE;          /* 25–50%  */
+  --heat-3: #A3B6C7;          /* 50–75%  */
+  --heat-4: #7E9AB2;          /* 75–100% */
+  --heat-fg: #16181D;         /* text on every step */
+
+  /* --- submission status: only needs-revision moves (deepened, and now the
+     ONLY amber in the product) --- */
+  --status-not-submitted-bg: #f3f4f6;  --status-not-submitted-fg: #374151;
+  --status-awaiting-eval-bg: #dbeafe;  --status-awaiting-eval-fg: #1e40af;
+  --status-needs-revision-bg: #FDECC8; --status-needs-revision-fg: #7A4E0B;
+  --status-accepted-bg:      #d1fae5;  --status-accepted-fg:      #065f46;
+  --status-rejected-bg:      #fee2e2;  --status-rejected-fg:      #991b1b;
+
+  /* --- version lifecycle badges --- */
+  --state-created-bg: #F0F1F4;   --state-created-fg: #3D4350;
+  --state-published-bg: #D1FAE5; --state-published-fg: #065F46;
+  --state-archived-bg: #E9EBEF;  --state-archived-fg: #5A616E;
+  --state-disabled-bg: #F0F1F4;  --state-disabled-fg: #5A616E;
+
+  /* A disabled version does not get a dim colour or an opacity: it recedes by
+     dropping its version number from --text to --muted, so the row sits a full
+     contrast step below its neighbours while every element stays above 5.5:1.
+     Opacity would composite the whole row — including live action glyphs —
+     against the page and push the text to 2.7:1. */
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--font-size-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numerals — counts, dates, ratios, slugs, versions — are always mono. */
+.mono, code, kbd { font-family: var(--font-mono); }
+
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Headings are tighter and smaller than browser defaults; the UI is dense. */
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.015em; margin: 0; }
+h2 { font-size: 15px; font-weight: 600; margin: 0; }
+h3 { font-size: 14px; font-weight: 600; margin: 0; }
+h4 { font-size: 13px; font-weight: 600; margin: 0; }
+
+:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+/* ---------------------------------------------------------------------------
+   Header lockup — exact geometry
+   The mark is two overlapping peaks: gold behind, steel blue in front. Its
+   viewBox is cropped to the ink (the source art is 32×32; the strokes bottom
+   out at 21.8 + half of 3.6 = 23.6), so the box has no dead space under the
+   strokes. It is then nudged up 4.35px inside a centre-aligned lockup so the
+   stroke ends land on the wordmark baseline.
+
+   <span style="display:flex; align-items:center; gap:7px">
+     <span style="display:inline-flex; width:26px; height:19.2px;
+                  transform:translateY(-4.35px)">
+       <svg viewBox="0 0 32 23.6" width="100%" height="100%" fill="none">
+         <path d="M10.15 21.8 18.25 10.2 28.05 21.8" stroke="#E8A317"
+               stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+         <path d="M3.95 21.7 10.85 12 19.25 21.7" stroke="#3F5C77"
+               stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+       </svg>
+     </span>
+     <span style="font-size:14px; font-weight:600; letter-spacing:-.01em">Mathion</span>
+   </span>
+
+   Other sizes: 56px (marketing), 24px reversed on a #3F5C77 tile (favicon /
+   app icon — front peak #fff, back peak rgba(255,255,255,.55)). Below 20px
+   drop the back peak entirely; the overlap goes sub-pixel.
+   --------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Teacher avatar
+   Circle at --avatar, --avatar-bg fill, 1px --border-strong ring, leading each
+   teacher row before the name/email column. With a photo on file it holds the
+   image (object-fit: cover). With none it holds a DRAWN silhouette — inline
+   SVG, not an image request — so a missing photo can never render a broken
+   tile or a network error:
+
+     <svg viewBox="0 0 16 16" fill="none">
+       <circle cx="8" cy="5.9" r="2.7" fill="var(--avatar-fig)"/>
+       <path d="M2.6 14.4c.5-3 2.7-4.6 5.4-4.6s4.9 1.6 5.4 4.6z"
+             fill="var(--avatar-fig)"/>
+     </svg>
+
+   No initials fallback: an invited teacher has no name yet.
+   --------------------------------------------------------------------------- */
