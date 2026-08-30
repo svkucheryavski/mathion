@@ -1,5 +1,5 @@
 <script lang="ts">
-  type Variant = 'primary' | 'secondary' | 'ghost';
+  type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-off';
   let {
     variant = 'primary' as Variant,
     type = 'button' as 'button' | 'submit',
@@ -18,6 +18,7 @@
 <button
   {type}
   class="btn {variant}"
+  data-variant={variant}
   {disabled}
   {title}
   aria-label={ariaLabel}
@@ -29,18 +30,44 @@
 
 <style>
   .btn {
-    padding: var(--space-2) var(--space-3);
+    padding: var(--btn-pad);
     border-radius: var(--radius);
     border: 1px solid transparent;
+    font-size: 13px;
     font-weight: 500;
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
   }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Disabled: recede via tokens, never opacity (opacity would composite the
+     whole button — glyphs included — against the page). Keep the tooltip. */
+  .btn:disabled {
+    background: var(--bg);
+    color: var(--faint);
+    border-color: var(--border-faint);
+    cursor: not-allowed;
+  }
   .primary { background: var(--primary); color: var(--primary-text); }
-  .secondary { background: var(--bg); color: var(--text); border-color: var(--border); }
-  .ghost { background: transparent; color: var(--text); }
+  .secondary { background: var(--surface); color: var(--text-3); border-color: var(--border-strong); }
+  .ghost { padding: var(--btn-pad-sm); background: transparent; color: var(--muted); }
+  /* Danger is a text treatment, never a red fill. */
+  .danger { background: transparent; color: var(--danger); }
+  /* Danger-off = an unarmed Force delete: keeps the red family, drops saturation. */
+  .danger-off {
+    background: var(--danger-off-bg);
+    color: var(--danger-off-text);
+    border-color: var(--danger-off-border);
+  }
+  /* A natively-disabled Force delete stays recognisably destructive (spec §4 /
+     base.css): re-assert the danger-off tokens so the higher-specificity generic
+     `.btn:disabled` (0,2,0) does not grey out `.danger-off` (0,1,0). This rule
+     is (0,3,0), so it wins. */
+  .btn.danger-off:disabled {
+    background: var(--danger-off-bg);
+    color: var(--danger-off-text);
+    border-color: var(--danger-off-border);
+    cursor: not-allowed;
+  }
   .spinner {
     display: inline-block;
     width: .75rem;
