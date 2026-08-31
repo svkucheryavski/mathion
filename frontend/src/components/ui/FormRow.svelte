@@ -11,7 +11,7 @@
 
 <style>
   .form-row { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
-  label { font-weight: 500; font-size: 12.5px; }
+  label { font-weight: 500; font-size: 12.5px; color: var(--text-3); }
   .error-text { color: var(--danger); font-size: 12.5px; }
   .helper-text { color: var(--muted); font-size: 12.5px; }
 </style>

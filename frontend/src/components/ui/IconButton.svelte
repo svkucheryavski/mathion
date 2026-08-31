@@ -81,7 +81,7 @@
     color: var(--muted);
     cursor: pointer;
   }
-  .sm { width: 24px; height: 24px; }
+  .sm { width: var(--glyph-btn); height: var(--glyph-btn); }
   .md { width: 28px; height: 28px; }
   .sm svg { width: 12px; height: 12px; }
   .md svg { width: 14px; height: 14px; }
