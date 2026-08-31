@@ -2,6 +2,9 @@
   import { session } from '../../stores/session.svelte';
   import { currentRoute, navigate, defaultLandingPath } from '../../lib/router.svelte';
   import { logout } from '../../lib/auth.svelte';
+  import { PRODUCT_NAME } from '../../lib/branding';
+  import Logo from '../ui/Logo.svelte';
+  import Button from '../ui/Button.svelte';
 
   const brandHref = $derived(defaultLandingPath(session.user));
   const isAuthoringActive = $derived(currentRoute.path.startsWith('/courses'));
@@ -18,7 +21,10 @@
   <nav aria-label="Primary">
     <a class="brand"
        href={brandHref}
-       onclick={(e) => { e.preventDefault(); navigate(brandHref); }}>Mathion</a>
+       onclick={(e) => { e.preventDefault(); navigate(brandHref); }}>
+      <span class="brand-mark"><Logo /></span>
+      <span class="wordmark">{PRODUCT_NAME}</span>
+    </a>
 
     <div class="links">
       {#if session.user?.has_course_admin}
@@ -35,33 +41,60 @@
 
     <div class="right">
       <span class="name">{displayName}</span>
-      <button type="button" onclick={onLogout}>Logout</button>
+      <Button variant="ghost" onclick={onLogout}>Logout</Button>
     </div>
   </nav>
 </header>
 
 <style>
+  /* 44px bar; border sits inside the height (box-sizing) per spec §4. */
   .app-header {
+    box-sizing: border-box;
+    height: 44px;
+    background: var(--surface);
     border-bottom: 1px solid var(--border);
-    background: var(--surface, var(--bg));
   }
   nav {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    padding: 0 var(--space-3);
+    height: 100%;
   }
-  .brand { font-weight: 600; text-decoration: none; }
-  .links { display: flex; gap: var(--space-3); flex: 1; }
+  /* Brand lockup — exact geometry (spec §2): mark + wordmark, centre-aligned,
+     gap 7px, mark nudged up 4.35px so its stroke ends land on the wordmark
+     baseline. */
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-decoration: none;
+  }
+  .brand-mark {
+    display: inline-flex;
+    transform: translateY(-4.35px);
+  }
+  .wordmark {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .links { display: flex; gap: var(--space-2); flex: 1; }
+  /* Nav pills: inactive = muted, no chrome. */
   .links a {
     text-decoration: none;
-    color: var(--text);
-    padding: var(--space-1) 0;
+    color: var(--muted);
+    padding: 4px 10px;
+    /* 4px is a literal here (matches no token: --radius is 5, --radius-pill 3). */
+    border-radius: 4px;
   }
+  /* Active pill = gold. */
   .links a[aria-current="page"] {
-    font-weight: 600;
-    border-bottom: 2px solid var(--accent, var(--primary));
+    color: var(--gold-text);
+    background: var(--gold-soft);
+    font-weight: 500;
   }
   .right { display: flex; align-items: center; gap: var(--space-2); }
-  .name { color: var(--muted); }
+  .name { font-size: 12.5px; color: var(--muted); }
 </style>
