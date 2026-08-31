@@ -20,14 +20,6 @@ export const STATUS_LABEL: Record<MpGroupStatus, string> = {
   rejected: 'Rejected',
 };
 
-export const STATUS_ICON: Record<MpGroupStatus, string> = {
-  not_submitted: '○',
-  awaiting_eval: '…',
-  needs_revision: '↻',
-  accepted: '✓',
-  rejected: '✗',
-};
-
 // Teacher-action-priority sort order (asc puts most-attention-needed first).
 export const STATUS_PRIORITY: Record<MpGroupStatus, number> = {
   needs_revision: 0,

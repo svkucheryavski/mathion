@@ -12,7 +12,7 @@ vi.mock('../lib/csvWrite', async (importOriginal) => {
 });
 
 import { downloadCSV } from '../lib/csvWrite';
-import { STATUS_LABEL, STATUS_ICON } from '../lib/dashboards';
+import { STATUS_LABEL } from '../lib/dashboards';
 import RunSubmissionTab from '../components/runs/RunSubmissionTab.svelte';
 
 let host: HTMLDivElement;
@@ -168,11 +168,10 @@ describe('RunSubmissionTab', () => {
     expect(statuses).toContain('needs_revision');
     expect(statuses).toContain('accepted');
     expect(statuses).toContain('rejected');
-    // Each badge must also show the label text and icon character (spec §13 line 1666)
+    // Each badge must show the label text (the decorative status glyph was dropped, §5 #8)
     for (const status of ['not_submitted', 'awaiting_eval', 'needs_revision', 'accepted', 'rejected'] as const) {
       const badge = Array.from(badges).find((b) => b.getAttribute('data-status') === status)!;
       expect(badge.textContent).toContain(STATUS_LABEL[status]);
-      expect(badge.textContent).toContain(STATUS_ICON[status]);
     }
   });
 

@@ -1,14 +1,11 @@
 <script lang="ts">
-  import { getMiniProjectsDashboard, STATUS_LABEL, STATUS_ICON, STATUS_PRIORITY,
+  import { getMiniProjectsDashboard, STATUS_LABEL, STATUS_PRIORITY,
            type DashboardMiniProjectsResponse, type DashboardMpRow, type DashboardMpGroupEntry }
     from '../../lib/dashboards';
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
-
-  // STATUS_ICON kept to satisfy import; used indirectly via StatusBadge
-  void STATUS_ICON;
 
   let {
     runId,
