@@ -8,8 +8,8 @@
     display: inline-block;
     width: 1.25rem;
     height: 1.25rem;
-    border: 2px solid var(--muted);
-    border-right-color: transparent;
+    border: 2px solid var(--border-soft);
+    border-top-color: var(--muted);
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
   }

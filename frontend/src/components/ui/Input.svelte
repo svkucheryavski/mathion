@@ -24,8 +24,10 @@
 
 <style>
   .input {
-    padding: var(--space-2);
-    border: 1px solid var(--border);
+    height: var(--control-h);
+    padding: 0 var(--control-pad-x);
+    font-size: var(--control-font);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     width: 100%;
   }

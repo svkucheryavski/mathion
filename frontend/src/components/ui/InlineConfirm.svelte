@@ -24,6 +24,8 @@
 
 <style>
   .inline-confirm { display: inline-flex; flex-direction: column; gap: 4px; }
-  .warning { color: var(--text-muted, #666); font-size: 0.85em; }
+  .warning { color: var(--muted); font-size: 0.85em; }
   .actions { display: inline-flex; gap: 6px; }
+  /* Destructive confirm uses the danger-TEXT convention (never a red fill). */
+  .confirm { color: var(--danger); }
 </style>
