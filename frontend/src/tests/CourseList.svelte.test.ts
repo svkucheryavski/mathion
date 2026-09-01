@@ -113,3 +113,21 @@ describe('CourseCard §2b (rendered through CourseList)', () => {
     expect(t.querySelector('.footer a[href="/courses/c4/edit"]')).not.toBeNull();
   });
 });
+
+describe('CourseList §2b header enrolled-count', () => {
+  it('§2b: mono enrolled-count = current enrolments (excludes admin-only + past)', async () => {
+    const t = seed([
+      courseStub(1), courseStub(2), courseStub(3),
+      courseStub(9, { is_admin: true, version_id: null, version_state: null, total_items: 0, is_active: false }),
+      courseStub(8, { is_active: false }),   // past enrolment (has a version_id, but inactive)
+      // admin-only but is_active:true — pins the `version_id !== null` clause independently:
+      // dropping it would count this row and yield '4 enrolled'. (dropping `is_active` counts
+      // row 8 → also '4', so both exclusion clauses are separately guarded.)
+      courseStub(7, { is_admin: true, version_id: null, version_state: null, total_items: 0 }),
+    ]);
+    await settle();
+    expect((t.querySelector('.enrolled') as HTMLElement).textContent?.trim()).toBe('3 enrolled');   // 3 current, not 6 rows
+    expect(Array.from(t.querySelectorAll('.footer-status')).map((n) => n.textContent?.trim()))
+      .toContain('Past enrolment');                                                                   // is_active:false footer
+  });
+});
