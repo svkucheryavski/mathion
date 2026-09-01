@@ -196,13 +196,13 @@
   .crumb.block { color: var(--muted); }
   .strip {
     display: flex;
-    gap: var(--space-2);
+    gap: 6px; /* ref 2112 — no --space token is 6px */
     padding: var(--space-2) 0;
     border-bottom: 1px solid var(--border);
     align-items: center;
     flex-wrap: wrap;
   }
-  .counter { margin-left: auto; color: var(--muted); font-size: 0.875rem; }
+  .counter { margin-left: auto; font-family: var(--font-mono); font-size: 11.5px; /* ref 2117 */ color: var(--muted); }
   .content { padding: var(--space-3) 0; min-height: 200px; }
   footer { display: flex; justify-content: space-between; padding-top: var(--space-3); border-top: 1px solid var(--border); }
   .empty { color: var(--muted); }
