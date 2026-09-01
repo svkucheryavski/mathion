@@ -145,3 +145,40 @@ it('a stale return path from a prior mount does not survive to a later login', a
   await settle();
   expect(sessionStorage.getItem('superuser_return_path')).toBeNull();
 });
+
+it('§2a: segmented duration in a card+logo; selecting 30 submits numeric duration_days', async () => {
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const calls: Array<[string, RequestInit]> = [];
+  const f = vi.fn((url: string, init?: RequestInit) => {
+    calls.push([String(url), init ?? {}]);
+    if (String(url).includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
+    if (String(url).includes('/api/auth/verify-pin')) return Promise.resolve(jsonResponse(200, { user: FAKE_USER }));
+    return Promise.resolve(jsonResponse(200, {}));
+  });
+  vi.stubGlobal('fetch', f);
+  component = mount(Login, { target });
+  await settle();
+
+  expect(target.querySelector('.card')).not.toBeNull();
+  expect(target.querySelector('.brand svg')).not.toBeNull();
+  expect(target.querySelector('.brand .wordmark')?.textContent).toContain('Mathion');
+  expect(target.querySelector('[role="radiogroup"]')).not.toBeNull();
+  expect(target.querySelector('select')).toBeNull();
+  expect(target.querySelector('input[name="pin"]')?.classList.contains('mono')).toBe(true);
+
+  const seg30 = (Array.from(target.querySelectorAll('.segment')) as HTMLElement[])
+    .find((s) => (s.textContent ?? '').includes('30'))!;
+  (seg30.querySelector('input') as HTMLInputElement).click();
+  flushSync();
+  expect(seg30.classList.contains('selected')).toBe(true);
+
+  setValue(target.querySelector('input[name="email"]')!, 'a@b.com');
+  setValue(target.querySelector('input[name="pin"]')!, '123456');
+  submitForm(target);           // helper takes the CONTAINER and finds the form itself
+  await settle();
+
+  const verify = calls.find(([u]) => u.includes('/api/auth/verify-pin'))!;
+  const body = JSON.parse(String(verify[1].body));
+  expect(body.duration_days).toBe(30);
+  expect(typeof body.duration_days).toBe('number');
+});
