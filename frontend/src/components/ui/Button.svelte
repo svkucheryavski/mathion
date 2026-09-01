@@ -11,6 +11,7 @@
     // users; the title attribute also supplies a tooltip.
     'aria-label': ariaLabel = undefined as string | undefined,
     onclick = undefined as (() => void) | undefined,
+    full = false,
     children,
   } = $props();
 </script>
@@ -18,6 +19,7 @@
 <button
   {type}
   class="btn {variant}"
+  class:full={full}
   data-variant={variant}
   {disabled}
   {title}
@@ -47,6 +49,10 @@
     border-color: var(--border-faint);
     cursor: not-allowed;
   }
+  /* Full-width form primary (e.g. Login §2a "Sign in", ref 2010) — scoped CSS in
+     a page can't reach a child component root, so this lives on the Button.
+     `flex:1` is inert outside a flex parent and exact inside `.actions` (ref 2010). */
+  .btn.full { flex: 1; width: 100%; justify-content: center; }
   .primary { background: var(--primary); color: var(--primary-text); }
   .secondary { background: var(--surface); color: var(--text-3); border-color: var(--border-strong); }
   .ghost { padding: var(--btn-pad-sm); background: transparent; color: var(--muted); }

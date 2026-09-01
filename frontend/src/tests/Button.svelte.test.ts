@@ -65,4 +65,13 @@ describe('Button', () => {
     expect(btn.disabled).toBe(true);
     expect(btn.getAttribute('data-variant')).toBe('danger-off');
   });
+
+  // §2a full-width primary (Login "Sign in"). ONE render() per test — the helper
+  // reassigns the module-level host/component, so afterEach cleans up only the last.
+  it('full adds the full class', () => {
+    expect(render({ full: true }).classList.contains('full')).toBe(true);
+  });
+  it('omits the full class by default', () => {
+    expect(render({}).classList.contains('full')).toBe(false);
+  });
 });
