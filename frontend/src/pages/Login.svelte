@@ -137,6 +137,14 @@
   .segment input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }        /* visually-hidden radio (sr-only, not a disabled treatment) */
   .segment input:focus-visible { box-shadow: none; }                                                /* suppress the global :focus-visible glow (base.css:21-25) on the hidden radio */
   .segment:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }                 /* --primary: visible on both --surface and the selected --primary-soft */
+  /* Forced-colors (Windows High Contrast) drops background-color AND box-shadow, so
+     both the selected fill (.segment.selected) and the focus ring above vanish —
+     the native <select> this replaced had system-drawn cues. Restore both with
+     outlines (forced-colors keeps outlines): neutral for selection, Highlight for focus. */
+  @media (forced-colors: active) {
+    .segment.selected { outline: 2px solid; outline-offset: -2px; }
+    .segment:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+  }
   .actions { display: flex; align-items: center; gap: 10px; /* ref 2009 */ }
   .loading { display: flex; justify-content: center; padding: var(--space-4); }
 </style>
