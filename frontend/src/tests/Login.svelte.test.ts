@@ -182,3 +182,27 @@ it('§2a: segmented duration in a card+logo; selecting 30 submits numeric durati
   expect(body.duration_days).toBe(30);
   expect(typeof body.duration_days).toBe('number');
 });
+
+it('§2a: the two-step pin step carries the full-width primary (ref 2010) and a named duration radiogroup', async () => {
+  // Guards Login.svelte:118 — `full` on the pin-step "Sign in". The §2a test above
+  // forces send_pin_enabled:false, which renders the intentionally-plain single-form
+  // button (:101), so without this test `full`'s only production call site is unguarded.
+  const f = vi.fn((url: string) => {
+    const s = String(url);
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true }));
+    if (s.includes('/request-pin')) return Promise.resolve(jsonResponse(200, { message: 'PIN sent' }));
+    return Promise.resolve(jsonResponse(200, {}));
+  });
+  vi.stubGlobal('fetch', f);
+  component = mount(Login, { target });
+  await settle();
+  setValue(target.querySelector('input[name="email"]')!, 'a@b.com');
+  await settle();
+  submitForm(target);           // email step -> pin step
+  await settle();
+
+  const submit = target.querySelector('form button[type="submit"]') as HTMLButtonElement | null;
+  expect(submit).not.toBeNull();
+  expect(submit!.classList.contains('full')).toBe(true);
+  expect(target.querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe('Stay signed in for');
+});
