@@ -82,6 +82,14 @@ describe('CourseCard §2b (rendered through CourseList)', () => {
     expect((t.querySelector('.footer-status') as HTMLElement).textContent?.trim()).toBe('Past enrolment');
   });
 
+  it('§2b pure-student: a barely-started huge course floors the bar to a visible 2% (not 0)', async () => {
+    // 1/220 → 0.45% rounds to 0; without the floor the started course renders an empty bar.
+    const t = seed([courseStub(6, { covered_items: 1, total_items: 220 })]);
+    await settle();
+    expect((t.querySelector('.bar-fill') as HTMLElement).style.width).toBe('2%');
+    expect((t.querySelector('.count') as HTMLElement).textContent?.trim()).toBe('1/220 items');   // count stays honest
+  });
+
   it('§2b mixed-admin (published): bar + ADMIN badge + Continue is a real anchor', async () => {
     const t = seed([courseStub(2, { is_admin: true, covered_items: 3, total_items: 12 })]);
     await settle();
@@ -103,12 +111,12 @@ describe('CourseCard §2b (rendered through CourseList)', () => {
     expect((t.querySelector('.cta') as HTMLElement).textContent?.trim()).toBe('Start →');
   });
 
-  it('§2b admin-only (version_id null): no bar, ADMIN badge, honest "Not enrolled"', async () => {
+  it('§2b admin-only (version_id null): no bar, ADMIN badge, honest "No active enrolment"', async () => {
     const t = seed([courseStub(4, { is_admin: true, version_id: null, version_state: null, total_items: 0, is_active: false })]);
     await settle();
     expect(t.querySelector('.bar')).toBeNull();
     expect(t.textContent).not.toContain('No published version');
-    expect((t.querySelector('.hint') as HTMLElement).textContent?.trim()).toBe('Not enrolled');
+    expect((t.querySelector('.hint') as HTMLElement).textContent?.trim()).toBe('No active enrolment');
     expect((t.querySelector('.badge-admin') as HTMLElement).textContent?.trim()).toBe('ADMIN');
     expect(t.querySelector('.footer a[href="/courses/c4/edit"]')).not.toBeNull();
   });

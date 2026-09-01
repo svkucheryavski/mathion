@@ -7,7 +7,13 @@
   const studentHref = $derived(`/courses/${course.course.slug}`);
   const editHref = $derived(`/courses/${course.course.slug}/edit`);
   const runsHref = $derived(`/courses/${course.course.slug}/runs`);
-  const pct = $derived(course.total_items > 0 ? Math.round((course.covered_items / course.total_items) * 100) : 0);
+  // Floor a nonzero fraction to a visible 2%: a started course (covered > 0) whose
+  // exact percentage rounds to 0 (e.g. 1/220 → 0.45%) must not render an empty bar.
+  const pct = $derived(
+    course.total_items > 0
+      ? Math.max(Math.round((course.covered_items / course.total_items) * 100), course.covered_items > 0 ? 2 : 0)
+      : 0
+  );
   const countText = $derived(
     course.total_items === 0 ? 'No items'
     : course.covered_items === 0 ? 'Not started'
@@ -45,7 +51,7 @@
     <div class="body">
       <h3 class="title"><a class="title-link" href={editHref}
         onclick={(e) => { e.preventDefault(); navigate(editHref); }}>{course.course.name}</a></h3>
-      <span class="hint">Not enrolled</span>
+      <span class="hint">No active enrolment</span>
     </div>
     {@render adminFooter()}
   </div>
