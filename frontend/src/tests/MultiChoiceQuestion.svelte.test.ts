@@ -94,7 +94,7 @@ describe('MultiChoiceQuestion structure (T2)', () => {
     expect(rows()[0].classList.contains('selected')).toBe(true);
     expect(rows()[2].classList.contains('selected')).toBe(true);
     expect(rows()[1].classList.contains('selected')).toBe(false);
-    expect(rows()[0].querySelector('.ctl svg.check')).not.toBeNull();
+    expect(rows()[0].querySelector('.ctl svg.check[aria-hidden="true"]')).not.toBeNull();
     expect(rows()[1].querySelector('.ctl svg.check')).toBeNull();
     expect(host.querySelectorAll('.ctl svg.check').length).toBe(2);
 
@@ -122,6 +122,9 @@ describe('MultiChoiceQuestion pre-reveal (T2)', () => {
     rows().forEach((row) => {
       expect(row.classList.contains('locked')).toBe(true);
       expect(revealOf(row)).toEqual([]);
+      // `disabled` on the native input is the ONLY thing making the row inert:
+      // the recede paints `cursor:default` but cannot stop a click.
+      expect(row.querySelector<HTMLInputElement>('input')!.disabled).toBe(true);
     });
     expect(rows()[0].classList.contains('selected')).toBe(true);
   });
@@ -138,6 +141,9 @@ describe('MultiChoiceQuestion reveal (D2, T2)', () => {
     expect(revealOf(rows()[0])).toEqual(['reveal-correct']);
     expect(revealOf(rows()[1])).toEqual(['reveal-wrong']);
     expect(revealOf(rows()[2])).toEqual(['reveal-missed']);
+    // A revealed row must stay inert — a click would mutate the answer map
+    // underneath the reveal.
+    rows().forEach((row) => expect(row.querySelector<HTMLInputElement>('input')!.disabled).toBe(true));
     expect(revealOf(rows()[3])).toEqual(['reveal-neutral']);
     rows().forEach((row) => expect(row.classList.contains('locked')).toBe(false));
   });
@@ -161,8 +167,8 @@ describe('MultiChoiceQuestion reveal (D2, T2)', () => {
 
     // The .ctl mark reports the student's SELECTION, the flush-right mark
     // reports CORRECTNESS — a chosen-correct row deliberately shows both.
-    expect(rows()[0].querySelector('.ctl svg.check')).not.toBeNull();
-    expect(rows()[1].querySelector('.ctl svg.check')).not.toBeNull();
+    expect(rows()[0].querySelector('.ctl svg.check[aria-hidden="true"]')).not.toBeNull();
+    expect(rows()[1].querySelector('.ctl svg.check[aria-hidden="true"]')).not.toBeNull();
     expect(rows()[2].querySelector('.ctl svg.check')).toBeNull();
     expect(rows()[3].querySelector('.ctl svg.check')).toBeNull();
   });

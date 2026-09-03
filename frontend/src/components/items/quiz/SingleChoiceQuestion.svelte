@@ -21,10 +21,13 @@
   <div class="opts">
     {#each question.options as opt (opt.id)}
       {@const isChosen = selected === opt.id}
-      {@const isCorrect = correctSet.has(opt.id)}
-      {@const isRevealCorrect = isRevealed && isCorrect && (isChosen || !studentAnswered)}
+      <!-- `isCorrect` is reveal-gated (spec-pinned form): false for every
+           option pre-submit, which is what keeps isWrongPick/isRevealNeutral
+           from firing the instant the student picks. -->
+      {@const isCorrect = isRevealed && correctSet.has(opt.id)}
+      {@const isRevealCorrect = isCorrect && (isChosen || !studentAnswered)}
       {@const isWrongPick = isRevealed && isChosen && !isCorrect}
-      {@const isMissedCorrect = isRevealed && isCorrect && !isChosen && studentAnswered}
+      {@const isMissedCorrect = isCorrect && !isChosen && studentAnswered}
       {@const isRevealNeutral = isRevealed && !isCorrect && !isChosen}
       {@const srLabel = isRevealCorrect
         ? (isChosen ? 'Correct answer — you chose this' : 'Correct answer')
@@ -78,7 +81,7 @@
     padding: 0;
     margin: 0 0 16px; /* ref 2120 */
     font-size: 14.5px; /* ref 2125 */
-    line-height: 1.6;
+    line-height: 1.6; /* ref 2125 */
     font-weight: 400;
     color: var(--text-2);
     text-wrap: pretty;
@@ -97,7 +100,7 @@
     align-items: center;
     gap: 10px; /* ref 2127 */
     padding: var(--btn-pad-sm); /* 4px 9px — ref 2127 */
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-strong); /* ref 2127 */
     border-radius: var(--radius);
     background: var(--surface);
     font-size: 14px; /* ref 2127 */
@@ -116,10 +119,10 @@
     width: 15px; /* ref 2127 */
     height: 15px; /* ref 2127 */
     border: 1.5px solid var(--border-strong); /* ref 2127 ring weight; its #C4CAD4 is untokenised, so it resolves to the nearest enabled-control token */
-    border-radius: 50%;
+    border-radius: 50%; /* ref 2127 */
     flex: 0 0 auto;
   }
-  .ctl .dot { width: 7px; height: 7px; /* ref 2128 */ border-radius: 50%; background: var(--primary); }
+  .ctl .dot { width: 7px; height: 7px; border-radius: 50%; /* ref 2128 */ background: var(--primary); }
   /* Flush right, and anti-shrink like .ctl so long text cannot squeeze it. */
   .mark { margin-left: auto; flex: 0 0 auto; }
   /* mechanism: visually-hidden, AT-only (Constraint 5c) */
@@ -140,7 +143,7 @@
   .opt.reveal-neutral .ctl { border-color: var(--border-faint); }
   /* (5) selection — after .opt.locked, so a locked+selected row keeps the
      student's own pick visible on the score screen. */
-  .opt.selected { border: 1.5px solid var(--primary); background: var(--primary-soft); font-weight: 500; color: var(--text); }
+  .opt.selected { border: 1.5px solid var(--primary); /* ref 2128 */ background: var(--primary-soft); font-weight: 500; color: var(--text); }
   /* (6) */
   .opt.selected .ctl { border-color: var(--primary); }
   /* (7) reveal rows — after .opt.selected, so reveal owns the row bg/border.

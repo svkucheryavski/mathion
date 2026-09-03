@@ -119,6 +119,9 @@ describe('SingleChoiceQuestion pre-reveal (T2)', () => {
     rows().forEach((row) => {
       expect(row.classList.contains('locked')).toBe(true);
       expect(revealOf(row)).toEqual([]);
+      // `disabled` on the native input is the ONLY thing making the row inert:
+      // the recede paints `cursor:default` but cannot stop a click.
+      expect(row.querySelector<HTMLInputElement>('input')!.disabled).toBe(true);
     });
     // The student's own pick stays visible on the score screen.
     expect(rows()[2].classList.contains('selected')).toBe(true);
@@ -132,6 +135,9 @@ describe('SingleChoiceQuestion reveal (D2, T2)', () => {
     rows().forEach((row) => {
       expect(revealOf(row).length).toBe(1);
       expect(row.classList.contains('locked')).toBe(false);
+      // A revealed row must stay inert — a click would mutate the answer map
+      // underneath the reveal.
+      expect(row.querySelector<HTMLInputElement>('input')!.disabled).toBe(true);
     });
   });
 
