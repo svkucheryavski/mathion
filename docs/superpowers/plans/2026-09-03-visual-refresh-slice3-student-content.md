@@ -453,7 +453,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 After T8b's per-task review is clean:
 
-- [ ] Run the **full gate** once more on the whole branch: autofixer clean on every edited `.svelte`, `npm test` green, `npm run check` **0 errors** with source warnings **at or below** the 34-warning baseline (T1 removes SequenceLink's 3; T8a removes BlockGroup's 2), `npm run build` green.
+- [ ] Run the **full gate** once more on the whole branch: autofixer clean on every edited `.svelte`, `npm test` green, `npm run check` **0 errors** with source warnings **at or below** the 34-warning baseline (T7 removes SequenceLink's 3 `state_referenced_locally`; T8a removes BlockGroup's 2 a11y — per spec §Testing-strategy), `npm run build` green.
 - [ ] **End-of-slice manual visual check** against reference screens **2c / 10h / 3b** (the content region — AppHeader is out of scope), walking the D2 reveal state checklist (correct/missed/wrong/neutral, unanswered-correct, multi-partial) and the D4 footer states (mid-course Next, course-flat Finish, unresolved/first-item disabled).
 - [ ] **Whole-branch review** on the most capable model (codex@high + first-party@Opus xhigh) over the full `dca0a7b..HEAD` diff. Fix any Critical/Important, re-review until clean.
 - [ ] Report completion. **Do NOT push and do NOT merge** — the Slice-3 branch stays local; the redesign lands as a stack (`main ← slice2 ← slice3`) when the whole redesign is done (user decision).
