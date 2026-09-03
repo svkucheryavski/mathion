@@ -17,6 +17,13 @@
   let lastResult = $state<QuizSubmitResponse | null>(null);
   let revealed = $state<QuizRevealResponse | null>(null);
   let autoRevealed = $state(false); // tracks "exhausted on mount" branch so we hide retry UI
+  // Attempt count from the most recent successful submit, kept across
+  // `tryAgain()` (which clears `lastResult`) so the attempts line does not fall
+  // back to the never-bumped store count. Keyed off the RESPONSE's `item_id`,
+  // not the reactive `item` prop: `item` is read after the `await`, so a
+  // navigation while the submit is in flight would otherwise tag this item's
+  // count onto the next one.
+  let lastAttempt = $state<{ id: number; count: number } | null>(null);
 
   const revealById = $derived(
     revealed === null
@@ -29,8 +36,13 @@
   const attemptsUsed = $derived(
     lastResult?.attempt_count
     ?? revealed?.attempt_count
+    ?? (lastAttempt?.id === item.id ? lastAttempt.count : undefined)
     ?? currentCourse.value?.state.items[String(item.id)]?.attempt_count
     ?? 0,
+  );
+
+  const remaining = $derived(
+    Math.max(0, (currentCourse.value?.version.max_quiz_attempts ?? 0) - attemptsUsed),
   );
 
   // Resolve the value to display per question: pre-fill from the student's
@@ -84,7 +96,8 @@
       inflight = api.post<QuizSubmitResponse>(`/api/items/${item.id}/submit`, { answers });
       const res = await inflight;
       lastResult = res;
-      markItemCovered(item.id);
+      lastAttempt = { id: res.item_id, count: res.attempt_count };
+      markItemCovered(res.item_id);
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Submit failed.';
       pushToast(msg, 'error');
@@ -132,37 +145,54 @@
 {:else}
   <article class="quiz">
     <h2>{item.title}</h2>
-    {#each item.questions as q (q.id)}
+    {#each item.questions as q, i (q.id)}
+      <!-- `{@const}` must stay an immediate {#each} child — Svelte rejects it
+           inside a plain element. `r` is still in scope within .q-block. -->
       {@const r = revealById?.[q.id] ?? null}
-      {#if q.type === 'single_choice'}
-        <SingleChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-          disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
-      {:else if q.type === 'multiple_choice'}
-        <MultiChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-          disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
-      {:else if q.type === 'numeric_answer'}
-        <Numeric question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-          disabled={locked} correctValue={r?.correct_numeric ?? null} />
-      {:else if q.type === 'text_answer'}
-        <Text question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-          disabled={locked} correctValue={r?.correct_text ?? null} />
-      {/if}
-      {#if r?.explanation_html}
-        <div class="exp">{@html r.explanation_html}</div>
-      {/if}
+      <div class="q-block">
+        <span class="q-counter mono">Question {i + 1} of {item.questions.length}</span>
+        {#if q.type === 'single_choice'}
+          <SingleChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+            disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
+        {:else if q.type === 'multiple_choice'}
+          <MultiChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+            disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
+        {:else if q.type === 'numeric_answer'}
+          <Numeric question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+            disabled={locked} correctValue={r?.correct_numeric ?? null} />
+        {:else if q.type === 'text_answer'}
+          <Text question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
+            disabled={locked} correctValue={r?.correct_text ?? null} />
+        {/if}
+        {#if r?.explanation_html}
+          <div class="exp">{@html r.explanation_html}</div>
+        {/if}
+      </div>
     {/each}
 
     {#if !locked}
-      <Button onclick={submit} loading={inflight !== null} disabled={!allAnswered || inflight !== null}>
-        Submit
-      </Button>
+      <div class="submit-row">
+        <Button
+          onclick={submit}
+          loading={inflight !== null}
+          disabled={!allAnswered || inflight !== null}
+          title={!allAnswered ? 'Answer every question first' : inflight !== null ? 'Submitting…' : undefined}
+        >
+          Submit answer
+        </Button>
+        <!-- The attempts line needs the snapshot's max_quiz_attempts; QuizItem
+             is independently mountable (tests), so guard on the snapshot. -->
+        {#if currentCourse.value !== null}
+          <p class="hint"><span class="mono">{remaining}</span> {remaining === 1 ? 'attempt' : 'attempts'} left</p>
+        {/if}
+      </div>
     {:else}
       {@const max = currentCourse.value?.version.max_quiz_attempts ?? 0}
       {@const score = lastResult ? { correct: lastResult.score_correct, total: lastResult.score_total, attempt: lastResult.attempt_count, max: lastResult.max_attempts, canRetry: lastResult.can_retry } : revealed ? { correct: revealed.score_correct, total: revealed.score_total, attempt: revealed.attempt_count, max, canRetry: revealed.attempt_count < max } : null}
       {#if score}
         <div class="result">
-          <p><strong>Score:</strong> {score.correct} / {score.total}</p>
-          <p class="meta">Attempt {score.attempt} of {score.max}</p>
+          <p><strong>Score:</strong> <span class="mono">{score.correct} / {score.total}</span></p>
+          <p class="meta">Attempt <span class="mono">{score.attempt}</span> of <span class="mono">{score.max}</span></p>
           {#if score.canRetry}
             <Button onclick={tryAgain}>Try again</Button>
           {:else if lastResult && !revealed}
@@ -171,21 +201,50 @@
         </div>
       {/if}
     {/if}
-    <p class="hint">Maximum {currentCourse.value?.version.max_quiz_attempts ?? '?'} attempts per quiz ({attemptsUsed} used).</p>
   </article>
 {/if}
 
 <style>
-  .quiz { padding: var(--space-3); }
+  /* The article gap is the sole vertical-rhythm owner, so every surviving
+     child margin below is zeroed against it. */
+  .quiz {
+    display: flex;
+    flex-direction: column;
+    gap: 16px; /* ref 2120 */
+    align-items: stretch;
+    padding: 0;
+  }
+  .quiz h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
   .empty { color: var(--muted); }
-  .result { padding: var(--space-3); margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
-  .meta { color: var(--muted); font-size: 0.875rem; }
-  .hint { color: var(--muted); font-size: 0.875rem; margin-top: var(--space-3); }
+  /* Counter + question + explanation read as one unit; 6px is the tight
+     intra-group step (the same one the player's item strip uses). */
+  .q-block { display: flex; flex-direction: column; gap: 6px; }
+  .q-counter { font-size: 11.5px; /* ref 2123 */ color: var(--muted); }
+  .submit-row { display: flex; align-items: center; gap: 12px; /* ref 2132 */ }
+  .hint { color: var(--muted); font-size: 12.5px; /* ref 2134 */ margin: 0; }
+  /* --surface-2, not --surface-3: the card sits on the article's inherited
+     --bg, against which --surface-3 is a near-invisible step. flex-start keeps
+     the Button children from blockifying under the default stretch. */
+  .result {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: flex-start;
+    margin-top: 0;
+  }
+  .meta { color: var(--muted); font-size: 12.5px; /* the secondary-text size */ }
+  /* Information panel: --surface-2 tint + a 3px --primary left rule
+     (visual-spec §4). 8px 10px is the code/textarea padding scale. */
   .exp {
-    color: var(--muted);
-    font-size: 0.9rem;
-    margin: calc(-1 * var(--space-2)) 0 var(--space-3) var(--space-3);
-    padding-left: var(--space-2);
-    border-left: 2px solid var(--border);
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    color: var(--text-2);
+    font-size: 13px;
+    padding: 8px 10px;
+    margin: 0;
   }
 </style>
