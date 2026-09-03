@@ -48,6 +48,26 @@ function quiz(id: number, title: string, questionCount: number): QuizItemType {
   };
 }
 
+/** One quiz carrying all four question types, in dispatch-chain order. */
+function mixedQuiz(id: number): QuizItemType {
+  return {
+    id,
+    sequence_id: 100,
+    title: 'Mixed',
+    slug: `quiz-${id}`,
+    order: 1,
+    type: 'quiz',
+    questions: [
+      { id: 201, order: 1, type: 'single_choice', text_md: '', text_html: '<p>Single</p>',
+        options: [{ id: 2011, text: 'First' }, { id: 2012, text: 'Second' }] },
+      { id: 202, order: 2, type: 'multiple_choice', text_md: '', text_html: '<p>Multi</p>',
+        options: [{ id: 2021, text: 'First' }, { id: 2022, text: 'Second' }] },
+      { id: 203, order: 3, type: 'numeric_answer', text_md: '', text_html: '<p>Numeric</p>' },
+      { id: 204, order: 4, type: 'text_answer', text_md: '', text_html: '<p>Text</p>' },
+    ],
+  };
+}
+
 function entry(attemptCount: number): ItemStateEntry {
   return {
     is_covered: false,
@@ -118,6 +138,12 @@ function answerAll(): void {
   flushSync();
 }
 
+/** Type a value into a numeric/text field the way the component listens for it. */
+function typeInto(el: HTMLInputElement, value: string): void {
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function submitButton(): HTMLButtonElement {
   const btn = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Submit'));
   if (!btn) throw new Error('submit button not rendered');
@@ -165,6 +191,17 @@ describe('QuizItem shell (T4)', () => {
     expect(host.querySelector('article.quiz h2')?.textContent).toBe('Check yourself');
   });
 
+  it('shares the quiz article with the empty-quiz branch', () => {
+    seed({ 1: 0 });
+    render(quiz(1, 'Check yourself', 0));
+
+    const article = host.querySelector('article.quiz');
+    expect(article).not.toBeNull();
+    expect(article!.querySelector('h2')?.textContent).toBe('Check yourself');
+    expect(article!.querySelector('.empty')).not.toBeNull();
+    expect(host.querySelector('.q-block')).toBeNull();
+  });
+
   it('wraps each question in a .q-block opened by a mono 1-based counter', () => {
     seed({ 1: 0 });
     render(quiz(1, 'Check yourself', 3));
@@ -200,6 +237,46 @@ describe('QuizItem shell (T4)', () => {
     const row = host.querySelector('.submit-row');
     expect(row).not.toBeNull();
     expect(row!.querySelector('button')?.textContent?.trim()).toBe('Submit answer');
+  });
+});
+
+describe('QuizItem type dispatch (T4)', () => {
+  // T4 rewrapped the {#each} body, so every arm of the preserved dispatch chain
+  // needs a witness inside its own .q-block — a single_choice-only fixture lets
+  // any other arm be deleted with the whole gate still green.
+  it('renders each question type inside its own .q-block and posts a mixed map', async () => {
+    seed({ 2: 0 });
+    render(mixedQuiz(2));
+
+    const blocks = [...host.querySelectorAll('.q-block')];
+    expect(blocks.length).toBe(4);
+    const radio = blocks[0].querySelector<HTMLInputElement>('input[type="radio"]');
+    const checkbox = blocks[1].querySelector<HTMLInputElement>('input[type="checkbox"]');
+    const numeric = blocks[2].querySelector<HTMLInputElement>('input[inputmode="decimal"]');
+    const text = blocks[3].querySelector<HTMLInputElement>('input[type="text"]');
+    expect(radio).not.toBeNull();
+    expect(checkbox).not.toBeNull();
+    expect(numeric).not.toBeNull();
+    expect(text).not.toBeNull();
+    expect(text!.hasAttribute('inputmode')).toBe(false); // not the numeric field
+
+    expect(submitButton().disabled).toBe(true);
+    radio!.click();
+    checkbox!.click();
+    // The string branch of `allAnswered` is reachable only through these two.
+    typeInto(numeric!, '42');
+    typeInto(text!, 'a vector');
+    flushSync();
+
+    expect(submitButton().disabled).toBe(false);
+    submitButton().click();
+    await settle();
+
+    const [, body] = postSpy.mock.calls[0] as unknown as [
+      string,
+      { answers: Record<string, number[] | string> },
+    ];
+    expect(body.answers).toEqual({ 201: [2011], 202: [2021], 203: '42', 204: 'a vector' });
   });
 });
 
@@ -259,6 +336,51 @@ describe('QuizItem submit contract (D1, T4)', () => {
   });
 });
 
+describe('QuizItem submit recovery (T4)', () => {
+  // `finally { inflight = null }` is what lets the student submit again; drop it
+  // and Submit stays disabled + spinning forever, with no other gate noticing.
+  it('re-enables Submit after Try again', async () => {
+    seed({ 1: 0 });
+    render(quiz(1, 'Check yourself', 1));
+    answerAll();
+    submitButton().click();
+    await settle();
+
+    buttonNamed('Try again').click();
+    flushSync();
+    answerAll(); // tryAgain() clears the answers
+
+    const btn = submitButton();
+    expect(btn.disabled).toBe(false);
+    expect(btn.querySelector('.spinner')).toBeNull();
+
+    btn.click();
+    await settle();
+    expect(postSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-enables Submit after a failed submit, keeping the answers', async () => {
+    seed({ 1: 0 });
+    render(quiz(1, 'Check yourself', 1));
+    postSpy.mockRejectedValueOnce(new Error('network down'));
+    answerAll();
+    submitButton().click();
+    await settle();
+
+    // The catch ran, so there is no result card; the answers survive, so the
+    // same submission can be retried without re-answering.
+    expect(host.querySelector('.result')).toBeNull();
+    const btn = submitButton();
+    expect(btn.disabled).toBe(false);
+    expect(btn.querySelector('.spinner')).toBeNull();
+
+    btn.click();
+    await settle();
+    expect(postSpy).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('.result')).not.toBeNull();
+  });
+});
+
 describe('QuizItem attempts line (T4)', () => {
   it('renders the remaining count with a mono numeral, pluralised', () => {
     seed({ 1: 1 });
@@ -283,6 +405,16 @@ describe('QuizItem attempts line (T4)', () => {
     // attempt_count === max fires the auto-reveal GET, stubbed never-resolving,
     // so `revealed` is still null and `locked` still false at this point.
     expect(getSpy).toHaveBeenCalledWith('/api/items/1/reveal');
+    expect(host.querySelector('.hint')?.textContent?.trim()).toBe('0 attempts left');
+  });
+
+  it('never renders a negative remaining', () => {
+    // More attempts recorded than the version allows (e.g. max_quiz_attempts
+    // lowered after attempts were spent). Without the pinned Math.max(0, …)
+    // clamp this reads "-2 attempts left".
+    seed({ 1: MAX + 2 });
+    render(quiz(1, 'Check yourself', 1));
+
     expect(host.querySelector('.hint')?.textContent?.trim()).toBe('0 attempts left');
   });
 
