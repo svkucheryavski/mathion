@@ -66,6 +66,26 @@ function rows(): HTMLLabelElement[] {
 function revealOf(row: Element): string[] {
   return REVEAL.filter((c) => row.classList.contains(c));
 }
+/**
+ * Constraint 3: every decorative glyph is an `aria-hidden` 16-unit SVG painted
+ * with `currentColor`. Asserting presence alone is not enough — the SVGs are
+ * `fill="none"`, so deleting the stroke leaves an invisible glyph that every
+ * class-level assertion still passes.
+ */
+function expectGlyph(svg: Element | null): void {
+  expect(svg).not.toBeNull();
+  expect(svg!.getAttribute('aria-hidden')).toBe('true');
+  expect(svg!.getAttribute('viewBox')).toBe('0 0 16 16');
+  expect(svg!.getAttribute('fill')).toBe('none');
+  expect(svg!.getAttribute('stroke')).toBe('currentColor');
+  expect(svg!.getAttribute('stroke-width')).toBe('1.9');
+}
+
+/** Indices whose NATIVE input reports checked — the drawn .ctl is decoration. */
+function checkedOf(): number[] {
+  return rows().flatMap((r, i) =>
+    r.querySelector<HTMLInputElement>('input')!.checked ? [i] : []);
+}
 function pick(index: number): void {
   rows()[index].querySelector<HTMLInputElement>('input[type="radio"]')!.click();
   flushSync();
@@ -80,8 +100,10 @@ describe('SingleChoiceQuestion structure (T2)', () => {
     expect(rows().length).toBe(4);
     rows().forEach((row) => {
       expect(row.parentElement).toBe(opts);
-      // The native input stays the real focusable/checkable control.
+      // The native input stays the real focusable/checkable control, and the
+      // shared `name` is what makes the four inputs one arrow-navigable group.
       expect(row.querySelector('input[type="radio"]')).not.toBeNull();
+      expect(row.querySelector<HTMLInputElement>('input')!.name).toBe('q-1');
       // The drawn control is a real element, never a pseudo-element.
       expect(row.querySelector('span.ctl')).not.toBeNull();
     });
@@ -92,11 +114,14 @@ describe('SingleChoiceQuestion structure (T2)', () => {
 
     expect(rows().every((r) => !r.classList.contains('selected'))).toBe(true);
     expect(host.querySelector('.ctl .dot')).toBeNull();
+    expect(checkedOf()).toEqual([]);
 
     pick(2);
 
     expect(rows()[2].classList.contains('selected')).toBe(true);
     expect(rows()[2].querySelector('.ctl .dot')).not.toBeNull();
+    // The painted row is decoration; `checked` is what AT and the form read.
+    expect(checkedOf()).toEqual([2]);
     // Single choice: exactly one row selected, one dot in the whole question.
     expect(rows().filter((r) => r.classList.contains('selected')).length).toBe(1);
     expect(host.querySelectorAll('.ctl .dot').length).toBe(1);
@@ -108,7 +133,12 @@ describe('SingleChoiceQuestion pre-reveal (T2)', () => {
     render();
     pick(2);
 
-    rows().forEach((row) => expect(revealOf(row)).toEqual([]));
+    rows().forEach((row) => {
+      expect(revealOf(row)).toEqual([]);
+      // The inverse of the locked test: an answerable row must stay answerable.
+      expect(row.classList.contains('locked')).toBe(false);
+      expect(row.querySelector<HTMLInputElement>('input')!.disabled).toBe(false);
+    });
     expect(host.querySelector('.mark')).toBeNull();
     expect(host.querySelector('.sr-only')).toBeNull();
   });
@@ -125,6 +155,7 @@ describe('SingleChoiceQuestion pre-reveal (T2)', () => {
     });
     // The student's own pick stays visible on the score screen.
     expect(rows()[2].classList.contains('selected')).toBe(true);
+    expect(checkedOf()).toEqual([2]);
   });
 });
 
@@ -139,6 +170,8 @@ describe('SingleChoiceQuestion reveal (D2, T2)', () => {
       // underneath the reveal.
       expect(row.querySelector<HTMLInputElement>('input')!.disabled).toBe(true);
     });
+    // A revealed row still reports the student's own pick to AT.
+    expect(checkedOf()).toEqual([0]);
   });
 
   it('labels a wrong pick and the correct option the student missed', () => {
@@ -146,11 +179,11 @@ describe('SingleChoiceQuestion reveal (D2, T2)', () => {
     const [wrong, neutral, missed] = [rows()[0], rows()[1], rows()[2]];
 
     expect(revealOf(wrong)).toEqual(['reveal-wrong']);
-    expect(wrong.querySelector('svg.mark[aria-hidden="true"]')).not.toBeNull();
+    expectGlyph(wrong.querySelector('svg.mark'));
     expect(wrong.querySelector('.sr-only')?.textContent).toBe('Your answer — incorrect');
 
     expect(revealOf(missed)).toEqual(['reveal-missed']);
-    expect(missed.querySelector('svg.mark[aria-hidden="true"]')).not.toBeNull();
+    expectGlyph(missed.querySelector('svg.mark'));
     expect(missed.querySelector('.sr-only')?.textContent).toBe('Correct answer — you missed this');
 
     // The leftover incorrect, unchosen rows recede with no mark and no SR label.
@@ -172,7 +205,7 @@ describe('SingleChoiceQuestion reveal (D2, T2)', () => {
 
     const correct = rows()[2];
     expect(revealOf(correct)).toEqual(['reveal-correct']);
-    expect(correct.querySelector('svg.mark[aria-hidden="true"]')).not.toBeNull();
+    expectGlyph(correct.querySelector('svg.mark'));
     expect(correct.querySelector('.sr-only')?.textContent).toBe('Correct answer');
     // Unanswered is NOT "missed" — that reads as the student's failure.
     expect(correct.classList.contains('reveal-missed')).toBe(false);

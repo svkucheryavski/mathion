@@ -27,9 +27,11 @@
   <div class="opts">
     {#each question.options as opt (opt.id)}
       {@const isChosen = selected.has(opt.id)}
-      <!-- `isCorrect` is reveal-gated (spec-pinned form): false for every
-           option pre-submit, which is what keeps isWrongPick/isRevealNeutral
-           from firing the instant the student picks. -->
+      <!-- `isCorrect` is authored reveal-gated (the spec-pinned form), so it is
+           false for every option pre-submit. That alone does NOT hold the other
+           predicates back — isWrongPick/isRevealNeutral NEGATE isCorrect, so
+           false makes their term true; their own explicit `isRevealed &&` is
+           the load-bearing guard that stops a pick turning red/grey pre-submit. -->
       {@const isCorrect = isRevealed && correctSet.has(opt.id)}
       {@const isRevealCorrect = isCorrect && (isChosen || !studentAnswered)}
       {@const isWrongPick = isRevealed && isChosen && !isCorrect}
