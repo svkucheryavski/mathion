@@ -7,7 +7,7 @@ const CORRECT = 13;
 
 function question(): SingleChoiceQuestion {
   return {
-    id: 1,
+    id: 7,   // NOT 1 — a literal `q-1` must not pass the name assertion
     order: 1,
     type: 'single_choice',
     text_md: '',
@@ -122,7 +122,7 @@ describe('SingleChoiceQuestion structure (T2)', () => {
       // The native input stays the real focusable/checkable control, and the
       // shared `name` is what makes the four inputs one arrow-navigable group.
       expect(row.querySelector('input[type="radio"]')).not.toBeNull();
-      expect(row.querySelector<HTMLInputElement>('input')!.name).toBe('q-1');
+      expect(row.querySelector<HTMLInputElement>('input')!.name).toBe('q-7');
       // The drawn control is a real element, never a pseudo-element.
       expect(row.querySelector('span.ctl')).not.toBeNull();
     });
