@@ -183,6 +183,16 @@ describe('QuizItem shell (T4)', () => {
     blocks.forEach((b) => expect(b.querySelector('.q-counter')).not.toBeNull());
   });
 
+  it('explains why Submit is disabled (enumerated (C)15)', () => {
+    seed({ 1: 0 });
+    render(quiz(1, 'Check yourself', 1));
+
+    expect(submitButton().getAttribute('title')).toBe('Answer every question first');
+
+    answerAll();
+    expect(submitButton().hasAttribute('title')).toBe(false);
+  });
+
   it('renders the submit row with the "Submit answer" label', () => {
     seed({ 1: 0 });
     render(quiz(1, 'Check yourself', 1));
@@ -226,14 +236,20 @@ describe('QuizItem submit contract (D1, T4)', () => {
       { answers: Record<string, number[] | string> },
     ];
     expect(path).toBe('/api/items/1/submit');
-    expect(Object.keys(body.answers).sort()).toEqual(
-      item.questions.map((q) => String(q.id)).sort(),
-    );
+    const expected: Record<string, number[]> = {};
+    for (const q of item.questions) expected[String(q.id)] = [q.id * 10 + 1];
+    expect(body.answers).toEqual(expected);
 
-    // In flight: the button holds the spinner and refuses a second submit.
+    // In flight: the button holds the spinner, is disabled, and says why.
     const btn = submitButton();
     expect(btn.disabled).toBe(true);
     expect(btn.querySelector('.spinner')).not.toBeNull();
+    expect(btn.getAttribute('title')).toBe('Submitting…');
+
+    // A disabled button's click() invokes no handler, so re-enable it: that is
+    // what makes the second click actually re-enter submit() and prove ITS
+    // `inflight !== null` early return — not merely the DOM-level guard above.
+    btn.disabled = false;
     btn.click();
     flushSync();
     expect(postSpy).toHaveBeenCalledTimes(1);

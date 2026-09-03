@@ -216,9 +216,12 @@
   }
   .quiz h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
   .empty { color: var(--muted); }
-  /* Counter + question + explanation read as one unit; 6px is the tight
-     intra-group step (the same one the player's item strip uses). */
-  .q-block { display: flex; flex-direction: column; gap: 6px; }
+  /* Counter + question + explanation read as one unit. */
+  .q-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px; /* Constraint 5(b) no-ref — the tight intra-group step, as on the player's item strip (ref 2112) */
+  }
   .q-counter { font-size: 11.5px; /* ref 2123 */ color: var(--muted); }
   .submit-row { display: flex; align-items: center; gap: 12px; /* ref 2132 */ }
   .hint { color: var(--muted); font-size: 12.5px; /* ref 2134 */ margin: 0; }
@@ -227,7 +230,7 @@
      the Button children from blockifying under the default stretch. */
   .result {
     background: var(--surface-2);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border); /* Constraint 5(b) no-ref — the standard 1px card border */
     border-radius: var(--radius);
     padding: var(--space-3);
     display: flex;
@@ -236,15 +239,14 @@
     align-items: flex-start;
     margin-top: 0;
   }
-  .meta { color: var(--muted); font-size: 12.5px; /* the secondary-text size */ }
-  /* Information panel: --surface-2 tint + a 3px --primary left rule
-     (visual-spec §4). 8px 10px is the code/textarea padding scale. */
+  .meta { color: var(--muted); font-size: 12.5px; /* Constraint 5(b) no-ref — the 12.5px secondary-text step, as on .hint (ref 2134) */ }
+  /* Information panel: --surface-2 tint + --primary left rule (visual-spec §4). */
   .exp {
     background: var(--surface-2);
-    border-left: 3px solid var(--primary);
+    border-left: 3px solid var(--primary); /* Constraint 5(b) no-ref — visual-spec §4's 3px information-banner rule */
     color: var(--text-2);
-    font-size: 13px;
-    padding: 8px 10px;
+    font-size: 13px; /* Constraint 5(b) no-ref — the body-copy step below the 14.5px prompt */
+    padding: 8px 10px; /* Constraint 5(b) no-ref — the code/textarea padding scale (--control-pad-textarea) */
     margin: 0;
   }
 </style>
