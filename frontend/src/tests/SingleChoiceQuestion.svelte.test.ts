@@ -117,6 +117,7 @@ describe('SingleChoiceQuestion structure (T2)', () => {
     // control's accessible name — both render, neither is asserted elsewhere.
     expect(host.querySelector('legend .text')!.innerHTML).toBe('<p>Which of these is prime?</p>');
     expect(rows().map((r) => r.textContent!.trim())).toEqual(['Four', 'Six', 'Seven', 'Nine']);
+
     rows().forEach((row) => {
       expect(row.parentElement).toBe(opts);
       // The native input stays the real focusable/checkable control, and the
@@ -126,6 +127,14 @@ describe('SingleChoiceQuestion structure (T2)', () => {
       // The drawn control is a real element, never a pseudo-element.
       expect(row.querySelector('span.ctl')).not.toBeNull();
     });
+
+    // The group name must TRACK the question, not merely equal the fixture's id
+    // — a hardcoded literal would put two single-choice questions in one native
+    // radio group, where a pick in the second silently unchecks the first.
+    props.question = { ...question(), id: 8 };
+    flushSync();
+    expect(rows().map((r) => r.querySelector<HTMLInputElement>('input')!.name))
+      .toEqual(['q-8', 'q-8', 'q-8', 'q-8']);
   });
 
   it('marks the picked row .selected and renders its inner dot only when chosen', () => {
