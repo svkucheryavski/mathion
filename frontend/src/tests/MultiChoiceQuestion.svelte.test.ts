@@ -66,17 +66,33 @@ function revealOf(row: Element): string[] {
 }
 /**
  * Constraint 3: every decorative glyph is an `aria-hidden` 16-unit SVG painted
- * with `currentColor`. Asserting presence alone is not enough — the SVGs are
- * `fill="none"`, so deleting the stroke leaves an invisible glyph that every
- * class-level assertion still passes.
+ * with `currentColor`. Presence alone is not enough — the SVGs are `fill="none"`,
+ * so a missing stroke leaves an invisible glyph, and the DRAWING lives entirely
+ * in the children: delete the tick's `<polyline>` and the SVG renders nothing,
+ * delete one of the cross's two `<line>`s and the × becomes a slash.
  */
-function expectGlyph(svg: Element | null): void {
+function expectGlyphChrome(svg: Element | null, size: string): void {
   expect(svg).not.toBeNull();
   expect(svg!.getAttribute('aria-hidden')).toBe('true');
   expect(svg!.getAttribute('viewBox')).toBe('0 0 16 16');
   expect(svg!.getAttribute('fill')).toBe('none');
   expect(svg!.getAttribute('stroke')).toBe('currentColor');
   expect(svg!.getAttribute('stroke-width')).toBe('1.9');
+  expect(svg!.getAttribute('stroke-linecap')).toBe('round');
+  expect(svg!.getAttribute('stroke-linejoin')).toBe('round');
+  expect(svg!.getAttribute('width')).toBe(size);
+  expect(svg!.getAttribute('height')).toBe(size);
+}
+function expectTick(svg: Element | null, size = '13'): void {
+  expectGlyphChrome(svg, size);
+  expect([...svg!.querySelectorAll('polyline')].map((p) => p.getAttribute('points')))
+    .toEqual(['3,8.6 6.4,12 13,4.6']);
+}
+function expectCross(svg: Element | null): void {
+  expectGlyphChrome(svg, '13');
+  expect([...svg!.querySelectorAll('line')].map(
+    (l) => ['x1', 'y1', 'x2', 'y2'].map((a) => l.getAttribute(a)).join(',')))
+    .toEqual(['4.2,4.2,11.8,11.8', '11.8,4.2,4.2,11.8']);
 }
 
 /** Indices whose NATIVE input reports checked — the drawn .ctl is decoration. */
@@ -96,6 +112,10 @@ describe('MultiChoiceQuestion structure (T2)', () => {
     const opts = host.querySelector('.opts');
     expect(opts).not.toBeNull();
     expect(rows().length).toBe(4);
+    // The prompt is the fieldset's accessible name and each row's text is its
+    // control's accessible name — both render, neither is asserted elsewhere.
+    expect(host.querySelector('legend .text')!.innerHTML).toBe('<p>Which of these are even?</p>');
+    expect(rows().map((r) => r.textContent!.trim())).toEqual(['Two', 'Three', 'Six', 'Nine']);
     rows().forEach((row) => {
       expect(row.parentElement).toBe(opts);
       expect(row.querySelector('input[type="checkbox"]')).not.toBeNull();
@@ -115,7 +135,7 @@ describe('MultiChoiceQuestion structure (T2)', () => {
     expect(rows()[0].classList.contains('selected')).toBe(true);
     expect(rows()[2].classList.contains('selected')).toBe(true);
     expect(rows()[1].classList.contains('selected')).toBe(false);
-    expectGlyph(rows()[0].querySelector('.ctl svg.check'));
+    expectTick(rows()[0].querySelector('.ctl svg.check'), '11');
     expect(rows()[1].querySelector('.ctl svg.check')).toBeNull();
     expect(host.querySelectorAll('.ctl svg.check').length).toBe(2);
     // The painted row is decoration; `checked` is what AT and the form read.
@@ -187,7 +207,9 @@ describe('MultiChoiceQuestion reveal (D2, T2)', () => {
     expect(rows()[1].querySelector('.sr-only')?.textContent).toBe('Your answer — incorrect');
     expect(rows()[2].querySelector('.sr-only')?.textContent).toBe('Correct answer — you missed this');
 
-    [0, 1, 2].forEach((i) => expectGlyph(rows()[i].querySelector('svg.mark')));
+    expectTick(rows()[0].querySelector('svg.mark'));    // reveal-correct
+    expectCross(rows()[1].querySelector('svg.mark'));   // reveal-wrong
+    expectTick(rows()[2].querySelector('svg.mark'));    // reveal-missed
     expect(rows()[3].querySelector('svg.mark')).toBeNull();
     expect(rows()[3].querySelector('.sr-only')).toBeNull();
   });
@@ -197,8 +219,8 @@ describe('MultiChoiceQuestion reveal (D2, T2)', () => {
 
     // The .ctl mark reports the student's SELECTION, the flush-right mark
     // reports CORRECTNESS — a chosen-correct row deliberately shows both.
-    expectGlyph(rows()[0].querySelector('.ctl svg.check'));
-    expectGlyph(rows()[1].querySelector('.ctl svg.check'));
+    expectTick(rows()[0].querySelector('.ctl svg.check'), '11');
+    expectTick(rows()[1].querySelector('.ctl svg.check'), '11');
     expect(rows()[2].querySelector('.ctl svg.check')).toBeNull();
     expect(rows()[3].querySelector('.ctl svg.check')).toBeNull();
   });

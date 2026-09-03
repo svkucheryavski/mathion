@@ -3,7 +3,6 @@ import { mount, unmount, flushSync } from 'svelte';
 import SingleChoice from '../components/items/quiz/SingleChoiceQuestion.svelte';
 import type { SingleChoiceQuestion } from '../lib/types';
 
-const IDS = [11, 12, 13, 14];
 const CORRECT = 13;
 
 function question(): SingleChoiceQuestion {
@@ -68,17 +67,33 @@ function revealOf(row: Element): string[] {
 }
 /**
  * Constraint 3: every decorative glyph is an `aria-hidden` 16-unit SVG painted
- * with `currentColor`. Asserting presence alone is not enough — the SVGs are
- * `fill="none"`, so deleting the stroke leaves an invisible glyph that every
- * class-level assertion still passes.
+ * with `currentColor`. Presence alone is not enough — the SVGs are `fill="none"`,
+ * so a missing stroke leaves an invisible glyph, and the DRAWING lives entirely
+ * in the children: delete the tick's `<polyline>` and the SVG renders nothing,
+ * delete one of the cross's two `<line>`s and the × becomes a slash.
  */
-function expectGlyph(svg: Element | null): void {
+function expectGlyphChrome(svg: Element | null, size: string): void {
   expect(svg).not.toBeNull();
   expect(svg!.getAttribute('aria-hidden')).toBe('true');
   expect(svg!.getAttribute('viewBox')).toBe('0 0 16 16');
   expect(svg!.getAttribute('fill')).toBe('none');
   expect(svg!.getAttribute('stroke')).toBe('currentColor');
   expect(svg!.getAttribute('stroke-width')).toBe('1.9');
+  expect(svg!.getAttribute('stroke-linecap')).toBe('round');
+  expect(svg!.getAttribute('stroke-linejoin')).toBe('round');
+  expect(svg!.getAttribute('width')).toBe(size);
+  expect(svg!.getAttribute('height')).toBe(size);
+}
+function expectTick(svg: Element | null, size = '13'): void {
+  expectGlyphChrome(svg, size);
+  expect([...svg!.querySelectorAll('polyline')].map((p) => p.getAttribute('points')))
+    .toEqual(['3,8.6 6.4,12 13,4.6']);
+}
+function expectCross(svg: Element | null): void {
+  expectGlyphChrome(svg, '13');
+  expect([...svg!.querySelectorAll('line')].map(
+    (l) => ['x1', 'y1', 'x2', 'y2'].map((a) => l.getAttribute(a)).join(',')))
+    .toEqual(['4.2,4.2,11.8,11.8', '11.8,4.2,4.2,11.8']);
 }
 
 /** Indices whose NATIVE input reports checked — the drawn .ctl is decoration. */
@@ -98,6 +113,10 @@ describe('SingleChoiceQuestion structure (T2)', () => {
     const opts = host.querySelector('.opts');
     expect(opts).not.toBeNull();
     expect(rows().length).toBe(4);
+    // The prompt is the fieldset's accessible name and each row's text is its
+    // control's accessible name — both render, neither is asserted elsewhere.
+    expect(host.querySelector('legend .text')!.innerHTML).toBe('<p>Which of these is prime?</p>');
+    expect(rows().map((r) => r.textContent!.trim())).toEqual(['Four', 'Six', 'Seven', 'Nine']);
     rows().forEach((row) => {
       expect(row.parentElement).toBe(opts);
       // The native input stays the real focusable/checkable control, and the
@@ -179,11 +198,11 @@ describe('SingleChoiceQuestion reveal (D2, T2)', () => {
     const [wrong, neutral, missed] = [rows()[0], rows()[1], rows()[2]];
 
     expect(revealOf(wrong)).toEqual(['reveal-wrong']);
-    expectGlyph(wrong.querySelector('svg.mark'));
+    expectCross(wrong.querySelector('svg.mark'));
     expect(wrong.querySelector('.sr-only')?.textContent).toBe('Your answer — incorrect');
 
     expect(revealOf(missed)).toEqual(['reveal-missed']);
-    expectGlyph(missed.querySelector('svg.mark'));
+    expectTick(missed.querySelector('svg.mark'));
     expect(missed.querySelector('.sr-only')?.textContent).toBe('Correct answer — you missed this');
 
     // The leftover incorrect, unchosen rows recede with no mark and no SR label.
@@ -205,13 +224,11 @@ describe('SingleChoiceQuestion reveal (D2, T2)', () => {
 
     const correct = rows()[2];
     expect(revealOf(correct)).toEqual(['reveal-correct']);
-    expectGlyph(correct.querySelector('svg.mark'));
+    expectTick(correct.querySelector('svg.mark'));
     expect(correct.querySelector('.sr-only')?.textContent).toBe('Correct answer');
     // Unanswered is NOT "missed" — that reads as the student's failure.
     expect(correct.classList.contains('reveal-missed')).toBe(false);
-    IDS.filter((id) => id !== CORRECT).forEach((_, i) => {
-      const row = rows()[i === 2 ? 3 : i];
-      if (row !== correct) expect(revealOf(row)).toEqual(['reveal-neutral']);
-    });
+    // Every other row (CORRECT is index 2) recedes as neutral.
+    [0, 1, 3].forEach((i) => expect(revealOf(rows()[i])).toEqual(['reveal-neutral']));
   });
 });
