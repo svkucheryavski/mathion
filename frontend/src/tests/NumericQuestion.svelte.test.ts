@@ -104,6 +104,10 @@ describe('NumericQuestion structure (T3)', () => {
     // also pass with the answer rendered above the field.
     expect([...row!.children].map((el) => `${el.tagName}.${el.className.split(' ')[0]}`))
       .toEqual(['DIV.text', 'INPUT.num', 'P.correct-line']);
+    // None of the four carries an inline style: it would beat every rule the
+    // dist gate pins, so the gate is only meaningful while they carry none.
+    [row!, host.querySelector('.text')!, field(), correctLine()!]
+      .forEach((el) => expect(el.hasAttribute('style')).toBe(false));
   });
 
   it('names the field with its own prompt for assistive tech', () => {

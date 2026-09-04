@@ -470,7 +470,9 @@ describe('QuizItem result card (T4)', () => {
         // non-nullable in the schema: [] is the no-choice-answer shape
         correct_option_ids: q.type === 'single_choice' ? [2011]
           : q.type === 'multiple_choice' ? [2021] : [],
-        correct_numeric: q.type === 'numeric_answer' ? 80 : null,
+        // 0, not 80: `correct_numeric ?? null` and `|| null` differ only on a
+        // falsy-but-valid answer, and 0 is one a teacher really authors.
+        correct_numeric: q.type === 'numeric_answer' ? 0 : null,
         correct_text: q.type === 'text_answer' ? 'Photosynthesis' : null,
         student_answer: q.id === 203 ? '42' : q.id === 204 ? 'a vector' : null,
       })),
@@ -488,7 +490,7 @@ describe('QuizItem result card (T4)', () => {
     // Inert, and shown next to the correct answer so the two can be compared.
     expect(numeric.disabled).toBe(true);
     expect(text.disabled).toBe(true);
-    expect(blocks[2].querySelector('.correct-line')?.textContent).toBe('Correct answer: 80');
+    expect(blocks[2].querySelector('.correct-line')?.textContent).toBe('Correct answer: 0');
   });
 
   it('renders the explanation panel for a revealed question', async () => {

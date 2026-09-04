@@ -46,10 +46,12 @@
      read alike inside one quiz — without it this div inherits body copy
      (14px/1.5/--text) and a quiz mixing question types shows two prompt sizes.
      spec:131 pins the treatment to `legend`; this div takes the four
-     declarations that actually change its rendering. `font-weight:400` is
-     deliberately omitted: a div is already 400, so the legend needed it only to
-     undo an authored 500 and here it would be an unfalsifiable pin. */
-  .text { font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ color: var(--text-2); text-wrap: pretty; }
+     declarations spec:131 lists. `font-weight:400` is inert TODAY (a div is
+     already 400 — the legend needed it only to undo an authored 500), but it is
+     pinned anyway: the gate compares each rule's full declaration set, so it is
+     falsifiable, and it makes the prompt immune to a future ancestor weight
+     exactly as T2's legend already is. */
+  .text { font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
      the .row gap already owns prompt→field. */

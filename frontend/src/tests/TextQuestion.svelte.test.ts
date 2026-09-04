@@ -104,6 +104,10 @@ describe('TextQuestion structure (T3)', () => {
     // also pass with the answer rendered above the field.
     expect([...row!.children].map((el) => `${el.tagName}.${el.className.split(' ')[0]}`))
       .toEqual(['DIV.text', 'INPUT.txt', 'P.correct-line']);
+    // None of the four carries an inline style: it would beat every rule the
+    // dist gate pins, so the gate is only meaningful while they carry none.
+    [row!, host.querySelector('.text')!, field(), correctLine()!]
+      .forEach((el) => expect(el.hasAttribute('style')).toBe(false));
   });
 
   it('names the field with its own prompt for assistive tech', () => {
@@ -172,6 +176,10 @@ describe('TextQuestion reveal (D2, T3)', () => {
     expect(answer.classList.contains('mono')).toBe(false);
   });
 
+  // NOTE: deliberately no empty-string twin of Numeric's `correctValue: 0`
+  // test. 0 is a real numeric answer, so its reveal must survive; '' is not a
+  // real text answer, and pinning it would enshrine a dangling
+  // "Correct answer: " label that the schema allows but nothing should show.
   it('does not judge the student value — the reveal reads the same right or wrong', () => {
     const seen = ['Respiration', CORRECT].map((studentValue) => {
       render({ value: studentValue, disabled: true, correctValue: CORRECT });
