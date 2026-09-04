@@ -103,6 +103,29 @@ describe('NumericQuestion structure (T3)', () => {
       .toEqual(['DIV.text', 'INPUT.num', 'P.correct-line']);
   });
 
+  it('names the field with its own prompt for assistive tech', () => {
+    render();
+
+    const prompt = host.querySelector('.text')!;
+    // Snapshot the STRING: `prompt` is the same live node after the swap below,
+    // so reading `prompt.id` afterwards would read the updated value.
+    const firstId = prompt.id;
+    expect(firstId).not.toBe('');
+    // Without this the a11y tree shows an unnamed textbox: a screen-reader user
+    // tabbing in hears the value and no question. The choice questions get the
+    // same association from <fieldset>/<legend>.
+    expect(field().getAttribute('aria-labelledby')).toBe(firstId);
+
+    // The id must TRACK the question, not be a literal — two of these on one
+    // page would otherwise share an id, and both fields would be named by
+    // whichever prompt the document happened to hold first.
+    props.question = { ...question(), id: 9 };
+    flushSync();
+    const moved = host.querySelector('.text')!;
+    expect(moved.id).not.toBe(firstId);
+    expect(field().getAttribute('aria-labelledby')).toBe(moved.id);
+  });
+
   it('shows the student value and reports every keystroke', () => {
     render();
     expect(field().value).toBe('');

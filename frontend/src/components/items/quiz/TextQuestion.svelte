@@ -10,13 +10,18 @@
   } = $props();
 
   const text = $derived(typeof value === 'string' ? value : '');
+  // The field has no visible <label>; the prompt IS its name, so it needs an
+  // id to point at. Derived from question.id so two of these on one page
+  // cannot collide (the choice questions get this from fieldset/legend).
+  const promptId = $derived(`q-${question.id}-prompt`);
 </script>
 
 <div class="row">
-  <div class="text">{@html question.text_html}</div>
+  <div class="text" id={promptId}>{@html question.text_html}</div>
   <input
     class="txt"
     type="text"
+    aria-labelledby={promptId}
     value={text}
     {disabled}
     oninput={(e) => onanswer((e.currentTarget as HTMLInputElement).value)}
@@ -36,6 +41,14 @@
      14.5px `legend` (spec:131 pins that treatment to `legend` alone), this one
      is body copy. */
   .row { display: flex; flex-direction: column; gap: 16px; /* ref 2120 */ margin: 0; }
+  /* The choice questions' prompt treatment (ref 2125), so both kinds of prompt
+     read alike inside one quiz — without it this div inherits body copy
+     (14px/1.5/--text) and a quiz mixing question types shows two prompt sizes.
+     spec:131 pins the treatment to `legend`; this div takes the four
+     declarations that actually change its rendering. `font-weight:400` is
+     deliberately omitted: a div is already 400, so the legend needed it only to
+     undo an authored 500 and here it would be an unfalsifiable pin. */
+  .text { font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
      the .row gap already owns prompt→field. */
@@ -63,7 +76,28 @@
      `.num:disabled, .txt:disabled` list: `.num` does not exist in this
      stylesheet, so the combined form would emit css_unused_selector for it. */
   .txt:disabled { background: var(--surface-2); color: var(--muted); border-color: var(--border-faint); /* theme-default.css:22, "disabled control borders" */ }
+  /* mechanism: the global `:focus-visible` (base.css:21-25) is (0,1,0) while
+     this scoped field rule is (0,2,0), so the rule's own
+     `border:1px solid var(--border-strong)` out-specifies the global
+     `border-color:var(--primary)` and the only surviving focus signal is a
+     3px --primary-soft halo at 1.12:1 against the page. Restoring it at
+     (0,3,0) is the whole fix. Per-component, NOT a combined `.num,.txt` list:
+     the absent member would warn, exactly as for `:disabled`. */
+  .txt:focus-visible { border-color: var(--primary); }
+  /* Forced-colors drops box-shadow AND border colours are system-forced, and
+     base.css:22's `outline:none` is still in force — so without this a focused
+     field has no indicator at all in that mode. Same restoration T2 made for
+     the option rows. */
+  @media (forced-colors: active) {
+    .txt:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+  }
   /* Reveal shows the correct answer only — no client-side judging. The value
      stays NON-mono: unlike the numeric answer it is prose. */
-  .correct-line { margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px secondary step as QuizItem's .exp */ }
+  /* overflow-wrap: an unbreakable answer would otherwise paint past the
+     viewport and scroll the page.
+     `correct_text` is teacher-authored and capped only at 500 chars
+     (schemas.py:328), so one long unbreakable token scrolls the whole page
+     at 320px — WCAG 1.4.10. `anywhere`, not `break-word`, for the same
+     reason T2 chose it on `.opt`. */
+  .correct-line { overflow-wrap: anywhere; margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px secondary step as QuizItem's .exp */ }
 </style>
