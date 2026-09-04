@@ -18,11 +18,11 @@
 {:else if item.type === 'quiz'}
   <QuizItem {item} />
 {:else if item.type === 'mini_project'}
-  <UnsupportedItem type="mini_project" />
+  <UnsupportedItem />
 {:else if item.type === 'interactive_app'}
   <InteractiveAppItem {item} {isCovered} />
 {:else}
   {@const _x = assertNever(item)}
   {String(_x)}
-  <UnsupportedItem type={(item as { type: string }).type} />
+  <UnsupportedItem />
 {/if}

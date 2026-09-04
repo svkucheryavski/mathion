@@ -139,3 +139,50 @@ it('a /track that resolves after unmount does NOT flip is_covered in the store (
   expect(currentCourse.value?.state.items['7'].is_covered).toBe(false);
   void target;
 });
+
+// --- T5: the ready-only coverage hint (enumerated (B)16) --------------------
+// Ref 10h/1047 shows this line, and it describes real behaviour: coverage is
+// credited in the fetch-success continuation. It is rendered in the READY state
+// only — a "marked covered once opened" promise shown beside "couldn't be
+// loaded" would be a lie, which is why each failure branch asserts its absence
+// rather than relying on one positive case.
+it('renders the cover hint in the ready state', async () => {
+  const target = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  const hint = target.querySelector('.cover-hint');
+  expect(hint).not.toBeNull();
+  expect(hint?.tagName).toBe('P');
+  expect(hint?.textContent).toBe('Marked covered once opened.');
+});
+
+it('does NOT render the cover hint on fetch failure', async () => {
+  fetchSpy.mockImplementation(routed(404));
+  const target = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(target.textContent).toContain("couldn't be loaded");
+  expect(target.querySelector('.cover-hint')).toBeNull();
+});
+
+it('does NOT render the cover hint when no app is uploaded', async () => {
+  const target = mountItem({ item: appItem({ script_url: null }), isCovered: false });
+  await settle();
+  expect(target.textContent).toContain('No app uploaded yet.');
+  expect(target.querySelector('.cover-hint')).toBeNull();
+});
+
+it('does NOT render the cover hint while still loading', () => {
+  // No settle(): the source fetch is still in flight, so status is neither
+  // ready nor a failure branch. flushSync() alone renders the initial state.
+  const target = mountItem({ item: appItem(), isCovered: false });
+  expect(target.querySelector('iframe')).toBeNull();
+  expect(target.querySelector('.cover-hint')).toBeNull();
+});
+
+it('drops the italic from the notice branches (tokens carry the recede)', async () => {
+  fetchSpy.mockImplementation(routed(404));
+  const target = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  const notice = target.querySelector('.notice');
+  expect(notice).not.toBeNull();
+  expect(getComputedStyle(notice!).fontStyle).not.toBe('italic');
+});

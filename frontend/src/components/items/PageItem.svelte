@@ -36,19 +36,69 @@
 </article>
 
 <style>
-  /* The same 652px measure QuizItem takes (ref 2120 at the reference document's
-     16px root — derivation on SequencePlayer's .content), but this article has
-     `padding: var(--space-3)` and `box-sizing:border-box` is global
-     (reset.css:1), so a bare `max-width:652px` would leave only 620px of text.
-     The calc() adds the padding back so the TEXT measure is 652px in both
-     components — that equality is the point of the rule. It equalises the
-     MEASURE, not the EDGES: this article keeps its 16px padding and .quiz has
-     none, so page prose starts (and ends) 16px right of where quiz text does.
-     Harmless — the two item types never render on one screen — but it is not
-     what "the same 652px" would suggest at a glance (laneC-M6). */
-  .page-item { padding: var(--space-3); max-width: calc(652px + 2 * var(--space-3)); }
+  /* §2 article rhythm. `padding:0` (was var(--space-3)) is what lets the
+     652px measure below be the TEXT measure directly: with padding it needed
+     `calc(652px + 2 * var(--space-3))` to compensate, and the prose then
+     started 16px right of where .quiz's does. Zeroing the padding makes the
+     two articles share an EDGE as well as a measure. */
+  .page-item {
+    display: flex;
+    flex-direction: column;
+    gap: 16px; /* ref 2120 */
+    align-items: stretch;
+    padding: 0;
+    /* The same 652px QuizItem takes — ref 2120's measure at the reference
+       document's 16px root; derivation on SequencePlayer's .content. Kept a px
+       literal on purpose: re-expressing it as `68ch` re-introduces the
+       14px-vs-16px shrink this value exists to correct. */
+    max-width: 652px;
+  }
+  .page-item h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
+
+  /* ---- {@html} content styles -------------------------------------------
+     RETAINED, not rewritten: these are load-bearing against reset.css:4, which
+     zeroes ul/ol padding AND their markers, so deleting them strips page
+     content of indentation and bullets entirely. Only re-tokened/retargeted.
+     Every rule stays ANCESTOR-SCOPED under `.content` — a bare top-level
+     `:global(p)` would leak page-content typography app-wide. */
+  .content { color: var(--text-2); }
   .content :global(p) { margin-bottom: var(--space-3); line-height: 1.6; }
   .content :global(h1), .content :global(h2), .content :global(h3) { margin: var(--space-4) 0 var(--space-2); }
+  .content :global(h1) { font-size: 21px; font-weight: 600; color: var(--text); }
+  .content :global(h2) { font-size: 16px; font-weight: 600; color: var(--text); }
+  .content :global(h3) { font-size: 14px; font-weight: 600; color: var(--text); }
+  .content :global(a) { color: var(--primary); }
   .content :global(ul), .content :global(ol) { padding-left: var(--space-4); margin-bottom: var(--space-3); }
-  .content :global(li) { list-style: disc; }
+  /* SPLIT by list type, replacing a blanket `:global(li){list-style:disc}`.
+     reset.css:4 zeroes all markers, so the blanket rule forced BULLETS onto
+     <ol> — ordered lists rendered as bullets instead of 1. 2. 3., a real
+     rendering bug in student content.
+     The `> li` MUST stay INSIDE :global(...): a trailing scoped `li`
+     (`.content :global(ul) li`) is a hard compile error
+     (css_global_invalid_placement — :global can start or end a sequence, not
+     sit in the middle) AND would carry the scope hash, which the {@html}-
+     injected <li> nodes do not have. The direct-child form also handles nested
+     mixed lists — an <ol> inside a <ul> takes decimal for its own items and
+     the outer keeps disc, with no source-order dependence. */
+  .content :global(ul > li) { list-style: disc; }
+  .content :global(ol > li) { list-style: decimal; }
+  /* Inline code: tint + tight inline padding, NO block padding (it must not
+     disturb line boxes). */
+  .content :global(code) {
+    background: var(--surface-2);
+    padding: 2px 4px;
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+  }
+  /* Block code: the tokenised textarea/markdown-code-block padding
+     (theme-default.css:49 = 8px 10px) rather than the literal. overflow-x
+     because a code block requires two-dimensional layout — WCAG 1.4.10 excepts
+     it, and wrapping would shred alignment and indentation. */
+  .content :global(pre) {
+    background: var(--surface-2);
+    padding: var(--control-pad-textarea);
+    border-radius: var(--radius);
+    overflow-x: auto;
+  }
+  .content :global(pre code) { padding: 0; background: none; }
 </style>

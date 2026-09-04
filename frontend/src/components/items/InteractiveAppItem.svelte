@@ -73,7 +73,17 @@
 <article class="interactive-app">
   <h2>{item.title}</h2>
   {#if status === 'ready' && source !== null}
-    <InteractiveFrame scriptSource={source} title={item.title || 'Interactive app'} />
+    <div class="app-card">
+      <InteractiveFrame scriptSource={source} title={item.title || 'Interactive app'} />
+    </div>
+    <!-- ref 10h/1047. Ready-state ONLY: coverage is credited in the
+         fetch-success continuation, so promising "marked covered once opened"
+         beside "couldn't be loaded" would be false. Placement deviates from
+         ref 10h/1046, which puts this line in the player footer — that footer
+         is SequencePlayer's shared chrome, rendered for every item type, and
+         threading an item-specific string up through ItemRouter would be
+         cross-component behavioural plumbing in a restyle slice. -->
+    <p class="cover-hint">Marked covered once opened.</p>
   {:else if status === 'error'}
     <p class="notice">This app couldn't be loaded.</p>
   {:else if status === 'empty'}
@@ -82,6 +92,30 @@
 </article>
 
 <style>
-  .interactive-app { padding: var(--space-3); }
-  .notice { color: var(--muted); font-style: italic; }
+  /* §2 article rhythm — the gap is the sole vertical-rhythm owner. */
+  .interactive-app {
+    display: flex;
+    flex-direction: column;
+    gap: 16px; /* ref 2120 */
+    align-items: stretch;
+    padding: 0;
+  }
+  .interactive-app h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
+  /* Twin of VideoItem's .video-card. InteractiveFrame is shared with the
+     editor preview and is NOT restyled; its root's `margin-bottom:
+     var(--space-3)` (InteractiveFrame.svelte:35) is zeroed through the
+     ANCESTOR-SCOPED form — a bare top-level `:global(.frame)` is forbidden,
+     it would reach the deferred editor previews. Its fixed 600px stays. */
+  .app-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .app-card :global(.frame) { margin-bottom: 0; }
+  /* A named class, not a bare <p>, so the size/colour is grep-able by the gate. */
+  .cover-hint { font-size: 12.5px; color: var(--muted); margin: 0; }
+  /* font-style:italic dropped — the --muted token carries the recede on its
+     own, and italic is not a device this design system uses elsewhere. */
+  .notice { color: var(--muted); margin: 0; }
 </style>
