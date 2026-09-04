@@ -80,6 +80,9 @@ describe('TextQuestion structure (T3)', () => {
     expect(field().classList.contains('mono')).toBe(false);
     expect(field().hasAttribute('inputmode')).toBe(false);
     expect(field().getAttribute('type')).toBe('text');
+    // No inline style: it would beat every rule the dist gate pins, so the
+    // gate is only meaningful while the element carries none.
+    expect(field().hasAttribute('style')).toBe(false);
     expect(field().disabled).toBe(false);
   });
 
@@ -134,6 +137,14 @@ describe('TextQuestion structure (T3)', () => {
 
     expect(props.value).toBe('Photo');
     expect(field().value).toBe('Photo');
+
+    // ...and the field TRACKS the prop after mount, which is how QuizItem's
+    // tryAgain() clears it and how the reveal path feeds the student's own
+    // answer back in. `typeIn` writes field().value itself, so the assertion
+    // above would also pass for a component that ignored `value` entirely.
+    props.value = 'Respiration';
+    flushSync();
+    expect(field().value).toBe('Respiration');
   });
 
   it('goes inert when disabled, still showing what the student typed', () => {

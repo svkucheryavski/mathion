@@ -449,6 +449,48 @@ describe('QuizItem result card (T4)', () => {
     expect(score?.textContent?.trim()).toBe('1 / 2');
   });
 
+  it('restores the student’s own numeric and text answers on auto-reveal', async () => {
+    // Attempts already exhausted, so QuizItem auto-loads the reveal on mount and
+    // `valueFor()` must pre-fill from `revealed.student_answer` — the only path
+    // that repopulates a field the in-progress `answers` map knows nothing
+    // about. Without it a returning student sees empty disabled fields beside
+    // the correct answers, with no way to compare the two.
+    seed({ 2: MAX });
+    const item = mixedQuiz(2);
+    const reveal: QuizRevealResponse = {
+      item_id: 2,
+      attempt_count: MAX,
+      score_correct: 0,
+      score_total: 4,
+      questions: item.questions.map((q) => ({
+        id: q.id,
+        type: q.type,
+        text_html: q.text_html,
+        explanation_html: null,
+        // non-nullable in the schema: [] is the no-choice-answer shape
+        correct_option_ids: q.type === 'single_choice' ? [2011]
+          : q.type === 'multiple_choice' ? [2021] : [],
+        correct_numeric: q.type === 'numeric_answer' ? 80 : null,
+        correct_text: q.type === 'text_answer' ? 'Photosynthesis' : null,
+        student_answer: q.id === 203 ? '42' : q.id === 204 ? 'a vector' : null,
+      })),
+    };
+    getSpy.mockResolvedValue(reveal);
+
+    render(item);
+    await settle();
+
+    const blocks = [...host.querySelectorAll('.q-block')];
+    const numeric = blocks[2].querySelector<HTMLInputElement>('input[inputmode="decimal"]')!;
+    const text = blocks[3].querySelector<HTMLInputElement>('input[type="text"]')!;
+    expect(numeric.value).toBe('42');
+    expect(text.value).toBe('a vector');
+    // Inert, and shown next to the correct answer so the two can be compared.
+    expect(numeric.disabled).toBe(true);
+    expect(text.disabled).toBe(true);
+    expect(blocks[2].querySelector('.correct-line')?.textContent).toBe('Correct answer: 80');
+  });
+
   it('renders the explanation panel for a revealed question', async () => {
     seed({ 1: MAX });
     const item = quiz(1, 'Check yourself', 1);

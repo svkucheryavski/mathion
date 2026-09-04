@@ -80,6 +80,9 @@ describe('NumericQuestion structure (T3)', () => {
     expect(field().classList.contains('mono')).toBe(true);
     expect(field().getAttribute('inputmode')).toBe('decimal');
     expect(field().getAttribute('type')).toBe('text');
+    // No inline style: it would beat every rule the dist gate pins, so the
+    // gate is only meaningful while the element carries none.
+    expect(field().hasAttribute('style')).toBe(false);
     expect(field().disabled).toBe(false);
   });
 
@@ -134,6 +137,14 @@ describe('NumericQuestion structure (T3)', () => {
 
     expect(props.value).toBe('80');
     expect(field().value).toBe('80');
+
+    // ...and the field TRACKS the prop after mount, which is how QuizItem's
+    // tryAgain() clears it and how the reveal path feeds the student's own
+    // answer back in. `typeIn` writes field().value itself, so the assertion
+    // above would also pass for a component that ignored `value` entirely.
+    props.value = '19';
+    flushSync();
+    expect(field().value).toBe('19');
   });
 
   it('goes inert when disabled, still showing what the student typed', () => {
@@ -160,6 +171,13 @@ describe('NumericQuestion reveal (D2, T3)', () => {
     // Constraint 4: this numeral is mono too, so the answer reads at the same
     // font as the field above it.
     expect(answer.classList.contains('mono')).toBe(true);
+  });
+
+  it('reveals a correct answer of 0 — the guard is !== null, not truthiness', () => {
+    render({ value: '5', disabled: true, correctValue: 0 });
+
+    expect(correctLine()!.textContent).toBe('Correct answer: 0');
+    expect(correctLine()!.querySelector('strong')!.classList.contains('mono')).toBe(true);
   });
 
   it('does not judge the student value — the reveal reads the same right or wrong', () => {
