@@ -1,0 +1,152 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { mount, unmount, flushSync } from 'svelte';
+import Text from '../components/items/quiz/TextQuestion.svelte';
+import type { TextQuestion } from '../lib/types';
+
+const CORRECT = 'Photosynthesis';
+
+function question(): TextQuestion {
+  return {
+    id: 6,
+    order: 1,
+    type: 'text_answer',
+    text_md: '',
+    // TWO paragraphs on purpose: the prompt's inter-paragraph rhythm is exactly
+    // what a blanket `.text p { margin:0 }` would destroy, so the fixture has to
+    // be able to show it.
+    text_html: '<p>Plants convert light into chemical energy.</p><p>Name that process.</p>',
+  };
+}
+
+type Props = {
+  question: TextQuestion;
+  value: number[] | string | undefined;
+  onanswer: (ans: string) => void;
+  disabled: boolean;
+  correctValue: string | null;
+};
+
+let host: HTMLDivElement;
+let component: ReturnType<typeof mount> | null = null;
+let props: Props;
+
+/** Mount with QuizItem's real contract: `onanswer` feeds the value back in. */
+function render(over: Partial<Props> = {}): HTMLDivElement {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const reactive = $state<Props>({
+    question: question(),
+    value: undefined,
+    onanswer: (ans: string) => { props.value = ans; },
+    disabled: false,
+    correctValue: null,
+    ...over,
+  });
+  props = reactive;
+  component = mount(Text, { target: host, props: reactive });
+  flushSync();
+  return host;
+}
+
+function teardown(): void {
+  if (component) { unmount(component); component = null; }
+  if (host?.parentNode) host.parentNode.removeChild(host);
+}
+afterEach(teardown);
+
+function field(): HTMLInputElement {
+  return host.querySelector<HTMLInputElement>('input')!;
+}
+function correctLine(): HTMLElement | null {
+  return host.querySelector<HTMLElement>('.correct-line');
+}
+function typeIn(text: string): void {
+  field().value = text;
+  field().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
+describe('TextQuestion structure (T3)', () => {
+  it('renders a local control field, not ui/Input, and keeps prose out of mono', () => {
+    render();
+
+    expect(field().classList.contains('txt')).toBe(true);
+    // ui/Input is NOT usable here: it renders `class="input"` and its prop list
+    // carries no `disabled` (and no rest-spread), so a swap would leave the
+    // field answerable after submit.
+    expect(field().classList.contains('input')).toBe(false);
+    // The answer is prose, not a numeral — Constraint 4's mono is for numerals,
+    // and this is also what tells the text field apart from the numeric one.
+    expect(field().classList.contains('mono')).toBe(false);
+    expect(field().hasAttribute('inputmode')).toBe(false);
+    expect(field().type).toBe('text');
+    expect(field().disabled).toBe(false);
+  });
+
+  it('keeps both prompt paragraphs and hangs prompt, field and answer off .row', () => {
+    render({ value: 'Respiration', disabled: true, correctValue: CORRECT });
+
+    const row = host.querySelector('.row');
+    expect(row).not.toBeNull();
+    // A collapsed prompt would render one paragraph; the rhythm between them is
+    // the last-paragraph-only margin rule's whole reason to exist.
+    expect(host.querySelectorAll('.text p').length).toBe(2);
+    // All three are direct .row children, so the single 16px gap — not any
+    // surviving child margin — owns prompt→field→answer.
+    expect(host.querySelector('.text')!.parentElement).toBe(row);
+    expect(field().parentElement).toBe(row);
+    expect(correctLine()!.parentElement).toBe(row);
+  });
+
+  it('shows the student value and reports every keystroke', () => {
+    render();
+    expect(field().value).toBe('');
+
+    typeIn('Photo');
+
+    expect(props.value).toBe('Photo');
+    expect(field().value).toBe('Photo');
+  });
+
+  it('goes inert when disabled, still showing what the student typed', () => {
+    render({ value: 'Respiration', disabled: true });
+
+    expect(field().disabled).toBe(true);
+    expect(field().value).toBe('Respiration');
+  });
+});
+
+describe('TextQuestion reveal (D2, T3)', () => {
+  it('shows nothing before the reveal', () => {
+    render({ value: 'Respiration' });
+
+    expect(correctLine()).toBeNull();
+  });
+
+  it('shows only the correct answer, and keeps that prose non-mono', () => {
+    render({ value: 'Respiration', disabled: true, correctValue: CORRECT });
+
+    expect(correctLine()!.textContent).toBe('Correct answer: Photosynthesis');
+    const answer = correctLine()!.querySelector('strong')!;
+    expect(answer.textContent).toBe('Photosynthesis');
+    // Deliberately NOT mono — unlike the numeric reveal, this value is prose.
+    expect(answer.classList.contains('mono')).toBe(false);
+  });
+
+  it('does not judge the student value — the reveal reads the same right or wrong', () => {
+    const seen = ['Respiration', CORRECT].map((studentValue) => {
+      render({ value: studentValue, disabled: true, correctValue: CORRECT });
+      const line = correctLine()!;
+      const snapshot = { text: line.textContent, cls: line.className, html: line.innerHTML };
+      // No tick, no cross, no AT verdict: grading a free-text answer is the
+      // backend's job, and D2 pins this reveal to the answer alone.
+      expect(host.querySelector('svg')).toBeNull();
+      expect(host.querySelector('.mark')).toBeNull();
+      expect(host.querySelector('.sr-only')).toBeNull();
+      teardown();
+      return snapshot;
+    });
+
+    expect(seen[0]).toEqual(seen[1]);
+  });
+});
