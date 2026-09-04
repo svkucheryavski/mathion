@@ -46,7 +46,7 @@
   /* The choice questions' prompt treatment (ref 2125), so both kinds of prompt
      read alike inside one quiz — without it this div inherits body copy
      (14px/1.5/--text) and a quiz mixing question types shows two prompt sizes.
-     spec:131 pins the treatment to `legend`; this div takes the four
+     spec:131 pins the treatment to `legend`; this div takes the five
      declarations spec:131 lists. `font-weight:400` is inert TODAY (a div is
      already 400 — the legend needed it only to undo an authored 500), but it is
      pinned anyway: the gate compares each rule's full declaration set, so it is
