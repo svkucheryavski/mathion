@@ -78,11 +78,13 @@
     padding: 0;
     margin: 0; /* the article gap owns the rhythm */
     /* mechanism: the UA `min-inline-size:min-content` would let an over-long
-       unbreakable option widen the whole group past its column — T2 raised the
-       row's min-content width by making `.opt` a flex row with three
-       `flex:0 0 auto` children, which drags every SIBLING row wide too. Zeroing
-       it holds the group at the column width; `.opt`'s `overflow-wrap` is what
-       stops the token overflowing the row at all. */
+       unbreakable word widen the whole group past its column — T2 raised the
+       row's min-content width by making `.opt` a flex row whose `flex:0 0 auto`
+       `.ctl` and `.mark` flank the text — which drags every SIBLING row wide
+       too. `.opt`'s `overflow-wrap` already collapses that for OPTION text, so
+       the case this still catches is the PROMPT: the legend's markdown is
+       outside `.opt`, so zeroing here is what holds the option rows at the
+       column width when a prompt carries an unbreakable token. */
     min-inline-size: 0;
   }
   /* A rendered <legend> is NOT a flex item (it is laid out at the block-start),
