@@ -106,9 +106,9 @@ describe('NumericQuestion structure (T3)', () => {
       .toEqual(['DIV.text', 'INPUT.num', 'P.correct-line']);
     // None of the five carries an inline style: it would beat every rule the
     // dist gate pins, so the gate is only meaningful while they carry none.
-    // The reveal's <strong> is in the list because it is the ONLY element the
-    // dist gate cannot see — it carries no class of its own in the selector
-    // the gate greps, so an inline style there would go unnoticed on both sides.
+    // The reveal's <strong> is in the list because it carries no scoped class
+    // of its own, so no hash-coupled dist grep can address it — an inline style
+    // there would go unnoticed on both sides.
     [row!, host.querySelector('.text')!, field(), correctLine()!,
      correctLine()!.querySelector('strong')!]
       .forEach((el) => expect(el.hasAttribute('style')).toBe(false));
@@ -192,15 +192,23 @@ describe('NumericQuestion reveal (D2, T3)', () => {
     const seen = ['75', '80'].map((studentValue) => {
       render({ value: studentValue, disabled: true, correctValue: CORRECT });
       const line = correctLine()!;
-      // `whole` is the load-bearing one: scoped to .correct-line, this test
-      // could not see a verdict rendered ANYWHERE ELSE in the component, and
-      // the three negative checks below only cover the shapes T2 happens to
-      // use. The property D2 actually pins is that the WHOLE render is
-      // identical for a right and a wrong student value. Svelte sets the
-      // field's `value` as a DOM property, not an attribute, so it does not
-      // leak into innerHTML and make the two runs differ spuriously.
+      // Svelte writes `value` as a DOM PROPERTY, so it never appears in
+      // innerHTML — which makes the field the one piece of student-dependent
+      // state the equality snapshot below is structurally blind to, and so the
+      // one place a verdict could hide (`value={… ? text + ' ✓ correct!' : text}`
+      // passed the whole suite). It legitimately DIFFERS between the two runs,
+      // so it cannot join the snapshot: assert instead that the field echoes
+      // the student's own value verbatim, undecorated.
+      expect(field().value).toBe(studentValue);
+      // Everything else must be identical right vs wrong. `whole` covers the
+      // component subtree (a verdict rendered outside .row), `head` covers
+      // <svelte:head> (rendered outside the mount target entirely).
+      // NOTE: a future NON-judging render derived from the student's value —
+      // a `{text.length} / 500 characters` counter, say — would red this test
+      // with a message accusing the component of judging. Widen deliberately.
       const snapshot = { text: line.textContent, cls: line.className,
-                         html: line.innerHTML, whole: host.innerHTML };
+                         html: line.innerHTML, whole: host.innerHTML,
+                         head: document.head.innerHTML, disabled: field().disabled };
       // No tick, no cross, no AT verdict: grading a numeric answer is the
       // backend's job, and D2 pins this reveal to the answer alone.
       expect(host.querySelector('svg')).toBeNull();

@@ -106,9 +106,9 @@ describe('TextQuestion structure (T3)', () => {
       .toEqual(['DIV.text', 'INPUT.txt', 'P.correct-line']);
     // None of the five carries an inline style: it would beat every rule the
     // dist gate pins, so the gate is only meaningful while they carry none.
-    // The reveal's <strong> is in the list because it is the ONLY element the
-    // dist gate cannot see — it carries no class of its own in the selector
-    // the gate greps, so an inline style there would go unnoticed on both sides.
+    // The reveal's <strong> is in the list because it carries no scoped class
+    // of its own, so no hash-coupled dist grep can address it — an inline style
+    // there would go unnoticed on both sides.
     [row!, host.querySelector('.text')!, field(), correctLine()!,
      correctLine()!.querySelector('strong')!]
       .forEach((el) => expect(el.hasAttribute('style')).toBe(false));
@@ -183,22 +183,32 @@ describe('TextQuestion reveal (D2, T3)', () => {
   // NOTE: deliberately no empty-string twin of Numeric's `correctValue: 0`
   // test. 0 is a real numeric answer, so its reveal must survive; '' is not a
   // real text answer, and pinning it would enshrine a dangling
-  // "Correct answer: " label. Only the Pydantic model would allow one — the
-  // API rejects an empty correct_text at api/questions.py:128-129 (422) and
-  // api/versions.py:311-316 (409), so no reachable state produces it.
+  // "Correct answer: " label. create_question (api/questions.py:49-83) does
+  // NOT validate this; what makes it unreachable is the publish gate
+  // (api/versions.py:311-316, 409) plus the update handler
+  // (api/questions.py:128-129, 422) — a student only ever sees a published
+  // version.
   it('does not judge the student value — the reveal reads the same right or wrong', () => {
     const seen = ['Respiration', CORRECT].map((studentValue) => {
       render({ value: studentValue, disabled: true, correctValue: CORRECT });
       const line = correctLine()!;
-      // `whole` is the load-bearing one: scoped to .correct-line, this test
-      // could not see a verdict rendered ANYWHERE ELSE in the component, and
-      // the three negative checks below only cover the shapes T2 happens to
-      // use. The property D2 actually pins is that the WHOLE render is
-      // identical for a right and a wrong student value. Svelte sets the
-      // field's `value` as a DOM property, not an attribute, so it does not
-      // leak into innerHTML and make the two runs differ spuriously.
+      // Svelte writes `value` as a DOM PROPERTY, so it never appears in
+      // innerHTML — which makes the field the one piece of student-dependent
+      // state the equality snapshot below is structurally blind to, and so the
+      // one place a verdict could hide (`value={… ? text + ' ✓ correct!' : text}`
+      // passed the whole suite). It legitimately DIFFERS between the two runs,
+      // so it cannot join the snapshot: assert instead that the field echoes
+      // the student's own value verbatim, undecorated.
+      expect(field().value).toBe(studentValue);
+      // Everything else must be identical right vs wrong. `whole` covers the
+      // component subtree (a verdict rendered outside .row), `head` covers
+      // <svelte:head> (rendered outside the mount target entirely).
+      // NOTE: a future NON-judging render derived from the student's value —
+      // a `{text.length} / 500 characters` counter, say — would red this test
+      // with a message accusing the component of judging. Widen deliberately.
       const snapshot = { text: line.textContent, cls: line.className,
-                         html: line.innerHTML, whole: host.innerHTML };
+                         html: line.innerHTML, whole: host.innerHTML,
+                         head: document.head.innerHTML, disabled: field().disabled };
       // No tick, no cross, no AT verdict: grading a free-text answer is the
       // backend's job, and D2 pins this reveal to the answer alone.
       expect(host.querySelector('svg')).toBeNull();

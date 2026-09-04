@@ -49,19 +49,31 @@
      spec:131 pins the treatment to `legend`; this div takes the five
      declarations spec:131 lists. `font-weight:400` is inert TODAY (a div is
      already 400 — the legend needed it only to undo an authored 500), but it is
-     pinned anyway: the dist gate compares each rule's full declaration set (so
-     removing this line reds it), and it makes the prompt immune to a future ancestor weight
-     exactly as T2's legend already is. */
+     pinned anyway so the prompt is immune to a future ancestor weight, exactly as
+     T2's legend already is. NOTHING IN-REPO GUARDS THIS RULE: T3's grep list
+     (plan:266) covers only the `.text` paragraph margins, not this typography
+     rule and not the `overflow-wrap` above — deleting either leaves the suite,
+     svelte-check and the build all green. */
   /* overflow-wrap: the prompt renders UNBOUNDED teacher markdown through
      {@html} — a long URL is likelier here than in the bounded answer below,
      and `.row` is a stretch column whose overflow escapes main.content
      (max-width:68ch) and .page (max-width:960px), neither of which clips,
-     giving page-level horizontal scroll (WCAG 1.4.10). T2's `legend` shares
-     this and is out of T3's scope — carried, not fixed here. */
+     giving page-level horizontal scroll (WCAG 1.4.10). It closes the PROSE
+     case only: the shapes that actually reproduce it are separator-free runs
+     (hashes, base64, long slugs) — an ordinary long URL already wraps, since
+     UAX #14 gives a break opportunity after `/`. A fenced code block needs its
+     own rule below, because the UA gives `<pre>` `white-space:pre`, which
+     suppresses wrapping whatever `overflow-wrap` says (measured: 417px of page
+     scroll at 320px viewport, with and without this line). T2's `legend` shares
+     the prose gap and is out of T3's scope — carried, not fixed here. */
   .text { overflow-wrap: anywhere; font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
      the .row gap already owns prompt→field. */
+  /* CommonMark (markdown.py:7) emits fenced AND indented code blocks, and
+     `text_md` is unbounded (schemas.py:323). `white-space:pre` makes the block
+     itself unwrappable, so the only fix is to let IT scroll instead of the page. */
+  .text :global(pre) { overflow-x: auto; max-width: 100%; }
   .text :global(p) { margin: 0 0 var(--space-2); }
   .text :global(p:last-child) { margin: 0; }
   /* A local <input> on the control tokens, NOT ui/Input — whose `mono` is the
