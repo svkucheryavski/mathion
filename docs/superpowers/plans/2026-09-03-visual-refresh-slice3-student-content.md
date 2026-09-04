@@ -145,7 +145,7 @@ Two-lane gate: **codex @ high** + **first-party reviewer @ Opus xhigh**, both ag
 
 - [ ] **Step 4: Run the tests — expect PASS.** `npm test -- SequencePlayer`.
 
-- [ ] **Step 5: Full gate** (Conventions §gate). T1 dist/source greps: `.strip` `margin-bottom:20px`; `.crumbs` `gap:8px` + `flex-wrap:wrap`; `.crumbs a` `color:var(--muted)` (scoped to `.crumbs`, not bare `nav a`); `.crumbs .current` `color:var(--text)`; `.crumbs .sep` `color:var(--faint)`; `.next-label` `white-space:nowrap`; `.next-title` `max-width:22ch` + `text-overflow:ellipsis`; `.content` `max-width:68ch` + `padding:0` **hash-coupled via the SequencePlayer-unique `.strip`** (bare `.content` collides with PageItem). Plus the DOM assertion that `nav.crumbs` has the expected flex-item children.
+- [ ] **Step 5: Full gate** (Conventions §gate). T1 dist/source greps: `.strip` `margin-bottom:20px`; `.crumbs` `gap:8px` + `flex-wrap:wrap`; `.crumbs a` `color:var(--muted)` (scoped to `.crumbs`, not bare `nav a`); `.crumbs .current` `color:var(--text)`; `.crumbs .sep` `color:var(--faint)`; `.next-label` `white-space:nowrap`; `.next-title` `max-width:22ch` + `text-overflow:ellipsis`; `.content` `padding:0` **hash-coupled via the SequencePlayer-unique `.strip`** (bare `.content` collides with PageItem). **The `max-width:68ch` half of this assertion is RETIRED** — spec §103's 2026-09-04 correction found it a 16px→14px unit-porting bug and moved the measure to `.quiz` (`max-width:652px`) and `.page-item` (`max-width:calc(652px + 2 * var(--space-3))`); assert those two instead, plus `68ch` appearing ZERO times in the bundle. **Also assert `.counter` `font-size:12.5px`** (§124(c) raised it from ref 2117's 11.5px; unguarded until revD-I3). Plus the DOM assertion that `nav.crumbs` has the expected flex-item children.
 
 - [ ] **Step 6: Commit.**
 ```bash
@@ -189,7 +189,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 4: Run — expect PASS.** `npm test -- QuizItem`.
 
-- [ ] **Step 5: Full gate.** T4 dist greps: `.q-block`; `.submit-row` `gap:12px`; `.result` `flex-direction:column` + `align-items:flex-start`; the quiz article `/\.quiz\.svelte-[a-z0-9]+[^}]*gap:16px/` + `padding:0` (`.quiz` is QuizItem-unique — verify one hash); the quiz `h2` `/\.quiz\.svelte-[a-z0-9]+ h2[^}]*font-size:16px/`. (The three P/V/I `h2`s are T5's.)
+- [ ] **Step 5: Full gate.** T4 dist greps: `.q-block`; `.submit-row` `gap:12px`; `.result` `flex-direction:column` + `align-items:flex-start`; the quiz article `/\.quiz\.svelte-[a-z0-9]+[^}]*gap:16px/` + `padding:0` (`.quiz` is QuizItem-unique — verify one hash); the quiz `h2` `/\.quiz\.svelte-[a-z0-9]+ h2[^}]*font-size:16px/`; **the quiz measure `/\.quiz\.svelte-[a-z0-9]+[^}]*max-width:652px/`** (§103 correction); **and the two §124 deviation values, unguarded until revD-I3: `/\.q-counter\.svelte-[a-z0-9]+\{[^}]*font-size:12\.5px/` and `/\.q-block\.svelte-[a-z0-9]+\+\.q-block[^}]*border-top:1px solid var\(--border\)/`, plus NEGATIVE assertions that the divider does not use `--border-faint` (the disabled-control token) and that neither `.q-counter` nor `.counter` is left at 11.5px.** (The three P/V/I `h2`s are T5's.)
 
 - [ ] **Step 6: Commit.**
 ```bash

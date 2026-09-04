@@ -106,7 +106,21 @@
      the legend margin above already owns prompt→options. */
   .text :global(p) { margin: 0 0 var(--space-2); }
   .text :global(p:last-child) { margin: 0; }
-  .opts { display: flex; flex-direction: column; gap: 8px; /* ref 2126 */ }
+  /* max-width matches `.txt`'s 480px (TextQuestion.svelte) so every answer
+     control in a quiz — choice rows, text field, numeric field — stops at one
+     shared right edge instead of each question type picking its own. Before
+     the §103 correction the quiz sat at 571px, which hid the difference; the
+     quiz article is now 652px, so an uncapped option row would run the full 652
+     and `.mark`'s `margin-left:auto` would flush the tick far from its label.
+     (An earlier revision of this comment said "now that the quiz fills the 960px
+     page … ~928px" — true only during the brief uncapped window between the two
+     halves of that correction, and false as shipped. revD-M3.)
+     NOTHING IN-REPO GUARDS THE PAIRING: 480px is a literal in three files now
+     (here, MultiChoiceQuestion, TextQuestion) with no shared token — spec §3
+     pins `.txt`'s value as retained verbatim, so it is deliberately not
+     refactored into one. Changing one and not the others silently unaligns
+     the column, and nothing in the suite, svelte-check or the build says so. */
+  .opts { display: flex; flex-direction: column; gap: 8px; /* ref 2126 */ max-width: 480px; }
 
   /* (1) base row */
   .opt {

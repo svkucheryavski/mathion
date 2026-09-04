@@ -207,12 +207,20 @@
 <style>
   /* The article gap is the sole vertical-rhythm owner, so every surviving
      child margin below is zeroed against it. */
+  /* max-width 652px = ref 2120's measure ROUNDED DOWN from 652.8px (68ch at the
+     reference document's 16px root, in the IBM Plex Sans its :14 font link
+     loads; see the derivation on SequencePlayer's .content). Not "exactly the
+     reference measure" — 0.8px short of it, which is why this says rounded. This article has
+     `padding:0`, so 652px IS the content measure — no box-sizing adjustment
+     needed, unlike PageItem. Kept as a px literal on purpose: re-expressing it as
+     `68ch` re-introduces the 14px-vs-16px shrink this value exists to correct. */
   .quiz {
     display: flex;
     flex-direction: column;
     gap: 16px; /* ref 2120 */
     align-items: stretch;
     padding: 0;
+    max-width: 652px;
   }
   .quiz h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
   .empty { color: var(--muted); }
@@ -222,7 +230,39 @@
     flex-direction: column;
     gap: 6px; /* Constraint 5(b) no-ref — the tight intra-group step, as on the player's item strip (ref 2112) */
   }
-  .q-counter { font-size: 11.5px; /* ref 2123 */ color: var(--muted); }
+  /* GROUP BOUNDARY — a deliberate extension of the deviation spec:124 already
+     records. The reference shows exactly ONE question per quiz card, with the
+     counter inline on the h2 baseline, so it never had to express how two
+     questions separate. This surface renders them all at once, where the
+     article's 16px gap against .q-block's 6px left only 10px of
+     differentiation and six questions read as one wall (browser pass on the
+     real stack, 2026-09-04). The hairline is what the gap alone could not say.
+     `+` not `:not(:first-child)`: only a q-block FOLLOWING another gets the
+     rule, so the submit row and result card below are untouched. */
+  .q-block + .q-block {
+    /* --border, NOT --border-faint: theme-default.css:22 documents that token as
+       "disabled control borders", and all 12 of its other uses in src/ are
+       exactly that — including `.opt.locked .ctl` and `.opt.reveal-neutral .ctl`,
+       which paint it on every option ring in THIS view once the quiz locks, so a
+       divider drawn in it is the colour this design uses to mean "disabled".
+       --border-soft is the semantically-labelled "row separators inside a card",
+       but it is LIGHTER (contrast on --bg: --border 1.22:1, --border-faint
+       1.11:1, --border-soft 1.09:1), which works against the very complaint this
+       rule answers. --border is also what the two rules bracketing this quiz on
+       the same screen use (SequencePlayer .strip bottom, footer top). */
+    border-top: 1px solid var(--border);
+    padding-top: 20px; /* Constraint 5(b) no-ref — the group-boundary step, above the 16px article gap */
+  }
+  /* 12.5px, NOT ref 2123's 11.5px. In the reference the counter sits beside a
+     16px h2, where 11.5px reads as a subordinate annotation on the same line.
+     Standing alone above each question it is too small to scan (reported on the
+     real stack, 2026-09-04). 12.5px is NOT borrowed from .hint/.meta, which are
+     sans secondary PROSE — this is mono positional chrome, and its sibling in
+     that class is SequencePlayer's .counter, raised to 12.5px in the same edit
+     so the two do not disagree ~40px apart on one screen. The rule that pairing
+     establishes: positional counters 12.5px, progress ratios ({covered}/{total},
+     e.g. CourseCard.svelte:105 and T7's SequenceLink) stay at 11.5px. */
+  .q-counter { font-size: 12.5px; color: var(--muted); }
   .submit-row { display: flex; align-items: center; gap: 12px; /* ref 2132 */ }
   .hint { color: var(--muted); font-size: 12.5px; /* ref 2134 */ margin: 0; }
   /* --surface-2, not --surface-3: the card sits on the article's inherited

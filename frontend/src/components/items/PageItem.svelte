@@ -36,7 +36,17 @@
 </article>
 
 <style>
-  .page-item { padding: var(--space-3); }
+  /* The same 652px measure QuizItem takes (ref 2120 at the reference document's
+     16px root — derivation on SequencePlayer's .content), but this article has
+     `padding: var(--space-3)` and `box-sizing:border-box` is global
+     (reset.css:1), so a bare `max-width:652px` would leave only 620px of text.
+     The calc() adds the padding back so the TEXT measure is 652px in both
+     components — that equality is the point of the rule. It equalises the
+     MEASURE, not the EDGES: this article keeps its 16px padding and .quiz has
+     none, so page prose starts (and ends) 16px right of where quiz text does.
+     Harmless — the two item types never render on one screen — but it is not
+     what "the same 652px" would suggest at a glance (laneC-M6). */
+  .page-item { padding: var(--space-3); max-width: calc(652px + 2 * var(--space-3)); }
   .content :global(p) { margin-bottom: var(--space-3); line-height: 1.6; }
   .content :global(h1), .content :global(h2), .content :global(h3) { margin: var(--space-4) 0 var(--space-2); }
   .content :global(ul), .content :global(ol) { padding-left: var(--space-4); margin-bottom: var(--space-3); }

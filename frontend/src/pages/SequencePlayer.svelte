@@ -249,8 +249,55 @@
     align-items: center;
     flex-wrap: wrap;
   }
-  .counter { margin-left: auto; font-family: var(--font-mono); font-size: 11.5px; /* ref 2117 */ color: var(--muted); }
-  .content { padding: 0; max-width: 68ch; min-height: 200px; /* ref 2120 */ }
+  /* 12.5px, NOT ref 2117's 11.5px — a deliberate, user-directed deviation
+     applied to BOTH mono "N of M" counters so they stay consistent: this one and
+     QuizItem's .q-counter sit ~40px apart on this screen, and 11.5px was
+     reported as too small to scan on the real stack (2026-09-04). Deviating on
+     one alone would have shipped two different sizes for the same kind of
+     positional chrome. NOTE this reverses spec:379's converged revA-I3, which
+     pinned mono counts product-wide at 11.5px citing mathion-visual-spec.md:250-251
+     — a citation that is still normative in the VENDORED handoff, which is
+     deliberately not edited; spec §124(c) records the deviation instead.
+     THE RULE, split by KIND rather than by scope: a POSITIONAL counter
+     ("Item N of M", "Question N of M") is 12.5px; a PROGRESS RATIO
+     ({covered}/{total}) stays 11.5px. So CourseCard.svelte:105 keeps 11.5px
+     because it is a ratio ("14/22 items"), and so will T7's SequenceLink .count
+     — which is IN this slice, so "CourseCard is the one place left at 11.5px"
+     (an earlier revision of this comment, and of spec:124) is FALSE. The two
+     families never share a screen: ratios live on CourseList and CourseView,
+     positions on the player. */
+  .counter { margin-left: auto; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+  /* No max-width here — the measure lives on the components that have prose to
+     measure (QuizItem, PageItem), not on the player's content slot.
+     WHY THE CAP MOVED, precisely, because the first two attempts at this were
+     both wrong: ref 2120 is `max-width:68ch` on the quiz column of artboard 2c,
+     which is `width:900px` (reference-screens.dc.html:2087) — NOT the 1180px an
+     earlier revision of this comment claimed; 1180px is artboard 2d, a different
+     screen. Inside 2c the card border and its `padding:16px 20px 20px` leave an
+     858px column, so the reference's quiz occupies 76% of its column. The
+     reference document sets no root font-size (its whole stylesheet is
+     `*{box-sizing}` + `body{margin,background}` + `a{color}` — the <style> block
+     is :15-19, its three rules :16-18), so its 68ch resolved at 16px.
+     THE FONT IS LOAD-BEARING, and an earlier revision of this comment implied
+     the opposite by calling those three rules the document's "entire
+     stylesheet": :14 is a <link> to Google Fonts pulling IBM Plex Sans, and
+     `ch` is the advance of "0" in the ELEMENT's font. IBM Plex Sans's zero is
+     exactly 0.6em, so 68 x 0.6 x 16 = 652.8px (measured live: 652.797px). With
+     that link absent the same document falls back to generic sans-serif and the
+     element measures 605px — so a reader who believed there was no stylesheet
+     beyond three rules would port 605, not 653. Rounded to 652px below.
+     Note this app does not touch the root either: --font-size-base:14px is set
+     on `body` (base.css:5), never on html/:root, so `rem` is NOT exposed to this
+     bug — only units resolving against the INHERITED size, i.e. `ch`. A sweep of
+     the whole reference found this was its only such value (revD Part 1). Porting the literal `68ch` into this app,
+     whose base is 14px (theme-default.css:67), silently re-resolved it to 571px
+     — 61.5% of our 928px column, which is exactly the "2/3 of the width" a user
+     reported on the real stack (2026-09-04). The bug was the UNIT, not the cap,
+     so the cap is restored at 652px as a px literal in the two components below;
+     video and interactive apps stay uncapped because they are UI, not prose, and
+     the reference gives them no measure. Do not "simplify" 652px back to a ch
+     value: that is the round trip that caused this. */
+  .content { padding: 0; min-height: 200px; }
   footer {
     display: flex;
     justify-content: space-between;

@@ -55,8 +55,8 @@
      svelte-check and the build all green. */
   /* overflow-wrap: the prompt renders UNBOUNDED teacher markdown through
      {@html} — a long URL is likelier here than in the bounded answer below,
-     and `.row` is a stretch column whose overflow escapes main.content
-     (max-width:68ch) and .page (max-width:960px), neither of which clips,
+     and `.row` is a stretch column whose overflow escapes the quiz article
+     (max-width:652px) and .page (max-width:960px), neither of which clips,
      giving page-level horizontal scroll (WCAG 1.4.10). Measured in Chromium
      at 320px: it takes NO break opportunity after `/` or `.`, only at `-`, so
      a slash- or dot-joined run, a hyphen-free URL, a hash and a base64 blob
@@ -139,5 +139,5 @@
      column flex container whose ancestors are all definite-width, so its
      min-content contribution is never consulted. `anywhere` is the superset
      and costs nothing: ordinary prose still breaks only at word boundaries. */
-  .correct-line { overflow-wrap: anywhere; margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px step as QuizItem's .exp (QuizItem.svelte:248) */ }
+  .correct-line { overflow-wrap: anywhere; margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px step as QuizItem's .exp rule — cited by selector, not by line: this citation named :248 and has gone stale twice as comment blocks landed above it */ }
 </style>
