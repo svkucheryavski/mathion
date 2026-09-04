@@ -73,7 +73,11 @@
 </fieldset>
 
 <style>
-  fieldset { border: 0; padding: 0; margin: 0; /* the article gap owns the rhythm */ }
+  /* mechanism: the UA `min-inline-size:min-content` would let an over-long
+     unbreakable option widen the whole group past its column — T2 raised the
+     row's min-content width by making `.opt` a flex row with three
+     `flex:0 0 auto` children, so the token must overflow inside the row. */
+  fieldset { border: 0; padding: 0; margin: 0; /* the article gap owns the rhythm */ min-inline-size: 0; }
   /* A rendered <legend> is NOT a flex item (it is laid out at the block-start),
      so a fieldset `gap` cannot separate prompt from options — the legend's own
      margin owns that step. `padding:0` zeroes the UA padding-inline so the
