@@ -59,13 +59,15 @@
      and `.row` is a stretch column whose overflow escapes main.content
      (max-width:68ch) and .page (max-width:960px), neither of which clips,
      giving page-level horizontal scroll (WCAG 1.4.10). Measured in Chromium
-     at a 320px viewport, 100-char runs of `abcde`: slash-joined 601px,
-     dot-joined 599px, a hyphen-free URL 364px — every one 0px with this line.
-     Chromium takes NO break opportunity after `/` or `.`; it breaks at `-`,
-     which is why a hyphenated URL wraps unaided and a hyphen-free one does
-     not. This closes the PROSE case only — it cannot reach a <pre>, which
-     needs its own rule (below). T2's `legend` has NEITHER rule, so it carries
-     both gaps; out of T3's scope, carried not fixed. */
+     at 320px: it takes NO break opportunity after `/` or `.`, only at `-`, so
+     a slash- or dot-joined run, a hyphen-free URL, a hash and a base64 blob
+     all overflow, and every one reaches 0px with this line. A HYPHENATED URL
+     wraps unaided, which is why "long URLs are fine" is a trap. Pixel figures
+     are deliberately omitted: they move with fixture length and with whether
+     the webfont has loaded, and two earlier revisions of this comment quoted
+     numbers that did not reproduce. This closes PROSE only — a <pre> needs its
+     own rule (below). T2's `legend` has NEITHER rule, so it carries both gaps;
+     out of T3's scope, carried not fixed. */
   .text { overflow-wrap: anywhere; font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
@@ -73,12 +75,22 @@
   .text :global(p) { margin: 0 0 var(--space-2); }
   .text :global(p:last-child) { margin: 0; }
   /* CommonMark (markdown.py:7) emits fenced AND indented code blocks, and
-     `text_md` is unbounded (schemas.py:323). The UA's `white-space:pre` makes
-     the block unwrappable, so the `overflow-wrap` above cannot reach it —
-     measured 333px of page scroll at 320px with it, 0px with this line.
-     `pre-wrap` rather than `overflow-x:auto`: both measure 0px, but reflow is
-     what WCAG 1.4.10 asks for and it adds no scroll container to the page. */
-  .text :global(pre) { white-space: pre-wrap; }
+     `text_md` is unbounded (schemas.py:323). `overflow-wrap` above IS inherited
+     and computes to `anywhere` on the <pre> — what stops it is the UA's
+     `white-space:pre`, which disables soft wrapping so there is no break
+     opportunity to act on.
+     `overflow-x:auto`, NOT `white-space:pre-wrap`: both reach 0px page
+     overflow, but WCAG 1.4.10 excepts "content which requires two-dimensional
+     layout for usage or meaning", and a fenced block is the canonical case —
+     wrapping shreds ASCII diagrams, aligned tables and indentation. A
+     scrollable <pre> is conforming; a mangled one is lost information.
+     The scroller is keyboard-focusable in Chromium (measured: tabIndex -1,
+     :focus-visible matches), which is what lets a keyboard user scroll it at
+     all — but base.css:22's `outline:none` leaves only the --primary-soft halo
+     at 1.12:1 on --bg, drawing nothing. So the ring below is load-bearing,
+     exactly as `.txt:focus-visible` is for the field. */
+  .text :global(pre) { overflow-x: auto; max-width: 100%; }
+  .text :global(pre:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
   /* A local <input> on the control tokens, NOT ui/Input — whose `mono` is the
      PIN-specific 17px/.34em (Input.svelte:40) and whose prop list has neither
      `disabled` nor `inputmode` and no rest-spread. Only the local field styling lives here;

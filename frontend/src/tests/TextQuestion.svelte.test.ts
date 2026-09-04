@@ -192,29 +192,35 @@ describe('TextQuestion reveal (D2, T3)', () => {
     const seen = ['Respiration', CORRECT].map((studentValue) => {
       render({ value: studentValue, disabled: true, correctValue: CORRECT });
       const line = correctLine()!;
-      // A markup snapshot is structurally blind to DOM PROPERTIES, and the
-      // field carries more than one a verdict can ride on. Svelte writes
-      // `value` as a property (that hole passed the whole suite once); so does
-      // `setCustomValidity`, which paints a native "invalid entry" AT
-      // announcement and :invalid styling with no markup at all. `value`
-      // legitimately differs between the two runs, so it is asserted rather
-      // than snapshotted: the field must echo the student verbatim.
+      // A markup snapshot is structurally blind to DOM PROPERTIES, and `value`
+      // is one — Svelte writes it as a property, and that hole passed the whole
+      // suite once. It legitimately differs between the two runs, so it is
+      // asserted rather than snapshotted: the field must echo the student
+      // verbatim. `validity` is pinned beside it as a FORWARD guard only —
+      // setCustomValidity is inert while the field is disabled (a disabled
+      // control is barred from constraint validation: no :invalid, no bubble,
+      // and validationMessage spec-pinned to '' whatever you set), and this
+      // reveal path always disables. So asserting validationMessage would be
+      // an assertion that cannot fail; `validity.valid` still bites in jsdom
+      // and would bite in a browser if the reveal ever stopped disabling.
       expect(field().value).toBe(studentValue);
       expect(field().validity.valid).toBe(true);
-      expect(field().validationMessage).toBe('');
-      // `body`, not `host`: a verdict can render outside the mount target —
-      // a portal appended by an $effect — and `head` covers <svelte:head>.
-      // BOUNDARY: this sees anything that reaches the DOM. A verdict pushed to
-      // a STORE (pushToast) is invisible here because its host component is not
-      // mounted in a component test; only an integration test would see it.
-      // NOTE the false-FAIL surface this buys: a future
-      // NON-judging render derived from the student's value (a
-      // `{text.length} / 500 characters` counter, say — the fixtures below
-      // differ in length, so it would bite) reds this test with a message
-      // accusing the component of judging. Widen deliberately.
+      // documentElement.outerHTML, not body.innerHTML: innerHTML serialises
+      // body's CHILDREN, so a verdict carried on <body>'s own class — paired
+      // with `:global(body.answer-wrong .correct-line::after){content:' x'}` —
+      // escaped it with the whole suite green. outerHTML subsumes body, head,
+      // and both elements' own attributes.
+      // BOUNDARY: this sees the DOM and nothing else. A verdict pushed to a
+      // STORE (pushToast) is invisible at component scope because its host is
+      // not mounted; so are focus placement, scroll position and speech. Those
+      // need an integration test, not a wider snapshot.
+      // NOTE the false-FAIL surface this buys: a future NON-judging render
+      // derived from the student's value (a `{text.length} / 500 characters`
+      // counter, say — the fixtures above differ in length, so it would bite)
+      // reds this test with a message accusing the component of judging.
       const snapshot = { text: line.textContent, cls: line.className,
-                         html: line.innerHTML, body: document.body.innerHTML,
-                         head: document.head.innerHTML };
+                         html: line.innerHTML,
+                         doc: document.documentElement.outerHTML };
       // No tick, no cross, no AT verdict: grading a free-text answer is the
       // backend's job, and D2 pins this reveal to the answer alone.
       expect(host.querySelector('svg')).toBeNull();
