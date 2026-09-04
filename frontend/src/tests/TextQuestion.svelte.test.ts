@@ -192,23 +192,29 @@ describe('TextQuestion reveal (D2, T3)', () => {
     const seen = ['Respiration', CORRECT].map((studentValue) => {
       render({ value: studentValue, disabled: true, correctValue: CORRECT });
       const line = correctLine()!;
-      // Svelte writes `value` as a DOM PROPERTY, so it never appears in
-      // innerHTML — which makes the field the one piece of student-dependent
-      // state the equality snapshot below is structurally blind to, and so the
-      // one place a verdict could hide (`value={… ? text + ' ✓ correct!' : text}`
-      // passed the whole suite). It legitimately DIFFERS between the two runs,
-      // so it cannot join the snapshot: assert instead that the field echoes
-      // the student's own value verbatim, undecorated.
+      // A markup snapshot is structurally blind to DOM PROPERTIES, and the
+      // field carries more than one a verdict can ride on. Svelte writes
+      // `value` as a property (that hole passed the whole suite once); so does
+      // `setCustomValidity`, which paints a native "invalid entry" AT
+      // announcement and :invalid styling with no markup at all. `value`
+      // legitimately differs between the two runs, so it is asserted rather
+      // than snapshotted: the field must echo the student verbatim.
       expect(field().value).toBe(studentValue);
-      // Everything else must be identical right vs wrong. `whole` covers the
-      // component subtree (a verdict rendered outside .row), `head` covers
-      // <svelte:head> (rendered outside the mount target entirely).
-      // NOTE: a future NON-judging render derived from the student's value —
-      // a `{text.length} / 500 characters` counter, say — would red this test
-      // with a message accusing the component of judging. Widen deliberately.
+      expect(field().validity.valid).toBe(true);
+      expect(field().validationMessage).toBe('');
+      // `body`, not `host`: a verdict can render outside the mount target —
+      // a portal appended by an $effect — and `head` covers <svelte:head>.
+      // BOUNDARY: this sees anything that reaches the DOM. A verdict pushed to
+      // a STORE (pushToast) is invisible here because its host component is not
+      // mounted in a component test; only an integration test would see it.
+      // NOTE the false-FAIL surface this buys: a future
+      // NON-judging render derived from the student's value (a
+      // `{text.length} / 500 characters` counter, say — the fixtures below
+      // differ in length, so it would bite) reds this test with a message
+      // accusing the component of judging. Widen deliberately.
       const snapshot = { text: line.textContent, cls: line.className,
-                         html: line.innerHTML, whole: host.innerHTML,
-                         head: document.head.innerHTML, disabled: field().disabled };
+                         html: line.innerHTML, body: document.body.innerHTML,
+                         head: document.head.innerHTML };
       // No tick, no cross, no AT verdict: grading a free-text answer is the
       // backend's job, and D2 pins this reveal to the answer alone.
       expect(host.querySelector('svg')).toBeNull();

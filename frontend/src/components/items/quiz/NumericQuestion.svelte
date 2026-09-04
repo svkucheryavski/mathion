@@ -58,24 +58,27 @@
      {@html} — a long URL is likelier here than in the bounded answer below,
      and `.row` is a stretch column whose overflow escapes main.content
      (max-width:68ch) and .page (max-width:960px), neither of which clips,
-     giving page-level horizontal scroll (WCAG 1.4.10). It closes the PROSE
-     case only: the shapes that actually reproduce it are separator-free runs
-     (hashes, base64, long slugs) — an ordinary long URL already wraps, since
-     UAX #14 gives a break opportunity after `/`. A fenced code block needs its
-     own rule below, because the UA gives `<pre>` `white-space:pre`, which
-     suppresses wrapping whatever `overflow-wrap` says (measured: 417px of page
-     scroll at 320px viewport, with and without this line). T2's `legend` shares
-     the prose gap and is out of T3's scope — carried, not fixed here. */
+     giving page-level horizontal scroll (WCAG 1.4.10). Measured in Chromium
+     at a 320px viewport, 100-char runs of `abcde`: slash-joined 601px,
+     dot-joined 599px, a hyphen-free URL 364px — every one 0px with this line.
+     Chromium takes NO break opportunity after `/` or `.`; it breaks at `-`,
+     which is why a hyphenated URL wraps unaided and a hyphen-free one does
+     not. This closes the PROSE case only — it cannot reach a <pre>, which
+     needs its own rule (below). T2's `legend` has NEITHER rule, so it carries
+     both gaps; out of T3's scope, carried not fixed. */
   .text { overflow-wrap: anywhere; font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
      the .row gap already owns prompt→field. */
-  /* CommonMark (markdown.py:7) emits fenced AND indented code blocks, and
-     `text_md` is unbounded (schemas.py:323). `white-space:pre` makes the block
-     itself unwrappable, so the only fix is to let IT scroll instead of the page. */
-  .text :global(pre) { overflow-x: auto; max-width: 100%; }
   .text :global(p) { margin: 0 0 var(--space-2); }
   .text :global(p:last-child) { margin: 0; }
+  /* CommonMark (markdown.py:7) emits fenced AND indented code blocks, and
+     `text_md` is unbounded (schemas.py:323). The UA's `white-space:pre` makes
+     the block unwrappable, so the `overflow-wrap` above cannot reach it —
+     measured 333px of page scroll at 320px with it, 0px with this line.
+     `pre-wrap` rather than `overflow-x:auto`: both measure 0px, but reflow is
+     what WCAG 1.4.10 asks for and it adds no scroll container to the page. */
+  .text :global(pre) { white-space: pre-wrap; }
   /* A local <input> on the control tokens, NOT ui/Input — whose `mono` is the
      PIN-specific 17px/.34em (Input.svelte:40) and whose prop list has neither
      `disabled` nor `inputmode` and no rest-spread. Only the local field styling lives here;
