@@ -28,9 +28,13 @@
 
 <style>
   /* The gap is the sole owner of the vertical rhythm (§2), so every surviving
-     child margin below is zeroed against it — including this row's own, which
-     T4's `.q-block` gap now owns. 16px matches a choice question's
-     prompt→options step, so both kinds of question read identically. */
+     child margin below is zeroed against it — including this row's own
+     `margin-bottom`, whose job is now split between T4's `.q-block` gap (down to
+     the explanation panel) and `.quiz`'s gap (on to the next question). 16px is
+     the same prompt→control step a choice question uses, so the two kinds of
+     question share one RHYTHM — not one prompt type: a choice prompt is a
+     14.5px `legend` (spec:131 pins that treatment to `legend` alone), this one
+     is body copy. */
   .row { display: flex; flex-direction: column; gap: 16px; /* ref 2120 */ margin: 0; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
@@ -52,7 +56,7 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     width: 100%;
-    max-width: 480px;
+    max-width: 480px; /* both retained verbatim from the rule this replaces (pre-T3 TextQuestion.svelte:31); spec §3 pins the retention */
   }
   /* Disabled treatment through the reserved disabled-control tokens, never
      opacity (Constraint 2). Written per-component and NOT as a combined
@@ -61,5 +65,5 @@
   .txt:disabled { background: var(--surface-2); color: var(--muted); border-color: var(--border-faint); /* theme-default.css:22, "disabled control borders" */ }
   /* Reveal shows the correct answer only — no client-side judging. The value
      stays NON-mono: unlike the numeric answer it is prose. */
-  .correct-line { margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the body-copy step below the 14.5px prompt, as on QuizItem's .exp */ }
+  .correct-line { margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px secondary step as QuizItem's .exp */ }
 </style>

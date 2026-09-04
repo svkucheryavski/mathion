@@ -79,7 +79,7 @@ describe('TextQuestion structure (T3)', () => {
     // and this is also what tells the text field apart from the numeric one.
     expect(field().classList.contains('mono')).toBe(false);
     expect(field().hasAttribute('inputmode')).toBe(false);
-    expect(field().type).toBe('text');
+    expect(field().getAttribute('type')).toBe('text');
     expect(field().disabled).toBe(false);
   });
 
@@ -88,14 +88,19 @@ describe('TextQuestion structure (T3)', () => {
 
     const row = host.querySelector('.row');
     expect(row).not.toBeNull();
-    // A collapsed prompt would render one paragraph; the rhythm between them is
-    // the last-paragraph-only margin rule's whole reason to exist.
+    // The MARGIN between the paragraphs is CSS and is guarded by the dist gate,
+    // not here. This asserts the precondition that rule styles: both authored
+    // paragraphs reach the DOM, so there is an inter-paragraph gap to keep.
     expect(host.querySelectorAll('.text p').length).toBe(2);
     // All three are direct .row children, so the single 16px gap — not any
     // surviving child margin — owns prompt→field→answer.
     expect(host.querySelector('.text')!.parentElement).toBe(row);
     expect(field().parentElement).toBe(row);
     expect(correctLine()!.parentElement).toBe(row);
+    // ...and in that ORDER: .row is a flex column, so membership alone would
+    // also pass with the answer rendered above the field.
+    expect([...row!.children].map((el) => `${el.tagName}.${el.className.split(' ')[0]}`))
+      .toEqual(['DIV.text', 'INPUT.txt', 'P.correct-line']);
   });
 
   it('shows the student value and reports every keystroke', () => {
