@@ -38,9 +38,10 @@
      `margin-bottom`, whose job is now split between T4's `.q-block` gap (down to
      the explanation panel) and `.quiz`'s gap (on to the next question). 16px is
      the same prompt→control step a choice question uses, so the two kinds of
-     question share one RHYTHM — not one prompt type: a choice prompt is a
-     14.5px `legend` (spec:131 pins that treatment to `legend` alone), this one
-     is body copy. */
+     question share one rhythm — and, since the `.text` rule below, one prompt
+     treatment too. (spec:131 pins the 14.5px treatment to `legend`; `.text`
+     reproduces it on a div. Before that rule this prompt WAS body copy, which
+     is what made the two question types read differently.) */
   .row { display: flex; flex-direction: column; gap: 16px; /* ref 2120 */ margin: 0; }
   /* The choice questions' prompt treatment (ref 2125), so both kinds of prompt
      read alike inside one quiz — without it this div inherits body copy
