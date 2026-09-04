@@ -48,10 +48,16 @@
      spec:131 pins the treatment to `legend`; this div takes the five
      declarations spec:131 lists. `font-weight:400` is inert TODAY (a div is
      already 400 — the legend needed it only to undo an authored 500), but it is
-     pinned anyway: the gate compares each rule's full declaration set, so it is
-     falsifiable, and it makes the prompt immune to a future ancestor weight
+     pinned anyway: the dist gate compares each rule's full declaration set (so
+     removing this line reds it), and it makes the prompt immune to a future ancestor weight
      exactly as T2's legend already is. */
-  .text { font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
+  /* overflow-wrap: the prompt renders UNBOUNDED teacher markdown through
+     {@html} — a long URL is likelier here than in the bounded answer below,
+     and `.row` is a stretch column whose overflow escapes main.content
+     (max-width:68ch) and .page (max-width:960px), neither of which clips,
+     giving page-level horizontal scroll (WCAG 1.4.10). T2's `legend` shares
+     this and is out of T3's scope — carried, not fixed here. */
+  .text { overflow-wrap: anywhere; font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
      the .row gap already owns prompt→field. */
@@ -106,5 +112,5 @@
      column flex container whose ancestors are all definite-width, so its
      min-content contribution is never consulted. `anywhere` is the superset
      and costs nothing: ordinary prose still breaks only at word boundaries. */
-  .correct-line { overflow-wrap: anywhere; margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px secondary step as QuizItem's .exp */ }
+  .correct-line { overflow-wrap: anywhere; margin: 0; color: var(--status-accepted-fg); font-size: 13px; /* Constraint 5(b) no-ref — the same 13px step as QuizItem's .exp (QuizItem.svelte:248) */ }
 </style>

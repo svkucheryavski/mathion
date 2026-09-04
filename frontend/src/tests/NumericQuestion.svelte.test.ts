@@ -192,7 +192,15 @@ describe('NumericQuestion reveal (D2, T3)', () => {
     const seen = ['75', '80'].map((studentValue) => {
       render({ value: studentValue, disabled: true, correctValue: CORRECT });
       const line = correctLine()!;
-      const snapshot = { text: line.textContent, cls: line.className, html: line.innerHTML };
+      // `whole` is the load-bearing one: scoped to .correct-line, this test
+      // could not see a verdict rendered ANYWHERE ELSE in the component, and
+      // the three negative checks below only cover the shapes T2 happens to
+      // use. The property D2 actually pins is that the WHOLE render is
+      // identical for a right and a wrong student value. Svelte sets the
+      // field's `value` as a DOM property, not an attribute, so it does not
+      // leak into innerHTML and make the two runs differ spuriously.
+      const snapshot = { text: line.textContent, cls: line.className,
+                         html: line.innerHTML, whole: host.innerHTML };
       // No tick, no cross, no AT verdict: grading a numeric answer is the
       // backend's job, and D2 pins this reveal to the answer alone.
       expect(host.querySelector('svg')).toBeNull();
