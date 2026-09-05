@@ -76,12 +76,13 @@ describe('SequenceLink', () => {
 
   it('removes the ✓ with NO replacement mark — completion reads from the chain', () => {
     // A fully-covered sequence used to append a green ✓. Completion now reads
-    // visually from an all-covered chain and, for AT, from the mono count; a
-    // replacement glyph would be a third, redundant signal.
+    // visually from an all-covered chain and, for AT, from the row's
+    // aria-label; a replacement glyph would be a third, redundant signal.
     const root = render({ state: vstate([1, 2, 3]) });
     expect(root.textContent).not.toContain('✓');
     expect(root.querySelector('.check')).toBeNull();
-    // The count still says so, and it is the AT-visible one.
+    // The count still says so — the sighted reading of what the aria-label
+    // carries in words.
     expect((root.querySelector('.count') as HTMLElement).textContent).toBe('3/3');
   });
 
@@ -90,8 +91,8 @@ describe('SequenceLink', () => {
     const chain = root.querySelector('.chain') as HTMLElement;
     expect(chain).not.toBeNull();
     // The whole chain is hidden from AT (Constraint 3): each mark is already
-    // aria-hidden, and this wrapper makes the mono count the SOLE completion
-    // signal assistive tech receives.
+    // aria-hidden, and this wrapper leaves the row's aria-label as the SOLE
+    // completion signal assistive tech receives.
     expect(chain.getAttribute('aria-hidden')).toBe('true');
     const marks = Array.from(chain.querySelectorAll('.item-mark'));
     expect(marks).toHaveLength(3);
@@ -157,7 +158,7 @@ describe('SequenceLink', () => {
     expect(a.getAttribute('aria-label')).toBe('Sequence S3: Determinants, 2 of 3 items completed');
   });
 
-  it('recomputes the aria-label from props, and says "item" when there is one', () => {
+  it('recomputes the aria-label from props, and says "item" for exactly one item', () => {
     // A label built as a plain `const` would freeze at mount exactly as `total`,
     // `covered` and `href` did before they became `$derived` — and it would do so
     // invisibly, since nothing on screen changes. Coverage alone must move it,
@@ -174,6 +175,15 @@ describe('SequenceLink', () => {
     // Singular: "1 of 1 items completed" is what a template with no plural
     // branch would say.
     expect(a.getAttribute('aria-label')).toBe('Sequence S4: Eigenvalues, 1 of 1 item completed');
+
+    // ...and EXACTLY one. With only totals 3 and 1 asserted, `total === 1`
+    // relaxed to `total <= 1` passed the whole file (codex, T7 round 2) and
+    // would have shipped "0 of 0 item completed" on an empty sequence. Zero is
+    // plural in English, so this is the assertion that separates the two.
+    props.sequence = sequence({ items: [] });
+    flushSync();
+    expect(a.getAttribute('aria-label')).toBe('Sequence S3: Determinants, 0 of 0 items completed');
+    expect(root.querySelectorAll('.chain .item-mark')).toHaveLength(0);
   });
 
   it('points at the sequence route', () => {
