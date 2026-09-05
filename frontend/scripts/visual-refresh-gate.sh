@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Visual-refresh built-CSS gate — Slice-3 (tasks T1-T6 so far).
+# Visual-refresh built-CSS gate — Slice-3 (tasks T1-T7 so far).
 #
 #   zsh frontend/scripts/visual-refresh-gate.sh     # from anywhere
 #
@@ -1090,7 +1090,12 @@ const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // So the pin is the whole per-ELEMENT signature, in document order:
 // `tag:token.token`. That pins which elements exist, their order, their tags
 // and their literal classes at once -- so it also reds on a reordered row, an
-// appended completion glyph, or a class landing on the wrong element. Dynamic
+// appended completion ELEMENT, or a class landing on the wrong element. It is
+// blind, by construction, to a glyph that is only TEXT: `{#if covered === total}`
+// wrapping a bare star adds no element, so the signature is byte-identical and
+// this scanner passed it (codex, T7 round 4 -- verified by mutation on both
+// lanes). Hence the second pin below: every non-whitespace literal text node,
+// keyed by the element that owns it. Dynamic
 // `{expr}` parts of a class attribute are deliberately not included: the state
 // values they carry are pinned by each component own tests and by the CSS
 // inventory. Update these when the markup legitimately changes; that is the
@@ -1101,6 +1106,18 @@ const SIG = {
   "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
 };
+// Every non-whitespace LITERAL text node these components emit, as
+// `owner-signature:text` in document order. Text inside `{expr}` is not literal
+// and never appears here; whitespace between elements trims away. The list is
+// short on purpose -- these are marks-and-badges components, so any growth is a
+// glyph or a label someone added in markup, which is exactly what T7 removed
+// (`✓`) and what a replacement (`★`) would reinstate.
+const TEXT = {
+  "ItemMark.svelte": [],
+  "ItemIcon.svelte": [],
+  "SequenceLink.svelte": ["span:badge.mono:S", "span:count.mono:/"],
+  "MiniProjectLink.svelte": ["span:row-title:Mini-project:"],
+};
 for (const f of process.argv.slice(1)) {
   const hits = [];
   const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
@@ -1108,14 +1125,24 @@ for (const f of process.argv.slice(1)) {
   if (!spec) { console.log(`FAIL  ${f} has no entry in SPEC — add one before the gate can vouch for it`); bad = 1; continue; }
   const NODE = new Set(spec.nodes), TAG = new Set(spec.tags);
   const sig = [];
-  (function walk(n) {
+  const txt = [];
+  // `owner` is the signature of the nearest enclosing element, so a text node
+  // is reported against the thing that renders it rather than in isolation --
+  // and a glyph appended straight into the row reads as `a:row:...`, which no
+  // pinned list contains.
+  (function walk(n, owner) {
     if (!n) return;
     if (!NODE.has(n.type)) { hits.push(`unreviewed markup construct ${n.type}`); return; }
     switch (n.type) {
-      case "Fragment": (n.nodes || []).forEach(walk); return;
-      case "Text": case "Comment": case "ExpressionTag": return;
-      case "IfBlock": walk(n.consequent); walk(n.alternate); return;
-      case "EachBlock": walk(n.body); walk(n.fallback); return;
+      case "Fragment": (n.nodes || []).forEach((k) => walk(k, owner)); return;
+      case "Text": {
+        const t = String(n.data || "").trim();
+        if (t) txt.push(`${owner}:${t}`);
+        return;
+      }
+      case "Comment": case "ExpressionTag": return;
+      case "IfBlock": walk(n.consequent, owner); walk(n.alternate, owner); return;
+      case "EachBlock": walk(n.body, owner); walk(n.fallback, owner); return;
       case "RegularElement": case "Component": {
         if (n.type === "RegularElement" && !TAG.has(n.name)) hits.push(`unreviewed element <${n.name}>`);
         for (const a of n.attributes || []) {
@@ -1133,19 +1160,24 @@ for (const f of process.argv.slice(1)) {
             for (const v of parts) if (v && v.type === "Text") cls.push(...String(v.data).split(/\s+/).filter(Boolean));
           }
         }
-        sig.push(n.name + ":" + cls.join("."));
-        walk(n.fragment);
+        const me = n.name + ":" + cls.join(".");
+        sig.push(me);
+        walk(n.fragment, me);
         return;
       }
     }
-  })(ast.fragment);
+  })(ast.fragment, "");
   const base = f.split("/").pop();
   const want = SIG[base] || [];
   if (JSON.stringify(sig) !== JSON.stringify(want)) {
     hits.push(`markup signature changed: ${JSON.stringify(sig)} (pinned ${JSON.stringify(want)})`);
   }
-  if (hits.length) { bad = 1; console.log(`FAIL  ${base} can style its DOM outside <style>: ${hits.join("; ")}`); }
-  else console.log(`PASS  ${base} declares no inline styling — its DECLARATIVE CSS is all gradeable here`);
+  const wantTxt = TEXT[base] || [];
+  if (JSON.stringify(txt) !== JSON.stringify(wantTxt)) {
+    hits.push(`literal text changed: ${JSON.stringify(txt)} (pinned ${JSON.stringify(wantTxt)})`);
+  }
+  if (hits.length) { bad = 1; console.log(`FAIL  ${base} markup pin broken: ${hits.join("; ")}`); }
+  else console.log(`PASS  ${base} declares no inline styling and no literal text beyond its pinned set`);
 }
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \

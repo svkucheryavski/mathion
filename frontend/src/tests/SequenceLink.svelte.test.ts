@@ -84,6 +84,14 @@ describe('SequenceLink', () => {
     // The count still says so — the sighted reading of what the aria-label
     // carries in words.
     expect((root.querySelector('.count') as HTMLElement).textContent).toBe('3/3');
+    // ...and the row renders NO other text at all. The child-schema test below
+    // reads `.children`, which excludes text nodes, and the gate's markup
+    // signature records elements — so `{#if covered === total}★{/if}` appended
+    // straight into the row passed BOTH lanes (codex, T7 round 4; reproduced by
+    // mutation before this line existed). The marks are SVG and contribute no
+    // text, so the row's whole normalised text is exactly badge + title + count.
+    const rowText = (root.querySelector('a.row') as HTMLElement).textContent!.replace(/\s+/g, '');
+    expect(rowText).toBe('S3Determinants3/3');
   });
 
   it('renders an aria-hidden ItemMark chain, one mark per item, in the right states', () => {
@@ -130,8 +138,10 @@ describe('SequenceLink', () => {
     // cannot see markup order. (b) The `✓` removal was asserted by rejecting
     // the `✓` character and `.check`, so ANY other replacement glyph — a `★`
     // in an {#if covered === total} — sailed through. An exact child schema
-    // closes both, and does so for the fully-covered case where a completion
-    // mark would be tempting to re-add.
+    // closes (a) outright and closes (b) only for an ELEMENT: `.children` skips
+    // text nodes, so a bare `★` still passed here. The normalised-textContent
+    // assertion in the `✓`-removal test above is what closes the text form; this
+    // one pins structure and order.
     const root = render({ state: vstate([1, 2, 3]) });
     const kids = Array.from((root.querySelector('a.row') as HTMLElement).children);
     expect(kids.map((e) => e.className.split(' ')[0])).toEqual(['badge', 'row-title', 'chain', 'count']);
