@@ -66,21 +66,37 @@
 # Resolve relative to this script, not the caller's cwd: every path below
 # (`src/...`, `dist/_app/*.css`) is frontend-relative, and the script is run
 # from the repo root as often as from frontend/.
-cd "${0:A:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
-# Report how many assertions actually RAN. The count is only knowable after the
-# run, so the script re-execs itself once: the child does the work, the parent
-# counts its PASS/FAIL lines and prints the summary. Without it the only output
-# was a bare pass/fail line, so a section that silently skipped its checks — an
-# anchor that stops resolving short-circuits a whole block — read exactly like a
-# section that passed them (codex-r1-M2).
-if [[ -z ${VRGATE_CHILD:-} ]]; then
-  log=$(mktemp -t vrgate) || { echo "FAIL  cannot create temp log"; exit 1 }
-  VRGATE_CHILD=1 zsh "$0" "$@" | tee "$log"
-  rc=${pipestatus[1]}
+# Resolve this script's own ABSOLUTE path BEFORE the cd: the re-exec below needs
+# it, and `$0` is relative when the documented `zsh frontend/scripts/...` form is
+# used from the repo root — re-execing that after cd'ing into frontend/ looked
+# for frontend/frontend/scripts/... and reported "FAILURES (0 checks)"
+# (codex-r2-I3). Resolve relative to the script, not the caller's cwd: every
+# path below (`src/...`, `dist/_app/*.css`) is frontend-relative, and the script
+# is run from the repo root as often as from frontend/.
+SELF=${0:A}
+cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
+# Report how many assertions actually RAN, and require the expected number. The
+# count is only knowable after the run, so the script re-execs itself once: the
+# child does the work, the parent counts its PASS/FAIL lines. The count is
+# EXACT, not a floor — a floor conceals a check that stops running once later
+# checks are added, which is the failure this exists to catch (codex-r1-M2,
+# tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
+# speed bump is intentional.
+EXPECTED_CHECKS=174
+if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
+  log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
+  trap 'rm -f "$log"' EXIT INT TERM
+  VRGATE_IS_CHILD_7f3a=1 zsh "$SELF" "$@" | tee "$log"
+  ps=($pipestatus); rc=$ps[1]; tee_rc=$ps[2]
   n=$(grep -cE '^(PASS|FAIL)' "$log")
+  [[ $tee_rc -eq 0 ]] || { echo "FAIL  tee failed (rc=$tee_rc) — the count is unreliable"; rc=1 }
+  if [[ $rc -eq 0 && $n -ne $EXPECTED_CHECKS ]]; then
+    echo "FAIL  ran $n checks, expected $EXPECTED_CHECKS — either a section skipped its"
+    echo "      assertions, or you added some without bumping EXPECTED_CHECKS."
+    rc=1
+  fi
   [[ $rc -eq 0 ]] && echo "VISUAL-REFRESH GATE: ALL PASS ($n checks)" \
-                  || echo "VISUAL-REFRESH GATE: FAILURES ($n checks)"
-  rm -f "$log"
+                  || echo "VISUAL-REFRESH GATE: FAILURES ($n checks, expected $EXPECTED_CHECKS)"
   exit $rc
 fi
 fail=0
@@ -196,8 +212,15 @@ css = '\n'.join(open(p).read() for p in sys.argv[3:])
 bad = 0
 FC = '@media (forced-colors:active)'   # normalised form — see the prelude fix in rules()
 
-def rules(text, media=None):
-    """Flat (selector, body, media) triples, descending into @-blocks."""
+def rules(text, anc=()):
+    """Flat (selector, body, ancestry) triples, descending into @-blocks.
+
+    `ancestry` is the FULL tuple of enclosing at-rules, not just the innermost:
+    it used to be replaced at each descent, so `@supports (display:grid) {
+    @media (forced-colors:active) { … } }` — or an outer `@media
+    (min-width:9999px)`, which never matches — read as exactly the one
+    permitted block and passed the guard (codex-r2-I2).
+    """
     out, i, start = [], 0, 0
     while i < len(text):
         c = text[i]
@@ -219,9 +242,9 @@ def rules(text, media=None):
             if sel.startswith('@'):
                 # normalise the prelude: selectors are minifier-normalised, so comparing
                 # `@media (forced-colors: active)` raw made the gate source-format-sensitive
-                out.extend(rules(body, re.sub(r'\s*:\s*', ':', ' '.join(sel.split()))))
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
             else:
-                out.append((sel, body, media))
+                out.append((sel, body, anc))
             i, start = j, j
         elif c == '}':
             i += 1; start = i
@@ -265,7 +288,7 @@ for name, h, field, width in SPECS:
     ]
     for _m, _s, _b in want:
         PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', _b))
-    got = sorted((m or '', s) for s, b, m in ALL if h in s)
+    got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
     exp = sorted((m, s) for m, s, _ in want)
     if got != exp:
         bad = 1
@@ -277,7 +300,7 @@ for name, h, field, width in SPECS:
         continue
     print('PASS  %s compiles to exactly its %d rules — no duplicate, no stray at-rule'
           % (name, len(want)))
-    index = {(m or '', s): b for s, b, m in ALL if h in s}
+    index = {(' >> '.join(a), s): b for s, b, a in ALL if h in s}
     off = 0
     for m, s, wb in want:
         have, wantd = decls(index[(m, s)]), decls(wb)
@@ -324,7 +347,7 @@ for name, path in (('Numeric', 'src/components/items/quiz/NumericQuestion.svelte
 #      `.input.mono` (ui/Input's PIN treatment) is a different compound and must
 #      not satisfy this.
 mono = [s for s, b, m in ALL
-        if m is None                      # @media print { .mono {…} } is not it
+        if not m                          # @media print { .mono {…} } is not it
         and any(part.strip() == '.mono' for part in s.split(','))
         and 'font-family:var(--font-mono)' in decls(b)]
 if mono:
@@ -450,13 +473,13 @@ for s, b, m in ALL:
     # A scope class is `.svelte-<hash>`; a substring test also swallows an
     # author class that merely CONTAINS the text, e.g. a selector list
     # `.svelte-inspector-overlay p, p{…}` — which is hashless and does reach.
-    if (m or '').startswith('@keyframes'): continue
+    if any(x.startswith('@keyframes') for x in m): continue
     if re.search(r'\.svelte-[a-z0-9]+(?![\w-])', s): continue
     if 'svelte-' in s:
         bad = 1
         print('FAIL  selector carries the text `svelte-` but no scope class: %s' % s)
-    got_full.append(((m or ''), s, dhash(b)))
-    bodies[((m or ''), s, dhash(b))] = b
+    got_full.append((' >> '.join(m), s, dhash(b)))
+    bodies[(' >> '.join(m), s, dhash(b))] = b
 got_order = [(m, s) for m, s, _ in got_full]   # DOCUMENT order, before sorting
 got_full.sort()
 # Document ORDER decides the winner between two same-selector rules (the bundle
@@ -536,7 +559,7 @@ SYSCOL = ('Canvas|CanvasText|LinkText|VisitedText|ActiveText|ButtonFace|ButtonTe
           'ButtonBorder|Field|FieldText|Highlight|HighlightText|SelectedItem|'
           'SelectedItemText|Mark|MarkText|GrayText|AccentColor|AccentColorText')
 stray = [(s, m2.group(0)) for s, b, m in ALL for m2 in [re.search(r'\b(%s)\b' % SYSCOL, b)]
-         if m2 and not (m and 'forced-colors' in m)]
+         if m2 and not any('forced-colors' in x for x in m)]
 if stray:
     bad = 1
     print('FAIL  system colour used outside a forced-colors block: %s' % stray)
@@ -568,7 +591,7 @@ for name, h, field, width in SPECS:
         print('PASS  %s sets no component-local font-family' % name)
 
 # (f) CUMULATIVE — T2's two prompt-paragraph pairs plus T3's two, in one bundle.
-BASE = [(s, b) for s, b, m in ALL if m is None]
+BASE = [(s, b) for s, b, m in ALL if not m]
 pairs = sorted({s.split()[0] for s, b in BASE if re.fullmatch(r'\.text\.svelte-[a-z0-9]+ p', s)})
 last  = {s.split()[0] for s, b in BASE if re.fullmatch(r'\.text\.svelte-[a-z0-9]+ p:last-child', s)}
 mine = {'.text.%s' % nh, '.text.%s' % th}
@@ -699,7 +722,7 @@ import re, sys
 SP_H = sys.argv[1]
 css = '\n'.join(open(p).read() for p in sys.argv[2:])
 
-def rules(text, media=None):
+def rules(text, anc=()):
     out, i, start = [], 0, 0
     while i < len(text):
         c = text[i]
@@ -711,9 +734,9 @@ def rules(text, media=None):
                 elif text[j] == '}': depth -= 1
                 j += 1
             if sel.startswith('@'):
-                out.extend(rules(text[i+1:j-1], ' '.join(sel.split())))
+                out.extend(rules(text[i+1:j-1], anc + (' '.join(sel.split()),)))
             else:
-                out.append((sel, media))
+                out.append((sel, anc))
             i, start = j, j
         elif c == '}':
             i += 1; start = i
@@ -785,9 +808,11 @@ def norm(m):
 for target in TARGETS:
     label, pat, want = target[0], target[1], target[2]
     allowed = sorted(norm(m) for m in (target[3] if len(target) > 3 else []))
-    top  = [s for s, m in ALL if m is None and re.fullmatch(pat, s)]
-    inat = [(s, m) for s, m in ALL if m is not None and re.fullmatch(pat, s)]
-    got_at = sorted(norm(m) for _, m in inat)
+    top  = [s for s, a in ALL if not a and re.fullmatch(pat, s)]
+    inat = [(s, a) for s, a in ALL if a and re.fullmatch(pat, s)]
+    # The whole ANCESTRY, joined — a permitted entry is a ONE-element ancestry,
+    # so an extra outer wrapper no longer masquerades as it (codex-r2-I2).
+    got_at = sorted(' >> '.join(norm(m) for m in a) for _, a in inat)
     if len(top) == want and len(set(top)) == want and got_at == allowed:
         print('PASS  %s declared exactly %d\xd7, top level%s' %
               (label, want, (' (+%d in %s)' % (len(allowed), allowed)) if allowed else ''))
@@ -984,18 +1009,42 @@ done
 # Inline styling bypasses this gate COMPLETELY: Svelte emits `style="…"` and
 # `style:prop` into the JS bundle, never into dist/_app/*.css. An inline 22px
 # bordered box on ItemIcon's button restores the exact double ring T6 removes,
-# with this gate reporting ALL PASS and all 26 component tests green
-# (codex-r1-C1, reproduced). Scan the MARKUP only — the `<style>` block is the
-# legitimate home of these declarations — and strip comments first, since both
-# components' comments quote the very forms this forbids.
-for f in src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte; do
-  markup=$(perl -0777 -pe 's{<style[^>]*>.*?</style>}{}gs; s{<!--.*?-->}{}gs; s{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' $f)
-  if print -r -- "$markup" | grep -qE '(^|[[:space:]])style[=:]|\{\.\.\.'; then
-    echo "FAIL  ${f:t} uses inline styling (style= / style: / spread) — invisible to this gate"; fail=1
-  else
-    echo "PASS  ${f:t} has no inline styling — all of its CSS is gradeable here"
-  fi
-done
+# with this gate reporting ALL PASS and every component test green
+# (codex-r1-C1, reproduced). PARSED with the Svelte compiler, not grepped: a
+# regex missed `style = "…"`, uppercase `STYLE=`, the `{style}` shorthand and
+# `--x={…}` CSS-property props, and its comment-stripping was not syntax-aware,
+# so a `//` inside a URL could erase the forbidden source that followed
+# (codex-r2-C). The check is an ALLOWLIST — anything not provably style-inert is
+# rejected, so `use:`, `{@attach}`, `bind:this`, spreads and `<svelte:element>`
+# all red rather than needing to be enumerated as they are invented.
+node -e '
+const { parse } = require("svelte/compiler");
+const fs = require("fs");
+let bad = 0;
+const OK_ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
+for (const f of process.argv.slice(1)) {
+  const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
+  const hits = [];
+  (function walk(n) {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (n.type === "RegularElement" || n.type === "Component" || n.type === "SvelteElement") {
+      for (const a of n.attributes || []) {
+        const nm = a.name || "";
+        if (!OK_ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
+        else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
+        else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
+      }
+      if (n.type === "SvelteElement") hits.push("<svelte:element> (tag chosen at runtime)");
+    }
+    for (const k of Object.keys(n)) if (k !== "parent") walk(n[k]);
+  })(ast.fragment);
+  const base = f.split("/").pop();
+  if (hits.length) { bad = 1; console.log(`FAIL  ${base} can style its DOM outside <style>: ${hits.join("; ")}`); }
+  else console.log(`PASS  ${base} has no inline-styling escape hatch — all of its CSS is gradeable here`);
+}
+process.exit(bad);
+' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -1009,8 +1058,15 @@ im_h, ic_h = sys.argv[1], sys.argv[2]
 css = '\n'.join(open(p).read() for p in sys.argv[3:])
 bad = 0
 
-def rules(text, media=None):
-    """Flat (selector, body, media) triples, descending into @-blocks."""
+def rules(text, anc=()):
+    """Flat (selector, body, ancestry) triples, descending into @-blocks.
+
+    `ancestry` is the FULL tuple of enclosing at-rules, not just the innermost:
+    it used to be replaced at each descent, so `@supports (display:grid) {
+    @media (forced-colors:active) { … } }` — or an outer `@media
+    (min-width:9999px)`, which never matches — read as exactly the one
+    permitted block and passed the guard (codex-r2-I2).
+    """
     out, i, start = [], 0, 0
     while i < len(text):
         c = text[i]
@@ -1023,9 +1079,9 @@ def rules(text, media=None):
                 j += 1
             body = text[i+1:j-1]
             if sel.startswith('@'):
-                out.extend(rules(body, re.sub(r'\s*:\s*', ':', ' '.join(sel.split()))))
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
             else:
-                out.append((sel, body, media))
+                out.append((sel, body, anc))
             i, start = j, j
         elif c == '}':
             i += 1; start = i
@@ -1075,7 +1131,7 @@ for name, h, want in SPECS:
     # `h in s` — substring of the PARSED selector, so a selector list, a
     # `:where()` suffix and an @media child are all selected, and any of them
     # that is not in `want` reports as unexpected.
-    got = sorted((m or '', s) for s, b, m in ALL if h in s)
+    got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
     exp = sorted((m, s) for m, s, _ in want)
     if got != exp:
         bad = 1
@@ -1086,7 +1142,7 @@ for name, h, want in SPECS:
         continue
     print('PASS  %s compiles to exactly its %d rule(s) — no duplicate, no stray at-rule, '
           'no selector list' % (name, len(want)))
-    index = {(m or '', s): b for s, b, m in ALL if h in s}
+    index = {(' >> '.join(a), s): b for s, b, a in ALL if h in s}
     off = 0
     for m, s, wb in want:
         have, wantd = decls(index[(m, s)]), decls(wb)
