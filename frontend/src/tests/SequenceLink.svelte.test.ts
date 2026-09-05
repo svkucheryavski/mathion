@@ -103,6 +103,39 @@ describe('SequenceLink', () => {
     expect(chain.querySelector('button, a, input')).toBeNull();
   });
 
+  it('feeds each item its OWN type through to the mark it draws', () => {
+    // Both review lanes independently found this hole: hardcoding
+    // `type="static_page"` (or any single type) in the chain left every
+    // assertion green while every mark in the app drew the wrong glyph. Chain
+    // LENGTH and STATE were pinned; the type-to-glyph mapping — the whole
+    // reason the chain takes a per-item type — was not. jsdom cannot see CSS
+    // but it CAN see inline SVG, so the mark's child-tag signature is the pin.
+    const root = render({
+      sequence: sequence({
+        items: [item(1, 'static_page'), item(2, 'video'), item(3, 'quiz')],
+      }),
+    });
+    const marks = Array.from(root.querySelectorAll('.chain .item-mark'));
+    const shape = (m: Element) => Array.from(m.querySelector('svg')!.children).map((c) => c.tagName);
+    expect(shape(marks[0])).toEqual(['line', 'line', 'line']);   // page: three rules
+    expect(shape(marks[1])).toEqual(['polygon']);                // video: play triangle
+    expect(shape(marks[2])).toEqual(['polyline']);               // quiz: check
+  });
+
+  it('renders exactly badge, title, chain, count — in that order, with nothing appended', () => {
+    // Two escapes at once. (a) The count must sit at the row's RIGHT edge
+    // (mathion-visual-spec.md:250-251); swapping it before the chain put the
+    // chain there instead, with the gate green — section (j) grades CSS and
+    // cannot see markup order. (b) The `✓` removal was asserted by rejecting
+    // the `✓` character and `.check`, so ANY other replacement glyph — a `★`
+    // in an {#if covered === total} — sailed through. An exact child schema
+    // closes both, and does so for the fully-covered case where a completion
+    // mark would be tempting to re-add.
+    const root = render({ state: vstate([1, 2, 3]) });
+    const kids = Array.from((root.querySelector('a.row') as HTMLElement).children);
+    expect(kids.map((e) => e.className.split(' ')[0])).toEqual(['badge', 'row-title', 'chain', 'count']);
+  });
+
   it('renders the count as exact "{covered}/{total}" text with the mono class', () => {
     const root = render();
     const count = root.querySelector('.count') as HTMLElement;

@@ -135,6 +135,15 @@ describe('MiniProjectLink', () => {
     expect(mark!.querySelector('svg')).not.toBeNull();
     // No state to give: the flag defaults to `not-yet` (ItemMark's D5 default).
     expect(mark!.classList.contains('not-yet')).toBe(true);
+    // It must be the MINI-PROJECT flag specifically. Asserting merely that
+    // "some .item-mark with some svg" is present left `type="static_page"`
+    // passing — and this is one of only two authorised changes in this file,
+    // so the wrong type here is the whole edit being wrong. The flag is a pole
+    // plus a pennant (ItemMark.svelte:45); jsdom sees inline SVG, so the exact
+    // child tags and the pennant's points are checkable.
+    const svg = mark!.querySelector('svg')!;
+    expect(Array.from(svg.children).map((c) => c.tagName)).toEqual(['line', 'polygon']);
+    expect(svg.querySelector('polygon')!.getAttribute('points')).toBe('4.2,3.2 12.4,5.8 4.2,8.4');
   });
 
   it('falls back to "Untitled block" in BOTH aria-label and visible title when block_title is whitespace', () => {

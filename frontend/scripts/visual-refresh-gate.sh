@@ -32,6 +32,11 @@
 #     in the rule.
 #   * Source greps must strip comments: several components' comments quote the
 #     very forms they forbid.
+#   * NEVER put an apostrophe inside the `node -e '…'` payload — not even in a
+#     comment. It closes the shell string and silently kills the scanner, with
+#     no error you would notice; both times this happened the only signal was
+#     EXPECTED_CHECKS coming up short. Write "each component own tests", not
+#     "each component's own tests".
 #   * Mutation-test every new assertion. Break the thing it claims to guard and
 #     watch it go red; an assertion never seen to fail is not known to work.
 #
@@ -527,6 +532,18 @@ else:
 # halo with the whole gate green.
 for _k, _b in bodies.items():
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', _b))
+# PINNED_TOKENS above is derived from T3's pinned bodies only, because those are
+# the ones stated in THIS process — but the later sections pin components that
+# reference tokens of their own, and an ancestor can null any of them by
+# inheritance. `.block { --border-soft: transparent }` on BlockGroup erased BOTH
+# T7 rows' separators with section (j) still seeing the exact pinned
+# `border-bottom:1px solid var(--border-soft)`, because the redefinition lives
+# under an unrelated hash (codex-r1-#1, reproduced). Harvest from the guarded
+# components' own sources rather than hand-listing, so a token added to any of
+# them is guarded automatically instead of silently unguarded.
+for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemIcon.svelte',
+           'src/components/course/SequenceLink.svelte', 'src/components/course/MiniProjectLink.svelte'):
+    PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', open(_f).read()))
 TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
 TOKEN_DECL = re.compile(r'(^|;)\s*(%s)\s*:' % TOKEN_ALT)
@@ -1062,12 +1079,35 @@ const SPEC = {
   "MiniProjectLink.svelte": { nodes: BASE,                     tags: ["a", "span"] },
 };
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
+// Rejecting inline `style` is NOT enough to make a component gradeable: a
+// GLOBAL utility class needs no scoped rule, so `class="row mono"` or
+// `class:mono={true}` restyles the whole row with the CSS inventory
+// byte-identical and every test green (codex-r1-#2 / laneA-C3, both
+// reproduced). A per-FILE list of allowed tokens does NOT close it -- `mono` is
+// legitimately used by the badge and the count, so `class="row mono"` reuses an
+// allowed token on the wrong element (my first fix, caught by mutation).
+//
+// So the pin is the whole per-ELEMENT signature, in document order:
+// `tag:token.token`. That pins which elements exist, their order, their tags
+// and their literal classes at once -- so it also reds on a reordered row, an
+// appended completion glyph, or a class landing on the wrong element. Dynamic
+// `{expr}` parts of a class attribute are deliberately not included: the state
+// values they carry are pinned by each component own tests and by the CSS
+// inventory. Update these when the markup legitimately changes; that is the
+// same intentional speed bump as EXPECTED_CHECKS.
+const SIG = {
+  "ItemMark.svelte": ["span:item-mark","svg:","line:","line:","line:","polygon:","polyline:","line:","line:","line:","circle:","circle:","circle:","line:","polygon:"],
+  "ItemIcon.svelte": ["button:icon","ItemMark:"],
+  "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
+  "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
+};
 for (const f of process.argv.slice(1)) {
   const hits = [];
   const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
   const spec = SPEC[f.split("/").pop()];
   if (!spec) { console.log(`FAIL  ${f} has no entry in SPEC — add one before the gate can vouch for it`); bad = 1; continue; }
   const NODE = new Set(spec.nodes), TAG = new Set(spec.tags);
+  const sig = [];
   (function walk(n) {
     if (!n) return;
     if (!NODE.has(n.type)) { hits.push(`unreviewed markup construct ${n.type}`); return; }
@@ -1083,13 +1123,27 @@ for (const f of process.argv.slice(1)) {
           if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
           else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
           else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
+
         }
+        const cls = [];
+        for (const a of n.attributes || []) {
+          if (a.type === "ClassDirective") cls.push("class:" + a.name);
+          else if (a.type === "Attribute" && String(a.name).toLowerCase() === "class") {
+            const parts = Array.isArray(a.value) ? a.value : [a.value];
+            for (const v of parts) if (v && v.type === "Text") cls.push(...String(v.data).split(/\s+/).filter(Boolean));
+          }
+        }
+        sig.push(n.name + ":" + cls.join("."));
         walk(n.fragment);
         return;
       }
     }
   })(ast.fragment);
   const base = f.split("/").pop();
+  const want = SIG[base] || [];
+  if (JSON.stringify(sig) !== JSON.stringify(want)) {
+    hits.push(`markup signature changed: ${JSON.stringify(sig)} (pinned ${JSON.stringify(want)})`);
+  }
   if (hits.length) { bad = 1; console.log(`FAIL  ${base} can style its DOM outside <style>: ${hits.join("; ")}`); }
   else console.log(`PASS  ${base} declares no inline styling — its DECLARATIVE CSS is all gradeable here`);
 }
