@@ -1,35 +1,106 @@
 <script lang="ts">
   import type { SequenceContent, VersionState } from '../../lib/types';
-  import { formatProgress } from '../../lib/format';
   import { navigate } from '../../lib/router.svelte';
+  import ItemMark from './ItemMark.svelte';
 
   let { courseSlug, sequence, state }: { courseSlug: string; sequence: SequenceContent; state: VersionState } = $props();
 
-  const total = sequence.items.length;
+  // All three are `$derived`: as plain `const`s they read `$props()` once at
+  // init and captured only the initial value (three `state_referenced_locally`
+  // warnings), so a parent swapping the sequence kept the old count and link.
+  const total = $derived(sequence.items.length);
   const covered = $derived(
     sequence.items.filter((it) => state.items[String(it.id)]?.is_covered).length,
   );
-  const href = `/courses/${courseSlug}/seq/${sequence.id}`;
+  const href = $derived(`/courses/${courseSlug}/seq/${sequence.id}`);
 </script>
 
 <a class="row" {href} onclick={(e) => { e.preventDefault(); navigate(href); }}>
-  <span class="title">S{sequence.order}. {sequence.title}</span>
-  <span class="progress">
-    {formatProgress(covered, total)}
-    {#if covered === total && total > 0}<span class="check">✓</span>{/if}
+  <!-- `S{order}` is a code badge (ref 1573), not a prefix on the title: the row
+       used to render one combined `S{order}. {title}` text node. No trailing
+       period — the badge is a label, not a numbered-list marker. The mono face
+       comes from the GLOBAL `.mono` utility (base.css:10) rather than a scoped
+       `font-family`, because jsdom cannot see scoped CSS and the class is
+       therefore the only thing a test can pin. -->
+  <span class="badge mono">S{sequence.order}</span>
+  <span class="row-title">{sequence.title}</span>
+  <!-- The chain is hidden from assistive tech as a whole (Constraint 3), not
+       just mark by mark: completion reaches AT through the mono count beside
+       it, and a chain of unlabelled marks would be a second, noisier reading of
+       the same fact. `current` never appears here — it is a player state. -->
+  <span class="chain" aria-hidden="true">
+    {#each sequence.items as it (it.id)}
+      <ItemMark type={it.type} state={state.items[String(it.id)]?.is_covered ? 'covered' : 'not-yet'} />
+    {/each}
   </span>
+  <span class="count mono">{covered}/{total}</span>
 </a>
 
 <style>
+  /* Row geometry is ref 1572, the 3b authoring sequence-row strip. The former
+     `border-radius: var(--radius)` is gone: rows are edge-flush inside T8a's
+     `overflow:hidden` card and separated by hairlines, so a per-row radius is
+     wrong and fights the `li:last-child` border fix T8a adds. The former
+     `justify-content: space-between` is gone too — `.row-title { flex:1 }`
+     pushes the right-hand side now.
+
+     `border-bottom` takes `--border-soft`, not `--border`: ref 1572 and ref
+     1564 share one untokenised #E9EBEF, and it splits by ROLE — soft for row
+     separators inside a card, `--border` for the card/section edge (T8a).
+
+     `color: var(--text)` is retained and load-bearing: without it the row's
+     text inherits the global `a { color: var(--primary) }` (base.css:12). */
   .row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius);
+    gap: 10px; /* ref 1572 */
+    padding: 8px 12px; /* ref 1572 */
+    border-bottom: 1px solid var(--border-soft);
     color: var(--text);
   }
-  .row:hover { background: var(--border); }
-  .progress { color: var(--muted); font-size: 0.875rem; }
-  .check { color: var(--success); margin-left: var(--space-1); }
+  /* `--primary-soft` is the hover fill; the old `var(--border)` was a line
+     token used as a surface. `text-decoration:none` suppresses the global
+     `a:hover { text-decoration: underline }` (base.css:13). */
+  .row:hover {
+    background: var(--primary-soft);
+    text-decoration: none;
+  }
+  /* ref 1573 — the twin of BlockGroup's `B{order}` badge (T8a). */
+  .badge {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--primary);
+    background: var(--primary-soft);
+    padding: 2px 6px;
+    border-radius: var(--radius-pill);
+  }
+  /* `min-width: 0` is load-bearing, not decorative: `flex: 1` resolves to
+     `flex-basis: 0`, and without it a long teacher-authored title on a row with
+     a many-item chain cannot shrink below its min-content and breaks per word
+     inside T8a's `overflow:hidden` card. Same idiom as `header h2` in T8a.
+     13.5px per mathion-visual-spec.md:266; weight 600 per ref 1574 (whose own
+     size, 13px, is superseded by the visual spec — a documented divergence). */
+  .row-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  /* `flex-wrap: wrap` is the long-chain ruling: a sequence with many items
+     wraps to further lines and the row grows taller, rather than the chain
+     being capped or the title ellipsed. */
+  .chain {
+    display: flex;
+    gap: 6px; /* mathion-visual-spec.md:249 */
+    flex-wrap: wrap;
+  }
+  /* 11.5px because this is a progress RATIO, not a positional counter — the
+     rule the 2026-09-04 counter change set: "Item N of M" is 12.5px, a
+     `{covered}/{total}` ratio is 11.5px. CourseCard's `.count` is the other
+     ratio and matches. */
+  .count {
+    font-size: 11.5px;
+    color: var(--muted);
+  }
 </style>

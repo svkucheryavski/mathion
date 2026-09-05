@@ -82,7 +82,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=174
+EXPECTED_CHECKS=185
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -1052,12 +1052,22 @@ let bad = 0;
 // that neither component styles its DOM declaratively outside its <style> block
 // — the actual regression path for the double ring — and that any new markup
 // construct or tag reds for review.
-const NODE = new Set(["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"]);
-const TAG  = new Set(["button", "span", "svg", "line", "polygon", "polyline", "circle"]);
+// Per FILE, so T6 keeps its tight pin while T7 gets the same protection: a
+// construct legitimate in one of these is not thereby legitimate in another.
+const BASE = ["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"];
+const SPEC = {
+  "ItemMark.svelte":        { nodes: BASE,                     tags: ["span", "svg", "line", "polygon", "polyline", "circle"] },
+  "ItemIcon.svelte":        { nodes: BASE,                     tags: ["button"] },
+  "SequenceLink.svelte":    { nodes: BASE.concat("EachBlock"), tags: ["a", "span"] },
+  "MiniProjectLink.svelte": { nodes: BASE,                     tags: ["a", "span"] },
+};
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 for (const f of process.argv.slice(1)) {
   const hits = [];
   const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
+  const spec = SPEC[f.split("/").pop()];
+  if (!spec) { console.log(`FAIL  ${f} has no entry in SPEC — add one before the gate can vouch for it`); bad = 1; continue; }
+  const NODE = new Set(spec.nodes), TAG = new Set(spec.tags);
   (function walk(n) {
     if (!n) return;
     if (!NODE.has(n.type)) { hits.push(`unreviewed markup construct ${n.type}`); return; }
@@ -1065,6 +1075,7 @@ for (const f of process.argv.slice(1)) {
       case "Fragment": (n.nodes || []).forEach(walk); return;
       case "Text": case "Comment": case "ExpressionTag": return;
       case "IfBlock": walk(n.consequent); walk(n.alternate); return;
+      case "EachBlock": walk(n.body); walk(n.fallback); return;
       case "RegularElement": case "Component": {
         if (n.type === "RegularElement" && !TAG.has(n.name)) hits.push(`unreviewed element <${n.name}>`);
         for (const a of n.attributes || []) {
@@ -1083,7 +1094,8 @@ for (const f of process.argv.slice(1)) {
   else console.log(`PASS  ${base} declares no inline styling — its DECLARATIVE CSS is all gradeable here`);
 }
 process.exit(bad);
-' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte || fail=1
+' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
+  src/components/course/SequenceLink.svelte src/components/course/MiniProjectLink.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -1198,5 +1210,136 @@ sys.exit(bad)
 T6EOF
   [[ $? -eq 0 ]] || fail=1
 fi
+
+# --- (j) T7: SequenceLink row + MiniProjectLink row -------------------------
+# PARSE-BASED for the same reason as (i): these two rows share every class name
+# they use (`.row`, `.row:hover`, `.row-title`), so a grep for `.row{…}` cannot
+# say WHICH component it matched, and a selector list or a `:where()` suffix
+# walks through a declaration-level regex anyway. Selecting by the component
+# hash and comparing the full inventory settles both at once: the shared names
+# are disambiguated by hash, and the pinned set is stated per component.
+echo
+echo "--- (j) T7 rows ---"
+# Anchors: each is authored by exactly ONE component and slice-introduced.
+# `.row` deliberately is NOT an anchor -- it is the 2-way collision itself.
+grep -qE '^[[:space:]]*\.chain[[:space:]]*[,{]' src/components/course/SequenceLink.svelte \
+  || { echo "FAIL  .chain is not authored as a rule in SequenceLink.svelte"; fail=1 }
+grep -qE '^[[:space:]]*\.row-glyph[[:space:]]*[,{]' src/components/course/MiniProjectLink.svelte \
+  || { echo "FAIL  .row-glyph is not authored as a rule in MiniProjectLink.svelte"; fail=1 }
+for cls in chain row-glyph; do
+  owners=(${(f)"$(grep -rlE "^[[:space:]]*\.${cls}[[:space:]]*[,{]" src --include='*.svelte')"})
+  if [[ ${#owners[@]} -eq 1 ]]; then
+    echo "PASS  .${cls} is authored by exactly one component (${owners[1]:t})"
+  else
+    echo "FAIL  .${cls} is authored by ${#owners[@]} components: $owners"; fail=1
+  fi
+done
+sq=(${(f)"$(grep -ohE '\.chain\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+mp=(${(f)"$(grep -ohE '\.row-glyph\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#sq[@]} -ne 1 || ${#mp[@]} -ne 1 || ${sq[1]} == ${mp[1]} ]]; then
+  echo "FAIL  T7 anchors not dist-unique/distinct (.chain=${#sq[@]}: $sq, .row-glyph=${#mp[@]}: $mp)"; fail=1
+else
+  echo "PASS  T7 anchors resolve to one distinct hash each (.chain ${sq[1]}, .row-glyph ${mp[1]})"
+  python3 - ${sq[1]} ${mp[1]} ${CSS[@]} <<'T7EOF'
+import sys
+sq_h, mp_h = sys.argv[1], sys.argv[2]
+css = '\n'.join(open(p).read() for p in sys.argv[3:])
+bad = 0
+
+def rules(text, anc=()):
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                out.extend(rules(body, anc + (' '.join(sel.split()),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+
+# Both rows' `.row` and `.row-title` are stated in FULL and identically, because
+# "the two row kinds agree" IS the pin -- they are <li> siblings in one BlockGroup
+# panel <ul>, and a drift in either makes the list read as two unrelated lists.
+ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 12px;'
+         'border-bottom:1px solid var(--border-soft);color:var(--text)')
+HOVER = 'background:var(--primary-soft);text-decoration:none'
+TITLE = 'flex:1;min-width:0;font-size:13.5px;font-weight:600;color:var(--text)'
+SPECS = [
+    ('SequenceLink', sq_h, [
+        ('', '.row.%s' % sq_h, ROW),
+        ('', '.row.%s:hover' % sq_h, HOVER),
+        # ref 1573 -- the twin of T8a's B{order} badge.
+        ('', '.badge.%s' % sq_h,
+             'font-size:11px;font-weight:500;color:var(--primary);'
+             'background:var(--primary-soft);padding:2px 6px;border-radius:var(--radius-pill)'),
+        ('', '.row-title.%s' % sq_h, TITLE),
+        # flex-wrap is the long-chain ruling: wrap and grow, no cap, no ellipsis.
+        ('', '.chain.%s' % sq_h, 'display:flex;gap:6px;flex-wrap:wrap'),
+        # 11.5px because this is a progress RATIO, not a positional counter.
+        ('', '.count.%s' % sq_h, 'font-size:11.5px;color:var(--muted)'),
+    ]),
+    ('MiniProjectLink', mp_h, [
+        ('', '.row.%s' % mp_h, ROW),
+        ('', '.row.%s:hover' % mp_h, HOVER),
+        ('', '.row-glyph.%s' % mp_h, 'display:inline-flex;flex:0 0 auto'),
+        ('', '.row-title.%s' % mp_h, TITLE),
+    ]),
+]
+
+for name, h, want in SPECS:
+    got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+    exp = sorted((m, s) for m, s, _ in want)
+    if got != exp:
+        bad = 1
+        print('FAIL  %s rule inventory differs (at-rules and selector lists included)' % name)
+        for x in sorted(set(got) - set(exp)): print('        unexpected: %s %s' % x)
+        for x in sorted(set(exp) - set(got)): print('        missing:    %s %s' % x)
+        continue
+    print('PASS  %s compiles to exactly its %d rule(s) — no duplicate, no stray at-rule, no selector list'
+          % (name, len(want)))
+    index = {(' >> '.join(a), s): b for s, b, a in ALL if h in s}
+    off = 0
+    for m, sel, wb in want:
+        have, wantd = decls(index[(m, sel)]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  %s %s%s declarations differ' % (name, (m + ' ') if m else '', sel))
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  %s declares exactly the pinned set in every rule — nothing added, '
+              'nothing dropped' % name)
+
+# The two rows must agree BYTE-FOR-BYTE on the shared geometry, not merely each
+# match its own copy of the spec: they are siblings in one list.
+for label, sel in (('.row', '.row.%s'), ('.row-title', '.row-title.%s')):
+    a = {k: v for k, v in ((s, b) for s, b, _ in ALL) if k == sel % sq_h}
+    b = {k: v for k, v in ((s, b) for s, b, _ in ALL) if k == sel % mp_h}
+    if a and b and decls(list(a.values())[0]) == decls(list(b.values())[0]):
+        print('PASS  both row kinds declare an identical %s — the list reads as one list' % label)
+    else:
+        bad = 1
+        print('FAIL  the two row kinds disagree on %s' % label)
+
+sys.exit(bad)
+T7EOF
+  [[ $? -eq 0 ]] || fail=1
+fi
+
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

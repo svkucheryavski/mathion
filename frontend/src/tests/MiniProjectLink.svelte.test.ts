@@ -124,7 +124,17 @@ describe('MiniProjectLink', () => {
     const glyph = target.querySelector('a.row-mp .row-glyph');
     expect(glyph).not.toBeNull();
     expect(glyph!.getAttribute('aria-hidden')).toBe('true');
-    expect(glyph!.textContent).toBe('📋');
+    // T7 (authorised inversion): the 📋 text node is replaced by the shared
+    // mini-project `ItemMark`, so the row leads with the same drawn flag the
+    // item chain uses instead of an emoji whose rendering varies by platform.
+    // The glyph span keeps aria-hidden — the link's own aria-label is still the
+    // sole place AT users hear what this row is.
+    expect(glyph!.textContent).not.toContain('📋');
+    const mark = glyph!.querySelector('.item-mark');
+    expect(mark).not.toBeNull();
+    expect(mark!.querySelector('svg')).not.toBeNull();
+    // No state to give: the flag defaults to `not-yet` (ItemMark's D5 default).
+    expect(mark!.classList.contains('not-yet')).toBe(true);
   });
 
   it('falls back to "Untitled block" in BOTH aria-label and visible title when block_title is whitespace', () => {
