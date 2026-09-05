@@ -1069,6 +1069,15 @@ let bad = 0;
 // that neither component styles its DOM declaratively outside its <style> block
 // — the actual regression path for the double ring — and that any new markup
 // construct or tag reds for review.
+// `hidden` and `inert` are refused for the same reason as `style`: both switch an
+// element off visually from the markup, where no CSS lane can see it. Hiding the
+// count with `hidden` passed every pin in this file and every unit test — DOM
+// textContent reads hidden nodes, so even the new normalised-text assertion stays
+// green (first-party lane, T7 round 5). None of these four components has any use
+// for either attribute. The BlockGroup panel in T8a legitimately takes
+// `hidden={!expanded}`, but it is not one of the files this scanner grades; if it
+// is ever added here, that attribute needs a per-file carve-out rather than a
+// relaxation of this rule.
 // Per FILE, so T6 keeps its tight pin while T7 gets the same protection: a
 // construct legitimate in one of these is not thereby legitimate in another.
 const BASE = ["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"];
@@ -1150,6 +1159,8 @@ for (const f of process.argv.slice(1)) {
           if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
           else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
           else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
+          else if (nm.toLowerCase() === "hidden" || nm.toLowerCase() === "inert")
+            hits.push(`<${n.name}> ${nm.toLowerCase()} attribute`);
 
         }
         const cls = [];
