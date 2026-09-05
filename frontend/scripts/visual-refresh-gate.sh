@@ -1039,6 +1039,19 @@ let bad = 0;
 // and REDS, which is the point: these two components are small and static, so
 // anything new here deserves a human look before the gate keeps vouching for
 // them.
+//
+// SCOPE, stated precisely because the old PASS text overclaimed (codex-r4): this
+// is a check on DECLARATIVE markup. It cannot see runtime style mutation — an
+// allowed `onpointerenter` (or an OnDirective handler) assigning
+// `currentTarget.style.cssText` parses as an ordinary Attribute, leaves the CSS
+// inventory untouched, and passes the initial no-style assertions
+// because nothing has fired yet. Nor does it traverse the internals of an
+// imported Component, so a helper could inject a stylesheet at runtime. Closing that
+// would need a rendered-DOM check (a real browser, computed styles after
+// interaction), which this slice does not have. What the gate DOES guarantee is
+// that neither component styles its DOM declaratively outside its <style> block
+// — the actual regression path for the double ring — and that any new markup
+// construct or tag reds for review.
 const NODE = new Set(["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"]);
 const TAG  = new Set(["button", "span", "svg", "line", "polygon", "polyline", "circle"]);
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
@@ -1067,7 +1080,7 @@ for (const f of process.argv.slice(1)) {
   })(ast.fragment);
   const base = f.split("/").pop();
   if (hits.length) { bad = 1; console.log(`FAIL  ${base} can style its DOM outside <style>: ${hits.join("; ")}`); }
-  else console.log(`PASS  ${base} has no inline-styling escape hatch — all of its CSS is gradeable here`);
+  else console.log(`PASS  ${base} declares no inline styling — its DECLARATIVE CSS is all gradeable here`);
 }
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte || fail=1
