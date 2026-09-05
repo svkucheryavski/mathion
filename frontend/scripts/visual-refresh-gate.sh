@@ -1398,6 +1398,7 @@ else
   echo "PASS  T7 anchors resolve to one distinct hash each (.chain ${sq[1]}, .row-glyph ${mp[1]})"
   python3 - ${sq[1]} ${mp[1]} ${CSS[@]} <<'T7EOF'
 import re, sys
+from collections import Counter
 sq_h, mp_h = sys.argv[1], sys.argv[2]
 css = '\n'.join(open(p).read() for p in sys.argv[3:])
 bad = 0
@@ -1493,8 +1494,15 @@ for name, h, want in SPECS:
     if got != exp:
         bad = 1
         print('FAIL  %s rule inventory differs (at-rules and selector lists included)' % name)
-        for x in sorted(set(got) - set(exp)): print('        unexpected: %s %s' % x)
-        for x in sorted(set(exp) - set(got)): print('        missing:    %s %s' % x)
+        # MULTISET, not set. A duplicated rule appears in both `got` and `exp`, so
+        # a set difference is empty and this printed a bare FAIL with no diff at
+        # all -- while "no duplicate" is the first defect the PASS string claims to
+        # cover. Detection was never affected (`got != exp` compares lists); only
+        # the diagnostics were, which is worse than it sounds, because the next
+        # person sees a failure the gate refuses to explain.
+        cg, ce = Counter(got), Counter(exp)
+        for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+        for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
         continue
     print('PASS  %s compiles to exactly its %d rule(s) — no duplicate, no stray at-rule, no selector list'
           % (name, len(want)))
@@ -1715,6 +1723,7 @@ else
   echo "PASS  T8b anchor resolves to one hash (.pill-success ${sp[1]})"
   python3 - ${sp[1]} ${CSS[@]} <<'T8BEOF'
 import re, sys
+from collections import Counter
 h = sys.argv[1]
 css = '\n'.join(open(p).read() for p in sys.argv[2:])
 bad = 0
@@ -1776,8 +1785,11 @@ exp = sorted(('', s) for s, _ in WANT)
 if got != exp:
     bad = 1
     print('FAIL  StatusPill rule inventory differs (at-rules and selector lists included)')
-    for x in sorted(set(got) - set(exp)): print('        unexpected: %s %s' % x)
-    for x in sorted(set(exp) - set(got)): print('        missing:    %s %s' % x)
+    # MULTISET, not set -- see the same note in (j). A duplicated rule sits in both
+    # collections, so a set difference prints nothing.
+    cg, ce = Counter(got), Counter(exp)
+    for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+    for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
 else:
     print('PASS  StatusPill compiles to exactly its %d rule(s) — no duplicate, no stray '
           'at-rule, no selector list' % len(WANT))
