@@ -1332,7 +1332,13 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 12px;'
          'border-bottom:1px solid var(--border-soft);color:var(--text)')
 HOVER = 'background:var(--primary-soft);text-decoration:none'
-TITLE = 'flex:1;min-width:0;font-size:13.5px;font-weight:600;color:var(--text)'
+# `flex:1 1 auto`, NOT `flex:1`. The shorthand `flex:1` means basis ZERO, and
+# with `.chain` on an auto basis (28n-6 px) the row goes negative past ~24 items
+# on a 760px card / ~9 on a 340px one -- at which point flex-grow stops applying
+# and the title resolves to 0px with its text across the marks. The auto basis
+# shares the shrink instead. A revert to `flex:1` reads as a harmless cleanup in
+# review, which is why the basis is pinned here rather than left to the comment.
+TITLE = 'flex:1 1 auto;min-width:0;font-size:13.5px;font-weight:600;color:var(--text)'
 SPECS = [
     ('SequenceLink', sq_h, [
         ('', '.row.%s' % sq_h, ROW),

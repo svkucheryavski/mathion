@@ -19,8 +19,8 @@
 
 <!-- aria-hidden with NO text node: the chain of these in SequenceLink (T7)
      carries no accessible name, because completion reaches assistive tech
-     through the sibling mono {covered}/{total} count instead. A label here
-     would be a second, unlabelled reading of the same fact. -->
+     through that row's `aria-label` ("… 2 of 3 items completed") instead. A
+     label here would be a second, unlabelled reading of the same fact. -->
 <span class="item-mark {state}" aria-hidden="true">
   <svg
     width="11"

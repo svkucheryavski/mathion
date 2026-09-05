@@ -147,6 +147,35 @@ describe('SequenceLink', () => {
     expect(count.classList.contains('mono')).toBe(true);
   });
 
+  it('names the row for assistive tech instead of leaving it to the contents', () => {
+    // The chain is aria-hidden, so before this the link's computed name was its
+    // remaining text — "S3 Determinants 2/3", a bare token plus a ratio a screen
+    // reader renders as "two slash three". The label states the same three facts
+    // in words, and pinning the WHOLE string is what catches a silent drop of
+    // any one of them (order, title, or progress).
+    const a = render().querySelector('a.row') as HTMLAnchorElement;
+    expect(a.getAttribute('aria-label')).toBe('Sequence S3: Determinants, 2 of 3 items completed');
+  });
+
+  it('recomputes the aria-label from props, and says "item" when there is one', () => {
+    // A label built as a plain `const` would freeze at mount exactly as `total`,
+    // `covered` and `href` did before they became `$derived` — and it would do so
+    // invisibly, since nothing on screen changes. Coverage alone must move it,
+    // and so must a whole-sequence swap.
+    const root = render();
+    const a = root.querySelector('a.row') as HTMLAnchorElement;
+
+    props.state = vstate([1, 2, 3, 4]);
+    flushSync();
+    expect(a.getAttribute('aria-label')).toBe('Sequence S3: Determinants, 3 of 3 items completed');
+
+    props.sequence = sequence({ id: 12, order: 4, title: 'Eigenvalues', items: [item(4)] });
+    flushSync();
+    // Singular: "1 of 1 items completed" is what a template with no plural
+    // branch would say.
+    expect(a.getAttribute('aria-label')).toBe('Sequence S4: Eigenvalues, 1 of 1 item completed');
+  });
+
   it('points at the sequence route', () => {
     const a = render().querySelector('a.row') as HTMLAnchorElement;
     expect(a).not.toBeNull();

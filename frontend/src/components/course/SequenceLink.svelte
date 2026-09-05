@@ -13,9 +13,20 @@
     sequence.items.filter((it) => state.items[String(it.id)]?.is_covered).length,
   );
   const href = $derived(`/courses/${courseSlug}/seq/${sequence.id}`);
+
+  // The row's accessible name. Without it the link's name is computed from its
+  // contents and comes out as "S3 Determinants 2/3" — the badge read as a bare
+  // token and the ratio as an ambiguous "two slash three". The chain is
+  // aria-hidden, so the count was the ONLY completion signal reaching assistive
+  // tech, and it was reaching it in the least legible form available. This
+  // states the same three facts in words. Visually nothing changes.
+  const label = $derived(
+    `Sequence S${sequence.order}: ${sequence.title}, ` +
+      `${covered} of ${total} ${total === 1 ? 'item' : 'items'} completed`,
+  );
 </script>
 
-<a class="row" {href} onclick={(e) => { e.preventDefault(); navigate(href); }}>
+<a class="row" {href} aria-label={label} onclick={(e) => { e.preventDefault(); navigate(href); }}>
   <!-- `S{order}` is a code badge (ref 1573), not a prefix on the title: the row
        used to render one combined `S{order}. {title}` text node. No trailing
        period — the badge is a label, not a numbered-list marker. The mono face
@@ -25,9 +36,9 @@
   <span class="badge mono">S{sequence.order}</span>
   <span class="row-title">{sequence.title}</span>
   <!-- The chain is hidden from assistive tech as a whole (Constraint 3), not
-       just mark by mark: completion reaches AT through the mono count beside
-       it, and a chain of unlabelled marks would be a second, noisier reading of
-       the same fact. `current` never appears here — it is a player state. -->
+       just mark by mark: completion reaches AT through the row's `aria-label`
+       above, and a chain of unlabelled marks would be a second, noisier reading
+       of the same fact. `current` never appears here — it is a player state. -->
   <span class="chain" aria-hidden="true">
     {#each sequence.items as it (it.id)}
       <ItemMark type={it.type} state={state.items[String(it.id)]?.is_covered ? 'covered' : 'not-yet'} />
@@ -41,7 +52,7 @@
      `border-radius: var(--radius)` is gone: rows are edge-flush inside T8a's
      `overflow:hidden` card and separated by hairlines, so a per-row radius is
      wrong and fights the `li:last-child` border fix T8a adds. The former
-     `justify-content: space-between` is gone too — `.row-title { flex:1 }`
+     `justify-content: space-between` is gone too — `.row-title { flex:1 1 auto }`
      pushes the right-hand side now.
 
      `border-bottom` takes `--border-soft`, not `--border`: ref 1572 and ref
@@ -74,14 +85,25 @@
     padding: 2px 6px;
     border-radius: var(--radius-pill);
   }
-  /* `min-width: 0` is load-bearing, not decorative: `flex: 1` resolves to
-     `flex-basis: 0`, and without it a long teacher-authored title on a row with
-     a many-item chain cannot shrink below its min-content and breaks per word
-     inside T8a's `overflow:hidden` card. Same idiom as `header h2` in T8a.
+  /* `flex: 1 1 auto`, NOT `flex: 1`. The shorthand `flex: 1` expands to
+     `flex: 1 1 0%` — a flex BASIS of zero — while `.chain` keeps an auto basis
+     equal to its max-content width (22px per mark plus a 6px gap, so 28n-6).
+     Once badge + chain + count + gaps exceed the row, free space goes negative,
+     `flex-grow` never applies, and the title resolves to ZERO width with its
+     text overflowing across the marks. That happened past ~24 items on a 760px
+     card and past ~9 on a 340px one — precisely the range
+     mathion-visual-spec.md:253 says must "wrap cleanly". With an auto basis the
+     shrink is shared in proportion to content instead of falling entirely on
+     the title, so the chain wraps and the title stays readable.
+
+     `min-width: 0` is retained so the title can still shrink below its
+     min-content rather than forcing the row to overflow the card; what changed
+     is that it is no longer the ONLY flexible thing in the row.
+
      13.5px per mathion-visual-spec.md:266; weight 600 per ref 1574 (whose own
      size, 13px, is superseded by the visual spec — a documented divergence). */
   .row-title {
-    flex: 1;
+    flex: 1 1 auto;
     min-width: 0;
     font-size: 13.5px;
     font-weight: 600;

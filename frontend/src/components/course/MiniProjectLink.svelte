@@ -76,15 +76,17 @@
     display: inline-flex;
     flex: 0 0 auto;
   }
-  /* The twin of SequenceLink's `.row-title`, `min-width: 0` included for the
-     same reason: `flex: 1` resolves to `flex-basis: 0`, so a long title would
-     otherwise refuse to shrink below its min-content and break per word.
+  /* The exact twin of SequenceLink's `.row-title`, `flex: 1 1 auto` included —
+     the gate asserts the two rules are byte-identical, because these rows are
+     `<li>` siblings in one BlockGroup panel `<ul>` and a drift makes the list
+     read as two unrelated lists. See SequenceLink for why the basis must not be
+     zero.
 
      `flex: 1` is also what pushes the StatusPill right. Deliberately NOT
      `margin-left: auto` on the pill — that would need a selector reaching into
      a child component's root, which Svelte prunes as `css_unused_selector`. */
   .row-title {
-    flex: 1;
+    flex: 1 1 auto;
     min-width: 0;
     font-size: 13.5px;
     font-weight: 600;
