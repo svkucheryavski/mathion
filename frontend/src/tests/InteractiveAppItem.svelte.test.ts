@@ -178,11 +178,26 @@ it('does NOT render the cover hint while still loading', () => {
   expect(target.querySelector('.cover-hint')).toBeNull();
 });
 
-it('drops the italic from the notice branches (tokens carry the recede)', async () => {
+it('puts the fetch-failure copy inside .notice (the class the gate anchors on)', async () => {
+  // Structural presence ONLY. This test used to assert
+  // `getComputedStyle(notice).fontStyle !== 'italic'`, which was vacuous:
+  // vite.config.ts sets no `css: true` for the test environment, so a
+  // component's <style> never reaches jsdom — re-adding `font-style: italic`
+  // to `.notice` left all of these green. Same trap the repo documents at
+  // MiniProjectModal.create-edit.svelte.test.ts:548-551. The dropped italic is
+  // guarded where it IS observable — in the built CSS, by the slice's per-task
+  // dist gate (spec:197, T5 targets): a negative `font-style:italic` assertion
+  // hash-coupled to the `.interactive-app` anchor, since `.notice` is not
+  // component-unique (InteractiveAppEditor authors one and keeps its italic).
   fetchSpy.mockImplementation(routed(404));
   const target = mountItem({ item: appItem(), isCovered: false });
   await settle();
   const notice = target.querySelector('.notice');
   expect(notice).not.toBeNull();
-  expect(getComputedStyle(notice!).fontStyle).not.toBe('italic');
+  // Binds the BRANCH to the CLASS, which is the one fact neither the 404 test
+  // above nor the dist gate can see: the gate proves a `.notice` rule exists
+  // and compiles, and the 404 test proves the copy renders — but `.notice`
+  // could sit on the "No app uploaded yet" branch alone with this one a bare
+  // <p>, and both would still pass.
+  expect(notice!.textContent).toContain("couldn't be loaded");
 });

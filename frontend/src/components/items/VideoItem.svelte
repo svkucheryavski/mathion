@@ -75,9 +75,15 @@
     overflow: hidden;
   }
   .video-card :global(.frame) { margin-bottom: 0; }
-  /* inline-flex, NOT block: the row must hug its content inside a stretch
-     column, and without the flex context the bare inline SVG baseline-aligns
-     against the text instead of centring on it. Constraint 5(b) no-ref. */
+  /* `align-items:center` is the load-bearing half: without a flex context the
+     bare inline SVG baseline-aligns against the text instead of centring on it.
+     The `inline-flex` does NOT make the row hug its content — an earlier
+     version of this comment claimed it did, which is false: `.watched` is a
+     direct child of the `display:flex` article, so it is a flex item and
+     blockifies to `flex` (measured live at 320px: computed display `flex`,
+     width 288 = the full column). `inline-flex` is retained because it states
+     the intent for a content-width row if this ever moves out of the flex
+     parent; today the two render identically. Constraint 5(b) no-ref. */
   .watched {
     display: inline-flex;
     align-items: center;

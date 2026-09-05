@@ -60,3 +60,37 @@ def test_render_link_preserved():
 def test_render_image_preserved():
     result = render_markdown("![alt text](https://example.com/img.png)")
     assert 'src="https://example.com/img.png"' in result
+
+
+def test_render_ordered_list_start_preserved():
+    """`start` survives sanitisation, so a resumed list keeps its own numbers.
+
+    markdown-it emits `<ol start="3">` for a list beginning at 3, but nh3 drops
+    any attribute not in the allow-list. While the frontend forced bullets onto
+    every `<ol>` this was invisible; once ordered lists render as numbers, a
+    stripped `start` silently renumbers a teacher's "3. 4. 5." to "1. 2. 3." —
+    a wrong statement in a maths derivation rather than merely unstyled markup.
+    """
+    result = render_markdown("3. third\n4. fourth\n5. fifth\n")
+    assert '<ol start="3">' in result
+    assert "<li>third</li>" in result
+
+
+def test_render_ordered_list_start_absent_when_list_starts_at_one():
+    """No spurious attribute on the ordinary case — markdown-it omits it."""
+    result = render_markdown("1. first\n2. second\n")
+    assert "<ol>" in result
+    assert "start=" not in result
+
+
+def test_render_ordered_list_start_is_the_only_ol_attribute():
+    """The allow-list widened by exactly one attribute, not by a wildcard.
+
+    Asserted against the allow-list itself rather than through a rendered
+    `<ol class=...>`: `_md` is built with `html=False`, so raw HTML is escaped
+    to text and never reaches nh3 at all — a round-trip test here would pass no
+    matter what the allow-list said.
+    """
+    from mathion.markdown import _ALLOWED_ATTRS
+
+    assert _ALLOWED_ATTRS["ol"] == {"start"}

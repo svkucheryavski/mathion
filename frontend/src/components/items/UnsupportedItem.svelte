@@ -1,10 +1,11 @@
 <script lang="ts">
   // Intentionally empty, and intentionally still `lang="ts"`. The component is
   // prop-less — T5 removed its only prop, `type` — but deleting the whole block
-  // (which spec §2's wording says to do) leaves the component untyped, so every
-  // importer resolves it as implicit `any`: `npm run check` went 0 -> 2 errors
-  // at ItemRouter.svelte:8 and the T5 test's import. Keeping the empty typed
-  // block is the smallest thing that satisfies both.
+  // (which an EARLIER spec revision said to do; §2 now says to keep it) leaves
+  // the component untyped, so every importer resolves it as implicit `any`:
+  // `npm run check` went 0 -> 2 errors at ItemRouter.svelte:8 and the T5 test's
+  // import. Keeping the empty typed block is the smallest thing that satisfies
+  // both.
 </script>
 
 <div class="unsupported">

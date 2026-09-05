@@ -6,8 +6,10 @@ let cleanup: (() => void) | null = null;
 function render() {
   const target = document.createElement('div');
   document.body.appendChild(target);
-  // Mounted with NO props on purpose: T5 removes the `type` prop entirely
-  // (it was the component's only one, so the whole <script> block goes).
+  // Mounted with NO props on purpose: T5 removes the `type` prop entirely.
+  // It was the component's only one, but the `<script lang="ts">` block STAYS
+  // (empty) — deleting it leaves the component untyped and every importer
+  // resolves it as implicit `any`, taking `npm run check` from 0 to 2 errors.
   // If a required prop were reintroduced this mount is what would surface it.
   const cmp = mount(UnsupportedItem, { target, props: {} });
   cleanup = () => unmount(cmp);
@@ -31,10 +33,13 @@ it('renders type-neutral copy that leaks no raw type identifier', () => {
   expect(text).not.toContain('(');
 });
 
-it('keeps the dashed notice box and its own inset padding', () => {
-  // The article-rhythm rule does NOT apply here: this component has no
-  // <article> and no <h2>, and its padding is the notice box's inset that
-  // keeps text off the dashed border (spec §2 UnsupportedItem, retained).
+it('renders a plain notice box, not an article-rhythm surface', () => {
+  // Why the article rule does not apply: no <article> and no <h2>, which is
+  // exactly what this asserts. The RETAINED `padding: var(--space-3)` is NOT
+  // checked here and the title no longer implies it is — jsdom gets no
+  // component CSS (vite.config.ts sets no `css: true`), so any assertion on it
+  // would be vacuous. It is pinned in the built CSS instead, by the slice's
+  // per-task dist gate (spec:197, T5 targets), together with the dashed border.
   const target = render();
   const box = target.querySelector('.unsupported');
   expect(box).not.toBeNull();

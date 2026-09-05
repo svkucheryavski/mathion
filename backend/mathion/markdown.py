@@ -23,6 +23,13 @@ _ALLOWED_ATTRS = {
     "img": {"src", "alt", "title"},
     "span": {"class"},
     "div": {"class"},
+    # A list that resumes after a paragraph carries `start`, which markdown-it
+    # emits and nh3 would otherwise drop. Harmless while the frontend forced
+    # bullets onto every <ol>; once ordered lists render as numbers, a stripped
+    # `start` renumbers a teacher's "3. 4. 5." to "1. 2. 3." — wrong content,
+    # not just unstyled markup. Value-restricted by nh3 to the attribute name
+    # only; the numeral itself is markdown-it's, never author HTML (html=False).
+    "ol": {"start"},
 }
 
 _URL_SCHEMES = {"http", "https", "mailto"}

@@ -61,7 +61,20 @@
      content of indentation and bullets entirely. Only re-tokened/retargeted.
      Every rule stays ANCESTOR-SCOPED under `.content` — a bare top-level
      `:global(p)` would leak page-content typography app-wide. */
-  .content { color: var(--text-2); }
+  /* overflow-wrap: `.content` renders UNBOUNDED teacher markdown through
+     `{@html}` (see the trust-boundary note above). This is the LARGEST such
+     surface in the app and was the only one T2/T3 left unprotected — the
+     identical rule sits on TextQuestion's and NumericQuestion's `.text` and on
+     both choice questions' `.opt` (cited by selector, not by line — the line
+     form of this citation has gone stale three times in this slice as comment
+     blocks landed above it). Measured in Chromium at a 320px
+     viewport, one long unbreakable URL in a paragraph gave documentElement
+     scrollWidth 753 vs clientWidth 320 — 433px of PAGE-level horizontal
+     scroll, because the overflow escapes .page-item (max-width:652px) and
+     .page (max-width:960px) and neither clips (WCAG 1.4.10 reflow). Inherited
+     by the descendant rules below, and inert on <pre>, which keeps its own
+     overflow-x:auto. */
+  .content { overflow-wrap: anywhere; color: var(--text-2); }
   .content :global(p) { margin-bottom: var(--space-3); line-height: 1.6; }
   .content :global(h1), .content :global(h2), .content :global(h3) { margin: var(--space-4) 0 var(--space-2); }
   .content :global(h1) { font-size: 21px; font-weight: 600; color: var(--text); }

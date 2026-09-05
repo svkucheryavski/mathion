@@ -1,7 +1,7 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ItemRouter from '../components/items/ItemRouter.svelte';
-import type { InteractiveAppItem, VersionState } from '../lib/types';
+import type { InteractiveAppItem, Item, MiniProjectItem, VersionState } from '../lib/types';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -61,9 +61,13 @@ it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedIte
 // pass. The interactive_app case above never mounts UnsupportedItem, so without
 // this nothing proves a mini_project item still routes there after the edit.
 it('dispatches a mini_project item to UnsupportedItem with type-neutral copy', () => {
-  const item = {
+  // Typed as MiniProjectItem, not cast. `as unknown as InteractiveAppItem`
+  // would declare a mini_project item to be an interactive_app one and swallow
+  // any future field added to MiniProjectItem — while MiniProjectItem is a
+  // real member of the Item union (types.ts:62), so no cast is needed at all.
+  const item: MiniProjectItem = {
     id: 11, sequence_id: 1, title: 'Group build', slug: 'group-build', order: 2,
-    type: 'mini_project' as const,
+    type: 'mini_project',
   };
   const state: VersionState = {
     version_id: 1,
@@ -76,7 +80,7 @@ it('dispatches a mini_project item to UnsupportedItem with type-neutral copy', (
   };
   const target = document.createElement('div');
   document.body.appendChild(target);
-  const props = $state({ item: item as unknown as InteractiveAppItem, state });
+  const props = $state<{ item: Item; state: VersionState }>({ item, state });
   const cmp = mount(ItemRouter, { target, props });
   cleanup = () => unmount(cmp);
   flushSync();
