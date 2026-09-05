@@ -89,5 +89,16 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
     );
     if (!link) throw new Error('expected MiniProjectLink anchor to be present');
     expect(link.textContent).toContain('Intro Project');
+    // ...and actually VISIBLE. Before T8a a collapsed BlockGroup removed this
+    // anchor from the DOM outright, so finding it proved it was showing. T8a
+    // renders the panel in BOTH states and hides it with `hidden`, and both
+    // `querySelector` and `textContent` read straight through that — so presence
+    // alone can no longer tell "visible" from "permanently hidden". Nothing is
+    // unguarded (BlockGroup's own test pins `panel.hidden`), but an assertion
+    // that READS as a visibility check and is not one is worse than none, so it
+    // is strengthened here rather than left to look like something it isn't.
+    const region = link.closest('[role="region"]') as HTMLElement | null;
+    expect(region).not.toBeNull();
+    expect(region!.hidden).toBe(false);
   });
 });

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=191
+EXPECTED_CHECKS=196
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -557,7 +557,12 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            # --surface-2 erases the header strip tint step — the one thing the 3b
            # card pattern exists for — with section (k) still reading
            # `background:var(--surface-2)` and the whole gate green.
-           'src/components/course/BlockGroup.svelte'):
+           # T8b: same reasoning one task later. StatusPill's five --status-*
+           # pairs and --radius-pill are its ENTIRE visual identity, so an
+           # ancestor nulling one erases a status colour with section (l) still
+           # reading the rule as correct.
+           'src/components/course/BlockGroup.svelte',
+           'src/components/course/StatusPill.svelte'):
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', open(_f).read()))
 TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
@@ -1112,6 +1117,12 @@ const SPEC = {
   // signature before this exemption could shelter it. If the panel is ever
   // given a class its signature stops matching and the LEGITIMATE hidden reds
   // — loud, and the right direction.
+  // T8b makes StatusPill a graded component (section (l)). Its class attribute
+  // is `class="pill {meta.cls}"` -- the literal `pill` is pinned in SIG, the
+  // `{meta.cls}` part is a dynamic expression and deliberately excluded, exactly
+  // as the header states; which of the five `pill-*` classes each status yields
+  // is pinned by StatusPill own tests instead.
+  "StatusPill.svelte":      { nodes: BASE,                     tags: ["span"] },
   "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
@@ -1144,6 +1155,7 @@ const SIG = {
   "ItemIcon.svelte": ["button:icon","ItemMark:"],
   "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
+  "StatusPill.svelte": ["span:pill","span:pill-token"],
   "BlockGroup.svelte":
     ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","@html:","ul:","li:","SequenceLink:","li:","MiniProjectLink:"],
 };
@@ -1159,6 +1171,10 @@ const TEXT = {
   "SequenceLink.svelte": ["span:badge.mono:S", "span:count.mono:/"],
   "MiniProjectLink.svelte": ["span:row-title:Mini-project:"],
   "BlockGroup.svelte": ["span:badge.mono:B"],
+  // Empty on purpose: BOTH the glyph and the label come through `{meta.token}` /
+  // `{meta.label}` from LATEST_STATUS_META, so a literal appearing here at all
+  // means someone hard-coded copy into the markup and bypassed that map.
+  "StatusPill.svelte": [],
 };
 for (const f of process.argv.slice(1)) {
   const hits = [];
@@ -1235,7 +1251,7 @@ for (const f of process.argv.slice(1)) {
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
   src/components/course/SequenceLink.svelte src/components/course/MiniProjectLink.svelte \
-  src/components/course/BlockGroup.svelte || fail=1
+  src/components/course/BlockGroup.svelte src/components/course/StatusPill.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -1667,6 +1683,119 @@ else:
 
 sys.exit(bad)
 T8AEOF
+  [[ $? -eq 0 ]] || fail=1
+fi
+
+# --- (l) T8b: StatusPill ----------------------------------------------------
+# PARSE-BASED, same reasoning as (i), (j) and (k). `.pill` is deliberately NOT
+# the anchor: RunMiniProjectsTab.svelte already authors its own top-level
+# `.pill` (plus `.pill-published`/`.pill-locked`), so the moment T8b adds
+# StatusPill the class is a 2-way collision and a grep for `.pill{...}` cannot
+# say which component it matched -- the same trap `.block` set in (k).
+# `.pill-success` is StatusPill-only and slice-introduced.
+#
+# The five status rules are stated in FULL rather than as a bg/fg pair each,
+# because the DEFECT this section exists to catch is a swapped or duplicated
+# token pair -- rejected wearing the accepted green -- which reads as correct in
+# every other lane: jsdom cannot see the colour, and the class name is right.
+echo
+echo "--- (l) T8b StatusPill ---"
+grep -qE '^[[:space:]]*\.pill-success[[:space:]]*[,{]' src/components/course/StatusPill.svelte \
+  || { echo "FAIL  .pill-success is not authored as a rule in StatusPill.svelte"; fail=1 }
+owners=(${(f)"$(grep -rlE "^[[:space:]]*\.pill-success[[:space:]]*[,{]" src --include='*.svelte')"})
+if [[ ${#owners[@]} -eq 1 ]]; then
+  echo "PASS  .pill-success is authored as a top-level rule in exactly one component (${owners[1]:t})"
+else
+  echo "FAIL  .pill-success is authored by ${#owners[@]} components: $owners"; fail=1
+fi
+sp=(${(f)"$(grep -ohE '\.pill-success\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#sp[@]} -ne 1 ]]; then
+  echo "FAIL  T8b anchor not dist-unique (.pill-success=${#sp[@]}: $sp)"; fail=1
+else
+  echo "PASS  T8b anchor resolves to one hash (.pill-success ${sp[1]})"
+  python3 - ${sp[1]} ${CSS[@]} <<'T8BEOF'
+import re, sys
+h = sys.argv[1]
+css = '\n'.join(open(p).read() for p in sys.argv[2:])
+bad = 0
+
+def rules(text, anc=()):
+    """Every rule, carrying its FULL at-rule ancestry -- never just the innermost."""
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                # Normalised exactly as the other heredocs do -- see (j).
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+
+# Stated in FULL, not as deltas. `padding: 3px 8px` is ref 1112 AND the documented
+# badge scale at ui/StatusBadge.svelte:18-19; `gap:4px` is a Constraint 5(b)
+# no-reference literal -- StatusBadge is label-only with no glyph and no gap, so
+# it is NOT a precedent for this one, which separates the .pill-token glyph from
+# the label. D6: component-scoped, never a global `.pill`, which is what keeps
+# visual-spec section 3's one-amber rule intact.
+WANT = [
+    ('.pill.%s' % h,
+     'display:inline-flex;align-items:center;white-space:nowrap;gap:4px;'
+     'padding:3px 8px;border-radius:var(--radius-pill);font-size:11px;font-weight:500'),
+    # The class->token table. Two statuses share pill-neutral and two share
+    # pill-warning, which is why the table is five rules and not seven.
+    ('.pill-neutral.%s' % h,
+     'background:var(--status-not-submitted-bg);color:var(--status-not-submitted-fg)'),
+    ('.pill-info.%s' % h,
+     'background:var(--status-awaiting-eval-bg);color:var(--status-awaiting-eval-fg)'),
+    ('.pill-danger.%s' % h,
+     'background:var(--status-rejected-bg);color:var(--status-rejected-fg)'),
+    ('.pill-warning.%s' % h,
+     'background:var(--status-needs-revision-bg);color:var(--status-needs-revision-fg)'),
+    ('.pill-success.%s' % h,
+     'background:var(--status-accepted-bg);color:var(--status-accepted-fg)'),
+]
+
+got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+exp = sorted(('', s) for s, _ in WANT)
+if got != exp:
+    bad = 1
+    print('FAIL  StatusPill rule inventory differs (at-rules and selector lists included)')
+    for x in sorted(set(got) - set(exp)): print('        unexpected: %s %s' % x)
+    for x in sorted(set(exp) - set(got)): print('        missing:    %s %s' % x)
+else:
+    print('PASS  StatusPill compiles to exactly its %d rule(s) — no duplicate, no stray '
+          'at-rule, no selector list' % len(WANT))
+    index = {s: b for s, b, a in ALL if h in s and not a}
+    off = 0
+    for sel, wb in WANT:
+        have, wantd = decls(index[sel]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  StatusPill %s declarations differ' % sel)
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  StatusPill declares exactly the pinned set in every rule — nothing '
+              'added, nothing dropped')
+
+sys.exit(bad)
+T8BEOF
   [[ $? -eq 0 ]] || fail=1
 fi
 

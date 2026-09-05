@@ -47,6 +47,21 @@ describe('StatusPill', () => {
     },
   );
 
+  it('renders the token as the FIRST child, ahead of the label', () => {
+    // D6 says "always a LEADING `.pill-token`". The seven per-status cases above
+    // assert the token exists and reads correctly, but `querySelector` finds it
+    // wherever it sits — moving it after the label leaves all seven green while
+    // reversing the glyph/label order the pill is specified with, and the glyph
+    // is the C14 non-colour signal, so its position is not cosmetic.
+    component = mount(StatusPill, { target, props: { status: 'accepted' } });
+    flushSync();
+    const pill = target.querySelector('.pill') as HTMLElement;
+    expect(pill.firstElementChild).not.toBeNull();
+    expect(pill.firstElementChild!.classList.contains('pill-token')).toBe(true);
+    // ...and it leads the rendered text too, which is what a sighted user sees.
+    expect(pill.textContent!.trim().startsWith('✓')).toBe(true);
+  });
+
   it('does NOT set aria-label on the pill (D3: visible text suffices, detail page owns aria-live)', () => {
     component = mount(StatusPill, { target, props: { status: 'accepted' } });
     flushSync();
