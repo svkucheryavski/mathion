@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=190
+EXPECTED_CHECKS=191
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -1418,6 +1418,14 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 12px;'
          'border-bottom:1px solid var(--border-soft);color:var(--text)')
 HOVER = 'background:var(--primary-soft);text-decoration:none'
+# An INSET ring, not the global outset one. base.css:21-25 gives every focusable
+# element `box-shadow: 0 0 0 3px var(--primary-soft)`, painted OUTSIDE the border
+# box -- and T8a's card is `overflow:hidden` with these rows spanning its padding
+# box EXACTLY, so the left and right bands were clipped away entirely and the
+# first/last row lost its outer band too. An inset ring paints inside the border
+# box and survives the clip. Pinned in full because "just use the global ring"
+# reads as a tidy-up in review and would silently re-clip it.
+FOCUS = 'box-shadow:inset 0 0 0 2px var(--primary)'
 # `flex:1 1 auto`, NOT `flex:1`. The shorthand `flex:1` means basis ZERO, and
 # with `.chain` on an auto basis (28n-6 px) the row goes negative past ~24 items
 # on a 760px card / ~9 on a 340px one -- at which point flex-grow stops applying
@@ -1429,6 +1437,7 @@ SPECS = [
     ('SequenceLink', sq_h, [
         ('', '.row.%s' % sq_h, ROW),
         ('', '.row.%s:hover' % sq_h, HOVER),
+        ('', '.row.%s:focus-visible' % sq_h, FOCUS),
         # ref 1573 -- the twin of T8a's B{order} badge.
         ('', '.badge.%s' % sq_h,
              'font-size:11px;font-weight:500;color:var(--primary);'
@@ -1442,6 +1451,7 @@ SPECS = [
     ('MiniProjectLink', mp_h, [
         ('', '.row.%s' % mp_h, ROW),
         ('', '.row.%s:hover' % mp_h, HOVER),
+        ('', '.row.%s:focus-visible' % mp_h, FOCUS),
         ('', '.row-glyph.%s' % mp_h, 'display:inline-flex;flex:0 0 auto'),
         ('', '.row-title.%s' % mp_h, TITLE),
     ]),
@@ -1473,7 +1483,8 @@ for name, h, want in SPECS:
 
 # The two rows must agree BYTE-FOR-BYTE on the shared geometry, not merely each
 # match its own copy of the spec: they are siblings in one list.
-for label, sel in (('.row', '.row.%s'), ('.row-title', '.row-title.%s')):
+for label, sel in (('.row', '.row.%s'), ('.row-title', '.row-title.%s'),
+                   ('.row:focus-visible', '.row.%s:focus-visible')):
     a = {k: v for k, v in ((s, b) for s, b, _ in ALL) if k == sel % sq_h}
     b = {k: v for k, v in ((s, b) for s, b, _ in ALL) if k == sel % mp_h}
     if a and b and decls(list(a.values())[0]) == decls(list(b.values())[0]):
@@ -1563,10 +1574,18 @@ WANT = [
     ('.block.%s' % h,
      'padding:0;overflow:hidden;margin-bottom:10px;border:1px solid var(--border);'
      'border-radius:var(--radius);background:var(--surface)'),
-    # The strip takes --border, not --border-soft: card edge, not row separator.
+    # NO border-bottom here. The separator lives on the PANEL instead (below):
+    # the panel is `hidden` when collapsed, so a header-owned border sat directly
+    # on top of `.block`'s own border with zero gap and drew the collapsed card a
+    # 2px bottom edge. Ref 1630 -- the collapsed B2 card -- omits it for exactly
+    # that reason, while ref 1564's EXPANDED header carries it. Same defect class
+    # as the last-row double hairline pinned at the end of this list.
     ('header.%s' % h,
-     'background:var(--surface-2);padding:9px 12px;border-bottom:1px solid var(--border);'
-     'display:flex;align-items:center'),
+     'background:var(--surface-2);padding:9px 12px;display:flex;align-items:center'),
+    # ...and here it is. Pinned in the MINIFIED form: the source authors
+    # `[role='region']` but the dist minifier strips quotes from a value that is a
+    # valid identifier, and dist is what ships and what this section grades.
+    ('[role=region].%s' % h, 'border-top:1px solid var(--border)'),
     # Without flex:1 the h2 shrink-wraps, `.acc width:100%` resolves against a
     # content-width box, and the chevron margin-left:auto has no free space.
     ('header.%s h2:where(.%s)' % (h, h), 'flex:1;min-width:0'),
@@ -1589,7 +1608,10 @@ WANT = [
     # The rotation IS the visible collapsed cue -- aria-expanded alone is invisible.
     ('.acc.%s .chev.collapsed:where(.%s)' % (h, h), 'transform:rotate(-90deg)'),
     # Padding lives here, never on the panel: the rows must stay edge-flush.
-    ('.info.%s' % h, 'color:var(--muted);padding:var(--space-2) var(--space-3);margin:0'),
+    # 12px, NOT var(--space-3)'s 16px: this sits in the same panel as the rows,
+    # whose `padding: 8px 12px` is ref 1572, and at 16px the info text started 4px
+    # right of every row badge below it.
+    ('.info.%s' % h, 'color:var(--muted);padding:var(--space-2) 12px;margin:0'),
     # The last-row hairline would otherwise double against the card border.
     ('ul.%s li:where(.%s):last-child .row' % (h, h), 'border-bottom:0'),
 ]

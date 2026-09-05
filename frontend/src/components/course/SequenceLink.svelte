@@ -76,6 +76,16 @@
     background: var(--primary-soft);
     text-decoration: none;
   }
+  /* An INSET ring. The global :focus-visible (base.css:21-25) paints
+     `box-shadow: 0 0 0 3px var(--primary-soft)` OUTSIDE the border box, and T8a's
+     card is `overflow: hidden` with these rows spanning its padding box exactly —
+     so the left and right bands were clipped away entirely, and the first and last
+     row lost their outer band too. Painted inside, the ring survives the clip.
+     2px `--primary` rather than 3px `--primary-soft`: at ~1.15:1 against
+     `--surface` the soft token was never a usable indicator on its own. */
+  .row:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--primary);
+  }
   /* ref 1573 — the twin of BlockGroup's `B{order}` badge (T8a). */
   .badge {
     font-size: 11px;

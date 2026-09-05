@@ -123,17 +123,33 @@
     border-radius: var(--radius);
     background: var(--surface);
   }
-  /* The header STRIP. `--border` (not `--border-soft`) because this is the
-     card/section edge, not a row separator inside it — the role split recorded
-     for ref 1564/1572's shared #E9EBEF. The old `justify-content: space-between`
-     and `cursor: pointer` are gone: the button owns both the click and the
-     layout now. */
+  /* The header STRIP. It draws NO bottom border — that separator lives on the
+     panel below, for the reason recorded there. The old `justify-content:
+     space-between` and `cursor: pointer` are gone: the button owns both the click
+     and the layout now. */
   header {
     background: var(--surface-2);
     padding: 9px 12px; /* ref 1564 */
-    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
+  }
+  /* The header/panel separator, and it lives on the PANEL deliberately. Carried
+     on the header it was drawn unconditionally, so a COLLAPSED card — whose panel
+     is `hidden`, i.e. `display: none` — put this 1px line directly on top of
+     `.block`'s own 1px border with zero gap between them, and the collapsed card's
+     bottom edge rendered at twice the weight of its other three sides. The
+     reference is explicit about the two states: ref 1630, the collapsed B2 card,
+     omits the header border entirely, while ref 1564's expanded header carries it.
+     Owning it here reproduces both states from one rule — no state class, no
+     `:has()` — and expanded rendering is unchanged: same 1px, same token, same y.
+     This is the same defect class as the last-row double hairline that
+     `li:last-child` fixes at the end of this block, in the state T8a introduces.
+
+     `--border` (not `--border-soft`) because this is a card/section edge, not a
+     row separator inside a card — the role split recorded for ref 1564/1572's
+     shared #E9EBEF. */
+  [role='region'] {
+    border-top: 1px solid var(--border);
   }
   /* Load-bearing: the default `flex: 0 1 auto` shrink-wraps the <h2> to its
      max-content, so `.acc { width: 100% }` would resolve against a content-width
@@ -200,10 +216,15 @@
     transform: rotate(-90deg);
   }
   /* Padding lives here, not on the panel: the panel carries none so the rows stay
-     flush to the card edge. `margin: 0` zeroes the old `var(--space-2) 0`. */
+     flush to the card edge. `margin: 0` zeroes the old `var(--space-2) 0`.
+
+     12px horizontally, NOT `var(--space-3)`'s 16px. This sits in the same panel as
+     the rows, whose `padding: 8px 12px` is ref 1572, and at 16px the info text
+     began 4px to the right of every row badge under it. Vertical stays
+     `var(--space-2)`, which has no such neighbour to align to. */
   .info {
     color: var(--muted);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-2) 12px;
     margin: 0;
   }
   /* The rows carry `border-bottom: 1px solid var(--border-soft)` and `.block`
