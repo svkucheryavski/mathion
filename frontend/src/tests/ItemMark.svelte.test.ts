@@ -44,10 +44,21 @@ describe('ItemMark', () => {
   });
 
   for (const type of types) {
-    it(`renders an aria-hidden SVG mark for ${type}`, () => {
+    it(`renders an aria-hidden SVG mark for ${type}, at the pinned geometry`, () => {
       const svg = render(type, 'not-yet').querySelector('svg');
       expect(svg).not.toBeNull();
       expect(svg!.getAttribute('aria-hidden')).toBe('true');
+      // The <svg> element's OWN attributes are pinned here because nothing else
+      // sees them: the distinctness test below compares `innerHTML`, which
+      // excludes them, and the dist gate sees only CSS. Constraint 3 + D5 fix
+      // the 11px size and the 16-unit viewBox, and spec section 4 states the
+      // marks are transcribed verbatim at stroke-width 1.6 EXCEPT the quiz
+      // check at 1.9 — so the ternary is a real pin, not an incidental detail.
+      expect(svg!.getAttribute('width')).toBe('11');
+      expect(svg!.getAttribute('height')).toBe('11');
+      expect(svg!.getAttribute('viewBox')).toBe('0 0 16 16');
+      expect(svg!.getAttribute('stroke')).toBe('currentColor');
+      expect(svg!.getAttribute('stroke-width')).toBe(type === 'quiz' ? '1.9' : '1.6');
     });
   }
 

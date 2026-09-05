@@ -6,7 +6,7 @@
   import ItemIcon from '../components/course/ItemIcon.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import Button from '../components/ui/Button.svelte';
-  import type { SequenceContent, Item } from '../lib/types';
+  import type { SequenceContent, Item, ItemMarkState } from '../lib/types';
 
   let { courseSlug, sequenceId }: { courseSlug: string; sequenceId: string } = $props();
 
@@ -136,7 +136,7 @@
     navigate(`/courses/${courseSlug}`);
   }
 
-  function iconState(itemId: number): 'covered' | 'current' | 'not-yet' {
+  function iconState(itemId: number): ItemMarkState {
     if (itemId === currentItemId) return 'current';
     if (currentCourse.value?.state.items[String(itemId)]?.is_covered) return 'covered';
     return 'not-yet';

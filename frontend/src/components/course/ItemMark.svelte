@@ -61,6 +61,7 @@
 
      No `color` here on purpose — the mark colour belongs to the state rules
      below, and `state` defaults to `not-yet`, so one of them always applies. */
+  /* box + 1px hairline: ref 2113 / ref 1439; the current state's 1.5px: ref 1039 */
   .item-mark {
     box-sizing: border-box;
     width: 22px;
