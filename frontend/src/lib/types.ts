@@ -54,6 +54,11 @@ export type SequenceContent = {
   items: Item[];
 };
 
+// The three completion states an item can be shown in. Shared by `ItemIcon`
+// (which puts the class on its button) and the presentational `ItemMark`
+// (which paints the box). "not started" is prose only — never a literal value.
+export type ItemMarkState = 'covered' | 'current' | 'not-yet';
+
 // ---- Items: discriminated union over backend Item.type ----
 export type Item =
   | StaticPageItem
