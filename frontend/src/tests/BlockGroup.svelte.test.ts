@@ -186,14 +186,46 @@ describe('BlockGroup', () => {
     // destroy it while leaving every other assertion here green — btn.click()
     // still fires, the selector still matches, and no CSS moves.
     expect(btn.tabIndex).toBe(0);
-    // EXACTLY one. `role` is invisible to the gate's markup signature (which
-    // records tag:class) and `querySelector` takes the first match, so a second
-    // `role="region"` anywhere in this template passed BOTH lanes — while taking
-    // the panel's `border-top` separator and adding an unnamed second landmark.
-    // Reproduced by mutation on the <ul> before this line existed.
+    // EXACTLY one — for the branches THIS fixture renders. `role` is invisible
+    // to the gate's markup signature (which records tag:class) and
+    // `querySelector` takes the first match, so a second `role="region"` passed
+    // BOTH lanes while taking the panel's `border-top` separator and adding an
+    // unnamed second landmark; reproduced by mutation on the <ul>. `mountBlock`
+    // renders neither the `.info` div nor the mini-project <li>, so those two
+    // branches are covered by the every-branch test below — a separate mount
+    // because `mountBlock` hardcodes `mpByBlockId: {}`.
     expect(target.querySelectorAll('[role="region"]')).toHaveLength(1);
     // The old glyph span is gone with the chevron that replaced it.
     expect(target.querySelector('.toggle')).toBeNull();
+  });
+
+  it('renders exactly one role="region" with every panel branch present', () => {
+    // The assertion above runs against `mountBlock`, whose fixture has
+    // `info_html: ''` and `mpByBlockId: {}` — so neither the `.info` div nor the
+    // mini-project <li> is in the DOM at that moment, and `role="region"` on
+    // either passed BOTH lanes (reproduced by mutation on `.info`: 10/10 tests,
+    // gate ALL PASS). It is not cosmetic: `.info` measured a second 1px
+    // `--border` hairline directly under the panel's own separator — the exact
+    // double-line defect round 3 was raised to remove — plus a nested unnamed
+    // landmark. This mount renders every branch instead.
+    //
+    // The three presence assertions are load-bearing, not decoration: without
+    // them a fixture change that stopped rendering a branch would silently
+    // return this test to the hole it exists to close, and it would still pass.
+    component = mount(BlockGroup, {
+      target,
+      props: {
+        courseSlug: 'course-a',
+        block: { ...BASE_BLOCK, info_html: '<p>x</p>' },
+        state: BASE_STATE,
+        mpByBlockId: { [String(BASE_BLOCK.id)]: BASE_MP },
+      },
+    });
+    flushSync();
+    expect(target.querySelector('.info')).not.toBeNull();
+    expect(target.querySelector('.row-mp')).not.toBeNull();
+    expect(target.querySelectorAll('section.block > [role="region"] > ul > li')).toHaveLength(3);
+    expect(target.querySelectorAll('[role="region"]')).toHaveLength(1);
   });
 
   it('keeps the panel AND its contents in the DOM when collapsed, gating only on hidden', () => {
