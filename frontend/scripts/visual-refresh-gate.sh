@@ -1105,7 +1105,13 @@ const SPEC = {
   // backend-sanitised markdown, the same limitation the header records above.
   // `hiddenOn` is the panel and ONLY the panel: `hidden={!expanded}` IS the
   // pinned collapse mechanism there, while a `hidden` anywhere else in this
-  // component would switch an element off where no CSS lane can see it.
+  // component would switch an element off where no CSS lane can see it. It
+  // gates `inert` on the same element too — the check treats the pair as one,
+  // and inert there would be an improvement rather than a regression. What
+  // keeps the carve-out narrow is SIG: a SECOND unclassed <div> reds on the
+  // signature before this exemption could shelter it. If the panel is ever
+  // given a class its signature stops matching and the LEGITIMATE hidden reds
+  // — loud, and the right direction.
   "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
@@ -1139,7 +1145,7 @@ const SIG = {
   "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
   "BlockGroup.svelte":
-    ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","ul:","li:","SequenceLink:","li:","MiniProjectLink:"],
+    ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","@html:","ul:","li:","SequenceLink:","li:","MiniProjectLink:"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
 // `owner-signature:text` in document order. Text inside `{expr}` is not literal
@@ -1176,7 +1182,14 @@ for (const f of process.argv.slice(1)) {
         if (t) txt.push(`${owner}:${t}`);
         return;
       }
-      case "Comment": case "ExpressionTag": case "HtmlTag": return;
+      case "Comment": case "ExpressionTag": return;
+      // Position-pinned, NOT swallowed. Allowing the node type is per-FILE, so a
+      // bare `return` here sanctioned ANY {@html} in that file — including a
+      // second one carrying `<style>…</style>`, which is exactly the codex-r3-C
+      // attack the header above records as DEFEATED: an injected stylesheet
+      // lives in the JS bundle, never in dist CSS, so no other lane can see it.
+      // Reproduced passing the whole gate before this line existed.
+      case "HtmlTag": sig.push("@html:"); return;
       case "IfBlock": walk(n.consequent, owner); walk(n.alternate, owner); return;
       case "EachBlock": walk(n.body, owner); walk(n.fallback, owner); return;
       case "RegularElement": case "Component": {
@@ -1490,12 +1503,14 @@ grep -qE '^[[:space:]]*\.acc[[:space:]]*[,{]' src/components/course/BlockGroup.s
 owners=(${(f)"$(grep -rlE "^[[:space:]]*\.acc[[:space:]]*[,{]" src --include='*.svelte')"})
 if [[ ${#owners[@]} -eq 1 ]]; then
   # The claim is exactly what the grep tests — a TOP-LEVEL `.acc {`/`.acc,` rule.
-  # It is blind to `.foo .acc {`, `.acc:hover {` and `.acc.x {` in another
-  # component, and that is sound rather than lucky: what the section actually
-  # needs is that `.acc.svelte-*` resolves to ONE hash in dist (checked next), and
-  # a nested or compound `.acc` elsewhere compiles to `.acc:where(.svelte-Y)`,
-  # which neither collides with that anchor nor carries this component hash into
-  # the inventory below.
+  # It is blind to `.foo .acc {` and `.acc:hover {` in another component, and that
+  # is sound rather than lucky — but for two DIFFERENT reasons, so neither case
+  # is load-bearing on this grep. A DESCENDANT `.foo .acc {` compiles to
+  # `.foo.svelte-Y .acc:where(.svelte-Y)`, which the anchor pattern below does not
+  # match and which never carries this component hash into the inventory. A
+  # COMPOUND `.acc:hover {` compiles to `.acc.svelte-Y:hover`, which DOES match the
+  # anchor pattern — so it resolves to two hashes and the next check fails loudly.
+  # Either way the dist-hash step, not this grep, is what makes the section sound.
   echo "PASS  .acc is authored as a top-level rule in exactly one component (${owners[1]:t})"
 else
   echo "FAIL  .acc is authored by ${#owners[@]} components: $owners"; fail=1

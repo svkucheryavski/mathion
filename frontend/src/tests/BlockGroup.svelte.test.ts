@@ -235,8 +235,19 @@ describe('BlockGroup', () => {
     expect(chev.getAttribute('fill')).toBe('none');
     expect(chev.getAttribute('stroke')).toBe('currentColor');
     expect(chev.getAttribute('stroke-width')).toBe('1.6');
-    // 13px, inside Constraint 3's ~11-14px band; ref 1559 and the matching glyph
-    // on ref 1576 are both 13. (This shipped at 16 and no lane caught it.)
+    // viewBox and the round caps/joins are part of that same convention and were
+    // NOT pinned in the first pass, though the comment above claimed the whole of
+    // it. `viewBox="0 0 24 24"` reads as a house-style tidy-up and silently breaks
+    // the glyph: the points live in 16-unit space, so in a 24-unit box the chevron
+    // draws at two-thirds scale, tucked up and left of centre, with a
+    // proportionally thinner stroke.
+    expect(chev.getAttribute('viewBox')).toBe('0 0 16 16');
+    expect(chev.getAttribute('stroke-linecap')).toBe('round');
+    expect(chev.getAttribute('stroke-linejoin')).toBe('round');
+    // 13px, inside Constraint 3's ~11-14px band. The glyph carrying these points
+    // is 13x13 at ref 1559 (the "Collapse" control) AND as the last SVG on BOTH
+    // refs the spec cites, 1568 and 1576. (This shipped at 16 and no lane caught
+    // it.)
     expect(chev.getAttribute('width')).toBe('13');
     expect(chev.getAttribute('height')).toBe('13');
     expect(chev.querySelector('polyline')!.getAttribute('points')).toBe('4.6,6.6 8,10 11.4,6.6');

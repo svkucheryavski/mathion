@@ -51,11 +51,14 @@
              the state as direction and `aria-expanded` alone is invisible.
 
              13x13, not 16: Constraint 3 pins every new decorative SVG at ~11-14px,
-             and the chevron carrying these exact points is 13x13 at BOTH refs the
-             spec cites — ref 1559 (the "Collapse" control beside the Blocks
-             heading) and the last SVG on ref 1576. The 12x12 SVGs on refs
-             1568/1576 are the move-up/move-down arrows and carry DIFFERENT points
-             (`4.4,7.2 8,3.6 11.6,7.2`), so they are not this glyph.
+             and the glyph carrying these exact points is 13x13 in every place it
+             appears — ref 1559, the "Collapse" control beside the Blocks heading,
+             and the LAST SVG on each of the two refs the spec cites, 1568 and
+             1576. The 12x12 SVGs on those same two lines are the move-up /
+             move-down arrows and carry DIFFERENT points (`4.4,7.2 8,3.6
+             11.6,7.2`), which is the confusion to avoid: the spec cites 1568/1576
+             for the POINTS, and the size at those refs is 13, not the 12 of the
+             arrows beside them.
 
              `fill="none"` is load-bearing, not boilerplate: a <polyline> has an
              implicit closing segment for fill purposes and SVG initial fill is
