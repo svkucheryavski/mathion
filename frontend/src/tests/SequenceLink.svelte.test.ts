@@ -208,6 +208,13 @@ describe('SequenceLink', () => {
     expect((root.querySelector('.row-title') as HTMLElement).textContent).toBe('Eigenvalues');
     expect((root.querySelector('.count') as HTMLElement).textContent).toBe('1/2');
     expect(root.querySelectorAll('.chain .item-mark')).toHaveLength(2);
+    // One covered OF TWO — the case that separates `total === 1` from
+    // `covered === 1` in the label's plural branch (codex, T7 round 3). The
+    // four cases asserted above are 2/3, 3/3, 1/1 and 0/0, on every one of
+    // which the two predicates agree, so the wrong one passed the whole file
+    // and would have shipped "1 of 2 item completed".
+    expect((root.querySelector('a.row') as HTMLAnchorElement).getAttribute('aria-label'))
+      .toBe('Sequence S4: Eigenvalues, 1 of 2 items completed');
     expect((root.querySelector('a.row') as HTMLAnchorElement).getAttribute('href'))
       .toBe('/courses/algebra-2/seq/12');
 

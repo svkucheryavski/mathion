@@ -82,7 +82,8 @@
      read as two unrelated lists. See SequenceLink for why the basis must not be
      zero.
 
-     `flex: 1` is also what pushes the StatusPill right. Deliberately NOT
+     Its `flex-grow` component is also what pushes the StatusPill right (the
+     2026-09-05 basis repin does not affect that). Deliberately NOT
      `margin-left: auto` on the pill — that would need a selector reaching into
      a child component's root, which Svelte prunes as `css_unused_selector`. */
   .row-title {
