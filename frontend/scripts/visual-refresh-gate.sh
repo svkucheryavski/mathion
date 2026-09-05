@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Visual-refresh built-CSS gate — Slice-3 (tasks T1-T7 so far).
+# Visual-refresh built-CSS gate — Slice-3 (tasks T1-T8a so far).
 #
 #   zsh frontend/scripts/visual-refresh-gate.sh     # from anywhere
 #
@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=185
+EXPECTED_CHECKS=189
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -412,6 +412,13 @@ GLOBAL_ALLOW = {
     ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'p:last-child'),
     ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'p'),
     ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'p:last-child'),
+    # T8a. Ancestor-scoped as `ul li:last-child :global(.row)`, so the hashed part
+    # pins it inside BlockGroup own panel list; the only thing a <li> there
+    # contains is a SequenceLink or MiniProjectLink whose root IS `.row`. It
+    # cannot reach T3: those rows live on the course landing page, while every T3
+    # question renders inside SequencePlayer. It kills the last row hairline that
+    # would otherwise double up against the card border.
+    ('src/components/course/BlockGroup.svelte', '.row'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -1441,6 +1448,128 @@ for label, sel in (('.row', '.row.%s'), ('.row-title', '.row-title.%s')):
 
 sys.exit(bad)
 T7EOF
+  [[ $? -eq 0 ]] || fail=1
+fi
+
+# --- (k) T8a: BlockGroup accordion -----------------------------------------
+# PARSE-BASED, same reasoning as (i) and (j). `.block` is deliberately NOT the
+# anchor: it is a 3-way collision (the authoring editor and the run views author
+# their own `.block`), so a grep for `.block{…}` cannot say which component it
+# matched. `.acc` is BlockGroup-only and slice-introduced.
+#
+# The last-row hairline fix needs no separate source grep: it compiles to
+# `ul.<hash> li:where(.<hash>):last-child .row`, which the inventory below states
+# in full, and its `:global` form is separately pinned by GLOBAL_ALLOW in (b3).
+echo
+echo "--- (k) T8a BlockGroup accordion ---"
+grep -qE '^[[:space:]]*\.acc[[:space:]]*[,{]' src/components/course/BlockGroup.svelte \
+  || { echo "FAIL  .acc is not authored as a rule in BlockGroup.svelte"; fail=1 }
+owners=(${(f)"$(grep -rlE "^[[:space:]]*\.acc[[:space:]]*[,{]" src --include='*.svelte')"})
+if [[ ${#owners[@]} -eq 1 ]]; then
+  echo "PASS  .acc is authored by exactly one component (${owners[1]:t})"
+else
+  echo "FAIL  .acc is authored by ${#owners[@]} components: $owners"; fail=1
+fi
+bg=(${(f)"$(grep -ohE '\.acc\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#bg[@]} -ne 1 ]]; then
+  echo "FAIL  T8a anchor not dist-unique (.acc=${#bg[@]}: $bg)"; fail=1
+else
+  echo "PASS  T8a anchor resolves to one hash (.acc ${bg[1]})"
+  python3 - ${bg[1]} ${CSS[@]} <<'T8AEOF'
+import sys
+from collections import Counter
+h = sys.argv[1]
+css = '\n'.join(open(p).read() for p in sys.argv[2:])
+bad = 0
+
+def rules(text, anc=()):
+    """Every rule, carrying its FULL at-rule ancestry -- never just the innermost."""
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                out.extend(rules(body, anc + (' '.join(sel.split()),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+
+# Stated in FULL, not as deltas. Two of these carry a note that a reviewer would
+# otherwise "correct": `.block` margin-bottom is 10px (ref 1563), NOT the 16px
+# var(--space-3) it replaced and NOT a decorative value -- it is the only
+# inter-card gap; and `.block` background is load-bearing, since the page sets
+# none and the header strip plus row separators lose their tint step without it.
+WANT = [
+    ('.block.%s' % h,
+     'padding:0;overflow:hidden;margin-bottom:10px;border:1px solid var(--border);'
+     'border-radius:var(--radius);background:var(--surface)'),
+    # The strip takes --border, not --border-soft: card edge, not row separator.
+    ('header.%s' % h,
+     'background:var(--surface-2);padding:9px 12px;border-bottom:1px solid var(--border);'
+     'display:flex;align-items:center'),
+    # Without flex:1 the h2 shrink-wraps, `.acc width:100%` resolves against a
+    # content-width box, and the chevron margin-left:auto has no free space.
+    ('header.%s h2:where(.%s)' % (h, h), 'flex:1;min-width:0'),
+    # 14px explicitly -- base.css:17 makes an h2 15px and the title inherits here.
+    ('.acc.%s' % h,
+     'width:100%;display:flex;align-items:center;gap:10px;text-align:left;'
+     'font-size:14px;font-weight:600'),
+    # The twin of the S-badge T7 renders; hash-coupled to .acc, NOT to .block.
+    ('.badge.%s' % h,
+     'font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);'
+     'padding:2px 6px;border-radius:var(--radius-pill)'),
+    # `color` is load-bearing: reset.css:7 gives a button `color: inherit`, so an
+    # unstyled chevron reads --text instead of --muted.
+    ('.acc.%s .chev:where(.%s)' % (h, h), 'color:var(--muted);margin-left:auto'),
+    # The rotation IS the visible collapsed cue -- aria-expanded alone is invisible.
+    ('.acc.%s .chev.collapsed:where(.%s)' % (h, h), 'transform:rotate(-90deg)'),
+    # Padding lives here, never on the panel: the rows must stay edge-flush.
+    ('.info.%s' % h, 'color:var(--muted);padding:var(--space-2) var(--space-3);margin:0'),
+    # The last-row hairline would otherwise double against the card border.
+    ('ul.%s li:where(.%s):last-child .row' % (h, h), 'border-bottom:0'),
+]
+
+got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+exp = sorted(('', s) for s, _ in WANT)
+if got != exp:
+    bad = 1
+    print('FAIL  BlockGroup rule inventory differs (at-rules and selector lists included)')
+    cg, ce = Counter(got), Counter(exp)
+    for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+    for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
+else:
+    print('PASS  BlockGroup compiles to exactly its %d rule(s) — no duplicate, no stray '
+          'at-rule, no selector list' % len(WANT))
+    index = {s: b for s, b, a in ALL if h in s and not a}
+    off = 0
+    for sel, wb in WANT:
+        have, wantd = decls(index[sel]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  BlockGroup %s declarations differ' % sel)
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  BlockGroup declares exactly the pinned set in every rule — nothing '
+              'added, nothing dropped')
+
+sys.exit(bad)
+T8AEOF
   [[ $? -eq 0 ]] || fail=1
 fi
 

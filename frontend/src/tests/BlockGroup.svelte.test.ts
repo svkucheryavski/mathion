@@ -75,7 +75,7 @@ describe('BlockGroup', () => {
       },
     });
     flushSync();
-    const lis = target.querySelectorAll('section.block > ul > li');
+    const lis = target.querySelectorAll('section.block > [role="region"] > ul > li');
     expect(lis.length).toBe(2);
     expect(target.querySelector('.row-mp')).toBeNull();
   });
@@ -91,7 +91,7 @@ describe('BlockGroup', () => {
       },
     });
     flushSync();
-    const ul = target.querySelector('section.block > ul') as HTMLUListElement;
+    const ul = target.querySelector('section.block > [role="region"] > ul') as HTMLUListElement;
     expect(ul).not.toBeNull();
     expect(ul.children.length).toBe(3);
     // First two <li>s are sequences (no .row-mp inside); last <li> contains the MP link.
@@ -111,7 +111,7 @@ describe('BlockGroup', () => {
       },
     });
     flushSync();
-    const ul = target.querySelector('section.block > ul') as HTMLUListElement;
+    const ul = target.querySelector('section.block > [role="region"] > ul') as HTMLUListElement;
     expect(ul).not.toBeNull();
     expect(ul.children.length).toBe(1);
     expect(ul.children[0].querySelector('.row-mp')).not.toBeNull();
@@ -127,7 +127,7 @@ describe('BlockGroup', () => {
       },
     });
     flushSync();
-    const lis = target.querySelectorAll('section.block > ul > li');
+    const lis = target.querySelectorAll('section.block > [role="region"] > ul > li');
     expect(lis.length).toBe(2);
     expect(target.querySelector('.row-mp')).toBeNull();
   });
@@ -150,5 +150,118 @@ describe('BlockGroup', () => {
     flushSync();
     const link = target.querySelector('.row-mp');
     expect(link).not.toBeNull();
+  });
+
+  // ---- T8a: the accordion contract ----
+  //
+  // Entirely new coverage: this file had no expand/collapse test at all, which is
+  // why the "adjust selectors only" green-list rule holds for the four cases above
+  // — there was no collapse assertion to weaken.
+
+  function mountBlock(over: Partial<BlockContent> = {}) {
+    component = mount(BlockGroup, {
+      target,
+      props: { courseSlug: 'course-a', block: { ...BASE_BLOCK, ...over }, state: BASE_STATE, mpByBlockId: {} },
+    });
+    flushSync();
+    return {
+      btn: target.querySelector('header h2 button.acc') as HTMLButtonElement,
+      panel: target.querySelector('[role="region"]') as HTMLElement,
+    };
+  }
+
+  it('gives the header a real <button> carrying the accordion ARIA contract', () => {
+    // The header was a <div onclick>: not focusable, not keyboard-operable, and
+    // the source of the two a11y warnings this task removes. The precedent for
+    // the button form is editor/AccordionHeader.svelte:59-71.
+    const { btn, panel } = mountBlock();
+    expect(btn).not.toBeNull();
+    expect(panel).not.toBeNull();
+    expect(btn.id).toBeTruthy();
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+    // aria-controls must POINT at the panel, and the panel must point back.
+    expect(btn.getAttribute('aria-controls')).toBe(panel.id);
+    expect(panel.getAttribute('aria-labelledby')).toBe(btn.id);
+    // The old glyph span is gone with the chevron that replaced it.
+    expect(target.querySelector('.toggle')).toBeNull();
+  });
+
+  it('keeps the panel AND its contents in the DOM when collapsed, gating only on hidden', () => {
+    // Reading B, pinned: the outer {#if expanded} is dropped entirely. A
+    // DOM-absence check would pass the wrong implementation, so the collapsed
+    // assertion is the `hidden` PROPERTY — and the id must never dangle, which is
+    // what keeps the aria-controls contract true in both states.
+    const { btn, panel } = mountBlock();
+    expect(panel.hidden).toBe(false);
+    expect(panel.querySelector('ul')).not.toBeNull();
+
+    btn.click();
+    flushSync();
+
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    expect(target.querySelector('[role="region"]')).toBe(panel);   // same node, not re-created
+    expect(panel.hidden).toBe(true);
+    expect(panel.querySelector('ul')).not.toBeNull();              // contents ALWAYS rendered
+    expect(panel.querySelectorAll('li').length).toBe(2);
+    expect(btn.getAttribute('aria-controls')).toBe(panel.id);      // still matches, collapsed
+
+    btn.click();
+    flushSync();
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+    expect(panel.hidden).toBe(false);
+  });
+
+  it('rotates the chevron exactly when the header reads collapsed', () => {
+    // `{expanded ? "▾" : "▸"}` encoded the state as DIRECTION, so a static SVG
+    // would drop the only VISIBLE collapsed cue and leave just aria-expanded.
+    // The pinned form is one down-chevron rotated by a class, so the assertion is
+    // the iff: `.collapsed` present exactly when aria-expanded is "false".
+    const { btn } = mountBlock();
+    const chev = btn.querySelector('svg.chev') as SVGElement;
+    expect(chev).not.toBeNull();
+    const agree = () =>
+      chev.classList.contains('collapsed') === (btn.getAttribute('aria-expanded') === 'false');
+    expect(chev.classList.contains('collapsed')).toBe(false);
+    expect(agree()).toBe(true);
+    btn.click();
+    flushSync();
+    expect(chev.classList.contains('collapsed')).toBe(true);
+    expect(agree()).toBe(true);
+    btn.click();
+    flushSync();
+    expect(agree()).toBe(true);
+  });
+
+  it('renders .info only when block.info_html is non-empty', () => {
+    // Only the OUTER {#if expanded} is dropped; this inner guard is retained.
+    // Without it the pinned `.info { padding: 8px 16px }` would draw an empty
+    // padded strip above the first row of every block that has no info — and
+    // BASE_BLOCK has `info_html: ''`, so the baseline suite would not notice.
+    const { panel } = mountBlock();
+    expect(panel.querySelector('.info')).toBeNull();
+    unmount(component);
+    target.innerHTML = '';
+
+    const withInfo = mountBlock({ info_html: '<p>Read this first.</p>' });
+    const info = withInfo.panel.querySelector('.info') as HTMLElement;
+    expect(info).not.toBeNull();
+    expect(info.textContent).toContain('Read this first.');
+  });
+
+  it('splits "B{order}. {title}" into a mono badge and a title, with no trailing period', () => {
+    // A rendered-copy change: `B1. Block 42` becomes `B1 Block 42`. The badge is
+    // ref 1565, the twin of the S-badge SequenceLink renders.
+    const { btn } = mountBlock();
+    const badge = btn.querySelector('.badge') as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('B1');
+    // The mono face comes from the GLOBAL `.mono` utility (base.css:10), which
+    // jsdom cannot see as CSS — so the class is the pin.
+    expect(badge.classList.contains('mono')).toBe(true);
+    // The header carries the badge and the title and NOTHING else: the chevron is
+    // an SVG and contributes no text, so any added glyph or restored period shows
+    // up here. (The T7 lesson: an element-only check cannot see a text node.)
+    expect(btn.textContent!.replace(/\s+/g, ' ').trim()).toBe('B1 Block 42');
+    expect(target.textContent).not.toContain('B1.');
   });
 });
