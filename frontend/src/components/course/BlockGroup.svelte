@@ -150,6 +150,24 @@
     text-align: left;
     font-size: 14px;
     font-weight: 600;
+    /* So the global :focus-visible halo (base.css:21-25) follows the card corner
+       instead of drawing square. Exactly what D5 added to ItemIcon's button, and
+       this is the more prominent keyboard target of the two. */
+    border-radius: var(--radius);
+  }
+  /* The title, and the half of the long-title fix that lives on it. Without
+     `min-width: 0` a flex item keeps an automatic minimum of its MIN-CONTENT, so
+     one unbroken word longer than the card pushes `.acc` past its own width,
+     `margin-left: auto` is left with no free space, and the chevron is carried
+     outside the card where `.block { overflow: hidden }` clips it. Measured in a
+     browser on a 340px card with a 43-character word: the chevron ended 51px
+     outside the card edge at 0px wide, and 111px outside at 280px. With this and
+     the `.chev` rule below it sits correctly at 13px in every case, and both are
+     exact no-ops at ordinary title lengths — the short-title measurements are
+     identical with and without them. The mirror image of the fix T7 needed on
+     SequenceLink's `.row-title`, where the title collapsed instead. */
+  .acc-title {
+    min-width: 0;
   }
   /* ref 1565 — the twin of SequenceLink's `S{order}` badge (ref 1573). */
   .badge {
@@ -166,6 +184,11 @@
   .acc .chev {
     color: var(--muted);
     margin-left: auto;
+    /* The other half: a flex item shrinks by default, and this one has no text to
+       floor it, so under the overflow above it went to ZERO width — the glyph
+       vanished before it was clipped. Ref 1559 carries `flex:0 0 auto` on the
+       chevron wrapper for the same reason, as does `.item-mark` per codex-r20-I3. */
+    flex: 0 0 auto;
   }
   /* no ref — Constraint 5(b) geometry literal: the reference ships a separate
      right-pointing glyph, and rotating the one down-chevron is what keeps the two

@@ -1558,14 +1558,19 @@ WANT = [
     # 14px explicitly -- base.css:17 makes an h2 15px and the title inherits here.
     ('.acc.%s' % h,
      'width:100%;display:flex;align-items:center;gap:10px;text-align:left;'
-     'font-size:14px;font-weight:600'),
+     'font-size:14px;font-weight:600;border-radius:var(--radius)'),
+    # Half of the long-title fix (2026-09-05 ruling): without it one unbroken word
+    # longer than the card carries the chevron outside the clipped card.
+    ('.acc-title.%s' % h, 'min-width:0'),
     # The twin of the S-badge T7 renders; hash-coupled to .acc, NOT to .block.
     ('.badge.%s' % h,
      'font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);'
      'padding:2px 6px;border-radius:var(--radius-pill)'),
     # `color` is load-bearing: reset.css:7 gives a button `color: inherit`, so an
     # unstyled chevron reads --text instead of --muted.
-    ('.acc.%s .chev:where(.%s)' % (h, h), 'color:var(--muted);margin-left:auto'),
+    # `flex:0 0 auto` is the other half: with no text to floor it this item shrank
+    # to ZERO width under that overflow. Ref 1559 carries it on the same glyph.
+    ('.acc.%s .chev:where(.%s)' % (h, h), 'color:var(--muted);margin-left:auto;flex:0 0 auto'),
     # The rotation IS the visible collapsed cue -- aria-expanded alone is invisible.
     ('.acc.%s .chev.collapsed:where(.%s)' % (h, h), 'transform:rotate(-90deg)'),
     # Padding lives here, never on the panel: the rows must stay edge-flush.
