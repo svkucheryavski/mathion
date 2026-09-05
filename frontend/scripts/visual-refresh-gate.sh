@@ -85,7 +85,13 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 EXPECTED_CHECKS=174
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
-  trap 'rm -f "$log"' EXIT INT TERM
+  # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
+  # signal status. A single combined trap ran `rm` on the way out, which
+  # overwrote $pipestatus before it was read and deleted the log before it was
+  # counted, and reported an ordinary failure instead of 130/143 (codex-r3-M2).
+  trap 'rm -f "$log"' EXIT
+  trap 'rm -f "$log"; trap - INT;  kill -INT  $$' INT
+  trap 'rm -f "$log"; trap - TERM; kill -TERM $$' TERM
   VRGATE_IS_CHILD_7f3a=1 zsh "$SELF" "$@" | tee "$log"
   ps=($pipestatus); rc=$ps[1]; tee_rc=$ps[2]
   n=$(grep -cE '^(PASS|FAIL)' "$log")
@@ -524,7 +530,7 @@ for _k, _b in bodies.items():
 TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
 TOKEN_DECL = re.compile(r'(^|;)\s*(%s)\s*:' % TOKEN_ALT)
-definers = sorted((m or '', s) for s, b, m in ALL if TOKEN_DECL.search(b))
+definers = sorted((m, s) for s, b, m in ALL if TOKEN_DECL.search(b))
 prop_at = sorted(set(re.findall(r'@property\s+(%s)(?![\w-])' % TOKEN_ALT, css)))
 inline = []
 # .ts/.js too: `document.documentElement.style.setProperty('--control-h','60px')`
@@ -541,18 +547,19 @@ for f in sorted(set(SVELTE) | {os.path.normpath(p) for p in
         inline.append('%s  setProperty("%s", …)' % (f, m.group(1)))
     for m in re.finditer(r'style=\{[^}]*?(%s)' % TOKEN_ALT, src):                 # style={…}
         inline.append('%s  style={… %s …}' % (f, m.group(1)))
-if definers == [('', ':root')] and not prop_at and not inline:
+if definers == [((), ':root')] and not prop_at and not inline:
     print('PASS  all %d pinned tokens are defined once, on a bare :root' % len(TOKENS))
 else:
     bad = 1
     print('FAIL  a pinned token is defined outside the single bare :root rule')
     for md, s in definers:
+        md = ' >> '.join(md)   # join only to FORMAT — see codex-r3-M1
         if (md, s) != ('', ':root'):
             print('        rule:    %s%s' % (md + ' ' if md else '', s))
     for t in prop_at: print('        @property %s  (initial-value can override :root)' % t)
     for x in inline: print('        source:  %s' % x)
-    if definers.count(('', ':root')) > 1:
-        print('        (:root itself is declared %d times)' % definers.count(('', ':root')))
+    if definers.count(((), ':root')) > 1:
+        print('        (:root itself is declared %d times)' % definers.count(((), ':root')))
 # (c) A system colour outside forced-colors would ignore the theme (Constraint 1
 #     exempts it only inside such a block).
 SYSCOL = ('Canvas|CanvasText|LinkText|VisitedText|ActiveText|ButtonFace|ButtonText|'
@@ -1021,23 +1028,42 @@ node -e '
 const { parse } = require("svelte/compiler");
 const fs = require("fs");
 let bad = 0;
-const OK_ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
+// Allowlists on BOTH axes, and the walk itself is a whitelist of markup
+// constructs rather than a generic recursion that only enforces on elements:
+// that earlier shape visited every node but checked only RegularElement /
+// Component / SvelteElement, so `{@html "<style>.icon{…22px box…}</style>"}`
+// after the button produced zero hits, restored the double ring, and left the
+// built CSS and the check count untouched (codex-r3-C). Any construct not
+// named below -- HtmlTag, RenderTag, SlotElement, a snippet, an await block, a
+// <svelte:head>, or whatever Svelte adds next -- falls through to the default
+// and REDS, which is the point: these two components are small and static, so
+// anything new here deserves a human look before the gate keeps vouching for
+// them.
+const NODE = new Set(["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"]);
+const TAG  = new Set(["button", "span", "svg", "line", "polygon", "polyline", "circle"]);
+const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 for (const f of process.argv.slice(1)) {
-  const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
   const hits = [];
+  const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
   (function walk(n) {
-    if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) return n.forEach(walk);
-    if (n.type === "RegularElement" || n.type === "Component" || n.type === "SvelteElement") {
-      for (const a of n.attributes || []) {
-        const nm = a.name || "";
-        if (!OK_ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
-        else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
-        else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
+    if (!n) return;
+    if (!NODE.has(n.type)) { hits.push(`unreviewed markup construct ${n.type}`); return; }
+    switch (n.type) {
+      case "Fragment": (n.nodes || []).forEach(walk); return;
+      case "Text": case "Comment": case "ExpressionTag": return;
+      case "IfBlock": walk(n.consequent); walk(n.alternate); return;
+      case "RegularElement": case "Component": {
+        if (n.type === "RegularElement" && !TAG.has(n.name)) hits.push(`unreviewed element <${n.name}>`);
+        for (const a of n.attributes || []) {
+          const nm = a.name || "";
+          if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
+          else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
+          else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
+        }
+        walk(n.fragment);
+        return;
       }
-      if (n.type === "SvelteElement") hits.push("<svelte:element> (tag chosen at runtime)");
     }
-    for (const k of Object.keys(n)) if (k !== "parent") walk(n[k]);
   })(ast.fragment);
   const base = f.split("/").pop();
   if (hits.length) { bad = 1; console.log(`FAIL  ${base} can style its DOM outside <style>: ${hits.join("; ")}`); }
