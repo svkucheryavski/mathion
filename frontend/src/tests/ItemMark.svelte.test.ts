@@ -62,6 +62,58 @@ describe('ItemMark', () => {
     });
   }
 
+  // Exact per-type geometry, transcribed from the reference "Item types" card
+  // (reference-screens.dc.html:1438) and its in-sequence chains (:1039-1040,
+  // :2113-2116). The distinctness test below proves only that the five bodies
+  // DIFFER — codex-r1-I2 showed that deleting `fill="currentColor"
+  // stroke="none"` from the video polygon silently turns the solid play mark
+  // into a hollow outline with every test and the CSS gate still green, and that
+  // coordinate drift passes just as quietly. The attribute set is compared
+  // EXACTLY, so this reds on a dropped override, an added one, or a moved point.
+  const MARKS: Record<Item['type'], { tag: string; attrs: Record<string, string> }[]> = {
+    static_page: [
+      { tag: 'line', attrs: { x1: '3', y1: '4', x2: '13', y2: '4' } },
+      { tag: 'line', attrs: { x1: '3', y1: '8', x2: '13', y2: '8' } },
+      { tag: 'line', attrs: { x1: '3', y1: '12', x2: '9', y2: '12' } },
+    ],
+    video: [
+      { tag: 'polygon', attrs: { points: '5,3.4 13,8 5,12.6', fill: 'currentColor', stroke: 'none' } },
+    ],
+    quiz: [
+      { tag: 'polyline', attrs: { points: '3,8.6 6.4,12 13,4.6' } },
+    ],
+    interactive_app: [
+      { tag: 'line', attrs: { x1: '4', y1: '2.6', x2: '4', y2: '13.4' } },
+      { tag: 'line', attrs: { x1: '8', y1: '2.6', x2: '8', y2: '13.4' } },
+      { tag: 'line', attrs: { x1: '12', y1: '2.6', x2: '12', y2: '13.4' } },
+      { tag: 'circle', attrs: { cx: '4', cy: '10', r: '1.9', fill: 'currentColor', stroke: 'none' } },
+      { tag: 'circle', attrs: { cx: '8', cy: '5.4', r: '1.9', fill: 'currentColor', stroke: 'none' } },
+      { tag: 'circle', attrs: { cx: '12', cy: '8.6', r: '1.9', fill: 'currentColor', stroke: 'none' } },
+    ],
+    mini_project: [
+      { tag: 'line', attrs: { x1: '4.2', y1: '2.4', x2: '4.2', y2: '13.6' } },
+      { tag: 'polygon', attrs: { points: '4.2,3.2 12.4,5.8 4.2,8.4', fill: 'currentColor', stroke: 'none' } },
+    ],
+  };
+
+  for (const type of types) {
+    it(`draws ${type} at the exact reference geometry`, () => {
+      const svg = render(type, 'not-yet').querySelector('svg')!;
+      const kids = Array.from(svg.children);
+      const want = MARKS[type];
+      expect(kids.map((k) => k.tagName)).toEqual(want.map((w) => w.tag));
+      kids.forEach((kid, i) => {
+        // Compare the WHOLE attribute set, not just the expected keys: a
+        // `fill="currentColor"` added to an outline shape is as wrong as one
+        // deleted from a solid, and only an exact set catches both directions.
+        const got = Object.fromEntries(
+          Array.from(kid.attributes).map((a) => [a.name, a.value]),
+        );
+        expect(got).toEqual(want[i].attrs);
+      });
+    });
+  }
+
   it('renders a DISTINCT mark for every item type (no shared SVG)', () => {
     // Full-set distinctness, not a two-type spot check: a pairwise assertion
     // would let quiz / interactive_app / mini_project collapse onto one mark.
@@ -83,6 +135,19 @@ describe('ItemMark', () => {
       for (const other of others) expect(mark.classList.contains(other)).toBe(false);
     });
   }
+
+  it('carries NO inline style attribute — inline styles bypass the CSS gate', () => {
+    // codex-r1-C1: Svelte emits `style="…"` into the JS bundle, not into
+    // dist/_app/*.css, so the built-CSS gate is structurally blind to it. An
+    // inline 22px bordered box put back on either root restores the double ring
+    // with the gate reporting ALL PASS (reproduced). The gate now rejects inline
+    // styling in both T6 components; this is the runtime half of that pin.
+    for (const state of ['covered', 'current', 'not-yet'] as const) {
+      const mark = render('quiz', state);
+      expect(mark.hasAttribute('style')).toBe(false);
+      unmount(component!); component = null; host.parentNode?.removeChild(host);
+    }
+  });
 
   it('defaults to not-yet when `state` is omitted', () => {
     // D5 pins the default so a consumer with no state to give — MiniProjectLink's

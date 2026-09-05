@@ -61,7 +61,10 @@
 
      No `color` here on purpose — the mark colour belongs to the state rules
      below, and `state` defaults to `not-yet`, so one of them always applies. */
-  /* box + 1px hairline: ref 2113 / ref 1439; the current state's 1.5px: ref 1039 */
+  /* box geometry: ref 2113; the 1px not-yet hairline: ref 1438 / ref 2116;
+     the current state's 1.5px ring: ref 1040 / ref 2115. (The earlier form of
+     this comment cited 1439, a bare `</div>`, and 1039, a row of COVERED
+     marks — both off by one, and 2113 is covered, not a hairline.) */
   .item-mark {
     box-sizing: border-box;
     width: 22px;
@@ -91,5 +94,38 @@
     background: var(--surface);
     color: var(--muted);
     border-color: var(--border-strong);
+  }
+
+  /* The three states above differ ONLY by colour, and Windows High Contrast
+     forces background-color, color, border-COLOR and the SVG's stroke/fill to
+     system colours — so `covered` and `not-yet` collapse into one appearance and
+     a sighted high-contrast user loses per-item completion entirely. Nothing
+     else carries it: the mark is aria-hidden by design, and ItemIcon's `title` /
+     `aria-label` give the item's TITLE, not its state. T7 raises the stakes
+     again by removing SequenceLink's tick, leaving this chain as the primary
+     visual completion signal.
+
+     border-WIDTH and border-STYLE are NOT forced, so each state is restated with
+     a distinction that survives even a monochrome theme:
+       covered = inverted SOLID FILL      current = 2px ring      not-yet = DASHED
+     System-colour keywords inside a forced-colors block are the required a11y
+     treatment rather than a Constraint-1 token violation (spec:255), and this is
+     the same idiom Login and all four question components already use. */
+  @media (forced-colors: active) {
+    .item-mark.covered {
+      background: CanvasText;
+      color: Canvas;
+      border: 1px solid CanvasText;
+    }
+    .item-mark.current {
+      background: Canvas;
+      color: Highlight;
+      border: 2px solid Highlight;
+    }
+    .item-mark.not-yet {
+      background: Canvas;
+      color: GrayText;
+      border: 1px dashed GrayText;
+    }
   }
 </style>

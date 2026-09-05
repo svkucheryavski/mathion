@@ -67,6 +67,22 @@
 # (`src/...`, `dist/_app/*.css`) is frontend-relative, and the script is run
 # from the repo root as often as from frontend/.
 cd "${0:A:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
+# Report how many assertions actually RAN. The count is only knowable after the
+# run, so the script re-execs itself once: the child does the work, the parent
+# counts its PASS/FAIL lines and prints the summary. Without it the only output
+# was a bare pass/fail line, so a section that silently skipped its checks — an
+# anchor that stops resolving short-circuits a whole block — read exactly like a
+# section that passed them (codex-r1-M2).
+if [[ -z ${VRGATE_CHILD:-} ]]; then
+  log=$(mktemp -t vrgate) || { echo "FAIL  cannot create temp log"; exit 1 }
+  VRGATE_CHILD=1 zsh "$0" "$@" | tee "$log"
+  rc=${pipestatus[1]}
+  n=$(grep -cE '^(PASS|FAIL)' "$log")
+  [[ $rc -eq 0 ]] && echo "VISUAL-REFRESH GATE: ALL PASS ($n checks)" \
+                  || echo "VISUAL-REFRESH GATE: FAILURES ($n checks)"
+  rm -f "$log"
+  exit $rc
+fi
 fail=0
 # Build here rather than trusting whatever is in dist/. A stale or foreign dist
 # yields a confident PASS about nothing: during a two-lane review this gate once
@@ -713,6 +729,7 @@ ALL = rules(css)
 # declared exactly once. A grep cannot see a duplicate or an @media override —
 # it still matches the ORIGINAL rule while the later one wins the cascade —
 # which is why every selector sections (g) and (h) pin is listed here.
+FC = ['@media (forced-colors: active)']
 TARGETS = [
     # T3/T4 measure + counters
     ('quiz article',          r'\.quiz\.svelte-[a-z0-9]+$', 1),
@@ -738,9 +755,15 @@ TARGETS = [
     # T6 ItemMark. The state rules compile as `.item-mark.covered.svelte-<h>`
     # -- the hash lands at the END of the compound, not after `.item-mark`.
     ('item-mark base',        r'\.item-mark\.svelte-[a-z0-9]+$', 1),
-    ('item-mark covered',     r'\.item-mark\.covered\.svelte-[a-z0-9]+$', 1),
-    ('item-mark current',     r'\.item-mark\.current\.svelte-[a-z0-9]+$', 1),
-    ('item-mark not-yet',     r'\.item-mark\.not-yet\.svelte-[a-z0-9]+$', 1),
+    # Each state gets ONE extra copy, inside the forced-colors block and nowhere
+    # else: that block is the a11y treatment (the states are otherwise
+    # colour-only and collapse under Windows High Contrast), so it has to be
+    # permitted here -- but named exactly, so an `@media (min-width:1px)`
+    # override is still caught. An empty/absent 4th element means "no at-rule
+    # copy at all", which is what every other target wants.
+    ('item-mark covered',     r'\.item-mark\.covered\.svelte-[a-z0-9]+$', 1, FC),
+    ('item-mark current',     r'\.item-mark\.current\.svelte-[a-z0-9]+$', 1, FC),
+    ('item-mark not-yet',     r'\.item-mark\.not-yet\.svelte-[a-z0-9]+$', 1, FC),
     ('ItemIcon .icon wrapper',r'\.icon\.svelte-[a-z0-9]+$', 1),
     # PageItem's {@html} rules: `:global` leaves the PAYLOAD hashless but the
     # LEADING part keeps the scope hash, so they are pinnable here. This is what
@@ -755,17 +778,24 @@ TARGETS = [
     ('option groups',         r'\.opts\.svelte-[a-z0-9]+$', 2),
     ('notices',               r'\.notice\.svelte-[a-z0-9]+$', 2),
 ]
+
 bad = 0
-for label, pat, want in TARGETS:
+def norm(m):
+    return re.sub(r'\s*:\s*', ':', ' '.join(m.split()))
+for target in TARGETS:
+    label, pat, want = target[0], target[1], target[2]
+    allowed = sorted(norm(m) for m in (target[3] if len(target) > 3 else []))
     top  = [s for s, m in ALL if m is None and re.fullmatch(pat, s)]
     inat = [(s, m) for s, m in ALL if m is not None and re.fullmatch(pat, s)]
-    if len(top) == want and len(set(top)) == want and not inat:
-        print('PASS  %s declared exactly %d\xd7, top level' % (label, want))
+    got_at = sorted(norm(m) for _, m in inat)
+    if len(top) == want and len(set(top)) == want and got_at == allowed:
+        print('PASS  %s declared exactly %d\xd7, top level%s' %
+              (label, want, (' (+%d in %s)' % (len(allowed), allowed)) if allowed else ''))
     else:
         bad = 1
         print('FAIL  %s: %d top-level copies (%d distinct), want %d%s' %
               (label, len(top), len(set(top)), want,
-               (', %d inside at-rules %s' % (len(inat), [m for _, m in inat])) if inat else ''))
+               (', at-rules %s want %s' % (got_at, allowed)) if got_at != allowed else ''))
         for x in top: print('        %s' % x)
 
 sys.exit(bad)
@@ -951,6 +981,21 @@ for cls in item-mark icon; do
     echo "FAIL  .${cls} is authored by ${#owners[@]} components: $owners"; fail=1
   fi
 done
+# Inline styling bypasses this gate COMPLETELY: Svelte emits `style="…"` and
+# `style:prop` into the JS bundle, never into dist/_app/*.css. An inline 22px
+# bordered box on ItemIcon's button restores the exact double ring T6 removes,
+# with this gate reporting ALL PASS and all 26 component tests green
+# (codex-r1-C1, reproduced). Scan the MARKUP only — the `<style>` block is the
+# legitimate home of these declarations — and strip comments first, since both
+# components' comments quote the very forms this forbids.
+for f in src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte; do
+  markup=$(perl -0777 -pe 's{<style[^>]*>.*?</style>}{}gs; s{<!--.*?-->}{}gs; s{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' $f)
+  if print -r -- "$markup" | grep -qE '(^|[[:space:]])style[=:]|\{\.\.\.'; then
+    echo "FAIL  ${f:t} uses inline styling (style= / style: / spread) — invisible to this gate"; fail=1
+  else
+    echo "PASS  ${f:t} has no inline styling — all of its CSS is gradeable here"
+  fi
+done
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -1007,6 +1052,19 @@ SPECS = [
              'background:var(--primary-soft);color:var(--primary);border:1.5px solid var(--primary)'),
         ('', '.item-mark.not-yet.%s' % im_h,
              'background:var(--surface);color:var(--muted);border-color:var(--border-strong)'),
+        # The three states differ ONLY by colour, which forced-colors mode
+        # overrides wholesale -- covered and not-yet would collapse into one
+        # appearance. border-WIDTH and border-STYLE survive, so each state is
+        # restated with a non-colour distinction (solid fill / 2px ring /
+        # dashed). Pinned here so a later edit cannot quietly drop the block:
+        # nothing in npm test can see it, and the states still LOOK right in a
+        # normal theme with it gone (codex-r1-I1).
+        ('@media (forced-colors:active)', '.item-mark.covered.%s' % im_h,
+             'background:CanvasText;color:Canvas;border:1px solid CanvasText'),
+        ('@media (forced-colors:active)', '.item-mark.current.%s' % im_h,
+             'background:Canvas;color:Highlight;border:2px solid Highlight'),
+        ('@media (forced-colors:active)', '.item-mark.not-yet.%s' % im_h,
+             'background:Canvas;color:GrayText;border:1px dashed GrayText'),
     ]),
     ('ItemIcon', ic_h, [
         ('', '.icon.%s' % ic_h, 'display:inline-flex;border-radius:var(--radius)'),
@@ -1045,5 +1103,5 @@ sys.exit(bad)
 T6EOF
   [[ $? -eq 0 ]] || fail=1
 fi
-[[ $fail -eq 0 ]] && echo "VISUAL-REFRESH GATE: ALL PASS" || echo "VISUAL-REFRESH GATE: FAILURES"
+# The summary line is the parent process's (see the re-exec at the top).
 exit $fail

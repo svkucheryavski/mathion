@@ -72,6 +72,15 @@ describe('ItemIcon', () => {
     });
     expect(new Set(marks).size).toBe(types.length);
   });
+  it('carries NO inline style attribute on the button or the mark', () => {
+    // codex-r1-C1: an inline `style` re-creating the 22px bordered box on the
+    // button restores the double ring while the built-CSS gate stays green,
+    // because Svelte emits inline styles into the JS bundle rather than the CSS
+    // file the gate grades. Both roots are pinned, here and in ItemMark's tests.
+    const btn = render('quiz', 'covered');
+    expect(btn.hasAttribute('style')).toBe(false);
+    expect(btn.firstElementChild!.hasAttribute('style')).toBe(false);
+  });
   it('fires onclick when the icon is activated', () => {
     const onclick = vi.fn();
     host = document.createElement('div');
