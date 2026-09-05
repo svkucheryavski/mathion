@@ -186,6 +186,14 @@ describe('BlockGroup', () => {
     // destroy it while leaving every other assertion here green — btn.click()
     // still fires, the selector still matches, and no CSS moves.
     expect(btn.tabIndex).toBe(0);
+    // ...and still IN the accessibility tree. `aria-hidden="true"` here — the
+    // copy-paste slip of the chevron's own attribute two lines down in the
+    // template — removes the control from that tree entirely (Chrome honours it:
+    // the heading measures empty and the button is gone), so a screen-reader user
+    // cannot discover or operate the accordion at all. It passed every lane
+    // before this line: 11/11 tests, check clean, gate ALL PASS, because the
+    // markup signature records tag:class and ARIA attributes are invisible to it.
+    expect(btn.getAttribute('aria-hidden')).toBeNull();
     // EXACTLY one — for the branches THIS fixture renders. `role` is invisible
     // to the gate's markup signature (which records tag:class) and
     // `querySelector` takes the first match, so a second `role="region"` passed
