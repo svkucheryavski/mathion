@@ -224,7 +224,7 @@
      `var(--space-2)`, which has no such neighbour to align to. */
   .info {
     color: var(--muted);
-    padding: var(--space-2) 12px;
+    padding: var(--space-2) 12px; /* ref 1572 — the rows in this same panel */
     margin: 0;
   }
   /* The rows carry `border-bottom: 1px solid var(--border-soft)` and `.block`

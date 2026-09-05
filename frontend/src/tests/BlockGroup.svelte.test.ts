@@ -186,6 +186,12 @@ describe('BlockGroup', () => {
     // destroy it while leaving every other assertion here green — btn.click()
     // still fires, the selector still matches, and no CSS moves.
     expect(btn.tabIndex).toBe(0);
+    // EXACTLY one. `role` is invisible to the gate's markup signature (which
+    // records tag:class) and `querySelector` takes the first match, so a second
+    // `role="region"` anywhere in this template passed BOTH lanes — while taking
+    // the panel's `border-top` separator and adding an unnamed second landmark.
+    // Reproduced by mutation on the <ul> before this line existed.
+    expect(target.querySelectorAll('[role="region"]')).toHaveLength(1);
     // The old glyph span is gone with the chevron that replaced it.
     expect(target.querySelector('.toggle')).toBeNull();
   });

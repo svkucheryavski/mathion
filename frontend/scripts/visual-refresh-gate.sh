@@ -1381,7 +1381,7 @@ if [[ ${#sq[@]} -ne 1 || ${#mp[@]} -ne 1 || ${sq[1]} == ${mp[1]} ]]; then
 else
   echo "PASS  T7 anchors resolve to one distinct hash each (.chain ${sq[1]}, .row-glyph ${mp[1]})"
   python3 - ${sq[1]} ${mp[1]} ${CSS[@]} <<'T7EOF'
-import sys
+import re, sys
 sq_h, mp_h = sys.argv[1], sys.argv[2]
 css = '\n'.join(open(p).read() for p in sys.argv[3:])
 bad = 0
@@ -1399,7 +1399,12 @@ def rules(text, anc=()):
                 j += 1
             body = text[i+1:j-1]
             if sel.startswith('@'):
-                out.extend(rules(body, anc + (' '.join(sel.split()),)))
+                # Normalise the prelude exactly as the T3 heredoc does: the
+                # minifier collapses whitespace unpredictably around a media
+                # feature's colon -- it ships `@media (forced-colors: active)`
+                # WITH the space today -- so an ancestry pinned to one spelling
+                # reds on a minifier bump rather than on a real change.
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
             else:
                 out.append((sel, body, anc))
             i, start = j, j
@@ -1426,6 +1431,13 @@ HOVER = 'background:var(--primary-soft);text-decoration:none'
 # box and survives the clip. Pinned in full because "just use the global ring"
 # reads as a tidy-up in review and would silently re-clip it.
 FOCUS = 'box-shadow:inset 0 0 0 2px var(--primary)'
+# ...and its forced-colors companion, which is NOT optional decoration: that mode
+# drops box-shadow outright while base.css:22's `outline:none` still applies, so
+# without this the row has NO focus indicator at all there. Same statement as the
+# T3 heredoc's note above. `Highlight` is a system colour under Constraint 1's
+# forced-colors exemption. Normalised (unspaced) form -- dist is minified.
+FC    = '@media (forced-colors:active)'
+FCRING = 'outline:2px solid Highlight;outline-offset:-2px'
 # `flex:1 1 auto`, NOT `flex:1`. The shorthand `flex:1` means basis ZERO, and
 # with `.chain` on an auto basis (28n-6 px) the row goes negative past ~24 items
 # on a 760px card / ~9 on a 340px one -- at which point flex-grow stops applying
@@ -1438,6 +1450,7 @@ SPECS = [
         ('', '.row.%s' % sq_h, ROW),
         ('', '.row.%s:hover' % sq_h, HOVER),
         ('', '.row.%s:focus-visible' % sq_h, FOCUS),
+        (FC, '.row.%s:focus-visible' % sq_h, FCRING),
         # ref 1573 -- the twin of T8a's B{order} badge.
         ('', '.badge.%s' % sq_h,
              'font-size:11px;font-weight:500;color:var(--primary);'
@@ -1452,6 +1465,7 @@ SPECS = [
         ('', '.row.%s' % mp_h, ROW),
         ('', '.row.%s:hover' % mp_h, HOVER),
         ('', '.row.%s:focus-visible' % mp_h, FOCUS),
+        (FC, '.row.%s:focus-visible' % mp_h, FCRING),
         ('', '.row-glyph.%s' % mp_h, 'display:inline-flex;flex:0 0 auto'),
         ('', '.row-title.%s' % mp_h, TITLE),
     ]),
@@ -1485,9 +1499,15 @@ for name, h, want in SPECS:
 # match its own copy of the spec: they are siblings in one list.
 for label, sel in (('.row', '.row.%s'), ('.row-title', '.row-title.%s'),
                    ('.row:focus-visible', '.row.%s:focus-visible')):
-    a = {k: v for k, v in ((s, b) for s, b, _ in ALL) if k == sel % sq_h}
-    b = {k: v for k, v in ((s, b) for s, b, _ in ALL) if k == sel % mp_h}
-    if a and b and decls(list(a.values())[0]) == decls(list(b.values())[0]):
+    # TOP-LEVEL rules only (`not anc`). `.row:focus-visible` is authored twice per
+    # component -- once bare, once under `@media (forced-colors:active)` -- and a
+    # lookup keyed on the selector alone keeps whichever comes last, which would
+    # have silently switched this check onto the forced-colors bodies. The two
+    # forced-colors rules need no separate agreement check: SPECS above pins each
+    # to the same FCRING literal, so they cannot drift apart.
+    a = [b for s, b, anc in ALL if not anc and s == sel % sq_h]
+    m = [b for s, b, anc in ALL if not anc and s == sel % mp_h]
+    if a and m and decls(a[0]) == decls(m[0]):
         print('PASS  both row kinds declare an identical %s — the list reads as one list' % label)
     else:
         bad = 1
@@ -1532,7 +1552,7 @@ if [[ ${#bg[@]} -ne 1 ]]; then
 else
   echo "PASS  T8a anchor resolves to one hash (.acc ${bg[1]})"
   python3 - ${bg[1]} ${CSS[@]} <<'T8AEOF'
-import sys
+import re, sys
 from collections import Counter
 h = sys.argv[1]
 css = '\n'.join(open(p).read() for p in sys.argv[2:])
@@ -1552,7 +1572,12 @@ def rules(text, anc=()):
                 j += 1
             body = text[i+1:j-1]
             if sel.startswith('@'):
-                out.extend(rules(body, anc + (' '.join(sel.split()),)))
+                # Normalise the prelude exactly as the T3 heredoc does: the
+                # minifier collapses whitespace unpredictably around a media
+                # feature's colon -- it ships `@media (forced-colors: active)`
+                # WITH the space today -- so an ancestry pinned to one spelling
+                # reds on a minifier bump rather than on a real change.
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
             else:
                 out.append((sel, body, anc))
             i, start = j, j

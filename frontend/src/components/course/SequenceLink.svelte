@@ -86,6 +86,16 @@
   .row:focus-visible {
     box-shadow: inset 0 0 0 2px var(--primary);
   }
+  /* Forced-colors drops `box-shadow` outright while base.css:22's `outline: none`
+     still applies, so without this the row has NO focus indicator at all in that
+     mode — the exact mechanism recorded at visual-refresh-gate.sh:296. `Highlight`
+     is a system colour, allowed by Constraint 1's forced-colors exemption. The
+     idiom is the slice's own: Login.svelte:146 pairs it with the identical
+     `box-shadow: inset 0 0 0 2px var(--primary)`, and all four question
+     components ship the same companion. */
+  @media (forced-colors: active) {
+    .row:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+  }
   /* ref 1573 — the twin of BlockGroup's `B{order}` badge (T8a). */
   .badge {
     font-size: 11px;
