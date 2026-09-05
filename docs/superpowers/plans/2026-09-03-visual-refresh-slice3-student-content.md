@@ -429,7 +429,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Consumes: T7's MiniProjectLink renders `<StatusPill>` structurally (unstyled until now).
 - Produces: the component-scoped pill CSS. No symbol other tasks consume (last task).
 
-- [ ] **Step 1: Write/adjust the failing tests.** StatusPill: always renders a leading `.pill-token` glyph + the class→token `pill-*` class from `LATEST_STATUS_META`; preserve the no-`aria-label` policy (`StatusPill.svelte.test.ts:31` stays green). CourseView: stays green with adjusted selectors (verify-only chrome).
+- [ ] **Step 1: Write/adjust the failing tests.** StatusPill: always renders a leading `.pill-token` glyph + the class→token `pill-*` class from `LATEST_STATUS_META`; preserve the no-`aria-label` policy (`StatusPill.svelte.test.ts:31` stays green). CourseView: stays green with adjusted selectors (verify-only chrome). **Added by T8a's review:** `CourseView.svelte.test.ts:87-91` asserts the MiniProjectLink anchor exists and contains its title. Before T8a a collapsed panel removed that anchor from the DOM; the panel is now ALWAYS rendered and `textContent` reads through `hidden`, so the assertion can no longer tell "visible" from "permanently hidden". Nothing is unguarded — BlockGroup's own test pins `panel.hidden` — but the assertion no longer means what it looks like it means, so strengthen it here (assert the enclosing `[role="region"]` is not hidden) rather than leaving a test that reads as a visibility check and is not one.
 
 - [ ] **Step 2: Run — expect FAIL** (StatusPill new scoped-CSS assertions) / green where verify-only. `npm test -- "StatusPill|CourseView"`.
 

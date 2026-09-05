@@ -182,6 +182,10 @@ describe('BlockGroup', () => {
     // aria-controls must POINT at the panel, and the panel must point back.
     expect(btn.getAttribute('aria-controls')).toBe(panel.id);
     expect(panel.getAttribute('aria-labelledby')).toBe(btn.id);
+    // Keyboard-reachable is the whole point of the change. `tabindex="-1"` would
+    // destroy it while leaving every other assertion here green — btn.click()
+    // still fires, the selector still matches, and no CSS moves.
+    expect(btn.tabIndex).toBe(0);
     // The old glyph span is gone with the chevron that replaced it.
     expect(target.querySelector('.toggle')).toBeNull();
   });
@@ -219,6 +223,23 @@ describe('BlockGroup', () => {
     const { btn } = mountBlock();
     const chev = btn.querySelector('svg.chev') as SVGElement;
     expect(chev).not.toBeNull();
+    // The whole Constraint-3 SVG convention, pinned here because nothing else
+    // can see it: the gate grades CSS, and its markup scanner records
+    // tag:class signatures, so every one of these attributes is invisible to
+    // both. `fill="none"` is the one that matters most — a <polyline> has an
+    // implicit closing segment for fill purposes and SVG initial fill is BLACK,
+    // so deleting it (a very natural tidy-up on a stroke-only shape) turns the
+    // hairline into a solid black triangle that `color: var(--muted)` cannot
+    // correct, since fill does not resolve to currentColor.
+    expect(chev.getAttribute('aria-hidden')).toBe('true');
+    expect(chev.getAttribute('fill')).toBe('none');
+    expect(chev.getAttribute('stroke')).toBe('currentColor');
+    expect(chev.getAttribute('stroke-width')).toBe('1.6');
+    // 13px, inside Constraint 3's ~11-14px band; ref 1559 and the matching glyph
+    // on ref 1576 are both 13. (This shipped at 16 and no lane caught it.)
+    expect(chev.getAttribute('width')).toBe('13');
+    expect(chev.getAttribute('height')).toBe('13');
+    expect(chev.querySelector('polyline')!.getAttribute('points')).toBe('4.6,6.6 8,10 11.4,6.6');
     const agree = () =>
       chev.classList.contains('collapsed') === (btn.getAttribute('aria-expanded') === 'false');
     expect(chev.classList.contains('collapsed')).toBe(false);

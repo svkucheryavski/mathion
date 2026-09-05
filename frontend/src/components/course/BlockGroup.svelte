@@ -48,12 +48,25 @@
         <span class="acc-title">{block.title}</span>
         <!-- One down-chevron, rotated when collapsed. A STATIC icon would drop the
              only visible collapsed cue, because `{expanded ? '▾' : '▸'}` encoded
-             the state as direction and `aria-expanded` alone is invisible. -->
+             the state as direction and `aria-expanded` alone is invisible.
+
+             13x13, not 16: Constraint 3 pins every new decorative SVG at ~11-14px,
+             and the chevron carrying these exact points is 13x13 at BOTH refs the
+             spec cites — ref 1559 (the "Collapse" control beside the Blocks
+             heading) and the last SVG on ref 1576. The 12x12 SVGs on refs
+             1568/1576 are the move-up/move-down arrows and carry DIFFERENT points
+             (`4.4,7.2 8,3.6 11.6,7.2`), so they are not this glyph.
+
+             `fill="none"` is load-bearing, not boilerplate: a <polyline> has an
+             implicit closing segment for fill purposes and SVG initial fill is
+             BLACK, so dropping it turns the hairline into a solid black triangle —
+             and `.acc .chev { color: var(--muted) }` cannot correct that, because
+             `fill` does not resolve to currentColor. Pinned by the chevron test. -->
         <svg
           class="chev"
           class:collapsed={!expanded}
-          width="16"
-          height="16"
+          width="13"
+          height="13"
           viewBox="0 0 16 16"
           fill="none"
           stroke="currentColor"
@@ -62,7 +75,7 @@
           stroke-linejoin="round"
           aria-hidden="true"
         >
-          <polyline points="4.6,6.6 8,10 11.4,6.6" />
+          <polyline points="4.6,6.6 8,10 11.4,6.6" /><!-- ref 1559 -->
         </svg>
       </button>
     </h2>
@@ -154,6 +167,9 @@
     color: var(--muted);
     margin-left: auto;
   }
+  /* no ref — Constraint 5(b) geometry literal: the reference ships a separate
+     right-pointing glyph, and rotating the one down-chevron is what keeps the two
+     states a single source of truth. -90deg points it left-to-right. */
   .acc .chev.collapsed {
     transform: rotate(-90deg);
   }

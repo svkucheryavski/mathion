@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=189
+EXPECTED_CHECKS=190
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -549,7 +549,15 @@ for _k, _b in bodies.items():
 # components' own sources rather than hand-listing, so a token added to any of
 # them is guarded automatically instead of silently unguarded.
 for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemIcon.svelte',
-           'src/components/course/SequenceLink.svelte', 'src/components/course/MiniProjectLink.svelte'):
+           'src/components/course/SequenceLink.svelte', 'src/components/course/MiniProjectLink.svelte',
+           # T8a made BlockGroup a graded component (section (k)), and the attack
+           # this guard was built from is literally `.block { --border-soft:
+           # transparent }` ON BlockGroup. Its own --surface-2 / --space-2 /
+           # --space-3 were unguarded until this line: an ancestor redefining
+           # --surface-2 erases the header strip tint step — the one thing the 3b
+           # card pattern exists for — with section (k) still reading
+           # `background:var(--surface-2)` and the whole gate green.
+           'src/components/course/BlockGroup.svelte'):
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', open(_f).read()))
 TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
@@ -1093,6 +1101,15 @@ const SPEC = {
   "ItemIcon.svelte":        { nodes: BASE,                     tags: ["button"] },
   "SequenceLink.svelte":    { nodes: BASE.concat("EachBlock"), tags: ["a", "span"] },
   "MiniProjectLink.svelte": { nodes: BASE,                     tags: ["a", "span"] },
+  // T8a. `HtmlTag` is the `{@html block.info_html}` the component already had —
+  // backend-sanitised markdown, the same limitation the header records above.
+  // `hiddenOn` is the panel and ONLY the panel: `hidden={!expanded}` IS the
+  // pinned collapse mechanism there, while a `hidden` anywhere else in this
+  // component would switch an element off where no CSS lane can see it.
+  "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
+                              tags: ["section", "header", "h2", "button", "span", "svg",
+                                     "polyline", "div", "ul", "li"],
+                              hiddenOn: ["div:"] },
 };
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // Rejecting inline `style` is NOT enough to make a component gradeable: a
@@ -1121,6 +1138,8 @@ const SIG = {
   "ItemIcon.svelte": ["button:icon","ItemMark:"],
   "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
+  "BlockGroup.svelte":
+    ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","ul:","li:","SequenceLink:","li:","MiniProjectLink:"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
 // `owner-signature:text` in document order. Text inside `{expr}` is not literal
@@ -1133,6 +1152,7 @@ const TEXT = {
   "ItemIcon.svelte": [],
   "SequenceLink.svelte": ["span:badge.mono:S", "span:count.mono:/"],
   "MiniProjectLink.svelte": ["span:row-title:Mini-project:"],
+  "BlockGroup.svelte": ["span:badge.mono:B"],
 };
 for (const f of process.argv.slice(1)) {
   const hits = [];
@@ -1156,20 +1176,11 @@ for (const f of process.argv.slice(1)) {
         if (t) txt.push(`${owner}:${t}`);
         return;
       }
-      case "Comment": case "ExpressionTag": return;
+      case "Comment": case "ExpressionTag": case "HtmlTag": return;
       case "IfBlock": walk(n.consequent, owner); walk(n.alternate, owner); return;
       case "EachBlock": walk(n.body, owner); walk(n.fallback, owner); return;
       case "RegularElement": case "Component": {
         if (n.type === "RegularElement" && !TAG.has(n.name)) hits.push(`unreviewed element <${n.name}>`);
-        for (const a of n.attributes || []) {
-          const nm = a.name || "";
-          if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
-          else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
-          else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
-          else if (nm.toLowerCase() === "hidden" || nm.toLowerCase() === "inert")
-            hits.push(`<${n.name}> ${nm.toLowerCase()} attribute`);
-
-        }
         const cls = [];
         for (const a of n.attributes || []) {
           if (a.type === "ClassDirective") cls.push("class:" + a.name);
@@ -1179,6 +1190,17 @@ for (const f of process.argv.slice(1)) {
           }
         }
         const me = n.name + ":" + cls.join(".");
+        // The signature is computed FIRST so the hidden/inert carve-out can name a
+        // single element rather than exempting a whole file.
+        for (const a of n.attributes || []) {
+          const nm = a.name || "";
+          if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
+          else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
+          else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
+          else if ((nm.toLowerCase() === "hidden" || nm.toLowerCase() === "inert")
+                   && !(spec.hiddenOn || []).includes(me))
+            hits.push(`<${n.name}> ${nm.toLowerCase()} attribute`);
+        }
         sig.push(me);
         walk(n.fragment, me);
         return;
@@ -1199,7 +1221,8 @@ for (const f of process.argv.slice(1)) {
 }
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
-  src/components/course/SequenceLink.svelte src/components/course/MiniProjectLink.svelte || fail=1
+  src/components/course/SequenceLink.svelte src/components/course/MiniProjectLink.svelte \
+  src/components/course/BlockGroup.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -1466,7 +1489,14 @@ grep -qE '^[[:space:]]*\.acc[[:space:]]*[,{]' src/components/course/BlockGroup.s
   || { echo "FAIL  .acc is not authored as a rule in BlockGroup.svelte"; fail=1 }
 owners=(${(f)"$(grep -rlE "^[[:space:]]*\.acc[[:space:]]*[,{]" src --include='*.svelte')"})
 if [[ ${#owners[@]} -eq 1 ]]; then
-  echo "PASS  .acc is authored by exactly one component (${owners[1]:t})"
+  # The claim is exactly what the grep tests — a TOP-LEVEL `.acc {`/`.acc,` rule.
+  # It is blind to `.foo .acc {`, `.acc:hover {` and `.acc.x {` in another
+  # component, and that is sound rather than lucky: what the section actually
+  # needs is that `.acc.svelte-*` resolves to ONE hash in dist (checked next), and
+  # a nested or compound `.acc` elsewhere compiles to `.acc:where(.svelte-Y)`,
+  # which neither collides with that anchor nor carries this component hash into
+  # the inventory below.
+  echo "PASS  .acc is authored as a top-level rule in exactly one component (${owners[1]:t})"
 else
   echo "FAIL  .acc is authored by ${#owners[@]} components: $owners"; fail=1
 fi
