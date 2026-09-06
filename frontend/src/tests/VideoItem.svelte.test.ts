@@ -57,6 +57,19 @@ it('renders the watched confirmation as an inline SVG + text, with no ✓ glyph'
   expect(watched!.textContent).toContain('Marked as watched');
 });
 
+it('passes item.video_url straight through to the iframe', () => {
+  // The gate's markup scanner pins attribute NAMES and the values of the SVG
+  // presentation attributes, but deliberately NOT the value of a non-visual
+  // prop: `src="about:blank"` blanked every video with the gate at ALL PASS
+  // (235) and all 1349 tests green, because nothing asserted the URL reached
+  // the frame (codex, Slice-3 close-out round 3, reproduced). Content is this
+  // lane's job, which is why the assertion lives here rather than in the gate.
+  const target = render({ isCovered: true });
+  const frame = target.querySelector('iframe');
+  expect(frame).not.toBeNull();
+  expect(frame!.getAttribute('src')).toBe('https://example.org/embed/x');
+});
+
 it('does not render the watched row (or its SVG) while uncovered', () => {
   const target = render({ isCovered: false });
   expect(target.querySelector('.watched')).toBeNull();

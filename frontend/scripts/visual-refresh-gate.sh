@@ -728,7 +728,7 @@ else
   echo "FAIL  .quiz is not dist-unique (${#qh[@]} hashes: $qh)"; fail=1
 fi
 
-# --- .page-item: the calc() and the padding it adds back ---------------------
+# --- .page-item: the plain 652px measure and the padding T5 zeroed -----------
 ph=(${(f)"$(grep -ohE '\.page-item\.svelte-[a-z0-9]+' $CSS | sort -u)"})
 if [[ ${#ph[@]} -eq 1 ]]; then
   echo "PASS  .page-item resolves to exactly one hash ($ph[1])"
@@ -1129,9 +1129,12 @@ done
 # regex missed `style = "…"`, uppercase `STYLE=`, the `{style}` shorthand and
 # `--x={…}` CSS-property props, and its comment-stripping was not syntax-aware,
 # so a `//` inside a URL could erase the forbidden source that followed
-# (codex-r2-C). The check is an ALLOWLIST — anything not provably style-inert is
-# rejected, so `use:`, `{@attach}`, `bind:this`, spreads and `<svelte:element>`
-# all red rather than needing to be enumerated as they are invented.
+# (codex-r2-C). The check is an ALLOWLIST on THREE axes — node type, tag and
+# attribute NAME — so `use:`, `{@attach}`, `bind:this`, spreads,
+# `<svelte:element>` and an attribute nobody reviewed all red rather than
+# needing to be enumerated as they are invented. It does NOT judge the VALUE of
+# an allowed non-visual attribute; the scope note on the walk below says so in
+# full, and says which lane does.
 node -e '
 const { parse } = require("svelte/compiler");
 const fs = require("fs");
@@ -1169,10 +1172,36 @@ let bad = 0;
 // Five review rounds each found the next door precisely because the comments
 // kept promising closure the code did not deliver, so: this file constrains
 // DECLARATIVE markup and the built stylesheet. It does not constrain script.
-// What the gate DOES guarantee is
-// that neither component styles its DOM declaratively outside its <style> block
-// — the actual regression path for the double ring — and that any new markup
-// construct or tag reds for review.
+// What the gate DOES guarantee, written as the list it actually is: no scanned
+// component styles its DOM declaratively outside its <style> block (no inline
+// `style`, no CSS-property prop, no `hidden`/`inert`, and no `<style>` written
+// INLINE into an `{@html}` payload — the `{@html}` EXPRESSION is pinned by
+// source, though what the backend puts in that variable is not, which is the
+// same limitation the sanitiser owns) — the actual regression path for the
+// double ring; every
+// markup construct, tag and attribute NAME is allowlisted, so a new one reds for
+// review; the VALUES of the SVG presentation and geometry attributes are pinned
+// by source, because those ARE styling declared outside the <style> block; and
+// element order, literal classes and literal text are pinned in document order.
+//
+// What it does NOT guarantee, named here so no later round has to rediscover it
+// (codex, close-out round 3): the VALUE of an allowed NON-visual attribute or
+// component prop. `src="about:blank"` on the video frame, an `href` pointing
+// elsewhere, a swapped `onclick` — each of those keeps this scanner green,
+// because each is a CONTENT question rather than a styling one, and content
+// belongs to the component tests. The boundary is deliberate. Pinning every prop
+// would make this a markup snapshot test, and every legitimate markup edit would
+// become a pin regeneration — which is precisely the moment a human waves a diff
+// through. VideoItem asserts its iframe `src` in its own test, which is where
+// that finding belongs.
+//
+// Nor does it pin WHICH allowed attributes an element carries: adding an
+// `aria-label` or dropping a `title` reds nothing, because no name left in
+// ATTR_OK can style anything — every styling-capable name is either refused
+// outright or pinned by value above. The one name that comes close is `type`
+// on the choice inputs, and those inputs are `opacity:0` 1px boxes whose
+// appearance is entirely the drawn `.ctl` beside them; both choice test files
+// assert `input[type="radio"]` / `[type="checkbox"]` directly.
 // `hidden` and `inert` are refused for the same reason as `style`: both switch an
 // element off visually from the markup, where no CSS lane can see it. Hiding the
 // count with `hidden` passed every pin in this file and every unit test — DOM
@@ -1254,6 +1283,38 @@ const SPEC = {
                               hiddenOn: ["div:"] },
 };
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
+// Attribute NAMES are allowlisted for the same reason node types and tags are:
+// the loop below used to check `style`, `--x`, `hidden` and `inert` and let
+// every other name through unread, so `opacity="0"` on the watched checkmark
+// made it invisible with the gate at ALL PASS (235) and 1349 tests green
+// (codex, close-out round 3, reproduced). An SVG presentation attribute IS
+// styling declared outside the <style> block, which is the one thing this
+// scanner exists to forbid, and it was the one form of it left open.
+//
+// VISUAL is that subset, and it is pinned by VALUE, appended to the element
+// signature as `tag:classes[fill="none" stroke-width="1.9"]`. Names in it that
+// nothing uses today (`opacity`, `transform`, the two `*-opacity` pairs) are
+// listed anyway: an unused name reds on ATTR_OK, so classifying it here in
+// advance is what stops a future reviewer allowlisting it as ordinary.
+const VISUAL = new Set([
+  "cx", "cy", "fill", "fill-opacity", "height", "opacity", "points", "r",
+  "stroke", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
+  "stroke-opacity", "stroke-width", "transform", "viewBox", "width",
+  "x", "x1", "x2", "y", "y1", "y2",
+]);
+// Everything else the 17 components actually use, element attributes and
+// component props in one list. These are pinned by NAME only -- their values
+// are content, and the scope note above records that boundary and the lane
+// that covers it. A name absent here reds rather than passing unread, so the
+// list grows by review, which is the intended speed bump.
+const ATTR_OK = new Set([
+  "aria-controls", "aria-expanded", "aria-hidden", "aria-label",
+  "aria-labelledby", "checked", "class", "correctOptionIds", "correctValue",
+  "courseSlug", "data-type", "disabled", "href", "id", "inputmode", "item",
+  "loading", "name", "onanswer", "onchange", "onclick", "oninput", "question",
+  "role", "scriptSource", "sequence", "src", "state", "status", "title",
+  "type", "value", "variant",
+]);
 // Rejecting inline `style` is NOT enough to make a component gradeable: a
 // GLOBAL utility class needs no scoped rule, so `class="row mono"` or
 // `class:mono={true}` restyles the whole row with the CSS inventory
@@ -1277,9 +1338,21 @@ const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // same intentional speed bump as EXPECTED_CHECKS.
 const SIG = {
   "ItemMark.svelte":
-    ["span:item-mark.{expr}", "svg:", "#if:", "line:", "line:", "line:", "#else:", "#if:",
-     "polygon:", "#else:", "#if:", "polyline:", "#else:", "#if:", "line:", "line:", "line:",
-     "circle:", "circle:", "circle:", "#else:", "#if:", "line:", "polygon:"],
+    ["span:item-mark.{expr}",
+     "svg:[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width={type === '\''quiz'\'' ? '\''1.9'\'' : '\''1.6'\''} stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "#if:", "line:[x1=\"3\" y1=\"4\" x2=\"13\" y2=\"4\"]",
+     "line:[x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\"]",
+     "line:[x1=\"3\" y1=\"12\" x2=\"9\" y2=\"12\"]", "#else:", "#if:",
+     "polygon:[points=\"5,3.4 13,8 5,12.6\" fill=\"currentColor\" stroke=\"none\"]", "#else:",
+     "#if:", "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
+     "line:[x1=\"4\" y1=\"2.6\" x2=\"4\" y2=\"13.4\"]",
+     "line:[x1=\"8\" y1=\"2.6\" x2=\"8\" y2=\"13.4\"]",
+     "line:[x1=\"12\" y1=\"2.6\" x2=\"12\" y2=\"13.4\"]",
+     "circle:[cx=\"4\" cy=\"10\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]",
+     "circle:[cx=\"8\" cy=\"5.4\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]",
+     "circle:[cx=\"12\" cy=\"8.6\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]", "#else:",
+     "#if:", "line:[x1=\"4.2\" y1=\"2.4\" x2=\"4.2\" y2=\"13.6\"]",
+     "polygon:[points=\"4.2,3.2 12.4,5.8 4.2,8.4\" fill=\"currentColor\" stroke=\"none\"]"],
   "ItemIcon.svelte":
     ["button:icon.{expr}", "ItemMark:"],
   "SequenceLink.svelte":
@@ -1310,13 +1383,19 @@ const SIG = {
   "SingleChoiceQuestion.svelte":
     ["fieldset:", "legend:", "div:text", "@html:question.text_html", "div:opts", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
-     "input:", "span:ctl", "#if:", "span:dot", "#if:", "svg:mark", "polyline:", "#else:",
-     "#if:", "svg:mark", "line:", "line:", "#if:", "span:sr-only"],
+     "input:", "span:ctl", "#if:", "span:dot", "#if:",
+     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
+     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "line:[x1=\"4.2\" y1=\"4.2\" x2=\"11.8\" y2=\"11.8\"]",
+     "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:", "span:sr-only"],
   "PageItem.svelte":
     ["article:page-item", "h2:", "div:content", "@html:item.content_html"],
   "VideoItem.svelte":
-    ["article:video-item", "h2:", "div:video-card", "VideoFrame:", "#if:", "div:actions", "Button:",
-     "#else:", "p:watched", "svg:", "polyline:"],
+    ["article:video-item", "h2:", "div:video-card", "VideoFrame:", "#if:", "div:actions",
+     "Button:", "#else:", "p:watched",
+     "svg:[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]"],
   "InteractiveAppItem.svelte":
     ["article:interactive-app", "h2:", "#if:", "div:app-card", "InteractiveFrame:", "p:cover-hint",
      "#else:", "#if:", "p:notice", "#else:", "#if:", "p:notice"],
@@ -1345,67 +1424,94 @@ const SIG = {
   "MultiChoiceQuestion.svelte":
     ["fieldset:", "legend:", "div:text", "@html:question.text_html", "div:opts", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
-     "input:", "span:ctl", "#if:", "svg:check", "polyline:", "#if:", "svg:mark", "polyline:",
-     "#else:", "#if:", "svg:mark", "line:", "line:", "#if:", "span:sr-only"],
+     "input:", "span:ctl", "#if:",
+     "svg:check[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
+     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
+     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "line:[x1=\"4.2\" y1=\"4.2\" x2=\"11.8\" y2=\"11.8\"]",
+     "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:", "span:sr-only"],
   "BlockGroup.svelte":
     ["section:block", "header:", "h2:", "button:acc", "span:badge.mono", "span:acc-title",
-     "svg:chev.class:collapsed", "polyline:", "div:", "#if:", "div:info",
+     "svg:chev.class:collapsed[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:", "#if:", "div:info",
      "@html:block.info_html", "ul:", "#each:", "li:", "SequenceLink:", "#if:", "li:",
      "MiniProjectLink:"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
-// `owner-signature:text` in document order. Text inside `{expr}` is not literal
-// and never appears here; whitespace between elements trims away. The list is
+// `owner-signature:text` in document order, interleaved with a `{expr}` marker
+// wherever an ExpressionTag renders. The marker pins THAT dynamic text appears
+// there and how many times, never what it says; whitespace between elements
+// trims away. The list is
 // short on purpose -- these are marks-and-badges components, so any growth is a
 // glyph or a label someone added in markup, which is exactly what T7 removed
 // (`✓`) and what a replacement (`★`) would reinstate.
 const TEXT = {
   "ItemMark.svelte": [],
   "ItemIcon.svelte": [],
-  "SequenceLink.svelte": ["span:badge.mono:S", "span:count.mono:/"],
-  "MiniProjectLink.svelte": ["span:row-title:Mini-project:"],
-  "BlockGroup.svelte": ["span:badge.mono:B"],
+  "SequenceLink.svelte":
+    ["span:badge.mono:S", "span:badge.mono:{expr}", "span:row-title:{expr}",
+     "span:count.mono:{expr}", "span:count.mono:/", "span:count.mono:{expr}"],
+  "MiniProjectLink.svelte": ["span:row-title:Mini-project:", "span:row-title:{expr}"],
+  "BlockGroup.svelte": ["span:badge.mono:B", "span:badge.mono:{expr}", "span:acc-title:{expr}"],
   // Empty on purpose: BOTH the glyph and the label come through `{meta.token}` /
   // `{meta.label}` from LATEST_STATUS_META, so a literal appearing here at all
   // means someone hard-coded copy into the markup and bypassed that map.
-  "StatusPill.svelte": [],
+  "StatusPill.svelte": ["span:pill-token:{expr}", "span:pill.{expr}:{expr}"],
   // Longer than the marks-and-badges lists above because these are PAGE
   // components carrying real copy: a literal label edit becomes a deliberate act.
   // SCOPE, stated precisely because an earlier wording overclaimed (reviewer,
-  // round 3): this pins literal TEXT NODES only. Student-readable copy that
-  // lives inside `{expr}` is not here and cannot be -- the choice components
-  // build their `.sr-only` reveal labels in script, QuizItem picks
-  // attempt/attempts, and SequencePlayer carries button `title`s. Those are
-  // pinned by each component own tests instead.
+  // round 3): this pins literal TEXT NODES, plus the POSITION and COUNT of the
+  // dynamic ones. What a `{expr}` renders is still not here and cannot be --
+  // the choice components build their `.sr-only` reveal labels in script,
+  // QuizItem picks attempt/attempts, and SequencePlayer carries button
+  // `title`s, all of which resolve where this scanner does not look. Those
+  // values are pinned by each component own tests instead. The marker closes
+  // only the cheaper hole: adding or removing an expression, which used to cost
+  // nothing at all (codex, close-out round 3).
   "SequencePlayer.svelte":
-    ["span:sep:/","span:mono:B","span:crumb:·","span:sep:/","span:mono.current:S",
-     "h1::Sequence not available","p::This sequence isn'\''t available to you.",
-     "h1::Couldn'\''t load","Button::← Course","h1::Sequence not found","Button::← Course",
-     "p:empty:This sequence has no items yet.","span:counter:Item","span:counter:of",
-     "Button::← Previous","Button::Finish sequence","span:next-label:Next:","span:next-label:→",
-     "Button::Next →"],
+    ["a::{expr}", "span:sep:/", "span:mono:B", "span:mono:{expr}", "span:crumb:·",
+     "span:crumb:{expr}", "span:sep:/", "span:mono.current:S", "span:mono.current:{expr}",
+     "h1::Sequence not available", "p::This sequence isn'\''t available to you.",
+     "h1::Couldn'\''t load", "p::{expr}", "Button::← Course", "h1::Sequence not found",
+     "Button::← Course", "h1:seq-title:{expr}", "p:empty:This sequence has no items yet.",
+     "h1:seq-title:{expr}", "span:counter:Item", "span:counter:{expr}", "span:counter:of",
+     "span:counter:{expr}", "Button::← Previous", "Button::Finish sequence",
+     "span:next-label:Next:", "span:next-title:{expr}", "span:next-label:→", "Button::Next →"],
   "QuizItem.svelte":
-    ["p:empty:This quiz has no questions yet.","span:q-counter.mono:Question","span:q-counter.mono:of",
-     "Button::Submit answer","p:hint:left","strong::Score:","span:mono:/","p:meta:Attempt","p:meta:of",
-     "Button::Try again","Button::Show correct answers"],
+    ["h2::{expr}", "p:empty:This quiz has no questions yet.", "h2::{expr}",
+     "span:q-counter.mono:Question", "span:q-counter.mono:{expr}", "span:q-counter.mono:of",
+     "span:q-counter.mono:{expr}", "Button::Submit answer", "span:mono:{expr}", "p:hint:{expr}",
+     "p:hint:left", "strong::Score:", "span:mono:{expr}", "span:mono:/", "span:mono:{expr}",
+     "p:meta:Attempt", "span:mono:{expr}", "p:meta:of", "span:mono:{expr}", "Button::Try again",
+     "Button::Show correct answers"],
   // Empty on purpose in both: every option label is `{opt.text}` from the API,
   // so a literal here means someone hard-coded question copy into the markup.
   // The `.sr-only` reveal wording is built in script and reaches the DOM through
   // an ExpressionTag, so it is out of scope here by construction, not by
   // oversight -- see the SCOPE note above.
-  "SingleChoiceQuestion.svelte": [],
-  "MultiChoiceQuestion.svelte": [],
-  "PageItem.svelte": [],
-  "VideoItem.svelte": ["Button::Mark as watched","p:watched:Marked as watched"],
+  "SingleChoiceQuestion.svelte":
+    [
+     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
+     "span:sr-only:{expr}"],
+  "MultiChoiceQuestion.svelte":
+    [
+     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
+     "span:sr-only:{expr}"],
+  "PageItem.svelte": ["h2::{expr}"],
+  "VideoItem.svelte": ["h2::{expr}", "Button::Mark as watched", "p:watched:Marked as watched"],
   "InteractiveAppItem.svelte":
-    ["p:cover-hint:Marked covered once opened.","p:notice:This app couldn'\''t be loaded.",
-     "p:notice:No app uploaded yet."],
+    ["h2::{expr}", "p:cover-hint:Marked covered once opened.",
+     "p:notice:This app couldn'\''t be loaded.", "p:notice:No app uploaded yet."],
   "UnsupportedItem.svelte": ["p::This item isn'\''t available in this view yet."],
-  "NumericQuestion.svelte": ["p:correct-line:Correct answer:"],
-  "TextQuestion.svelte":    ["p:correct-line:Correct answer:"],
+  "NumericQuestion.svelte": ["p:correct-line:Correct answer:", "strong:mono:{expr}"],
+  "TextQuestion.svelte": ["p:correct-line:Correct answer:", "strong::{expr}"],
   "CourseCard.svelte":
-    ["a:foot-link:Edit","a:foot-link:Runs","span:badge-draft:DRAFT","span:badge-admin:ADMIN",
-     "span:hint:No active enrolment"],
+    ["a:foot-link:Edit", "a:foot-link:Runs", "span:badge-draft:DRAFT", "span:badge-admin:ADMIN",
+     "a:title-link:{expr}", "span:hint:No active enrolment", "a:title-link:{expr}",
+     "span:count:{expr}", "a:cta:{expr}", "h3:title:{expr}", "span:count:{expr}",
+     "span:cta:{expr}", "div:footer.footer-status:{expr}"],
 };
 for (const f of process.argv.slice(1)) {
   const hits = [];
@@ -1432,10 +1538,23 @@ for (const f of process.argv.slice(1)) {
         if (t) txt.push(`${owner}:${t}`);
         return;
       }
-      // `{@const}` joins these two: it binds a local and emits no DOM, so it can
-      // carry no style and no class. Anything it computes reaches the page only
-      // through an ExpressionTag or an attribute, and both are already scanned.
-      case "Comment": case "ExpressionTag": case "ConstTag": return;
+      // `{@const}` joins Comment: it binds a local and emits no DOM, so it can
+      // carry no style and no class. Anything it computes reaches the page
+      // through an ExpressionTag or an attribute -- both of which are VISITED,
+      // and neither of which has its VALUE pinned unless the attribute is
+      // visual. The earlier wording here said the two were "already scanned",
+      // which reads as a guarantee about values that this walk does not make
+      // (codex, close-out round 3).
+      case "Comment": case "ConstTag": return;
+      // An ExpressionTag emits DOM, so unlike the two above it cannot simply be
+      // discarded. It leaves a `{expr}` marker in the TEXT pin, in position and
+      // counted: `Marked as watched {STAR}` put a student-visible glyph on the
+      // page with every pin byte-identical, because a node dropped on the floor
+      // is a node that can be added for free (codex, close-out round 3,
+      // reproduced). The marker records THAT dynamic text renders here and
+      // where, never what it says -- that resolves in script, which this
+      // scanner never reads.
+      case "ExpressionTag": txt.push(`${owner}:{expr}`); return;
       // Position-pinned, NOT swallowed. Allowing the node type is per-FILE, so a
       // bare `return` here sanctioned ANY {@html} in that file — including a
       // second one carrying `<style>…</style>`, which is exactly the codex-r3-C
@@ -1551,9 +1670,15 @@ for (const f of process.argv.slice(1)) {
         const me = n.name + ":" + cls.join(".");
         // The signature is computed FIRST so the hidden/inert carve-out can name a
         // single element rather than exempting a whole file.
+        const vis = [];
         for (const a of n.attributes || []) {
           const nm = a.name || "";
-          if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
+          const low = nm.toLowerCase();
+          if (!ATTR.has(a.type)) { hits.push(`<${n.name}> ${a.type} ${nm}`.trim()); continue; }
+          // A ClassDirective is read by the class collector above, and an
+          // OnDirective names an EVENT rather than an attribute, so neither
+          // carries a name the allowlist below is entitled to judge.
+          if (a.type !== "Attribute") continue;
           // `styleOn` is the twin of `hiddenOn` and exists for exactly one
           // element: the CourseCard progress fill, whose width IS the datum
           // (`style="width:{pct}%"`) and cannot be expressed in a stylesheet.
@@ -1568,18 +1693,30 @@ for (const f of process.argv.slice(1)) {
           // Pinning the source also settles the second-element case -- a further
           // `span:bar-fill` carrying a different style reds on the VALUE, not just
           // on the signature that a pin regeneration would absorb.
-          else if (nm.toLowerCase() === "style") {
+          if (low === "style") {
             const want = (spec.styleOn || {})[me];
             const got = srcText.slice(a.start, a.end).split(/\s+/).join(" ");
             if (want === undefined) hits.push(`<${n.name}> style attribute`);
             else if (got !== want) hits.push(`<${n.name}> style attribute is ${got} (pinned ${want})`);
+            continue;
           }
-          else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
-          else if ((nm.toLowerCase() === "hidden" || nm.toLowerCase() === "inert")
-                   && !(spec.hiddenOn || []).includes(me))
-            hits.push(`<${n.name}> ${nm.toLowerCase()} attribute`);
+          if (nm.startsWith("--")) { hits.push(`<${n.name}> CSS-property prop ${nm}`); continue; }
+          if (low === "hidden" || low === "inert") {
+            if (!(spec.hiddenOn || []).includes(me)) hits.push(`<${n.name}> ${low} attribute`);
+            continue;
+          }
+          // Pinned by SOURCE, and appended to the signature rather than checked
+          // against a per-element map: an SVG presentation attribute is styling
+          // that never reaches dist CSS, so `stroke-width="0"` or `fill="#c00"`
+          // has to red the same way an inline `style` does. Appending puts it in
+          // document order beside the classes it sits with, so a value moving to
+          // a different element reds too.
+          if (VISUAL.has(nm)) { vis.push(srcText.slice(a.start, a.end).split(/\s+/).join(" ")); continue; }
+          // Fail-closed on the NAME. Everything above is judged; this is what
+          // stops a name nobody classified from being read as harmless.
+          if (!ATTR_OK.has(nm)) hits.push(`<${n.name}> unreviewed attribute ${nm}`);
         }
-        sig.push(me);
+        sig.push(vis.length ? `${me}[${vis.join(" ")}]` : me);
         walk(n.fragment, me);
         return;
       }
@@ -1607,7 +1744,7 @@ for (const f of process.argv.slice(1)) {
     hits.push(`literal text changed: ${JSON.stringify(txt)} (pinned ${JSON.stringify(wantTxt)})`);
   }
   if (hits.length) { bad = 1; console.log(`FAIL  ${base} markup pin broken: ${hits.join("; ")}`); }
-  else console.log(`PASS  ${base} declares no inline styling and no literal text beyond its pinned set`);
+  else console.log(`PASS  ${base} declares no unapproved inline styling; markup, attributes and text match their pins`);
 }
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
@@ -2632,8 +2769,11 @@ fi
 #
 # Section (g) is kept as-is rather than folded in here: its value is the
 # CROSS-component pairings (the two positional counters agreeing at 12.5px, the
-# 480px answer-control edge shared with the choice components, `.page-item`'s
-# calc), which a single-component inventory cannot express.
+# 480px answer-control edge shared with the choice components, `.page-item`
+# sharing an EDGE with `.quiz` at a plain 652px), which a single-component
+# inventory cannot express. Both places used to call that measure a calc(); T5
+# removed the calc and section (g) now rejects it outright (codex, close-out
+# round 3).
 echo
 echo "--- (o) T4 QuizItem shell ---"
 owners=(${(f)"$(grep -rlE "^[[:space:]]*\.q-block[[:space:]]*[,{+]" src --include='*.svelte')"})

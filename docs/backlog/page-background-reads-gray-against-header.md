@@ -21,6 +21,7 @@ against the article's inherited `--bg`.
 
 `later`, not `yes`: the unknown is whether a tinted page ground is wanted at all. The reference screens
 float cards on a tint, but they never place that tint flush against a pure-white bar. Settling it means
-deciding either (a) the header takes a bottom border / its own tint so the step is deliberate, or
+deciding either (a) the existing bottom border is strengthened, or the header takes its own tint, so the
+step reads as deliberate, or
 (b) `--bg` goes to `#FFFFFF` and card separation moves entirely onto borders — which changes every
 screen in the app, not just the student surfaces. Not a Slice-3 decision.
