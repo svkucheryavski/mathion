@@ -1173,16 +1173,19 @@ let bad = 0;
 // kept promising closure the code did not deliver, so: this file constrains
 // DECLARATIVE markup and the built stylesheet. It does not constrain script.
 // What the gate DOES guarantee, written as the list it actually is: no scanned
-// component styles its DOM declaratively outside its <style> block (no inline
-// `style`, no CSS-property prop, no `hidden`/`inert`, and no `<style>` written
-// INLINE into an `{@html}` payload — the `{@html}` EXPRESSION is pinned by
-// source, though what the backend puts in that variable is not, which is the
-// same limitation the sanitiser owns) — the actual regression path for the
-// double ring; every
-// markup construct, tag and attribute NAME is allowlisted, so a new one reds for
-// review; the VALUES of the SVG presentation and geometry attributes are pinned
-// by source, because those ARE styling declared outside the <style> block; and
-// element order, literal classes and literal text are pinned in document order.
+// component carries UNAPPROVED declarative styling outside its <style> block.
+// Approved is a closed set of four, each pinned by SOURCE so an addition or an
+// edit reds — the one inline `style` on the CourseCard progress fill, the one
+// `hidden` on the BlockGroup panel, the SVG presentation and geometry values,
+// and the styling props (`variant`, `loading`, `disabled`). Everything else in
+// that family is refused outright: any other inline `style`, any CSS-property
+// prop, any other `hidden`/`inert`, and any `<style>` written INLINE into an
+// `{@html}` payload — the `{@html}` EXPRESSION is pinned by source, though what
+// the backend puts in that variable is not, which is the limitation the
+// sanitiser owns. That family is the actual regression path for the double
+// ring. Beyond it: every markup construct, tag and attribute NAME is
+// allowlisted, so a new one reds for review; and element order, literal classes
+// and literal text are pinned in document order.
 //
 // What it does NOT guarantee, named here so no later round has to rediscover it
 // (codex, close-out round 3): the VALUE of an allowed NON-visual attribute or
@@ -1196,12 +1199,25 @@ let bad = 0;
 // that finding belongs.
 //
 // Nor does it pin WHICH allowed attributes an element carries: adding an
-// `aria-label` or dropping a `title` reds nothing, because no name left in
-// ATTR_OK can style anything — every styling-capable name is either refused
-// outright or pinned by value above. The one name that comes close is `type`
-// on the choice inputs, and those inputs are `opacity:0` 1px boxes whose
-// appearance is entirely the drawn `.ctl` beside them; both choice test files
-// assert `input[type="radio"]` / `[type="checkbox"]` directly.
+// `aria-label` or dropping a `title` reds nothing. An earlier draft justified
+// that by claiming no name left in ATTR_OK could style anything, which was
+// false — `variant` is `class="btn {variant}"` inside Button, and both review
+// lanes found it independently. The three styling props now sit in VISUAL and
+// are pinned by source. What is left in ATTR_OK is content and behaviour, plus
+// three names that come CLOSE and are owned by component tests rather than by
+// this scanner:
+//   `type`      picks the ItemMark glyph and its stroke-width, and the input
+//               kind. Pinned by the ItemIcon, SequenceLink and MiniProjectLink
+//               suites, and by both choice suites, which select
+//               `input[type="radio"]` / `[type="checkbox"]` directly. Those
+//               inputs are `opacity:0` 1px boxes in any case -- the visible
+//               control is the drawn `.ctl` beside them.
+//   `data-type` has no `[data-type]` selector anywhere in src; its value is
+//               pinned by the ItemIcon suite.
+//   `checked`   has no `:checked` rule anywhere in src; visual selection runs
+//               through `class:selected`, which the class collector pins.
+// `class` is in the set too, but the collector above pins it, not the name
+// check.
 // `hidden` and `inert` are refused for the same reason as `style`: both switch an
 // element off visually from the markup, where no CSS lane can see it. Hiding the
 // count with `hidden` passed every pin in this file and every unit test — DOM
@@ -1291,16 +1307,31 @@ const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // styling declared outside the <style> block, which is the one thing this
 // scanner exists to forbid, and it was the one form of it left open.
 //
-// VISUAL is that subset, and it is pinned by VALUE, appended to the element
-// signature as `tag:classes[fill="none" stroke-width="1.9"]`. Names in it that
-// nothing uses today (`opacity`, `transform`, the two `*-opacity` pairs) are
-// listed anyway: an unused name reds on ATTR_OK, so classifying it here in
+// VISUAL is every name whose VALUE selects appearance, pinned by SOURCE and
+// appended to the element signature as `tag:classes[fill="none" variant="ghost"]`.
+// It has TWO families, and an earlier draft of this file contained only the
+// first, which is what made the set wrong rather than merely incomplete:
+//
+//   1. SVG presentation and geometry, which style the element directly with no
+//      CSS involved, so no other lane can see them at all;
+//   2. component PROPS that pick a class or a rendered chrome inside a shared
+//      component. `variant` is `class="btn {variant}"` in Button.svelte, so
+//      `variant="ghost"` on the quiz CTA turns the filled primary button into a
+//      transparent muted one -- the component-level twin of `class="quiz mono"`,
+//      which an earlier round graded Critical. It passed the gate at ALL PASS
+//      (235) with 1350 tests green (codex and reviewer, close-out round 4,
+//      found independently and both reproduced). `loading` renders a spinner
+//      and `disabled` matches `.btn:disabled` / `.num:disabled` / `.txt:disabled`.
+//
+// Names nothing uses today (`opacity`, `transform`, the two `*-opacity` pairs)
+// are listed anyway: an unused name reds on ATTR_OK, so classifying it here in
 // advance is what stops a future reviewer allowlisting it as ordinary.
 const VISUAL = new Set([
   "cx", "cy", "fill", "fill-opacity", "height", "opacity", "points", "r",
   "stroke", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
   "stroke-opacity", "stroke-width", "transform", "viewBox", "width",
   "x", "x1", "x2", "y", "y1", "y2",
+  "disabled", "loading", "variant",
 ]);
 // Everything else the 17 components actually use, element attributes and
 // component props in one list. These are pinned by NAME only -- their values
@@ -1310,10 +1341,10 @@ const VISUAL = new Set([
 const ATTR_OK = new Set([
   "aria-controls", "aria-expanded", "aria-hidden", "aria-label",
   "aria-labelledby", "checked", "class", "correctOptionIds", "correctValue",
-  "courseSlug", "data-type", "disabled", "href", "id", "inputmode", "item",
-  "loading", "name", "onanswer", "onchange", "onclick", "oninput", "question",
+  "courseSlug", "data-type", "href", "id", "inputmode", "item",
+  "name", "onanswer", "onchange", "onclick", "oninput", "question",
   "role", "scriptSource", "sequence", "src", "state", "status", "title",
-  "type", "value", "variant",
+  "type", "value",
 ]);
 // Rejecting inline `style` is NOT enough to make a component gradeable: a
 // GLOBAL utility class needs no scoped rule, so `class="row mono"` or
@@ -1365,25 +1396,31 @@ const SIG = {
   "SequencePlayer.svelte":
     ["#snippet:crumbs", "nav:crumbs", "a:", "#if:", "span:sep", "span:crumb", "span:mono",
      "span:sep", "span:mono.current", "div:page", "#if:", "Spinner:", "#else:", "#if:", "#if:",
-     "h1:", "p:", "#else:", "h1:", "p:", "Button:", "#else:", "#if:", "h1:", "Button:",
-     "#else:", "#if:", "@render:crumbs", "h1:seq-title", "p:empty", "#else:", "@render:crumbs",
-     "h1:seq-title", "nav:strip", "#each:", "ItemIcon:", "span:counter", "main:content", "#if:",
-     "ItemRouter:", "footer:", "Button:", "#if:", "Button:", "#else:", "Button:", "#if:",
-     "span:next-label", "span:next-title", "#else:"],
+     "h1:", "p:", "#else:", "h1:", "p:", "Button:[variant=\"ghost\"]", "#else:", "#if:", "h1:",
+     "Button:[variant=\"ghost\"]", "#else:", "#if:", "@render:crumbs", "h1:seq-title", "p:empty",
+     "#else:", "@render:crumbs", "h1:seq-title", "nav:strip", "#each:", "ItemIcon:",
+     "span:counter", "main:content", "#if:", "ItemRouter:", "footer:",
+     "Button:[variant=\"secondary\" disabled={flatIndex <= 0}]", "#if:",
+     "Button:[variant=\"primary\"]", "#else:",
+     "Button:[variant=\"primary\" disabled={flatIndex < 0}]", "#if:", "span:next-label",
+     "span:next-title", "#else:"],
   "QuizItem.svelte":
     ["#if:", "article:quiz", "h2:", "p:empty", "#else:", "article:quiz", "h2:", "#each:",
-     "div:q-block", "span:q-counter.mono", "#if:", "SingleChoice:", "#else:", "#if:",
-     "MultiChoice:", "#else:", "#if:", "Numeric:", "#else:", "#if:", "Text:", "#if:", "div:exp",
-     "@html:r.explanation_html", "#if:", "div:submit-row", "Button:", "#if:", "p:hint",
-     "span:mono", "#else:", "#if:", "div:result", "p:", "strong:", "span:mono", "p:meta",
-     "span:mono", "span:mono", "#if:", "Button:", "#else:", "#if:", "Button:"],
+     "div:q-block", "span:q-counter.mono", "#if:", "SingleChoice:[disabled={locked}]", "#else:",
+     "#if:", "MultiChoice:[disabled={locked}]", "#else:", "#if:", "Numeric:[disabled={locked}]",
+     "#else:", "#if:", "Text:[disabled={locked}]", "#if:", "div:exp", "@html:r.explanation_html",
+     "#if:", "div:submit-row",
+     "Button:[loading={inflight !== null} disabled={!allAnswered || inflight !== null}]", "#if:",
+     "p:hint", "span:mono", "#else:", "#if:", "div:result", "p:", "strong:", "span:mono",
+     "p:meta", "span:mono", "span:mono", "#if:", "Button:", "#else:", "#if:",
+     "Button:[variant=\"secondary\"]"],
   // The two choice components differ in their CONTROL markup exactly as they
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
   "SingleChoiceQuestion.svelte":
     ["fieldset:", "legend:", "div:text", "@html:question.text_html", "div:opts", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
-     "input:", "span:ctl", "#if:", "span:dot", "#if:",
+     "input:[{disabled}]", "span:ctl", "#if:", "span:dot", "#if:",
      "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
@@ -1393,7 +1430,7 @@ const SIG = {
     ["article:page-item", "h2:", "div:content", "@html:item.content_html"],
   "VideoItem.svelte":
     ["article:video-item", "h2:", "div:video-card", "VideoFrame:", "#if:", "div:actions",
-     "Button:", "#else:", "p:watched",
+     "Button:[loading={busy}]", "#else:", "p:watched",
      "svg:[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]"],
   "InteractiveAppItem.svelte":
@@ -1416,15 +1453,15 @@ const SIG = {
      "#else:", "a:card.card-link", "div:body", "h3:title", "@render:bar", "span:meta",
      "span:count", "span:cta", "div:footer.footer-status"],
   "NumericQuestion.svelte":
-    ["div:row", "div:text", "@html:question.text_html", "input:num.mono", "#if:", "p:correct-line",
-     "strong:mono"],
+    ["div:row", "div:text", "@html:question.text_html", "input:num.mono[{disabled}]", "#if:",
+     "p:correct-line", "strong:mono"],
   "TextQuestion.svelte":
-    ["div:row", "div:text", "@html:question.text_html", "input:txt", "#if:", "p:correct-line",
-     "strong:"],
+    ["div:row", "div:text", "@html:question.text_html", "input:txt[{disabled}]", "#if:",
+     "p:correct-line", "strong:"],
   "MultiChoiceQuestion.svelte":
     ["fieldset:", "legend:", "div:text", "@html:question.text_html", "div:opts", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
-     "input:", "span:ctl", "#if:",
+     "input:[{disabled}]", "span:ctl", "#if:",
      "svg:check[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
      "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
@@ -1455,9 +1492,10 @@ const TEXT = {
      "span:count.mono:{expr}", "span:count.mono:/", "span:count.mono:{expr}"],
   "MiniProjectLink.svelte": ["span:row-title:Mini-project:", "span:row-title:{expr}"],
   "BlockGroup.svelte": ["span:badge.mono:B", "span:badge.mono:{expr}", "span:acc-title:{expr}"],
-  // Empty on purpose: BOTH the glyph and the label come through `{meta.token}` /
-  // `{meta.label}` from LATEST_STATUS_META, so a literal appearing here at all
-  // means someone hard-coded copy into the markup and bypassed that map.
+  // No LITERAL entry on purpose -- the two below are `{expr}` markers. BOTH the
+  // glyph and the label come through `{meta.token}` / `{meta.label}` from
+  // LATEST_STATUS_META, so a LITERAL appearing here means someone hard-coded
+  // copy into the markup and bypassed that map.
   "StatusPill.svelte": ["span:pill-token:{expr}", "span:pill.{expr}:{expr}"],
   // Longer than the marks-and-badges lists above because these are PAGE
   // components carrying real copy: a literal label edit becomes a deliberate act.
@@ -1486,11 +1524,13 @@ const TEXT = {
      "p:hint:left", "strong::Score:", "span:mono:{expr}", "span:mono:/", "span:mono:{expr}",
      "p:meta:Attempt", "span:mono:{expr}", "p:meta:of", "span:mono:{expr}", "Button::Try again",
      "Button::Show correct answers"],
-  // Empty on purpose in both: every option label is `{opt.text}` from the API,
-  // so a literal here means someone hard-coded question copy into the markup.
-  // The `.sr-only` reveal wording is built in script and reaches the DOM through
-  // an ExpressionTag, so it is out of scope here by construction, not by
-  // oversight -- see the SCOPE note above.
+  // No LITERAL entry on purpose in either -- the entries below are `{expr}`
+  // markers. Every option label is `{opt.text}` from the API, so a LITERAL here
+  // means someone hard-coded question copy into the markup.
+  // The `.sr-only` reveal WORDING is built in script; the ExpressionTag that
+  // renders it is now marked here in position, so removing or duplicating it
+  // reds, but what it says stays out of scope by construction, not by oversight
+  // -- see the SCOPE note above.
   "SingleChoiceQuestion.svelte":
     [
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
@@ -1744,7 +1784,7 @@ for (const f of process.argv.slice(1)) {
     hits.push(`literal text changed: ${JSON.stringify(txt)} (pinned ${JSON.stringify(wantTxt)})`);
   }
   if (hits.length) { bad = 1; console.log(`FAIL  ${base} markup pin broken: ${hits.join("; ")}`); }
-  else console.log(`PASS  ${base} declares no unapproved inline styling; markup, attributes and text match their pins`);
+  else console.log(`PASS  ${base} carries only approved attribute names; its styling values, markup and text match their pins`);
 }
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
