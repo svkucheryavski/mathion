@@ -1174,13 +1174,16 @@ let bad = 0;
 // DECLARATIVE markup and the built stylesheet. It does not constrain script.
 // What the gate DOES guarantee, written as the list it actually is: no scanned
 // component carries UNAPPROVED declarative styling outside its <style> block.
-// Approved is a closed set of four, each pinned by SOURCE so an addition or an
-// edit reds — the one inline `style` on the CourseCard progress fill, the one
-// `hidden` on the BlockGroup panel, the SVG presentation and geometry values,
-// and the styling props (`variant`, `loading`, `disabled`). Everything else in
-// that family is refused outright: any other inline `style`, any CSS-property
-// prop, any other `hidden`/`inert`, and any `<style>` written INLINE into an
-// `{@html}` payload — the `{@html}` EXPRESSION is pinned by source, though what
+// Approved is a closed set of four, each pinned by SOURCE and — for the two
+// single-element carve-outs — required to appear EXACTLY ONCE, so an addition,
+// an edit or a DELETION reds: the one inline `style` on the CourseCard progress
+// fill, the one `hidden` on the BlockGroup panel, the SVG presentation and
+// geometry values, and the styling props (`variant`, `loading`, `disabled`,
+// `state`). Everything else in that family is refused outright: any other
+// inline `style`, any CSS-property prop, any other `hidden` or `inert`, and any
+// `<style>` written INLINE into an `{@html}` payload. The single tolerance is
+// `inert` on the BlockGroup panel itself, which is allowed without a source pin
+// because it changes focus order and nothing visual — the `{@html}` EXPRESSION is pinned by source, though what
 // the backend puts in that variable is not, which is the limitation the
 // sanitiser owns. That family is the actual regression path for the double
 // ring. Beyond it: every markup construct, tag and attribute NAME is
@@ -1204,7 +1207,7 @@ let bad = 0;
 // false — `variant` is `class="btn {variant}"` inside Button, and both review
 // lanes found it independently. The three styling props now sit in VISUAL and
 // are pinned by source. What is left in ATTR_OK is content and behaviour, plus
-// three names that come CLOSE and are owned by component tests rather than by
+// four names that come CLOSE and are owned by component tests rather than by
 // this scanner:
 //   `type`      picks the ItemMark glyph and its stroke-width, and the input
 //               kind. Pinned by the ItemIcon, SequenceLink and MiniProjectLink
@@ -1216,6 +1219,10 @@ let bad = 0;
 //               pinned by the ItemIcon suite.
 //   `checked`   has no `:checked` rule anywhere in src; visual selection runs
 //               through `class:selected`, which the class collector pins.
+//   `status`    picks the `pill-*` class inside StatusPill, but MiniProjectLink
+//               is the only component that passes it and its suite asserts the
+//               composed pill from `item.latest_status`. Its sibling `state` is
+//               NOT test-owned at the call sites and has moved to VISUAL.
 // `class` is in the set too, but the collector above pins it, not the name
 // check.
 // `hidden` and `inert` are refused for the same reason as `style`: both switch an
@@ -1240,8 +1247,9 @@ const SPEC = {
   // `hiddenOn` is the panel and ONLY the panel: `hidden={!expanded}` IS the
   // pinned collapse mechanism there, while a `hidden` anywhere else in this
   // component would switch an element off where no CSS lane can see it. It
-  // gates `inert` on the same element too — the check treats the pair as one,
-  // and inert there would be an improvement rather than a regression. What
+  // tolerates `inert` on the same element — it changes focus order, never
+  // appearance — but no longer treats the pair as one: `hidden` there is pinned
+  // to its exact source and required exactly once, so DELETING it reds. What
   // keeps the carve-out narrow is SIG: a SECOND unclassed <div> reds on the
   // signature before this exemption could shelter it. If the panel is ever
   // given a class its signature stops matching and the LEGITIMATE hidden reds
@@ -1296,7 +1304,7 @@ const SPEC = {
   "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
-                              hiddenOn: ["div:"] },
+                              hiddenOn: { "div:": "hidden={!expanded}" } },
 };
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // Attribute NAMES are allowlisted for the same reason node types and tags are:
@@ -1322,6 +1330,14 @@ const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 //      (235) with 1350 tests green (codex and reviewer, close-out round 4,
 //      found independently and both reproduced). `loading` renders a spinner
 //      and `disabled` matches `.btn:disabled` / `.num:disabled` / `.txt:disabled`.
+//      `state` picks the covered/current/not-yet mark treatment: hard-coding
+//      `state="not-yet"` at the two CALL sites -- `<ItemIcon>` in the player
+//      strip and `<SequenceLink>` in BlockGroup -- greys every mark on the page,
+//      and neither suite observes it (the player tests assert breadcrumbs and
+//      footer, BlockGroup fixtures carry no items, and the ItemIcon tests prove
+//      only that ItemIcon honours whatever state it is handed). Its sibling
+//      `status` stays in ATTR_OK because MiniProjectLink DOES assert the pill it
+//      composes (codex, close-out round 5).
 //
 // Names nothing uses today (`opacity`, `transform`, the two `*-opacity` pairs)
 // are listed anyway: an unused name reds on ATTR_OK, so classifying it here in
@@ -1331,7 +1347,7 @@ const VISUAL = new Set([
   "stroke", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
   "stroke-opacity", "stroke-width", "transform", "viewBox", "width",
   "x", "x1", "x2", "y", "y1", "y2",
-  "disabled", "loading", "variant",
+  "disabled", "loading", "state", "variant",
 ]);
 // Everything else the 17 components actually use, element attributes and
 // component props in one list. These are pinned by NAME only -- their values
@@ -1343,7 +1359,7 @@ const ATTR_OK = new Set([
   "aria-labelledby", "checked", "class", "correctOptionIds", "correctValue",
   "courseSlug", "data-type", "href", "id", "inputmode", "item",
   "name", "onanswer", "onchange", "onclick", "oninput", "question",
-  "role", "scriptSource", "sequence", "src", "state", "status", "title",
+  "role", "scriptSource", "sequence", "src", "status", "title",
   "type", "value",
 ]);
 // Rejecting inline `style` is NOT enough to make a component gradeable: a
@@ -1384,10 +1400,10 @@ const SIG = {
      "circle:[cx=\"12\" cy=\"8.6\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]", "#else:",
      "#if:", "line:[x1=\"4.2\" y1=\"2.4\" x2=\"4.2\" y2=\"13.6\"]",
      "polygon:[points=\"4.2,3.2 12.4,5.8 4.2,8.4\" fill=\"currentColor\" stroke=\"none\"]"],
-  "ItemIcon.svelte":
-    ["button:icon.{expr}", "ItemMark:"],
+  "ItemIcon.svelte": ["button:icon.{expr}", "ItemMark:[state={istate}]"],
   "SequenceLink.svelte":
-    ["a:row", "span:badge.mono", "span:row-title", "span:chain", "#each:", "ItemMark:",
+    ["a:row", "span:badge.mono", "span:row-title", "span:chain", "#each:",
+     "ItemMark:[state={state.items[String(it.id)]?.is_covered ? '\''covered'\'' : '\''not-yet'\''}]",
      "span:count.mono"],
   "MiniProjectLink.svelte":
     ["a:row.row-mp", "span:row-glyph", "ItemMark:", "span:row-title", "StatusPill:"],
@@ -1398,8 +1414,9 @@ const SIG = {
      "span:sep", "span:mono.current", "div:page", "#if:", "Spinner:", "#else:", "#if:", "#if:",
      "h1:", "p:", "#else:", "h1:", "p:", "Button:[variant=\"ghost\"]", "#else:", "#if:", "h1:",
      "Button:[variant=\"ghost\"]", "#else:", "#if:", "@render:crumbs", "h1:seq-title", "p:empty",
-     "#else:", "@render:crumbs", "h1:seq-title", "nav:strip", "#each:", "ItemIcon:",
-     "span:counter", "main:content", "#if:", "ItemRouter:", "footer:",
+     "#else:", "@render:crumbs", "h1:seq-title", "nav:strip", "#each:",
+     "ItemIcon:[state={iconState(it.id)}]", "span:counter", "main:content", "#if:",
+     "ItemRouter:[state={currentCourse.value.state}]", "footer:",
      "Button:[variant=\"secondary\" disabled={flatIndex <= 0}]", "#if:",
      "Button:[variant=\"primary\"]", "#else:",
      "Button:[variant=\"primary\" disabled={flatIndex < 0}]", "#if:", "span:next-label",
@@ -1473,8 +1490,8 @@ const SIG = {
     ["section:block", "header:", "h2:", "button:acc", "span:badge.mono", "span:acc-title",
      "svg:chev.class:collapsed[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:", "#if:", "div:info",
-     "@html:block.info_html", "ul:", "#each:", "li:", "SequenceLink:", "#if:", "li:",
-     "MiniProjectLink:"],
+     "@html:block.info_html", "ul:", "#each:", "li:", "SequenceLink:[state={vstate}]", "#if:",
+     "li:", "MiniProjectLink:"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
 // `owner-signature:text` in document order, interleaved with a `{expr}` marker
@@ -1564,6 +1581,13 @@ for (const f of process.argv.slice(1)) {
   const txt = [];
   const renders = [];
   const snippets = [];
+  // An approved channel that is only checked WHEN ENCOUNTERED is not a pin: it
+  // reds on an edit and stays silent on a deletion. Removing
+  // `style="width:{pct}%"` left `span:bar-fill` byte-identical in SIG and no
+  // check fired (codex, close-out round 5). These counters make each approved
+  // channel required, exactly once.
+  const seenStyle = {};
+  const seenHidden = {};
   // `owner` is the signature of the nearest enclosing element, so a text node
   // is reported against the thing that renders it rather than in isolation --
   // and a glyph appended straight into the row reads as `a:row:...`, which no
@@ -1738,11 +1762,24 @@ for (const f of process.argv.slice(1)) {
             const got = srcText.slice(a.start, a.end).split(/\s+/).join(" ");
             if (want === undefined) hits.push(`<${n.name}> style attribute`);
             else if (got !== want) hits.push(`<${n.name}> style attribute is ${got} (pinned ${want})`);
+            else seenStyle[me] = (seenStyle[me] || 0) + 1;
             continue;
           }
           if (nm.startsWith("--")) { hits.push(`<${n.name}> CSS-property prop ${nm}`); continue; }
           if (low === "hidden" || low === "inert") {
-            if (!(spec.hiddenOn || []).includes(me)) hits.push(`<${n.name}> ${low} attribute`);
+            const want = (spec.hiddenOn || {})[me];
+            if (want === undefined) { hits.push(`<${n.name}> ${low} attribute`); continue; }
+            // `inert` on the SAME element is TOLERATED, not pinned, and the two
+            // are no longer treated as one: `inert` takes the panel out of the
+            // tab order and cannot change how anything LOOKS, which is the only
+            // axis this file grades. Saying that here is the point -- the
+            // guarantee paragraph used to claim every `hidden`/`inert` outside
+            // the carve-out was refused, which was not what the code did
+            // (codex, close-out round 5).
+            if (low === "inert") continue;
+            const got = srcText.slice(a.start, a.end).split(/\s+/).join(" ");
+            if (got !== want) hits.push(`<${n.name}> hidden attribute is ${got} (pinned ${want})`);
+            else seenHidden[me] = (seenHidden[me] || 0) + 1;
             continue;
           }
           // Pinned by SOURCE, and appended to the signature rather than checked
@@ -1773,6 +1810,14 @@ for (const f of process.argv.slice(1)) {
   // reviewed out of this list rather than quietly allowed (reviewer, round 5, m3).
   for (const r of renders) {
     if (!snippets.includes(r)) hits.push(`{@render ${r}} has no {#snippet ${r}} in this file`);
+  }
+  for (const [k, v] of Object.entries(spec.styleOn || {})) {
+    const c = seenStyle[k] || 0;
+    if (c !== 1) hits.push(`approved style ${v} on ${k} appears ${c} times (pinned exactly once)`);
+  }
+  for (const [k, v] of Object.entries(spec.hiddenOn || {})) {
+    const c = seenHidden[k] || 0;
+    if (c !== 1) hits.push(`approved ${v} on ${k} appears ${c} times (pinned exactly once)`);
   }
   const base = f.split("/").pop();
   const want = SIG[base] || [];
