@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=228
+EXPECTED_CHECKS=234
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -558,7 +558,14 @@ for _k, _b in bodies.items():
 # `border-bottom:1px solid var(--border-soft)`, because the redefinition lives
 # under an unrelated hash (codex-r1-#1, reproduced). Harvest from the guarded
 # components' own sources rather than hand-listing, so a token added to any of
-# them is guarded automatically instead of silently unguarded.
+# them is guarded automatically instead of silently unguarded. It reads the WHOLE
+# file, comments included, so a token merely NAMED in prose joins TOKENS too
+# (reviewer, round 3). That direction is safe -- it can only forbid more
+# definition sites, never fewer -- and every token it currently picks up that way
+# is already pinned from a real rule elsewhere, so the set is unchanged in
+# practice. Left as-is deliberately: narrowing it to the <style> body could drop
+# a token that only a comment happens to mention today and silently weaken the
+# guard, which is the failure direction that matters.
 for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemIcon.svelte',
            'src/components/course/SequenceLink.svelte', 'src/components/course/MiniProjectLink.svelte',
            # T8a made BlockGroup a graded component (section (k)), and the attack
@@ -753,8 +760,19 @@ none  "no positional counter left at 11.5px" \
       '\.(counter|q-counter)\.svelte-[a-z0-9]+\{([^}]*;)?font-size:11\.5px[;}]'
 # The progress-ratio family deliberately KEEPS 11.5px (spec §124(c)): asserting
 # its absence app-wide would forbid the rule the design actually wants.
+# HASH-ANCHORED to CourseCard. Unanchored, `.count.svelte-[a-z0-9]+` also matched
+# SequenceLink `.count`, which section (j) pins at 11.5px -- so this check could
+# never fail, and CourseCard `.count` at 22px passed the whole gate (reviewer,
+# round 3, reproduced). `.bar-fill` is the anchor: authored by CourseCard alone
+# and compiled under the same hash. If it stops resolving uniquely the
+# substitution below cannot match anything and this check reds, which is the
+# right direction.
+cc=(${(f)"$(grep -ohE '\.bar-fill\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+ccsrc=(${(f)"$(grep -rlE '^[[:space:]]*\.bar-fill[[:space:]]*[,{]' src --include='*.svelte')"})
+[[ ${#cc[@]} -eq 1 && ${#ccsrc[@]} -eq 1 && ${ccsrc[1]:t} == 'CourseCard.svelte' ]] \
+  || cc=(NO-UNIQUE-COURSECARD-ANCHOR)
 check "CourseCard .count (a RATIO) still 11.5px" \
-      '\.count\.svelte-[a-z0-9]+\{([^}]*;)?font-size:11\.5px[;}]'
+      "\.count\.${cc[1]}\{([^}]*;)?font-size:11\.5px[;}]"
 
 # --- the 480px answer-control edge -------------------------------------------
 # Count alone is not identity: a third component gaining `.opts` while Single
@@ -1175,6 +1193,24 @@ const SPEC = {
   "MultiChoiceQuestion.svelte":  { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
                               tags: ["div", "fieldset", "input", "label", "legend",
                                      "line", "polyline", "span", "svg"] },
+  // Round 3. Section (p) gave these four CSS inventories in the very commit
+  // whose SPEC comment above explains that a CSS inventory closes only HALF of
+  // the problem -- and then did not wire them in here. All three named attacks
+  // were still live on `.page-item`: `style="max-width:200px"` overrode the same
+  // 652px measure, `class="page-item mono"` set every static page in Plex Mono,
+  // and `{@html "<style>…</style>"}` injected a stylesheet into the JS chunk
+  // where no CSS lane can reach it. Gate ALL PASS (228), 1349 tests green
+  // (reviewer, close-out round 3, all reproduced).
+  "PageItem.svelte":        { nodes: BASE.concat("HtmlTag"), tags: ["article", "div", "h2"] },
+  "VideoItem.svelte":       { nodes: BASE, tags: ["article", "div", "h2", "p", "polyline", "svg"] },
+  "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"] },
+  "UnsupportedItem.svelte": { nodes: BASE, tags: ["div", "p"] },
+  // T3 for the same reason. Their own tests DO reject an inline `style`, but the
+  // sibling class assertion reads `el.className.split(" ")[0]` -- the FIRST
+  // token only -- so `class="text mono"` set every numeric prompt in Plex Mono
+  // with the gate green and all 1349 tests passing (reviewer, round 3).
+  "NumericQuestion.svelte": { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"] },
+  "TextQuestion.svelte":    { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"] },
   "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
@@ -1209,9 +1245,9 @@ const SIG = {
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
   "StatusPill.svelte": ["span:pill","span:pill-token"],
   "SequencePlayer.svelte":
-    ["#snippet:","nav:crumbs","a:","span:sep","span:crumb","span:mono","span:sep","span:mono.current",
-     "div:page","Spinner:","h1:","p:","h1:","p:","Button:","h1:","Button:","@render:","h1:seq-title",
-     "p:empty","@render:","h1:seq-title","nav:strip","ItemIcon:","span:counter","main:content",
+    ["#snippet:crumbs","nav:crumbs","a:","span:sep","span:crumb","span:mono","span:sep","span:mono.current",
+     "div:page","Spinner:","h1:","p:","h1:","p:","Button:","h1:","Button:","@render:crumbs","h1:seq-title",
+     "p:empty","@render:crumbs","h1:seq-title","nav:strip","ItemIcon:","span:counter","main:content",
      "ItemRouter:","footer:","Button:","Button:","Button:","span:next-label","span:next-title"],
   "QuizItem.svelte":
     ["article:quiz","h2:","p:empty","article:quiz","h2:","div:q-block","span:q-counter.mono",
@@ -1225,6 +1261,16 @@ const SIG = {
     ["fieldset:","legend:","div:text","@html:","div:opts",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
      "input:","span:ctl","span:dot","svg:mark","polyline:","svg:mark","line:","line:","span:sr-only"],
+  "PageItem.svelte": ["article:page-item","h2:","div:content","@html:"],
+  "VideoItem.svelte":
+    ["article:video-item","h2:","div:video-card","VideoFrame:","div:actions","Button:","p:watched",
+     "svg:","polyline:"],
+  "InteractiveAppItem.svelte":
+    ["article:interactive-app","h2:","div:app-card","InteractiveFrame:","p:cover-hint","p:notice",
+     "p:notice"],
+  "UnsupportedItem.svelte": ["div:unsupported","p:"],
+  "NumericQuestion.svelte": ["div:row","div:text","@html:","input:num.mono","p:correct-line","strong:mono"],
+  "TextQuestion.svelte":    ["div:row","div:text","@html:","input:txt","p:correct-line","strong:"],
   "MultiChoiceQuestion.svelte":
     ["fieldset:","legend:","div:text","@html:","div:opts",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
@@ -1249,8 +1295,13 @@ const TEXT = {
   // means someone hard-coded copy into the markup and bypassed that map.
   "StatusPill.svelte": [],
   // Longer than the marks-and-badges lists above because these are PAGE
-  // components carrying real copy. That is the point: every literal string a
-  // student can read is pinned here, so a label edit becomes a deliberate act.
+  // components carrying real copy: a literal label edit becomes a deliberate act.
+  // SCOPE, stated precisely because an earlier wording overclaimed (reviewer,
+  // round 3): this pins literal TEXT NODES only. Student-readable copy that
+  // lives inside `{expr}` is not here and cannot be -- the choice components
+  // build their `.sr-only` reveal labels in script, QuizItem picks
+  // attempt/attempts, and SequencePlayer carries button `title`s. Those are
+  // pinned by each component own tests instead.
   "SequencePlayer.svelte":
     ["span:sep:/","span:mono:B","span:crumb:·","span:sep:/","span:mono.current:S",
      "h1::Sequence not available","p::This sequence isn'\''t available to you.",
@@ -1264,8 +1315,19 @@ const TEXT = {
      "Button::Try again","Button::Show correct answers"],
   // Empty on purpose in both: every option label is `{opt.text}` from the API,
   // so a literal here means someone hard-coded question copy into the markup.
+  // The `.sr-only` reveal wording is built in script and reaches the DOM through
+  // an ExpressionTag, so it is out of scope here by construction, not by
+  // oversight -- see the SCOPE note above.
   "SingleChoiceQuestion.svelte": [],
   "MultiChoiceQuestion.svelte": [],
+  "PageItem.svelte": [],
+  "VideoItem.svelte": ["Button::Mark as watched","p:watched:Marked as watched"],
+  "InteractiveAppItem.svelte":
+    ["p:cover-hint:Marked covered once opened.","p:notice:This app couldn'\''t be loaded.",
+     "p:notice:No app uploaded yet."],
+  "UnsupportedItem.svelte": ["p::This item isn'\''t available in this view yet."],
+  "NumericQuestion.svelte": ["p:correct-line:Correct answer:"],
+  "TextQuestion.svelte":    ["p:correct-line:Correct answer:"],
 };
 for (const f of process.argv.slice(1)) {
   const hits = [];
@@ -1303,12 +1365,24 @@ for (const f of process.argv.slice(1)) {
       // T1 uses `{#snippet crumbs()}` + `{@render crumbs()}` for the breadcrumb,
       // which BOTH branches of the page render. The snippet BODY is walked, so
       // its elements land in the signature at the point of declaration and the
-      // markup it contributes is pinned exactly like any other. `@render:` marks
-      // the instantiation point without naming the callee: swapping in a
-      // different snippet requires that snippet to EXIST, and a new `#snippet:`
-      // entry reds the signature on its own.
-      case "SnippetBlock": sig.push("#snippet:"); walk(n.body, owner); return;
-      case "RenderTag": sig.push("@render:"); return;
+      // markup it contributes is pinned exactly like any other.
+      //
+      // Both markers NAME what they refer to. An earlier version pushed a bare
+      // `@render:`, on the argument that swapping in a different snippet needs
+      // that snippet to exist and a new `#snippet:` would red on its own. That
+      // holds only for snippets declared in the SAME file: Svelte 5 supports
+      // `<script module>`-exported snippets, so the callee can live in another
+      // component entirely. Proven by mutation -- a foreign snippet reproducing
+      // the breadcrumb DOM, carrying `style="color:#c00; font-size:24px"`, and
+      // rendered in the non-empty branch only, left the local snippet declared
+      // and every marker byte-identical: gate ALL PASS, 1349 tests green
+      // (reviewer, close-out round 3).
+      case "SnippetBlock": sig.push("#snippet:" + (n.expression && n.expression.name)); walk(n.body, owner); return;
+      case "RenderTag": {
+        const e = n.expression || {};
+        sig.push("@render:" + (((e.callee || e) || {}).name || "?"));
+        return;
+      }
       case "IfBlock": walk(n.consequent, owner); walk(n.alternate, owner); return;
       case "EachBlock": walk(n.body, owner); walk(n.fallback, owner); return;
       case "RegularElement": case "Component": {
@@ -1357,7 +1431,11 @@ process.exit(bad);
   src/components/course/BlockGroup.svelte src/components/course/StatusPill.svelte \
   src/pages/SequencePlayer.svelte src/components/items/QuizItem.svelte \
   src/components/items/quiz/SingleChoiceQuestion.svelte \
-  src/components/items/quiz/MultiChoiceQuestion.svelte || fail=1
+  src/components/items/quiz/MultiChoiceQuestion.svelte \
+  src/components/items/PageItem.svelte src/components/items/VideoItem.svelte \
+  src/components/items/InteractiveAppItem.svelte src/components/items/UnsupportedItem.svelte \
+  src/components/items/quiz/NumericQuestion.svelte \
+  src/components/items/quiz/TextQuestion.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -2507,8 +2585,12 @@ fi
 # while every page, video and interactive item lays its <h2> out BESIDE its body
 # -- gate ALL PASS, 1349 tests green (reproduced). That is the same false-pass
 # class I3 set out to end, and after this section T5 is no longer the last
-# grep-only surface: every target (g) and (h) grep is now also covered by a
-# declaration-set inventory, so the duplicate-property escape is dead everywhere.
+# grep-only surface: every (h) target and every (g) target INSIDE THIS SLICE is
+# now also covered by a declaration-set inventory. The one grep left standing
+# alone is the CourseCard ratio in (g) -- CourseCard is a Slice-2 component with
+# no inventory in this file -- and it is hash-anchored there instead. An earlier
+# wording here said the escape was dead "everywhere", which was wrong while that
+# grep was still unanchored (reviewer, round 3).
 echo
 echo "--- (p) T5 item bodies ---"
 t5ok=1
