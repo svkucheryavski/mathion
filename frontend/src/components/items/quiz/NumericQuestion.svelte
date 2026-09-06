@@ -66,8 +66,9 @@
      are deliberately omitted: they move with fixture length and with whether
      the webfont has loaded, and two earlier revisions of this comment quoted
      numbers that did not reproduce. This closes PROSE only — a <pre> needs its
-     own rule (below). T2's `legend` has NEITHER rule, so it carries both gaps;
-     out of T3's scope, carried not fixed. */
+     own rule (below). T2's `legend` carried both gaps when this was written and
+     was left out of T3's scope; the whole-branch review measured it at 659-784px
+     of page scroll and both choice questions now ship the same pair. */
   .text { overflow-wrap: anywhere; font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —

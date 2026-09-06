@@ -112,10 +112,29 @@
     font-weight: 400;
     color: var(--text-2);
     text-wrap: pretty;
+    /* Load-bearing for reflow, not defensive. A rendered <legend> is
+       SHRINK-TO-FIT, so a <pre> inside it widens the legend itself and the
+       scroller below never fires — measured 784px of page scroll at a 320px
+       viewport with the `pre` rule present but this line absent. `.text {
+       max-width: 100% }` does NOT substitute: the legend is the box that grows. */
+    max-width: 100%;
   }
   /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
      `p` globally, so this is its only source) and zero ONLY the trailing gap —
      the legend margin above already owns prompt→options. */
+  /* Reflow (WCAG 1.4.10). The prompt renders UNBOUNDED teacher markdown through
+     `{@html}` (`text_md` is uncapped — backend/mathion/schemas.py:323), and until
+     the whole-branch review it carried NEITHER guard. Measured at a 320px
+     viewport: one hyphen-free URL produced 659px of PAGE-level horizontal scroll,
+     a fenced code block 784px. `overflow-wrap` closes the prose case and the
+     `pre` scroller closes the code case — the identical pair already on
+     TextQuestion:70,91, NumericQuestion and PageItem:77,110.
+
+     The fieldset's `min-inline-size: 0` above is a DIFFERENT fix and does not
+     cover this: it stops an unbreakable prompt token from dragging the OPTION
+     rows wide, but never wraps the prompt itself. */
+  .text { overflow-wrap: anywhere; }
+  .text :global(pre) { overflow-x: auto; max-width: 100%; }
   .text :global(p) { margin: 0 0 var(--space-2); }
   .text :global(p:last-child) { margin: 0; }
   /* max-width matches `.txt`'s 480px (TextQuestion.svelte) so every answer

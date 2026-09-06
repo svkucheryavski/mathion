@@ -63,7 +63,11 @@
      `:global(p)` would leak page-content typography app-wide. */
   /* overflow-wrap: `.content` renders UNBOUNDED teacher markdown through
      `{@html}` (see the trust-boundary note above). This is the LARGEST such
-     surface in the app and was the only one T2/T3 left unprotected — the
+     surface in the app. It was described here as "the only one T2/T3 left
+     unprotected", which was WRONG and is corrected: the whole-branch review
+     measured the same failure on both choice questions' prompt `.text` and on
+     QuizItem's `.exp`, all three now fixed. What was true is that this is the
+     largest such surface. The identical rule sits on the
      identical rule sits on TextQuestion's and NumericQuestion's `.text` and on
      both choice questions' `.opt` (cited by selector, not by line — the line
      form of this citation has gone stale three times in this slice as comment

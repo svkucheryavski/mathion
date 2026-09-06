@@ -412,6 +412,17 @@ GLOBAL_ALLOW = {
     ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'p:last-child'),
     ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'p'),
     ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'p:last-child'),
+    # Reflow fix (whole-branch review I2): the two choice prompts and QuizItem's
+    # explanation panel render unbounded teacher markdown and had no <pre>
+    # scroller, measured at 294-464px of PAGE-level horizontal scroll on a 320px
+    # viewport — a WCAG 1.4.10 AA failure of the same class this slice already
+    # treated as ship-blocking in T5. Each is ancestor-scoped (`.text :global(pre)`
+    # / `.exp :global(pre)`), so the hashed prefix pins it inside its own
+    # component. None can reach T3: T3's own `.text` carries a different hash and
+    # already ships the identical rule (TextQuestion.svelte:91).
+    ('src/components/items/QuizItem.svelte', 'pre'),
+    ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'pre'),
+    ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'pre'),
     # T8a. Ancestor-scoped as `ul li:last-child :global(.row)`, so the hashed part
     # pins it inside BlockGroup own panel list; the only thing a <li> there
     # contains is a SequenceLink or MiniProjectLink whose root IS `.row`. It
@@ -879,13 +890,23 @@ echo "--- (h) T5 item components ---"
 # matching exactly THREE distinct hashes: a bare `article{...}` selector could
 # not be attributed to a component, and a count alone would pass if one
 # component authored the rule twice.
+# ANCHORED, not `grep -F` over the rule body. Until the whole-branch review (I3)
+# this was the ONE section in the file using the unanchored substring idiom its
+# own preamble (:45-51) forbids, and all three traps were live: `column-gap:16px`
+# satisfied `gap:16px` -- which in a COLUMN flex sets the vertical rhythm to ZERO,
+# collapsing title, card and button together -- `padding:0 20px` satisfied
+# `padding:0`, and `flex-direction:column-reverse` satisfied
+# `flex-direction:column`, rendering the whole article bottom-up. Each printed
+# `PASS all 3 P/V/I articles carry <decl>` while shipping the defect: a FALSE
+# pass, not a missing check. The left side now anchors to the rule brace or a
+# `;` and the right side terminates on `[;}]`, exactly as `check()` does.
 for want in 'gap:16px' 'padding:0' 'display:flex' 'flex-direction:column' 'align-items:stretch'; do
-  n=$(grep -ohE "\.(page-item|video-item|interactive-app)\.svelte-[a-z0-9]+\{[^}]*\}" $CSS \
-      | grep -F "$want" | sed 's/{.*//' | sort -u | wc -l | tr -d ' ')
+  n=$(grep -ohE "\.(page-item|video-item|interactive-app)\.svelte-[a-z0-9]+\{([^}]*;)?${want}[;}]" $CSS \
+      | sed 's/{.*//' | sort -u | wc -l | tr -d ' ')
   if [[ $n -eq 3 ]]; then echo "PASS  all 3 P/V/I articles carry $want"
   else echo "FAIL  $want found on $n of 3 P/V/I articles"; fail=1; fi
 done
-h2n=$(grep -ohE "\.(page-item|video-item|interactive-app)\.svelte-[a-z0-9]+ h2[^}]*font-size:16px" $CSS \
+h2n=$(grep -ohE "\.(page-item|video-item|interactive-app)\.svelte-[a-z0-9]+ h2:where\(\.svelte-[a-z0-9]+\)\{([^}]*;)?font-size:16px[;}]" $CSS \
       | sed 's/ h2.*//' | sort -u | wc -l | tr -d ' ')
 [[ $h2n -eq 3 ]] && echo "PASS  all 3 P/V/I item h2 at 16px (ref 2122)" \
                  || { echo "FAIL  P/V/I h2 16px on $h2n of 3"; fail=1 }

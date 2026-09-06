@@ -288,5 +288,14 @@
     font-size: 13px; /* Constraint 5(b) no-ref — the body-copy step below the 14.5px prompt */
     padding: 8px 10px; /* Constraint 5(b) no-ref — the code/textarea padding scale (--control-pad-textarea) */
     margin: 0;
+    /* Reflow (WCAG 1.4.10), the same class as the prompt fix in both choice
+       components. `.exp` renders unbounded `explanation_md` through `{@html}`
+       (uncapped — backend/mathion/schemas.py:325). Measured at a 320px viewport
+       before this: 614px of page scroll from one hyphen-free URL, 718px from a
+       fenced code block. Unlike the <legend> there, `.exp` is an ordinary block
+       in a column flex, so it needs no `max-width` — these two rules are the
+       whole fix. */
+    overflow-wrap: anywhere;
   }
+  .exp :global(pre) { overflow-x: auto; max-width: 100%; }
 </style>
