@@ -1,6 +1,18 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body { line-height: 1.5; -webkit-font-smoothing: antialiased; }
+/* No `-webkit-font-smoothing: antialiased`, deliberately. On macOS it forces
+   grayscale smoothing, which draws thinner, lighter glyph edges than the
+   platform default (subpixel, on a headed browser). The design handoff at
+   `docs/design/visual-refresh/reference-screens.dc.html` declares no smoothing
+   at all — its whole stylesheet is `*{box-sizing}` + `body{margin,background}`
+   + `a{color:inherit}` — so every app screen rendered LIGHTER than the
+   reference it is measured against, at identical colours and sizes. Measured
+   2026-09-06 by toggling this one property on an otherwise identical page:
+   2.8% less ink on reference screen 2c, 0.7% on /login (the gap scales with
+   how much type is on screen), both headless — wider headed. Removed at the
+   user's direction after the Slice-3 visual pass; base.css:6 carried a
+   duplicate of the same declaration and lost it in the same change. */
+body { line-height: 1.5; }
 ul, ol { padding: 0; margin: 0; list-style: none; }
 h1, h2, h3, h4, h5, h6 { margin: 0; font-weight: 600; }
 p { margin: 0; }

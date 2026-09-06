@@ -474,11 +474,16 @@ else:
 #      (at-rule context, selector, sha1(sorted declarations)): no predicate to
 #      be wrong about, and declaration and cascade-origin drift are both visible.
 #      `@keyframes` children are excluded — `to`/`from` are stops, not selectors.
+# The two `body` hashes moved on 2026-09-06 (6015bdd1 -> 0c999c4b, base.css;
+# 972a896c -> 77e2fef1, reset.css): both rules carried
+# `-webkit-font-smoothing: antialiased` and both lost it. That is the ONLY
+# change; the freeze existing is what made it a deliberate two-line edit here
+# rather than silent drift. See the note at the top of reset.css.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', ':focus-visible', '1684b043'), ('', ':root', '8872e5cb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
-    ('', 'body', '6015bdd1'), ('', 'body', '972a896c'), ('', 'button', 'd50dfcde'),
+    ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
     ('', 'h1,h2,h3,h4,h5,h6', '610dd856'), ('', 'h2', 'a8b134e8'),
     ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html,body', '3bd2fa51'),

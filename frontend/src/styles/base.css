@@ -3,7 +3,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: var(--font-size-base);
-  -webkit-font-smoothing: antialiased;
+  /* This rule carried a second `-webkit-font-smoothing: antialiased`, an exact
+     duplicate of reset.css:3's. Both are gone — see the note there. */
 }
 
 /* Numerals — counts, dates, ratios, slugs, versions — are always mono. */
