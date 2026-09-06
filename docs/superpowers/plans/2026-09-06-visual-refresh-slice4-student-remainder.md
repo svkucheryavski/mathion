@@ -214,9 +214,9 @@ describe('Skeleton (Slice-4 §1.1)', () => {
     const label = root!.querySelector('.sr-only');
     expect(label).not.toBeNull();
     expect(label!.textContent).toBe('Loading…');
-    // Every visible character would be read twice (once here, once via the row
-    // marks); the rows carry no text, so the region text IS the label.
-    expect(root!.textContent).toBe('Loading…');
+    // The rows carry no text, so the region's text IS the label (trimmed: Svelte
+    // keeps single spaces between sibling elements).
+    expect(root!.textContent?.trim()).toBe('Loading…');
   });
 
   it('renders the default 3 rows, each hidden from AT with exactly 3 bars', () => {
