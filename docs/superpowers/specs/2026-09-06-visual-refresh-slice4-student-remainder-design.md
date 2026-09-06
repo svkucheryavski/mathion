@@ -1,6 +1,6 @@
 # Visual Refresh — Slice 4: Student Remainder (9c + 9d) — Design Spec
 
-**Status:** Design — **rev 5** (round 4: **codex CONVERGED 0/0/0**, **first-party CONVERGED** + 1 rendering Minor, folded here; rounds 1-3 confirmed fully resolved by both lanes; resolutions listed at the foot). Awaiting the round-5 scoped confirmation, then user review, then writing-plans.
+**Status:** Design — **CONVERGED at rev 5** (round 5 scoped confirmation: codex 0C/0I/0M, first-party 0C/0I/0M, both CONVERGED; round 4: both CONVERGED with one rendering Minor folded into rev 5; rounds 1-3 confirmed fully resolved by both lanes; every round's resolutions listed at the foot). Next: user review, then writing-plans.
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (line refs below are into that file: artboard **9c** is `:1251-1334`, artboard **9d** is `:1336-1395`) and `docs/design/visual-refresh/mathion-visual-spec.md` (§3 colour of state `:110-133`, §4 precondition banners `:289-293`, §6 table `:344-345`). Where the two disagree, the spec's *rules* win over the artboard's *pixels* and the deviation is recorded here (there is exactly one: D3).
 
