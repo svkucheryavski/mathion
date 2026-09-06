@@ -6,8 +6,10 @@ added: 2026-09-04
 # the page background reads as gray against the white header
 
 `--bg: #FBFBFC` paints `body` (`frontend/src/styles/base.css:3`) directly beneath `AppHeader`, whose
-bar is `--surface: #FFFFFF` (`frontend/src/components/chrome/AppHeader.svelte:54`). The two meet on a
-hard edge with no border between them, so the ~1.5% step does not read as depth — it reads as the page
+bar is `--surface: #FFFFFF` (`frontend/src/components/chrome/AppHeader.svelte:54`). The header DOES
+carry `border-bottom: 1px solid var(--border)` (`AppHeader.svelte:55`) — a first version of this item
+said the two met with no border between them, which was wrong (codex, Slice-3 close-out). The step is
+therefore already delimited; what remains is that the ~1.5% tone difference does not read as depth — it reads as the page
 being dirty. Surfaced during Slice-3 T3's browser pass on the real stack (2026-09-04); a lighter `--bg`
 was tried and reverted at the user's request ("We will work on refinements later").
 

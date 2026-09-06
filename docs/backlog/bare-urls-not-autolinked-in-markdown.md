@@ -12,8 +12,11 @@ question prompt, page body, or explanation gets unclickable text. Surfaced in Sl
 whatever `text_html` the backend hands it.
 
 `later`, not `yes`: the unknown is whether authors are expected to write explicit `[text](url)` links.
-Flipping `linkify` on is a one-line change plus the `linkify-it-py` dependency, but it re-renders every
-markdown body already in the database, and it will also catch strings authors did not mean as links
+Flipping `linkify` on is a one-line change plus the `linkify-it-py` dependency. It does NOT re-render
+markdown bodies already in the database — `content_html` is stored and served verbatim, so the change
+reaches existing content only on a later edit, publish, clone or an explicit backfill (see
+[[stored-content-html-not-rerendered-after-renderer-change]]; an earlier version of this line claimed
+the opposite and contradicted that entry — codex, Slice-3 close-out). It will also catch strings authors did not mean as links
 (bare domains inside code prose, `foo.py` style filenames). That makes it a content-behavior decision
 about what authors are promised, not a config tweak. Settling it means asking whether any real course
 content relies on either behavior.
