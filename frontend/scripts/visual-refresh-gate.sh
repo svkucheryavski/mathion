@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Visual-refresh built-CSS gate — Slice-3 (tasks T1-T8a so far).
+# Visual-refresh built-CSS gate — Slice-3, all nine tasks (T1-T8b).
 #
 #   zsh frontend/scripts/visual-refresh-gate.sh     # from anywhere
 #
@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=196
+EXPECTED_CHECKS=212
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -1829,6 +1829,560 @@ else:
 
 sys.exit(bad)
 T8BEOF
+  [[ $? -eq 0 ]] || fail=1
+fi
+
+# --- (m) T1: SequencePlayer chrome ------------------------------------------
+# WHY THIS EXISTS (whole-branch review C1): T1 shipped with NO gate section at
+# all. Both review lanes independently found it, and the second proved the
+# consequence by mutation -- deleting `.crumbs a { color: var(--muted) }` renders
+# the breadcrumb course link `--primary` blue (the precise defect spec section 1
+# pins that rule to prevent), deleting `.next-title { max-width: 22ch }` lets a
+# long title grow the footer button unbounded, and zeroing `.strip`
+# `margin-bottom` collides the chain strip with the content -- each with the gate
+# at ALL PASS and every test green.
+#
+# `.strip` is the anchor and is already resolved as $SP_H by section (g); it is
+# recomputed here so this section is readable and movable on its own.
+echo
+echo "--- (m) T1 SequencePlayer chrome ---"
+owners=(${(f)"$(grep -rlE "^[[:space:]]*\.crumbs[[:space:]]*[,{]" src --include='*.svelte')"})
+if [[ ${#owners[@]} -eq 1 ]]; then
+  echo "PASS  .crumbs is authored as a top-level rule in exactly one component (${owners[1]:t})"
+else
+  echo "FAIL  .crumbs is authored by ${#owners[@]} components: $owners"; fail=1
+fi
+sp=(${(f)"$(grep -ohE '\.strip\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#sp[@]} -ne 1 ]]; then
+  echo "FAIL  T1 anchor not dist-unique (.strip=${#sp[@]}: $sp)"; fail=1
+else
+  echo "PASS  T1 anchor resolves to one hash (.strip ${sp[1]})"
+  python3 - ${sp[1]} ${CSS[@]} <<'T1EOF'
+import re, sys
+from collections import Counter
+h = sys.argv[1]
+css = '\n'.join(open(p).read() for p in sys.argv[2:])
+bad = 0
+
+def rules(text, anc=()):
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+
+# Stated in FULL. Values a reviewer would otherwise "tidy": `.crumbs a` colour is
+# --muted NOT --primary (the global `a` colour is what it exists to override, and
+# the :hover rule re-asserts the underline because the scoped rule out-specifies
+# the global one); `.next-title` max-width is 22ch, the only thing bounding the
+# footer button; `.strip` margin-bottom 20px is ref 2112; `.counter` is 12.5px
+# because it is a POSITIONAL counter, not a ratio.
+W = '.%s' % h
+WANT = [
+    ('.page' + W, 'max-width:960px;margin:0 auto;padding:var(--space-3)'),
+    ('.crumbs' + W,
+     'display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12.5px;'
+     'color:var(--muted);margin-bottom:10px'),
+    ('.crumbs%s a:where(%s)' % (W, W), 'color:var(--muted);text-decoration:none'),
+    ('.crumbs%s a:where(%s):hover' % (W, W), 'color:var(--text);text-decoration:underline'),
+    ('.crumbs%s .sep:where(%s)' % (W, W), 'color:var(--faint)'),
+    ('.crumbs%s .current:where(%s)' % (W, W), 'color:var(--text)'),
+    ('.seq-title' + W, 'margin:0 0 14px'),
+    ('.strip' + W,
+     'display:flex;gap:6px;padding:0 0 14px;margin-bottom:20px;'
+     'border-bottom:1px solid var(--border);align-items:center;flex-wrap:wrap'),
+    ('.counter' + W, 'margin-left:auto;font-family:var(--font-mono);font-size:12.5px;color:var(--muted)'),
+    ('.content' + W, 'padding:0;min-height:200px'),
+    ('footer' + W,
+     'display:flex;justify-content:space-between;align-items:center;'
+     'margin-top:24px;padding-top:14px;border-top:1px solid var(--border)'),
+    ('.next-label' + W, 'white-space:nowrap;min-width:0'),
+    ('.next-title' + W,
+     'display:inline-block;max-width:22ch;overflow:hidden;text-overflow:ellipsis;'
+     'white-space:nowrap;vertical-align:bottom'),
+    ('.empty' + W, 'color:var(--muted)'),
+]
+
+got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+exp = sorted(('', s) for s, _ in WANT)
+if got != exp:
+    bad = 1
+    print('FAIL  SequencePlayer rule inventory differs (at-rules and selector lists included)')
+    cg, ce = Counter(got), Counter(exp)
+    for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+    for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
+else:
+    print('PASS  SequencePlayer compiles to exactly its %d rule(s) — no duplicate, no stray '
+          'at-rule, no selector list' % len(WANT))
+    index = {s: b for s, b, a in ALL if h in s and not a}
+    off = 0
+    for sel, wb in WANT:
+        have, wantd = decls(index[sel]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  SequencePlayer %s declarations differ' % sel)
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  SequencePlayer declares exactly the pinned set in every rule — nothing '
+              'added, nothing dropped')
+
+sys.exit(bad)
+T1EOF
+  [[ $? -eq 0 ]] || fail=1
+fi
+
+# --- (n) T2: SingleChoiceQuestion / MultiChoiceQuestion ---------------------
+# WHY THIS EXISTS (whole-branch review C1): T2 shipped with NO gate section
+# either, and it is the slice's largest CSS surface -- the whole D2 reveal
+# system. The second lane proved two escapes with the gate at ALL PASS and 1349
+# tests green: retokenising `.opt.reveal-wrong` from --status-rejected-* to the
+# accepted pair (a wrong answer painted GREEN), and moving `.opt.selected` after
+# the three evaluative reveal rules, which is invisible to any declaration-set
+# check because the declarations are unchanged -- only the cascade moves.
+#
+# The two components differ in EXACTLY three rules, so they are pinned as one
+# shared spec plus a named divergence set, and the gate asserts the divergence
+# set itself. Applying a drift to one component only is what that catches: it
+# lands as either an unexpected divergence or a missing one.
+echo
+echo "--- (n) T2 choice questions (Single / Multi) ---"
+opth=(${(f)"$(grep -ohE '\.opt\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+doth=(${(f)"$(grep -ohE '\.dot:where\(\.svelte-[a-z0-9]+\)' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+dotsrc=(${(f)"$(grep -rlE '^[[:space:]]*\.ctl[[:space:]]+\.dot[[:space:]]*\{' src --include='*.svelte')"})
+if [[ ${#opth[@]} -ne 2 ]]; then
+  echo "FAIL  expected exactly 2 components to compile a top-level .opt rule, got ${#opth[@]}: $opth"; fail=1
+elif [[ ${#doth[@]} -ne 1 || ${#dotsrc[@]} -ne 1 || ${dotsrc[1]:t} != 'SingleChoiceQuestion.svelte' ]]; then
+  # The discriminator. `.dot` is the radio's filled centre and exists ONLY in the
+  # single-choice control, so it names which of the two anonymous hashes is
+  # which. Both halves are checked: one dist owner, and that owner is the file
+  # SingleChoiceQuestion.svelte -- without the second half the hashes could be
+  # swapped wholesale and every pin below would still pass, since the spec is
+  # shared and the divergences would simply trade places.
+  echo "FAIL  .dot discriminator is ambiguous (dist owners=${#doth[@]}: $doth; source owners: $dotsrc)"; fail=1
+else
+  # Not `${opth[(r)^$sc]}` — the `^` negation needs extendedglob, which this
+  # script does not set, so that subscript silently yields an EMPTY string.
+  sc=${doth[1]}
+  mc=''
+  for x in $opth; do [[ $x == $sc ]] || mc=$x; done
+  echo "PASS  T2 hashes resolve unambiguously (.dot ⇒ Single=$sc, Multi=$mc)"
+  python3 - $sc $mc ${CSS[@]} <<'T2EOF'
+import re, sys
+from collections import Counter
+sc, mc = sys.argv[1], sys.argv[2]
+css = '\n'.join(open(p).read() for p in sys.argv[3:])
+bad = 0
+
+def rules(text, anc=()):
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+FC = ('@media (forced-colors:active)',)
+
+def want(h, ctl_radius, selected_ctl, dot):
+    """The pinned rule set for ONE choice component.
+
+    Everything here is shared by both; the three parameters ARE the divergence
+    set, asserted as such below. Values a reviewer would otherwise 'tidy':
+
+      `.opt` padding is var(--btn-pad-sm), the shared small-control padding, NOT
+      a literal -- ref 2126. `border-color: var(--border-strong)`, not --border:
+      an option is an interactive target, and the faint line reads as disabled.
+      `overflow-wrap: anywhere` on both `.opt` and `.text` is the I2 reflow fix
+      (long unbroken option/prompt text used to push the page into horizontal
+      scroll); `.text pre { overflow-x: auto; max-width: 100% }` is its
+      companion, and `legend { max-width: 100% }` is load-bearing with it --
+      a rendered <legend> is shrink-to-fit, so without the cap the legend simply
+      grows to the <pre> and the scroller never fires.
+
+      The four reveal ROW rules carry the D2 semantics and are the pins the
+      second lane defeated by retokenising: correct = accepted bg + accepted
+      border, wrong = REJECTED bg + REJECTED border, missed = accepted bg with a
+      DASHED border (the dash is what separates 'you missed this' from 'you got
+      this'), neutral = surface-2/muted, deliberately non-evaluative. All four
+      set `cursor: default` because the reveal state is not clickable.
+
+      The reveal `.ctl` rules recede to --border-faint so the control stops
+      competing with the row tint; `.opt.selected .ctl` re-asserts --primary
+      AFTER them, which is the cascade the source-order gate below protects.
+
+      The focus pair is the slice's inset-ring idiom: the visually-hidden input
+      has its global glow suppressed (`box-shadow: none`) and the ROW takes the
+      ring via :has(), with the forced-colors companion because that mode drops
+      box-shadow entirely. `.opt.selected` also outlines in forced-colors --
+      there the --primary tint is not rendered, so selection would otherwise be
+      invisible; the reveal rows are deliberately NOT outlined (their meaning
+      survives via the .mark SVG)."""
+    W = '.' + h
+    L = [
+        ('fieldset' + W, 'border:0;padding:0;margin:0;min-inline-size:0', ()),
+        ('legend' + W,
+         'display:block;padding:0;margin:0 0 16px;font-size:14.5px;line-height:1.6;'
+         'font-weight:400;color:var(--text-2);text-wrap:pretty;max-width:100%', ()),
+        ('.text' + W, 'overflow-wrap:anywhere', ()),
+        ('.text%s pre' % W, 'overflow-x:auto;max-width:100%', ()),
+        ('.text%s p' % W, 'margin:0 0 var(--space-2)', ()),
+        ('.text%s p:last-child' % W, 'margin:0', ()),
+        ('.opts' + W, 'display:flex;flex-direction:column;gap:8px;max-width:480px', ()),
+        ('.opt' + W,
+         'position:relative;display:flex;align-items:center;gap:10px;'
+         'padding:var(--btn-pad-sm);border:1px solid var(--border-strong);'
+         'border-radius:var(--radius);background:var(--surface);font-size:14px;'
+         'color:var(--text-2);cursor:pointer;overflow-wrap:anywhere', ()),
+        ('.opt%s input:where(%s)' % (W, W),
+         'position:absolute;width:1px;height:1px;opacity:0;margin:-1px', ()),
+        ('.ctl' + W,
+         'display:flex;align-items:center;justify-content:center;width:15px;height:15px;'
+         'border:1.5px solid var(--border-strong);border-radius:%s;flex:0 0 auto' % ctl_radius, ()),
+        ('.mark' + W, 'margin-left:auto;flex:0 0 auto', ()),
+        ('.sr-only' + W,
+         'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);'
+         'white-space:nowrap', ()),
+        ('.opt.locked' + W,
+         'background:var(--surface-2);color:var(--muted);border-color:var(--border-faint);'
+         'cursor:default', ()),
+        ('.opt.locked%s .ctl:where(%s)' % (W, W), 'border-color:var(--border-faint)', ()),
+        ('.opt.reveal-correct%s .ctl:where(%s),.opt.reveal-missed%s .ctl:where(%s),'
+         '.opt.reveal-wrong%s .ctl:where(%s),.opt.reveal-neutral%s .ctl:where(%s)'
+         % ((W,) * 8), 'border-color:var(--border-faint)', ()),
+        ('.opt.selected' + W,
+         'border:1.5px solid var(--primary);background:var(--primary-soft);'
+         'font-weight:500;color:var(--text)', ()),
+        ('.opt.selected%s .ctl:where(%s)' % (W, W), selected_ctl, ()),
+        ('.opt.reveal-correct' + W,
+         'background:var(--status-accepted-bg);border-color:var(--status-accepted-fg);'
+         'border-width:1.5px;color:var(--text-2);cursor:default', ()),
+        ('.opt.reveal-wrong' + W,
+         'background:var(--status-rejected-bg);border-color:var(--status-rejected-fg);'
+         'border-width:1.5px;color:var(--text-2);cursor:default', ()),
+        ('.opt.reveal-missed' + W,
+         'background:var(--status-accepted-bg);border:1.5px dashed var(--status-accepted-fg);'
+         'color:var(--text-2);cursor:default', ()),
+        ('.opt.reveal-neutral' + W,
+         'background:var(--surface-2);color:var(--muted);border-color:var(--border-faint);'
+         'cursor:default', ()),
+        ('.opt.reveal-correct%s .mark:where(%s),.opt.reveal-missed%s .mark:where(%s)'
+         % ((W,) * 4), 'color:var(--status-accepted-fg)', ()),
+        ('.opt.reveal-wrong%s .mark:where(%s)' % (W, W), 'color:var(--status-rejected-fg)', ()),
+        ('.opt%s input:where(%s):focus-visible' % (W, W), 'box-shadow:none', ()),
+        ('.opt%s:has(input:where(%s):focus-visible)' % (W, W),
+         'box-shadow:inset 0 0 0 2px var(--primary)', ()),
+        ('.opt.selected' + W, 'outline:2px solid;outline-offset:-2px', FC),
+        ('.opt%s:has(input:where(%s):focus-visible)' % (W, W),
+         'outline:2px solid Highlight;outline-offset:-2px', FC),
+    ]
+    if dot:
+        L.insert(11, ('.ctl%s .dot:where(%s)' % (W, W),
+                      'width:7px;height:7px;border-radius:50%;background:var(--primary)', ()))
+    return L
+
+# The divergence set, stated as three facts rather than three magic arguments:
+#   .ctl        -- a radio is round (50%), a checkbox takes the shared --radius.
+#   .ctl .dot   -- the radio's filled centre; a checkbox has no such element
+#                  (its tick is the .mark SVG), so Multi must NOT compile one.
+#   .opt.selected .ctl -- a selected radio only tints its RING (the dot inside
+#                  already carries --primary, and filling the ring would hide
+#                  it); a selected checkbox FILLS, which is what makes its tick
+#                  legible, so it also sets --primary-text on the glyph.
+SPECS = [
+    ('SingleChoiceQuestion', sc, want(sc, '50%', 'border-color:var(--primary)', True)),
+    ('MultiChoiceQuestion',  mc, want(mc, 'var(--radius)',
+                                      'background:var(--primary);border-color:var(--primary);'
+                                      'color:var(--primary-text)', False)),
+]
+
+for name, h, WANT in SPECS:
+    got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+    exp = sorted((' >> '.join(a), s) for s, _, a in WANT)
+    if got != exp:
+        bad = 1
+        print('FAIL  %s rule inventory differs (at-rules and selector lists included)' % name)
+        cg, ce = Counter(got), Counter(exp)
+        for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+        for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
+        continue
+    print('PASS  %s compiles to exactly its %d rule(s) — no duplicate, no stray at-rule'
+          % (name, len(WANT)))
+    index = {(a, s): b for s, b, a in ALL if h in s}
+    off = 0
+    for sel, wb, anc in WANT:
+        have, wantd = decls(index[(anc, sel)]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  %s %s%s declarations differ'
+                  % (name, (' >> '.join(anc) + ' >> ') if anc else '', sel))
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  %s declares exactly the pinned set in every rule — the four reveal row '
+              'rules keep their own status tokens' % name)
+
+# The two components must agree everywhere EXCEPT the three rules above. This is
+# what catches a drift applied to one component only: it surfaces as an
+# unexpected divergence, or -- if a shared rule is edited to match a divergent
+# one -- as a missing one.
+def norm(h, rs):
+    return {(a, s.replace('.' + h, '⟨H⟩')): ';'.join(sorted(decls(b)))
+            for s, b, a in rs if h in s}
+A, B = norm(sc, ALL), norm(mc, ALL)
+diverge = {k for k in set(A) | set(B) if A.get(k) != B.get(k)}
+EXPECTED_DIVERGENCE = {
+    ((), '.ctl⟨H⟩'),
+    ((), '.ctl⟨H⟩ .dot:where(⟨H⟩)'),
+    ((), '.opt.selected⟨H⟩ .ctl:where(⟨H⟩)'),
+}
+if diverge != EXPECTED_DIVERGENCE:
+    bad = 1
+    print('FAIL  Single/Multi diverge somewhere other than the three control rules')
+    for k in sorted(diverge - EXPECTED_DIVERGENCE): print('        unexpected divergence: %s %s' % k)
+    for k in sorted(EXPECTED_DIVERGENCE - diverge): print('        no longer divergent:   %s %s' % k)
+else:
+    print('PASS  Single and Multi agree on every rule except the three control rules — a drift '
+          'applied to only one of them cannot pass')
+
+sys.exit(bad)
+T2EOF
+  [[ $? -eq 0 ]] || fail=1
+
+  # The source-order gate (spec:140). Declaration-set checks above cannot see
+  # cascade order at all: moving `.opt.selected` below the three evaluative
+  # reveal rules changes NO declaration anywhere and passes every other lane,
+  # while a revealed row that the student had selected reverts to the --primary
+  # tint and loses its correct/wrong colour entirely. Offsets are compared in
+  # the component's own <style> SOURCE, because the compiled sheet is what the
+  # bundler emits, not what an author edits.
+  python3 - src/components/items/quiz/SingleChoiceQuestion.svelte \
+             src/components/items/quiz/MultiChoiceQuestion.svelte <<'T2ORDER'
+import re, sys
+bad = 0
+# `.opt.selected` is authored TWICE — once at top level and once inside the
+# forced-colors block — so that block is removed before offsets are taken;
+# comments go too, since several of them quote selectors verbatim.
+PAIRS = [
+    (r'\.opt\.locked\s*\{',                '.opt.locked',
+     r'\.opt\.selected\s*\{',              '.opt.selected'),
+    (r'\.opt\.reveal-correct\s+\.ctl\s*,', '.opt.reveal-* .ctl (combined recede)',
+     r'\.opt\.selected\s+\.ctl\s*\{',      '.opt.selected .ctl'),
+]
+# Spec:140 names the three EVALUATIVE reveal rules; .reveal-neutral is checked
+# with them because it is the same row group and equally must not out-cascade
+# the selected tint.
+for pat, lab in [(r'\.opt\.reveal-%s\s*\{' % k, '.opt.reveal-%s' % k)
+                 for k in ('correct', 'wrong', 'missed', 'neutral')]:
+    PAIRS.append((r'\.opt\.selected\s*\{', '.opt.selected', pat, lab))
+
+for path in sys.argv[1:]:
+    src = open(path).read()
+    style = src[src.index('<style>'):]
+    style = re.sub(r'/\*.*?\*/', '', style, flags=re.S)
+    fc = re.search(r'@media\s*\(forced-colors:\s*active\)\s*\{', style)
+    if not fc:
+        print('FAIL  %s has no forced-colors block — the order gate cannot isolate the '
+              'top-level rules' % path.split('/')[-1]); bad = 1; continue
+    style = style[:fc.start()]
+    off, dup = {}, []
+    for a_pat, a_lab, b_pat, b_lab in PAIRS:
+        for pat, lab in ((a_pat, a_lab), (b_pat, b_lab)):
+            hits = [m.start() for m in re.finditer(pat, style)]
+            if len(hits) != 1:
+                dup.append('%s matched %d time(s)' % (lab, len(hits)))
+            else:
+                off[lab] = hits[0]
+    if dup:
+        bad = 1
+        print('FAIL  %s: order anchors are not unique — %s' % (path.split('/')[-1], '; '.join(sorted(set(dup)))))
+        continue
+    wrong = ['%s must precede %s' % (a_lab, b_lab)
+             for _, a_lab, _, b_lab in PAIRS if off[a_lab] > off[b_lab]]
+    if wrong:
+        bad = 1
+        print('FAIL  %s: authored cascade order is wrong — %s'
+              % (path.split('/')[-1], '; '.join(sorted(set(wrong)))))
+    else:
+        print('PASS  %s authors the D2 cascade in order: .opt.locked and the reveal .ctl recede '
+              'before .opt.selected, which precedes all four .opt.reveal-* row rules'
+              % path.split('/')[-1])
+sys.exit(bad)
+T2ORDER
+  [[ $? -eq 0 ]] || fail=1
+fi
+
+# --- (o) T4: QuizItem shell --------------------------------------------------
+# WHY THIS EXISTS (whole-branch review C1): T4 was covered only by section (g)'s
+# greps, which pin the `.quiz` measure, the `.q-block` divider and the two
+# positional counters — four values out of a twelve-rule component. `.submit-row`,
+# `.hint`, `.result`, `.meta` and `.exp` had NO pin at all, so the second lane
+# deleted `.result`'s border and background outright (the evaluation panel
+# dissolves into the page) and flipped `.exp`'s `border-left` accent to
+# `--border`, both under a green gate and 1349 green tests.
+#
+# Section (g) is kept as-is rather than folded in here: its value is the
+# CROSS-component pairings (the two positional counters agreeing at 12.5px, the
+# 480px answer-control edge shared with the choice components, `.page-item`'s
+# calc), which a single-component inventory cannot express.
+echo
+echo "--- (o) T4 QuizItem shell ---"
+owners=(${(f)"$(grep -rlE "^[[:space:]]*\.q-block[[:space:]]*[,{+]" src --include='*.svelte')"})
+if [[ ${#owners[@]} -eq 1 ]]; then
+  echo "PASS  .q-block is authored as a top-level rule in exactly one component (${owners[1]:t})"
+else
+  echo "FAIL  .q-block is authored by ${#owners[@]} components: $owners"; fail=1
+fi
+qi=(${(f)"$(grep -ohE '\.quiz\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#qi[@]} -ne 1 ]]; then
+  echo "FAIL  T4 anchor not dist-unique (.quiz=${#qi[@]}: $qi)"; fail=1
+else
+  echo "PASS  T4 anchor resolves to one hash (.quiz ${qi[1]})"
+  python3 - ${qi[1]} ${CSS[@]} <<'T4EOF'
+import re, sys
+from collections import Counter
+h = sys.argv[1]
+css = '\n'.join(open(p).read() for p in sys.argv[2:])
+bad = 0
+
+def rules(text, anc=()):
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+
+# Stated in FULL. The values a reviewer would otherwise "tidy":
+#
+#   `.quiz` max-width is 652px, NOT 68ch. The handoff sets no root font-size, so
+#   its `ch` resolves against 16px while this app sets 14px on BODY — an
+#   inherit-relative unit therefore shrinks the measure 12.5% here and nowhere in
+#   the reference. 652px is that measure expressed absolutely.
+#   `align-items: stretch` is load-bearing on a COLUMN flex: without it the
+#   children shrink to content and the divider hairline stops spanning the block.
+#
+#   `.q-block + .q-block` takes `--border`, never `--border-faint` — section (g)
+#   states the same pin as a `none` grep, and it is repeated here because this
+#   inventory would otherwise accept the swap silently.
+#
+#   `.result` is a real card (surface-2 + --border + --radius + --space-3), with
+#   `align-items: flex-start` so it shrink-wraps its verdict instead of stretching
+#   the button inside it, and `margin-top: 0` because the parent's 16px gap owns
+#   that step. `.exp` is the opposite treatment — a 3px `--primary` LEFT accent,
+#   no full border — which is what distinguishes explanation from verdict.
+#
+#   `.exp`'s `overflow-wrap: anywhere` and `.exp pre { overflow-x: auto }` are
+#   the I2 reflow fix; teacher-authored explanations carry code and URLs, and
+#   without the pair a single long token pushed the whole page into horizontal
+#   scroll.
+#
+#   12.5px on `.q-counter`, `.hint` and `.meta` is the positional-counter /
+#   secondary-text step (refs 2134, 2122); the 11.5px sibling step is for
+#   progress RATIOS and must not appear here.
+W = '.%s' % h
+WANT = [
+    ('.quiz' + W,
+     'display:flex;flex-direction:column;gap:16px;align-items:stretch;padding:0;max-width:652px'),
+    ('.quiz%s h2:where(%s)' % (W, W), 'font-size:16px;font-weight:600;color:var(--text)'),
+    ('.empty' + W, 'color:var(--muted)'),
+    ('.q-block' + W, 'display:flex;flex-direction:column;gap:6px'),
+    ('.q-block%s+.q-block:where(%s)' % (W, W),
+     'border-top:1px solid var(--border);padding-top:20px'),
+    ('.q-counter' + W, 'font-size:12.5px;color:var(--muted)'),
+    ('.submit-row' + W, 'display:flex;align-items:center;gap:12px'),
+    ('.hint' + W, 'color:var(--muted);font-size:12.5px;margin:0'),
+    ('.result' + W,
+     'background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);'
+     'padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);'
+     'align-items:flex-start;margin-top:0'),
+    ('.meta' + W, 'color:var(--muted);font-size:12.5px'),
+    ('.exp' + W,
+     'background:var(--surface-2);border-left:3px solid var(--primary);color:var(--text-2);'
+     'font-size:13px;padding:8px 10px;margin:0;overflow-wrap:anywhere'),
+    ('.exp%s pre' % W, 'overflow-x:auto;max-width:100%'),
+]
+
+got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+exp = sorted(('', s) for s, _ in WANT)
+if got != exp:
+    bad = 1
+    print('FAIL  QuizItem rule inventory differs (at-rules and selector lists included)')
+    cg, ce = Counter(got), Counter(exp)
+    for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+    for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
+else:
+    print('PASS  QuizItem compiles to exactly its %d rule(s) — no duplicate, no stray at-rule, '
+          'no selector list' % len(WANT))
+    index = {s: b for s, b, a in ALL if h in s and not a}
+    off = 0
+    for sel, wb in WANT:
+        have, wantd = decls(index[sel]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  QuizItem %s declarations differ' % sel)
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  QuizItem declares exactly the pinned set in every rule — .result keeps its '
+              'card, .exp keeps its --primary left accent')
+
+sys.exit(bad)
+T4EOF
   [[ $? -eq 0 ]] || fail=1
 fi
 
