@@ -1174,21 +1174,31 @@ let bad = 0;
 // DECLARATIVE markup and the built stylesheet. It does not constrain script.
 // What the gate DOES guarantee, written as the list it actually is: no scanned
 // component carries UNAPPROVED declarative styling outside its <style> block.
-// Approved is a closed set of four, each pinned by SOURCE and — for the two
-// single-element carve-outs — required to appear EXACTLY ONCE, so an addition,
-// an edit or a DELETION reds: the one inline `style` on the CourseCard progress
-// fill, the one `hidden` on the BlockGroup panel, the SVG presentation and
-// geometry values, and the styling props (`variant`, `loading`, `disabled`,
-// `state`). Everything else in that family is refused outright: any other
-// inline `style`, any CSS-property prop, any other `hidden` or `inert`, and any
-// `<style>` written INLINE into an `{@html}` payload. The single tolerance is
-// `inert` on the BlockGroup panel itself, which is allowed without a source pin
-// because it changes focus order and nothing visual — the `{@html}` EXPRESSION is pinned by source, though what
-// the backend puts in that variable is not, which is the limitation the
-// sanitiser owns. That family is the actual regression path for the double
-// ring. Beyond it: every markup construct, tag and attribute NAME is
-// allowlisted, so a new one reds for review; and element order, literal classes
-// and literal text are pinned in document order.
+//
+// Every attribute and prop is pinned by SOURCE except the CONTENT names below,
+// which are pinned by name. So the SVG presentation and geometry values, and
+// every prop that selects appearance (`variant`, `loading`, `disabled`,
+// `state`, `type`, `status`, `role`, `checked`, `data-type`,
+// `correctOptionIds`, `correctValue`), red on an edit without anyone having to
+// classify them first.
+//
+// Two single-element carve-outs sit on top of that, each pinned to its exact
+// source AND required to appear exactly once, so an addition, an edit or a
+// DELETION reds: the inline `style` on the CourseCard progress fill, and the
+// `hidden` on the BlockGroup panel. Everything else in that family is refused
+// outright — any other inline `style`, any CSS-property prop, any other
+// `hidden` or `inert`, and any `<style>` written INLINE into an `{@html}`
+// payload. There is one deliberate tolerance: `inert` on the BlockGroup panel
+// itself, allowed without a source pin because it changes focus order and
+// nothing visual.
+//
+// The `{@html}` EXPRESSION is pinned by source, though what the backend puts in
+// that variable is not — the limitation the sanitiser owns.
+//
+// That family is the actual regression path for the double ring. Beyond it:
+// every markup construct and tag is allowlisted, so a new one reds for review;
+// and element order, literal classes and literal text are pinned in document
+// order.
 //
 // What it does NOT guarantee, named here so no later round has to rediscover it
 // (codex, close-out round 3): the VALUE of an allowed NON-visual attribute or
@@ -1201,30 +1211,20 @@ let bad = 0;
 // through. VideoItem asserts its iframe `src` in its own test, which is where
 // that finding belongs.
 //
-// Nor does it pin WHICH allowed attributes an element carries: adding an
-// `aria-label` or dropping a `title` reds nothing. An earlier draft justified
-// that by claiming no name left in ATTR_OK could style anything, which was
-// false — `variant` is `class="btn {variant}"` inside Button, and both review
-// lanes found it independently. The three styling props now sit in VISUAL and
-// are pinned by source. What is left in ATTR_OK is content and behaviour, plus
-// four names that come CLOSE and are owned by component tests rather than by
-// this scanner:
-//   `type`      picks the ItemMark glyph and its stroke-width, and the input
-//               kind. Pinned by the ItemIcon, SequenceLink and MiniProjectLink
-//               suites, and by both choice suites, which select
-//               `input[type="radio"]` / `[type="checkbox"]` directly. Those
-//               inputs are `opacity:0` 1px boxes in any case -- the visible
-//               control is the drawn `.ctl` beside them.
-//   `data-type` has no `[data-type]` selector anywhere in src; its value is
-//               pinned by the ItemIcon suite.
-//   `checked`   has no `:checked` rule anywhere in src; visual selection runs
-//               through `class:selected`, which the class collector pins.
-//   `status`    picks the `pill-*` class inside StatusPill, but MiniProjectLink
-//               is the only component that passes it and its suite asserts the
-//               composed pill from `item.latest_status`. Its sibling `state` is
-//               NOT test-owned at the call sites and has moved to VISUAL.
-// `class` is in the set too, but the collector above pins it, not the name
-// check.
+// It does NOT pin the VALUE of a CONTENT attribute: `src`, `href`, `title`,
+// `id`, `name`, `value`, `inputmode`, the `aria-*` family, the handler props and
+// the three data objects (`item`, `question`, `sequence`). Their presence is
+// pinned -- they are recorded by name, so adding or dropping one reds -- but
+// what they carry is owned by the component tests. That is the same content
+// boundary stated above, and CONTENT is now the only list a reviewer has to
+// audit: everything not on it is pinned by source, so a name nobody thought
+// about is pinned rather than unread.
+//
+// An earlier shape had this exactly backwards and said so in a comment: it
+// claimed no name in the allowlist could style anything, which three rounds
+// falsified in a row (`opacity`, then `variant`, then `state`). The list that
+// needs auditing is now the one whose entries are CLAIMS about content, not the
+// one whose entries are permissions.
 // `hidden` and `inert` are refused for the same reason as `style`: both switch an
 // element off visually from the markup, where no CSS lane can see it. Hiding the
 // count with `hidden` passed every pin in this file and every unit test — DOM
@@ -1307,60 +1307,37 @@ const SPEC = {
                               hiddenOn: { "div:": "hidden={!expanded}" } },
 };
 const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
-// Attribute NAMES are allowlisted for the same reason node types and tags are:
-// the loop below used to check `style`, `--x`, `hidden` and `inert` and let
-// every other name through unread, so `opacity="0"` on the watched checkmark
-// made it invisible with the gate at ALL PASS (235) and 1349 tests green
-// (codex, close-out round 3, reproduced). An SVG presentation attribute IS
-// styling declared outside the <style> block, which is the one thing this
-// scanner exists to forbid, and it was the one form of it left open.
+// The DEFAULT is to PIN an attribute by source. CONTENT below is the explicit
+// exception list, and inverting the default this way is the whole point.
 //
-// VISUAL is every name whose VALUE selects appearance, pinned by SOURCE and
-// appended to the element signature as `tag:classes[fill="none" variant="ghost"]`.
-// It has TWO families, and an earlier draft of this file contained only the
-// first, which is what made the set wrong rather than merely incomplete:
+// The earlier shape was the other way round: an ATTR_OK allowlist of names that
+// went unread, and a VISUAL set of names pinned by value. That put every
+// attribute in the repo on trial one at a time, and three consecutive review
+// rounds each found exactly one more name filed on the wrong side --
+// `opacity` (unread entirely), then `variant` (`class="btn {variant}"` inside
+// Button), then `state` (picks the covered/current/not-yet mark). Each was a
+// real student-visible regression passing at ALL PASS with every test green,
+// and each was fixed by moving one name. A fourth was already queued when this
+// landed: `correctOptionIds` / `correctValue` drive `class:locked` and the whole
+// D2 reveal cascade, so a literal at the QuizItem call site reveals every
+// question permanently.
 //
-//   1. SVG presentation and geometry, which style the element directly with no
-//      CSS involved, so no other lane can see them at all;
-//   2. component PROPS that pick a class or a rendered chrome inside a shared
-//      component. `variant` is `class="btn {variant}"` in Button.svelte, so
-//      `variant="ghost"` on the quiz CTA turns the filled primary button into a
-//      transparent muted one -- the component-level twin of `class="quiz mono"`,
-//      which an earlier round graded Critical. It passed the gate at ALL PASS
-//      (235) with 1350 tests green (codex and reviewer, close-out round 4,
-//      found independently and both reproduced). `loading` renders a spinner
-//      and `disabled` matches `.btn:disabled` / `.num:disabled` / `.txt:disabled`.
-//      `state` picks the covered/current/not-yet mark treatment: hard-coding
-//      `state="not-yet"` at the two CALL sites -- `<ItemIcon>` in the player
-//      strip and `<SequenceLink>` in BlockGroup -- greys every mark on the page,
-//      and neither suite observes it (the player tests assert breadcrumbs and
-//      footer, BlockGroup fixtures carry no items, and the ItemIcon tests prove
-//      only that ItemIcon honours whatever state it is handed). Its sibling
-//      `status` stays in ATTR_OK because MiniProjectLink DOES assert the pill it
-//      composes (codex, close-out round 5).
+// The defect was never the individual name. It was that FORGETTING a name made
+// it unread. Inverted, forgetting a name makes it PINNED -- noisy, and safe.
+// A new attribute now reds through the signature rather than through a special
+// message, which is the same fail-closed behaviour by a shorter route.
 //
-// Names nothing uses today (`opacity`, `transform`, the two `*-opacity` pairs)
-// are listed anyway: an unused name reds on ATTR_OK, so classifying it here in
-// advance is what stops a future reviewer allowlisting it as ordinary.
-const VISUAL = new Set([
-  "cx", "cy", "fill", "fill-opacity", "height", "opacity", "points", "r",
-  "stroke", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
-  "stroke-opacity", "stroke-width", "transform", "viewBox", "width",
-  "x", "x1", "x2", "y", "y1", "y2",
-  "disabled", "loading", "state", "variant",
-]);
-// Everything else the 17 components actually use, element attributes and
-// component props in one list. These are pinned by NAME only -- their values
-// are content, and the scope note above records that boundary and the lane
-// that covers it. A name absent here reds rather than passing unread, so the
-// list grows by review, which is the intended speed bump.
-const ATTR_OK = new Set([
+// CONTENT names are recorded by NAME, not by value, so the attribute SET is
+// still pinned (adding or dropping one reds) while what they carry stays owned
+// by the component tests -- the boundary the scope note above draws, unchanged.
+// A name belongs here only if its value cannot reach the cascade: no class
+// expression, no `class:` predicate, no attribute selector, no script-derived
+// class, no rendered chrome.
+const CONTENT = new Set([
   "aria-controls", "aria-expanded", "aria-hidden", "aria-label",
-  "aria-labelledby", "checked", "class", "correctOptionIds", "correctValue",
-  "courseSlug", "data-type", "href", "id", "inputmode", "item",
+  "aria-labelledby", "courseSlug", "href", "id", "inputmode", "item",
   "name", "onanswer", "onchange", "onclick", "oninput", "question",
-  "role", "scriptSource", "sequence", "src", "status", "title",
-  "type", "value",
+  "scriptSource", "sequence", "src", "title", "value",
 ]);
 // Rejecting inline `style` is NOT enough to make a component gradeable: a
 // GLOBAL utility class needs no scoped rule, so `class="row mono"` or
@@ -1385,8 +1362,8 @@ const ATTR_OK = new Set([
 // same intentional speed bump as EXPECTED_CHECKS.
 const SIG = {
   "ItemMark.svelte":
-    ["span:item-mark.{expr}",
-     "svg:[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width={type === '\''quiz'\'' ? '\''1.9'\'' : '\''1.6'\''} stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+    ["span:item-mark.{expr}[class=\"item-mark {state}\" aria-hidden]",
+     "svg:[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width={type === '\''quiz'\'' ? '\''1.9'\'' : '\''1.6'\''} stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "#if:", "line:[x1=\"3\" y1=\"4\" x2=\"13\" y2=\"4\"]",
      "line:[x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\"]",
      "line:[x1=\"3\" y1=\"12\" x2=\"9\" y2=\"12\"]", "#else:", "#if:",
@@ -1400,61 +1377,86 @@ const SIG = {
      "circle:[cx=\"12\" cy=\"8.6\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]", "#else:",
      "#if:", "line:[x1=\"4.2\" y1=\"2.4\" x2=\"4.2\" y2=\"13.6\"]",
      "polygon:[points=\"4.2,3.2 12.4,5.8 4.2,8.4\" fill=\"currentColor\" stroke=\"none\"]"],
-  "ItemIcon.svelte": ["button:icon.{expr}", "ItemMark:[state={istate}]"],
+  "ItemIcon.svelte":
+    ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label]",
+     "ItemMark:[type={item.type} state={istate}]"],
   "SequenceLink.svelte":
-    ["a:row", "span:badge.mono", "span:row-title", "span:chain", "#each:",
-     "ItemMark:[state={state.items[String(it.id)]?.is_covered ? '\''covered'\'' : '\''not-yet'\''}]",
-     "span:count.mono"],
+    ["a:row[class=\"row\" href aria-label onclick]", "span:badge.mono[class=\"badge mono\"]",
+     "span:row-title[class=\"row-title\"]", "span:chain[class=\"chain\" aria-hidden]", "#each:",
+     "ItemMark:[type={it.type} state={state.items[String(it.id)]?.is_covered ? '\''covered'\'' : '\''not-yet'\''}]",
+     "span:count.mono[class=\"count mono\"]"],
   "MiniProjectLink.svelte":
-    ["a:row.row-mp", "span:row-glyph", "ItemMark:", "span:row-title", "StatusPill:"],
+    ["a:row.row-mp[class=\"row row-mp\" href aria-label]",
+     "span:row-glyph[class=\"row-glyph\" aria-hidden]", "ItemMark:[type=\"mini_project\"]",
+     "span:row-title[class=\"row-title\"]", "StatusPill:[status={item.latest_status}]"],
   "StatusPill.svelte":
-    ["span:pill.{expr}", "span:pill-token"],
+    ["span:pill.{expr}[class=\"pill {meta.cls}\"]",
+     "span:pill-token[class=\"pill-token\" aria-hidden]"],
   "SequencePlayer.svelte":
-    ["#snippet:crumbs", "nav:crumbs", "a:", "#if:", "span:sep", "span:crumb", "span:mono",
-     "span:sep", "span:mono.current", "div:page", "#if:", "Spinner:", "#else:", "#if:", "#if:",
-     "h1:", "p:", "#else:", "h1:", "p:", "Button:[variant=\"ghost\"]", "#else:", "#if:", "h1:",
-     "Button:[variant=\"ghost\"]", "#else:", "#if:", "@render:crumbs", "h1:seq-title", "p:empty",
-     "#else:", "@render:crumbs", "h1:seq-title", "nav:strip", "#each:",
-     "ItemIcon:[state={iconState(it.id)}]", "span:counter", "main:content", "#if:",
-     "ItemRouter:[state={currentCourse.value.state}]", "footer:",
-     "Button:[variant=\"secondary\" disabled={flatIndex <= 0}]", "#if:",
-     "Button:[variant=\"primary\"]", "#else:",
-     "Button:[variant=\"primary\" disabled={flatIndex < 0}]", "#if:", "span:next-label",
-     "span:next-title", "#else:"],
+    ["#snippet:crumbs", "nav:crumbs[class=\"crumbs\" aria-label]", "a:[href onclick]", "#if:",
+     "span:sep[class=\"sep\" aria-hidden]", "span:crumb[class=\"crumb\"]",
+     "span:mono[class=\"mono\"]", "span:sep[class=\"sep\" aria-hidden]",
+     "span:mono.current[class=\"mono current\"]", "div:page[class=\"page\"]", "#if:", "Spinner:",
+     "#else:", "#if:", "#if:", "h1:", "p:", "#else:", "h1:", "p:",
+     "Button:[variant=\"ghost\" onclick]", "#else:", "#if:", "h1:",
+     "Button:[variant=\"ghost\" onclick]", "#else:", "#if:", "@render:crumbs",
+     "h1:seq-title[class=\"seq-title\"]", "p:empty[class=\"empty\"]", "#else:", "@render:crumbs",
+     "h1:seq-title[class=\"seq-title\"]", "nav:strip[class=\"strip\" aria-label]", "#each:",
+     "ItemIcon:[item state={iconState(it.id)} onclick]", "span:counter[class=\"counter\"]",
+     "main:content[class=\"content\"]", "#if:",
+     "ItemRouter:[item state={currentCourse.value.state}]", "footer:",
+     "Button:[variant=\"secondary\" onclick disabled={flatIndex <= 0} title]", "#if:",
+     "Button:[variant=\"primary\" onclick]", "#else:",
+     "Button:[variant=\"primary\" onclick disabled={flatIndex < 0} title]", "#if:",
+     "span:next-label[class=\"next-label\"]", "span:next-title[class=\"next-title\"]", "#else:"],
   "QuizItem.svelte":
-    ["#if:", "article:quiz", "h2:", "p:empty", "#else:", "article:quiz", "h2:", "#each:",
-     "div:q-block", "span:q-counter.mono", "#if:", "SingleChoice:[disabled={locked}]", "#else:",
-     "#if:", "MultiChoice:[disabled={locked}]", "#else:", "#if:", "Numeric:[disabled={locked}]",
-     "#else:", "#if:", "Text:[disabled={locked}]", "#if:", "div:exp", "@html:r.explanation_html",
-     "#if:", "div:submit-row",
-     "Button:[loading={inflight !== null} disabled={!allAnswered || inflight !== null}]", "#if:",
-     "p:hint", "span:mono", "#else:", "#if:", "div:result", "p:", "strong:", "span:mono",
-     "p:meta", "span:mono", "span:mono", "#if:", "Button:", "#else:", "#if:",
-     "Button:[variant=\"secondary\"]"],
+    ["#if:", "article:quiz[class=\"quiz\"]", "h2:", "p:empty[class=\"empty\"]", "#else:",
+     "article:quiz[class=\"quiz\"]", "h2:", "#each:", "div:q-block[class=\"q-block\"]",
+     "span:q-counter.mono[class=\"q-counter mono\"]", "#if:",
+     "SingleChoice:[question value onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "#else:", "#if:",
+     "MultiChoice:[question value onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "#else:", "#if:",
+     "Numeric:[question value onanswer disabled={locked} correctValue={r?.correct_numeric ?? null}]",
+     "#else:", "#if:",
+     "Text:[question value onanswer disabled={locked} correctValue={r?.correct_text ?? null}]",
+     "#if:", "div:exp[class=\"exp\"]", "@html:r.explanation_html", "#if:",
+     "div:submit-row[class=\"submit-row\"]",
+     "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
+     "#if:", "p:hint[class=\"hint\"]", "span:mono[class=\"mono\"]", "#else:", "#if:",
+     "div:result[class=\"result\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
+     "p:meta[class=\"meta\"]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
+     "Button:[onclick]", "#else:", "#if:", "Button:[variant=\"secondary\" onclick]"],
   // The two choice components differ in their CONTROL markup exactly as they
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
   "SingleChoiceQuestion.svelte":
-    ["fieldset:", "legend:", "div:text", "@html:question.text_html", "div:opts", "#each:",
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
-     "input:[{disabled}]", "span:ctl", "#if:", "span:dot", "#if:",
-     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+    ["fieldset:", "legend:", "div:text[class=\"text\"]", "@html:question.text_html",
+     "div:opts[class=\"opts\"]", "#each:",
+     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
+     "input:[type=\"radio\" name value checked={isChosen} {disabled} onchange]",
+     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]", "#if:",
+     "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
-     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "line:[x1=\"4.2\" y1=\"4.2\" x2=\"11.8\" y2=\"11.8\"]",
-     "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:", "span:sr-only"],
+     "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:",
+     "span:sr-only[class=\"sr-only\"]"],
   "PageItem.svelte":
-    ["article:page-item", "h2:", "div:content", "@html:item.content_html"],
+    ["article:page-item[class=\"page-item\"]", "h2:", "div:content[class=\"content\"]",
+     "@html:item.content_html"],
   "VideoItem.svelte":
-    ["article:video-item", "h2:", "div:video-card", "VideoFrame:", "#if:", "div:actions",
-     "Button:[loading={busy}]", "#else:", "p:watched",
-     "svg:[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+    ["article:video-item[class=\"video-item\"]", "h2:", "div:video-card[class=\"video-card\"]",
+     "VideoFrame:[src title]", "#if:", "div:actions[class=\"actions\"]",
+     "Button:[onclick loading={busy}]", "#else:", "p:watched[class=\"watched\"]",
+     "svg:[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]"],
   "InteractiveAppItem.svelte":
-    ["article:interactive-app", "h2:", "#if:", "div:app-card", "InteractiveFrame:", "p:cover-hint",
-     "#else:", "#if:", "p:notice", "#else:", "#if:", "p:notice"],
-  "UnsupportedItem.svelte":
-    ["div:unsupported", "p:"],
+    ["article:interactive-app[class=\"interactive-app\"]", "h2:", "#if:",
+     "div:app-card[class=\"app-card\"]", "InteractiveFrame:[scriptSource title]",
+     "p:cover-hint[class=\"cover-hint\"]", "#else:", "#if:", "p:notice[class=\"notice\"]",
+     "#else:", "#if:", "p:notice[class=\"notice\"]"],
+  "UnsupportedItem.svelte": ["div:unsupported[class=\"unsupported\"]", "p:"],
   // CourseCard is a Slice-2 component, but the gate pins its `.count` at 11.5px
   // (the progress-RATIO step), so the markup half was open in exactly the way
   // every other graded component was: `<span class="count" style="font-size:22px">`
@@ -1462,36 +1464,54 @@ const SIG = {
   // (reviewer, round 4). Scanning it closes the last component in this file that
   // had a CSS pin and no markup pin.
   "CourseCard.svelte":
-    ["#snippet:bar", "span:bar", "span:bar-fill", "#snippet:adminFooter", "div:footer",
-     "a:foot-link", "a:foot-link", "#if:", "span:badge-draft", "#else:", "span:badge-admin",
-     "#if:", "div:card", "div:body", "h3:title", "a:title-link", "span:hint",
-     "@render:adminFooter", "#else:", "#if:", "div:card", "div:body", "h3:title",
-     "a:title-link", "@render:bar", "span:meta", "span:count", "a:cta", "@render:adminFooter",
-     "#else:", "a:card.card-link", "div:body", "h3:title", "@render:bar", "span:meta",
-     "span:count", "span:cta", "div:footer.footer-status"],
+    ["#snippet:bar", "span:bar[class=\"bar\" aria-hidden]", "span:bar-fill[class=\"bar-fill\"]",
+     "#snippet:adminFooter", "div:footer[class=\"footer\"]",
+     "a:foot-link[class=\"foot-link\" href onclick aria-label]",
+     "a:foot-link[class=\"foot-link\" href onclick aria-label]", "#if:",
+     "span:badge-draft[class=\"badge-draft\"]", "#else:",
+     "span:badge-admin[class=\"badge-admin\"]", "#if:", "div:card[class=\"card\"]",
+     "div:body[class=\"body\"]", "h3:title[class=\"title\"]",
+     "a:title-link[class=\"title-link\" href onclick]", "span:hint[class=\"hint\"]",
+     "@render:adminFooter", "#else:", "#if:", "div:card[class=\"card\"]",
+     "div:body[class=\"body\"]", "h3:title[class=\"title\"]",
+     "a:title-link[class=\"title-link\" href onclick]", "@render:bar",
+     "span:meta[class=\"meta\"]", "span:count[class=\"count\"]",
+     "a:cta[class=\"cta\" href onclick]", "@render:adminFooter", "#else:",
+     "a:card.card-link[class=\"card card-link\" href onclick]", "div:body[class=\"body\"]",
+     "h3:title[class=\"title\"]", "@render:bar", "span:meta[class=\"meta\"]",
+     "span:count[class=\"count\"]", "span:cta[class=\"cta\"]",
+     "div:footer.footer-status[class=\"footer footer-status\"]"],
   "NumericQuestion.svelte":
-    ["div:row", "div:text", "@html:question.text_html", "input:num.mono[{disabled}]", "#if:",
-     "p:correct-line", "strong:mono"],
+    ["div:row[class=\"row\"]", "div:text[class=\"text\" id]", "@html:question.text_html",
+     "input:num.mono[class=\"num mono\" type=\"text\" inputmode aria-labelledby value {disabled} oninput]",
+     "#if:", "p:correct-line[class=\"correct-line\"]", "strong:mono[class=\"mono\"]"],
   "TextQuestion.svelte":
-    ["div:row", "div:text", "@html:question.text_html", "input:txt[{disabled}]", "#if:",
-     "p:correct-line", "strong:"],
+    ["div:row[class=\"row\"]", "div:text[class=\"text\" id]", "@html:question.text_html",
+     "input:txt[class=\"txt\" type=\"text\" aria-labelledby value {disabled} oninput]", "#if:",
+     "p:correct-line[class=\"correct-line\"]", "strong:"],
   "MultiChoiceQuestion.svelte":
-    ["fieldset:", "legend:", "div:text", "@html:question.text_html", "div:opts", "#each:",
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
-     "input:[{disabled}]", "span:ctl", "#if:",
-     "svg:check[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+    ["fieldset:", "legend:", "div:text[class=\"text\"]", "@html:question.text_html",
+     "div:opts[class=\"opts\"]", "#each:",
+     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
+     "input:[type=\"checkbox\" value checked={isChosen} {disabled} onchange]",
+     "span:ctl[class=\"ctl\"]", "#if:",
+     "svg:check[class=\"check\" width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
-     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
-     "svg:mark[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "line:[x1=\"4.2\" y1=\"4.2\" x2=\"11.8\" y2=\"11.8\"]",
-     "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:", "span:sr-only"],
+     "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:",
+     "span:sr-only[class=\"sr-only\"]"],
   "BlockGroup.svelte":
-    ["section:block", "header:", "h2:", "button:acc", "span:badge.mono", "span:acc-title",
-     "svg:chev.class:collapsed[width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
-     "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:", "#if:", "div:info",
-     "@html:block.info_html", "ul:", "#each:", "li:", "SequenceLink:[state={vstate}]", "#if:",
-     "li:", "MiniProjectLink:"],
+    ["section:block[class=\"block\"]", "header:", "h2:",
+     "button:acc[id class=\"acc\" aria-expanded aria-controls onclick]",
+     "span:badge.mono[class=\"badge mono\"]", "span:acc-title[class=\"acc-title\"]",
+     "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
+     "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
+     "#if:", "div:info[class=\"info\"]", "@html:block.info_html", "ul:", "#each:", "li:",
+     "SequenceLink:[courseSlug sequence state={vstate}]", "#if:", "li:",
+     "MiniProjectLink:[courseSlug item]"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
 // `owner-signature:text` in document order, interleaved with a `{expr}` marker
@@ -1782,16 +1802,12 @@ for (const f of process.argv.slice(1)) {
             else seenHidden[me] = (seenHidden[me] || 0) + 1;
             continue;
           }
-          // Pinned by SOURCE, and appended to the signature rather than checked
-          // against a per-element map: an SVG presentation attribute is styling
-          // that never reaches dist CSS, so `stroke-width="0"` or `fill="#c00"`
-          // has to red the same way an inline `style` does. Appending puts it in
-          // document order beside the classes it sits with, so a value moving to
-          // a different element reds too.
-          if (VISUAL.has(nm)) { vis.push(srcText.slice(a.start, a.end).split(/\s+/).join(" ")); continue; }
-          // Fail-closed on the NAME. Everything above is judged; this is what
-          // stops a name nobody classified from being read as harmless.
-          if (!ATTR_OK.has(nm)) hits.push(`<${n.name}> unreviewed attribute ${nm}`);
+          // A CONTENT name is recorded by NAME only; everything else is pinned
+          // by SOURCE. Appending to the signature puts each in document order
+          // beside the classes it sits with, so an attribute moving to a
+          // different element reds too.
+          if (CONTENT.has(nm)) { vis.push(nm); continue; }
+          vis.push(srcText.slice(a.start, a.end).split(/\s+/).join(" "));
         }
         sig.push(vis.length ? `${me}[${vis.join(" ")}]` : me);
         walk(n.fragment, me);
