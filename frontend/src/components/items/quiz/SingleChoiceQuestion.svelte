@@ -116,7 +116,11 @@
      viewport: one hyphen-free URL produced 659px of PAGE-level horizontal scroll,
      a fenced code block 784px. `overflow-wrap` closes the prose case and the
      `pre` scroller closes the code case — the identical pair already on
-     TextQuestion:70,91, NumericQuestion and PageItem:77,110.
+     TextQuestion, NumericQuestion and PageItem, each on its own `.text` /
+     `.content` rule and its `:global(pre)` companion (cited by SELECTOR, not by
+     line: the line form was stale on arrival — the same commit that added this
+     comment added four lines to the PageItem block above the lines it named,
+     which is the fourth time that has happened in this slice).
 
      The fieldset's `min-inline-size: 0` above is a DIFFERENT fix and does not
      cover this: it stops an unbreakable prompt token from dragging the OPTION

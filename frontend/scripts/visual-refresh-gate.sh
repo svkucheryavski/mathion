@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=212
+EXPECTED_CHECKS=228
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -573,7 +573,18 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            # ancestor nulling one erases a status colour with section (l) still
            # reading the rule as correct.
            'src/components/course/BlockGroup.svelte',
-           'src/components/course/StatusPill.svelte'):
+           'src/components/course/StatusPill.svelte',
+           # The four components of the close-out. Computing TOKENS without them
+           # left exactly two of their tokens unguarded: --btn-pad-sm (the T2
+           # `.opt` padding, ref 2126) and --faint (the T1 `.crumbs .sep`, ref
+           # 2108). An ancestor redefining either -- the
+           # `.block { --border-soft: transparent }` attack this guard was built
+           # from -- retunes them with sections (m) and (n) still reading the
+           # pinned `var(...)` and the whole gate green.
+           'src/pages/SequencePlayer.svelte',
+           'src/components/items/QuizItem.svelte',
+           'src/components/items/quiz/SingleChoiceQuestion.svelte',
+           'src/components/items/quiz/MultiChoiceQuestion.svelte'):
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', open(_f).read()))
 TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
@@ -1144,6 +1155,26 @@ const SPEC = {
   // as the header states; which of the five `pill-*` classes each status yields
   // is pinned by StatusPill own tests instead.
   "StatusPill.svelte":      { nodes: BASE,                     tags: ["span"] },
+  // The four components the close-out gave CSS inventories to -- sections (m),
+  // (n) and (o). Both final lanes found, independently, that pinning their CSS
+  // closed only HALF of C1: none of them was in this scanner, so
+  // `<article class="quiz" style="--btn-pad-sm: 4px 40px">` retuned every option
+  // row in BOTH choice components, `style="max-width:200px"` overrode the 652px
+  // measure that sections (g) and (o) both exist to pin, and `class="quiz mono"`
+  // set the whole quiz in IBM Plex Mono -- each with the gate at ALL PASS and
+  // 1349 tests green. Being here also pins DOM ORDER, which nothing else does:
+  // the T1 strip/main/footer order and the T4 questions-before-submit order are
+  // load-bearing and were invisible to every lane.
+  "SequencePlayer.svelte":  { nodes: BASE.concat("EachBlock", "RenderTag", "SnippetBlock"),
+                              tags: ["a", "div", "footer", "h1", "main", "nav", "p", "span"] },
+  "QuizItem.svelte":        { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
+                              tags: ["article", "div", "h2", "p", "span", "strong"] },
+  "SingleChoiceQuestion.svelte": { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
+                              tags: ["div", "fieldset", "input", "label", "legend",
+                                     "line", "polyline", "span", "svg"] },
+  "MultiChoiceQuestion.svelte":  { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
+                              tags: ["div", "fieldset", "input", "label", "legend",
+                                     "line", "polyline", "span", "svg"] },
   "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
@@ -1177,6 +1208,27 @@ const SIG = {
   "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
   "StatusPill.svelte": ["span:pill","span:pill-token"],
+  "SequencePlayer.svelte":
+    ["#snippet:","nav:crumbs","a:","span:sep","span:crumb","span:mono","span:sep","span:mono.current",
+     "div:page","Spinner:","h1:","p:","h1:","p:","Button:","h1:","Button:","@render:","h1:seq-title",
+     "p:empty","@render:","h1:seq-title","nav:strip","ItemIcon:","span:counter","main:content",
+     "ItemRouter:","footer:","Button:","Button:","Button:","span:next-label","span:next-title"],
+  "QuizItem.svelte":
+    ["article:quiz","h2:","p:empty","article:quiz","h2:","div:q-block","span:q-counter.mono",
+     "SingleChoice:","MultiChoice:","Numeric:","Text:","div:exp","@html:","div:submit-row","Button:",
+     "p:hint","span:mono","div:result","p:","strong:","span:mono","p:meta","span:mono","span:mono",
+     "Button:","Button:"],
+  // The two choice components differ in their CONTROL markup exactly as they
+  // differ in their control CSS (the divergence set in section (n)): the radio
+  // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
+  "SingleChoiceQuestion.svelte":
+    ["fieldset:","legend:","div:text","@html:","div:opts",
+     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
+     "input:","span:ctl","span:dot","svg:mark","polyline:","svg:mark","line:","line:","span:sr-only"],
+  "MultiChoiceQuestion.svelte":
+    ["fieldset:","legend:","div:text","@html:","div:opts",
+     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
+     "input:","span:ctl","svg:check","polyline:","svg:mark","polyline:","svg:mark","line:","line:","span:sr-only"],
   "BlockGroup.svelte":
     ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","@html:","ul:","li:","SequenceLink:","li:","MiniProjectLink:"],
 };
@@ -1196,6 +1248,24 @@ const TEXT = {
   // `{meta.label}` from LATEST_STATUS_META, so a literal appearing here at all
   // means someone hard-coded copy into the markup and bypassed that map.
   "StatusPill.svelte": [],
+  // Longer than the marks-and-badges lists above because these are PAGE
+  // components carrying real copy. That is the point: every literal string a
+  // student can read is pinned here, so a label edit becomes a deliberate act.
+  "SequencePlayer.svelte":
+    ["span:sep:/","span:mono:B","span:crumb:·","span:sep:/","span:mono.current:S",
+     "h1::Sequence not available","p::This sequence isn'\''t available to you.",
+     "h1::Couldn'\''t load","Button::← Course","h1::Sequence not found","Button::← Course",
+     "p:empty:This sequence has no items yet.","span:counter:Item","span:counter:of",
+     "Button::← Previous","Button::Finish sequence","span:next-label:Next:","span:next-label:→",
+     "Button::Next →"],
+  "QuizItem.svelte":
+    ["p:empty:This quiz has no questions yet.","span:q-counter.mono:Question","span:q-counter.mono:of",
+     "Button::Submit answer","p:hint:left","strong::Score:","span:mono:/","p:meta:Attempt","p:meta:of",
+     "Button::Try again","Button::Show correct answers"],
+  // Empty on purpose in both: every option label is `{opt.text}` from the API,
+  // so a literal here means someone hard-coded question copy into the markup.
+  "SingleChoiceQuestion.svelte": [],
+  "MultiChoiceQuestion.svelte": [],
 };
 for (const f of process.argv.slice(1)) {
   const hits = [];
@@ -1219,7 +1289,10 @@ for (const f of process.argv.slice(1)) {
         if (t) txt.push(`${owner}:${t}`);
         return;
       }
-      case "Comment": case "ExpressionTag": return;
+      // `{@const}` joins these two: it binds a local and emits no DOM, so it can
+      // carry no style and no class. Anything it computes reaches the page only
+      // through an ExpressionTag or an attribute, and both are already scanned.
+      case "Comment": case "ExpressionTag": case "ConstTag": return;
       // Position-pinned, NOT swallowed. Allowing the node type is per-FILE, so a
       // bare `return` here sanctioned ANY {@html} in that file — including a
       // second one carrying `<style>…</style>`, which is exactly the codex-r3-C
@@ -1227,6 +1300,15 @@ for (const f of process.argv.slice(1)) {
       // lives in the JS bundle, never in dist CSS, so no other lane can see it.
       // Reproduced passing the whole gate before this line existed.
       case "HtmlTag": sig.push("@html:"); return;
+      // T1 uses `{#snippet crumbs()}` + `{@render crumbs()}` for the breadcrumb,
+      // which BOTH branches of the page render. The snippet BODY is walked, so
+      // its elements land in the signature at the point of declaration and the
+      // markup it contributes is pinned exactly like any other. `@render:` marks
+      // the instantiation point without naming the callee: swapping in a
+      // different snippet requires that snippet to EXIST, and a new `#snippet:`
+      // entry reds the signature on its own.
+      case "SnippetBlock": sig.push("#snippet:"); walk(n.body, owner); return;
+      case "RenderTag": sig.push("@render:"); return;
       case "IfBlock": walk(n.consequent, owner); walk(n.alternate, owner); return;
       case "EachBlock": walk(n.body, owner); walk(n.fallback, owner); return;
       case "RegularElement": case "Component": {
@@ -1272,7 +1354,10 @@ for (const f of process.argv.slice(1)) {
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
   src/components/course/SequenceLink.svelte src/components/course/MiniProjectLink.svelte \
-  src/components/course/BlockGroup.svelte src/components/course/StatusPill.svelte || fail=1
+  src/components/course/BlockGroup.svelte src/components/course/StatusPill.svelte \
+  src/pages/SequencePlayer.svelte src/components/items/QuizItem.svelte \
+  src/components/items/quiz/SingleChoiceQuestion.svelte \
+  src/components/items/quiz/MultiChoiceQuestion.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
@@ -1846,11 +1931,16 @@ fi
 # recomputed here so this section is readable and movable on its own.
 echo
 echo "--- (m) T1 SequencePlayer chrome ---"
+# The filename is asserted, not merely reported. "Exactly one owner" leaves the
+# hash free to migrate to a DIFFERENT component wholesale, and this section would
+# then grade that component against T1 pins -- the gate header states proving
+# OWNERSHIP as a rule, and printing `${owners[1]:t}` looked like proof without
+# being it (codex, close-out round 1).
 owners=(${(f)"$(grep -rlE "^[[:space:]]*\.crumbs[[:space:]]*[,{]" src --include='*.svelte')"})
-if [[ ${#owners[@]} -eq 1 ]]; then
-  echo "PASS  .crumbs is authored as a top-level rule in exactly one component (${owners[1]:t})"
+if [[ ${#owners[@]} -eq 1 && ${owners[1]:t} == 'SequencePlayer.svelte' ]]; then
+  echo "PASS  .crumbs is authored as a top-level rule by SequencePlayer.svelte and nothing else"
 else
-  echo "FAIL  .crumbs is authored by ${#owners[@]} components: $owners"; fail=1
+  echo "FAIL  .crumbs owner is not SequencePlayer.svelte alone (${#owners[@]}: $owners)"; fail=1
 fi
 sp=(${(f)"$(grep -ohE '\.strip\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#sp[@]} -ne 1 ]]; then
@@ -1969,8 +2059,16 @@ echo "--- (n) T2 choice questions (Single / Multi) ---"
 opth=(${(f)"$(grep -ohE '\.opt\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 doth=(${(f)"$(grep -ohE '\.dot:where\(\.svelte-[a-z0-9]+\)' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 dotsrc=(${(f)"$(grep -rlE '^[[:space:]]*\.ctl[[:space:]]+\.dot[[:space:]]*\{' src --include='*.svelte')"})
+# `.dot` proves which hash is Single. NOTHING proved the other one was Multi:
+# with the Multi rules deleted and any third component authoring `.opt`, the
+# count would still be 2 and this section would grade that component against
+# Multi pins (codex, close-out round 1). Naming both source owners closes it.
+optsrc=(${(f)"$(grep -rlE '^[[:space:]]*\.opt[[:space:]]*[,{]' src --include='*.svelte')"})
+optnames=(${(on)${(f)"$(print -l ${optsrc[@]:t})"}})
 if [[ ${#opth[@]} -ne 2 ]]; then
   echo "FAIL  expected exactly 2 components to compile a top-level .opt rule, got ${#opth[@]}: $opth"; fail=1
+elif [[ "$optnames" != 'MultiChoiceQuestion.svelte SingleChoiceQuestion.svelte' ]]; then
+  echo "FAIL  .opt is not authored by exactly the two choice components: $optnames"; fail=1
 elif [[ ${#doth[@]} -ne 1 || ${#dotsrc[@]} -ne 1 || ${dotsrc[1]:t} != 'SingleChoiceQuestion.svelte' ]]; then
   # The discriminator. `.dot` is the radio's filled centre and exists ONLY in the
   # single-choice control, so it names which of the two anonymous hashes is
@@ -1985,7 +2083,8 @@ else
   sc=${doth[1]}
   mc=''
   for x in $opth; do [[ $x == $sc ]] || mc=$x; done
-  echo "PASS  T2 hashes resolve unambiguously (.dot ⇒ Single=$sc, Multi=$mc)"
+  echo "PASS  T2 hashes resolve unambiguously — .opt is authored by exactly the two choice"
+  echo "      components and .dot names which is which (Single=$sc, Multi=$mc)"
   python3 - $sc $mc ${CSS[@]} <<'T2EOF'
 import re, sys
 from collections import Counter
@@ -2204,6 +2303,17 @@ PAIRS = [
      r'\.opt\.selected\s*\{',              '.opt.selected'),
     (r'\.opt\.reveal-correct\s+\.ctl\s*,', '.opt.reveal-* .ctl (combined recede)',
      r'\.opt\.selected\s+\.ctl\s*\{',      '.opt.selected .ctl'),
+    # The fourth relation, and the one the plan Step-5 line does not spell out
+    # even though the spec canonical order does (design doc step (3) before step
+    # (6)). `.opt.locked .ctl` and `.opt.selected .ctl` BOTH compile to (0,4,0) --
+    # `:where()` contributes nothing -- and both apply to the same element in the
+    # post-submit pre-reveal window, so ONLY source order decides. Swapped, the
+    # student own pick loses its --primary control ring on the score screen: the
+    # Single radio ring drops to --border-faint around a floating dot, the Multi
+    # box loses its --primary border. Declarations are untouched, so every
+    # inventory in this file passes it (reviewer, close-out round 1, reproduced).
+    (r'\.opt\.locked\s+\.ctl\s*\{',        '.opt.locked .ctl',
+     r'\.opt\.selected\s+\.ctl\s*\{',      '.opt.selected .ctl'),
 ]
 # Spec:140 names the three EVALUATIVE reveal rules; .reveal-neutral is checked
 # with them because it is the same row group and equally must not out-cascade
@@ -2240,9 +2350,9 @@ for path in sys.argv[1:]:
         print('FAIL  %s: authored cascade order is wrong — %s'
               % (path.split('/')[-1], '; '.join(sorted(set(wrong)))))
     else:
-        print('PASS  %s authors the D2 cascade in order: .opt.locked and the reveal .ctl recede '
-              'before .opt.selected, which precedes all four .opt.reveal-* row rules'
-              % path.split('/')[-1])
+        print('PASS  %s authors the D2 cascade in order: .opt.locked and both .ctl recede rules '
+              'precede .opt.selected and .opt.selected .ctl, which precede all four '
+              '.opt.reveal-* row rules' % path.split('/')[-1])
 sys.exit(bad)
 T2ORDER
   [[ $? -eq 0 ]] || fail=1
@@ -2264,10 +2374,10 @@ fi
 echo
 echo "--- (o) T4 QuizItem shell ---"
 owners=(${(f)"$(grep -rlE "^[[:space:]]*\.q-block[[:space:]]*[,{+]" src --include='*.svelte')"})
-if [[ ${#owners[@]} -eq 1 ]]; then
-  echo "PASS  .q-block is authored as a top-level rule in exactly one component (${owners[1]:t})"
+if [[ ${#owners[@]} -eq 1 && ${owners[1]:t} == 'QuizItem.svelte' ]]; then
+  echo "PASS  .q-block is authored as a top-level rule by QuizItem.svelte and nothing else"
 else
-  echo "FAIL  .q-block is authored by ${#owners[@]} components: $owners"; fail=1
+  echo "FAIL  .q-block owner is not QuizItem.svelte alone (${#owners[@]}: $owners)"; fail=1
 fi
 qi=(${(f)"$(grep -ohE '\.quiz\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#qi[@]} -ne 1 ]]; then
@@ -2383,6 +2493,173 @@ else:
 
 sys.exit(bad)
 T4EOF
+  [[ $? -eq 0 ]] || fail=1
+fi
+
+# --- (p) T5: Page / Video / Interactive / Unsupported item bodies ------------
+# WHY THIS EXISTS (close-out review, reviewer I-2). Section (h) grades T5 with
+# POSITIVE greps only, and a positive grep cannot see an ADDED declaration --
+# including a duplicate of one it just matched, which the minifier keeps and the
+# cascade resolves last-wins. Appending `flex-direction: row` to `.page-item`
+# compiles to
+#     .page-item.svelte-1uu0qfr{…flex-direction:column;…;flex-direction:row}
+# and (h) still prints `PASS all 3 P/V/I articles carry flex-direction:column`
+# while every page, video and interactive item lays its <h2> out BESIDE its body
+# -- gate ALL PASS, 1349 tests green (reproduced). That is the same false-pass
+# class I3 set out to end, and after this section T5 is no longer the last
+# grep-only surface: every target (g) and (h) grep is now also covered by a
+# declaration-set inventory, so the duplicate-property escape is dead everywhere.
+echo
+echo "--- (p) T5 item bodies ---"
+t5ok=1
+typeset -A T5H
+for spec in 'page-item:PageItem.svelte' 'video-item:VideoItem.svelte' \
+            'interactive-app:InteractiveAppItem.svelte' 'unsupported:UnsupportedItem.svelte'; do
+  cls=${spec%%:*}; want=${spec#*:}
+  own=(${(f)"$(grep -rlE "^[[:space:]]*\.${cls}[[:space:]]*[,{]" src --include='*.svelte')"})
+  hh=(${(f)"$(grep -ohE "\.${cls}\.svelte-[a-z0-9]+" $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+  if [[ ${#own[@]} -eq 1 && ${own[1]:t} == $want && ${#hh[@]} -eq 1 ]]; then
+    echo "PASS  .${cls} is authored by ${want} alone and resolves to one hash (${hh[1]})"
+    T5H[$cls]=${hh[1]}
+  else
+    echo "FAIL  .${cls} anchor unproven (owners ${#own[@]}: $own; hashes ${#hh[@]}: $hh)"
+    fail=1; t5ok=0
+  fi
+done
+if (( t5ok )); then
+  python3 - $T5H[page-item] $T5H[video-item] $T5H[interactive-app] $T5H[unsupported] ${CSS[@]} <<'T5EOF'
+import re, sys
+from collections import Counter
+pi, vi, ia, un = sys.argv[1:5]
+css = '\n'.join(open(p).read() for p in sys.argv[5:])
+bad = 0
+
+def rules(text, anc=()):
+    out, i, start = [], 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == '{':
+            sel = text[start:i].rsplit(';', 1)[-1].strip()
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                if text[j] == '{': depth += 1
+                elif text[j] == '}': depth -= 1
+                j += 1
+            body = text[i+1:j-1]
+            if sel.startswith('@'):
+                out.extend(rules(body, anc + (re.sub(r'\s*:\s*', ':', ' '.join(sel.split())),)))
+            else:
+                out.append((sel, body, anc))
+            i, start = j, j
+        elif c == '}':
+            i += 1; start = i
+        else:
+            i += 1
+    return out
+
+ALL = rules(css)
+def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
+
+# The three article shells are deliberately IDENTICAL apart from the page one
+# carrying a measure: `display:flex; flex-direction:column; gap:16px;
+# align-items:stretch; padding:0`. That agreement is what section (g) pins
+# across components; what it could not pin is that nothing has been ADDED.
+SHELL = 'display:flex;flex-direction:column;gap:16px;align-items:stretch;padding:0'
+H2 = 'font-size:16px;font-weight:600;color:var(--text)'   # ref 2122, shared with T4
+CARD = ('background:var(--surface);border:1px solid var(--border);'
+        'border-radius:var(--radius);overflow:hidden')
+
+def spec(name, h, extra):
+    W = '.' + h
+    return (name, h, [(s.replace('@W@', W), d) for s, d in extra])
+
+SPECS = [
+    # `max-width:652px` is the corrected measure -- the handoff sets no root
+    # font-size so its `ch` resolves against 16px while this app sets 14px on
+    # BODY, and 68ch would silently shrink the measure 12.5% here. `.content`
+    # descendants are the `{@html}` body: they are authored `:global(...)` and so
+    # carry the hash on the ANCESTOR only, which is what scopes them.
+    # `overflow-wrap:anywhere` on `.content` is the I2 reflow fix and is
+    # INHERITED by every descendant, which is why no descendant repeats it;
+    # `pre` keeps its own `overflow-x:auto` because inheritance cannot help a
+    # box that must scroll. `ol>li{list-style:decimal}` is the T5 split that
+    # made stored ordered lists render as numbers.
+    spec('PageItem', pi, [
+        ('.page-item@W@', SHELL + ';max-width:652px'),
+        ('.page-item@W@ h2:where(@W@)', H2),
+        ('.content@W@', 'overflow-wrap:anywhere;color:var(--text-2)'),
+        ('.content@W@ p', 'margin-bottom:var(--space-3);line-height:1.6'),
+        ('.content@W@ h1,.content@W@ h2,.content@W@ h3', 'margin:var(--space-4) 0 var(--space-2)'),
+        ('.content@W@ h1', 'font-size:21px;font-weight:600;color:var(--text)'),
+        ('.content@W@ h2', H2),
+        ('.content@W@ h3', 'font-size:14px;font-weight:600;color:var(--text)'),
+        ('.content@W@ a', 'color:var(--primary)'),
+        ('.content@W@ ul,.content@W@ ol', 'padding-left:var(--space-4);margin-bottom:var(--space-3)'),
+        ('.content@W@ ul>li', 'list-style:disc'),
+        ('.content@W@ ol>li', 'list-style:decimal'),
+        ('.content@W@ code',
+         'background:var(--surface-2);padding:2px 4px;border-radius:var(--radius);'
+         'font-family:var(--font-mono)'),
+        ('.content@W@ pre',
+         'background:var(--surface-2);padding:var(--control-pad-textarea);'
+         'border-radius:var(--radius);overflow-x:auto'),
+        ('.content@W@ pre code', 'padding:0;background:none'),
+    ]),
+    # No measure on the video and app shells: both wrap a 16:9 frame that owns
+    # its own width. `.frame { margin-bottom: 0 }` cancels the shared frame
+    # component default so the card clips flush -- with `overflow:hidden` on the
+    # card, a residual margin shows as a strip of --surface under the video.
+    spec('VideoItem', vi, [
+        ('.video-item@W@', SHELL),
+        ('.video-item@W@ h2:where(@W@)', H2),
+        ('.video-card@W@', CARD),
+        ('.video-card@W@ .frame', 'margin-bottom:0'),
+        ('.watched@W@',
+         'display:inline-flex;align-items:center;gap:6px;color:var(--status-accepted-fg);margin:0'),
+    ]),
+    spec('InteractiveAppItem', ia, [
+        ('.interactive-app@W@', SHELL),
+        ('.interactive-app@W@ h2:where(@W@)', H2),
+        ('.app-card@W@', CARD),
+        ('.app-card@W@ .frame', 'margin-bottom:0'),
+        ('.cover-hint@W@', 'font-size:12.5px;color:var(--muted);margin:0'),
+        ('.notice@W@', 'color:var(--muted);margin:0'),
+    ]),
+    # The fallback for an item type this build cannot render. A DASHED border is
+    # the point -- it reads as "nothing is here" rather than as a real card.
+    spec('UnsupportedItem', un, [
+        ('.unsupported@W@',
+         'padding:var(--space-3);border:1px dashed var(--border);border-radius:var(--radius);'
+         'color:var(--muted)'),
+    ]),
+]
+
+for name, h, WANT in SPECS:
+    got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
+    exp = sorted(('', s) for s, _ in WANT)
+    if got != exp:
+        bad = 1
+        print('FAIL  %s rule inventory differs (at-rules and selector lists included)' % name)
+        cg, ce = Counter(got), Counter(exp)
+        for k in sorted((cg - ce).elements()): print('        unexpected: %s %s' % k)
+        for k in sorted((ce - cg).elements()): print('        missing:    %s %s' % k)
+        continue
+    print('PASS  %s compiles to exactly its %d rule(s) — no duplicate, no stray at-rule' % (name, len(WANT)))
+    index = {s: b for s, b, a in ALL if h in s and not a}
+    off = 0
+    for sel, wb in WANT:
+        have, wantd = decls(index[sel]), decls(wb)
+        if have != wantd:
+            bad = 1; off += 1
+            print('FAIL  %s %s declarations differ' % (name, sel))
+            print('        extra:   %s' % sorted(have - wantd))
+            print('        missing: %s' % sorted(wantd - have))
+    if not off:
+        print('PASS  %s declares exactly the pinned set in every rule — an APPENDED declaration, '
+              'duplicate or not, now reds' % name)
+
+sys.exit(bad)
+T5EOF
   [[ $? -eq 0 ]] || fail=1
 fi
 

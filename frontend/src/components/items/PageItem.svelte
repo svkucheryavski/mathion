@@ -67,8 +67,7 @@
      unprotected", which was WRONG and is corrected: the whole-branch review
      measured the same failure on both choice questions' prompt `.text` and on
      QuizItem's `.exp`, all three now fixed. What was true is that this is the
-     largest such surface. The identical rule sits on the
-     identical rule sits on TextQuestion's and NumericQuestion's `.text` and on
+     largest such surface. The identical rule sits on TextQuestion's and NumericQuestion's `.text` and on
      both choice questions' `.opt` (cited by selector, not by line — the line
      form of this citation has gone stale three times in this slice as comment
      blocks landed above it). Measured in Chromium at a 320px
