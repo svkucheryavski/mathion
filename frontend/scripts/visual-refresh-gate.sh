@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=235
+EXPECTED_CHECKS=312
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -150,6 +150,9 @@ plain() { echo "${1//\\/}" }   # the label shows the selector, not its escaping
 d()  { local sel=$1 suf=$2; shift 2; for decl in "$@"; do check "$N $(plain $sel)$(plain $suf) { $(plain $decl) }" "${sel}\.${H}${suf}\{([^}]*;)?${decl}[;}]"; done }
 # dd SELECTOR CHILD DECL... — the same for a descendant rule
 dd() { local sel=$1 kid=$2; shift 2; for decl in "$@"; do check "$N $(plain $sel) $(plain $kid) { $(plain $decl) }" "${sel}\.${H} ${kid}\{([^}]*;)?${decl}[;}]"; done }
+# chk EMITTED-SELECTOR-REGEX DECL... — one declaration-level check per DECL; the caller
+# supplies the full emitted selector (descendant/:has/:where forms), hash already expanded.
+chk() { local pre=$1; shift; for decl in "$@"; do check "$N $(plain $pre) { $(plain $decl) }" "${pre}\{([^}]*;)?${decl}[;}]"; done }
 
 for pair in "Numeric:$NH:\\.num:160px" "Text:$TH:\\.txt:100%"; do
   N=${pair%%:*}; rest=${pair#*:}; H=${rest%%:*}; rest=${rest#*:}; FIELD=${rest%%:*}; W=${rest##*:}
@@ -1415,11 +1418,12 @@ const SIG = {
     ["#snippet:crumbs", "nav:crumbs[class=\"crumbs\" aria-label]", "a:[href onclick]", "#if:",
      "span:sep[class=\"sep\" aria-hidden]", "span:crumb[class=\"crumb\"]",
      "span:mono[class=\"mono\"]", "span:sep[class=\"sep\" aria-hidden]",
-     "span:mono.current[class=\"mono current\"]", "div:page[class=\"page\"]", "#if:", "Spinner:",
-     "#else:", "#if:", "#if:", "h1:", "p:", "#else:", "h1:", "p:",
-     "Button:[variant=\"ghost\" onclick]", "#else:", "#if:", "h1:",
-     "Button:[variant=\"ghost\" onclick]", "#else:", "#if:", "@render:crumbs",
-     "h1:seq-title[class=\"seq-title\"]", "p:empty[class=\"empty\"]", "#else:", "@render:crumbs",
+     "span:mono.current[class=\"mono current\"]", "div:page[class=\"page\"]", "#if:", "Skeleton:",
+     "#else:", "#if:", "ErrorState:[variant=\"page\" title message={errorMessage}]",
+     "#snippet:action", "Button:[variant=\"secondary\" onclick]", "#else:", "#if:",
+     "ErrorState:[variant=\"page\" title]", "#snippet:action",
+     "Button:[variant=\"secondary\" onclick]", "#else:", "#if:", "@render:crumbs",
+     "h1:seq-title[class=\"seq-title\"]", "EmptyState:[title]", "#else:", "@render:crumbs",
      "h1:seq-title[class=\"seq-title\"]", "nav:strip[class=\"strip\" aria-label]", "#each:",
      "ItemIcon:[item={it} state={iconState(it.id)} onclick]", "span:counter[class=\"counter\"]",
      "main:content[class=\"content\"]", "#if:",
@@ -1429,7 +1433,7 @@ const SIG = {
      "Button:[variant=\"primary\" onclick disabled={flatIndex < 0} title]", "#if:",
      "span:next-label[class=\"next-label\"]", "span:next-title[class=\"next-title\"]", "#else:"],
   "QuizItem.svelte":
-    ["#if:", "article:quiz[class=\"quiz\"]", "h2:", "p:empty[class=\"empty\"]", "#else:",
+    ["#if:", "article:quiz[class=\"quiz\"]", "h2:", "EmptyState:[title]", "#else:",
      "article:quiz[class=\"quiz\"]", "h2:", "#each:", "div:q-block[class=\"q-block\"]",
      "span:q-counter.mono[class=\"q-counter mono\"]", "#if:",
      "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
@@ -1567,14 +1571,13 @@ const TEXT = {
   "SequencePlayer.svelte":
     ["a::{expr}", "span:sep:/", "span:mono:B", "span:mono:{expr}", "span:crumb:·",
      "span:crumb:{expr}", "span:sep:/", "span:mono.current:S", "span:mono.current:{expr}",
-     "h1::Sequence not available", "p::This sequence isn'\''t available to you.",
-     "h1::Couldn'\''t load", "p::{expr}", "Button::← Course", "h1::Sequence not found",
-     "Button::← Course", "h1:seq-title:{expr}", "p:empty:This sequence has no items yet.",
+     "Button::Back to course", "Button::Back to course",
+     "h1:seq-title:{expr}",
      "h1:seq-title:{expr}", "span:counter:Item", "span:counter:{expr}", "span:counter:of",
      "span:counter:{expr}", "Button::← Previous", "Button::Finish sequence",
      "span:next-label:Next:", "span:next-title:{expr}", "span:next-label:→", "Button::Next →"],
   "QuizItem.svelte":
-    ["h2::{expr}", "p:empty:This quiz has no questions yet.", "h2::{expr}",
+    ["h2::{expr}", "h2::{expr}",
      "span:q-counter.mono:Question", "span:q-counter.mono:{expr}", "span:q-counter.mono:of",
      "span:q-counter.mono:{expr}", "Button::Submit answer", "span:mono:{expr}", "p:hint:{expr}",
      "p:hint:left", "strong::Score:", "span:mono:{expr}", "span:mono:/", "span:mono:{expr}",
@@ -2529,7 +2532,6 @@ WANT = [
     ('.next-title' + W,
      'display:inline-block;max-width:22ch;overflow:hidden;text-overflow:ellipsis;'
      'white-space:nowrap;vertical-align:bottom'),
-    ('.empty' + W, 'color:var(--muted)'),
 ]
 
 got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
@@ -2972,7 +2974,6 @@ WANT = [
     ('.quiz' + W,
      'display:flex;flex-direction:column;gap:16px;align-items:stretch;padding:0;max-width:652px'),
     ('.quiz%s h2:where(%s)' % (W, W), 'font-size:16px;font-weight:600;color:var(--text)'),
-    ('.empty' + W, 'color:var(--muted)'),
     ('.q-block' + W, 'display:flex;flex-direction:column;gap:6px'),
     ('.q-block%s+.q-block:where(%s)' % (W, W),
      'border-top:1px solid var(--border);padding-top:20px'),
@@ -3189,6 +3190,133 @@ sys.exit(bad)
 T5EOF
   [[ $? -eq 0 ]] || fail=1
 fi
+
+echo
+echo "--- (q) Slice-4 T1 primitives ---"
+# ownership: the anchor is authored as a top-level rule by exactly one file
+for pair in "Skeleton:skeleton:Skeleton.svelte" "ErrorState:error-state:ErrorState.svelte"; do
+  N=${pair%%:*}; rest=${pair#*:}; A=${rest%%:*}; F=${rest##*:}
+  owners=(${(f)"$(grep -rlE "^[[:space:]]*\.${A}[[:space:]]*[,{]" src --include='*.svelte')"})
+  if [[ ${#owners[@]} -eq 1 && ${owners[1]:t} == $F ]]; then
+    echo "PASS  .$A is authored as a top-level rule by $F alone"
+  else
+    echo "FAIL  .$A owner is not $F alone (${#owners[@]}: $owners)"; fail=1
+  fi
+done
+# .empty-state collides with RunSubmissionTab/RunAssetsTab (spec §Testing), so a
+# single-owner grep cannot prove it. Ownership is pinned instead as the EXACT set
+# of three authoring files (a fourth author reds), and the dist hash is picked by
+# EXCLUDING the two hashes those files own — each identified by an anchor only
+# that file authors (`.submission-grid`, `.run-assets-tab`).
+emf=(${(f)"$(grep -rlE '^[[:space:]]*\.empty-state[[:space:]]*[,{]' src --include='*.svelte')"})
+emo=(${(o)${(@)emf:t}})
+if [[ "${(j:,:)emo}" == 'EmptyState.svelte,RunAssetsTab.svelte,RunSubmissionTab.svelte' ]]; then
+  echo "PASS  .empty-state is authored by EmptyState.svelte plus exactly the two known run tabs"
+else
+  echo "FAIL  .empty-state authors are not the three known files (${#emf[@]}: $emo)"; fail=1
+fi
+# Union cardinality ALONE cannot prove the exclusion set: two hashes would also
+# come back if one anchor resolved to two and the other to none, and the set would
+# then exclude the wrong component. Each exclusion anchor is therefore proved
+# dist-unique on its own FIRST, and the union is checked on top of that (T1 review).
+sgh=(${(f)"$(grep -ohE '\.submission-grid\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+rah=(${(f)"$(grep -ohE '\.run-assets-tab\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#sgh[@]} -eq 1 ]]; then
+  echo "PASS  .submission-grid resolves to one hash ($sgh)"
+else
+  echo "FAIL  .submission-grid not dist-unique (${#sgh[@]}: $sgh)"; fail=1
+fi
+if [[ ${#rah[@]} -eq 1 ]]; then
+  echo "PASS  .run-assets-tab resolves to one hash ($rah)"
+else
+  echo "FAIL  .run-assets-tab not dist-unique (${#rah[@]}: $rah)"; fail=1
+fi
+xh=(${(f)"$(grep -ohE '\.(submission-grid|run-assets-tab)\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#xh[@]} -eq 2 ]]; then
+  echo "PASS  the two colliding run tabs resolve to 2 hashes ($xh) — the exclusion set"
+else
+  echo "FAIL  the run-tab exclusion set is not 2 hashes (${#xh[@]}: $xh)"; fail=1
+fi
+sk=(${(f)"$(grep -ohE '\.skeleton\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+es=(${(f)"$(grep -ohE '\.error-state\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+allem=(${(f)"$(grep -ohE '\.empty-state\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+em=(${allem:|xh})
+for t in "skeleton:${#sk[@]}:$sk" "error-state:${#es[@]}:$es" "empty-state:${#em[@]}:$em"; do
+  a=${t%%:*}; rest=${t#*:}; n=${rest%%:*}
+  if [[ $n -eq 1 ]]; then echo "PASS  .$a resolves to one hash (${rest#*:})"; else echo "FAIL  .$a not dist-unique ($n: ${rest#*:})"; fail=1; fi
+done
+if [[ ${#sk[@]} -eq 1 ]]; then
+  N=Skeleton; H=$sk[1]
+  d '\.skeleton' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:12px' 'display:flex' 'flex-direction:column' 'gap:9px'
+  d '\.row' '' 'display:flex' 'align-items:center' 'gap:12px'
+  d '\.bar' '' 'display:block' 'height:13px' 'border-radius:3px' 'background:var\(--border-faint\)'
+  d '\.end' '' 'margin-left:auto'
+  none "Skeleton has no animation (ref 1345: never a spinner)" "\.(skeleton|row|bar)\.${H}\{[^}]*animation"
+fi
+if [[ ${#em[@]} -eq 1 ]]; then
+  N=EmptyState; H=$em[1]
+  d '\.empty-state' '' 'padding:34px 20px' 'align-items:center' 'gap:9px' 'text-align:center' 'border:1px solid var\(--border\)'
+  d '\.title' '' 'font-size:14px' 'font-weight:600' 'color:var\(--text\)' 'margin:0'
+fi
+if [[ ${#es[@]} -eq 1 ]]; then
+  N=ErrorState; H=$es[1]
+  d '\.error-state' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.inline' '' 'display:flex' 'align-items:center' 'gap:12px' 'padding:14px 16px' 'border-left:3px solid var\(--danger\)'
+  chk "\.inline\.${H} \.body:where\(\.${H}\)"    'gap:3px' 'flex:1' 'min-width:0'
+  chk "\.inline\.${H} \.title:where\(\.${H}\)"   'font-size:13px'
+  chk "\.inline\.${H} \.message:where\(\.${H}\)" 'font-size:12\.5px' 'overflow-wrap:anywhere'
+  d '\.page' '' 'display:flex' 'flex-direction:column' 'align-items:center' 'gap:9px' 'padding:30px 20px' 'text-align:center'
+  chk "\.page\.${H} \.body:where\(\.${H}\)"    'align-items:center' 'gap:9px'
+  chk "\.page\.${H} \.title:where\(\.${H}\)"   'font-size:14px' 'letter-spacing:0'
+  chk "\.page\.${H} \.message:where\(\.${H}\)" 'font-size:13px' 'line-height:1\.5' 'max-width:46ch' 'text-wrap:pretty' 'overflow-wrap:anywhere'
+  chk "\.page\.${H} \.action:where\(\.${H}\)"  'margin-top:4px'
+  # The leak guard (spec §1.3): the UNQUALIFIED .message / .title / .body rules
+  # carry no metric. Paired with the positives above on the same hash.
+  # BOTH ends of the anchor allow a `,`: the minifier emits a merged selector
+  # LIST (`.title.H,.message.H{…}`) whenever two rules end up with the same
+  # declaration block, and the original `(^|\})…\{` form walked straight past it
+  # (T1 review). The left `[},]` covers the compound sitting LAST in such a list,
+  # the right `[,{]` the compound sitting first — mutation-testing merged the two
+  # rules and showed the left fix alone still let `.title` pass vacuously. `[^}]*`
+  # cannot cross a closing brace, so the scan stays inside the one rule.
+  # The left class also admits `{`: an @media/@supports-wrapped duplicate opens
+  # with the at-block's own `{` (`@media (min-width:1px){.message.H{font-size:…}}`),
+  # and the primitives have NO parsed rule inventory in this script, so nothing
+  # else would see it (T2 codex round 1 — the earlier comment claimed otherwise).
+  none "ErrorState unqualified .message has no font-size" "(^|[{},])\.message\.${H}[,{][^}]*font-size:"
+  none "ErrorState unqualified .body has no gap"          "(^|[{},])\.body\.${H}[,{][^}]*gap:"
+  none "ErrorState unqualified .title has no font-size"   "(^|[{},])\.title\.${H}[,{][^}]*font-size:"
+fi
+
+echo
+echo "--- (r) Slice-4 T2 student-page adoption ---"
+# The four scoped `.empty` rules and CourseList's `.error` are gone (spec §2);
+# a surviving one would be a css_unused_selector warning AND a stray rule.
+for f in src/pages/CourseList.svelte src/pages/CourseView.svelte src/pages/SequencePlayer.svelte src/components/items/QuizItem.svelte; do
+  if sed 's#/\*.*\*/##g' "$f" | grep -qE '^[[:space:]]*\.(empty|error)[[:space:]]*\{'; then
+    echo "FAIL  $f still authors a .empty/.error rule"; fail=1
+  else
+    echo "PASS  ${f:t} no longer authors .empty/.error"
+  fi
+  # `ui/Spinner\.svelte`, not `components/ui/...`: QuizItem sits in components/items
+  # and would import it as `../ui/Spinner.svelte`, which the longer prefix cannot see —
+  # the check would have been vacuous on one of the four files (mutation-testing found it).
+  if grep -qE "ui/Spinner\.svelte" "$f"; then
+    echo "FAIL  $f still imports Spinner"; fail=1
+  else
+    echo "PASS  ${f:t} does not import Spinner"
+  fi
+done
+# The ← glyph left SequencePlayer's error actions (enumerated 12); CourseView's
+# `← Courses` header button is out of scope and must still be there.
+if sed 's#<!--.*-->##g' src/pages/SequencePlayer.svelte | grep -qE '← Course<'; then
+  echo "FAIL  SequencePlayer still renders '← Course'"; fail=1
+else
+  echo "PASS  SequencePlayer error actions read 'Back to course'"
+fi
+# perl -0 strips MULTI-line HTML comments too (a line-based sed let a commented-out
+# button inside `<!--\n…\n-->` keep the guard green — T2 codex round 2).
+perl -0pe 's/<!--.*?-->//gs' src/pages/CourseView.svelte | grep -qE '>← Courses<' && echo "PASS  CourseView header button untouched (out of scope)" || { echo "FAIL  CourseView '← Courses' header button changed — out of Slice-4 scope"; fail=1 }
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

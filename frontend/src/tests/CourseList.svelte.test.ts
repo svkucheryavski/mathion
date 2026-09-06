@@ -139,3 +139,60 @@ describe('CourseList §2b header enrolled-count', () => {
       .toContain('Past enrolment');                                                                   // is_active:false footer
   });
 });
+
+describe('CourseList 9d states (Slice-4 T2)', () => {
+  it('loading: renders the Skeleton (3 rows), not a spinner', () => {
+    fetchSpy.mockReturnValue(new Promise(() => {}));   // never settles
+    target = document.createElement('div'); document.body.appendChild(target);
+    cmp = mount(CourseList, { target });
+    flushSync();
+    expect(target.querySelector('.skeleton')).not.toBeNull();
+    expect(target.querySelectorAll('.skeleton .row').length).toBe(3);
+    expect(target.querySelector('.spinner')).toBeNull();
+  });
+
+  it('empty: EmptyState carries the enrolment copy verbatim', async () => {
+    const t = seed([]);
+    await settle();
+    const title = t.querySelector('.empty-state .title');
+    expect(title).not.toBeNull();
+    expect(title!.textContent).toBe("You're not enrolled in any courses yet — ask your teacher for an invite.");
+    expect(t.querySelector('.grid')).toBeNull();
+  });
+
+  it('error: inline ErrorState with the backend detail; Retry re-fetches with a clean error and shows the grid', async () => {
+    fetchSpy
+      .mockResolvedValueOnce({
+        ok: false, status: 500,
+        json: () => Promise.resolve({ detail: 'Database is asleep.' }),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve([courseStub(1)]),
+        headers: new Headers({ 'content-type': 'application/json' }),
+      } as unknown as Response);
+    target = document.createElement('div'); document.body.appendChild(target);
+    cmp = mount(CourseList, { target });
+    await settle();
+
+    const err = target.querySelector('.error-state.inline');
+    expect(err).not.toBeNull();
+    expect(err!.querySelector('.title')!.textContent).toBe("Couldn't load courses");
+    expect(err!.querySelector('.message')!.textContent).toBe('Database is asleep.');
+    const retry = err!.querySelector<HTMLButtonElement>('.btn');
+    expect(retry).not.toBeNull();
+    expect(retry!.textContent?.trim()).toBe('Retry');
+
+    retry!.click();
+    flushSync();
+    // Retry re-enters the loading branch with the error cleared (enumerated (A)2).
+    expect(target.querySelector('.skeleton')).not.toBeNull();
+    expect(target.querySelector('.error-state')).toBeNull();
+    await settle();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(target.querySelector('.error-state')).toBeNull();
+    expect(target.querySelectorAll('.grid a').length).toBeGreaterThan(0);
+  });
+});

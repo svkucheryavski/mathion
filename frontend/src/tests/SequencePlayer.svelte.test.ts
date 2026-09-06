@@ -11,7 +11,8 @@ vi.mock('../stores/currentCourse.svelte', async (importOriginal) => {
   return { ...real, loadCourse: vi.fn().mockResolvedValue(undefined) };
 });
 
-import { __test__setSlots } from '../stores/currentCourse.svelte';
+import { __test__setSlots, loadCourse } from '../stores/currentCourse.svelte';
+import { ApiError } from '../lib/api';
 import { currentRoute } from '../lib/router.svelte';
 import SequencePlayer from '../pages/SequencePlayer.svelte';
 import type { Item } from '../lib/types';
@@ -149,7 +150,7 @@ describe('SequencePlayer breadcrumb (T1)', () => {
 
     const h1 = el.querySelector('h1.seq-title');
     expect(h1!.textContent).toBe('Empty seq');
-    expect(el.querySelector('.empty')).not.toBeNull();
+    expect(el.querySelector('.empty-state .title')!.textContent).toBe('This sequence has no items yet.');
   });
 });
 
@@ -237,5 +238,49 @@ describe('SequencePlayer footer (T1 / D4)', () => {
     expect(primary.textContent).toContain('Next →');
     expect(primary.getAttribute('title')).toBe('Loading…');
     expect(prev.getAttribute('title')).toBe('Loading…');
+  });
+});
+
+async function settle() {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  flushSync();
+}
+
+describe('SequencePlayer 9d states (Slice-4 T2)', () => {
+  it('loading: Skeleton (3 rows) while the course loads; then "Sequence not found" page ErrorState when the store stays empty', async () => {
+    // Store NOT seeded → the :16-29 effect takes the loadCourse branch.
+    seedRoute(100, '');
+    const el = render('100');
+    expect(el.querySelector('.skeleton')).not.toBeNull();
+    expect(el.querySelectorAll('.skeleton .row').length).toBe(3);
+
+    await settle();   // mocked loadCourse resolves; the store is still null → !sequence branch
+    const err = el.querySelector('.error-state.page');
+    expect(err).not.toBeNull();
+    expect(err!.querySelector('h1.title')!.textContent).toBe('Sequence not found');
+    expect(err!.querySelector('.message')).toBeNull();               // title-only (§2)
+    const back = err!.querySelector<HTMLButtonElement>('.action .btn');
+    expect(back!.textContent?.trim()).toBe('Back to course');     // no ← glyph (enumerated 12)
+  });
+
+  it('error 404: page ErrorState with the verbatim copy and the Back action', async () => {
+    vi.mocked(loadCourse).mockRejectedValueOnce(new ApiError(404, 'gone'));
+    seedRoute(100, '');
+    const el = render('100');
+    await settle();
+    const err = el.querySelector('.error-state.page');
+    expect(err!.querySelector('h1.title')!.textContent).toBe('Sequence not available');
+    expect(err!.querySelector('.message')!.textContent).toBe("This sequence isn't available to you.");
+    expect(err!.querySelector('.action .btn')!.textContent?.trim()).toBe('Back to course');
+  });
+
+  it('error 500: generic heading + the backend message', async () => {
+    vi.mocked(loadCourse).mockRejectedValueOnce(new ApiError(500, 'Server exploded.'));
+    seedRoute(100, '');
+    const el = render('100');
+    await settle();
+    const err = el.querySelector('.error-state.page');
+    expect(err!.querySelector('h1.title')!.textContent).toBe("Couldn't load");
+    expect(err!.querySelector('.message')!.textContent).toBe('Server exploded.');
   });
 });

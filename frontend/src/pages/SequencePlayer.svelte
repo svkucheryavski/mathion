@@ -4,7 +4,9 @@
   import { currentRoute, navigate } from '../lib/router.svelte';
   import ItemRouter from '../components/items/ItemRouter.svelte';
   import ItemIcon from '../components/course/ItemIcon.svelte';
-  import Spinner from '../components/ui/Spinner.svelte';
+  import Skeleton from '../components/ui/Skeleton.svelte';
+  import EmptyState from '../components/ui/EmptyState.svelte';
+  import ErrorState from '../components/ui/ErrorState.svelte';
   import Button from '../components/ui/Button.svelte';
   import type { SequenceContent, Item, ItemMarkState } from '../lib/types';
 
@@ -141,6 +143,16 @@
     if (currentCourse.value?.state.items[String(itemId)]?.is_covered) return 'covered';
     return 'not-yet';
   }
+
+  // Page-level error copy (Slice-4 §2), text verbatim from the former branches.
+  const errorTitle = $derived.by(() => {
+    if (error === null) return '';
+    return error.status === 404 || error.status === 403 ? 'Sequence not available' : "Couldn't load";
+  });
+  const errorMessage = $derived.by(() => {
+    if (error === null) return '';
+    return error.status === 404 || error.status === 403 ? "This sequence isn't available to you." : error.message;
+  });
 </script>
 
 {#snippet crumbs(seq: SequenceContent)}
@@ -160,23 +172,23 @@
 
 <div class="page">
   {#if loading}
-    <Spinner />
+    <Skeleton />
   {:else if error}
-    {#if error.status === 404 || error.status === 403}
-      <h1>Sequence not available</h1>
-      <p>This sequence isn't available to you.</p>
-    {:else}
-      <h1>Couldn't load</h1>
-      <p>{error.message}</p>
-    {/if}
-    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← Course</Button>
+    <ErrorState variant="page" title={errorTitle} message={errorMessage}>
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
+      {/snippet}
+    </ErrorState>
   {:else if !sequence}
-    <h1>Sequence not found</h1>
-    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← Course</Button>
+    <ErrorState variant="page" title="Sequence not found">
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
+      {/snippet}
+    </ErrorState>
   {:else if sequence.items.length === 0}
     {@render crumbs(sequence)}
     <h1 class="seq-title">{sequence.title}</h1>
-    <p class="empty">This sequence has no items yet.</p>
+    <EmptyState title="This sequence has no items yet." />
   {:else}
     {@render crumbs(sequence)}
     <h1 class="seq-title">{sequence.title}</h1>
@@ -317,5 +329,4 @@
     white-space: nowrap;
     vertical-align: bottom;
   }
-  .empty { color: var(--muted); }
 </style>

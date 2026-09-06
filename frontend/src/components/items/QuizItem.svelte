@@ -9,6 +9,7 @@
   import Numeric from './quiz/NumericQuestion.svelte';
   import Text from './quiz/TextQuestion.svelte';
   import Button from '../ui/Button.svelte';
+  import EmptyState from '../ui/EmptyState.svelte';
 
   let { item }: { item: QuizItem } = $props();
 
@@ -140,7 +141,7 @@
 {#if item.questions.length === 0}
   <article class="quiz">
     <h2>{item.title}</h2>
-    <p class="empty">This quiz has no questions yet.</p>
+    <EmptyState title="This quiz has no questions yet." />
   </article>
 {:else}
   <article class="quiz">
@@ -223,7 +224,6 @@
     max-width: 652px;
   }
   .quiz h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
-  .empty { color: var(--muted); }
   /* Counter + question + explanation read as one unit. */
   .q-block {
     display: flex;

@@ -198,7 +198,7 @@ describe('QuizItem shell (T4)', () => {
     const article = host.querySelector('article.quiz');
     expect(article).not.toBeNull();
     expect(article!.querySelector('h2')?.textContent).toBe('Check yourself');
-    expect(article!.querySelector('.empty')).not.toBeNull();
+    expect(article!.querySelector('.empty-state .title')!.textContent).toBe('This quiz has no questions yet.');
     expect(host.querySelector('.q-block')).toBeNull();
   });
 

@@ -14,7 +14,8 @@ vi.mock('../stores/currentCourse.svelte', async (importOriginal) => {
   };
 });
 
-import { __test__setSlots } from '../stores/currentCourse.svelte';
+import { __test__setSlots, loadCourse } from '../stores/currentCourse.svelte';
+import { ApiError } from '../lib/api';
 import CourseView from '../pages/CourseView.svelte';
 import type { StudentMiniProjectListItem } from '../lib/types';
 
@@ -36,7 +37,7 @@ afterEach(() => {
 // 12-tick settle: CourseView fires loadCourse() inside an $effect, then waits
 // for the .catch(...).finally(() => { loading = false; }) chain — a multi-tick
 // promise chain. A bare `await Promise.resolve()` would leave `loading=true`
-// and the page would render the Spinner branch without the BlockGroup tree.
+// and the page would render the Skeleton branch without the BlockGroup tree.
 // Copied verbatim from tests/RunDetailPage.svelte.test.ts:83-86.
 async function settle() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
@@ -100,5 +101,47 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
     const region = link.closest('[role="region"]') as HTMLElement | null;
     expect(region).not.toBeNull();
     expect(region!.hidden).toBe(false);
+  });
+});
+
+describe('CourseView 9d states (Slice-4 T2)', () => {
+  it('loading: Skeleton with 4 rows while loadCourse is in flight', () => {
+    vi.mocked(loadCourse).mockReturnValueOnce(new Promise<void>(() => {}));
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    flushSync();
+    expect(target.querySelector('.skeleton')).not.toBeNull();
+    expect(target.querySelectorAll('.skeleton .row').length).toBe(4);
+  });
+
+  it('empty: EmptyState under the course header when there are no blocks', async () => {
+    __test__setSlots({
+      slug: 'course-x', versionId: 1,
+      course: { id: 1, slug: 'course-x', name: 'Course X' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
+      blocks: [], state: { version_id: 1, items: {} }, miniProjectsByBlockId: {},
+    });
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    expect(target.querySelector('h1')!.textContent).toBe('Course X');
+    expect(target.querySelector('.empty-state .title')!.textContent).toBe('This course has no published blocks yet.');
+  });
+
+  it.each([
+    [404, 'Course not available', "This course isn't available to you. Ask your teacher for an invite link, or check the URL."],
+    [403, 'Access denied', "You don't have access to this course."],
+    [500, "Couldn't load course", 'Server exploded.'],
+  ])('error %i: page ErrorState keeps the <h1> (D9) and the Back action', async (status, title, message) => {
+    vi.mocked(loadCourse).mockRejectedValueOnce(new ApiError(status, 'Server exploded.'));
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const err = target.querySelector('.error-state.page');
+    expect(err).not.toBeNull();
+    const h1 = err!.querySelector('h1.title');
+    expect(h1).not.toBeNull();
+    expect(h1!.textContent).toBe(title);
+    expect(err!.querySelector('.message')!.textContent).toBe(message);
+    const back = err!.querySelector<HTMLButtonElement>('.action .btn');
+    expect(back!.textContent?.trim()).toBe('Back to courses');
+    expect(back!.classList.contains('secondary')).toBe(true);
   });
 });
