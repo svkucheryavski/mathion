@@ -1147,9 +1147,10 @@ let bad = 0;
 // built CSS and the check count untouched (codex-r3-C). Any construct not
 // named below -- HtmlTag, RenderTag, SlotElement, a snippet, an await block, a
 // <svelte:head>, or whatever Svelte adds next -- falls through to the default
-// and REDS, which is the point: these two components are small and static, so
+// and REDS, which is the point: the scanned set is small and mostly static, so
 // anything new here deserves a human look before the gate keeps vouching for
-// them.
+// it. (That sentence began life when the set WAS two components; it is 17 now,
+// listed at the foot of this payload.)
 //
 // SCOPE, stated precisely because the old PASS text overclaimed (codex-r4): this
 // is a check on DECLARATIVE markup. It cannot see runtime style mutation — an
@@ -1229,11 +1230,13 @@ let bad = 0;
 // element off visually from the markup, where no CSS lane can see it. Hiding the
 // count with `hidden` passed every pin in this file and every unit test — DOM
 // textContent reads hidden nodes, so even the new normalised-text assertion stays
-// green (first-party lane, T7 round 5). None of these four components has any use
-// for either attribute. The BlockGroup panel in T8a legitimately takes
-// `hidden={!expanded}`, but it is not one of the files this scanner grades; if it
-// is ever added here, that attribute needs a per-file carve-out rather than a
-// relaxation of this rule.
+// green (first-party lane, T7 round 5). Exactly one scanned component has a
+// legitimate use: the BlockGroup panel takes `hidden={!expanded}` as its pinned
+// collapse mechanism. BlockGroup IS graded here (it is in SPEC and in the file
+// list below), and that attribute has the per-file `hiddenOn` carve-out this
+// paragraph used to say it would need -- pinned to its exact source and required
+// exactly once. An earlier wording still said BlockGroup was not scanned, which
+// stopped being true several rounds ago (codex, close-out round 6).
 // Per FILE, so T6 keeps its tight pin while T7 gets the same protection: a
 // construct legitimate in one of these is not thereby legitimate in another.
 const BASE = ["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"];
@@ -1333,11 +1336,22 @@ const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // A name belongs here only if its value cannot reach the cascade: no class
 // expression, no `class:` predicate, no attribute selector, no script-derived
 // class, no rendered chrome.
+// The four whole-data-object props are NOT here, and they were the first
+// version of this list getting it wrong: `item`, `question`, `sequence` and
+// `value` each reach the cascade through a field. `item` picks the ItemRouter
+// branch, the ItemIcon glyph and (via `item.latest_status`) the StatusPill
+// class -- and worse, it reaches `{@html item.content_html}`, so an item built
+// at the call site reopens the injected-stylesheet channel an earlier round
+// graded Critical. `question` reaches `{@html question.text_html}` and the
+// option ids that drive selection. `value` becomes `selected`, then `isChosen`,
+// then `class:selected` and the reveal predicates. `sequence.items` sets the
+// number and type of ItemMark glyphs. All four pass a NAME-only record; all four
+// are pinned by source now (codex, close-out round 6, all reproduced).
 const CONTENT = new Set([
   "aria-controls", "aria-expanded", "aria-hidden", "aria-label",
-  "aria-labelledby", "courseSlug", "href", "id", "inputmode", "item",
-  "name", "onanswer", "onchange", "onclick", "oninput", "question",
-  "scriptSource", "sequence", "src", "title", "value",
+  "aria-labelledby", "courseSlug", "href", "id", "inputmode",
+  "name", "onanswer", "onchange", "onclick", "oninput",
+  "scriptSource", "src", "title",
 ]);
 // Rejecting inline `style` is NOT enough to make a component gradeable: a
 // GLOBAL utility class needs no scoped rule, so `class="row mono"` or
@@ -1402,9 +1416,9 @@ const SIG = {
      "Button:[variant=\"ghost\" onclick]", "#else:", "#if:", "@render:crumbs",
      "h1:seq-title[class=\"seq-title\"]", "p:empty[class=\"empty\"]", "#else:", "@render:crumbs",
      "h1:seq-title[class=\"seq-title\"]", "nav:strip[class=\"strip\" aria-label]", "#each:",
-     "ItemIcon:[item state={iconState(it.id)} onclick]", "span:counter[class=\"counter\"]",
+     "ItemIcon:[item={it} state={iconState(it.id)} onclick]", "span:counter[class=\"counter\"]",
      "main:content[class=\"content\"]", "#if:",
-     "ItemRouter:[item state={currentCourse.value.state}]", "footer:",
+     "ItemRouter:[item={currentItem} state={currentCourse.value.state}]", "footer:",
      "Button:[variant=\"secondary\" onclick disabled={flatIndex <= 0} title]", "#if:",
      "Button:[variant=\"primary\" onclick]", "#else:",
      "Button:[variant=\"primary\" onclick disabled={flatIndex < 0} title]", "#if:",
@@ -1413,13 +1427,13 @@ const SIG = {
     ["#if:", "article:quiz[class=\"quiz\"]", "h2:", "p:empty[class=\"empty\"]", "#else:",
      "article:quiz[class=\"quiz\"]", "h2:", "#each:", "div:q-block[class=\"q-block\"]",
      "span:q-counter.mono[class=\"q-counter mono\"]", "#if:",
-     "SingleChoice:[question value onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
-     "MultiChoice:[question value onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "MultiChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
-     "Numeric:[question value onanswer disabled={locked} correctValue={r?.correct_numeric ?? null}]",
+     "Numeric:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_numeric ?? null}]",
      "#else:", "#if:",
-     "Text:[question value onanswer disabled={locked} correctValue={r?.correct_text ?? null}]",
+     "Text:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_text ?? null}]",
      "#if:", "div:exp[class=\"exp\"]", "@html:r.explanation_html", "#if:",
      "div:submit-row[class=\"submit-row\"]",
      "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
@@ -1434,7 +1448,7 @@ const SIG = {
     ["fieldset:", "legend:", "div:text[class=\"text\"]", "@html:question.text_html",
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
-     "input:[type=\"radio\" name value checked={isChosen} {disabled} onchange]",
+     "input:[type=\"radio\" name value={opt.id} checked={isChosen} {disabled} onchange]",
      "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
@@ -1483,17 +1497,17 @@ const SIG = {
      "div:footer.footer-status[class=\"footer footer-status\"]"],
   "NumericQuestion.svelte":
     ["div:row[class=\"row\"]", "div:text[class=\"text\" id]", "@html:question.text_html",
-     "input:num.mono[class=\"num mono\" type=\"text\" inputmode aria-labelledby value {disabled} oninput]",
+     "input:num.mono[class=\"num mono\" type=\"text\" inputmode aria-labelledby value={text} {disabled} oninput]",
      "#if:", "p:correct-line[class=\"correct-line\"]", "strong:mono[class=\"mono\"]"],
   "TextQuestion.svelte":
     ["div:row[class=\"row\"]", "div:text[class=\"text\" id]", "@html:question.text_html",
-     "input:txt[class=\"txt\" type=\"text\" aria-labelledby value {disabled} oninput]", "#if:",
-     "p:correct-line[class=\"correct-line\"]", "strong:"],
+     "input:txt[class=\"txt\" type=\"text\" aria-labelledby value={text} {disabled} oninput]",
+     "#if:", "p:correct-line[class=\"correct-line\"]", "strong:"],
   "MultiChoiceQuestion.svelte":
     ["fieldset:", "legend:", "div:text[class=\"text\"]", "@html:question.text_html",
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
-     "input:[type=\"checkbox\" value checked={isChosen} {disabled} onchange]",
+     "input:[type=\"checkbox\" value={opt.id} checked={isChosen} {disabled} onchange]",
      "span:ctl[class=\"ctl\"]", "#if:",
      "svg:check[class=\"check\" width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
@@ -1510,8 +1524,8 @@ const SIG = {
      "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
      "#if:", "div:info[class=\"info\"]", "@html:block.info_html", "ul:", "#each:", "li:",
-     "SequenceLink:[courseSlug sequence state={vstate}]", "#if:", "li:",
-     "MiniProjectLink:[courseSlug item]"],
+     "SequenceLink:[courseSlug sequence={s} state={vstate}]", "#if:", "li:",
+     "MiniProjectLink:[courseSlug item={mpByBlockId[String(block.id)]}]"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
 // `owner-signature:text` in document order, interleaved with a `{expr}` marker
