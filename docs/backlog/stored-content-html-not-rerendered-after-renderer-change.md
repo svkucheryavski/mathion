@@ -38,5 +38,13 @@ to decide whether to touch them at all. A narrowly targeted pass — only items 
 smaller blast radius and is the obvious candidate. Needs an endpoint-level regression test seeded
 with pre-change stored HTML.
 
+**Disposition (2026-09-06):** raised again by codex at the Slice-3 close-out as an Important that
+should not be deferred, and the reasoning is accepted — before T5 a resuming list rendered as
+bullets (visibly broken), whereas now it renders "1. 2. 3." (plausible and wrong), which is the
+worse failure. Measured on the dev database at that point: 0 of 12 items carry a stored `<ol>` at
+all, so nothing is affected there. Scheduled as its OWN branch immediately after Slice 3 rather
+than appended to the close-out: a re-render pass over stored course content is a backend data
+change with its own archived-version decision, and it deserves its own review loop.
+
 The same exposure applies to [[bare-urls-not-autolinked-in-markdown]] if that one is ever done —
 it is a property of the stored-HTML design, not of either individual fix.
