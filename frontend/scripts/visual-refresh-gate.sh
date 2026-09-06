@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=234
+EXPECTED_CHECKS=235
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -591,7 +591,21 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            'src/pages/SequencePlayer.svelte',
            'src/components/items/QuizItem.svelte',
            'src/components/items/quiz/SingleChoiceQuestion.svelte',
-           'src/components/items/quiz/MultiChoiceQuestion.svelte'):
+           'src/components/items/quiz/MultiChoiceQuestion.svelte',
+           # Round 3 added six components to the SCANNER and forgot this list --
+           # the identical omission round 2 had just fixed for the four above.
+           # It left --space-4 and --control-pad-textarea (both PageItem) with no
+           # guard, so an ancestor could zero them: every markdown page loses its
+           # list padding-left, so bullets and numbers sit outside the text
+           # column, heading top margins collapse and code blocks lose their
+           # padding -- gate ALL PASS, 1349 tests green (reviewer, round 4).
+           'src/components/items/PageItem.svelte',
+           'src/components/items/VideoItem.svelte',
+           'src/components/items/InteractiveAppItem.svelte',
+           'src/components/items/UnsupportedItem.svelte',
+           'src/components/items/quiz/NumericQuestion.svelte',
+           'src/components/items/quiz/TextQuestion.svelte',
+           'src/components/course/CourseCard.svelte'):
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', open(_f).read()))
 TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
@@ -769,8 +783,15 @@ none  "no positional counter left at 11.5px" \
 # right direction.
 cc=(${(f)"$(grep -ohE '\.bar-fill\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ccsrc=(${(f)"$(grep -rlE '^[[:space:]]*\.bar-fill[[:space:]]*[,{]' src --include='*.svelte')"})
-[[ ${#cc[@]} -eq 1 && ${#ccsrc[@]} -eq 1 && ${ccsrc[1]:t} == 'CourseCard.svelte' ]] \
-  || cc=(NO-UNIQUE-COURSECARD-ANCHOR)
+if [[ ${#cc[@]} -ne 1 || ${#ccsrc[@]} -ne 1 || ${ccsrc[1]:t} != 'CourseCard.svelte' ]]; then
+  # Say WHY. Without this the substitution simply stops matching and the check
+  # below reds as "CourseCard .count (a RATIO) still 11.5px", sending whoever
+  # reads it to the font-size rule rather than to the anchor (reviewer, round 4).
+  # Every sibling anchor guard in this file prints an explicit line; this one
+  # prints to stderr so it does not disturb the PASS/FAIL count.
+  print -u2 "      note: CourseCard anchor unproven (.bar-fill dist hashes ${#cc[@]}: $cc; source owners ${#ccsrc[@]}: $ccsrc)"
+  cc=(NO-UNIQUE-COURSECARD-ANCHOR)
+fi
 check "CourseCard .count (a RATIO) still 11.5px" \
       "\.count\.${cc[1]}\{([^}]*;)?font-size:11\.5px[;}]"
 
@@ -1205,6 +1226,9 @@ const SPEC = {
   "VideoItem.svelte":       { nodes: BASE, tags: ["article", "div", "h2", "p", "polyline", "svg"] },
   "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"] },
   "UnsupportedItem.svelte": { nodes: BASE, tags: ["div", "p"] },
+  "CourseCard.svelte":      { nodes: BASE.concat("RenderTag", "SnippetBlock"),
+                              tags: ["a", "div", "h3", "span"],
+                              styleOn: ["span:bar-fill"] },
   // T3 for the same reason. Their own tests DO reject an inline `style`, but the
   // sibling class assertion reads `el.className.split(" ")[0]` -- the FIRST
   // token only -- so `class="text mono"` set every numeric prompt in Plex Mono
@@ -1239,29 +1263,29 @@ const ATTR = new Set(["Attribute", "OnDirective", "ClassDirective"]);
 // inventory. Update these when the markup legitimately changes; that is the
 // same intentional speed bump as EXPECTED_CHECKS.
 const SIG = {
-  "ItemMark.svelte": ["span:item-mark","svg:","line:","line:","line:","polygon:","polyline:","line:","line:","line:","circle:","circle:","circle:","line:","polygon:"],
-  "ItemIcon.svelte": ["button:icon","ItemMark:"],
-  "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","ItemMark:","span:count.mono"],
+  "ItemMark.svelte": ["span:item-mark.{expr}","svg:","line:","line:","line:","polygon:","polyline:","line:","line:","line:","circle:","circle:","circle:","line:","polygon:"],
+  "ItemIcon.svelte": ["button:icon.{expr}","ItemMark:"],
+  "SequenceLink.svelte": ["a:row","span:badge.mono","span:row-title","span:chain","#each:","ItemMark:","span:count.mono"],
   "MiniProjectLink.svelte": ["a:row.row-mp","span:row-glyph","ItemMark:","span:row-title","StatusPill:"],
-  "StatusPill.svelte": ["span:pill","span:pill-token"],
+  "StatusPill.svelte": ["span:pill.{expr}","span:pill-token"],
   "SequencePlayer.svelte":
     ["#snippet:crumbs","nav:crumbs","a:","span:sep","span:crumb","span:mono","span:sep","span:mono.current",
      "div:page","Spinner:","h1:","p:","h1:","p:","Button:","h1:","Button:","@render:crumbs","h1:seq-title",
-     "p:empty","@render:crumbs","h1:seq-title","nav:strip","ItemIcon:","span:counter","main:content",
+     "p:empty","@render:crumbs","h1:seq-title","nav:strip","#each:","ItemIcon:","span:counter","main:content",
      "ItemRouter:","footer:","Button:","Button:","Button:","span:next-label","span:next-title"],
   "QuizItem.svelte":
-    ["article:quiz","h2:","p:empty","article:quiz","h2:","div:q-block","span:q-counter.mono",
-     "SingleChoice:","MultiChoice:","Numeric:","Text:","div:exp","@html:","div:submit-row","Button:",
+    ["article:quiz","h2:","p:empty","article:quiz","h2:","#each:","div:q-block","span:q-counter.mono",
+     "SingleChoice:","MultiChoice:","Numeric:","Text:","div:exp","@html:r.explanation_html","div:submit-row","Button:",
      "p:hint","span:mono","div:result","p:","strong:","span:mono","p:meta","span:mono","span:mono",
      "Button:","Button:"],
   // The two choice components differ in their CONTROL markup exactly as they
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
   "SingleChoiceQuestion.svelte":
-    ["fieldset:","legend:","div:text","@html:","div:opts",
+    ["fieldset:","legend:","div:text","@html:question.text_html","div:opts","#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
      "input:","span:ctl","span:dot","svg:mark","polyline:","svg:mark","line:","line:","span:sr-only"],
-  "PageItem.svelte": ["article:page-item","h2:","div:content","@html:"],
+  "PageItem.svelte": ["article:page-item","h2:","div:content","@html:item.content_html"],
   "VideoItem.svelte":
     ["article:video-item","h2:","div:video-card","VideoFrame:","div:actions","Button:","p:watched",
      "svg:","polyline:"],
@@ -1269,14 +1293,26 @@ const SIG = {
     ["article:interactive-app","h2:","div:app-card","InteractiveFrame:","p:cover-hint","p:notice",
      "p:notice"],
   "UnsupportedItem.svelte": ["div:unsupported","p:"],
-  "NumericQuestion.svelte": ["div:row","div:text","@html:","input:num.mono","p:correct-line","strong:mono"],
-  "TextQuestion.svelte":    ["div:row","div:text","@html:","input:txt","p:correct-line","strong:"],
+  // CourseCard is a Slice-2 component, but the gate pins its `.count` at 11.5px
+  // (the progress-RATIO step), so the markup half was open in exactly the way
+  // every other graded component was: `<span class="count" style="font-size:22px">`
+  // shipped the same 22px the CSS check forbids, gate ALL PASS, 1349 tests green
+  // (reviewer, round 4). Scanning it closes the last component in this file that
+  // had a CSS pin and no markup pin.
+  "CourseCard.svelte":
+    ["#snippet:bar","span:bar","span:bar-fill","#snippet:adminFooter","div:footer","a:foot-link",
+     "a:foot-link","span:badge-draft","span:badge-admin","div:card","div:body","h3:title",
+     "a:title-link","span:hint","@render:adminFooter","div:card","div:body","h3:title","a:title-link",
+     "@render:bar","span:meta","span:count","a:cta","@render:adminFooter","a:card.card-link","div:body",
+     "h3:title","@render:bar","span:meta","span:count","span:cta","div:footer.footer-status"],
+  "NumericQuestion.svelte": ["div:row","div:text","@html:question.text_html","input:num.mono","p:correct-line","strong:mono"],
+  "TextQuestion.svelte":    ["div:row","div:text","@html:question.text_html","input:txt","p:correct-line","strong:"],
   "MultiChoiceQuestion.svelte":
-    ["fieldset:","legend:","div:text","@html:","div:opts",
+    ["fieldset:","legend:","div:text","@html:question.text_html","div:opts","#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral",
      "input:","span:ctl","svg:check","polyline:","svg:mark","polyline:","svg:mark","line:","line:","span:sr-only"],
   "BlockGroup.svelte":
-    ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","@html:","ul:","li:","SequenceLink:","li:","MiniProjectLink:"],
+    ["section:block","header:","h2:","button:acc","span:badge.mono","span:acc-title","svg:chev.class:collapsed","polyline:","div:","div:info","@html:block.info_html","ul:","#each:","li:","SequenceLink:","li:","MiniProjectLink:"],
 };
 // Every non-whitespace LITERAL text node these components emit, as
 // `owner-signature:text` in document order. Text inside `{expr}` is not literal
@@ -1328,15 +1364,21 @@ const TEXT = {
   "UnsupportedItem.svelte": ["p::This item isn'\''t available in this view yet."],
   "NumericQuestion.svelte": ["p:correct-line:Correct answer:"],
   "TextQuestion.svelte":    ["p:correct-line:Correct answer:"],
+  "CourseCard.svelte":
+    ["a:foot-link:Edit","a:foot-link:Runs","span:badge-draft:DRAFT","span:badge-admin:ADMIN",
+     "span:hint:No active enrolment"],
 };
 for (const f of process.argv.slice(1)) {
   const hits = [];
-  const ast = parse(fs.readFileSync(f, "utf8"), { modern: true, filename: f });
+  const srcText = fs.readFileSync(f, "utf8");
+  const ast = parse(srcText, { modern: true, filename: f });
   const spec = SPEC[f.split("/").pop()];
   if (!spec) { console.log(`FAIL  ${f} has no entry in SPEC — add one before the gate can vouch for it`); bad = 1; continue; }
   const NODE = new Set(spec.nodes), TAG = new Set(spec.tags);
   const sig = [];
   const txt = [];
+  const renders = [];
+  const snippets = [];
   // `owner` is the signature of the nearest enclosing element, so a text node
   // is reported against the thing that renders it rather than in isolation --
   // and a glyph appended straight into the row reads as `a:row:...`, which no
@@ -1361,7 +1403,17 @@ for (const f of process.argv.slice(1)) {
       // attack the header above records as DEFEATED: an injected stylesheet
       // lives in the JS bundle, never in dist CSS, so no other lane can see it.
       // Reproduced passing the whole gate before this line existed.
-      case "HtmlTag": sig.push("@html:"); return;
+      // The marker carries the EXPRESSION, not just the position. Pinning the
+      // position alone sanctioned any payload at that spot, so the already
+      // allowed `{@html item.content_html}` became
+      // `{@html "<style>.page-item{max-width:200px !important}</style>" + item.content_html}`
+      // -- a stylesheet in the JS chunk, which $CSS, (b4) and every inventory
+      // are blind to, restyling the whole document. Gate ALL PASS (234), 1349
+      // tests green (reviewer, close-out round 4). Every scanned component with
+      // an allowed `@html:` had the same opening.
+      case "HtmlTag":
+        sig.push("@html:" + srcText.slice(n.expression.start, n.expression.end).split(/\s+/).join(" "));
+        return;
       // T1 uses `{#snippet crumbs()}` + `{@render crumbs()}` for the breadcrumb,
       // which BOTH branches of the page render. The snippet BODY is walked, so
       // its elements land in the signature at the point of declaration and the
@@ -1377,14 +1429,34 @@ for (const f of process.argv.slice(1)) {
       // rendered in the non-empty branch only, left the local snippet declared
       // and every marker byte-identical: gate ALL PASS, 1349 tests green
       // (reviewer, close-out round 3).
-      case "SnippetBlock": sig.push("#snippet:" + (n.expression && n.expression.name)); walk(n.body, owner); return;
+      case "SnippetBlock": {
+        const nm = (n.expression && n.expression.name) || "?";
+        snippets.push(nm); sig.push("#snippet:" + nm); walk(n.body, owner); return;
+      }
       case "RenderTag": {
         const e = n.expression || {};
-        sig.push("@render:" + (((e.callee || e) || {}).name || "?"));
+        const c = e.callee || e;
+        // A non-identifier callee is REJECTED rather than recorded as "?".
+        // Recording it would work only until the first legitimate
+        // `{@render x?.()}` pinned `@render:?`, after which every member
+        // expression, optional call and conditional callee would match that pin
+        // and the marker would silently decay back to the bare form
+        // (reviewer, round 4, m-1). `{@render a?.()}` parses as a
+        // ChainExpression, so this is reachable by ordinary code, not just attack.
+        const nm = (c && c.type === "Identifier" && c.name) || null;
+        if (!nm) hits.push(`{@render} callee is not a plain identifier`);
+        renders.push(nm || "?");
+        sig.push("@render:" + (nm || "?"));
         return;
       }
       case "IfBlock": walk(n.consequent, owner); walk(n.alternate, owner); return;
-      case "EachBlock": walk(n.body, owner); walk(n.fallback, owner); return;
+      // `#each:` is emitted because a block that contributes NOTHING can be
+      // wrapped around anything for free. `{#each [evilCrumbs] as crumbs}` bound
+      // the name `crumbs` to a snippet imported from another component, so
+      // `@render:crumbs` stayed byte-identical and the breadcrumb rendered from
+      // foreign, unscoped markup carrying `style="font-size:24px; color:#c00"`
+      // -- gate ALL PASS (234), 1349 tests green (reviewer, round 4).
+      case "EachBlock": sig.push("#each:"); walk(n.body, owner); walk(n.fallback, owner); return;
       case "RegularElement": case "Component": {
         if (n.type === "RegularElement" && !TAG.has(n.name)) hits.push(`unreviewed element <${n.name}>`);
         const cls = [];
@@ -1392,7 +1464,22 @@ for (const f of process.argv.slice(1)) {
           if (a.type === "ClassDirective") cls.push("class:" + a.name);
           else if (a.type === "Attribute" && String(a.name).toLowerCase() === "class") {
             const parts = Array.isArray(a.value) ? a.value : [a.value];
-            for (const v of parts) if (v && v.type === "Text") cls.push(...String(v.data).split(/\s+/).filter(Boolean));
+            let dyn = false;
+            for (const v of parts) {
+              if (v && v.type === "Text") cls.push(...String(v.data).split(/\s+/).filter(Boolean));
+              else if (v) dyn = true;
+            }
+            // A `{expr}` token records THAT the attribute has a dynamic part,
+            // never its value. Without it only the literal half was read, so
+            // `class="text {extraCls}"` with `extraCls = "mono"` set every
+            // numeric prompt in Plex Mono with the signature byte-identical --
+            // gate ALL PASS (234), 1349 tests green (reviewer, round 4). The
+            // fully dynamic form `class={cls}` was already caught (the element
+            // loses its literal tokens); the MIXED form is ordinary Svelte, so
+            // this was reachable by accident, not only by attack. StatusPill
+            // and the two mark components use the mixed form legitimately, and
+            // their pins carry `{expr}` to say so.
+            if (dyn) cls.push("{expr}");
           }
         }
         const me = n.name + ":" + cls.join(".");
@@ -1401,7 +1488,14 @@ for (const f of process.argv.slice(1)) {
         for (const a of n.attributes || []) {
           const nm = a.name || "";
           if (!ATTR.has(a.type)) hits.push(`<${n.name}> ${a.type} ${nm}`.trim());
-          else if (nm.toLowerCase() === "style") hits.push(`<${n.name}> style attribute`);
+          // `styleOn` is the twin of `hiddenOn` and exists for exactly one
+          // element: CourseCard progress fill, whose width IS the datum
+          // (`style="width:{pct}%"`) and cannot be expressed in a stylesheet.
+          // It names a single element signature, so every other span in that
+          // component -- including the `.count` the gate pins at 11.5px -- stays
+          // banned.
+          else if (nm.toLowerCase() === "style" && !(spec.styleOn || []).includes(me))
+            hits.push(`<${n.name}> style attribute`);
           else if (nm.startsWith("--")) hits.push(`<${n.name}> CSS-property prop ${nm}`);
           else if ((nm.toLowerCase() === "hidden" || nm.toLowerCase() === "inert")
                    && !(spec.hiddenOn || []).includes(me))
@@ -1413,6 +1507,13 @@ for (const f of process.argv.slice(1)) {
       }
     }
   })(ast.fragment, "");
+  // Naming the callee raises the bar but does not close it on its own: the
+  // name can be bound to a snippet from another component. Requiring the
+  // declaration to be in THIS file is what actually forbids foreign markup,
+  // and it composes with `#each:` above, which catches the shadowing route.
+  for (const r of renders) {
+    if (!snippets.includes(r)) hits.push(`{@render ${r}} has no {#snippet ${r}} in this file`);
+  }
   const base = f.split("/").pop();
   const want = SIG[base] || [];
   if (JSON.stringify(sig) !== JSON.stringify(want)) {
@@ -1435,7 +1536,8 @@ process.exit(bad);
   src/components/items/PageItem.svelte src/components/items/VideoItem.svelte \
   src/components/items/InteractiveAppItem.svelte src/components/items/UnsupportedItem.svelte \
   src/components/items/quiz/NumericQuestion.svelte \
-  src/components/items/quiz/TextQuestion.svelte || fail=1
+  src/components/items/quiz/TextQuestion.svelte \
+  src/components/course/CourseCard.svelte || fail=1
 im=(${(f)"$(grep -ohE '\.item-mark\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 ic=(${(f)"$(grep -ohE '\.icon\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#im[@]} -ne 1 || ${#ic[@]} -ne 1 ]]; then
