@@ -6,7 +6,8 @@
   // {@html} block with rewriteExternalLinks effect (L1/M1/M7), group context
   // (3 branches per spec §6 step 3 — D4 + F10), submission history block
   // (DESC, D15 Late-pill sibling-of-h3), and fetch-error full-page banner
-  // (spec §6 step 7 — 403 / 404 / generic).
+  // (spec §6 step 7 — 403 / 404 / generic); Slice-4 (2026-09-06) restyled
+  // every D5 block to artboard 9c.
   //
   // D6 owns: submit / resubmit section, the 4-state submit machine (C15),
   // client-side guard rails (.pdf + MAX_FILE_SIZE), error mapping per status
@@ -29,6 +30,9 @@
   } from '../lib/studentMiniProjects';
   import type { StudentMiniProjectDetail } from '../lib/types';
   import StatusPill from '../components/course/StatusPill.svelte';
+  import Skeleton from '../components/ui/Skeleton.svelte';
+  import ErrorState from '../components/ui/ErrorState.svelte';
+  import Button from '../components/ui/Button.svelte';
   import { currentCourse, loadCourse } from '../stores/currentCourse.svelte';
   import { pushToast } from '../stores/toasts.svelte';
   import { navigate } from '../lib/router.svelte';
@@ -185,6 +189,25 @@
   const titleForHeading = $derived.by(() => {
     if (!data) return '';
     return data.block_title.trim() || 'Untitled block';
+  });
+
+  // Deadline row (Slice-4 §3.2): the resubmission line takes prominence in a
+  // revision state (the former :429 predicate); the row itself renders only
+  // when it would have content.
+  //
+  // `$derived.by` and not a bare `$derived(expr)`: `data` is declared
+  // `let data: StudentMiniProjectDetail | null = $state(null)`, so TS narrows it
+  // to `null` at the declaration site and every later assignment happens inside
+  // a closure it does not follow — a top-level `data !== null && data.x` then
+  // narrows to `never` (3 svelte-check errors). Reading `data` inside a closure
+  // restores the annotation, which is why every other derived in this file uses
+  // `.by` (`titleForHeading`, `fetchErrorMessage`, `orderedMembers`).
+  const showResub = $derived.by(() => {
+    if (data === null) return false;
+    return (
+      data.resubmission_deadline !== null &&
+      (data.latest_status === 'major_revision' || data.latest_status === 'minor_revision')
+    );
   });
 
   // Deadline summary text. Resubmission deadline takes prominence when the
@@ -404,152 +427,165 @@
   <div class="sr-only" aria-live="polite" data-testid="sr-live">Status: {statusLiveLabel}</div>
 
   {#if isLoading}
-    <p>Loading…</p>
+    <Skeleton rows={4} />
   {:else if fetchErrorMessage !== null}
-    <div class="banner banner-error" data-testid="fetch-error-banner">
-      <h1>Mini-project unavailable</h1>
-      <p>{fetchErrorMessage}</p>
-      <button type="button" onclick={() => navigate(`/courses/${courseSlug}`)}>
-        Back to course
-      </button>
+    <div data-testid="fetch-error-banner">
+      <ErrorState variant="page" title="Mini-project unavailable" message={fetchErrorMessage}>
+        {#snippet action()}
+          <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
+        {/snippet}
+      </ErrorState>
     </div>
   {:else if data}
     <header>
       <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a href="/courses">&lt; Courses</a>
-        <span class="sep"> › </span>
+        <a href="/courses">Courses</a>
+        <span class="sep" aria-hidden="true">/</span>
         <a href="/courses/{courseSlug}">{currentCourse.value?.course.name ?? '<Course Name>'}</a>
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="current" aria-current="page">{titleForHeading}</span>
       </nav>
       <div class="title-row">
-        <h1>{titleForHeading} — Mini-project</h1>
+        <h1>Mini-project — {titleForHeading}</h1>
         <StatusPill status={data.latest_status} />
       </div>
-
-      <div class="deadlines">
-        {#if data.resubmission_deadline && (data.latest_status === 'major_revision' || data.latest_status === 'minor_revision')}
-          <p class="deadline deadline-resub">
-            <strong>Resubmission deadline:</strong>
-            {formatRelativeDeadline(data.resubmission_deadline)}
-          </p>
-        {:else if data.hard_deadline}
-          <p class="deadline deadline-hard">
-            <strong>Hard deadline:</strong>
-            {formatRelativeDeadline(data.hard_deadline)}
-          </p>
-        {/if}
-        {#if data.soft_deadline}
-          <p class="deadline deadline-soft">(Soft deadline: {formatLocalWithTz(data.soft_deadline)})</p>
-        {/if}
-      </div>
+      {#if showResub || data.hard_deadline !== null || data.soft_deadline !== null}
+        <div class="deadlines">
+          <!-- `&& data.resubmission_deadline !== null` narrows for TS; showResub already implies it. -->
+          {#if showResub && data.resubmission_deadline !== null}
+            <p class="deadline deadline-resub"><strong>Resubmission deadline</strong> · {formatRelativeDeadline(data.resubmission_deadline)}</p>
+          {:else if data.hard_deadline !== null}
+            <p class="deadline deadline-hard"><strong>Hard deadline</strong> · {formatRelativeDeadline(data.hard_deadline)}</p>
+          {/if}
+          {#if data.soft_deadline !== null}
+            <p class="deadline-soft mono">soft deadline · {formatLocalWithTz(data.soft_deadline)}</p>
+          {/if}
+        </div>
+      {/if}
     </header>
 
-    <!-- L1 + M1: bind:this and {@html} on the SAME div; data-testid is the test seam. -->
-    <div class="assignment-html" data-testid="assignment-html" bind:this={assignmentEl}>
-      {@html data.assignment_html}
-    </div>
-
-    <!-- F10: `.group-disabled` class wraps when is_disabled is true. -->
-    <section class="group-block" class:group-disabled={data.group?.is_disabled}>
-      <h2>Group</h2>
-      {#if data.group === null}
-        <!-- D4 friendly banner. -->
-        <p class="group-pending">
-          You're not yet assigned to a group. Once your teacher assigns you, you'll be able to submit.
-        </p>
-      {:else if data.group.members.length === 1}
-        {@const me = data.group.members[0]}
-        <p>Group {data.group.name}: You ({me.full_name}) — you're the only member so far.</p>
-      {:else}
-        <p>
-          Group {data.group.name}:
-          {#each orderedMembers as m, i (m.user_id)}{#if i > 0}, {/if}{m.full_name}{m.is_me ? ' (you)' : ''}{/each}
-        </p>
-      {/if}
-      {#if data.group?.is_disabled}
-        <p class="group-disabled-notice">This group is disabled — contact your teacher.</p>
-      {/if}
+    <section class="assignment">
+      <h2>Assignment</h2>
+      <!-- L1 + M1: bind:this and {@html} on the SAME div; data-testid is the test seam. -->
+      <div class="assignment-html" data-testid="assignment-html" bind:this={assignmentEl}>
+        {@html data.assignment_html}
+      </div>
     </section>
 
-    <!-- D6 — submit / resubmit section. Renders ONLY when the group is
-         assigned AND can_submit has been resolved (true OR false with a
-         reason). When can_submit=false, render the reason banner only —
-         no file picker, no submit button. -->
-    {#if data.group !== null && data.can_submit !== null}
-      <section class="submit-block" data-testid="mp-submit-section">
-        {#if data.can_submit === true}
-          <h2>{submitHeading}</h2>
-          <input
-            type="file"
-            accept="application/pdf"
-            data-testid="mp-file-input"
-            disabled={submitState === 'submitting'}
-            onchange={handleFileChange}
-            bind:this={fileInputEl}
-          />
-          <button
-            type="button"
-            data-testid="mp-submit-btn"
-            disabled={!canSubmitClick}
-            onclick={handleSubmit}
-          >
-            {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
-          </button>
-          {#if submitState === 'error' && submitErrorMessage !== null}
-            <div class="banner banner-error" data-testid="mp-submit-error">
-              <p>{submitErrorMessage}</p>
-              {#if submitErrorIsNetwork}
-                <button
-                  type="button"
-                  data-testid="mp-retry-btn"
-                  onclick={handleSubmit}
-                >Retry</button>
-              {/if}
-            </div>
-          {/if}
-        {:else if data.can_submit_reason_if_not !== null}
-          <div class="banner banner-info" data-testid="mp-cannot-submit">
-            {REASON_LABELS[data.can_submit_reason_if_not]}
-          </div>
+    <div class="grid2">
+      <section class="group-block">
+        <h2>Your group</h2>
+        {#if data.group === null}
+          <!-- D4 friendly banner. -->
+          <p class="members">You're not yet assigned to a group. Once your teacher assigns you, you'll be able to submit.</p>
+        {:else if data.group.members.length === 1}
+          {@const me = data.group.members[0]}
+          <p class="members">Group {data.group.name} — <strong>{me.full_name} (you)</strong> — you're the only member so far.</p>
+        {:else}
+          <p class="members">
+            Group {data.group.name} —
+            {#each orderedMembers as m, i (m.user_id)}{#if i > 0}{', '}{/if}{#if m.is_me}<strong>{m.full_name} (you)</strong>{:else}{m.full_name}{/if}{/each}
+          </p>
+        {/if}
+        {#if data.group?.is_disabled}
+          <!-- The disabled meaning is carried by this line alone (Constraint 2: no opacity dim). -->
+          <p class="group-notice">This group is disabled — contact your teacher.</p>
         {/if}
       </section>
-    {/if}
+
+      <!-- D6 — submit / resubmit section. Renders ONLY when the group is
+           assigned AND can_submit has been resolved (true OR false with a
+           reason). When can_submit=false, render the reason banner only —
+           no file picker, no submit button. -->
+      {#if data.group !== null && data.can_submit !== null}
+        <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
+          {#if data.can_submit === true}
+            <h2>{submitHeading}</h2>
+            <input
+              type="file"
+              accept="application/pdf"
+              data-testid="mp-file-input"
+              disabled={submitState === 'submitting'}
+              onchange={handleFileChange}
+              bind:this={fileInputEl}
+            />
+            <button
+              type="button"
+              data-testid="mp-submit-btn"
+              disabled={!canSubmitClick}
+              onclick={handleSubmit}
+            >
+              {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
+            </button>
+            {#if submitState === 'error' && submitErrorMessage !== null}
+              <div class="banner banner-error" data-testid="mp-submit-error">
+                <p>{submitErrorMessage}</p>
+                {#if submitErrorIsNetwork}
+                  <button
+                    type="button"
+                    data-testid="mp-retry-btn"
+                    onclick={handleSubmit}
+                  >Retry</button>
+                {/if}
+              </div>
+            {/if}
+          {:else if data.can_submit_reason_if_not !== null}
+            <div class="banner banner-info" data-testid="mp-cannot-submit">
+              {REASON_LABELS[data.can_submit_reason_if_not]}
+            </div>
+          {/if}
+        </section>
+      {/if}
+    </div>
 
     {#if data.submission_history.length > 0}
       <section class="history">
         <h2>Submission history</h2>
         {#each data.submission_history as entry (entry.submission_id)}
           <section class="history-entry">
-            <!-- D15: the Late pill is a SIBLING of <h3>, not nested. -->
+            <!-- D15 (restated in Slice-4 enumerated 19): the Late pill is never inside <h3>;
+                 its parent is .pills, the h3's sibling. -->
             <div class="history-entry-header">
-              <h3>Submission #{entry.submission_number}</h3>
-              {#if entry.is_late}
-                <span
-                  class="pill pill-warning"
-                  title={data.soft_deadline
-                    ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
-                    : 'Submitted past the soft deadline'}
-                >Late</span>
+              <h3>Submission <span class="mono">{entry.submission_number}</span></h3>
+              <span class="entry-meta mono">{formatLocalWithTz(entry.submitted_at)} · {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}</span>
+              <span class="pills">
+                {#if entry.is_late}
+                  <span
+                    class="pill pill-late"
+                    title={data.soft_deadline
+                      ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
+                      : 'Submitted past the soft deadline'}
+                  >Late</span>
+                {/if}
+                {#if entry.evaluation}
+                  <StatusPill status={entry.evaluation.result} />
+                {/if}
+              </span>
+            </div>
+            <div class="history-entry-body">
+              <div class="file">
+                <span class="file-kind mono" aria-hidden="true">PDF</span>
+                <span class="file-name">
+                  <span class="name">{entry.filename}</span>
+                  <span class="size mono">{formatFileSize(entry.file_size)}</span>
+                </span>
+                <a class="dl" href="/api/submissions/{entry.submission_id}/file" download title="Download" aria-label="Download {entry.filename}">
+                  <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="3" x2="8" y2="10.6"/><polyline points="4.8,7.6 8,10.8 11.2,7.6"/><line x1="3.4" y1="13" x2="12.6" y2="13"/></svg>
+                </a>
+              </div>
+              {#if entry.evaluation}
+                {@const ev = entry.evaluation}
+                <div class="feedback {ev.result === 'rejected' ? 'rejected' : ev.result === 'accepted' ? 'accepted' : 'needs-revision'}">
+                  <!-- Separators as string expressions: Svelte trims whitespace at block edges, and a
+                       bare " · score " as the first node of the {#if} would lose its leading space. -->
+                  <p class="feedback-meta">{evaluationResultLabel(ev.result)}{#if ev.score !== null}{' · score '}<span class="mono">{ev.score}/100</span>{/if}{' · '}{ev.evaluated_by_full_name}, <span class="mono">{formatLocalWithTz(ev.evaluated_at)}</span></p>
+                  <p class="feedback-text">{ev.feedback_text || 'No written feedback'}</p>
+                  {#if ev.has_feedback_file}
+                    <a class="feedback-file" href="/api/evaluations/{ev.eval_id}/feedback-file" download>Download feedback</a>
+                  {/if}
+                </div>
               {/if}
             </div>
-            <p>
-              By {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}
-              on {formatLocalWithTz(entry.submitted_at)}
-            </p>
-            <p>
-              File: {entry.filename} ({formatFileSize(entry.file_size)})
-              <a href="/api/submissions/{entry.submission_id}/file" download>Download</a>
-            </p>
-            {#if entry.evaluation}
-              {@const ev = entry.evaluation}
-              <p>
-                Evaluated: {evaluationResultLabel(ev.result)}{ev.score !== null ? ` — score ${ev.score}/100` : ''}
-              </p>
-              <p>By {ev.evaluated_by_full_name} on {formatLocalWithTz(ev.evaluated_at)}</p>
-              <p>Feedback: {ev.feedback_text || 'No written feedback'}</p>
-              {#if ev.has_feedback_file}
-                <a href="/api/evaluations/{ev.eval_id}/feedback-file" download>Download feedback</a>
-              {/if}
-            {/if}
           </section>
         {/each}
       </section>
@@ -558,25 +594,71 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+  .page { max-width: 800px; /* ref 1265-1266: 760px content column + 20px padding each side; reset.css:1 is border-box, so the outer max is 800 for the inner to be 760 */ margin: 0 auto; padding: 18px 20px 24px; /* ref 1265 */ }
+  header { display: flex; flex-direction: column; }
+  /* Breadcrumb — ref 1267. base.css paints links --primary; the crumbs read as chrome. */
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; /* ref 1267 */ flex-wrap: wrap; }
   .breadcrumb a { color: var(--muted); }
-  .breadcrumb .sep { color: var(--muted); }
-  .title-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-  .deadlines { color: var(--muted); }
-  .deadline { margin: 0; }
-  .deadline-resub strong { color: var(--warning, inherit); }
-  .assignment-html { margin: var(--space-3) 0; }
-  .group-block { margin: var(--space-3) 0; padding: var(--space-2); border: 1px solid var(--border, #ddd); border-radius: 4px; }
-  .group-disabled { opacity: 0.7; }
-  .group-disabled-notice { color: var(--warning, #b85c00); margin: var(--space-1) 0 0 0; }
-  .history { margin-top: var(--space-3); }
-  .history-entry { margin: var(--space-2) 0; padding: var(--space-2); border: 1px solid var(--border, #ddd); border-radius: 4px; }
-  .history-entry-header { display: flex; align-items: center; gap: var(--space-2); }
-  .history-entry-header h3 { margin: 0; }
+  .breadcrumb .sep { color: var(--faint); /* ref 1267 — separators are the token's documented role */ }
+  .breadcrumb .current { color: var(--text); }
+  .title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; /* ref 1268 */ flex-wrap: wrap; /* 320px viewports: a long block title + the nowrap pill need it */ }
+  .title-row h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; /* 5(c): a long unbreakable title shrinks instead of pushing the pill out (PageItem.svelte:80 precedent) */ }
+  .deadlines { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; /* ref 1272 */ flex-wrap: wrap; /* 5(b): the mono aside drops under the sentence at narrow widths */ }
+  .deadline { font-size: 12.5px; color: var(--muted); margin: 0; /* ref 1273 */ }
+  .deadline strong { font-weight: 600; }
+  .deadline-resub { color: var(--status-needs-revision-fg); /* ref 1273 — the one amber: names the revision the student must act on */ }
+  .deadline-soft { font-size: 11.5px; color: var(--muted); margin: 0; /* ref 1274 */ }
+  /* Assignment card — ref 1277-1280. Content typography is the assignment SUBSET of
+     PageItem's block (paragraphs, list, link, code); headings/pre/img are not copied. */
+  .assignment { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 16px 18px; margin-bottom: 14px; /* ref 1277 */ }
+  .assignment h2 { font-size: 14px; margin: 0 0 8px; /* ref 1278 */ }
+  .assignment-html { overflow-wrap: anywhere; /* PageItem.svelte:80 precedent */ }
+  .assignment-html :global(p) { font-size: 14px; line-height: 1.65; color: var(--text-2); margin: 0 0 10px; /* ref 1279 */ }
+  .assignment-html :global(p:last-child) { margin-bottom: 0; /* ref 1280 */ }
+  .assignment-html :global(a) { color: var(--primary); }
+  .assignment-html :global(ul), .assignment-html :global(ol) { padding-left: var(--space-4); margin: 0 0 10px; }
+  .assignment-html :global(ul > li) { list-style: disc; /* reset.css:16 strips markers (PageItem.svelte:99-100 split form) */ }
+  .assignment-html :global(ol > li) { list-style: decimal; }
+  .assignment-html :global(code) { font-family: var(--font-mono); }
+  /* Group + submit grid — ref 1283-1285. auto-fit collapses to one column under ~600px (5(b)). */
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 14px; margin-bottom: 14px; /* ref 1283; 5(c): min(280px, 100%) so the track never exceeds the container — at the spec's 320px test width the content box is exactly 280px, the bare floor, and any pixel shaved off it (a classic scrollbar) would overflow the page */ }
+  .group-block, .submit-block { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; /* ref 1284 */ }
+  .group-block h2, .submit-block h2 { font-size: 13px; margin: 0 0 8px; /* ref 1285 */ }
+  .members { font-size: 13px; line-height: 1.7; color: var(--text-2); margin: 0; /* ref 1286 */ }
+  .group-notice { font-size: 12.5px; color: var(--text-3); margin: 6px 0 0; /* 5(b): the hint scale; `.notice` is scoped in InteractiveAppItem, hence the name */ }
+  /* Submission history — ref 1297-1332, D6 uniform card per entry. */
+  .history h2 { font-size: 14px; margin: 0 0 10px; /* ref 1297 */ }
+  .history-entry { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; margin-bottom: 10px; /* ref 1298 */ }
+  .history-entry:last-child { margin-bottom: 0; }
+  .history-entry-header { display: flex; align-items: center; gap: 9px; padding: 9px 12px; /* ref 1299 */ background: var(--surface-2); border-bottom: 1px solid var(--border-soft); /* #E9EBEF → --border-soft (spec substitution table: the exact-hex token is a state token) */ flex-wrap: wrap; }
+  .history-entry-header h3 { font-size: 13px; margin: 0; /* ref 1300 */ }
+  .entry-meta { font-size: 11.5px; color: var(--muted); /* ref 1301; `.meta` is scoped in CourseCard/QuizItem, hence the name */ }
+  .pills { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1302 */ }
+  /* Late pill — ref 1320 geometry (StatusPill's ref-1112 scale); GREY per D3, not the artboard's amber:
+     "needs revision" is the only amber in the product (mathion-visual-spec.md:132-133). */
+  .pill-late { padding: 3px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 500; white-space: nowrap; background: var(--status-not-submitted-bg); color: var(--status-not-submitted-fg); }
+  .history-entry-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; /* ref 1304 */ }
+  .file { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-3); /* ref 1305 — #FCFCFD exact */ }
+  .file-kind { display: flex; align-items: center; justify-content: center; width: 32px; height: 28px; border-radius: 4px; /* ref 1306 */ background: var(--surface-2); /* #F0F1F4 → --surface-2 (substitution table: a background wants a surface token) */ font-size: 9.5px; font-weight: 600; color: var(--muted); flex: 0 0 auto; }
+  .file-name { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; /* ref 1307 */ }
+  .file-name .name { font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+  .file-name .size { font-size: 11.5px; color: var(--muted); }
+  .dl { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-3); flex: 0 0 auto; /* ref 1308 */ }
+  .dl:hover { text-decoration: none; color: var(--text); }
+  /* Feedback block — ref 1310-1312. The rule colour is the result's pill BACKGROUND token
+     (the artboard's #FDECC8 is the pill background, not its text); the --border default is
+     unreachable (every result maps to one of the three) and exists so the rule is never colourless. */
+  .feedback { border-left: 3px solid var(--border); padding: 2px 0 2px 11px; display: flex; flex-direction: column; gap: 5px; /* ref 1310 */ }
+  .feedback.needs-revision { border-color: var(--status-needs-revision-bg); }
+  .feedback.rejected { border-color: var(--status-rejected-bg); }
+  .feedback.accepted { border-color: var(--status-accepted-bg); }
+  .feedback-meta { font-size: 12.5px; color: var(--muted); margin: 0; /* ref 1311 */ }
+  .feedback-text { font-size: 13px; line-height: 1.6; color: var(--text-2); text-wrap: pretty; margin: 0; /* ref 1312 */ }
+  .feedback-file { font-size: 12.5px; /* 5(b): a text link at the meta scale — no artboard counterpart */ }
+  /* T4 replaces the two rules below together with the submit section's inner markup (spec §3.9);
+     kept here so the relocated section renders correctly between the T3 and T4 commits. */
   .banner-error { padding: var(--space-3); border: 1px solid var(--danger, #c33); border-radius: 4px; background: var(--danger-bg, #fee); }
   .banner-info { padding: var(--space-2); border: 1px solid var(--info, #ccd); border-radius: 4px; background: var(--info-bg, #eef); margin-top: var(--space-2); }
-  .submit-block { margin: var(--space-3) 0; padding: var(--space-2); border: 1px solid var(--border, #ddd); border-radius: 4px; }
   /* C16 — visually-hidden but reachable by screen readers. */
   .sr-only {
     position: absolute;

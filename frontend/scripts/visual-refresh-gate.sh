@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=312
+EXPECTED_CHECKS=434
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -433,6 +433,21 @@ GLOBAL_ALLOW = {
     # question renders inside SequencePlayer. It kills the last row hairline that
     # would otherwise double up against the card border.
     ('src/components/course/BlockGroup.svelte', '.row'),
+    # Slice-4 T3. The mini-project assignment card's content typography (spec
+    # §3.3), every rule ancestor-scoped under `.assignment-html` — the page own
+    # {@html} container, which carries this component hash. None can reach
+    # Slice-3 T3: those questions render inside SequencePlayer QuizItem, and a
+    # mini-project detail page is a different route that renders no quiz at all.
+    # The list is the assignment SUBSET of PageItem block above (no headings,
+    # no pre, no img), so it also cannot widen what PageItem already froze.
+    ('src/pages/MiniProjectDetailPage.svelte', 'p'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'p:last-child'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'a'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'ul'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'ol'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'ul > li'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'ol > li'),
+    ('src/pages/MiniProjectDetailPage.svelte', 'code'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -3317,6 +3332,87 @@ fi
 # perl -0 strips MULTI-line HTML comments too (a line-based sed let a commented-out
 # button inside `<!--\n…\n-->` keep the guard green — T2 codex round 2).
 perl -0pe 's/<!--.*?-->//gs' src/pages/CourseView.svelte | grep -qE '>← Courses<' && echo "PASS  CourseView header button untouched (out of scope)" || { echo "FAIL  CourseView '← Courses' header button changed — out of Slice-4 scope"; fail=1 }
+
+echo
+echo "--- (s) Slice-4 T3 mini-project page (frame, header, assignment, group, history) ---"
+owners=(${(f)"$(grep -rlE '^[[:space:]]*\.history-entry-header[[:space:]]*[,{]' src --include='*.svelte')"})
+if [[ ${#owners[@]} -eq 1 && ${owners[1]:t} == 'MiniProjectDetailPage.svelte' ]]; then
+  echo "PASS  .history-entry-header is authored by MiniProjectDetailPage.svelte alone"
+else
+  echo "FAIL  .history-entry-header owner is not MiniProjectDetailPage.svelte alone (${#owners[@]}: $owners)"; fail=1
+fi
+mp=(${(f)"$(grep -ohE '\.history-entry-header\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#mp[@]} -ne 1 ]]; then
+  echo "FAIL  MP anchor not dist-unique (${#mp[@]}: $mp)"; fail=1
+else
+  echo "PASS  MP page resolves to one hash ($mp[1])"
+  N=MP; H=$mp[1]
+  d '\.page' '' 'max-width:800px' 'padding:18px 20px 24px'
+  d '\.breadcrumb' '' 'gap:8px' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin-bottom:10px' 'flex-wrap:wrap'
+  chk "\.breadcrumb\.${H} a:where\(\.${H}\)"        'color:var\(--muted\)'
+  chk "\.breadcrumb\.${H} \.sep:where\(\.${H}\)"     'color:var\(--faint\)'
+  chk "\.breadcrumb\.${H} \.current:where\(\.${H}\)" 'color:var\(--text\)'
+  d '\.title-row' '' 'gap:12px' 'margin-bottom:6px' 'flex-wrap:wrap'
+  chk "\.title-row\.${H} h1:where\(\.${H}\)" 'flex:1' 'min-width:0' 'overflow-wrap:anywhere'
+  d '\.deadlines' '' 'gap:14px' 'margin-bottom:18px' 'flex-wrap:wrap'
+  d '\.deadline' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin:0'
+  d '\.deadline-resub' '' 'color:var\(--status-needs-revision-fg\)'
+  d '\.deadline-soft' '' 'font-size:11\.5px'
+  d '\.assignment' '' 'padding:16px 18px' 'margin-bottom:14px' 'border:1px solid var\(--border\)'
+  chk "\.assignment\.${H} h2:where\(\.${H}\)" 'font-size:14px' 'margin:0 0 8px'
+  d '\.assignment-html' '' 'overflow-wrap:anywhere'
+  chk "\.assignment-html\.${H} p"            'font-size:14px' 'line-height:1\.65' 'color:var\(--text-2\)' 'margin:0 0 10px'
+  chk "\.assignment-html\.${H} p:last-child" 'margin-bottom:0'
+  chk "\.assignment-html\.${H} a"            'color:var\(--primary\)'
+  chk "\.assignment-html\.${H} ul>li"        'list-style:disc'
+  chk "\.assignment-html\.${H} ol>li"        'list-style:decimal'
+  chk "\.assignment-html\.${H} code"         'font-family:var\(--font-mono\)'
+  d '\.grid2' '' 'display:grid' 'grid-template-columns:repeat\(auto-fit,minmax\(min\(280px,100%\),1fr\)\)' 'gap:14px' 'margin-bottom:14px'
+  chk "\.group-block\.${H},\.submit-block\.${H}"  'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:14px 16px'
+  chk "\.group-block\.${H} h2:where\(\.${H}\),\.submit-block\.${H} h2:where\(\.${H}\)" 'font-size:13px' 'margin:0 0 8px'
+  d '\.members' '' 'font-size:13px' 'line-height:1\.7' 'color:var\(--text-2\)' 'margin:0'
+  d '\.group-notice' '' 'font-size:12\.5px' 'color:var\(--text-3\)' 'margin:6px 0 0'
+  chk "\.history\.${H} h2:where\(\.${H}\)" 'font-size:14px' 'margin:0 0 10px'
+  d '\.history-entry' '' 'overflow:hidden' 'margin-bottom:10px' 'border:1px solid var\(--border\)'
+  d '\.history-entry' ':last-child' 'margin-bottom:0'
+  chk "\.history-entry-header\.${H} h3:where\(\.${H}\)" 'font-size:13px' 'margin:0'
+  d '\.history-entry-header' '' 'gap:9px' 'padding:9px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border-soft\)' 'flex-wrap:wrap'
+  d '\.entry-meta' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.pills' '' 'margin-left:auto' 'gap:6px'
+  d '\.pill-late' '' 'padding:3px 8px' 'border-radius:var\(--radius-pill\)' 'font-size:11px' 'font-weight:500' 'white-space:nowrap' 'background:var\(--status-not-submitted-bg\)' 'color:var\(--status-not-submitted-fg\)'
+  none "MP Late pill is not amber (D3)"    "\.pill-late\.${H}\{[^}]*needs-revision"
+  d '\.history-entry-body' '' 'padding:12px' 'gap:10px'
+  d '\.file' '' 'gap:9px' 'padding:8px 10px' 'background:var\(--surface-3\)'
+  d '\.file-kind' '' 'width:32px' 'height:28px' 'border-radius:4px' 'background:var\(--surface-2\)' 'font-size:9\.5px' 'font-weight:600'
+  d '\.dl' '' 'width:24px' 'height:24px' 'border:1px solid var\(--border-strong\)' 'color:var\(--text-3\)'
+  d '\.feedback' '' 'border-left:3px solid var\(--border\)' 'padding:2px 0 2px 11px' 'gap:5px'
+  d '\.feedback\.needs-revision' '' 'border-color:var\(--status-needs-revision-bg\)'
+  d '\.feedback\.rejected' ''       'border-color:var\(--status-rejected-bg\)'
+  d '\.feedback\.accepted' ''       'border-color:var\(--status-accepted-bg\)'
+  d '\.file-name' '' 'flex:1' 'min-width:0'
+  chk "\.file-name\.${H} \.name:where\(\.${H}\)" 'font-size:12\.5px' 'color:var\(--text\)' 'overflow-wrap:anywhere'
+  chk "\.file-name\.${H} \.size:where\(\.${H}\)" 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.dl' ':hover' 'text-decoration:none' 'color:var\(--text\)'
+  d '\.feedback-meta' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.feedback-text' '' 'font-size:13px' 'line-height:1\.6' 'color:var\(--text-2\)' 'text-wrap:pretty'
+  # Constraint 1/2 deletions — paired with the positives above on the same hash.
+  # (The "no hex fallback in var()" none lives in section (t): .banner-error/.banner-info
+  #  keep theirs until T4, so it would be red here for a state the spec permits.)
+  # The anchor is `(^|[{}])[^{}]*\.${H}[^{]*\{`: ANY selector carrying the MP hash —
+  # class-first, element-first (`header.H{`), descendant, list, or at-block-wrapped.
+  # The earlier `\.[a-z0-9-]+\.${H}` form needed a leading class and let
+  # `header.H{opacity:.7}` through (T3 codex round 1). `[^{}]*` cannot cross a brace,
+  # so the scan still starts inside one rule's selector.
+  # The value class is DIM values only (`opacity:.7` / `opacity:0.5`), never a bare
+  # `opacity:0`: that is the sanctioned sr-only idiom (Global Constraint 2, Login.svelte:137
+  # — hiding a still-focusable control, not a disabled treatment), and T4's drop-zone input
+  # emits `.drop.H input:where(.H){…opacity:0…}`, which section (t) positively pins. The
+  # anchor spans descendant and compound selectors (`[^{]*` before the brace), so a dim on
+  # a nested rule or a selector list is caught too — a `\{`-only anchor was not (round-1 review).
+  none "MP no opacity dim (group-disabled gone)"     "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*opacity:0?\.[0-9]"
+  none "MP no --warning fallback"                    "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*var\(--warning"
+  none "MP no .group-disabled rule"                  "\.group-disabled(-notice)?\.${H}"
+fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
