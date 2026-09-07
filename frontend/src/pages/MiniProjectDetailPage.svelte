@@ -636,9 +636,13 @@
   header { display: flex; flex-direction: column; }
   /* Breadcrumb — ref 1267. base.css paints links --primary; the crumbs read as chrome. */
   .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; /* ref 1267 */ flex-wrap: wrap; }
-  .breadcrumb a { color: var(--muted); }
+  /* 5(c): the crumbs are flex items, and `min-width:auto` refuses to shrink below their
+     content — min-width:0 lets the cell shrink under a long unbroken course or block title
+     and overflow-wrap:anywhere lets the token itself break. Without the pair a 320px viewport
+     scrolls horizontally; the `.title-row h1` rule below is the same pairing for its sibling row. */
+  .breadcrumb a { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
   .breadcrumb .sep { color: var(--faint); /* ref 1267 — separators are the token's documented role */ }
-  .breadcrumb .current { color: var(--text); }
+  .breadcrumb .current { color: var(--text); min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
   .title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; /* ref 1268 */ flex-wrap: wrap; /* 320px viewports: a long block title + the nowrap pill need it */ }
   .title-row h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; /* 5(c): a long unbreakable title shrinks instead of pushing the pill out (PageItem.svelte:80 precedent) */ }
   .deadlines { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; /* ref 1272 */ flex-wrap: wrap; /* 5(b): the mono aside drops under the sentence at narrow widths */ }

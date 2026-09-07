@@ -986,11 +986,13 @@ describe('MiniProjectDetailPage 9c assignment + group (Slice-4 T3)', () => {
     expect(members!.querySelector('strong')!.textContent).toBe('Alice Student (you)');
   });
 
-  it('submit section is the grid second cell with its seam and inner controls intact (T4 restyles them)', async () => {
+  it("submit section is the grid's second direct child with its seam and inner controls", async () => {
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
     await mountPage();
     const submit = target.querySelector('[data-testid="mp-submit-section"]');
-    expect(submit!.closest('.grid2')).not.toBeNull();
+    // Position, not mere ancestry: `closest('.grid2')` stayed green with the cells swapped.
+    const grid = target.querySelector('.grid2');
+    expect(grid!.children[1]).toBe(submit);
     expect(submit!.classList.contains('can')).toBe(true);
     expect(submit!.querySelector('[data-testid="mp-file-input"]')).not.toBeNull();
   });
@@ -1165,6 +1167,11 @@ describe('MiniProjectDetailPage (Slice-4 T4 — submit card)', () => {
     vi.mocked(submit).mockResolvedValue(undefined);
     await mountPage();
     const zone = dropZone();
+    // Light the zone first — otherwise the post-drop `dragover` assertion below is
+    // vacuous (the class was never set) and could not see handleDrop dropping the clear.
+    zone.dispatchEvent(dropEvent('dragover'));
+    flushSync();
+    expect(zone.classList.contains('dragover')).toBe(true);
     const drop = dropEvent('drop', [makePdf('dropped.pdf'), makePdf('second.pdf')]);
     zone.dispatchEvent(drop);
     await settle();

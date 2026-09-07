@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=485
+EXPECTED_CHECKS=489
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3349,9 +3349,9 @@ else
   N=MP; H=$mp[1]
   d '\.page' '' 'max-width:800px' 'padding:18px 20px 24px'
   d '\.breadcrumb' '' 'gap:8px' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin-bottom:10px' 'flex-wrap:wrap'
-  chk "\.breadcrumb\.${H} a:where\(\.${H}\)"        'color:var\(--muted\)'
+  chk "\.breadcrumb\.${H} a:where\(\.${H}\)"        'color:var\(--muted\)' 'min-width:0' 'overflow-wrap:anywhere'
   chk "\.breadcrumb\.${H} \.sep:where\(\.${H}\)"     'color:var\(--faint\)'
-  chk "\.breadcrumb\.${H} \.current:where\(\.${H}\)" 'color:var\(--text\)'
+  chk "\.breadcrumb\.${H} \.current:where\(\.${H}\)" 'color:var\(--text\)' 'min-width:0' 'overflow-wrap:anywhere'
   d '\.title-row' '' 'gap:12px' 'margin-bottom:6px' 'flex-wrap:wrap'
   chk "\.title-row\.${H} h1:where\(\.${H}\)" 'flex:1' 'min-width:0' 'overflow-wrap:anywhere'
   d '\.deadlines' '' 'gap:14px' 'margin-bottom:18px' 'flex-wrap:wrap'
