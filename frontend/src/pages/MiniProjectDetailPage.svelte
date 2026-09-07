@@ -61,6 +61,10 @@
   let submitErrorMessage: string | null = $state(null);
   // Drives the Retry button on network/503 banners.
   let submitErrorIsNetwork = $state(false);
+  // Slice-4 D5 — drop-zone highlight. Drag handlers below cancel the browser's
+  // default FIRST and unconditionally (an uncancelled drop opens the file and
+  // navigates away), then gate everything else on not submitting.
+  let isDragOver = $state(false);
 
   // Single-flight guard shared by initial load + visibility-driven refetches.
   // The spec mandates "skip if already fetching" (line 805) — using one flag
@@ -280,14 +284,44 @@
     return selectedFile !== null && (submitState === 'idle' || submitState === 'error');
   });
 
-  function handleFileChange(e: Event): void {
-    const input = e.currentTarget as HTMLInputElement;
-    const f = input.files && input.files.length > 0 ? input.files[0] : null;
+  // Single entry point for a picked OR dropped file (D5): selectedFile is the
+  // one source of truth for what gets submitted; the .pdf / size guards run
+  // in handleSubmit, so both paths get them identically.
+  function acceptFile(f: File | null): void {
     selectedFile = f;
     // Spec line 781: picking a new file in 'error' does NOT clear the banner
     // or change state — the student may want to retry with the same file
     // after seeing the error. Only the transition out of 'success' is here.
     if (submitState === 'success') submitState = 'idle';
+  }
+
+  function handleFileChange(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    acceptFile(input.files && input.files.length > 0 ? input.files[0] : null);
+  }
+
+  function handleDragOver(e: DragEvent): void {
+    e.preventDefault();
+    if (submitState === 'submitting') return;
+    isDragOver = true;
+  }
+
+  function handleDragLeave(): void {
+    isDragOver = false;
+  }
+
+  function handleDrop(e: DragEvent): void {
+    e.preventDefault();
+    isDragOver = false;
+    if (submitState === 'submitting') return;
+    const f = e.dataTransfer?.files?.[0] ?? null;
+    if (f === null) return;   // a fileless drop (text, a URL) changes nothing
+    // An ACCEPTED drop clears the native input: after pick A → drop B, re-picking
+    // A must fire `change` (browsers suppress it for an identical stored value),
+    // else Submit would silently send B. Programmatic `.value = ''` fires no
+    // `change`, so this cannot re-enter acceptFile.
+    if (fileInputEl) fileInputEl.value = '';
+    acceptFile(f);
   }
 
   async function handleSubmit(): Promise<void> {
@@ -354,7 +388,7 @@
           return;
         }
         if (e.status === 503) {
-          submitErrorMessage = "Couldn't submit — retry?";
+          submitErrorMessage = "The upload didn't go through. Nothing has been lost — retrying sends the same file.";
           submitErrorIsNetwork = true;
           submitState = 'error';
           return;
@@ -370,7 +404,7 @@
         // Page tearing down — leave state alone, the unmount cleanup handles it.
         return;
       }
-      submitErrorMessage = "Couldn't submit — retry?";
+      submitErrorMessage = "The upload didn't go through. Nothing has been lost — retrying sends the same file.";
       submitErrorIsNetwork = true;
       submitState = 'error';
       return;
@@ -501,38 +535,42 @@
         <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
           {#if data.can_submit === true}
             <h2>{submitHeading}</h2>
-            <input
-              type="file"
-              accept="application/pdf"
-              data-testid="mp-file-input"
-              disabled={submitState === 'submitting'}
-              onchange={handleFileChange}
-              bind:this={fileInputEl}
-            />
-            <button
-              type="button"
-              data-testid="mp-submit-btn"
-              disabled={!canSubmitClick}
-              onclick={handleSubmit}
-            >
-              {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
-            </button>
+            <div class="submit-row">
+              <label
+                class="drop"
+                class:dragover={isDragOver}
+                class:has-file={selectedFile !== null}
+                ondragover={handleDragOver}
+                ondragleave={handleDragLeave}
+                ondrop={handleDrop}
+              >
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  data-testid="mp-file-input"
+                  disabled={submitState === 'submitting'}
+                  onchange={handleFileChange}
+                  bind:this={fileInputEl}
+                />
+                <span class="drop-label">{selectedFile !== null ? selectedFile.name : 'Drop a PDF or click to pick'}</span>
+              </label>
+              <Button
+                variant="primary"
+                disabled={!canSubmitClick}
+                loading={submitState === 'submitting'}
+                onclick={handleSubmit}
+                title={selectedFile === null && submitState !== 'submitting' ? 'Pick a PDF first' : undefined}
+              >
+                {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
+              </Button>
+            </div>
             {#if submitState === 'error' && submitErrorMessage !== null}
-              <div class="banner banner-error" data-testid="mp-submit-error">
-                <p>{submitErrorMessage}</p>
-                {#if submitErrorIsNetwork}
-                  <button
-                    type="button"
-                    data-testid="mp-retry-btn"
-                    onclick={handleSubmit}
-                  >Retry</button>
-                {/if}
+              <div class="submit-error" data-testid="mp-submit-error">
+                <ErrorState title="Couldn't submit" message={submitErrorMessage} onretry={submitErrorIsNetwork ? handleSubmit : undefined} />
               </div>
             {/if}
           {:else if data.can_submit_reason_if_not !== null}
-            <div class="banner banner-info" data-testid="mp-cannot-submit">
-              {REASON_LABELS[data.can_submit_reason_if_not]}
-            </div>
+            <div class="precondition" data-testid="mp-cannot-submit">{REASON_LABELS[data.can_submit_reason_if_not]}</div>
           {/if}
         </section>
       {/if}
@@ -626,6 +664,28 @@
   .group-block h2, .submit-block h2 { font-size: 13px; margin: 0 0 8px; /* ref 1285 */ }
   .members { font-size: 13px; line-height: 1.7; color: var(--text-2); margin: 0; /* ref 1286 */ }
   .group-notice { font-size: 12.5px; color: var(--text-3); margin: 6px 0 0; /* 5(b): the hint scale; `.notice` is scoped in InteractiveAppItem, hence the name */ }
+  /* Submit card, can submit — ref 1288-1293. The only card with an emphasised border: it is the one action on the page. */
+  .submit-block.can { border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); /* ref 1288 */ }
+  .submit-block.can h2 { margin-bottom: 9px; /* ref 1289 */ }
+  .submit-row { display: flex; align-items: center; gap: 9px; /* ref 1290 */ }
+  .drop { position: relative; /* anchors the absolutely-positioned hidden input (Login.svelte:134) */ flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; border: 2px dashed var(--border-strong); border-radius: var(--radius); padding: 4px 9px; font-size: 12.5px; color: var(--muted); /* ref 1291 */ cursor: pointer; }
+  .drop > * { pointer-events: none; /* 5(c): dragleave fires when the pointer crosses onto a child, which would blink the highlight between dragover ticks; with the children inert the label is the only drag target. Click-to-pick is unaffected — label activation reaches the input through label semantics, not hit-testing */ }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }        /* visually-hidden file input (sr-only, not a disabled treatment — Login.svelte:137 idiom) */
+  .drop.has-file .drop-label { color: var(--text); overflow-wrap: anywhere; /* a picked filename is content, not a hint */ }
+  .drop.dragover { border-color: var(--primary); background: var(--primary-soft); /* 5(b): the affordance the artboard cannot show */ }
+  .drop input:focus-visible { box-shadow: none; }                                                /* suppress the global :focus-visible glow (base.css:21-25) on the hidden input */
+  .drop:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }                 /* redraw it on the label */
+  /* Forced-colors drops background-color AND box-shadow: restore the focus ring and the
+     drag highlight with outlines (forced-colors keeps outlines). Highlight is a system colour
+     under Constraint 1's forced-colors exemption. */
+  @media (forced-colors: active) {
+    .drop:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+    .drop.dragover { outline: 2px dashed; }
+  }
+  .drop:has(input:disabled) { background: var(--bg); border-color: var(--border-faint); color: var(--faint); cursor: not-allowed; /* mathion-visual-spec.md:159 disabled recipe — tokens, no opacity */ }
+  .submit-error { margin-top: 10px; /* 5(b): the history body gap */ }
+  /* Precondition banner — mathion-visual-spec.md:289-293. */
+  .precondition { border-left: 3px solid var(--primary); background: var(--surface-2); padding: 14px 16px; /* 5(b): no artboard box for this banner — matches the inline-state row, ref 1378 */ font-size: 13px; line-height: 1.55; color: var(--text-3); /* ref 1373 */ border-radius: var(--radius); }
   /* Submission history — ref 1297-1332, D6 uniform card per entry. */
   .history h2 { font-size: 14px; margin: 0 0 10px; /* ref 1297 */ }
   .history-entry { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; margin-bottom: 10px; /* ref 1298 */ }
@@ -655,10 +715,6 @@
   .feedback-meta { font-size: 12.5px; color: var(--muted); margin: 0; /* ref 1311 */ }
   .feedback-text { font-size: 13px; line-height: 1.6; color: var(--text-2); text-wrap: pretty; margin: 0; /* ref 1312 */ }
   .feedback-file { font-size: 12.5px; /* 5(b): a text link at the meta scale — no artboard counterpart */ }
-  /* T4 replaces the two rules below together with the submit section's inner markup (spec §3.9);
-     kept here so the relocated section renders correctly between the T3 and T4 commits. */
-  .banner-error { padding: var(--space-3); border: 1px solid var(--danger, #c33); border-radius: 4px; background: var(--danger-bg, #fee); }
-  .banner-info { padding: var(--space-2); border: 1px solid var(--info, #ccd); border-radius: 4px; background: var(--info-bg, #eef); margin-top: var(--space-2); }
   /* C16 — visually-hidden but reachable by screen readers. */
   .sr-only {
     position: absolute;

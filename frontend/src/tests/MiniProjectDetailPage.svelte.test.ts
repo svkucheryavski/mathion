@@ -37,7 +37,7 @@ vi.mock('../lib/events', () => {
 });
 
 import { ApiError } from '../lib/api';
-import { fetchDetail, submit } from '../lib/studentMiniProjects';
+import { fetchDetail, submit, REASON_LABELS } from '../lib/studentMiniProjects';
 import { emitUnauthorized } from '../lib/events';
 import { currentCourse, __test__setSlots } from '../stores/currentCourse.svelte';
 import { formatFileSize } from '../lib/format';
@@ -374,7 +374,7 @@ async function pickFile(file: File): Promise<void> {
 }
 
 function clickSubmit(): void {
-  const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+  const btn = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary');
   if (!btn) throw new Error('expected submit button present');
   btn.click();
 }
@@ -403,16 +403,16 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     const pill = target.querySelector('header .pill');
     expect(pill?.textContent).toContain('Rejected');
     // Banner: none on success.
-    expect(target.querySelector('.banner-error')).toBeNull();
+    expect(target.querySelector('[data-testid="mp-submit-error"]')).toBeNull();
     // In 'success' state with no file selected, button is disabled.
-    const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    const btn = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary');
     if (!btn) throw new Error('expected submit button present');
     expect(btn.disabled).toBe(true);
 
     // Pick a new file → handleFileChange transitions 'success' → 'idle'.
     // The button must become ENABLED again (state=idle + selectedFile!=null).
     await pickFile(makePdf('again.pdf'));
-    const btn2 = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    const btn2 = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary');
     if (!btn2) throw new Error('expected submit button present after next pick');
     expect(btn2.disabled).toBe(false);
   });
@@ -444,12 +444,11 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     const banner = target.querySelector('[data-testid="mp-submit-error"]');
     if (!banner) throw new Error('expected 409 banner');
     // Byte-exact equality — copy drift would otherwise sneak through a
-    // substring match. The banner copy lives in a <p> child; query it
-    // directly so an incidental Retry button (none on 409, but defensive)
-    // can't bleed into the comparison.
-    const bannerP = banner.querySelector('p');
-    if (!bannerP) throw new Error('expected <p> inside 409 banner');
-    expect(bannerP.textContent?.trim()).toBe('Submission state changed — refreshing.');
+    // substring match. The banner is ErrorState inline: the title is a <p> too, so query .message
+    // directly — a <p> query would return the constant title.
+    const bannerMsg = banner.querySelector('.message');
+    if (!bannerMsg) throw new Error('expected .message inside 409 banner');
+    expect(bannerMsg.textContent?.trim()).toBe('Submission state changed — refreshing.');
 
     // Now resolve the pending refetch — state drops back to 'idle' and the
     // banner disappears.
@@ -459,7 +458,7 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     expect(vi.mocked(fetchDetail)).toHaveBeenCalledTimes(2);
     // Banner cleared.
     expect(target.querySelector('[data-testid="mp-submit-error"]')).toBeNull();
-    const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    const btn = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary');
     if (!btn) throw new Error('expected submit button present');
     // After 409 recovery: state → 'idle', file still selected → button enabled.
     expect(btn.disabled).toBe(false);
@@ -496,9 +495,17 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     const banner = target.querySelector('[data-testid="mp-submit-error"]');
     if (!banner) throw new Error('expected submit error banner');
     expect(banner.textContent).toContain("Couldn't submit");
-    const retryBtn = banner.querySelector<HTMLButtonElement>('button[data-testid="mp-retry-btn"]');
+    expect(banner.querySelector('.message')!.textContent).toBe("The upload didn't go through. Nothing has been lost — retrying sends the same file.");
+    const retryBtn = banner.querySelector<HTMLButtonElement>('.btn');
     if (!retryBtn) throw new Error('expected Retry button on 503');
     expect(retryBtn.textContent).toContain('Retry');
+    // Rendering Retry is not the contract — being wired to a real re-submit is.
+    // The mock rejects 503 every time, so the second attempt ends in the same
+    // banner; the assertion is the CALL COUNT, not the outcome.
+    retryBtn.click();
+    flushSync();
+    await settle();
+    expect(vi.mocked(submit)).toHaveBeenCalledTimes(2);
   });
 
   it('D6.5 network — same retry banner', async () => {
@@ -513,7 +520,8 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     const banner = target.querySelector('[data-testid="mp-submit-error"]');
     if (!banner) throw new Error('expected submit error banner');
     expect(banner.textContent).toContain("Couldn't submit");
-    expect(banner.querySelector('[data-testid="mp-retry-btn"]')).not.toBeNull();
+    expect(banner.querySelector('.message')!.textContent).toBe("The upload didn't go through. Nothing has been lost — retrying sends the same file.");
+    expect(banner.querySelector('.btn')).not.toBeNull();
   });
 
   it('D6.6 client non-PDF — banner shows + submit NOT called', async () => {
@@ -562,7 +570,7 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
     await settle();
 
     const input = target.querySelector<HTMLInputElement>('input[type="file"][data-testid="mp-file-input"]');
-    const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    const btn = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary');
     if (!input || !btn) throw new Error('expected submit controls present');
     expect(input.disabled).toBe(true);
     expect(btn.disabled).toBe(true);
@@ -643,7 +651,7 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
     expect(input.value).toBe('');
     // The submit button is disabled in 'success' state (canSubmitClick excludes
     // both 'submitting' and 'success').
-    const btn = target.querySelector<HTMLButtonElement>('button[data-testid="mp-submit-btn"]');
+    const btn = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary');
     if (!btn) throw new Error('expected submit button present');
     expect(btn.disabled).toBe(true);
   });
@@ -1073,5 +1081,172 @@ describe('MiniProjectDetailPage 9c history (Slice-4 T3)', () => {
     const back = err!.querySelector('.action .btn');
     expect(back!.textContent?.trim()).toBe('Back to course');
     expect(back!.classList.contains('secondary')).toBe(true);
+  });
+});
+
+// ---- Slice-4 T4 — drop zone (D5 / enumerated (A)1) ----
+
+function dropEvent(type: 'dragover' | 'dragleave' | 'drop', files: File[] = []): Event {
+  // jsdom has no DragEvent / DataTransfer constructor; a plain Event with a
+  // synthetic dataTransfer carries what the handlers read.
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'dataTransfer', {
+    configurable: true,
+    value: { files: Object.assign(files.slice(), { item: (i: number) => files[i] ?? null }) },
+  });
+  return e;
+}
+
+// jsdom throws InvalidStateError when a file input's `value` is set to a
+// non-empty string (the spec's "filename" mode); D6.10 works around it the same
+// way. After the defineProperty fallback the production `fileInputEl.value = ''`
+// writes the own data property, which is what the assertions read back.
+function setFileInputValue(input: HTMLInputElement, v: string): void {
+  try {
+    input.value = v;
+  } catch {
+    Object.defineProperty(input, 'value', { configurable: true, writable: true, value: v });
+  }
+  expect(input.value).toBe(v);
+}
+
+function dropZone(): HTMLLabelElement {
+  const z = target.querySelector<HTMLLabelElement>('label.drop');
+  if (!z) throw new Error('expected label.drop');
+  return z;
+}
+
+describe('MiniProjectDetailPage (Slice-4 T4 — submit card)', () => {
+  it('can-submit card: emphasised class, drop label wraps the input, Submit is a primary Button with the pick hint', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const section = target.querySelector('[data-testid="mp-submit-section"]')!;
+    expect(section.classList.contains('can')).toBe(true);
+    expect(section.querySelector('h2')!.textContent).toBe('Submit');
+    const zone = dropZone();
+    expect(zone.querySelector('input[type="file"][data-testid="mp-file-input"]')).not.toBeNull();
+    expect(zone.querySelector('.drop-label')!.textContent).toBe('Drop a PDF or click to pick');
+    expect(zone.classList.contains('has-file')).toBe(false);
+    const btn = section.querySelector<HTMLButtonElement>('.submit-row .btn.primary')!;
+    expect(btn.textContent?.trim()).toBe('Submit');
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute('title')).toBe('Pick a PDF first');
+    expect(section.querySelector('.banner-error, .banner-info')).toBeNull();
+  });
+
+  it('picking a file swaps the label for the filename and clears the hint', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    await pickFile(makePdf('thesis.pdf'));
+    const zone = dropZone();
+    expect(zone.classList.contains('has-file')).toBe(true);
+    expect(zone.querySelector('.drop-label')!.textContent).toBe('thesis.pdf');
+    const btn = target.querySelector<HTMLButtonElement>('.submit-row .btn.primary')!;
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('title')).toBeNull();
+  });
+
+  it('dragover lights the zone and is cancelled; dragleave clears it', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const zone = dropZone();
+    const over = dropEvent('dragover');
+    zone.dispatchEvent(over);
+    flushSync();
+    expect(over.defaultPrevented).toBe(true);
+    expect(zone.classList.contains('dragover')).toBe(true);
+    zone.dispatchEvent(dropEvent('dragleave'));
+    flushSync();
+    expect(zone.classList.contains('dragover')).toBe(false);
+  });
+
+  it('drop selects the first file through the same path as the picker and submits it', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    vi.mocked(submit).mockResolvedValue(undefined);
+    await mountPage();
+    const zone = dropZone();
+    const drop = dropEvent('drop', [makePdf('dropped.pdf'), makePdf('second.pdf')]);
+    zone.dispatchEvent(drop);
+    await settle();
+    expect(drop.defaultPrevented).toBe(true);
+    expect(zone.classList.contains('dragover')).toBe(false);
+    expect(zone.querySelector('.drop-label')!.textContent).toBe('dropped.pdf');
+    clickSubmit();
+    await settle();
+    expect(vi.mocked(submit)).toHaveBeenCalledTimes(1);
+    expect((vi.mocked(submit).mock.calls[0][1] as File).name).toBe('dropped.pdf');
+  });
+
+  it('a fileless drop is a no-op: keeps the earlier pick and the native input untouched', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    await pickFile(makePdf('kept.pdf'));
+    const input = target.querySelector<HTMLInputElement>('[data-testid="mp-file-input"]')!;
+    setFileInputValue(input, 'sentinel.pdf');
+    dropZone().dispatchEvent(dropEvent('drop', []));
+    await settle();
+    expect(dropZone().querySelector('.drop-label')!.textContent).toBe('kept.pdf');
+    expect(input.value).toBe('sentinel.pdf');
+  });
+
+  it('pick A → drop B → re-pick A submits A (an accepted drop clears the native input, D5)', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    vi.mocked(submit).mockResolvedValue(undefined);
+    await mountPage();
+    await pickFile(makePdf('a.pdf'));
+    const input = target.querySelector<HTMLInputElement>('[data-testid="mp-file-input"]')!;
+    setFileInputValue(input, 'a.pdf');                      // what a browser stores after the pick
+    dropZone().dispatchEvent(dropEvent('drop', [makePdf('b.pdf')]));
+    await settle();
+    expect(input.value).toBe('');                           // cleared → the re-pick of a.pdf will fire change
+    expect(dropZone().querySelector('.drop-label')!.textContent).toBe('b.pdf');
+    await pickFile(makePdf('a.pdf'));
+    clickSubmit();
+    await settle();
+    expect((vi.mocked(submit).mock.calls[0][1] as File).name).toBe('a.pdf');
+  });
+
+  it('while submitting: drop is cancelled but discarded, and dragover does not light the zone', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    let resolveSubmit: () => void = () => {};
+    vi.mocked(submit).mockReturnValue(new Promise<void>((res) => { resolveSubmit = res; }));
+    await mountPage();
+    await pickFile(makePdf('first.pdf'));
+    clickSubmit();
+    await settle();
+    const zone = dropZone();
+    const over = dropEvent('dragover');
+    zone.dispatchEvent(over); flushSync();
+    expect(over.defaultPrevented).toBe(true);
+    expect(zone.classList.contains('dragover')).toBe(false);
+    const drop = dropEvent('drop', [makePdf('late.pdf')]);
+    zone.dispatchEvent(drop); await settle();
+    expect(drop.defaultPrevented).toBe(true);
+    expect(zone.querySelector('.drop-label')!.textContent).toBe('first.pdf');
+    resolveSubmit(); await settle();
+  });
+
+  it('submit error renders the inline ErrorState with the constant title; network errors get Retry, guards do not', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    await pickFile(makeTxt());
+    clickSubmit(); await settle();
+    const err = target.querySelector('[data-testid="mp-submit-error"] .error-state.inline');
+    expect(err).not.toBeNull();
+    expect(err!.querySelector('.title')!.textContent).toBe("Couldn't submit");
+    expect(err!.querySelector('.message')!.textContent).toBe('Only PDF files are accepted.');
+    expect(err!.querySelector('.btn')).toBeNull();
+  });
+
+  it('cannot-submit: precondition banner replaces the card body, no heading, no controls', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation', latest_status: 'awaiting_evaluation' }));
+    await mountPage();
+    const section = target.querySelector('[data-testid="mp-submit-section"]')!;
+    expect(section.classList.contains('can')).toBe(false);
+    const pre = section.querySelector('.precondition[data-testid="mp-cannot-submit"]');
+    expect(pre).not.toBeNull();
+    expect(pre!.textContent?.trim()).toBe(REASON_LABELS.awaiting_evaluation);
+    expect(section.querySelector('h2')).toBeNull();
+    expect(section.querySelector('input, .btn')).toBeNull();
   });
 });

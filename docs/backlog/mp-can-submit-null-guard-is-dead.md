@@ -1,6 +1,6 @@
 ---
 worth: yes
-where: frontend/src/pages/MiniProjectDetailPage.svelte:500
+where: frontend/src/pages/MiniProjectDetailPage.svelte:534
 added: 2026-09-06
 ---
 # `data.can_submit !== null` is a dead comparison

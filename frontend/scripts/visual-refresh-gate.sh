@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=434
+EXPECTED_CHECKS=485
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3412,6 +3412,52 @@ else
   none "MP no opacity dim (group-disabled gone)"     "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*opacity:0?\.[0-9]"
   none "MP no --warning fallback"                    "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*var\(--warning"
   none "MP no .group-disabled rule"                  "\.group-disabled(-notice)?\.${H}"
+fi
+
+echo
+echo "--- (t) Slice-4 T4 submit card ---"
+mp=(${(f)"$(grep -ohE '\.history-entry-header\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#mp[@]} -ne 1 ]]; then
+  echo "FAIL  MP anchor not dist-unique (${#mp[@]}: $mp)"; fail=1
+else
+  N=MP; H=$mp[1]
+  d '\.submit-block\.can' '' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  chk "\.submit-block\.can\.${H} h2:where\(\.${H}\)" 'margin-bottom:9px'
+  d '\.submit-row' '' 'display:flex' 'align-items:center' 'gap:9px'
+  d '\.drop' '' 'position:relative' 'display:flex' 'align-items:center' 'gap:8px' 'flex:1' 'min-width:0' 'border:2px dashed var\(--border-strong\)' 'border-radius:var\(--radius\)' 'padding:4px 9px' 'font-size:12\.5px' 'color:var\(--muted\)' 'cursor:pointer'
+  # `.drop > *` — Svelte's scoping of the universal child is not pinned to one emitted form; the
+  # child part is absorbed with [^{]*, the .drop half stays hash-exact.
+  chk "\.drop\.${H}>[^{]*"                                       'pointer-events:none'
+  chk "\.drop\.${H} input:where\(\.${H}\)"                      'position:absolute' 'width:1px' 'height:1px' 'opacity:0' 'margin:-1px'
+  chk "\.drop\.has-file\.${H} \.drop-label:where\(\.${H}\)"   'color:var\(--text\)' 'overflow-wrap:anywhere'
+  d '\.drop\.dragover' '' 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
+  chk "\.drop\.${H} input:where\(\.${H}\):focus-visible"        'box-shadow:none'
+  chk "\.drop\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
+  FCM="@media \(forced-colors: ?active\)\{(\.[^{]*\{[^}]*\})*"
+  chk "${FCM}\.drop\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+  chk "${FCM}\.drop\.dragover\.${H}"                                 'outline:2px dashed'
+  chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)"    'background:var\(--bg\)' 'border-color:var\(--border-faint\)' 'color:var\(--faint\)' 'cursor:not-allowed'
+  none  "MP disabled drop uses no opacity"   "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)\{[^}]*opacity"
+  d '\.submit-error' '' 'margin-top:10px'
+  d '\.precondition' '' 'border-left:3px solid var\(--primary\)' 'background:var\(--surface-2\)' 'padding:14px 16px' 'font-size:13px' 'line-height:1\.55' 'color:var\(--text-3\)' 'border-radius:var\(--radius\)'
+  # Constraint 1: the last hex fallbacks left with .banner-error/.banner-info (paired with the positives above).
+  # Class-name and token-name char classes both admit digits: without them the check cannot see
+  # `.grid2{...}` as an anchor nor `var(--surface-2,#hex)` as a fallback, and its own mutation
+  # (re-introducing exactly that fallback) stayed green. Deviation from the brief, deliberate.
+  none  "MP no hex fallback in var() anywhere" "\.[a-z0-9-]+\.${H}[^{]*\{[^}]*var\(--[a-z0-9-]+,#"
+  # Bare hex anywhere in an MP-hashed rule: the MP page has no declaration inventory (unlike the
+  # Slice-3 components), so without this a `color:#c33` would be invisible to every other check.
+  # Comments never reach dist, so the sweep is on emitted declarations only (whole-branch review).
+  # Same selector-agnostic anchor as section (s)'s guards (T3 codex round 1).
+  none  "MP no bare hex in any declaration"   "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*:[^};]*#[0-9a-fA-F]{3}"
+  none  "MP .banner-error gone"               "\.banner-error\.${H}"
+  none  "MP .banner-info gone"                "\.banner-info\.${H}"
+  # Old markup must not linger in source either (strip comments first).
+  if sed 's#<!--.*-->##g' src/pages/MiniProjectDetailPage.svelte | grep -qE 'mp-submit-btn|mp-retry-btn|banner-(error|info)'; then
+    echo "FAIL  MiniProjectDetailPage.svelte still references mp-submit-btn / mp-retry-btn / banner-*"; fail=1
+  else
+    echo "PASS  MiniProjectDetailPage.svelte carries no pre-Slice-4 submit seams"
+  fi
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).
