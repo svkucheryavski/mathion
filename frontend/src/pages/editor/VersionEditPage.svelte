@@ -222,6 +222,14 @@
       pushToast('Block created', 'success');
     } catch (e) {
       const mapped = mapCreateError(e, ['title']);
+      // The form closed while the POST was in flight (a confirmed discard, a
+      // read-only flip): there is no form to show the error on, and writing it
+      // would resurface stale on the next open — toast it instead (as the
+      // accordions' create forms do).
+      if (!creating) {
+        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
+        return;
+      }
       createErrors = mapped.fieldErrors;
       createGlobalError = mapped.globalMessage
         ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);

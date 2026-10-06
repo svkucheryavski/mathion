@@ -134,3 +134,32 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
   an outline).
 - **The item type is not announced.** `ItemMark` is `aria-hidden`, so a screen reader hears the item title
   but not its type (the old emoji was `aria-hidden` too). A visually-hidden type word would fix it.
+
+## Final whole-branch review (both lanes)
+
+- **Focus falls to `<body>` after a 3b action.** Deleting the expanded block unmounts the trash button and the
+  page's focus effect has no header target at the version root; a successful create-block / create-sequence
+  unmounts the focused Title input (a create-item success navigates into the new item's editor by design). A
+  keyboard author restarts at the top of the page. Return focus to the owning `+` (create) or the Blocks
+  heading / next block header (delete). Extends the T2 item.
+- **N identical "Editing closed" toasts** on archive / disable with N dirty inline fields (the read-only flip
+  runs per field), after the author already confirmed "Unsaved edits may be lost." Dedupe or word it once.
+- **Create inputs lack `maxlength={200}`** (create-block, create-sequence, create-item Title) while the matching
+  inline fields have it; an over-long title round-trips to a Pydantic 422 message. Pre-existing.
+- **Every accordion expand / collapse prompts for an open dirty Version-info draft**, although the Version-info
+  card stays mounted and would keep it. D3 specifies this; revisit in the browser pass — likely surprising.
+- **Remaining selector-exact gate negatives** (same class as the (x)/(z) fixes): (v) `.inline-field.H:focus`
+  misses `.inline-field.open:focus` / `[role]:focus-visible`; (w) `.blocks-card.H{…margin-bottom}` misses the
+  `margin` shorthand and descendant forms; the three "no rem font sizes" checks miss element selectors
+  (`h5.H{font-size:1rem}`); InlineField `.sr-only` opacity misses compound forms and `sweep`'s
+  `opacity:0?\.[0-9]` misses an integer `opacity:0`; the legacy "rule gone" negatives (`.badge.H`, `.state-*.H`)
+  are exact (the hex sweep is the real Constraint-1 guard).
+- **Stale text.** `dirtyRegistry.svelte.ts:1-4` still describes per-form `makeDirtyTracker` getters registered on
+  mount (the editor now registers InlineField trackers and create-form shims while open);
+  `docs/backlog/flex-1-titles-may-collapse-to-zero-width.md` cites `ItemRow.svelte:99` and
+  `AccordionHeader.svelte:92` rules this slice rewrote — update or close those bullets.
+- **The read-only flip that closes an open create form is unpinned at page level.** Deleting
+  `VersionEditPage`'s `canStructure`-flip effect leaves the suite green; the accordions' twin effects are
+  covered only indirectly. One case — open the form, a publish lands, the form is gone — would pin it.
+- **Untested pre-existing 3a behaviours:** closing the duplicate row on a transition, and hiding the
+  "+ New version" EmptyState action while the create form is open.

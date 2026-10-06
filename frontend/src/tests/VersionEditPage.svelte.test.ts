@@ -345,6 +345,35 @@ describe('VersionEditPage — Blocks card (T4)', () => {
     expect(confirmSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('a create failure after a confirmed discard toasts and leaves no stale error for the next open', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'Title already taken' }, 409))
+      : undefined));
+    await render();
+    plus().click();
+    await settle();
+    const title = target.querySelector<HTMLInputElement>('.cr-form input')!;
+    title.value = 'Intro';
+    title.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    title.form!.requestSubmit();
+    await settle();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    expect(target.querySelector('.cr-form')).toBeNull();
+    release();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
+    plus().click();
+    await settle();
+    expect(target.querySelector<HTMLInputElement>('.cr-form input')!.value).toBe('');
+    expect(target.querySelector('.cr-form .field-err')).toBeNull();
+    expect(target.querySelector('.cr-form .form-err')).toBeNull();
+  });
+
   it('empty: "No blocks yet" on a created version, "This version has no blocks." otherwise', async () => {
     tree.blocks = [];
     await render();
