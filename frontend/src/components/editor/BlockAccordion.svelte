@@ -1,16 +1,19 @@
 <script lang="ts">
-  import { getContext, onDestroy } from 'svelte';
+  import { getContext, onDestroy, tick } from 'svelte';
   import AccordionHeader from './AccordionHeader.svelte';
   import SequenceAccordion from './SequenceAccordion.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
+  import { structureReason } from '../../lib/editorReasons';
+  import { labelFor } from '../../lib/labelFor';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import Button from '../ui/Button.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import type { AdminTreeBlock } from '../../lib/types';
 
   type Props = {
@@ -54,6 +57,8 @@
   const perms = $derived(version ? versionPermissions(version) : null);
   const canEdit = $derived(perms?.canEditTextFields ?? false);
   const canStructure = $derived(perms?.canEditStructure ?? false);
+  const structReason = $derived(version ? structureReason(version) : null);
+  const name = $derived(labelFor(block.title, block.slug, `block ${index}`));
 
   type Meta = { title: string; info: string };
   const tracker = makeDirtyTracker<Meta>({ title: block.title, info: block.info });
@@ -172,7 +177,7 @@
     // `busy || createBusy || parentBusy`, but a stale/programmatic click
     // could still call this. A second reorder while one is in flight would
     // see a pre-swap snapshot of block.sequences.
-    if (tracker.isDirty || busy || createBusy || parentBusy) return;
+    if (busy || createBusy || parentBusy) return;
     const seqs = [...block.sequences];
     const target = idx + dir;
     if (target < 0 || target >= seqs.length) return;
@@ -202,6 +207,7 @@
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
+  let titleEl = $state<HTMLInputElement>();
 
   // Tracker shim with synthesized isDirty — no reset()-on-keystroke.
   const createTracker: RegisteredTracker = {
@@ -229,14 +235,31 @@
     }
   });
 
-  function toggleCreate() {
+  async function toggleCreate() {
     // Defense-in-depth: refuse mid-flight toggles. The toggle button is
     // already disabled in these states, but a stale/programmatic click
     // would otherwise unmount the form during an in-flight POST,
     // discarding validation errors and unregistering the create tracker.
     if (createBusy || busy || parentBusy) return;
-    if (creating) { newTitle = ''; createErrors = {}; createGlobalError = null; }
-    creating = !creating;
+    if (creating) { newTitle = ''; createErrors = {}; createGlobalError = null; creating = false; return; }
+    creating = true;
+    await tick();
+    titleEl?.focus();
+  }
+
+  // The header `+` (ref 1568). On a collapsed block it first expands the block
+  // through the router (so the DirtyGuard prompt still applies), then opens
+  // the form only if the expansion actually landed — a cancelled prompt
+  // leaves everything unchanged.
+  async function onPlus() {
+    if (structReason || createBusy || busy || parentBusy) return;
+    if (expanded) { await toggleCreate(); return; }
+    await navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
+    await tick();
+    if (!expanded) return;
+    creating = true;
+    await tick();
+    titleEl?.focus();
   }
 
   async function submitCreate() {
@@ -278,14 +301,27 @@
     slug={block.slug}
     {index}
     {expanded}
-    dirty={tracker.isDirty}
+    badge={`B${index}`}
     busy={busy || createBusy || parentBusy}
-    canReorderUp={canStructure && index > 1}
-    canReorderDown={canStructure && index < blockCount}
+    structureReason={structReason}
+    canReorderUp={index > 1}
+    canReorderDown={index < blockCount}
     onToggle={toggle}
     {onMoveUp}
     {onMoveDown}
-  />
+  >
+    {#snippet extra()}
+      <IconButton
+        size="sm"
+        glyph={creating && expanded ? 'close' : 'plus'}
+        title={structReason ?? (creating && expanded ? 'Cancel new sequence' : 'New sequence')}
+        aria-label={`New sequence in ${name}`}
+        aria-expanded={creating && expanded}
+        disabled={!!structReason || busy || createBusy || parentBusy}
+        onclick={() => void onPlus()}
+      />
+    {/snippet}
+  </AccordionHeader>
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
@@ -301,21 +337,10 @@
       {/if}
 
       <section class="seqs">
-        <div class="head">
-          <h3>Sequences</h3>
-          {#if canStructure}
-            <Button
-              disabled={tracker.isDirty || busy || createBusy || parentBusy}
-              title={tracker.isDirty ? 'Save or discard changes first' : ''}
-              onclick={toggleCreate}
-            >{creating ? 'Cancel' : '+ New sequence'}</Button>
-          {/if}
-        </div>
-
         {#if creating}
           <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
             <div class="field">
-              <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+              <input bind:this={titleEl} placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
               {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
             </div>
             {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
@@ -371,7 +396,6 @@
   .meta label { display: block; margin: var(--space-2) 0; }
   .meta input, .meta textarea { width: 100%; }
   .row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .head { display: flex; justify-content: space-between; align-items: center; }
   .create { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
   .create input { width: 100%; }
   .create .field { display: flex; flex-direction: column; }

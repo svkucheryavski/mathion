@@ -84,3 +84,17 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
   `aria-describedby` / `aria-invalid`). Pre-existing.
 - **Unannotated literals.** `.cr-form { padding: 12px 0 }` and the `.state-actions` gap / margins carry no
   ref or scale comment (Constraint 5); only the `border-top` cites ref 1639.
+
+## T5a — accordion headers
+
+- **The block `+` busy-disable is untested.** Dropping `busy` from the `+`'s `disabled`, or the whole
+  `onPlus` guard line, leaves the suite green (each guard covers the other). The arrows have a "busy
+  disables" test; add one for the `+` (start a sequence reorder against an unresolved fetch, assert the
+  `+` is disabled, then resolve).
+- **Slug / code badge wrap at narrow widths.** `.slug` and `.code` have no `white-space: nowrap`, so a
+  hyphenated slug wraps onto a second line inside the toggle; the reference row is single-line.
+- **`onPlus`'s `await tick()` before the `expanded` check is belt-and-braces** — the `$derived` is
+  already fresh after `navigate`; removing it passes the suite. Keep or drop.
+- **Focus after `+` on a collapsed block depends on microtask order** (the page focus `$effect` runs one
+  hop before `onPlus`'s second `tick()`, so Title wins). Verified by a throwaway page-level probe; no
+  committed test pins it.

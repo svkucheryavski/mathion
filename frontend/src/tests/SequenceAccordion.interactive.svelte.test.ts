@@ -90,3 +90,28 @@ it('the type picker still offers interactive_app', () => {
   newBtn.click(); flushSync();
   expect(target.querySelector('input[value="interactive_app"]')).not.toBeNull();
 });
+
+it('on a published version the header arrows carry the structure reason (T5a)', () => {
+  currentEditorVersion.value = {
+    course: { id: 1, name: 'C', slug: 'c' }, version: { ...version, state: 'published' }, blocks: [block],
+  };
+  const target = mountAccordion();
+  for (const dir of ['up', 'down']) {
+    const b = target.querySelector<HTMLButtonElement>(`[aria-label="Move sequence ${dir}: Seq"]`)!;
+    expect(b.disabled).toBe(true);
+    expect(b.title).toBe('Only a created version can change its structure');
+  }
+});
+
+it('the header is an <h4> toggle with the S{index} badge; arrows render at the boundary (T5a)', () => {
+  const target = mountAccordion();
+  const toggle = target.querySelector<HTMLButtonElement>('#seq-2-header')!;
+  expect(toggle.parentElement!.tagName).toBe('H4');
+  expect(toggle.querySelector('.code')!.textContent).toBe('S1');
+  const up = target.querySelector<HTMLButtonElement>('[aria-label="Move sequence up: Seq"]')!;
+  const down = target.querySelector<HTMLButtonElement>('[aria-label="Move sequence down: Seq"]')!;
+  expect(up.disabled).toBe(true);
+  expect(up.title).toBe('Move up — already first');
+  expect(down.disabled).toBe(true);
+  expect(down.title).toBe('Move down — already last');
+});

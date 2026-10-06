@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=730
+EXPECTED_CHECKS=776
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3646,6 +3646,40 @@ if grep -qE '<Button variant="danger" disabled=\{busy\} onclick=\{deleteVersion\
   echo "PASS  VersionEditPage Delete uses Button variant=danger"
 else
   echo "FAIL  VersionEditPage Delete uses Button variant=danger"; fail=1
+fi
+
+echo
+echo "--- (x) Slice-5a T5a — accordion headers (3b) ---"
+own acc-row AccordionHeader.svelte
+uniq1 acc-row
+if [[ -n $REPLY ]]; then
+  N=AccordionHeader; H=$REPLY
+  d '\.acc-row' '' 'display:flex' 'align-items:center' 'gap:10px'
+  d '\.block' '' 'padding:9px 12px' 'background:var\(--surface-2\)'
+  d '\.block\.open' '' 'border-bottom:1px solid var\(--border\)'
+  # D10: only an EXPANDED block header carries the bottom edge; the sequence header none.
+  # Selector-agnostic (spec Testing): any rule whose subject is the bare collapsed `.block`
+  # (descendant / pseudo forms included) — `.block.open.H` is the one allowed edge.
+  none "AccordionHeader collapsed block header has no border" "(^|[{}])[^{}]*\.block\.${H}[^{]*\{[^}]*border"
+  d '\.seq' '' 'padding:8px 12px' 'background:var\(--surface\)'
+  none "AccordionHeader no border on any .seq rule, incl. .seq.open (D10)" "(^|[{}])[^{}]*\.seq(\.[a-z-]+)*\.${H}[^{]*\{[^}]*border"
+  none "AccordionHeader .acc-row carries no border" "(^|[{}])[^{}]*\.acc-row(\.[a-z-]+)*\.${H}[^{]*\{[^}]*border"
+  d '\.hd' '' 'margin:0' 'flex:1 1 auto' 'min-width:0' 'font:inherit'
+  d '\.toggle' '' 'display:flex' 'align-items:center' 'gap:10px' 'width:100%' 'padding:0' 'border:0' 'background:transparent' 'color:var\(--text\)' 'text-align:left' 'cursor:pointer'
+  none "AccordionHeader no hover background on any rule" "(^|[{}])[^{}]*\.${H}[^{]*:hover[^{]*\{[^}]*background"
+  d '\.code' '' 'font-size:11px' 'font-weight:500' 'color:var\(--primary\)' 'background:var\(--primary-soft\)' 'padding:2px 6px' 'border-radius:3px'
+  d '\.title' '' 'font-size:14px' 'font-weight:600'
+  chk "\.seq\.${H} \.title:where\(\.${H}\)" 'font-size:13\.5px'
+  d '\.slug' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
+  none "AccordionHeader pre-5a .accordion-row gone" "\.accordion-row\.${H}"
+  sweep AccordionHeader $H
+fi
+# Source: the old #f5f5f5 fallback and the ↑/↓ text glyphs are gone.
+if grep -qE '#f5f5f5|surface-hover|[↑↓]' src/components/editor/AccordionHeader.svelte; then
+  echo "FAIL  AccordionHeader no #f5f5f5 / --surface-hover / ↑↓ text glyphs"; fail=1
+else
+  echo "PASS  AccordionHeader no #f5f5f5 / --surface-hover / ↑↓ text glyphs"
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

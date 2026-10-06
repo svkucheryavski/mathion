@@ -7,6 +7,7 @@
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
+  import { structureReason } from '../../lib/editorReasons';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -57,6 +58,7 @@
   const perms = $derived(version ? versionPermissions(version) : null);
   const canEdit = $derived(perms?.canEditTextFields ?? false);
   const canStructure = $derived(perms?.canEditStructure ?? false);
+  const structReason = $derived(version ? structureReason(version) : null);
 
   type Meta = { title: string };
   const tracker = makeDirtyTracker<Meta>({ title: seq.title });
@@ -300,10 +302,11 @@
     slug={seq.slug}
     {index}
     {expanded}
-    dirty={tracker.isDirty}
+    badge={`S${index}`}
     busy={busy || createBusy || parentBusy}
-    canReorderUp={canStructure && index > 1}
-    canReorderDown={canStructure && index < sequenceCount}
+    structureReason={structReason}
+    canReorderUp={index > 1}
+    canReorderDown={index < sequenceCount}
     onToggle={toggle}
     {onMoveUp}
     {onMoveDown}
