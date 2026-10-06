@@ -79,3 +79,21 @@ Let's backlog it for the final stage." → polish slice.
 by default (only text fields and drop-downs stop). Use **Option+Tab**, or enable Safari >
 Settings > Advanced > "Press Tab to highlight each item on a webpage". This is not something
 the app can change; Chrome and Firefox reach buttons with plain Tab.
+
+## Addendum 2026-10-06 — Slice-5a focusables (D12)
+
+Slice 5a adds these focusables. Per the 2026-09-07 ruling none gets a per-control ring now; they all rely
+on the global rule, so the polish-slice fix must cover them:
+
+- `ui/IconButton.svelte` — every variant, including `round` and `primary` (a filled `--primary` button: an
+  outline ring needs `outline-offset` so it reads off the fill).
+- `ui/InlineField.svelte` — the open editor (its `--primary` border + `--primary-soft` halo marks the *open*
+  state, not focus) and the row container (`tabindex="-1"`, the focus-parking spot after a read-only flip;
+  deliberately unstyled).
+- `editor/AccordionHeader.svelte` — the title toggle button (the chevron is `tabindex="-1"`).
+- `pages/editor/VersionEditPage.svelte` — the `<h1>` course link.
+- The raw create-form inputs/textareas in `VersionsPage`, `VersionEditPage`, `BlockAccordion`,
+  `SequenceAccordion`, and the `VersionsPage` duplicate-row input.
+
+`editor/ItemTypePicker.svelte` is the D12 exception: it keeps its own inset `--primary` ring plus a
+forced-colors outline (the established Login / quiz-option idiom).

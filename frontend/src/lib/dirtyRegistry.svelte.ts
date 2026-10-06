@@ -11,8 +11,10 @@ import { SvelteSet } from 'svelte/reactivity';
 
 // Erased shape — the registry stores trackers across all form shapes.
 // The concrete tracker types still flow through their owning form; only
-// the registry needs to forget the parameter.
-export type RegisteredTracker = { readonly isDirty: boolean };
+// the registry needs to forget the parameter. `discard` (Slice-5a D3) drops
+// the tracker's draft when the user confirms the "Discard unsaved changes?"
+// prompt, so a confirmed discard never re-prompts on the next navigation.
+export type RegisteredTracker = { readonly isDirty: boolean; discard?: () => void };
 
 export const DIRTY_REGISTRY_KEY = Symbol('dirtyRegistry');
 
@@ -20,6 +22,7 @@ export type DirtyRegistry = {
   register(t: RegisteredTracker): void;
   unregister(t: RegisteredTracker): void;
   isAnyDirty(): boolean;
+  discardAll(): void;
 };
 
 export function createDirtyRegistry(): DirtyRegistry {
@@ -30,6 +33,11 @@ export function createDirtyRegistry(): DirtyRegistry {
     isAnyDirty() {
       for (const t of registry) if (t.isDirty) return true;
       return false;
+    },
+    discardAll() {
+      // Snapshot first: a discard closes its field, and that field's $effect
+      // cleanup unregisters the tracker — never mutate the set mid-iteration.
+      for (const t of [...registry]) if (t.isDirty) t.discard?.();
     },
   };
 }

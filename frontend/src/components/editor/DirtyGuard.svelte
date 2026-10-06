@@ -9,7 +9,9 @@
   import { onMount } from 'svelte';
   import { registerNavigationGuard } from '../../lib/router.svelte';
 
-  let { isDirty }: { isDirty: () => boolean } = $props();
+  // `onDiscard` (Slice-5a D3) runs after the user CONFIRMS the in-app prompt —
+  // never on beforeunload, which leaves the page anyway.
+  let { isDirty, onDiscard = undefined }: { isDirty: () => boolean; onDiscard?: () => void } = $props();
 
   function confirmDiscard(): boolean {
     return window.confirm('Discard unsaved changes and continue?');
@@ -18,7 +20,9 @@
   onMount(() => {
     const dispose = registerNavigationGuard(() => {
       if (!isDirty()) return true;
-      return confirmDiscard();
+      const ok = confirmDiscard();
+      if (ok) onDiscard?.();
+      return ok;
     });
     const onUnload = (e: BeforeUnloadEvent) => {
       if (!isDirty()) return;
