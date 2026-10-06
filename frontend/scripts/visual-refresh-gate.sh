@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=489
+EXPECTED_CHECKS=591
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3458,6 +3458,105 @@ else
   else
     echo "PASS  MiniProjectDetailPage.svelte carries no pre-Slice-4 submit seams"
   fi
+fi
+
+echo
+echo "--- (u) Slice-5a T2 — IconButton, EmptyState additions, VersionBadges, VersionsPage (3a) ---"
+# Slice-5a helpers (used by sections u-z):
+# own ANCHOR FILE — ANCHOR is authored as a top-level rule by FILE alone.
+own() {
+  local owners=(${(f)"$(grep -rlE "^[[:space:]]*\.${1}[[:space:]]*[,{.:]" src --include='*.svelte')"})
+  if [[ ${#owners[@]} -eq 1 && ${owners[1]:t} == $2 ]]; then
+    echo "PASS  .$1 is authored by $2 alone"
+  else
+    echo "FAIL  .$1 owner is not $2 alone (${#owners[@]}: $owners)"; fail=1
+  fi
+}
+# uniq1 ANCHOR — ANCHOR resolves to exactly one dist hash; the hash is left in REPLY ('' on failure).
+uniq1() {
+  local hs=(${(f)"$(grep -ohE "\.${1}\.svelte-[a-z0-9]+" $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+  if [[ ${#hs[@]} -eq 1 ]]; then
+    echo "PASS  .$1 resolves to one hash ($hs[1])"; REPLY=$hs[1]
+  else
+    echo "FAIL  .$1 not dist-unique (${#hs[@]}: $hs)"; fail=1; REPLY=''
+  fi
+}
+# sweep LABEL HASH — Constraints 1/2 over every emitted rule carrying HASH (the
+# section-(s)/(t) selector-agnostic anchors): no hex, no var() hex fallback, no opacity dim.
+sweep() {
+  none "$1 no bare hex in any declaration" "(^|[{}])[^{}]*\.${2}[^{]*\{[^}]*:[^};]*#[0-9a-fA-F]{3}"
+  none "$1 no opacity dim"                 "(^|[{}])[^{}]*\.${2}[^{]*\{[^}]*opacity:0?\.[0-9]"
+}
+
+own icon-btn IconButton.svelte
+uniq1 icon-btn
+if [[ -n $REPLY ]]; then
+  N=IconButton; H=$REPLY
+  d '\.icon-btn' '' 'display:inline-flex' 'border-radius:var\(--radius\)' 'border:1px solid var\(--border-strong\)' 'background:var\(--surface\)' 'color:var\(--muted\)' 'cursor:pointer'
+  d '\.sm' '' 'width:var\(--glyph-btn\)' 'height:var\(--glyph-btn\)'
+  d '\.md' '' 'width:28px' 'height:28px'
+  d '\.danger' '' 'color:var\(--danger\)'
+  d '\.borderless' '' 'border-color:transparent' 'background:transparent'
+  d '\.round' '' 'border-radius:50%'
+  d '\.primary' '' 'background:var\(--primary\)' 'color:var\(--primary-text\)' 'border-color:var\(--primary\)'
+  # The disabled rule must outrank .primary/.danger: it carries the extra :disabled pseudo-class.
+  d '\.icon-btn' ':disabled' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+  # ...and only while .primary/.danger stay BARE rules: a compound (`.icon-btn.primary`) or any
+  # pseudo/suffix form would reach (0,3,0) and could out-cascade the :disabled rule.
+  none "IconButton .primary/.danger are emitted only as bare rules (so :disabled outranks them)" "[^{},]\.(primary|danger)\.${H}|\.(primary|danger)\.${H}[^{]"
+  sweep IconButton $H
+fi
+
+# EmptyState: the hash section (q) derived (allem minus the run-tab exclusion set xh).
+emh=(${allem:|xh})
+if [[ ${#emh[@]} -eq 1 ]]; then
+  N=EmptyState; H=$emh[1]
+  d '\.tile' '' 'display:flex' 'width:38px' 'height:38px' 'border-radius:8px' 'background:var\(--surface-2\)' 'border:1px solid var\(--border\)' 'color:var\(--muted\)'
+  chk "\.tile\.${H} svg:where\(\.${H}\)" 'width:18px' 'height:18px'
+  d '\.hint' '' 'margin:0' 'font-size:13px' 'line-height:1\.5' 'max-width:44ch' 'color:var\(--muted\)'
+  d '\.action' '' 'margin-top:4px'
+  sweep EmptyState $H
+else
+  echo "FAIL  EmptyState hash not derivable for the Slice-5a additions (${#emh[@]}: $emh)"; fail=1
+fi
+
+own vbadge VersionBadges.svelte
+uniq1 vbadge
+if [[ -n $REPLY ]]; then
+  N=VersionBadges; H=$REPLY
+  d '\.vbadges' '' 'display:inline-flex' 'gap:6px'
+  d '\.vbadge' '' 'font-size:11px' 'font-weight:500' 'padding:3px 8px' 'border-radius:3px' 'white-space:nowrap'
+  d '\.created' '' 'background:var\(--state-created-bg\)' 'color:var\(--state-created-fg\)'
+  d '\.published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
+  d '\.archived' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
+  d '\.off' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  sweep VersionBadges $H
+fi
+
+own versions-head VersionsPage.svelte
+uniq1 versions-head
+if [[ -n $REPLY ]]; then
+  N=VersionsPage; H=$REPLY
+  d '\.heading' '' 'display:flex' 'align-items:center' 'gap:10px' 'margin-bottom:16px'
+  d '\.versions-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'margin-bottom:12px'
+  d '\.count' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.push' '' 'margin-left:auto'
+  d '\.vlist' '' 'list-style:none' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'overflow:hidden'
+  d '\.vrow' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:9px 12px 9px 14px' 'border-bottom:1px solid var\(--border-soft\)'
+  chk "\.vlist\.${H}>li:where\(\.${H}\):last-child" 'border-bottom:0'
+  d '\.vnum' '' 'font-size:13px' 'color:var\(--text\)'
+  d '\.vnum\.off' '' 'color:var\(--muted\)'
+  d '\.vlabel' '' 'font-size:13px' 'color:var\(--muted\)'
+  d '\.badges' '' 'margin-left:auto'
+  d '\.slots' '' 'display:flex' 'gap:6px' 'margin-left:22px'
+  d '\.dup-row' '' 'padding:9px 12px 9px 14px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border-soft\)'
+  none "VersionsPage pre-Slice-5a .badge rules gone" "\.badge\.${H}"
+  sweep VersionsPage $H
+fi
+if grep -q 'TODO(version-slice)' src/styles/theme-default.css; then
+  echo "FAIL  theme-default.css still carries the TODO(version-slice) note (D5)"; fail=1
+else
+  echo "PASS  theme-default.css TODO(version-slice) note removed (D5)"
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

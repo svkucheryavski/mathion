@@ -105,6 +105,4 @@
      contrast step below its neighbours while every element stays above 5.5:1.
      Opacity would composite the whole row — including live action glyphs —
      against the page and push the text to 2.7:1. */
-
-  /* TODO(version-slice): reconcile the disabled-version treatment with design — spec §4 prose uses --dimmed #6B7280; this reference deliberately omits --dimmed and uses --state-disabled-fg #5A616E. */
 }

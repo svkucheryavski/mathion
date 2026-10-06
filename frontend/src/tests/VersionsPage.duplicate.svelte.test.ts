@@ -76,6 +76,13 @@ function clickButtonByText(root: HTMLElement, text: string) {
   btn.click();
   flushSync();
 }
+// Slice-5a: row actions are icon buttons named by aria-label ("Duplicate v7").
+function clickByLabel(root: HTMLElement, label: string) {
+  const btn = root.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  if (!btn) throw new Error(`button [aria-label="${label}"] not found`);
+  btn.click();
+  flushSync();
+}
 
 describe('VersionsPage — Duplicate', () => {
   it('opens with a clamped prefill, POSTs the label, navigates on success', async () => {
@@ -87,10 +94,12 @@ describe('VersionsPage — Duplicate', () => {
     // label renders in the row (spec frontend requirement)
     expect(target.querySelector('.vlabel')?.textContent).toBe('Fall');
 
-    clickButtonByText(target, 'Duplicate');
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
     const input = target.querySelector<HTMLInputElement>('input.dup-label');
     if (!input) throw new Error('duplicate label input missing');
     expect(input.value).toBe('Copy of Fall');       // prefill
+    expect(document.activeElement).toBe(input);     // opening focuses the input
     expect(input.maxLength).toBe(200);
 
     input.value = 'My Copy';
@@ -108,7 +117,7 @@ describe('VersionsPage — Duplicate', () => {
     postMock.mockRejectedValue(new Error('boom'));
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
     await settle();
-    clickButtonByText(target, 'Duplicate');
+    clickByLabel(target, 'Duplicate v7');
     clickButtonByText(target, 'Create copy');
     await settle();
     expect(navigateMock).not.toHaveBeenCalled();
@@ -119,9 +128,8 @@ describe('VersionsPage — Duplicate', () => {
     versionsPageState.versions = [mkVersion({ id: 7, label: 'A' }), mkVersion({ id: 8, label: 'B' })];
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
     await settle();
-    const dupButtons = [...target.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Duplicate');
-    dupButtons[0].click(); flushSync();
-    dupButtons[1].click(); flushSync();
+    clickByLabel(target, 'Duplicate v7');
+    clickByLabel(target, 'Duplicate v8');
     const inputs = target.querySelectorAll('input.dup-label');
     expect(inputs.length).toBe(1);                    // only one row open
     expect((inputs[0] as HTMLInputElement).value).toBe('Copy of B');
@@ -131,7 +139,8 @@ describe('VersionsPage — Duplicate', () => {
     postMock.mockResolvedValue({ id: 99 });
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
     await settle();
-    clickButtonByText(target, '+ New version');
+    clickByLabel(target, 'New version');
+    await settle();
     const labelInput = target.querySelector<HTMLInputElement>('input.new-label');
     if (!labelInput) throw new Error('new-version label input missing');
     labelInput.value = 'First';
@@ -147,7 +156,7 @@ describe('VersionsPage — Duplicate', () => {
     versionsPageState.versions = [mkVersion({ id: 7, label: longLabel })];
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
     await settle();
-    clickButtonByText(target, 'Duplicate');
+    clickByLabel(target, 'Duplicate v7');
     const input = target.querySelector<HTMLInputElement>('input.dup-label');
     if (!input) throw new Error('duplicate label input missing');
     expect(input.value.length).toBe(200);
@@ -158,7 +167,7 @@ describe('VersionsPage — Duplicate', () => {
     versionsPageState.versions = [mkVersion({ id: 7, is_disabled: false })];
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
     await settle();
-    clickButtonByText(target, 'Duplicate');
+    clickByLabel(target, 'Duplicate v7');
     expect(target.querySelector('input.dup-label')).not.toBeNull(); // form open
     // Simulate the row becoming disabled (e.g., after transition('disable'))
     versionsPageState.versions = [mkVersion({ id: 7, is_disabled: true })];
@@ -166,8 +175,8 @@ describe('VersionsPage — Duplicate', () => {
     await settle();
     // Form must be gone
     expect(target.querySelector('input.dup-label')).toBeNull();
-    // Confirm row rendered as disabled (Enable button present, not Duplicate)
-    const enableBtn = [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Enable');
-    expect(enableBtn).toBeDefined();
+    // Row rendered as disabled: the Enable slot replaces Disable, Duplicate keeps its slot disabled.
+    expect(target.querySelector('button[aria-label="Enable v7"]')).not.toBeNull();
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="Duplicate v7"]')!.disabled).toBe(true);
   });
 });

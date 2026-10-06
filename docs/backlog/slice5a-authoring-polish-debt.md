@@ -28,3 +28,24 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 - **Tests: dirtyRegistry "unregistering mid-loop"** does not discriminate the `[...registry]`
   snapshot in `discardAll` — JS `Set` iteration already tolerates deletes. The snapshot is harmless
   defensive code; soften its comment or the test's claim.
+
+## T2 — Versions page (3a)
+
+- **Focus after a row action.** Duplicate's Cancel unmounts the focused button, and a Disable click
+  disables the button (busy) and swaps it for Enable, so focus falls to `<body>`. Spec only requires
+  focus on open. Return focus to the row's Duplicate / Enable / Disable slot once the action settles.
+- **The versions count has no screen-reader context.** `<span class="mono count">2</span>` after the
+  `<h2>` is announced as a bare "2". Add a visually-hidden " versions" (or an `aria-label`).
+- **Create-version 422 with an array detail** toasts "Please correct the highlighted fields." with
+  nothing highlighted (only `max_quiz_attempts` is validated client-side). Use
+  `validationErrors()?.[0]?.msg ?? displayMessage`, as InlineField does. Pre-existing.
+- **No `alive` guard after a transition / delete.** `transition` / `deleteVersion` call `load()` after
+  the request; leaving the page mid-request repopulates the module store for that slug post-unmount.
+  Harmless today (the next mount reloads); pre-existing.
+- **Gate coverage gaps (u).** The create card (`padding:14px`, border, `margin-bottom:12px`) and the
+  form inputs' `height:var(--control-h)` / border are not pinned; `own` / `uniq1` scan `.svelte`
+  files only, so a global `.icon-btn {…}` in `src/styles/*.css` would escape them.
+- **Test gaps.** The EmptyState-action test does not assert that Label gets focus.
+- **Create / duplicate state survives an in-place slug change.** `creating`, `newLabel` and
+  `duplicatingId` persist when App rebinds `courseSlug`, so a half-typed create form from course A
+  reappears under course B once it loads. Reset them in the `courseSlug` effect. Pre-existing.

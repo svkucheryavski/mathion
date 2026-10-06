@@ -1,9 +1,14 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import Button from '../../components/ui/Button.svelte';
-  import Spinner from '../../components/ui/Spinner.svelte';
+  import IconButton from '../../components/ui/IconButton.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
+  import ErrorState from '../../components/ui/ErrorState.svelte';
+  import EmptyState from '../../components/ui/EmptyState.svelte';
+  import VersionBadges from '../../components/editor/VersionBadges.svelte';
+  import { deleteVersionReason, duplicateVersionReason } from '../../lib/editorReasons';
   import { pushToast } from '../../stores/toasts.svelte';
   import type { Version } from '../../lib/types';
   import {
@@ -22,17 +27,22 @@
   const versions = $derived(versionsPageState.versions);
   const loading = $derived(versionsPageState.loading);
   const error = $derived(versionsPageState.error);
+  // The page frame renders once this slug's course is known; a reload then shows
+  // the Skeleton in the list position only (spec §2). A course left over from
+  // another slug (in-place route change) is never shown under the new URL.
+  const shownCourse = $derived(course?.slug === courseSlug ? course : null);
 
   // Single in-flight flag — disables every action button (Create / Open /
   // Disable / Enable / Delete) while a POST/DELETE is awaiting completion,
   // preventing double-submit / racing transitions on the same row.
   let busy = $state(false);
 
-  // Create form
+  // Create form — collapsed behind the `+` toggle (visual-spec §5.3).
   let creating = $state(false);
   let info_md = $state('');
   let max_quiz_attempts = $state<number | null>(3);
   let newLabel = $state('');
+  let newLabelEl = $state<HTMLInputElement>();
 
   async function load() {
     await loadVersionsPage(courseSlug);
@@ -50,6 +60,24 @@
   // previous course's data before its own fetch resolves. Mirrors
   // VersionEditPage's clearEditorVersion onDestroy.
   onDestroy(() => resetVersionsPageState());
+
+  function resetCreateForm() {
+    newLabel = '';
+    info_md = '';
+    max_quiz_attempts = 3;
+  }
+
+  async function toggleCreate() {
+    if (busy) return;
+    if (creating) {
+      resetCreateForm();
+      creating = false;
+      return;
+    }
+    creating = true;
+    await tick();
+    newLabelEl?.focus();
+  }
 
   async function createVersion() {
     if (!course) return;
@@ -122,15 +150,18 @@
   // maxlength only bounds typing, not a programmatically-assigned value).
   let duplicatingId = $state<number | null>(null);
   let dupLabel = $state('');
+  let dupInputEl = $state<HTMLInputElement>();
 
-  function openDuplicate(v: Version) {
+  async function openDuplicate(v: Version) {
     duplicatingId = v.id;
     dupLabel = ('Copy of ' + (v.label || 'v' + v.id)).slice(0, 200);
+    await tick();
+    dupInputEl?.focus();
   }
 
   async function duplicateVersion(v: Version) {
     // Pin id + slug before the await (prop-change-mid-await guard, mirroring
-    // createVersion at lines 68-69).
+    // createVersion above).
     const savedId = v.id;
     const savedSlug = courseSlug;
     busy = true;
@@ -147,98 +178,168 @@
   }
 </script>
 
+{#snippet backToCourses()}
+  <Button variant="secondary" onclick={() => navigate('/courses')}>Back to courses</Button>
+{/snippet}
+
+{#snippet newVersionAction()}
+  <Button onclick={() => void toggleCreate()} disabled={busy}>+ New version</Button>
+{/snippet}
+
 <div class="page">
-  {#if loading}
-    <Spinner />
-  {:else if error}
-    <h1>Couldn't load</h1>
-    <p>{error.message}</p>
-    <Button variant="ghost" onclick={() => navigate('/courses')}>← Back to courses</Button>
-  {:else if course}
-    <header>
-      <Button variant="ghost" onclick={() => navigate('/courses')}>← Courses</Button>
-      <h1>Edit · {course.name}</h1>
-    </header>
-    <section class="versions">
-      <div class="head">
-        <h2>Versions</h2>
-        <Button onclick={() => (creating = !creating)} disabled={busy}>{creating ? 'Cancel' : '+ New version'}</Button>
-      </div>
-      {#if creating}
-        <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
-          <label>Label (optional)
-            <input class="new-label" type="text" maxlength="200" bind:value={newLabel} />
-          </label>
-          <label>Info (markdown)
-            <textarea bind:value={info_md} rows="3"></textarea>
-          </label>
-          <label>Max quiz attempts
-            <!-- Raw <input> — `Input.svelte` doesn't accept min/max; opening it up
-                 would be unrelated work. Native browser validation gives min/max bounds. -->
-            <input type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} />
-          </label>
-          <Button type="submit" disabled={busy} loading={busy}>Create</Button>
-        </form>
-      {/if}
-      {#if versions.length === 0}
-        <p class="empty">No versions yet. Create one to start authoring.</p>
-      {:else}
-        <ul>
-          {#each versions as v (v.id)}
-            <li class="row">
-              <div>
-                <strong>v{v.id}</strong>
-                {#if v.label}<span class="vlabel">{v.label}</span>{/if}
-                <span class="badge state-{v.state}">{v.state}</span>
-                {#if v.is_disabled}<span class="badge disabled">disabled</span>{/if}
-              </div>
-              <div class="actions">
-                <Button onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)} disabled={busy}>Open</Button>
-                {#if v.is_disabled}
-                  <Button variant="ghost" onclick={() => transition(v, 'enable')} disabled={busy}>Enable</Button>
-                {:else}
-                  <Button variant="ghost" onclick={() => transition(v, 'disable')} disabled={busy}>Disable</Button>
-                  <Button variant="ghost" onclick={() => openDuplicate(v)} disabled={busy}>Duplicate</Button>
-                {/if}
-                {#if v.state === 'created' && !v.is_disabled}
-                  <Button variant="ghost" onclick={() => deleteVersion(v)} disabled={busy}>Delete</Button>
-                {/if}
-              </div>
+  {#if error && !loading}
+    <ErrorState variant="page" title="Couldn't load" message={error.message} action={backToCourses} />
+  {:else if !shownCourse}
+    {#if loading}<Skeleton rows={3} />{/if}
+  {:else}
+    {@const course = shownCourse}
+    <div class="heading">
+      <IconButton round glyph="back" title="Back to courses" onclick={() => navigate('/courses')} />
+      <h1>{course.name}</h1>
+    </div>
+    <div class="versions-head">
+      <h2>Versions</h2>
+      <span class="mono count">{versions.length}</span>
+      <span class="push">
+        <IconButton
+          primary
+          glyph={creating ? 'close' : 'plus'}
+          title={creating ? 'Cancel new version' : 'New version'}
+          aria-label="New version"
+          aria-expanded={creating}
+          disabled={busy}
+          onclick={() => void toggleCreate()}
+        />
+      </span>
+    </div>
+    {#if creating}
+      <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
+        <label>Label (optional)
+          <input class="new-label" type="text" maxlength="200" bind:value={newLabel} bind:this={newLabelEl} />
+        </label>
+        <label>Info (markdown)
+          <textarea bind:value={info_md} rows="3"></textarea>
+        </label>
+        <label>Max quiz attempts
+          <!-- Raw <input> — `Input.svelte` lacks min/max (spec Constraint 6). -->
+          <input class="mono" type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} />
+        </label>
+        <div class="submit"><Button type="submit" disabled={busy} loading={busy}>Create</Button></div>
+      </form>
+    {/if}
+    {#if loading}
+      <Skeleton rows={3} />
+    {:else if versions.length === 0}
+      <EmptyState
+        icon="list"
+        title="No versions yet"
+        hint="A version holds the blocks, sequences and items students see. Create one to start authoring."
+        action={creating ? undefined : newVersionAction}
+      />
+    {:else}
+      <ul class="vlist">
+        {#each versions as v (v.id)}
+          {@const dupReason = duplicateVersionReason(v)}
+          {@const delReason = deleteVersionReason(v)}
+          <li class="vrow">
+            <span class="mono vnum" class:off={v.is_disabled}>v{v.id}</span>
+            {#if v.label}<span class="vlabel">{v.label}</span>{/if}
+            <span class="badges"><VersionBadges state={v.state} isDisabled={v.is_disabled} /></span>
+            <span class="slots">
+              <IconButton size="sm" glyph="pencil" title="Open" aria-label="Open v{v.id}" disabled={busy}
+                onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)} />
+              <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}"
+                disabled={busy || dupReason !== null} onclick={() => void openDuplicate(v)} />
+              {#if v.is_disabled}
+                <IconButton size="sm" glyph="enable" title="Enable" aria-label="Enable v{v.id}" disabled={busy}
+                  onclick={() => transition(v, 'enable')} />
+              {:else}
+                <IconButton size="sm" glyph="disable" title="Disable" aria-label="Disable v{v.id}" disabled={busy}
+                  onclick={() => transition(v, 'disable')} />
+              {/if}
+              <IconButton size="sm" glyph="trash" danger title={delReason ?? 'Delete'} aria-label="Delete v{v.id}"
+                disabled={busy || delReason !== null} onclick={() => deleteVersion(v)} />
+            </span>
+          </li>
+          {#if !v.is_disabled && duplicatingId === v.id}
+            <li class="dup-row">
+              <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
+                <label>New draft label
+                  <input class="dup-label" type="text" maxlength="200" bind:value={dupLabel} bind:this={dupInputEl} disabled={busy} />
+                </label>
+                <Button type="submit" disabled={busy} loading={busy}>Create copy</Button>
+                <Button variant="ghost" onclick={() => (duplicatingId = null)} disabled={busy}>Cancel</Button>
+              </form>
             </li>
-            {#if !v.is_disabled && duplicatingId === v.id}
-              <li class="dup-row">
-                <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
-                  <label>New draft label
-                    <input class="dup-label" type="text" maxlength="200" bind:value={dupLabel} disabled={busy} />
-                  </label>
-                  <Button type="submit" disabled={busy} loading={busy}>Create copy</Button>
-                  <Button variant="ghost" onclick={() => (duplicatingId = null)} disabled={busy}>Cancel</Button>
-                </form>
-              </li>
-            {/if}
-          {/each}
-        </ul>
-      {/if}
-    </section>
+          {/if}
+        {/each}
+      </ul>
+    {/if}
   {/if}
 </div>
 
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
-  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-  .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; margin-left: var(--space-2); }
-  .badge.state-created { background: #ffeac0; color: #663; }
-  .badge.state-published { background: #ddf3dd; color: #265; }
-  .badge.state-archived { background: #eee; color: #555; }
-  .badge.disabled { background: #fdd; color: #833; }
-  .create { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: var(--space-3); }
-  textarea { width: 100%; }
-  .empty { color: var(--muted); }
-  .vlabel { font-size: 0.85rem; color: var(--muted); margin-left: var(--space-2); }
-  .dup-row { padding: 0 0 var(--space-2); }
-  .dup { display: flex; align-items: flex-end; gap: var(--space-2); flex-wrap: wrap; }
-  .dup input { min-width: 240px; }
+  /* h1 / h2 metrics come from base.css (21px/600/-.015em, 15px/600 — ref 1474, 1477). */
+  .heading { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; /* ref 1472 */ }
+  .versions-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; /* ref 1476 */ }
+  .count { font-size: 11.5px; /* ref 1478 */ color: var(--muted); }
+  .push { margin-left: auto; display: flex; /* ref 1479 */ }
+  .create {
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* the 8px create-form gap (spec §4 Create forms) */
+    padding: 14px;
+    margin-bottom: 12px; /* the list's 12px rhythm (ref 1476) */
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .create label,
+  .dup label { display: flex; flex-direction: column; gap: 4px; /* the 4px label/field step */ font-size: 12.5px; color: var(--muted); }
+  .create input,
+  .create textarea,
+  .dup input {
+    box-sizing: border-box;
+    width: 100%;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+  }
+  .create input,
+  .dup input { height: var(--control-h); padding: 0 10px; }
+  .create textarea { padding: 8px 10px; }
+  .submit { display: flex; justify-content: flex-end; }
+  .vlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden; /* ref 1481 */
+  }
+  .vrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px 9px 14px; /* ref 1482 */
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .vlist > li:last-child { border-bottom: 0; }
+  .vnum { font-size: 13px; /* ref 1483 */ color: var(--text); }
+  /* D5: a disabled version recedes by its number dropping to --muted (ref 1495). */
+  .vnum.off { color: var(--muted); }
+  .vlabel { font-size: 13px; /* ref 1484 */ color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .badges { margin-left: auto; display: flex; /* ref 1485 */ }
+  .slots { display: flex; gap: 6px; margin-left: 22px; /* ref 1486 */ }
+  .dup-row {
+    padding: 9px 12px 9px 14px; /* the row inset (ref 1482) */
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .dup { display: flex; align-items: flex-end; gap: 8px; /* the 8px create-form gap */ }
+  .dup label { flex: 1; min-width: 0; }
 </style>
