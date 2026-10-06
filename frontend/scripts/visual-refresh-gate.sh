@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=682
+EXPECTED_CHECKS=730
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3616,6 +3616,36 @@ if [[ -n $REPLY ]]; then
   none "VersionEditPage pre-Slice-5a .state-* badges gone" "\.state-(created|published|archived)\.${H}"
   none "VersionEditPage .banner.err gone"                  "\.banner\.err\.${H}"
   sweep VersionEditPage $H
+fi
+
+echo
+echo "--- (w) Slice-5a T4 — Blocks card, create-block form, state-action bar (3b) ---"
+own blocks-card VersionEditPage.svelte
+own state-actions VersionEditPage.svelte
+uniq1 blocks-card
+if [[ -n $REPLY ]]; then
+  N=VersionEditPage; H=$REPLY
+  d '\.blocks-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:16px 18px'
+  none "VersionEditPage .blocks-card has no margin-bottom (last card)" "\.blocks-card\.${H}\{[^}]*margin-bottom"
+  d '\.card-head' '' 'display:flex' 'align-items:center' 'gap:8px' 'margin-bottom:10px'
+  d 'h2' '' 'font-size:14px'
+  d '\.push' '' 'margin-left:auto' 'display:flex'
+  d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
+  chk "\.cr-form\.${H} input:where\(\.${H}\)" 'box-sizing:border-box' 'width:100%' 'height:var\(--control-h\)' 'padding:0 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
+  d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end'
+  chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
+  d '\.blocks-list' '' 'list-style:none' 'padding:0' 'margin:0'
+  d '\.state-actions' '' 'display:flex' 'align-items:center' 'gap:10px' 'justify-content:flex-end' 'margin-top:20px' 'padding-top:14px' 'border-top:1px solid var\(--border\)'
+  # The pre-T4 rules are gone (old .blocks/.head/.create/.empty, rem font sizes).
+  none "VersionEditPage pre-T4 .blocks/.head/.create/.empty rules gone" "\.(blocks|head|create|empty)\.${H}[{ ,:]"
+  none "VersionEditPage no rem font sizes"                            "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep VersionEditPage $H
+fi
+# Source: the state bar uses Button's own variants; Delete is the danger variant.
+if grep -qE '<Button variant="danger" disabled=\{busy\} onclick=\{deleteVersion\}>Delete</Button>' src/pages/editor/VersionEditPage.svelte; then
+  echo "PASS  VersionEditPage Delete uses Button variant=danger"
+else
+  echo "FAIL  VersionEditPage Delete uses Button variant=danger"; fail=1
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

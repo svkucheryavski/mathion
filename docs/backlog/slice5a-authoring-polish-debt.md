@@ -69,3 +69,18 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 - **The heading link's purpose is only in its `title`** — a screen reader hears "link, Applied Linear
   Algebra"; "Back to versions" is a description only, and `v{id}` sits outside the `<h1>`. Spec choice.
 - **`.editor-heading h1` `min-width:0; overflow-wrap:anywhere`** carries no form-(c) mechanism comment.
+
+## T4 — Blocks card, create-block form, state bar
+
+- **A sequence-to-sequence history step under a folded card stays folded.** The unfold effect tracks only
+  `routeBid` (spec-specified), so Back/forward from `/blocks/A/sequences/S1` to `…/S2` while the card is
+  folded leaves it folded, and the focus effect's `focus()` on a header inside the hidden body is a no-op.
+- **An empty create-block form survives a version switch.** `creating` (with an empty title) is not
+  reset on a `vid` change, so the empty form reappears on the new version; `discard()` only runs for a
+  dirty title. Reset `creating` on a `vid` change. Pre-existing.
+- **A late transition toast after a version switch is ambiguous.** "Version published" still fires (the
+  action did succeed) while the author is on another version; consider naming the version (`v1`).
+- **Create-block field error is not linked to the Title input** (`small.field-err` has no
+  `aria-describedby` / `aria-invalid`). Pre-existing.
+- **Unannotated literals.** `.cr-form { padding: 12px 0 }` and the `.state-actions` gap / margins carry no
+  ref or scale comment (Constraint 5); only the `border-top` cites ref 1639.
