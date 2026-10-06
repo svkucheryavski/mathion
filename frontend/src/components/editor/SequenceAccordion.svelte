@@ -1,18 +1,20 @@
 <script lang="ts">
-  import { getContext } from 'svelte';
+  import { getContext, onDestroy, tick, untrack } from 'svelte';
   import AccordionHeader from './AccordionHeader.svelte';
   import ItemRow from './ItemRow.svelte';
   import ItemTypePicker from './ItemTypePicker.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
-  import { structureReason } from '../../lib/editorReasons';
+  import { structureReason, textReason, unsavedSuffix } from '../../lib/editorReasons';
+  import { labelFor } from '../../lib/labelFor';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import Button from '../ui/Button.svelte';
+  import IconButton from '../ui/IconButton.svelte';
+  import InlineField from '../ui/InlineField.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
 
   type Props = {
@@ -24,12 +26,18 @@
     sequenceCount: number;
     routeBid: string | null;
     routeSid: string | null;
+    // The parent BlockAccordion's version guard (`alive && vid === savedVid`).
+    // Required: this component is rendered inside the block's {#if expanded}
+    // body, so its own lifetime ends when the block collapses — a reload
+    // gated on its own `alive` would be skipped and leave a deleted sequence
+    // or an old title in the store. The parent stays mounted while the block
+    // is in the tree. No `() => true` default: that would silently reload a
+    // torn-down version.
+    stillOnVid: (savedVid: number) => boolean;
     onMoveUp: () => void;
     onMoveDown: () => void;
-    // parentBusy locks inputs while a parent (BlockAccordion / VersionEditPage)
-    // mutation is in flight, so the user can't type into the title or the
-    // create form between our own dirty checks and the tracker.reset() that
-    // follows a refresh. Same convention as VersionMetaForm.
+    // parentBusy disables this sequence's controls while a parent
+    // (BlockAccordion / VersionEditPage) mutation is in flight.
     parentBusy?: boolean;
   };
 
@@ -42,6 +50,7 @@
     sequenceCount,
     routeBid,
     routeSid,
+    stillOnVid,
     onMoveUp,
     onMoveDown,
     parentBusy = false,
@@ -51,34 +60,15 @@
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — SequenceAccordion must mount under VersionEditPage');
 
   const expanded = $derived(String(block.id) === routeBid && String(seq.id) === routeSid);
-  const headerId = `seq-${String(seq.id)}-header`;
-  const panelId = `seq-${String(seq.id)}-panel`;
+  const headerId = $derived(`seq-${String(seq.id)}-header`);
+  const panelId = $derived(`seq-${String(seq.id)}-panel`);
 
   const version = $derived(currentEditorVersion.value?.version ?? null);
   const perms = $derived(version ? versionPermissions(version) : null);
-  const canEdit = $derived(perms?.canEditTextFields ?? false);
   const canStructure = $derived(perms?.canEditStructure ?? false);
   const structReason = $derived(version ? structureReason(version) : null);
-
-  type Meta = { title: string };
-  const tracker = makeDirtyTracker<Meta>({ title: seq.title });
-
-  // Defensive rebuild on seq.id change (belt-and-suspenders — child body
-  // unmounts via {#if expanded} so a sid change typically remounts the
-  // whole component).
-  let trackerSid = $state(seq.id);
-  $effect(() => {
-    if (seq.id !== trackerSid) {
-      tracker.reset({ title: seq.title });
-      trackerSid = seq.id;
-    }
-  });
-
-  $effect(() => {
-    if (!expanded) return;
-    dirty.register(tracker);
-    return () => dirty.unregister(tracker);
-  });
+  const txtReason = $derived(version ? textReason(version) : null);
+  const name = $derived(labelFor(seq.title, seq.slug, `sequence ${index}`));
 
   function toggle() {
     if (expanded) {
@@ -90,77 +80,68 @@
 
   let busy = $state(false);
 
-  async function save() {
-    if (!tracker.isDirty) return;
-    const savedVid = vid;
-    const savedSid = seq.id;
-    const savedBid = block.id;
-    const sentTitle = tracker.current.title;
-    busy = true;
-    try {
-      await api.patch(`/api/sequences/${savedSid}`, { title: sentTitle });
-      const result = await loadAdminTree(savedVid, { force: true });
-      if (result === 'discarded') {
-        pushToast('Saved', 'success');
-      } else if (result === 'ok') {
-        const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === savedBid)?.sequences.find((x) => x.id === savedSid);
-        if (fresh) tracker.reset({ title: fresh.title });
-        pushToast('Saved', 'success');
-      } else {
-        tracker.reset({ title: sentTitle });
-        pushToast('Saved (refresh failed — reload to see latest)', 'info');
-      }
-    } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
-    } finally {
-      busy = false;
-    }
-  }
+  // Own lifetime — gates only the post-delete forced navigate (§4 race guards).
+  let alive = true;
+  onDestroy(() => { alive = false; });
 
-  function discard() {
-    tracker.reset({ title: seq.title });
+  // One field per PATCH (D2). A PATCH failure propagates to InlineField.
+  async function patchSeq(field: { title: string }) {
+    const savedVid = vid;
+    const check = stillOnVid;
+    const savedSid = seq.id;
+    await api.patch(`/api/sequences/${savedSid}`, field);
+    if (!check(savedVid)) return;
+    const result = await loadAdminTree(savedVid, { force: true });
+    if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
   }
 
   async function deleteSeq() {
-    if (tracker.isDirty || !canStructure || seq.items.length > 0) return;
-    if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.`)) return;
+    if (creating || !canStructure || busy || createBusy || parentBusy || seq.items.length > 0) return;
+    if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`)) return;
     const savedVid = vid;
+    const check = stillOnVid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
     busy = true;
     try {
       await api.delete(`/api/sequences/${savedSid}`);
-      // Refresh the store BEFORE navigating — the parent page stays mounted
-      // on the same vid, so without an explicit reload the deleted sequence
-      // would remain in currentEditorVersion until some later refetch.
-      await loadAdminTree(savedVid, { force: true });
-      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`);
+      // Navigate FIRST (no spurious "Sequence not found."), only while the
+      // live route still names this sequence; `force` — already confirmed;
+      // `replace` — keep the deleted URL out of history. Then reload, gated on
+      // the parent's guard so it still runs after the block collapsed.
+      if (alive && expanded && check(savedVid)) {
+        void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`, { replace: true, force: true });
+      }
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
   }
 
   // Item-list reorder: this component owns seq.items and the API call.
+  // Not blocked by drafts (D3); a second reorder while one is in flight would
+  // see a pre-swap snapshot of seq.items.
   async function reorderItem(idx: number, dir: -1 | 1) {
-    if (tracker.isDirty) return;
+    if (busy || createBusy || parentBusy) return;
     const items = [...seq.items];
     const target = idx + dir;
     if (target < 0 || target >= items.length) return;
     [items[idx], items[target]] = [items[target], items[idx]];
     const order = items.map((it, i) => ({ id: it.id, order: i + 1 }));
     const savedVid = vid;
+    const check = stillOnVid;
     const savedSid = seq.id;
     busy = true;
     try {
       await api.post(`/api/sequences/${savedSid}/items/reorder`, { order });
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -170,14 +151,15 @@
     if (busy || !canStructure) return;
     if (!confirm(`Delete "${itemTitle}"? This cannot be undone.`)) return;
     const savedVid = vid;
+    const check = stillOnVid;
     busy = true;
     try {
       await api.delete(`/api/items/${itemId}`);
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
       pushToast('Item deleted', 'success');
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -197,6 +179,7 @@
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
   let contentMdTouched = $state(false);
+  let formEl = $state<HTMLFormElement>();
 
   $effect(() => {
     if (creating && newType === 'static_page' && !contentMdTouched && newTitle) {
@@ -204,9 +187,32 @@
     }
   });
 
+  // Footer text mirrors the trash button's title (ref 1610). Precedence:
+  // structure reason → items remain → create form open → enabled.
+  const deleteText = $derived(
+    structReason
+      ? `Delete this sequence — ${structReason[0].toLowerCase()}${structReason.slice(1)}`
+      : seq.items.length > 0
+        ? 'Delete this sequence — remove its items first'
+        : creating
+          ? 'Delete this sequence — cancel the new item first'
+          : 'Delete this sequence',
+  );
+
+  function resetCreateForm() {
+    newType = 'static_page';
+    newTitle = '';
+    newContentMd = '';
+    newVideoUrl = '';
+    contentMdTouched = false;
+    createErrors = {};
+    createGlobalError = null;
+  }
+
   // Tracker shim for the create form: synthesized isDirty getter reads
   // current state directly — NO reset()-on-keystroke (that would always
-  // make the tracker clean and break smoke 14b).
+  // make the tracker clean and break smoke 14b). discard() lets a confirmed
+  // DirtyGuard prompt really drop the draft (D3).
   const createTracker: RegisteredTracker = {
     get isDirty() {
       return creating && (
@@ -215,12 +221,19 @@
         (newType === 'video' && newVideoUrl.trim() !== '')
       );
     },
+    discard() { resetCreateForm(); creating = false; },
   };
 
+  // Registered only while the form is actually on screen.
   $effect(() => {
-    if (!creating) return;
+    if (!(creating && expanded)) return;
     dirty.register(createTracker);
     return () => dirty.unregister(createTracker);
+  });
+
+  // Collapse resets the form. Tracks only `expanded`.
+  $effect(() => {
+    if (!expanded) untrack(() => { if (creating) { resetCreateForm(); creating = false; } });
   });
 
   // Close + reset the create form if structure permission is revoked while
@@ -234,29 +247,24 @@
     }
   });
 
-  function resetCreateForm() {
-    newType = 'static_page';
-    newTitle = '';
-    newContentMd = '';
-    newVideoUrl = '';
-    contentMdTouched = false;
-    createErrors = {};
-    createGlobalError = null;
-  }
-
-  function toggleCreate() {
+  async function toggleCreate() {
     // Defense-in-depth: refuse mid-flight toggles. The toggle button is
     // already disabled in these states, but a stale/programmatic click
     // would otherwise unmount the form during an in-flight POST,
     // discarding validation errors and unregistering the create tracker.
-    if (createBusy || busy || parentBusy) return;
-    if (creating) resetCreateForm();
-    creating = !creating;
+    if (createBusy || busy || parentBusy || structReason) return;
+    if (creating) { resetCreateForm(); creating = false; return; }
+    creating = true;
+    await tick();
+    // The checked type radio is the form's first tab stop. Scoped to this
+    // form — several sequences' pickers share the radio group name.
+    formEl?.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.focus();
   }
 
   async function submitCreate() {
     if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim()) return;
     const savedVid = vid;
+    const check = stillOnVid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
@@ -268,10 +276,12 @@
     createBusy = true;
     try {
       const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
       resetCreateForm();
       creating = false;
-      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
+      // Gated like the reload: a late success must not pull the author back
+      // into the old version's item editor.
+      if (check(savedVid)) void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
     } catch (e) {
       const known = newType === 'static_page'
         ? ['title', 'content_md', 'type']
@@ -279,6 +289,13 @@
           ? ['title', 'video_url', 'type']
           : ['title', 'type'];
       const mapped = mapCreateError(e, known);
+      // The form closed while the POST was in flight (collapse, a confirmed
+      // discard, a read-only flip): there is no form to show the error on, and
+      // writing it would resurface stale on the next open — toast it instead.
+      if (!creating) {
+        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
+        return;
+      }
       createErrors = mapped.fieldErrors;
       // Fall back to a generic message if mapper produced nothing — without
       // this, a 500 with no validation body silently swallows the failure.
@@ -293,7 +310,8 @@
   }
 </script>
 
-<div class="sequence">
+<!-- D10: no card border — nesting is carried by indentation, badges and tints. -->
+<div>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -313,107 +331,121 @@
   />
 
   {#if expanded}
-    <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
-      {#if canEdit}
-        <section class="meta">
-          <label>Sequence title <input bind:value={tracker.current.title} required disabled={busy || createBusy || parentBusy} /></label>
-          <div class="row">
-            <Button onclick={save} disabled={!tracker.isDirty || busy || createBusy || parentBusy} loading={busy}>Save</Button>
-            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || createBusy || parentBusy}>Discard</Button>
-          </div>
-        </section>
-      {/if}
+    <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
+      <div class="fields">
+        <InlineField
+          label="Sequence title"
+          value={seq.title}
+          required
+          maxlength={200}
+          editTitle="Edit the sequence title"
+          disabledReason={txtReason}
+          onCommit={(p) => patchSeq({ title: String(p) })}
+        />
+      </div>
 
-      <section class="items">
-        <div class="head">
-          <h4>Items</h4>
-          {#if canStructure}
-            <Button
-              disabled={tracker.isDirty || busy || createBusy || parentBusy}
-              title={tracker.isDirty ? 'Save or discard changes first' : ''}
-              onclick={toggleCreate}
-            >{creating ? 'Cancel' : '+ New item'}</Button>
+      <div class="items-head">
+        <h5>Items</h5>
+        <IconButton
+          primary
+          glyph={creating ? 'close' : 'plus'}
+          title={structReason ?? (creating ? 'Cancel new item' : 'New item')}
+          aria-label={`New item in ${name}`}
+          aria-expanded={creating}
+          disabled={!!structReason || busy || createBusy || parentBusy}
+          onclick={() => void toggleCreate()}
+        />
+      </div>
+
+      {#if creating}
+        <form class="cr-form" bind:this={formEl} onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
+          <ItemTypePicker bind:value={newType} />
+          <input placeholder="Title" aria-label="Item title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
+          {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
+          {#if newType === 'static_page'}
+            <textarea placeholder="Content (markdown)" aria-label="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || busy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
+            {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
+          {:else if newType === 'video'}
+            <input type="url" placeholder="Video URL (https://…)" aria-label="Video URL" bind:value={newVideoUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
+            {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
           {/if}
-        </div>
-
-        {#if creating}
-          <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
-            <ItemTypePicker bind:value={newType} />
-            <div class="field">
-              <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
-              {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
-            </div>
-            {#if newType === 'static_page'}
-              <div class="field">
-                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || busy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
-                {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
-              </div>
-            {:else if newType === 'video'}
-              <div class="field">
-                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
-                {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
-              </div>
-            {/if}
-            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
-          </form>
-        {/if}
-
-        {#if seq.items.length === 0}
-          <p class="empty">
-            {canStructure ? 'No items yet — pick a type above to add one.' : 'No items.'}
-          </p>
-        {:else}
-          <ul class="items-list">
-            {#each seq.items as item, i (item.id)}
-              <li>
-                <ItemRow
-                  {item}
-                  index={i + 1}
-                  {canStructure}
-                  canReorderUp={canStructure && i > 0}
-                  canReorderDown={canStructure && i < seq.items.length - 1}
-                  parentDirty={tracker.isDirty}
-                  busy={busy || createBusy || parentBusy}
-                  onMoveUp={() => void reorderItem(i, -1)}
-                  onMoveDown={() => void reorderItem(i, 1)}
-                  onOpen={() => openItem(item.id)}
-                  onDelete={() => void deleteItem(item.id, item.title)}
-                />
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-
-      {#if canStructure}
-        <section class="danger">
-          <Button
-            variant="ghost"
-            disabled={tracker.isDirty || busy || createBusy || parentBusy || seq.items.length > 0}
-            title={tracker.isDirty ? 'Save or discard changes first' : seq.items.length > 0 ? 'Remove items first' : ''}
-            onclick={deleteSeq}
-          >Delete this sequence</Button>
-        </section>
+          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
+          <div class="cr-actions">
+            <Button type="submit" disabled={createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
+          </div>
+        </form>
       {/if}
+
+      {#if seq.items.length === 0}
+        <p class="empty">{canStructure ? 'No items yet.' : 'No items.'}</p>
+      {:else}
+        <ul class="items-list">
+          {#each seq.items as item, i (item.id)}
+            <li>
+              <ItemRow
+                {item}
+                index={i + 1}
+                {canStructure}
+                canReorderUp={canStructure && i > 0}
+                canReorderDown={canStructure && i < seq.items.length - 1}
+                parentDirty={false}
+                busy={busy || createBusy || parentBusy}
+                onMoveUp={() => void reorderItem(i, -1)}
+                onMoveDown={() => void reorderItem(i, 1)}
+                onOpen={() => openItem(item.id)}
+                onDelete={() => void deleteItem(item.id, item.title)}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      <div class="del-footer">
+        <IconButton
+          glyph="trash"
+          danger
+          title={deleteText}
+          aria-label={`Delete sequence ${name}`}
+          disabled={!!structReason || seq.items.length > 0 || creating || busy || createBusy || parentBusy}
+          onclick={() => void deleteSeq()}
+        />
+        <span class="del-text">{deleteText}</span>
+      </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .sequence { border: 1px solid var(--border); border-radius: var(--radius); margin: var(--space-2) 0; }
-  .accordion-body { padding: var(--space-3); border-top: 1px solid var(--border); }
-  .meta { margin-bottom: var(--space-3); }
-  .meta label { display: block; margin: var(--space-2) 0; }
-  .meta input { width: 100%; }
-  .row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .head { display: flex; justify-content: space-between; align-items: center; }
-  .create { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
-  .create input, .create textarea { width: 100%; }
-  .create .field { display: flex; flex-direction: column; }
-  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
-  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
+  .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
+  .fields { display: flex; flex-direction: column; }
+  .fields > :global(.inline-field:last-child) { border-bottom: 0; /* ref 1548 */ }
+  .items-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; /* ref 1584 */ }
+  h5 { margin: 0; font-size: 13px; font-weight: 600; /* ref 1585 */ }
+  /* Create forms — shared look (spec §4). */
+  .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
+  .cr-form input,
+  .cr-form textarea {
+    box-sizing: border-box;
+    width: 100%;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+  }
+  .cr-form input { height: var(--control-h); padding: 0 10px; }
+  .cr-form textarea { height: auto; padding: 8px 10px; }
+  .cr-actions { display: flex; justify-content: flex-end; }
+  .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
+  .empty { margin: 0; font-size: 13px; color: var(--muted); }
   .items-list { list-style: none; padding: 0; margin: 0; }
-  .empty { color: var(--muted); }
-  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); margin-top: var(--space-3); }
+  .del-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-soft); /* ref 1609 */
+  }
+  .del-text { font-size: 12.5px; color: var(--muted); /* ref 1610 */ }
 </style>

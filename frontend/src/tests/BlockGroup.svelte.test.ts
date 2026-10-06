@@ -173,7 +173,7 @@ describe('BlockGroup', () => {
   it('gives the header a real <button> carrying the accordion ARIA contract', () => {
     // The header was a <div onclick>: not focusable, not keyboard-operable, and
     // the source of the two a11y warnings this task removes. The precedent for
-    // the button form is editor/AccordionHeader.svelte:59-71.
+    // the button form is editor/AccordionHeader.svelte:67-82.
     const { btn, panel } = mountBlock();
     expect(btn).not.toBeNull();
     expect(panel).not.toBeNull();

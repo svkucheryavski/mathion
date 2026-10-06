@@ -98,3 +98,22 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 - **Focus after `+` on a collapsed block depends on microtask order** (the page focus `$effect` runs one
   hop before `onPlus`'s second `tick()`, so Title wins). Verified by a throwaway page-level probe; no
   committed test pins it.
+
+## T5b — accordion bodies
+
+- **Two inputs share the accessible name "Sequence title".** The block's create-sequence input and an
+  expanded sequence's title InlineField both announce "Sequence title"; with a sequence open and the
+  create form open, a screen-reader user hears two identically named fields in one block. Rename the
+  create input (e.g. "New sequence title"). Pre-existing name.
+- **No D3-suffix test on item delete.** Adding `unsavedSuffix(...)` to `deleteItem`'s confirm leaves
+  the suite green; the T6 test "an item delete never carries the unsaved suffix (D3)" is meant to pin it.
+- **Back after a delete can land on a deeper stale entry** (e.g. `/blocks/3/sequences/7` from before the
+  delete); `handleStaleIdFallback` handles it. The spec only promises the current entry is replaced.
+- **Re-expanding a sequence whose DELETE is still pending** (the old instance unmounted, `busy` lost)
+  ends in the stale-id toast. Contrived timing.
+- **The block "late … after an unmount" tests pin only the `alive` half of `stillOnVid`.** A mutation to
+  `return alive;` passes; a twin that bumps the `vid` prop to 2 before releasing the request would pin
+  `vid === savedVid` too (the sequence tests already drive their stub to false).
+- **The closed-form create toast can lose part of a mixed 422.** With a field error and an unmapped entry
+  together, `globalMessage` (the unmapped part) wins and the field message is dropped; a network failure
+  reads `mapCreateError`'s generic "Save failed", odd wording for a create. Pre-existing mapper behaviour.

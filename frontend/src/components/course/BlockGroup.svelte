@@ -29,7 +29,7 @@
   <header>
     <!-- A real <button>, not the former `<header onclick>`: that form was not
          focusable or keyboard-operable and raised both of this file's a11y
-         warnings. The pattern is the one editor/AccordionHeader.svelte:59-71
+         warnings. The pattern is the one editor/AccordionHeader.svelte:67-82
          already uses — id + aria-expanded + aria-controls, no `type` attribute,
          matching that precedent. -->
     <h2>

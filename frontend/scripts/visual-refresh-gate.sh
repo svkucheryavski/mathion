@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=776
+EXPECTED_CHECKS=882
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -450,6 +450,9 @@ GLOBAL_ALLOW = {
     ('src/pages/MiniProjectDetailPage.svelte', 'code'),
     # Slice-5a T3: the last InlineField row drops its divider (ref 1548).
     ('src/components/editor/VersionMetaForm.svelte', '.inline-field:last-child'),
+    # Slice-5a T5b: same last-row rule in the accordion bodies.
+    ('src/components/editor/BlockAccordion.svelte', '.inline-field:last-child'),
+    ('src/components/editor/SequenceAccordion.svelte', '.inline-field:last-child'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -3680,6 +3683,57 @@ if grep -qE '#f5f5f5|surface-hover|[↑↓]' src/components/editor/AccordionHead
   echo "FAIL  AccordionHeader no #f5f5f5 / --surface-hover / ↑↓ text glyphs"; fail=1
 else
   echo "PASS  AccordionHeader no #f5f5f5 / --surface-hover / ↑↓ text glyphs"
+fi
+
+echo
+echo "--- (y) Slice-5a T5b — accordion bodies: inline fields, create forms, delete footers (3b) ---"
+# body_common LABEL — the rules BlockAccordion and SequenceAccordion share (N/H set by caller).
+body_common() {
+  d '\.fields' '' 'display:flex' 'flex-direction:column'
+  chk "\.fields\.${H}>\.inline-field:last-child" 'border-bottom:0'
+  d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
+  d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end'
+  chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
+  d '\.empty' '' 'margin:0' 'font-size:13px' 'color:var\(--muted\)'
+  d '\.del-footer' '' 'display:flex' 'align-items:center' 'gap:8px' 'margin-top:14px' 'padding-top:12px' 'border-top:1px solid var\(--border-soft\)'
+  d '\.del-text' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  none "$N pre-5a .meta/.row/.head/.create/.danger rules gone" "\.(meta|row|head|create|danger)\.${H}[{ ,:>]"
+  none "$N no rem font sizes"                                "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep $N $H
+}
+
+own block-card BlockAccordion.svelte
+uniq1 block-card
+if [[ -n $REPLY ]]; then
+  N=BlockAccordion; H=$REPLY
+  d '\.block-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'overflow:hidden' 'margin-bottom:10px'
+  d '\.acc-body' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'padding:12px 14px'
+  chk "\.cr-form\.${H} input:where\(\.${H}\)" 'box-sizing:border-box' 'width:100%' 'height:var\(--control-h\)' 'padding:0 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
+  d '\.seqs-list' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'list-style:none' 'padding:0' 'margin:0'
+  body_common
+fi
+
+own items-head SequenceAccordion.svelte
+uniq1 items-head
+if [[ -n $REPLY ]]; then
+  N=SequenceAccordion; H=$REPLY
+  d '\.acc-body' '' 'padding:12px 14px' 'border-top:1px solid var\(--border-soft\)'
+  d '\.items-head' '' 'display:flex' 'align-items:center' 'justify-content:space-between' 'margin-bottom:4px'
+  d 'h5' '' 'margin:0' 'font-size:13px' 'font-weight:600'
+  CF="\.cr-form\.${H} input:where\(\.${H}\),\.cr-form\.${H} textarea:where\(\.${H}\)"
+  chk "$CF" 'box-sizing:border-box' 'width:100%' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
+  chk "\.cr-form\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
+  chk "\.cr-form\.${H} textarea:where\(\.${H}\)" 'height:auto' 'padding:8px 10px'
+  d '\.items-list' '' 'list-style:none' 'padding:0' 'margin:0'
+  # D10: the sequence has no card border of its own — selector-agnostic: no rule
+  # authored by SequenceAccordion (except the create form's input/textarea rule,
+  # pinned above) may draw a full / left / right / bottom border; only `border-top`
+  # hairlines (the body, the delete footer) are allowed. (No `(^|[{}])` anchor: with
+  # grep -o the previous match eats the shared `}`.)
+  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -vE "^\.cr-form\.${H} (input|textarea):where\(\.${H}\)[,{]" | grep -E 'border(-(left|right|bottom))?:[^0]')
+  if [[ -z $bad ]]; then echo "PASS  SequenceAccordion: no box / side border on any rule (D10)"
+  else echo "FAIL  SequenceAccordion: no box / side border on any rule (D10): $bad"; fail=1; fi
+  body_common
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

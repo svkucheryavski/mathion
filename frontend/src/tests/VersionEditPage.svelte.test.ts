@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import VersionEditPage from '../pages/editor/VersionEditPage.svelte';
 import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
-import { navigate, currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
-import type { AdminTree, AdminTreeBlock, AdminTreeVersion } from '../lib/types';
+import { navigate, currentRoute, matchRoute, __resetGuardsForTests } from '../lib/router.svelte';
+import { routes } from '../routes';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
+import type { AdminTree, AdminTreeBlock, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
 import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 
 // Capture the page's real registry so a test can register a dirty tracker
@@ -69,6 +71,7 @@ afterEach(() => {
   if (target.parentNode) target.parentNode.removeChild(target);
   (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
   clearEditorVersion();
+  clearToasts();
   __resetGuardsForTests();
   vi.restoreAllMocks();
 });
@@ -491,5 +494,83 @@ describe('VersionEditPage — a late transition / delete after a version switch 
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
     expect(target.querySelector('.editor-heading .vid')!.textContent).toBe('v2');
+  });
+});
+
+// Router-driven props, as App.svelte supplies them: getters over the live
+// route, so the page follows the accordions' own navigate() calls.
+async function renderRouted() {
+  const param = (k: string) => matchRoute(routes, currentRoute.path)?.params[k];
+  component = mount(VersionEditPage, {
+    target,
+    props: {
+      get courseSlug() { return param('courseSlug') ?? ''; },
+      get versionId() { return param('versionId') ?? ''; },
+      get blockId() { return param('blockId'); },
+      get sequenceId() { return param('sequenceId'); },
+    },
+  });
+  await settle();
+}
+
+describe('VersionEditPage — a create-sequence draft and a confirmed collapse (D3)', () => {
+  it('collapse with a confirmed prompt drops the draft; the next + opens an empty form without a prompt', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    const plus = () => target.querySelector<HTMLButtonElement>('button[aria-label="New sequence in Block 10"]')!;
+    const title = () => target.querySelector<HTMLInputElement>('input[aria-label="Sequence title"]');
+    plus().click();
+    await settle();
+    title()!.value = 'Draft';
+    title()!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await navigate('/courses/c/edit/v/1'); // collapse the block: DirtyGuard prompts
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    plus().click(); // collapsed block: expands, then opens the form
+    await settle();
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(title()!.value).toBe('');
+  });
+});
+
+describe('VersionEditPage — no spurious stale-id toast after a delete (T5b)', () => {
+  const seq20: AdminTreeSequence = { id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] };
+
+  it('deleting the expanded block lands on the version with no "Block not found."', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    serve((url, init) => {
+      if (url === '/api/blocks/10' && init?.method === 'DELETE') { tree.blocks = []; return jres({}); }
+      return undefined;
+    });
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Block 10"]')!.click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(target.querySelector('#block-10-header')).toBeNull();
+    expect(toasts.list.map((t) => t.message)).not.toContain('Block not found.');
+  });
+
+  it('deleting the expanded sequence lands on its block with no "Sequence not found."', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    serve((url, init) => {
+      if (url === '/api/sequences/20' && init?.method === 'DELETE') { tree.blocks[0].sequences = []; return jres({}); }
+      return undefined;
+    });
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq 20"]')!.click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(target.querySelector('#seq-20-header')).toBeNull();
+    expect(toasts.list.map((t) => t.message)).not.toContain('Sequence not found.');
   });
 });
