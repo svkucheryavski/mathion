@@ -385,10 +385,9 @@
               <ItemRow
                 {item}
                 index={i + 1}
-                {canStructure}
-                canReorderUp={canStructure && i > 0}
-                canReorderDown={canStructure && i < seq.items.length - 1}
-                parentDirty={false}
+                structureReason={structReason}
+                canReorderUp={i > 0}
+                canReorderDown={i < seq.items.length - 1}
                 busy={busy || createBusy || parentBusy}
                 onMoveUp={() => void reorderItem(i, -1)}
                 onMoveDown={() => void reorderItem(i, 1)}
@@ -439,6 +438,7 @@
   .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
   .empty { margin: 0; font-size: 13px; color: var(--muted); }
   .items-list { list-style: none; padding: 0; margin: 0; }
+  .items-list > li:last-child > :global(.item-row) { border-bottom: 0; /* ref 1602 */ }
   .del-footer {
     display: flex;
     align-items: center;

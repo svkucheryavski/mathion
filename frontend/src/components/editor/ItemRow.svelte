@@ -1,15 +1,21 @@
 <script lang="ts">
+  // One item in a sequence body (3b, ref 1588-1606): a non-interactive type
+  // mark, the title, the mono slug, a quiz's question count, and four fixed
+  // icon slots — ↑ ↓ open delete (§4 keep the slot count fixed).
   import { labelFor } from '../../lib/labelFor';
-  import Button from '../ui/Button.svelte';
+  import ItemMark from '../course/ItemMark.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import type { AdminTreeItem } from '../../lib/types';
 
   type Props = {
     item: AdminTreeItem;
     index: number;
-    canStructure: boolean;
+    // Non-null when the version forbids structure changes; disables the
+    // arrows and Delete with this reason as their title.
+    structureReason: string | null;
+    // "Not at the boundary in that direction" — the arrows always render.
     canReorderUp: boolean;
     canReorderDown: boolean;
-    parentDirty: boolean;
     busy: boolean;
     onMoveUp: () => void;
     onMoveDown: () => void;
@@ -20,10 +26,9 @@
   let {
     item,
     index,
-    canStructure,
+    structureReason,
     canReorderUp,
     canReorderDown,
-    parentDirty,
     busy,
     onMoveUp,
     onMoveDown,
@@ -39,65 +44,62 @@
   const ariaName = $derived(labelFor(item.title, item.slug, placeholder));
   const visibleTitle = $derived(item.title.trim() || item.slug.trim() || `(${placeholder})`);
 
-  const glyph = $derived(
-    item.type === 'static_page' ? '📄' :
-    item.type === 'video' ? '▶' :
-    item.type === 'quiz' ? '?' :
-    item.type === 'interactive_app' ? '🧩' :
-    '⌘'
-  );
+  // Title precedence (as AccordionHeader): structure reason → boundary → normal.
+  const upTitle = $derived(structureReason ?? (canReorderUp ? 'Move up' : 'Move up — already first'));
+  const downTitle = $derived(structureReason ?? (canReorderDown ? 'Move down' : 'Move down — already last'));
 </script>
 
 <div class="item-row">
-  <span class="glyph" aria-hidden="true">{glyph}</span>
+  <ItemMark type={item.type} state="not-yet" />
   <span class="item-title">{visibleTitle}</span>
   {#if item.title.trim() && item.slug.trim()}
-    <span class="item-slug" aria-hidden="true">/{item.slug}</span>
+    <span class="mono item-slug" aria-hidden="true">/{item.slug}</span>
   {/if}
   {#if item.type === 'quiz'}
-    <span class="q-sep" aria-hidden="true">·</span>
-    <span class="q-count" data-testid="item-question-count">{item.questions_count} {item.questions_count === 1 ? 'question' : 'questions'}</span>
+    <span class="sep" aria-hidden="true">·</span>
+    <span class="mono q-count" data-testid="item-question-count">{item.questions_count} {item.questions_count === 1 ? 'question' : 'questions'}</span>
   {/if}
-  <div class="actions">
-    {#if canReorderUp}
-      <Button
-        variant="ghost"
-        aria-label={`Move item up: ${ariaName}`}
-        onclick={onMoveUp}
-        disabled={parentDirty || busy}
-        title={parentDirty ? 'Save or discard changes first' : 'Move up'}
-      >↑</Button>
-    {/if}
-    {#if canReorderDown}
-      <Button
-        variant="ghost"
-        aria-label={`Move item down: ${ariaName}`}
-        onclick={onMoveDown}
-        disabled={parentDirty || busy}
-        title={parentDirty ? 'Save or discard changes first' : 'Move down'}
-      >↓</Button>
-    {/if}
-    <Button
-      aria-label={`Open ${ariaName}`}
-      onclick={onOpen}
-      disabled={busy}
-    >Open</Button>
-    {#if canStructure}
-      <Button
-        variant="ghost"
-        aria-label={`Delete ${ariaName}`}
-        onclick={onDelete}
-        disabled={busy}
-      >Delete</Button>
-    {/if}
-  </div>
+  <span class="actions">
+    <IconButton
+      size="sm"
+      glyph="up"
+      title={upTitle}
+      aria-label={`Move item up: ${ariaName}`}
+      disabled={busy || !!structureReason || !canReorderUp}
+      onclick={onMoveUp}
+    />
+    <IconButton
+      size="sm"
+      glyph="down"
+      title={downTitle}
+      aria-label={`Move item down: ${ariaName}`}
+      disabled={busy || !!structureReason || !canReorderDown}
+      onclick={onMoveDown}
+    />
+    <IconButton size="sm" glyph="pencil" title="Open" aria-label={`Open ${ariaName}`} disabled={busy} onclick={onOpen} />
+    <IconButton
+      size="sm"
+      glyph="trash"
+      danger
+      title={structureReason ?? 'Delete'}
+      aria-label={`Delete ${ariaName}`}
+      disabled={busy || !!structureReason}
+      onclick={onDelete}
+    />
+  </span>
 </div>
 
 <style>
-  .item-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-  .glyph { width: 24px; text-align: center; opacity: 0.65; }
-  .item-title { font-weight: 600; flex: 1; }
-  .item-slug { color: var(--muted); font-size: 0.85rem; }
-  .q-count, .q-sep { color: var(--muted); font-size: 0.85rem; }
-  .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-soft); /* ref 1588 */
+  }
+  .item-title { min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; /* ref 1590 */ }
+  .item-slug { font-size: 12px; color: var(--muted); /* ref 1591 */ }
+  .sep { color: var(--faint); /* ref 1606 — the separator use of --faint */ }
+  .q-count { font-size: 12px; color: var(--muted); /* ref 1606 */ }
+  .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1593 */ }
 </style>

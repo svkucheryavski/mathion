@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=882
+EXPECTED_CHECKS=945
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -453,6 +453,8 @@ GLOBAL_ALLOW = {
     # Slice-5a T5b: same last-row rule in the accordion bodies.
     ('src/components/editor/BlockAccordion.svelte', '.inline-field:last-child'),
     ('src/components/editor/SequenceAccordion.svelte', '.inline-field:last-child'),
+    # Slice-5a T6: the last item row drops its hairline (ref 1602).
+    ('src/components/editor/SequenceAccordion.svelte', '.item-row'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -3734,6 +3736,75 @@ if [[ -n $REPLY ]]; then
   if [[ -z $bad ]]; then echo "PASS  SequenceAccordion: no box / side border on any rule (D10)"
   else echo "FAIL  SequenceAccordion: no box / side border on any rule (D10): $bad"; fail=1; fi
   body_common
+fi
+
+echo
+echo "--- (z) Slice-5a T6 — item rows + item type picker (3b) ---"
+own item-row ItemRow.svelte
+uniq1 item-row
+if [[ -n $REPLY ]]; then
+  N=ItemRow; H=$REPLY
+  d '\.item-row' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 0' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.item-title' '' 'font-size:13px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.item-slug' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.sep' '' 'color:var\(--faint\)'
+  d '\.q-count' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.actions' '' 'margin-left:auto' 'display:flex' 'align-items:center' 'gap:6px'
+  none "ItemRow pre-5a .glyph rule gone"  "\.glyph\.${H}"
+  none "ItemRow no rem font sizes"         "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  # Selector-agnostic: every rule that colours .sep (bare, descendant, compound) uses --faint.
+  # A descendant emits the hash as `:where(.H)`, so both scoping forms count.
+  bad=$(grep -oE "[^{}]*\.sep(\.${H}|:where\(\.${H}\))[^{}]*\{[^}]*\}" $CSS | grep -oE '[{;]color:[^;}]*' | grep -v '^.color:var(--faint)$')
+  if [[ -z $bad ]]; then echo "PASS  ItemRow: .sep is only ever coloured --faint"
+  else echo "FAIL  ItemRow: .sep is only ever coloured --faint: ${(f)bad}"; fail=1; fi
+  sweep ItemRow $H
+fi
+# The parent drops the last row's hairline (ref 1602), hash-coupled to SequenceAccordion.
+uniq1 items-head
+if [[ -n $REPLY ]]; then
+  N=SequenceAccordion; H=$REPLY
+  chk "\.items-list\.${H}>li:where\(\.${H}\):last-child>\.item-row" 'border-bottom:0'
+fi
+
+own type-picker ItemTypePicker.svelte
+uniq1 type-picker
+if [[ -n $REPLY ]]; then
+  N=ItemTypePicker; H=$REPLY
+  d '\.type-picker' '' 'border:0' 'padding:0' 'margin:0'
+  d 'legend' '' 'padding:0' 'margin-bottom:4px' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.cards' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px'
+  d 'label' '' 'position:relative' 'display:flex' 'align-items:center' 'gap:8px' 'padding:6px 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'font-size:13px' 'cursor:pointer'
+  d 'label\.selected' '' 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
+  # D12 exception: the established inset ring, and the forced-colors block.
+  chk "label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
+  chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'border:2px solid Highlight'
+  chk "label\.selected\.${H}\{border:2px solid Highlight\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+  # Constraint 2: the radio stays the sr-only idiom (position + pointer-events), not a dim.
+  chk "label\.${H} input:where\(\.${H}\)" 'position:absolute' 'opacity:0' 'pointer-events:none'
+  # D12: focus styling only via :focus-visible — selector-agnostic, so a :focus /
+  # :focus-within on any selector (label, .cards, a compound or descendant) fails.
+  none "ItemTypePicker: focus styling only via :focus-visible (D12)" "[^{}]*\.${H}[^{}]*:focus(-within|[^-])[^{}]*\{"
+  # No outline but a Highlight one (the forced-colors block): the inset ring is the
+  # only non-forced focus indicator. Per declaration, so a non-Highlight outline
+  # cannot ride on a Highlight sibling in the same rule; the longhands count too
+  # (outline-offset is geometry, not a ring).
+  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -oE '[{;]outline(-(style|color|width))?:[^;}]*' | grep -v Highlight)
+  if [[ -z $bad ]]; then echo "PASS  ItemTypePicker: no outline outside forced colors (D12)"
+  else echo "FAIL  ItemTypePicker: no outline outside forced colors (D12): ${(f)bad}"; fail=1; fi
+  none "ItemTypePicker pre-5a .picker/.glyph gone" "\.(picker|glyph)\.${H}"
+  sweep ItemTypePicker $H
+fi
+# Source: no emoji or decorative glyph in either file (Constraint 3) — BSD grep has no -P.
+if python3 - <<'PY'
+import re, sys
+pat = re.compile('[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u25A0-\u25FF\u2318]')
+files = ('src/components/editor/ItemRow.svelte', 'src/components/editor/ItemTypePicker.svelte')
+sys.exit(1 if any(pat.search(open(f).read()) for f in files) else 0)
+PY
+then
+  echo "PASS  ItemRow / ItemTypePicker carry no emoji"
+else
+  echo "FAIL  ItemRow / ItemTypePicker carry no emoji"; fail=1
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

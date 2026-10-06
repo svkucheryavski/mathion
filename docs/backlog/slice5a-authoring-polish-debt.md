@@ -117,3 +117,20 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 - **The closed-form create toast can lose part of a mixed 422.** With a field error and an unmapped entry
   together, `globalMessage` (the unmapped part) wins and the field message is dropped; a network failure
   reads `mapCreateError`'s generic "Save failed", odd wording for a create. Pre-existing mapper behaviour.
+- **Gate D10: a multi-rule FAIL prints extra offenders on unprefixed lines.** Only the first offending rule
+  sits on the `FAIL` line; join `$bad` onto one line (`${(f)bad}` / `tr '\n' ' '`). Nothing is mis-graded.
+- **Gate D10: a comma group led by the inputs selector escapes the check.** The `[,{]` terminator lets
+  `.cr-form.H input:where(.H),.seq-box.H{border:…}` exempt its later members. Require every group member
+  to be an inputs selector: `^\.cr-form\.${H} (input|textarea):where\(\.${H}\)(,\.cr-form\.${H} (input|textarea):where\(\.${H}\))*\{`.
+
+## T6 — item rows + item type picker
+
+- **A long slug can squeeze the item title at narrow widths.** `.item-title` has `min-width: 0;
+  overflow-wrap: anywhere`, but `.item-slug` keeps its min-content width (its longest hyphen segment), so
+  on a narrow viewport the title can collapse to a few characters. Consider `.item-slug { min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap }`. Same family as the T5a slug-wrap item.
+- **Forced colors: the selected picker card grows by 1px.** `label.selected { border: 2px solid Highlight }`
+  shifts layout; use `outline: 2px solid Highlight; outline-offset: -1px` (or keep the 1px border and add
+  an outline).
+- **The item type is not announced.** `ItemMark` is `aria-hidden`, so a screen reader hears the item title
+  but not its type (the old emoji was `aria-hidden` too). A visually-hidden type word would fix it.

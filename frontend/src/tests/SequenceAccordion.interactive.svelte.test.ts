@@ -348,3 +348,49 @@ describe('SequenceAccordion — delete footer (T5b)', () => {
     expect(treeFetchPaths).toEqual([]);
   });
 });
+
+describe('SequenceAccordion — item rows (T6)', () => {
+  it('passes the structure reason to item rows (published: delete disabled, open enabled)', () => {
+    const { target } = mountAccordion(mkSeq({ items: [item] }), mkVersion({ state: 'published' }));
+    const del = target.querySelector<HTMLButtonElement>('button[aria-label="Delete Page"]')!;
+    expect(del.disabled).toBe(true);
+    expect(del.title).toBe('Only a created version can change its structure');
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="Open Page"]')!.disabled).toBe(false);
+  });
+
+  const two = () => mkSeq({ items: [item, { ...item, id: 10, title: 'Two', slug: 'two', order: 2 }] });
+
+  it('boundary arrows at the call site: first up / last down disabled with "already first/last"', () => {
+    const { target } = mountAccordion(two());
+    const btn = (l: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="${l}"]`)!;
+    expect([btn('Move item up: Page').disabled, btn('Move item up: Page').title]).toEqual([true, 'Move up — already first']);
+    expect([btn('Move item down: Two').disabled, btn('Move item down: Two').title]).toEqual([true, 'Move down — already last']);
+    expect(btn('Move item down: Page').disabled).toBe(false);
+    expect(btn('Move item up: Two').disabled).toBe(false);
+  });
+
+  it('↑ on the second item POSTs the swapped order', async () => {
+    const { target } = mountAccordion(two());
+    target.querySelector<HTMLButtonElement>('button[aria-label="Move item up: Two"]')!.click();
+    await settle();
+    const post = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/sequences/2/items/reorder' && (i as RequestInit)?.method === 'POST')!;
+    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ order: [{ id: 10, order: 1 }, { id: 9, order: 2 }] });
+  });
+
+  it('Open navigates to the item editor', async () => {
+    const { target } = mountAccordion(mkSeq({ items: [item] }));
+    target.querySelector<HTMLButtonElement>('button[aria-label="Open Page"]')!.click();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2/items/9');
+  });
+
+  it('an item delete never carries the unsaved suffix (D3)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { target } = mountAccordion(mkSeq({ items: [item] }));
+    target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!.click();
+    await settle();
+    type(target.querySelector<HTMLInputElement>('.inline-field input')!, 'Dirty');
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete Page"]')!.click();
+    expect(confirmSpy).toHaveBeenCalledWith('Delete "Page"? This cannot be undone.');
+  });
+});
