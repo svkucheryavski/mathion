@@ -1,120 +1,106 @@
 <script lang="ts">
-  import { getContext } from 'svelte';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
-  import { makeDirtyTracker } from '../../lib/dirty.svelte';
-  import { versionPermissions } from '../../lib/versionPermissions';
-  import { api, ApiError } from '../../lib/api';
+  // Version info card (3b, ref 1531-1553): three per-field InlineFields, each
+  // committing its own single-field PATCH (visual-spec §5.5, Slice-5a D2). Always
+  // rendered — read-only states show the values as text with a disabled pencil
+  // carrying the reason (D4). Foldable; the folded body stays mounted (D3), so
+  // an open draft survives a fold.
+  import { onDestroy } from 'svelte';
+  import { api } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
-  import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
-  import Button from '../ui/Button.svelte';
+  import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
+  import { metaReason } from '../../lib/editorReasons';
+  import InlineField from '../ui/InlineField.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import type { AdminTreeVersion } from '../../lib/types';
 
-  type Props = {
-    vid: number;
-    version: AdminTreeVersion;
-    // parentBusy locks inputs/buttons while the page shell is running a
-    // mutation (publish/archive/.../delete). Without it, the user could
-    // start editing after isAnyDirty() passed at action entry, leaving
-    // unreachable dirty state once perms.canEditVersionMeta flips false.
-    parentBusy?: boolean;
-  };
+  let { vid, version }: { vid: number; version: AdminTreeVersion } = $props();
 
-  let { vid, version, parentBusy = false }: Props = $props();
+  const uid = $props.id();
+  const bodyId = `${uid}-body`;
+  let folded = $state(false);
+  const reason = $derived(metaReason(version));
 
-  const dirty = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
-  if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — VersionEditPage must wrap VersionMetaForm');
+  let alive = true;
+  onDestroy(() => { alive = false; });
 
-  const perms = $derived(versionPermissions(version));
-
-  type Meta = { info_md: string; max_quiz_attempts: number; label: string };
-  const tracker = makeDirtyTracker<Meta>({
-    info_md: version.info_md,
-    max_quiz_attempts: version.max_quiz_attempts,
-    label: version.label,
-  });
-
-  // Defensive rebuild on vid change. Slice-2 mount model destroys this
-  // component when VersionEditPage unmounts (different course/version), so
-  // this is belt-and-suspenders — see spec §Race safety carry-over.
-  let trackerVid = $state(vid);
-  $effect(() => {
-    if (vid !== trackerVid) {
-      tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts, label: version.label });
-      trackerVid = vid;
-    }
-  });
-
-  $effect(() => {
-    dirty.register(tracker);
-    return () => dirty.unregister(tracker);
-  });
-
-  let busy = $state(false);
-
-  async function save() {
-    if (!tracker.isDirty) return;
-    // Slice-1 client-side validation (Task-18 lesson preserved): bind:value
-    // on <input type=number> can yield null/NaN/decimal — all 422 server-
-    // side with an opaque message. Validate first.
-    const n = tracker.current.max_quiz_attempts as number | null;
-    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 10) {
-      pushToast('Max quiz attempts must be a whole number between 1 and 10', 'error');
-      return;
-    }
+  // One field per PATCH. A PATCH failure propagates to InlineField (inline
+  // error); only the follow-up refresh is guarded — skipped if the page moved
+  // to another version meanwhile (the page instance is preserved across vids).
+  async function patch(field: { label: string } | { info_md: string } | { max_quiz_attempts: number }) {
     const savedVid = vid;
-    const sentInfoMd = tracker.current.info_md;
-    const sentAttempts = n;
-    const sentLabel = tracker.current.label;
-    busy = true;
-    try {
-      await api.patch(`/api/versions/${savedVid}`, { info_md: sentInfoMd, max_quiz_attempts: sentAttempts, label: sentLabel });
-      const result = await loadAdminTree(savedVid, { force: true });
-      if (result === 'discarded') {
-        pushToast('Saved', 'success');
-      } else if (result === 'ok') {
-        const fresh = currentEditorVersion.value;
-        if (fresh && fresh.version.id === savedVid) {
-          tracker.reset({ info_md: fresh.version.info_md, max_quiz_attempts: fresh.version.max_quiz_attempts, label: fresh.version.label });
-        }
-        pushToast('Saved', 'success');
-      } else {
-        tracker.reset({ info_md: sentInfoMd, max_quiz_attempts: sentAttempts, label: sentLabel });
-        pushToast('Saved (refresh failed — reload to see latest)', 'info');
-      }
-    } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
-    } finally {
-      busy = false;
-    }
+    await api.patch(`/api/versions/${savedVid}`, field);
+    if (!alive || vid !== savedVid) return;
+    const result = await loadAdminTree(savedVid, { force: true });
+    if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
   }
 
-  function discard() {
-    tracker.reset({ info_md: version.info_md, max_quiz_attempts: version.max_quiz_attempts, label: version.label });
+  function validateAttempts(n: string | number): string | null {
+    return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 10
+      ? null
+      : 'Max quiz attempts must be a whole number between 1 and 10';
   }
 </script>
 
-{#if perms.canEditVersionMeta}
-  <section class="meta">
+<section class="meta-card">
+  <div class="card-head">
     <h2>Version info</h2>
-    <label>Label
-      <input class="meta-label" type="text" maxlength="200" bind:value={tracker.current.label} disabled={busy || parentBusy} />
-    </label>
-    <label>Info (markdown)
-      <textarea bind:value={tracker.current.info_md} rows="4" disabled={busy || parentBusy}></textarea>
-    </label>
-    <label>Max quiz attempts
-      <input type="number" min="1" max="10" step="1" required bind:value={tracker.current.max_quiz_attempts} disabled={busy || parentBusy} />
-    </label>
-    <div class="row">
-      <Button onclick={save} disabled={!tracker.isDirty || busy || parentBusy} loading={busy}>Save</Button>
-      <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || parentBusy}>Discard</Button>
+    <IconButton
+      size="sm"
+      borderless
+      glyph={folded ? 'chevron-right' : 'chevron'}
+      title={folded ? 'Expand' : 'Collapse'}
+      aria-label={folded ? 'Expand version info' : 'Collapse version info'}
+      aria-expanded={!folded}
+      aria-controls={bodyId}
+      onclick={() => (folded = !folded)}
+    />
+  </div>
+  <!-- No display rule on the element carrying `hidden` (an author display would
+       beat the UA [hidden] rule); layout lives on the inner .fields wrapper. -->
+  <div id={bodyId} hidden={folded}>
+    <div class="fields">
+      <InlineField
+        label="Label"
+        value={version.label}
+        maxlength={200}
+        editTitle="Edit the label"
+        disabledReason={reason}
+        onCommit={(p) => patch({ label: String(p) })}
+      />
+      <InlineField
+        label="Info (markdown)"
+        value={version.info_md}
+        kind="textarea"
+        editTitle="Edit the info"
+        disabledReason={reason}
+        onCommit={(p) => patch({ info_md: String(p) })}
+      />
+      <InlineField
+        label="Max quiz attempts"
+        value={version.max_quiz_attempts}
+        kind="number"
+        min={1}
+        max={10}
+        step={1}
+        editTitle="Edit the attempt limit"
+        disabledReason={reason}
+        validate={validateAttempts}
+        onCommit={(p) => patch({ max_quiz_attempts: Number(p) })}
+      />
     </div>
-  </section>
-{/if}
+  </div>
+</section>
 
 <style>
-  .meta { margin: var(--space-4) 0; }
-  .meta label { display: block; margin: var(--space-2) 0; }
-  .meta textarea, .meta input[type=number] { width: 100%; }
-  .row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; flex-wrap: wrap; }
+  .meta-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 16px 18px; /* ref 1531 */
+    margin-bottom: 18px; /* ref 1531 */
+  }
+  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; /* ref 1532 */ }
+  h2 { font-size: 14px; /* ref 1533 — base.css h2 is 15px */ }
+  .fields { display: flex; flex-direction: column; /* ref 1536 */ }
+  .fields > :global(.inline-field:last-child) { border-bottom: 0; /* ref 1548 */ }
 </style>

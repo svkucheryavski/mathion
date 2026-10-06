@@ -49,3 +49,23 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 - **Create / duplicate state survives an in-place slug change.** `creating`, `newLabel` and
   `duplicatingId` persist when App rebinds `courseSlug`, so a half-typed create form from course A
   reappears under course B once it loads. Reset them in the `courseSlug` effect. Pre-existing.
+
+## T3 — version editor shell (heading, banners, Version info)
+
+- **Fold body `display` is not guarded.** The folded body relies on `hidden`; an author `display` rule
+  on it (e.g. `.body { display: block }`) would silently break the fold while the gate and tests stay
+  green (the fold test only checks the `hidden` attribute). Add a source-level gate check that the
+  `hidden={folded}` element carries no styled class — the T4 Blocks body needs the same.
+- **A late refresh can be skipped after a quick round trip.** ✓ on v1 → switch to v2 → back to v1 before
+  the PATCH returns: the old `VersionMetaForm` instance is dead (`alive` false), so its forced reload is
+  skipped, and v1's fresh GET may predate the PATCH — the field shows the old value until the next
+  reload. Sub-second; a page-level `stillOnVid` would close it.
+- **Test gaps.** No test pins the `{info_md}` PATCH body, the "Saved (refresh failed — reload to see
+  latest)" info toast, the inline refresh ErrorState retry, the `vid !== savedVid` / unmount reload
+  gate (defensive only — a version switch unmounts the card), Shift/Alt clicks on the course link, or
+  a non-integer max-attempts value (`'2.5'`; only `'11'` is exercised).
+- **Fold chevron name changes with `aria-expanded`** ("Collapse" / "Expand version info"), so assistive
+  tech hears the state twice; the T2 `+` toggles keep a stable name. Spec-specified; consistency note.
+- **The heading link's purpose is only in its `title`** — a screen reader hears "link, Applied Linear
+  Algebra"; "Back to versions" is a description only, and `v{id}` sits outside the `<h1>`. Spec choice.
+- **`.editor-heading h1` `min-width:0; overflow-wrap:anywhere`** carries no form-(c) mechanism comment.

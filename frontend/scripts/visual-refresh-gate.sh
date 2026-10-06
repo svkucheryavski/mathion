@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=591
+EXPECTED_CHECKS=682
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -448,6 +448,8 @@ GLOBAL_ALLOW = {
     ('src/pages/MiniProjectDetailPage.svelte', 'ul > li'),
     ('src/pages/MiniProjectDetailPage.svelte', 'ol > li'),
     ('src/pages/MiniProjectDetailPage.svelte', 'code'),
+    # Slice-5a T3: the last InlineField row drops its divider (ref 1548).
+    ('src/components/editor/VersionMetaForm.svelte', '.inline-field:last-child'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -3557,6 +3559,63 @@ if grep -q 'TODO(version-slice)' src/styles/theme-default.css; then
   echo "FAIL  theme-default.css still carries the TODO(version-slice) note (D5)"; fail=1
 else
   echo "PASS  theme-default.css TODO(version-slice) note removed (D5)"
+fi
+
+echo
+echo "--- (v) Slice-5a T3 — InlineField, Version info card, editor heading + banners (3b shell) ---"
+own inline-field InlineField.svelte
+uniq1 inline-field
+if [[ -n $REPLY ]]; then
+  N=InlineField; H=$REPLY
+  d '\.inline-field' '' 'display:grid' 'grid-template-columns:132px 1fr 54px' 'gap:12px' 'align-items:baseline' 'padding:9px 0' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.inline-field\.open' '' 'align-items:start'
+  d '\.label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  chk "\.open\.${H} \.label:where\(\.${H}\)"    'padding-top:6px'
+  chk "\.open\.ta\.${H} \.label:where\(\.${H}\)" 'padding-top:9px'
+  d '\.value' '' 'min-width:0' 'font-size:13px' 'line-height:1\.55' 'color:var\(--text\)' 'white-space:pre-wrap' 'overflow-wrap:anywhere'
+  d '\.not-set' '' 'color:var\(--muted\)'
+  d '\.slot' '' 'display:flex' 'justify-content:flex-end' 'gap:6px' 'align-self:center'
+  chk "\.open\.${H} \.slot:where\(\.${H}\)"    'align-self:start' 'padding-top:3px'
+  chk "\.open\.ta\.${H} \.slot:where\(\.${H}\)" 'padding-top:7px'
+  # The open-editor treatment (ref 1544) — one selector list covers input + textarea.
+  ED="\.editor\.${H} input:where\(\.${H}\),\.editor\.${H} textarea:where\(\.${H}\)"
+  chk "$ED" 'box-sizing:border-box' 'width:100%' 'border:1\.5px solid var\(--primary\)' 'border-radius:var\(--radius\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text-2\)' 'font-size:13px'
+  chk "\.editor\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
+  chk "\.editor\.${H} textarea:where\(\.${H}\)" 'padding:8px 10px' 'line-height:1\.6' 'resize:vertical'
+  d '\.err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
+  d '\.sr-only' '' 'position:absolute' 'width:1px' 'height:1px' 'overflow:hidden' 'clip-path:inset\(50%\)' 'white-space:nowrap'
+  none "InlineField .sr-only uses no opacity" "\.sr-only\.${H}\{[^}]*opacity"
+  # D12: the parking row gets NO outline/ring of its own.
+  none "InlineField row has no focus styling of its own" "\.inline-field\.${H}:focus"
+  sweep InlineField $H
+fi
+
+own meta-card VersionMetaForm.svelte
+uniq1 meta-card
+if [[ -n $REPLY ]]; then
+  N=VersionMetaForm; H=$REPLY
+  d '\.meta-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:16px 18px' 'margin-bottom:18px'
+  d '\.card-head' '' 'display:flex' 'align-items:center' 'gap:8px' 'margin-bottom:4px'
+  d 'h2' '' 'font-size:14px'
+  d '\.fields' '' 'display:flex' 'flex-direction:column'
+  chk "\.fields\.${H}>\.inline-field:last-child" 'border-bottom:0'
+  sweep VersionMetaForm $H
+fi
+
+own editor-heading VersionEditPage.svelte
+uniq1 editor-heading
+if [[ -n $REPLY ]]; then
+  N=VersionEditPage; H=$REPLY
+  d '\.editor-heading' '' 'display:flex' 'align-items:center' 'gap:10px' 'margin-bottom:18px'
+  chk "\.editor-heading\.${H} h1:where\(\.${H}\)" 'font-size:20px'
+  chk "\.editor-heading\.${H} a:where\(\.${H}\)"  'color:var\(--primary\)' 'text-decoration:none'
+  chk "\.editor-heading\.${H} a:where\(\.${H}\):hover" 'text-decoration:underline'
+  d '\.vlabel' '' 'color:var\(--text\)'
+  d '\.vid' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.banner' '' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:13px' 'color:var\(--text\)'
+  none "VersionEditPage pre-Slice-5a .state-* badges gone" "\.state-(created|published|archived)\.${H}"
+  none "VersionEditPage .banner.err gone"                  "\.banner\.err\.${H}"
+  sweep VersionEditPage $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

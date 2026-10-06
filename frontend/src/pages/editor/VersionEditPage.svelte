@@ -12,7 +12,9 @@
   import VersionMetaForm from '../../components/editor/VersionMetaForm.svelte';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
-  import Spinner from '../../components/ui/Spinner.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
+  import ErrorState from '../../components/ui/ErrorState.svelte';
+  import VersionBadges from '../../components/editor/VersionBadges.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import type { RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
 
@@ -255,6 +257,15 @@
     }
   }
 
+  // The course name in the <h1> is the way back to the version list (§5.2).
+  // Plain left clicks route in-app; modifier / middle clicks fall through so
+  // the list can open in a new tab (the router has no global anchor capture).
+  function onCourseLink(e: MouseEvent) {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    void navigate(`/courses/${courseSlug}/edit`);
+  }
+
   async function deleteVersion() {
     if (dirtyRegistry.isAnyDirty()) return;
     if (!confirm(`Delete version ${vid}? This cannot be undone.`)) return;
@@ -272,37 +283,38 @@
   }
 </script>
 
+{#snippet backToVersions()}
+  <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>Back to versions</Button>
+{/snippet}
+
 <div class="page">
   {#if !vidValid}
-    <h1>Bad URL</h1>
-    <p>Version "{versionId}" is not a valid id.</p>
-    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+    <ErrorState variant="page" title="Bad URL" message={`Version "${versionId}" is not a valid id.`} action={backToVersions} />
   {:else if loadError && (!tree || tree.version.id !== vid)}
-    <h1>Couldn't load</h1>
-    <p>{loadError}</p>
-    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
+    <ErrorState variant="page" title="Couldn't load" message={loadError} action={backToVersions} />
   {:else if !tree || tree.version.id !== vid}
-    <Spinner />
+    <Skeleton rows={4} />
   {:else if !slugMatches}
-    <h1>Not found</h1>
-    <p>This version does not belong to course "{courseSlug}".</p>
-    <Button onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Back</Button>
+    <ErrorState variant="page" title="Not found" message={`This version does not belong to course "${courseSlug}".`} action={backToVersions} />
   {:else if !v || !perms}
-    <Spinner />
+    <Skeleton rows={4} />
   {:else}
     {#if loadError}
-      <p class="banner err">{loadError}</p>
+      <div class="refresh-err">
+        <ErrorState variant="inline" title="Couldn't refresh this version" message={loadError} onretry={() => void loadAdminTree(vid, { force: true })} />
+      </div>
     {/if}
-    <header>
-      <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}/edit`)}>← Versions</Button>
-      <h1>{tree.course.name} · v{v.id}{#if v.label} <span class="vlabel">{v.label}</span>{/if} <span class="state state-{v.state}">{v.state}</span>{#if v.is_disabled}<span class="state disabled">disabled</span>{/if}</h1>
-    </header>
+    <div class="editor-heading">
+      <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
+      <span class="mono vid">v{v.id}</span>
+      <VersionBadges state={v.state} isDisabled={v.is_disabled} />
+    </div>
 
     {#if v.is_disabled}
       <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
     {/if}
 
-    <VersionMetaForm {vid} version={v} parentBusy={busy || createBusy} />
+    <VersionMetaForm {vid} version={v} />
 
     <section class="blocks">
       <div class="head">
@@ -374,21 +386,28 @@
       {/if}
     </section>
 
-    <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} />
+    <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
   {/if}
 </div>
 
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
-  .vlabel { font-weight: 400; font-size: 0.9rem; color: var(--muted); }
-  .state { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; margin-left: var(--space-2); }
-  .state-created { background: #ffeac0; color: #663; }
-  .state-published { background: #ddf3dd; color: #265; }
-  .state-archived { background: #eee; color: #555; }
-  .state.disabled { background: #fdd; color: #833; }
-  .banner { background: #fff3cd; border-left: 3px solid #d99; padding: var(--space-2); }
-  .banner.err { background: #fdd; border-left-color: #a33; color: #833; }
+  .editor-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; /* ref 1525 */ }
+  .editor-heading h1 { font-size: 20px; /* ref 1526 — base.css h1 is 21px */ min-width: 0; overflow-wrap: anywhere; }
+  .editor-heading a { color: var(--primary); text-decoration: none; /* ref 1526 */ }
+  .editor-heading a:hover { text-decoration: underline; }
+  .vlabel { color: var(--text); /* ref 1526 */ }
+  .vid { font-size: 12px; /* ref 1527 */ color: var(--muted); }
+  /* §4 precondition banner, information form. */
+  .banner {
+    margin: 0 0 18px; /* the 18px section rhythm (ref 1525) */
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    font-size: 13px;
+    color: var(--text);
+  }
+  .refresh-err { margin-bottom: 18px; /* the 18px section rhythm (ref 1525) */ }
   .state-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); border-top: 1px solid var(--border); }
   .blocks { margin: var(--space-4) 0; }
   .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
