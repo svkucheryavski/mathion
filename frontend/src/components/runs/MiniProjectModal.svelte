@@ -80,7 +80,9 @@
   const initialFormSnapshot = currentFormSnapshot();
 
   function onWindowKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
+    // An inner widget that owns Escape (the asset sidebar's inline delete
+    // confirm) default-prevents it; the modal must not also close.
+    if (e.key === 'Escape' && !e.defaultPrevented) {
       e.preventDefault();
       closeForCurrentStage();
     }

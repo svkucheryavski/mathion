@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
@@ -36,6 +37,8 @@
   let listError = $state<string | null>(null);
   let loading = $state(true);
   let fileInputEl = $state<HTMLInputElement | null>(null);
+  let asideEl = $state<HTMLElement | null>(null);
+  let dropZoneEl = $state<HTMLElement | null>(null);
   // Plain `let`, NOT $state — used as a gate inside $effect to skip the
   // pre-mount tick. Making it reactive would cause the $effect to re-run
   // when onMount flips it, triggering a spurious second fetchAssets.
@@ -78,8 +81,35 @@
   });
   onMount(() => { mountDone = true; void fetchAssets(); });
 
-  function askDelete(id: number) { if (disabled) return; confirmId = id; }
-  function cancelDelete() { confirmId = null; }
+  // R2: `is_referenced` counts references across the whole version (course) or
+  // the whole run, never one item — the reason says so.
+  const inUseReason = $derived(
+    assetContext.kind === 'run'
+      ? 'Remove asset — referenced by a mini-project'
+      : 'Remove asset — still referenced in this version',
+  );
+  // R7: the inline confirm takes focus on Cancel so Escape reaches it, and
+  // gives it back to the row's trash when it closes.
+  const trashEls = $state<Record<number, HTMLButtonElement | undefined>>({});
+  const cancelEls = $state<Record<number, HTMLButtonElement | undefined>>({});
+  async function askDelete(id: number) {
+    if (disabled) return;
+    confirmId = id;
+    await tick();
+    cancelEls[id]?.focus();
+  }
+  async function cancelDelete() {
+    const id = confirmId;
+    confirmId = null;
+    await tick();
+    if (id !== null) trashEls[id]?.focus();
+  }
+  // Escape = Cancel. preventDefault so an enclosing modal does not close (§1).
+  function onConfirmKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    void cancelDelete();
+  }
   async function confirmDelete(id: number) {
     if (disabled) return;
     if (deletingIds.has(id)) return;
@@ -90,10 +120,25 @@
     } catch (e) {
       deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
     } finally {
-      if (confirmId === id) confirmId = null;
+      const closing = confirmId === id;
+      if (closing) confirmId = null;
       deletingIds.delete(id);
+      const idx = assets.findIndex((a) => a.id === id);
       await fetchAssets();
+      if (closing) await refocusAfterDelete(id, idx);
     }
+  }
+  // R7, the Confirm path: the confirm pair is gone (and the list re-rendered),
+  // so focus would fall to <body>. Land on this row's trash (failed delete),
+  // else the trash now at its position, the one before it, else the drop zone.
+  // Leave focus alone if the author moved it elsewhere or opened another confirm.
+  async function refocusAfterDelete(id: number, idx: number) {
+    await tick();
+    const active = document.activeElement;
+    if (confirmId !== null || (active && active !== document.body && !asideEl?.contains(active))) return;
+    const near = [trashEls[id], trashEls[assets[idx]?.id ?? -1], trashEls[assets[idx - 1]?.id ?? -1]];
+    const target = near.find((el) => el?.isConnected && !el.disabled) ?? dropZoneEl;
+    target?.focus();
   }
 
   function pickFile() { if (disabled || uploading) return; fileInputEl?.click(); }
@@ -182,7 +227,8 @@
 </script>
 
 <aside
-  class="sidebar"
+  bind:this={asideEl}
+  class="asset-sidebar"
   data-testid="asset-sidebar"
   ondragover={handleDragOver}
   ondrop={handleAsideRootDrop}
@@ -190,26 +236,23 @@
   <h3>{assetContext.kind === 'run' ? 'Run assets — shared across all MPs in this run' : 'Course assets'}</h3>
 
   {#if !cursorReady}
-    <p class="banner" data-testid="cursor-banner">
+    <p class="hint" data-testid="cursor-banner">
       Click in the editor to position the cursor, or new assets will be appended to the end.
     </p>
   {/if}
 
   {#if uploadError}
     <div class="error" data-testid="upload-error">
-      <span>
+      <span class="msg">
         {#if uploadError.stoppedAt}
           Upload stopped at file {uploadError.stoppedAt.n} of {uploadError.stoppedAt.m}: {uploadError.detail}
         {:else}
           {uploadError.detail}
         {/if}
       </span>
-      <button
-        type="button"
-        aria-label="Dismiss error"
-        data-testid="upload-error-dismiss"
-        onclick={() => (uploadError = null)}
-      >×</button>
+      <span data-testid="upload-error-dismiss">
+        <IconButton glyph="close" size="sm" borderless title="Dismiss error" onclick={() => (uploadError = null)} />
+      </span>
     </div>
   {/if}
 
@@ -225,12 +268,8 @@
 
   {#if deleteErrorMsg}
     <div class="error" data-testid="delete-error">
-      <span>{deleteErrorMsg}</span>
-      <button
-        type="button"
-        aria-label="Dismiss error"
-        onclick={() => (deleteErrorMsg = null)}
-      >×</button>
+      <span class="msg">{deleteErrorMsg}</span>
+      <IconButton glyph="close" size="sm" borderless title="Dismiss error" onclick={() => (deleteErrorMsg = null)} />
     </div>
   {/if}
 
@@ -254,12 +293,12 @@
               {#if isImage(a.mime_type)}
                 <img loading="lazy" src={assetContext.imgSrc(a)} alt="" />
               {:else}
-                <span class="chip">{extChip(a)}</span>
+                <span class="chip mono">{extChip(a)}</span>
               {/if}
             </span>
             <span class="meta">
               <span class="name" title={a.filename}>{displayName(a.filename)}</span>
-              <span class="size">{formatFileSize(a.file_size)}</span>
+              <span class="size mono">{formatFileSize(a.file_size)}</span>
             </span>
           </button>
           {#if a.is_referenced}
@@ -268,29 +307,39 @@
               data-testid="used-badge"
               title="Remove this reference from content and save to enable delete."
             >used</span>
-          {:else if confirmId === a.id}
+          {/if}
+          {#if confirmId === a.id}
             <span class="confirm-pair">
               <button
                 type="button"
+                class="confirm"
                 data-testid="delete-confirm"
                 disabled={disabled || deletingIds.has(a.id)}
+                onkeydown={onConfirmKeydown}
                 onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
               >Confirm</button>
               <button
                 type="button"
+                class="cancel"
                 data-testid="delete-cancel"
-                onclick={(e) => { e.stopPropagation(); cancelDelete(); }}
+                bind:this={cancelEls[a.id]}
+                onkeydown={onConfirmKeydown}
+                onclick={(e) => { e.stopPropagation(); void cancelDelete(); }}
               >Cancel</button>
             </span>
           {:else}
-            <button
-              type="button"
-              class="trash"
-              data-testid="delete-trash"
-              disabled={disabled}
-              aria-label={`Delete ${a.filename}`}
-              onclick={(e) => { e.stopPropagation(); askDelete(a.id); }}
-            >🗑</button>
+            <span data-testid="delete-trash">
+              <IconButton
+                glyph="trash"
+                size="sm"
+                danger
+                title={a.is_referenced ? inUseReason : 'Remove asset'}
+                aria-label={`Delete ${a.filename}`}
+                disabled={disabled || a.is_referenced}
+                bind:element={trashEls[a.id]}
+                onclick={() => void askDelete(a.id)}
+              />
+            </span>
           {/if}
         </li>
       {/each}
@@ -298,6 +347,7 @@
   {/if}
 
   <div
+    bind:this={dropZoneEl}
     class="drop-zone"
     data-testid="drop-zone"
     ondragover={handleDragOver}
@@ -322,31 +372,116 @@
 </aside>
 
 <style>
-  .sidebar { flex: 0 0 280px; padding: var(--space-3); border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--space-2); }
-  h3 { margin: 0 0 var(--space-2) 0; }
-  .banner { background: #fff8e1; border-left: 3px solid #f9a825; padding: var(--space-2); font-size: 0.85rem; color: #5d4037; }
-  .error { display: flex; gap: var(--space-2); align-items: flex-start; background: #fdecea; border-left: 3px solid #c62828; padding: var(--space-2); color: #7c1f1f; font-size: 0.85rem; }
-  .error button { background: none; border: 0; color: inherit; cursor: pointer; font-size: 1.2em; line-height: 1; }
-  .progress { background: #e3f2fd; border-left: 3px solid #1976d2; padding: var(--space-2); color: #0d47a1; font-size: 0.85rem; }
-  .muted { color: var(--muted, #666); font-size: 0.85rem; }
-  .error-inline { color: #a33; font-size: 0.85rem; }
-  .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-  .row { display: flex; align-items: center; cursor: pointer; border: 1px solid transparent; border-radius: var(--radius); }
-  .row:hover { background: #f5f5f5; }
-  .row-click { flex: 1; display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2); background: none; border: 0; cursor: pointer; text-align: left; }
-  .thumb { width: 32px; height: 32px; flex: 0 0 32px; display: flex; align-items: center; justify-content: center; background: #eee; border-radius: 4px; overflow: hidden; }
+  .asset-sidebar {
+    flex: 0 0 260px;
+    min-width: 0;
+    padding: 12px;
+    border-left: 1px solid var(--border);
+    background: var(--surface-3);
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* ref 1717 */
+  }
+  /* Stacked under 880px (MarkdownEditor): a full-width block, not a 260px-tall one. */
+  @media (max-width: 880px) {
+    .asset-sidebar { flex: 0 0 auto; border-left: 0; border-top: 1px solid var(--border); }
+  }
+  h3 { font-size: 12.5px; font-weight: 600; color: var(--text); /* ref 1718 */ }
+  /* D11: the information-banner colour treatment at sidebar size (ref 1719 geometry). */
+  .hint {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--text-3);
+  }
+  .error {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--danger);
+    font-size: 11.5px;
+    color: var(--danger); /* D11 treatment, error form */
+  }
+  .msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .progress {
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    font-size: 11.5px;
+    color: var(--text-3); /* D11 treatment */
+  }
+  .muted { margin: 0; font-size: 12px; color: var(--muted); }
+  .error-inline { margin: 0; font-size: 12px; color: var(--danger); }
+  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .row { display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: var(--radius); /* ref 1720 */ }
+  .row:hover { background: var(--surface-2); }
+  .row-click {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 9px; /* ref 1720 */
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .row-click:disabled { cursor: not-allowed; }
+  .thumb {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 28px;
+    border-radius: 4px; /* the 4px tile radius (ref 1721) */
+    background: var(--border-soft); /* ref 1721 — no fill token; --border-soft is the same value */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .chip { font-size: 0.65rem; font-weight: 600; color: #555; }
-  .meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-  .name { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .size { font-size: 0.7rem; color: var(--muted, #666); }
-  .used { font-size: 0.65rem; padding: 2px 6px; background: #c8e6c9; color: #1b5e20; border-radius: 999px; }
-  .drop-zone { margin-top: var(--space-2); padding: var(--space-3); border: 2px dashed var(--border); border-radius: var(--radius); text-align: center; color: var(--muted, #666); cursor: pointer; font-size: 0.85rem; }
-  .drop-zone:hover { background: #fafafa; }
-  .drop-zone.disabled { opacity: 0.5; cursor: not-allowed; }
-  .confirm-pair { display: flex; gap: var(--space-1); }
-  .confirm-pair button { font-size: 0.7rem; padding: 2px 6px; cursor: pointer; }
-  .trash { background: none; border: 0; cursor: pointer; opacity: 0; transition: opacity 80ms; font-size: 0.9rem; }
-  .row:hover .trash { opacity: 0.7; }
-  .trash:hover { opacity: 1; }
+  .chip { font-size: 9.5px; font-weight: 600; color: var(--muted); /* ref 1721 */ }
+  .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; /* ref 1722 */ }
+  .name { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; /* ref 1723 */ }
+  .size { font-size: 10.5px; color: var(--muted); /* ref 1724 */ }
+  .used {
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: var(--status-accepted-bg);
+    color: var(--status-accepted-fg);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap; /* ref 1726 */
+  }
+  .confirm-pair { display: flex; gap: 4px; /* the 4px step */ }
+  .confirm-pair button {
+    padding: 2px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .confirm-pair .confirm { color: var(--danger); }
+  .confirm-pair button:disabled { color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
+  .drop-zone {
+    margin-top: 2px;
+    padding: 11px 10px;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer; /* ref 1744 */
+  }
+  .drop-zone:hover { background: var(--surface-2); }
+  .drop-zone.disabled { color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
 </style>

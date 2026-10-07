@@ -267,7 +267,7 @@ describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
     const cmp = mount(AssetSidebar, { target, props: propsRef });
     cleanup = () => unmount(cmp);
     await Promise.resolve(); flushSync();
-    const dismiss = target.querySelector<HTMLElement>('[data-testid="upload-error-dismiss"]')!;
+    const dismiss = target.querySelector<HTMLElement>('[data-testid="upload-error-dismiss"] button')!;
     dismiss.click();
     flushSync();
     expect(propsRef.uploadError).toBe(null);
@@ -348,13 +348,16 @@ describe('AssetSidebar — delete UI', () => {
     ]);
   });
 
-  it('trash icon is rendered for unreferenced rows and absent for referenced rows', async () => {
+  it('a referenced row shows `used` and a disabled trash with the in-use reason (R2)', async () => {
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const row1 = target.querySelector('[data-testid="asset-row-1"]')!;
-    const row2 = target.querySelector('[data-testid="asset-row-2"]')!;
-    expect(row1.querySelector('[data-testid="delete-trash"]')).toBeTruthy();
-    expect(row2.querySelector('[data-testid="delete-trash"]')).toBeNull();
+    const t1 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
+    const t2 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!;
+    expect(t1.disabled).toBe(false);
+    expect(t1.title).toBe('Remove asset');
+    expect(t2.disabled).toBe(true);
+    expect(t2.title).toBe('Remove asset — still referenced in this version');
+    expect(target.querySelector('[data-testid="asset-row-2"] [data-testid="used-badge"]')!.textContent).toBe('used');
   });
 
   it('trash → confirm → deleteAsset called and list refreshes', async () => {
@@ -367,7 +370,7 @@ describe('AssetSidebar — delete UI', () => {
       .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"]')!;
+    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLElement>('[data-testid="delete-confirm"]')!;
@@ -389,7 +392,7 @@ describe('AssetSidebar — delete UI', () => {
       .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"]')!;
+    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLElement>('[data-testid="delete-confirm"]')!;
@@ -412,7 +415,7 @@ describe('AssetSidebar — delete UI', () => {
       .mockResolvedValueOnce([]);
     const { target } = mountSidebar();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
-    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"]')!;
+    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLButtonElement>('[data-testid="delete-confirm"]')!;
@@ -445,7 +448,7 @@ describe('AssetSidebar — delete UI', () => {
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
 
     // Start delete on row 1.
-    const trash1 = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"]')!;
+    const trash1 = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
     trash1.click();
     flushSync();
     const confirm1 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-confirm"]')!;
@@ -453,7 +456,7 @@ describe('AssetSidebar — delete UI', () => {
     flushSync();
 
     // While row 1 is in flight, move focus to row 2: click its trash.
-    const trash2 = target.querySelector<HTMLElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"]')!;
+    const trash2 = target.querySelector<HTMLElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!;
     trash2.click();
     flushSync();
 
@@ -531,5 +534,89 @@ describe('AssetSidebar — long filename truncation', () => {
     // MAX=24, no dot → filename.slice(0, 21) + '...'.
     expect(name.textContent).toBe('this-is-a-name-withou...');
     expect(name.getAttribute('title')).toBe(full);
+  });
+});
+
+describe('AssetSidebar — Slice-5b restyle', () => {
+  beforeEach(() => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+  });
+  const settleList = async () => { await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync(); };
+
+  it('the cursor hint is the D11 hint paragraph', async () => {
+    const { target } = mountSidebar({ cursorReady: false });
+    await settleList();
+    const hint = target.querySelector('[data-testid="cursor-banner"]')!;
+    expect(hint.tagName).toBe('P');
+    expect(hint.classList.contains('hint')).toBe(true);
+  });
+
+  it('opening the inline confirm focuses Cancel; Escape cancels it, is default-prevented and refocuses the trash', async () => {
+    const { target } = mountSidebar();
+    await settleList();
+    target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
+    await Promise.resolve(); flushSync(); await Promise.resolve();
+    const cancel = target.querySelector<HTMLButtonElement>('[data-testid="delete-cancel"]')!;
+    expect(document.activeElement).toBe(cancel);
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    cancel.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(target.querySelector('[data-testid="delete-confirm"]')).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('[data-testid="delete-trash"] button'));
+  });
+
+  it('renders no emoji or text glyph controls', async () => {
+    const { target } = mountSidebar({ uploadError: { detail: 'Boom' } });
+    await settleList();
+    expect(target.textContent).not.toMatch(/[\u{1F5D1}×]/u);
+    expect(target.querySelector('[data-testid="delete-trash"] button svg')).not.toBeNull();
+    expect(target.querySelector('[data-testid="upload-error-dismiss"] button svg')).not.toBeNull();
+  });
+});
+
+// ---- Slice-5b T2 review (lane-2 I2): closing the confirm through Confirm
+// never drops focus to <body>.
+describe('AssetSidebar — focus after a confirmed delete (R7)', () => {
+  const settleAll = async () => {
+    for (let i = 0; i < 4; i++) { await Promise.resolve(); flushSync(); }
+  };
+  const confirmRow = async (target: HTMLElement, id: number) => {
+    target.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!.click();
+    await settleAll();
+    target.querySelector<HTMLButtonElement>('[data-testid="delete-confirm"]')!.click();
+    await settleAll();
+  };
+
+  it('a failed delete gives focus back to the same row\'s trash', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+    const { target } = mountSidebar();
+    await settleAll();
+    await confirmRow(target, 1);
+    expect(target.querySelector('[data-testid="delete-error"]')).not.toBeNull();
+    expect(document.activeElement).toBe(
+      target.querySelector('[data-testid="asset-row-1"] [data-testid="delete-trash"] button'));
+  });
+
+  it('a successful delete moves focus to the next row\'s trash', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })])
+      .mockResolvedValue([mkAsset({ id: 2, filename: 'b.png' })]);
+    const { target } = mountSidebar();
+    await settleAll();
+    await confirmRow(target, 1);
+    expect(document.activeElement).toBe(
+      target.querySelector('[data-testid="asset-row-2"] [data-testid="delete-trash"] button'));
+  });
+
+  it('deleting the last asset moves focus to the drop zone', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
+      .mockResolvedValue([]);
+    const { target } = mountSidebar();
+    await settleAll();
+    await confirmRow(target, 1);
+    expect(document.activeElement).toBe(target.querySelector('[data-testid="drop-zone"]'));
   });
 });

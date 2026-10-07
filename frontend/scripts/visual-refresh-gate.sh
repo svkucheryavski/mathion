@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=945
+EXPECTED_CHECKS=1049
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3811,6 +3811,72 @@ then
 else
   echo "FAIL  ItemRow / ItemTypePicker carry no emoji"; fail=1
 fi
+
+echo
+echo "--- (ab) Slice-5b T2 — MarkdownEditor + AssetSidebar (3c) ---"
+# Slice-5b helper (sections ab-ag). emoji_scan LABEL FILE... — Constraint 3 over
+# source with comments stripped: <!-- -->, /* */, and // when it starts a line or
+# follows whitespace (so https:// is not a comment). The arrows block and the
+# multiplication sign are in the set: the old quiz controls used them as glyphs.
+emoji_scan() {
+  local label=$1; shift
+  if python3 - "$@" <<'PY'
+import re, sys
+pat = re.compile('[\U0001F300-\U0001FAFF☀-➿⬀-⯿■-◿←-⇿⌘×＋]')
+def strip(s):
+    s = re.sub(r'<!--.*?-->', ' ', s, flags=re.S)
+    s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)
+    return re.sub(r'(?m)(^|\s)//.*$', ' ', s)
+sys.exit(1 if any(pat.search(strip(open(f).read())) for f in sys.argv[1:]) else 0)
+PY
+  then echo "PASS  $label carry no emoji or decorative glyphs"
+  else echo "FAIL  $label carry no emoji or decorative glyphs"; fail=1; fi
+}
+
+own md-card MarkdownEditor.svelte
+uniq1 md-card
+if [[ -n $REPLY ]]; then
+  N=MarkdownEditor; H=$REPLY
+  d '\.md-card' '' 'display:flex' 'flex-direction:column' 'overflow:hidden' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.tabs' '' 'display:flex' 'border-bottom:1px solid var\(--border\)'
+  chk "\.tabs\.${H} button:where\(\.${H}\)" 'padding:8px 14px' 'border:0' 'font-size:13px' 'font-weight:400' 'color:var\(--muted\)'
+  chk "\.tabs\.${H} button\[aria-pressed=\"?true\"?\]:where\(\.${H}\)" 'background:var\(--surface-2\)' 'font-weight:600' 'color:var\(--text\)'
+  chk "\.tabs\.${H} button:where\(\.${H}\):disabled" 'color:var\(--faint\)' 'cursor:not-allowed'
+  d 'textarea' '' 'flex:1 1 0' 'min-width:0' 'min-height:230px' 'padding:12px 14px' 'border:0' 'font:13px/1\.7 var\(--font-mono\)' 'color:var\(--text-2\)' 'caret-color:var\(--primary\)' 'resize:vertical'
+  d '\.preview' '' 'padding:12px 14px' 'font-size:13px' 'color:var\(--text\)'
+  d '\.preview\.err' '' 'color:var\(--danger\)'
+  d '\.plain-src' '' 'margin:0' 'padding:12px 14px' 'font:13px/1\.7 var\(--font-mono\)' 'color:var\(--text-2\)' 'white-space:pre-wrap'
+  d '\.edit-content\.flash' '' 'box-shadow:inset 0 0 0 2px var\(--danger\)'
+  # The `none` prefix (^|[{}])… is selector-agnostic, as in sweep(): it also sees
+  # element-led rules (textarea, h3), where the pre-5b literals lived (T2 review).
+  none "MarkdownEditor pre-5b .editor root gone"   "\.editor\.${H}[{ ,:.]"
+  none "MarkdownEditor no ui-monospace literal"    "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*ui-monospace"
+  none "MarkdownEditor no rem font sizes"          "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep MarkdownEditor $H
+fi
+
+own asset-sidebar AssetSidebar.svelte
+uniq1 asset-sidebar
+if [[ -n $REPLY ]]; then
+  N=AssetSidebar; H=$REPLY
+  d '\.asset-sidebar' '' 'flex:0 0 260px' 'padding:12px' 'border-left:1px solid var\(--border\)' 'background:var\(--surface-3\)' 'display:flex' 'flex-direction:column' 'gap:8px'
+  d 'h3' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.hint' '' 'margin:0' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
+  d '\.error' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger\)'
+  d '\.progress' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'color:var\(--text-3\)'
+  d '\.row' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:6px 7px' 'border-radius:var\(--radius\)'
+  d '\.thumb' '' 'width:32px' 'height:28px' 'border-radius:4px' 'background:var\(--border-soft\)'
+  d '\.chip' '' 'font-size:9\.5px' 'font-weight:600' 'color:var\(--muted\)'
+  d '\.name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis' 'white-space:nowrap'
+  d '\.size' '' 'font-size:10\.5px' 'color:var\(--muted\)'
+  d '\.used' '' 'padding:3px 8px' 'border-radius:3px' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)' 'font-size:11px' 'font-weight:500'
+  d '\.drop-zone' '' 'padding:11px 10px' 'border:2px dashed var\(--border-strong\)' 'border-radius:var\(--radius\)' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.drop-zone\.disabled' '' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)'
+  none "AssetSidebar pre-5b .sidebar/.banner/.trash rules gone" "\.(sidebar|banner|trash)\.${H}[{ ,:.]"
+  none "AssetSidebar no rem font sizes"                         "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep AssetSidebar $H
+fi
+emoji_scan "MarkdownEditor / AssetSidebar" src/components/editor/MarkdownEditor.svelte src/components/editor/AssetSidebar.svelte
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

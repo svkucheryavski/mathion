@@ -665,4 +665,45 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     // Save button re-enabled (submitting reset in finally).
     expect((target.querySelector('button[data-action="save"]') as HTMLButtonElement).disabled).toBe(false);
   });
+
+  // ---- Slice-5b T2 review (lane-2 I1): the run-asset sidebar's inline delete
+  // confirm owns Escape (default-prevented); the modal must not also close.
+  describe('MiniProjectModal — Escape inside the asset delete confirm', () => {
+    it('cancels the confirm and leaves the modal open', async () => {
+      fetchSpy.mockImplementation((url: string) =>
+        String(url).includes('/assets')
+          ? jres([{ id: 1, filename: 'p.png', mime_type: 'image/png', file_size: 1, is_referenced: false }])
+          : jres([]));
+      const onClose = vi.fn();
+      const target = document.createElement('div');
+      document.body.appendChild(target);
+      trackedMount(MiniProjectModal, {
+        target,
+        props: {
+          runId: 10,
+          mode: 'edit',
+          initial,
+          availableBlocks: [],
+          currentBlock: blocks[0],
+          runIsPublished: true,
+          versionIsDisabled: false,
+          runEndDate: '2026-06-30',
+          course: baseCourse,
+          onClose,
+          onSaved: vi.fn(),
+          onNavigateToTab: vi.fn(),
+        },
+      });
+      await settle();
+      target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
+      await settle();
+      const cancel = target.querySelector<HTMLButtonElement>('[data-testid="delete-cancel"]')!;
+      expect(document.activeElement).toBe(cancel);
+      cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      expect(target.querySelector('[data-testid="delete-confirm"]')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(target.querySelector('[data-testid="discard-confirm"], .inline-confirm')).toBeNull();
+    });
+  });
 });

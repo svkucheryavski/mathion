@@ -43,3 +43,45 @@ None blocks the slice; each is input for the final polish slice.
   `from === candidates()[0]` assumes both agree. Extract one shared `getFocusable(root)`.
 - **Hand-off to T3a/T3b:** after a failed delete, refocus the header trash; an Escape pressed inside an
   iframe in the body (none in 5b) never reaches `svelte:window`.
+
+## T2 — MarkdownEditor + AssetSidebar
+
+- **AssetSidebar: a row that turns referenced while its confirm is open keeps an enabled Confirm**
+  (open confirm on A → type a reference → Save → reload). Confirm then sends a DELETE the server rejects
+  with 409 — shown as an error, nothing lost. Fix: `|| a.is_referenced` on Confirm, or clear `confirmId`.
+- **AssetSidebar: the disabled trash's reason is hidden from assistive tech** — `aria-label="Delete …"`
+  overrides the `title`. Fix: when referenced, `aria-label={`${inUseReason}: ${a.filename}`}`.
+- **AssetSidebar: disabled rows do not recede** (`.row-click:disabled` changes only the cursor). Add a
+  token colour (`--faint`) on the name under `:disabled`.
+- **AssetSidebar: `.thumb` fill uses `--border-soft`** (matches ref 1721 by value, but it is a border token).
+  Design call: a fill token, or keep.
+- **MarkdownEditor: `frozen` lets an upload already in flight finish** (its ref is not inserted;
+  `refreshKey` bumps). Same as `disabled`; unreachable in 5b (Save is disabled while uploading). Abort it
+  on freeze if "blocked" must be literal.
+- **MarkdownEditor: `frozen` disables (and so blurs) a focused sidebar control** — trash, row, Confirm.
+  The textarea keeps focus as promised; D10 accepts disabled structure controls.
+- **MarkdownEditor: `plain` flipped true → false with `readOnly` set leaves an empty preview**
+  (`loadPreview` runs only in onMount). Not reachable while the modal is open.
+- **Hand-off to T3a: plain mode drops `ariaLabel` / `ariaDescribedby`** — the `pre` has no accessible
+  name. PageBody should label its wrapper (visible label or `aria-labelledby`).
+- **Tests not yet written:** Escape on the inline Cancel inside the real `Modal` (the delegated handler
+  runs before `svelte:window` — a capture-phase listener would silently break it); an in-flight upload
+  then a freeze; a wrapper drop while frozen.
+- **Gate (ab) gaps:** the two `@media (max-width: 880px)` rules are not pinned; `textarea` background
+  is not pinned; `emoji_scan` reads source, so an escaped glyph (`{'\u{1F5D1}'}`, `&#x1F5D1;`) evades it.
+  The older 5a sections' `no rem font sizes` checks keep the class-led-only prefix (they miss element-led
+  rules); (ab) now uses sweep's selector-agnostic prefix.
+- **AssetSidebar: focus after a delete — lost-focus-only rule.** Every `fetchAssets` swaps the whole list
+  out (`loading`), destroying any focused row control. `refocusAfterDelete` acts only when Confirm closed
+  the pair and treats focus anywhere in the aside as movable. Gaps: (a) a second confirm opened while
+  the first delete is in flight loses its Cancel focus on the refetch → `<body>`, and the next Escape
+  closes the enclosing modal; (b) Cancel clicked during an in-flight delete → `<body>`; (c) focus the
+  author moved within the aside (drop zone, a row) jumps to the neighbour trash; (d) a disabled neighbour
+  falls through to the drop zone even when an enabled trash sits further on. Fix: always run the refocus
+  after the refetch but only when focus fell to `<body>`; focus `cancelEls[confirmId]` if a confirm is
+  open; otherwise search forward then back for the first enabled trash.
+- **AssetSidebar: Escape while a confirm is open but focus is on the row's insert button** still closes an
+  enclosing modal (R7 scopes Escape to the pair). Polish if "confirm open ⇒ Escape = Cancel" is wanted.
+- **Tests: the "focus after a confirmed delete" `settleAll`** is a fixed 4-microtask loop; an extra await
+  in `confirmDelete` would turn them red (never falsely green).
+

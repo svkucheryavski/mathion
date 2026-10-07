@@ -605,3 +605,72 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
     expect(preventSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('MarkdownEditor — plain (Slice-5b D6)', () => {
+  it('shows the source as text with no tabs, no sidebar and no /render call', async () => {
+    const { target } = mountEditor({ value: '# Title\n$x^2$', plain: true });
+    await Promise.resolve(); flushSync();
+    expect(target.querySelector('[data-testid="markdown-plain"]')!.textContent).toBe('# Title\n$x^2$');
+    expect(target.querySelector('.tabs')).toBeNull();
+    expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
+    expect(target.querySelector('textarea')).toBeNull();
+    expect(stubCtx.renderPreview).not.toHaveBeenCalled();
+  });
+
+  it('wins over readOnly: still no /render call', async () => {
+    mountEditor({ value: 'x', plain: true, readOnly: true });
+    await Promise.resolve(); flushSync();
+    expect(stubCtx.renderPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe('MarkdownEditor — ariaLabel (Slice-5b R10)', () => {
+  it('names the textarea', () => {
+    const { target } = mountEditor({ ariaLabel: 'Content' });
+    flushSync();
+    expect(target.querySelector('textarea')!.getAttribute('aria-label')).toBe('Content');
+  });
+});
+
+describe('MarkdownEditor — frozen (Slice-5b D10)', () => {
+  it('makes the textarea readonly without blurring it', async () => {
+    const { target, propsRef } = mountEditor({ value: 'abc' });
+    flushSync();
+    const ta = target.querySelector('textarea')!;
+    ta.focus();
+    propsRef.frozen = true;
+    flushSync();
+    expect(ta.hasAttribute('readonly')).toBe(true);
+    expect(ta.disabled).toBe(false);
+    expect(document.activeElement).toBe(ta);
+  });
+
+  it('blocks a textarea drop: no upload, no insert', async () => {
+    const { target } = mountEditor({ value: 'abc', frozen: true });
+    flushSync();
+    const file = new File(['x'], 'a.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    target.querySelector('textarea')!.dispatchEvent(ev);
+    await Promise.resolve(); flushSync();
+    expect(stubCtx.upload).not.toHaveBeenCalled();
+  });
+
+  it('disables sidebar inserts and the drop zone', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1 })]);
+    const { target } = mountEditor({ value: '', frozen: true });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(target.querySelector<HTMLButtonElement>('.row-click')!.disabled).toBe(true);
+    expect(target.querySelector('[data-testid="drop-zone"]')!.classList.contains('disabled')).toBe(true);
+  });
+
+  it('keeps the tabs usable', async () => {
+    const { target } = mountEditor({ value: 'abc', frozen: true });
+    flushSync();
+    const preview = target.querySelector<HTMLButtonElement>('button[data-action="preview"]')!;
+    expect(preview.disabled).toBe(false);
+    preview.click();
+    await Promise.resolve(); flushSync();
+    expect(stubCtx.renderPreview).toHaveBeenCalledWith('abc');
+  });
+});

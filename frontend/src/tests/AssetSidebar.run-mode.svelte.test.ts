@@ -236,11 +236,33 @@ describe('AssetSidebar error surfaces — asset delete 409 (spec line 526)', () 
     cleanup = () => unmount(cmp);
     await settle();
     const row1 = target.querySelector('[data-testid="asset-row-1"]') as HTMLElement;
-    (row1.querySelector('[data-testid="delete-trash"]') as HTMLButtonElement).click();
+    (row1.querySelector('[data-testid="delete-trash"] button') as HTMLButtonElement).click();
     await settle();
     (row1.querySelector('[data-testid="delete-confirm"]') as HTMLButtonElement).click();
     await settle();
     expect(deleteUrl).toBe('/api/runs/42/assets/1');
     expect(target.textContent).toContain('referenced by 2 mini-project');
+  });
+});
+
+describe('AssetSidebar run mode — in-use reason (Slice-5b R2)', () => {
+  it('a referenced run asset shows a disabled trash naming the mini-project reason', async () => {
+    fetchSpy.mockImplementation(() =>
+      jres([{ id: 1, filename: 'p.png', mime_type: 'image/png', file_size: 1, is_referenced: true }]));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(AssetSidebar, {
+      target,
+      props: {
+        assetContext: runAssetContext(42),
+        onInsert: vi.fn(),
+        onUploadFile: vi.fn<(file: File, batch?: { current: number; total: number }) => Promise<AssetItem | null>>(),
+      },
+    });
+    cleanup = () => unmount(cmp);
+    await settle();
+    const t = target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!;
+    expect(t.disabled).toBe(true);
+    expect(t.title).toBe('Remove asset — referenced by a mini-project');
   });
 });
