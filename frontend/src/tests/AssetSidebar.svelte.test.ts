@@ -186,7 +186,7 @@ describe('AssetSidebar — refreshKey triggers re-fetch', () => {
   });
 
   it('changing assetContext refetches against the new context (covers same-page version swap)', async () => {
-    // Codex T5a finding: ItemEditPage derives `editAssetContext` from `vid`.
+    // Codex T5a finding: the item editor derives its asset context from `vid`.
     // If the router swaps `versionId` without remounting (same-page navigation
     // between two items of different versions), the sidebar must refetch
     // against the new context — otherwise it shows the old version's assets.

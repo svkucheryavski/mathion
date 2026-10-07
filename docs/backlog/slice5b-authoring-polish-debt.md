@@ -230,3 +230,22 @@ None blocks the slice; each is input for the final polish slice.
   - QuestionTypePicker's visually-hidden input and its `:disabled label` (Constraint 2, the "no opacity dim" rule). This one deserves a `chk`.
 - **(Round 2) A resync never refreshes a surviving question's `saved` baseline or header snippet.** The accordion seeds them once, so a clean question doesn't pick up another admin's remote edit after a failed reorder, delete or add. The old remount path did pick it up. Later saving that question overwrites the remote edit (the API is last-writer-wins). The lanes split on this. One wants a `setOptions`-style merge: a clean field follows the server and a dirty field keeps its draft. The other wants D10, where baselines come only from PATCH echoes. Decide before changing it, and don't "fix" it silently.
 - **(Round 2) The resync-failure toast is `'error'`.** It stacks a second red toast under the operation's own error. The modal's equivalent secondary notice is `'info'`. Fix: `'info'`.
+
+## T7 — Clean-up, carry-overs, gate (af)/(ag)
+
+- **The (ag) scanner is regex-based, not a CSS parser.** Several inputs are outside its contract:
+  - an inline `style={…}` expression (only literal `style="…"` attributes are read);
+  - colour literals in `.ts`-built style strings;
+  - a trailing `//` comment after code (Constraint 11 already forbids colours there).
+
+  It also misses:
+  - declarations before a nested CSS rule (`.a { color: red; .b {…} }`);
+  - a `"/*"` inside a CSS string, which swallows the rules after it;
+  - `style:prop=` directives;
+  - `.css` files: none is read, though Constraint 11 (spec :46) says the scan covers them. No `.css` file was touched in 5b, so the spec sentence overstates the scan.
+  - `oklch` / `hwb` / `lab` / `color()`, which are outside the spec's literal definition.
+
+  False positives: colour words inside `url(…)` (`red.png`), font names (`Tan`) and animation names (`gold`).
+
+  None of these occurs in today's 17 files. Widen the scanner only if a later slice adds one of these shapes.
+- **Constraint 11's scope sentence lists "untouched files" as examples, not an enumeration.** The exemptions now live in two places: the spec line under Constraint 11 and the comment above `FILES_5B`. Slice 6 adds MiniProjectModal and the run modals back to (ag) when it restyles them (D21). Keep the two places in step.

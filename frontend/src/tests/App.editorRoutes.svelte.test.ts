@@ -7,8 +7,11 @@ import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
 import { clearToasts } from '../stores/toasts.svelte';
 import type { AdminTree, AdminTreeItem } from '../lib/types';
 
-// Slice-5b T3b: the 5a Back-freeze (open item → Back → the editor never
-// recovers) through the REAL App + router + store. Only fetch is stubbed.
+// Slice-5b T3b: a routing smoke test through the REAL App + router + store —
+// the item route renders VersionEditPage's modal, Back returns to the tree,
+// and another item opens. Only fetch is stubbed. It guards the shape of the
+// 5a Back-freeze fix (one page instance, no swap), but jsdom does not
+// reproduce the freeze itself even with the old clear-on-unmount restored.
 vi.mock('../lib/auth.svelte', () => ({
   logout: vi.fn(async () => {}),
   getAuthConfig: vi.fn(async () => ({ send_pin_enabled: true })),
@@ -99,7 +102,7 @@ afterEach(() => {
 
 const openBtn = (id: number) => target.querySelector<HTMLButtonElement>(`button[aria-label="Open Item ${id}"]`)!;
 
-describe('App editor routes — the 5a Back-freeze (Slice-5b T3b)', () => {
+describe('App editor routes — item route → VersionEditPage modal (Slice-5b T3b smoke test)', () => {
   it('sequence → item → Back leaves a live page; a created item then opens in the modal', async () => {
     component = mount(App, { target });
     await settle();

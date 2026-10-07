@@ -2,7 +2,7 @@
 // registers a save contributor on QUIZ_SAVE_KEY; QuizEditor validates the dirty
 // ones and saves them in display order after the title (§5.3). QUIZ_GUARD_KEY
 // carries a second dirty registry for the typed add-question / add-option
-// forms (T5b): they make closing the modal prompt (guardDirty), but the footer
+// forms (§5.4): they make closing the modal prompt (guardDirty), but the footer
 // and Save ignore them (D5).
 
 export const QUIZ_SAVE_KEY = Symbol('quizSave');

@@ -71,8 +71,8 @@
   }
 
   function insertAtCursor(text: string, atOffset?: number) {
-    // §7.2: while the editor is frozen (`disabled`, e.g. an in-flight option
-    // mutation flipped the two-way lock mid-upload), no programmatic insert may
+    // §7.2: while the editor is frozen (`disabled`, or `frozen` while a save is
+    // in flight and an upload resolves late), no programmatic insert may
     // mutate the markdown. The old readOnly path unmounted the textarea so a
     // late drop/sidebar upload no-op'd on `!textareaEl`; now the textarea stays
     // mounted, so this guard is what preserves the freeze. Central here so it

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1402
+EXPECTED_CHECKS=1404
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4067,6 +4067,105 @@ if [[ -n $REPLY ]]; then
   sweep QuestionTypePicker $H
 fi
 emoji_scan "quiz editor files" src/components/editor/QuizEditor.svelte src/components/editor/QuestionAccordion.svelte src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
+
+echo
+echo "--- (af) Slice-5b T7 — emoji scan over every Slice-5b source file (Constraint 3) ---"
+# Every 5b-touched component with CSS, in one list (reused by (ag)).
+# MiniProjectModal.svelte is deliberately left out: 5b gave it only T2's one-line
+# Escape guard, and Slice 6 restyles it (D21; spec Constraint 11).
+FILES_5B=(
+  src/components/ui/Modal.svelte
+  src/components/editor/MarkdownEditor.svelte src/components/editor/AssetSidebar.svelte
+  src/components/editor/ItemEditorModal.svelte src/components/editor/item/PageBody.svelte
+  src/components/editor/item/VideoBody.svelte src/components/editor/item/AppBody.svelte
+  src/components/items/VideoFrame.svelte src/components/items/InteractiveFrame.svelte
+  src/pages/editor/VersionEditPage.svelte src/components/editor/ItemRow.svelte
+  src/components/editor/QuizEditor.svelte src/components/editor/QuestionAccordion.svelte
+  src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
+  src/pages/MiniProjectDetailPage.svelte src/App.svelte
+)
+emoji_scan "all Slice-5b source files" $FILES_5B src/components/ui/FocusTrap.svelte src/lib/itemBody.ts src/lib/quizSave.ts \
+  src/lib/deriveExpansion.ts src/lib/handleStaleIdFallback.ts src/routes.ts src/stores/currentEditorVersion.svelte.ts
+
+echo
+echo "--- (ag) Slice-5b T7 — no literal colour in a 5b-touched CSS context (Constraint 11) ---"
+python3 - $FILES_5B <<'AG'
+import re, sys
+# Constraint 11 (spec §Global Constraints): no literal colour in a CSS context
+# of a 5b-touched file. CSS contexts = <style> blocks and inline style="…".
+NAMED = set('''aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue
+blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan
+darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen
+darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey
+darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite
+forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink
+indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral
+lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen
+lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta
+maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue
+mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin
+navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen
+paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red
+rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue
+slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white
+whitesmoke yellow yellowgreen'''.split())
+LIT = re.compile(r'#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z_-])|(?<![\w-])(?:rgba?|hsla?)\(')
+# The one Modal literal the spec allows (Constraint 11), compared whitespace-free.
+# The backdrop is color-mix(…var(--text)…transparent) — no literal, so no entry.
+ALLOWED = {'Modal.svelte': {'box-shadow:0 16px 44px rgba(20,24,35,.22)'.replace(' ', '')}}
+
+def strip_comments(s):
+    s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)
+    s = re.sub(r'<!--.*?-->', ' ', s, flags=re.S)
+    return re.sub(r'(?m)^\s*//.*$', ' ', s)   # only a line that STARTS with // (never https://)
+
+def drop_forced_colors(css):
+    while True:
+        m = re.search(r'@media\s*\(\s*forced-colors\s*:\s*active\s*\)\s*\{', css)
+        if not m:
+            return css
+        i, depth = m.end(), 1
+        while i < len(css) and depth:
+            depth += {'{': 1, '}': -1}.get(css[i], 0)
+            i += 1
+        css = css[:m.start()] + css[i:]
+
+def bodies(src):
+    out = []
+    for m in re.finditer(r'<style[^>]*>(.*?)</style>', src, re.S):
+        out += re.findall(r'\{([^{}]*)\}', drop_forced_colors(strip_comments(m.group(1))))
+    out += [m.group(1) for m in re.finditer(r'\sstyle="([^"]*)"', src)]
+    out += [m.group(1) for m in re.finditer(r"\sstyle='([^']*)'", src)]
+    return out
+
+def hits(path):
+    name = path.rsplit('/', 1)[-1]
+    found = []
+    for body in bodies(open(path).read()):
+        for decl in body.split(';'):
+            if ':' not in decl:
+                continue
+            prop, val = (x.strip() for x in decl.split(':', 1))
+            flat = (prop + ':' + val).replace(' ', '').replace('\n', '')
+            if flat in ALLOWED.get(name, set()):
+                continue
+            # A named colour counts only as a whole value token, never inside var(--…).
+            words = re.findall(r'(?<![\w-])[a-zA-Z]+(?![\w-])', re.sub(r'var\(\s*--[\w-]+', ' ', val))
+            if LIT.search(val) or any(w.lower() in NAMED for w in words):
+                found.append('%s: %s' % (prop, val))
+    return found
+
+bad = 0
+for p in sys.argv[1:]:
+    h = hits(p)
+    if h:
+        bad = 1
+        print('FAIL  %s holds a literal colour in a CSS context: %s' % (p.rsplit('/', 1)[-1], '; '.join(h[:3])))
+if not bad:
+    print('PASS  no literal colour in any CSS context of the %d 5b-touched files (Constraint 11)' % (len(sys.argv) - 1))
+sys.exit(bad)
+AG
+[[ $? -eq 0 ]] || fail=1
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

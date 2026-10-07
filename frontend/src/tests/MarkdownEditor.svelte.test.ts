@@ -207,7 +207,7 @@ describe('MarkdownEditor — textarea drop', () => {
 
   it('§7.2: a drop whose upload resolves AFTER `disabled` flips true does NOT mutate value', async () => {
     // Regression for the readOnly→disabled fix (commit 6690c9e): the textarea now stays mounted
-    // while the option-mutation two-way lock is engaged, so a late upload must be blocked by
+    // while the editor is disabled, so a late upload must be blocked by
     // insertAtCursor's `disabled` guard. The old readOnly path unmounted the textarea, so a late
     // insert no-op'd on `!textareaEl`; without the explicit guard this would bypass §7.2.
     let resolveUpload!: (a: AssetItem) => void;

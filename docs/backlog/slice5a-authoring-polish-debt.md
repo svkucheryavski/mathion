@@ -190,9 +190,20 @@ so they are 5b requirements, not 5a polish.
   page, use an owner token (a page clears only the tree it still owns) or drop clear-on-unmount. Either way,
   update the store's documented contract (`currentEditorVersion.svelte.ts:1-5`, `ItemEditPage.svelte:246-247`).
   **Regression test:** open an item → close or Back → create another item without reloading.
+  **Closed in Slice 5b (T3b).** Items open as a modal over the still-mounted `VersionEditPage`, `ItemEditPage`
+  is deleted, and only `VersionEditPage` loads and clears the tree (D22, documented in
+  `currentEditorVersion.svelte.ts`). The fix is structural: the editor routes share one page instance, so there
+  is no page swap to race. `frontend/src/tests/App.editorRoutes.svelte.test.ts` pins the routing (item route →
+  `VersionEditPage` modal, Back, create another item). It is a smoke test, because jsdom does not reproduce the
+  5a freeze even with the old clear-on-unmount restored. The Safari browser pass is the real check.
 - **A disabled version's item shows an inline 403 instead of a rendered preview.**
   `POST /api/versions/{id}/render` returns 403 "Version is disabled" (`versions.py:185-186`). `ItemEditPage`'s
   read-only preview calls it and shows that message inline. This was specified on purpose (an earlier spec's §11
   item 7, quoted at `ItemEditPage.svelte:308-313`), so it is a product decision to revisit, not a regression.
   The row's Open pencil stays enabled by design (5a spec, ItemRow: "enabled unless busy"). 5b decides whether
   to keep this, to relax the endpoint for read-only rendering, or to show the reason in the modal instead.
+  **Closed in Slice 5b (D6; T2 `plain`, T3a, T4).** A disabled version's page, quiz and app items show their plain
+  source (the app shows no preview) plus the note "Preview is unavailable while this version is disabled — enable it
+  to preview or edit.", and make no `/render` or asset request (pinned in `ItemEditorModal.svelte.test.ts`). A video
+  item keeps its external preview and its note reads "Editing is unavailable while this version is disabled — enable
+  it to edit." (user decision, T3c review). The endpoint is unchanged.

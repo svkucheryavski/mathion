@@ -100,7 +100,7 @@ describe('dirtyRegistry', () => {
 
   it('discardAll tolerates trackers without discard and unregistering mid-loop', () => {
     const r = createDirtyRegistry();
-    const legacy = fakeTracker(true);                       // no discard (e.g. ItemEditPage trackers)
+    const legacy = fakeTracker(true);                       // no discard (the legacy tracker shape)
     const selfRemoving: RegisteredTracker = {
       get isDirty() { return true; },
       discard: () => r.unregister(selfRemoving),

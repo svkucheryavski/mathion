@@ -180,8 +180,8 @@
   });
 
   // L1/M7 — link rewriter effect. `void data.assignment_html;` tracks the
-  // assignment_html dep without using the value (M7 idiom — precedent at
-  // ItemEditPage.svelte:238). assignmentEl is bound on the SAME div as
+  // assignment_html dep without using the value (the M7 idiom). assignmentEl
+  // is bound on the SAME div as
   // {@html}, so by the time this effect fires the anchors exist in the DOM.
   $effect(() => {
     if (!assignmentEl || !data) return;

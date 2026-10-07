@@ -4,7 +4,7 @@
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (artboard **3c** `:1649-1758` page, **3e** `:1759-1835` video, **3f** `:1836-1969` quiz; `ref NNNN` below are line numbers in that file) and `docs/design/visual-refresh/mathion-visual-spec.md` (§4 "Item editor modal (3c, 3e, 3f)" `:212-229`, Icon button `:168-181`, §3 colour of state `:110-133`, type-name rule `:230`). Where the two disagree, the spec's *rules* win over the artboard's *pixels*. **User decisions** (§Decisions) override both, and each override is recorded.
 
-**What this slice does.** Opening an item stops routing to a separate page (`pages/editor/ItemEditPage.svelte`, deleted). Instead a **modal opens over the version editor**. Four item types share one frame: page (3c), video (3e), quiz (3f) and interactive app (no artboard; borrows 3e). The slice also adds a **generic modal frame** (`ui/Modal.svelte`). Slice 6 will reuse it for `runs/{NewRunModal, PublishConflictsModal, RosterImportModal, MiniProjectModal}` (10k/10l/10m and the roster import). 5b does not touch those four.
+**What this slice does.** Opening an item stops routing to a separate page (`pages/editor/ItemEditPage.svelte`, deleted). Instead a **modal opens over the version editor**. Four item types share one frame: page (3c), video (3e), quiz (3f) and interactive app (no artboard; borrows 3e). The slice also adds a **generic modal frame** (`ui/Modal.svelte`). Slice 6 will reuse it for `runs/{NewRunModal, PublishConflictsModal, RosterImportModal, MiniProjectModal}` (10k/10l/10m and the roster import). 5b leaves those four as they are, except a one-line Escape guard in `MiniProjectModal` (T2).
 
 **Carried in from 5a** (`docs/backlog/slice5a-authoring-polish-debt.md` §"Browser pass (2026-10-07) — requirements carried to Slice 5b"):
 - **(1) The Back freeze.** It is removed by design. With ItemEditPage gone, no page swap shares the editor store (§2).
@@ -46,6 +46,7 @@ Additionally:
     - **The (ag) scan covers** only CSS contexts: `.svelte` `<style>` blocks, inline `style=` attributes and `.css` files. It never scans `.ts` or test files, where `:` also starts object values and type annotations. A named colour matches only as a **whole value token**, never inside a `var(--…)` name (`--gold-text` is a token, not a hit). It strips `/* */` and `<!-- -->` comments first, plus `//` comments **only on lines where `//` is the first non-blank token**. It never strips mid-line `//`: CSS has none, and stripping it would eat the rest of any line holding `https://`. A trailing `//` comment after code must therefore not hold a colour literal (rule for 5b-touched files). The scan then matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
     - `box-shadow` with token colours stays allowed: the D12 focus ring is the existing `base.css:21-25` / `InlineField.svelte:297` pattern, and the MarkdownEditor flash uses `--danger`.
     - Untouched files (`Toast`, the run modals, `Login`) are out of scope.
+    - `MiniProjectModal.svelte` received only T2's one-line Escape guard. It stays out of (ag) until Slice 6 restyles it (D21).
     - `Modal.svelte` may also carry `-webkit-backdrop-filter`, duplicating `backdrop-filter` for Safari < 18 (the user tests in Safari).
 12. **Gate discipline as in 5a.** Every new section is hash-anchored (`own` + `uniq1`), carries positive pins with paired negatives, a `sweep`, a "no rem font sizes" check and an emoji source scan. `EXPECTED_CHECKS` is bumped exactly.
 13. **Stay in the project directory.** That covers scratch files, gate temp files and reviewer probes. The gate's `mktemp "${TMPDIR:-/tmp}"` (`visual-refresh-gate.sh:92`) is run with `TMPDIR` pointing into the plan workspace.
@@ -97,7 +98,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
   - **Footer Discard** resets save drafts only. **A confirmed close** (`discardAll`) resets both and collapses the create forms.
 - **D6 (user) — Disabled version: read-only text plus a calm note, with no server call.**
   - Page bodies and quiz question text show their markdown as plain mono text, and the interactive app shows no preview.
-  - All carry the note *"Preview is unavailable while this version is disabled — enable it to preview or edit."*
+  - Page, quiz and app carry the note *"Preview is unavailable while this version is disabled — enable it to preview or edit."*
   - **Video (user, T3c review):** its preview is an external iframe and stays (§4), so a disabled video item's note reads *"Editing is unavailable while this version is disabled — enable it to edit."*
   - Nothing calls `/render` or fetches assets. The deliberate 403 (`backend/mathion/api/versions.py:185-186`) stays, but the UI no longer provokes it.
   - Archived versions still render (the server allows it).
@@ -196,7 +197,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
   - the Q badge is plain mono 11px `--primary` text, not the 3b chip;
   - there's no chevron, because the header button itself toggles `aria-expanded`;
   - type names are lowercase mono `--muted`: `single choice`, `multiple choice`, `numeric answer`, `text answer`;
-  - disabled arrows carry a reason: "Already first", "Already last", or the structure reason.
+  - disabled arrows carry a reason: "Move up — already first", "Move down — already last" (5a's wording, plan R12), or the structure reason.
 - **D16 — Option reorder is kept.** It exists today; 3f simply doesn't draw it. Option rows get ↑ ↓ before 🗑, with the same rules as D15. Dropping a working feature would be the bigger deviation.
 - **D17 — Modal placement.**
   - The backdrop is `position: fixed; inset: 0`, above the app header (`z-index: 100`, the existing modals' value).
@@ -256,7 +257,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     
     Text drafts on the other options survive.
   - **When no mark draft differs,** an option delete keeps today's behaviour: immediate, no confirm (`QuestionAccordion.svelte:200-203`).
-  - When C2 blocks the delete button, its tooltip stays the existing reason.
+  - When C2 blocks the delete button, its tooltip reads "Can't delete the only correct option — mark another one correct and save first" (plan R14).
 - **D25 — The correct-row look follows the *draft* mark,** so the author sees what Save will send. After a partial single-choice failure (D10), the draft still shows exactly one correct row.
 
 ---
@@ -482,6 +483,7 @@ The tabs keep `aria-pressed`.
 
 **`VideoBody.svelte`:**
 - **Fields:** a tracker `{ video_url }`, plus a **Video URL** `.field-row` (mono input, `type="url"`, required, `aria-label="Video URL"`) with the hint text below in 12px `--muted`: "Paste any YouTube or Vimeo URL — it is converted to embed form on save."
+  The row uses `align-items: baseline` (not `center`, T3c review): the hint sits under the input, so `center` would drop the label below the input's text line.
 - **Preview card** (ref 1813-1824):
   - the card is `1px solid var(--border)`, `--radius`, `overflow:hidden`;
   - header: `padding:8px 12px; background:var(--surface-2); border-bottom:1px solid var(--border)`, with "Preview" 12.5px/600 and a mono 11.5px `--muted` provider;
@@ -519,7 +521,7 @@ The tabs keep `aria-pressed`.
   - These live in the accordion component, which stays mounted while its body is collapsed (`:80-84`).
   - It receives `versionDisabled` (D6), `frozen` (D10/D9) and `expanded` / `onExpand`. `QuizEditor` keeps the single `expandedId` and sets it on a validation failure (D10).
 - **Each accordion registers a save contributor** with `QuizEditor` through a new context `QUIZ_SAVE_KEY`:
-  - `{ questionId, order(): number, isDirty, locked(): boolean, keyChanged(): boolean, validate(): boolean, focusFirstInvalid(): void, save(): Promise<'ok' | 'failed'>, discard() }`.
+  - `{ questionId, order(): number, isDirty, locked(): boolean, keyChanged(): boolean, validate(): boolean, focusFirstInvalid(): void, save(): Promise<'ok' | 'partial' | 'failed'>, discard() }`.
 
 #### 5.2 What becomes a draft
 These all stop being immediate writes:

@@ -737,7 +737,7 @@ describe('ItemEditorModal — quiz body (T5a)', () => {
   async function expand(i = 0) { toggle(i).click(); await settle(); }
   const answerInput = () => panel().querySelector<HTMLInputElement>('[data-testid="text-answer-input"]')!;
 
-  it('a question draft marks the footer and the page registry dirty (the interim bridge is gone)', async () => {
+  it('a question draft marks the footer and the page registry dirty (the T3a stop-gap bridge is gone)', async () => {
     serveQuiz([textQ]);
     await render({ item: { type: 'quiz' } });
     expect(panel().querySelector('[data-testid="quiz-title"]')).toBeNull();
