@@ -1,6 +1,6 @@
 # Visual Refresh — Slice 5b: Authoring — Item Editor Modal (3c + 3e + 3f) — Design Spec
 
-**Status:** Design — **rev 4** (brainstormed with the user 2026-10-07; self-checked; revs 2-4 fold three rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
+**Status:** Design — **rev 5** (brainstormed with the user 2026-10-07; self-checked; revs 2-5 fold four rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (artboard **3c** `:1649-1758` page, **3e** `:1759-1835` video, **3f** `:1836-1969` quiz; `ref NNNN` below are line numbers in that file) and `docs/design/visual-refresh/mathion-visual-spec.md` (§4 "Item editor modal (3c, 3e, 3f)" `:212-229`, Icon button `:168-181`, §3 colour of state `:110-133`, type-name rule `:230`). Where the two disagree, the spec's *rules* win over the artboard's *pixels*. **User decisions** (§Decisions) override both, and each override is recorded.
 
@@ -43,7 +43,7 @@ Additionally:
       This also applies inside a `box-shadow`.
     - **Not literal colours:** the keywords `transparent`, `currentColor` and `inherit`, and CSS system colours (`Highlight`, `CanvasText`, …) inside `@media (forced-colors: active)`. That last exemption is 5a Constraint 1's, used by `ItemTypePicker.svelte:59-61`.
     - **Comments are exempt,** as in 5a Constraint 1 (e.g. `/* #E9EBEF → --border */` notes and the hexes in `MiniProjectDetailPage.svelte` comments).
-    - **The (ag) scan** strips `/* */`, `//` and `<!-- -->` comments first, matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
+    - **The (ag) scan** strips `/* */` and `<!-- -->` comments first (not `//`: CSS has none, and stripping from `//` would eat the rest of any line holding `https://`), matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
     - `box-shadow` with token colours stays allowed: the D12 focus ring is the existing `base.css:21-25` / `InlineField.svelte:297` pattern, and the MarkdownEditor flash uses `--danger`.
     - Untouched files (`Toast`, the run modals, `Login`) are out of scope.
     - `Modal.svelte` may also carry `-webkit-backdrop-filter`, duplicating `backdrop-filter` for Safari < 18 (the user tests in Safari).
@@ -127,15 +127,15 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
   - **Ownership.** The delete flow lives in **`VersionEditPage`** (`deleteOpenItem()`), not in the modal. The modal's trash button just calls it. This matters because the modal unmounts as soon as the route leaves the item, and its `alive` flag would then skip the reload and the toast. The page's own `stillOnVid` gates every step, as `SequenceAccordion.deleteSeq` does (`:109-116`).
   - **On confirm** (`confirm('Delete item "…"? This cannot be undone.')`):
     1. **Freeze the modal.** Set page state `deletingIid = id`. The modal receives `deleting = (deletingIid === item.id)`, so another item opened via browser Back + Open is never frozen. While it is set:
-       - the modal body container is **`inert`** (losing focus is fine during a delete), which also covers checkable inputs and the T3a interim bodies;
+       - the modal body is **`inert`** via a new `Modal` prop `bodyInert` on `div.modal-body` (a wrapper would break the body's gap and `flex: 0 0 auto` rule). Losing focus is fine during a delete. This also covers checkable inputs and the T3a interim bodies. With every header and footer button disabled too, focus falls back to the panel itself (`tabindex="-1"`, §1);
        - Save, Discard, trash and × are disabled;
        - Modal's Escape is ignored (`closeDisabled`);
        - `requestCloseItem` returns early **only** when `deletingIid !== null && String(deletingIid) === routeIid`.
        
        Nothing can make the item dirty or issue a second close while the request is in flight.
     2. `DELETE /api/items/{id}`.
-    3. **On failure:** the error toast, a forced reload (`stillOnVid`-gated), then clear `deletingIid`. The modal stays open; focus returns to the trash button, or to × if trash is still disabled (the disabled trash had dropped focus to `body`).
-    4. **On success:** record `deletedIid = id`. Then:
+    3. **On failure:** the error toast, a forced reload (`stillOnVid`-gated), then clear `deletingIid` and `await tick()`. The modal stays open; focus returns to the trash button, or to × if trash is still disabled (the disabled trash had dropped focus to `body`).
+    4. **On success:** record `deletedIid = id` only if `routeIid === String(id)` (otherwise the user already left, and nothing needs suppressing). Then:
        - if `routeIid === String(id)` (the user hasn't already left with the browser's own Back), set `closing = true` and close the item with **`navigate(seqUrl, { replace: true, force: true })`**. The delete never uses `history.back()`: a user Back press queued just before the DELETE resolves would otherwise be followed by a second traversal past the sequence page. Cost: an in-page open leaves history `[S, S]` (one dead Back), as D19 already accepts;
        - force a tree reload (await it);
        - toast "Item deleted";
@@ -163,7 +163,10 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
       The main gesture (type, then ⌘S) keeps the caret where it was.
     - Every structure control (add/delete/reorder, upload/replace/remove) is disabled while saving.
     - Save, Discard and ⌘S are disabled while any structure operation, app-script upload or asset upload is in flight. Each body exposes a bindable `busy` for this, which includes every inner `MarkdownEditor`'s `uploading`.
-    - A successful part advances **`saved` only and never reassigns `draft`** (today's `draft = { ...saved }` at `QuestionAccordion.svelte:354` goes). With inputs frozen, `draft` equals what was sent, so the part goes clean by comparison.
+    - **After a successful part,** `saved` takes the server's echo, and **each field that was in that request** gets `draft.x = saved.x`. This applies to every body: page, video, app title and quiz.
+      - This is needed because the client and server normalise: `correct_text` is trimmed, a numeric `"2.50"` comes back as `"2.5"`, the Video URL comes back in embed form, and strings are stripped server-side (`schemas.py:48`).
+      - It is safe because inputs are frozen while the request is out, so no newer input can be overwritten.
+      - Fields that were not sent (other questions, untouched fields) keep their drafts. The whole-draft `draft = { ...saved }` (`QuestionAccordion.svelte:354`) and the whole-tracker `reset()` are replaced by this per-field write-back.
     - So a Save never interleaves with a structure change, and a reset never wipes input made after a request left.
   - **Partial failure.**
     - Requests go in a fixed order (§5.3), and each part that succeeds advances its saved baseline. **The save stops at the first failure.**
@@ -216,8 +219,8 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     
     **Mechanism:**
     - The `routeIid` effect records `lastClosedIid` and sets a one-shot `justClosedItem` flag on the non-null → null transition. It is **declared before** the focus effect (added to the 5a effect-order comment).
-    - The focus effect reads and clears the flag inside `untrack` (a tracked write-then-read would re-run it). Its body/`null` check runs **after `await tick()`**, as today (`VersionEditPage.svelte:143-149`), because within the same flush the modal's × is still mounted and focused.
-    - Only when the flag was set and `document.activeElement` is `body` or `null` does it reset `lastFocusedTarget` and apply the fallback.
+    - The focus effect reads and clears the flag inside `untrack`, at the **top** of the effect, before the existing `lastFocusedTarget` equality skip (`VersionEditPage.svelte:136`). A tracked write-then-read would re-run it. When the flag was set, the equality skip is bypassed for that run. Its body/`null` check runs **after `await tick()`**, as today (`VersionEditPage.svelte:143-149`), because within the same flush the modal's × is still mounted and focused.
+    - Only when the flag was set and `document.activeElement` is `body` or `null` does it apply the fallback. The fallback **replaces** the existing header focus-and-scroll path for that run (a deep-link close would otherwise focus the header): it focuses the pencil or the header, sets `lastFocusedTarget` to the sequence header id so a later reload doesn't refocus, and returns.
     - The fallback looks up the pencil by the new `id="item-{id}-open"` on `ItemRow`'s Open button (`ItemRow.svelte:79`).
     - A tree reload without a close never runs the fallback, so it can't steal focus.
   - **The page's focus `$effect`** is skipped while an item is open, so it doesn't race the modal.
@@ -314,7 +317,8 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
 - **Backdrop:**
   - `mousedown` on the backdrop itself calls `preventDefault()`, which keeps focus in the panel;
   - `click` closes only when `closeOnBackdrop` is set and the target is the backdrop itself.
-- **Focus containment:** the document `focusin` listener from D18. It bails when the panel is disconnected, and is removed on destroy.
+- **Focus containment:** the document `focusin` listener from D18. It bails when the panel is disconnected, and is removed on destroy. The panel carries `tabindex="-1"` and is the **last-resort target**: when nothing inside can take focus (e.g. `bodyInert` with all buttons disabled), both the `focusin` handler and the Tab handling move focus to the panel itself.
+- **`bodyInert = false`** puts `inert` on `div.modal-body` (D9).
 - **Scroll lock:** on mount, save `document.documentElement.style.overflow` and set it to `hidden`; restore it on destroy.
 - Modal holds no dirty state; the parent decides what closing means.
 
@@ -605,7 +609,8 @@ Vitest/jsdom with mount, unmount and flushSync (no testing-library).
     - the body contract (`saveDirty` vs `guardDirty`, `savedTitle`);
     - Save, Discard and ⌘S;
     - the busy interlock: Save is disabled while the body is busy, and inputs are `readonly` while saving, **with focus kept in a focused textarea and input across a ⌘S save**;
-    - the `deleting` freeze;
+    - the `deleting` freeze. jsdom does not enforce `inert`, so assert the attribute plus disabled ×, Save and trash, rather than typing into the body;
+    - **normalised fields come back clean:** a pasted `youtube.com/watch?v=…` URL, a trimmed text answer and a numeric `"2.50"` each save and leave no "unsaved changes" (the quiz cases run in T5a);
     - read-only published / archived / disabled, where disabled makes no render call (page **and** quiz);
     - autofocus lands on Title, and on × when read-only (never the trash button);
     - `refreshKey` increments after a page save;
@@ -686,7 +691,7 @@ Every task ends green (Constraint 14).
 |---|---|---|
 | **T1** | `ui/Modal.svelte` (+ `closeDisabled`, focus containment, autofocus default) + tests | Generic; no item knowledge. **No gate section yet:** the gate grades the built bundle (`visual-refresh-gate.sh:7,118-119`), and nothing imports Modal until T3a |
 | **T2** | `MarkdownEditor` + `AssetSidebar` restyle (3c) + `plain` (D6) + `frozen` (D10) + the AssetSidebar Escape + gate (ab) | Also restyles MiniProjectModal's use (D21) |
-| **T3a** | `ItemEditorModal` (header, Title, footer, body contract, interlock, `deleting` freeze) + `PageBody` + **interim wiring** + the D6 quiz `plain` leg + gate (aa) Modal + (ac) ItemEditorModal/PageBody | Unit-tested, and **imported into `VersionEditPage` behind `{#if expandedItem}` with `expandedItem` still always `null`** (routing untouched, so ItemEditPage still serves items), which puts Modal's and the modal's CSS into the bundle for the gate. **Interim wiring** (quiz): mount today's `QuizEditor` with `showTitle={false}` and `versionDisabled`; the modal Save sends the title (`PATCH {title}`); `QuizEditor`'s `quizDirty` is bridged into **`guardDirty` only**; `saveDirty` = the title, and the footer's Discard resets only the title; per-question Save/Discard keep serving question drafts until T5a. Interim `discardAll` resets the title only: a confirmed close unmounts the modal, which drops today's `QuizEditor` drafts anyway. **Interim wiring** (interactive app): the modal Save sends `PATCH {title}`; mount today's `InteractiveAppEditor` with its `<h3>` title hidden (`showTitle={false}`) under the modal Title, and **only when `!versionDisabled`** (otherwise the D6 note; its script fetch would 403, `assets.py:142-143`), until T4 |
+| **T3a** | `ItemEditorModal` (header, Title, footer, body contract, interlock, `deleting` freeze) + `PageBody` + **interim wiring** + the D6 quiz `plain` leg + gate (aa) Modal + (ac) ItemEditorModal/PageBody | Unit-tested, and **imported into `VersionEditPage` behind `{#if expandedItem}` with `expandedItem` still always `null`** (routing untouched, so ItemEditPage still serves items), which puts Modal's and the modal's CSS into the bundle for the gate. `expandedItem` is declared `$state<AdminTreeItem \| null>(null)` (a plain `const … = null` narrows to `never` and fails `npm run check`). The dead branch's other props come from the expanded block/sequence with typed fallbacks; T3b replaces it with `deriveExpansion`. **Interim wiring** (quiz): mount today's `QuizEditor` with `showTitle={false}` and `versionDisabled`; the modal Save sends the title (`PATCH {title}`); `QuizEditor`'s `quizDirty` is bridged into **`guardDirty` only**; `saveDirty` = the title, and the footer's Discard resets only the title; per-question Save/Discard keep serving question drafts until T5a. Interim `discardAll` resets the title only: a confirmed close unmounts the modal, which drops today's `QuizEditor` drafts anyway. **Interim wiring** (interactive app): the modal Save sends `PATCH {title}`; mount today's `InteractiveAppEditor` with its `<h3>` title hidden (`showTitle={false}`) and its `uploadBusy` made bindable and bound to `busy`, under the modal Title, and **only when `!versionDisabled`** (otherwise the D6 note; its script fetch would 403, `assets.py:142-143`), until T4 |
 | **T3b** | Routing + `VersionEditPage` host (D7 latch, D9 page-owned delete with freeze, D18 focus with `justClosedItem` + `ItemRow` pencil ids, D19 stale item) + delete `ItemEditPage` and its tests + the D22 contract + the App-level Back-freeze test (written first, mutation-proved) | |
 | **T3c** | `VideoBody` logic (field, validation, normalise, save) | Card styling arrives in T4 |
 | **T4** | Video preview card (3e) + `AppBody` (D4, D14, `busy`) replacing `InteractiveAppEditor` + the `VideoFrame` / `InteractiveFrame` `height` props + gate (ad) + the `.notice` target | |
@@ -779,6 +784,22 @@ Minors folded in:
 - `frozen` reaches `uploadOne` and `AssetSidebar`;
 - the interim app's title, hidden `<h3>` and no fetch when disabled;
 - the interim `discardAll` is title-only.
+
+## Review resolutions (round 4, 2026-10-07: Opus + Fable on rev 4)
+
+Both lanes confirmed the round-3 Important findings resolved.
+
+**One new Important finding, raised in both lanes, was accepted.** The rev-4 "advance `saved` only" rule left normalised fields (trimmed text, `"2.50"` → `"2.5"`, the embed URL) dirty forever. The fix is the per-field write-back of sent fields after success (D10), plus a test.
+
+Minors folded in:
+- `Modal bodyInert` and the panel `tabindex="-1"` as the last-resort focus target;
+- `await tick()` before the failure refocus;
+- jsdom `inert` assertions;
+- `deletedIid` set only when the route is still on the item;
+- the D18 flag consumed before the equality skip, with the fallback replacing the header path;
+- Constraint 11 doesn't strip `//`;
+- the T3a `expandedItem` typing and dead-branch props;
+- the interim app's `uploadBusy` bound to `busy`.
 
 ## Git stacking
 Same local branch as 5a. One commit per task after its two-lane review is clean; no push and no merge.
