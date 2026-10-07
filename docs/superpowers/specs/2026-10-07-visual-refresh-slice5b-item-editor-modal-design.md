@@ -1,6 +1,6 @@
 # Visual Refresh — Slice 5b: Authoring — Item Editor Modal (3c + 3e + 3f) — Design Spec
 
-**Status:** Design — **rev 6** (brainstormed with the user 2026-10-07; self-checked; revs 2-6 fold five rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
+**Status:** Design — **rev 7** (brainstormed with the user 2026-10-07; self-checked; revs 2-7 fold six rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (artboard **3c** `:1649-1758` page, **3e** `:1759-1835` video, **3f** `:1836-1969` quiz; `ref NNNN` below are line numbers in that file) and `docs/design/visual-refresh/mathion-visual-spec.md` (§4 "Item editor modal (3c, 3e, 3f)" `:212-229`, Icon button `:168-181`, §3 colour of state `:110-133`, type-name rule `:230`). Where the two disagree, the spec's *rules* win over the artboard's *pixels*. **User decisions** (§Decisions) override both, and each override is recorded.
 
@@ -43,7 +43,7 @@ Additionally:
       This also applies inside a `box-shadow`.
     - **Not literal colours:** the keywords `transparent`, `currentColor` and `inherit`, and CSS system colours (`Highlight`, `CanvasText`, …) inside `@media (forced-colors: active)`. That last exemption is 5a Constraint 1's, used by `ItemTypePicker.svelte:59-61`.
     - **Comments are exempt,** as in 5a Constraint 1 (e.g. `/* #E9EBEF → --border */` notes and the hexes in `MiniProjectDetailPage.svelte` comments).
-    - **The (ag) scan** strips `/* */` and `<!-- -->` comments first, plus `//` comments **only on lines where `//` is the first non-blank token**. It never strips mid-line `//`: CSS has none, and stripping it would eat the rest of any line holding `https://`. A trailing `//` comment after code must therefore not hold a colour literal (rule for 5b-touched files). The scan then matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
+    - **The (ag) scan covers** only CSS contexts: `.svelte` `<style>` blocks, inline `style=` attributes and `.css` files. It never scans `.ts` or test files, where `:` also starts object values and type annotations. A named colour matches only as a **whole value token**, never inside a `var(--…)` name (`--gold-text` is a token, not a hit). It strips `/* */` and `<!-- -->` comments first, plus `//` comments **only on lines where `//` is the first non-blank token**. It never strips mid-line `//`: CSS has none, and stripping it would eat the rest of any line holding `https://`. A trailing `//` comment after code must therefore not hold a colour literal (rule for 5b-touched files). The scan then matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
     - `box-shadow` with token colours stays allowed: the D12 focus ring is the existing `base.css:21-25` / `InlineField.svelte:297` pattern, and the MarkdownEditor flash uses `--danger`.
     - Untouched files (`Toast`, the run modals, `Login`) are out of scope.
     - `Modal.svelte` may also carry `-webkit-backdrop-filter`, duplicating `backdrop-filter` for Safari < 18 (the user tests in Safari).
@@ -220,7 +220,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     **Mechanism:**
     - The `routeIid` effect records `lastClosedIid` and sets a one-shot `justClosedItem` flag on the non-null → null transition. It is **declared before** the focus effect (added to the 5a effect-order comment).
     - The focus effect reads the flag inside `untrack`, at the **top** of the effect, before the existing `lastFocusedTarget` equality skip (`VersionEditPage.svelte:136`). A tracked write-then-read would re-run it. When the flag is set, the equality skip is bypassed for that run.
-    - The flag is **cleared inside the async block, only when the close handling actually runs** (after the `cancelled` check, `:142-146`). A run cancelled by an overlapping tree reload therefore leaves it for the next run. Its body/`null` check runs **after `await tick()`**, as today (`VersionEditPage.svelte:143-149`), because within the same flush the modal's × is still mounted and focused.
+    - The flag is **cleared inside the async block, only when the close handling actually runs** (after the `cancelled` check, `:142-146`). A run cancelled by an overlapping tree reload therefore leaves it for the next run. The flag is **also cleared on the effect's synchronous early returns** (`if (!t) return`, `:111`; the `!headerId` branch, `:128-133`), so the one-shot can never outlive its close. Its body/`null` check runs **after `await tick()`**, as today (`VersionEditPage.svelte:143-149`), because within the same flush the modal's × is still mounted and focused.
     - **When the flag is set, after `await tick()`:**
       - if `document.activeElement` is `body` or `null`, apply the fallback (focus the pencil, else the header);
       - **otherwise leave focus where it is.** FocusTrap has already restored it to the opener, or to whatever the user had focused.
@@ -419,7 +419,7 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
   3. the modal advances the title baseline from `savedTitle` when present.
 - **After a full or partial success**, `loadAdminTree(vid, { force: true })` is gated on `stillOnVid`, and the body stays `frozen` until it settles.
   - **Baselines come only from the PATCH responses** (D10 per-field write-back). The reload refreshes only the tree: the header, the item rows and the `used` badges. Nothing is reset from the fresh tree after it.
-  - From ItemEditPage's outcome handling (`:169-203`) only the toast wording is kept: `'error'` → "Saved (refresh failed — reload to see latest)"; `'discarded'` → no toast.
+  - From ItemEditPage's outcome handling (`:169-203`) only the toast wording is kept: `'error'` → "Saved (refresh failed — reload to see latest)"; `'discarded'` → "Saved" (the PATCH succeeded; only the refetch was superseded; the Toaster is global, `ItemEditPage.svelte:170-175`).
   
   Then:
   - the toast "Saved", or the D10 partial-failure pop-up;
@@ -823,6 +823,15 @@ Minors folded in:
 - the containment handler verifies that focus actually landed;
 - the close flag is cleared only when its handling runs;
 - `//` comments are stripped only when they start a line.
+
+## Review resolutions (round 6, 2026-10-07: Opus + Fable on rev 6)
+
+**No Critical or Important findings in either lane.** The round-5 Important finding is confirmed resolved.
+
+Minors folded in (rev 7):
+- the close flag is also cleared on the focus effect's early returns;
+- (ag) covers CSS contexts only, matching named colours as whole value tokens;
+- `'discarded'` keeps the "Saved" toast.
 
 ## Git stacking
 Same local branch as 5a. One commit per task after its two-lane review is clean; no push and no merge.
