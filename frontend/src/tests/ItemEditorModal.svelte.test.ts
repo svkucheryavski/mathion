@@ -468,3 +468,19 @@ describe('ItemEditorModal — video body (T3c)', () => {
     expect(panel().querySelector('iframe')!.getAttribute('src')).toBe(EMBED);
   });
 });
+
+describe('ItemEditorModal — ported from ItemEditPage.interactive (T3b)', () => {
+  it('app: the fetched script previews in the sandboxed frame; there is no URL form', async () => {
+    serve((u) => (u.includes('/assets/')
+      ? Promise.resolve({ ok: true, status: 200, statusText: 'x', text: () => Promise.resolve("getElementById('app-root')") } as unknown as Response)
+      : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    expect(panel().querySelector('iframe')?.getAttribute('srcdoc')).toContain("getElementById('app-root')");
+    expect(panel().querySelector('input[type="url"]')).toBeNull();
+  });
+
+  it('app: with no script the empty upload state shows', async () => {
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    expect(panel().textContent).toContain('No app uploaded yet.');
+  });
+});

@@ -14,7 +14,6 @@
   import NotFound from './pages/NotFound.svelte';
   import VersionsPage from './pages/editor/VersionsPage.svelte';
   import VersionEditPage from './pages/editor/VersionEditPage.svelte';
-  import ItemEditPage from './pages/editor/ItemEditPage.svelte';
   import RunListPage from './pages/runs/RunListPage.svelte';
   import RunDetailPage from './pages/runs/RunDetailPage.svelte';
   import TeacherRunListPage from './pages/teaching/TeacherRunListPage.svelte';
@@ -28,7 +27,6 @@
     MiniProjectDetailPage: MiniProjectDetailPage as Component<Record<string, string>>,
     VersionsPage: VersionsPage as Component<Record<string, string>>,
     VersionEditPage: VersionEditPage as Component<Record<string, string>>,
-    ItemEditPage: ItemEditPage as Component<Record<string, string>>,
     RunListPage: RunListPage as Component<Record<string, string>>,
     RunDetailPage: RunDetailPage as Component<Record<string, string>>,
     TeacherRunListPage: TeacherRunListPage as Component<Record<string, string>>,

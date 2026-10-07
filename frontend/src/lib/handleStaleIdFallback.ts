@@ -1,9 +1,9 @@
 // handleStaleIdFallback resolves a stale-id condition discovered by the
 // validation $effect: toasts a user-facing 'info' message (this is a
 // benign redirection, not an error) and navigates (replace + force) to
-// the nearest valid parent URL. staleBid wins over staleSid because a
-// missing block makes any nested sequence URL moot (cascade-deleted or
-// unreachable). `force: true` bypasses DirtyGuard — prompting "save your
+// the nearest valid parent URL. staleBid wins over staleSid (and staleSid
+// over staleIid) because a missing block makes any nested sequence URL moot
+// (cascade-deleted or unreachable). `force: true` bypasses DirtyGuard — prompting "save your
 // changes?" on a deleted entity is pointless; Cancel would re-trigger
 // the stale-id loop.
 //
@@ -13,12 +13,18 @@
 export type StaleFlags = {
   staleBid: boolean;
   staleSid: boolean;
+  staleIid?: boolean;
 };
 
 export type StaleContext = {
   courseSlug: string;
   vid: string;
   bid: string | null;
+  sid?: string | null;
+  iid?: string | null;
+  // Slice-5b D9: the item this page just deleted. Its route is an expected
+  // close in flight, not a stale address — no toast, no navigation.
+  deletedIid?: number | null;
 };
 
 export type StaleDeps = {
@@ -42,5 +48,13 @@ export function handleStaleIdFallback(
     deps.pushToast('Sequence not found.', 'info');
     deps.navigate(`/courses/${ctx.courseSlug}/edit/v/${ctx.vid}/blocks/${ctx.bid}`, { replace: true, force: true });
     return;
+  }
+  if (flags.staleIid && ctx.bid !== null && ctx.sid != null) {
+    if (ctx.deletedIid != null && ctx.iid === String(ctx.deletedIid)) return;
+    deps.pushToast('Item not found.', 'info');
+    deps.navigate(
+      `/courses/${ctx.courseSlug}/edit/v/${ctx.vid}/blocks/${ctx.bid}/sequences/${ctx.sid}`,
+      { replace: true, force: true },
+    );
   }
 }

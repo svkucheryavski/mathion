@@ -125,3 +125,33 @@ None blocks the slice; each is input for the final polish slice.
   one); a failed PATCH keeps the draft dirty; empty title + empty URL (R9 focus ends on Title); the
   500 ms debounce and the preview returning after Discard (T4 owns the card).
 
+
+## T3b — Item route hosted by VersionEditPage
+
+- **A late DELETE success can steal focus.** Open an item in-page and press Trash with a slow DELETE.
+  Press Back, open "New item" and type. When the DELETE resolves, `deleteOpenItem` focuses
+  `#seq-…-header` (VersionEditPage ~:297) and the next Space toggles the sequence. The code follows
+  D9's wording, but D18 says focus is never stolen. Fix: focus the header only when focus has dropped
+  to `body`/null; the normal path still works because the reload removes the restored pencil.
+- **B's trash does nothing while A's DELETE is in flight.** Back during A's DELETE, open B, click
+  Trash: `deleteOpenItem` returns early with no confirm and no feedback. Fix: pass
+  `deleteBusy={deletingIid !== null}` into the modal's `trashDisabled`, or toast from the early return.
+- **No toast after a DELETE that succeeds following a version switch.** The `!stillOnVid` bail
+  returns before "Item deleted". Fix: toast before the bail, or document why it is silent.
+- **The `deletedIid` exemption cannot be reached in the host flow.** `navigate(…, {force})` moves the
+  route to S synchronously, so no flush sees `routeIid === deleted` with a tree that lacks it. Only
+  the unit test discriminates. Keep it as belt-and-braces, but reword the comment in
+  `handleStaleIdFallback.ts`.
+- **Stale effect-order comments in VersionEditPage.** The load effect still says "load → validation →
+  focus". The focus effect still says "declared THIRD" and omits `routeIid` from its tracked list.
+  The create-tracker effect still says "FOURTH". The new order is load → validation → item-route →
+  focus → create-tracker.
+- **`App.editorRoutes.svelte.test.ts` oversells itself.** The header comment and describe title claim
+  it reproduces "the 5a Back-freeze". Step 8 showed jsdom cannot reproduce that freeze; it is a
+  routing smoke test. Reword both (T7 sweep).
+- **Tests not yet written:**
+  - A deep-link open keeps autofocus on Title: removing the `iid !== null` early return in the focus
+    effect survives the suite.
+  - Forward after a close reopens the item, and × then calls `history.back()` exactly once.
+  - A deep-link delete keeps `[X, S]` and never calls `history.back()`.
+  - A DELETE that fails while item B is open.

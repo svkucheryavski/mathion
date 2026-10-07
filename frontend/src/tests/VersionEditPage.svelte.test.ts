@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import VersionEditPage from '../pages/editor/VersionEditPage.svelte';
-import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
+import { clearEditorVersion, loadAdminTree } from '../stores/currentEditorVersion.svelte';
 import { navigate, currentRoute, matchRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { routes } from '../routes';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
-import type { AdminTree, AdminTreeBlock, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
+import type { AdminTree, AdminTreeBlock, AdminTreeItem, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
 import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 
 // Capture the page's real registry so a test can register a dirty tracker
@@ -537,6 +537,7 @@ async function renderRouted() {
       get versionId() { return param('versionId') ?? ''; },
       get blockId() { return param('blockId'); },
       get sequenceId() { return param('sequenceId'); },
+      get itemId() { return param('itemId'); },
     },
   });
   await settle();
@@ -601,5 +602,328 @@ describe('VersionEditPage — no spurious stale-id toast after a delete (T5b)', 
     expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
     expect(target.querySelector('#seq-20-header')).toBeNull();
     expect(toasts.list.map((t) => t.message)).not.toContain('Sequence not found.');
+  });
+});
+
+// ---- Slice-5b T3b: the item modal hosted on the item route ----
+function mkItem(id: number, over: Partial<AdminTreeItem> = {}): AdminTreeItem {
+  return {
+    id, sequence_id: 20, title: `Item ${id}`, slug: `i${id}`, order: id, type: 'static_page',
+    content_md: `body ${id}`, content_html: '', video_url: null, script_url: null, questions_count: 0, ...over,
+  };
+}
+const SEQ = '/courses/c/edit/v/1/blocks/10/sequences/20';
+const ITEM = (id: number) => `${SEQ}/items/${id}`;
+// jsdom fires popstate for history.back() on the SECOND macrotask after the
+// call (probed: one setTimeout(0) is not enough), so wait two timer hops.
+const tick0 = () => new Promise((r) => setTimeout(r, 0));
+async function waitPop() { await tick0(); await tick0(); await settle(); await settle(); }
+const modal = () => document.querySelector<HTMLElement>('section.modal-panel');
+const xBtn = () => modal()!.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+const trashBtn = () => modal()!.querySelector<HTMLButtonElement>('button[aria-label="Delete item"]')!;
+const pencil = (id: number) => document.getElementById(`item-${id}-open`) as HTMLButtonElement | null;
+const titleField = () => modal()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!;
+const msgs = () => toasts.list.map((t) => t.message);
+function typeInto(el: HTMLInputElement, v: string) {
+  el.value = v;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+const esc = (init: KeyboardEventInit = {}) =>
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init }));
+// A DELETE /api/items/{id} held until release(); release() also drops the item from the served tree.
+function holdDelete(id: number) {
+  let release!: () => void;
+  serve((url, init) => {
+    if (url === `/api/items/${id}` && init?.method === 'DELETE') {
+      return new Promise<Response>((r) => {
+        release = () => {
+          const s = tree.blocks[0].sequences[0];
+          s.items = s.items.filter((x) => x.id !== id);
+          void jres({}).then(r);
+        };
+      });
+    }
+    return undefined;
+  });
+  return () => release();
+}
+
+describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
+  beforeEach(() => {
+    tree.blocks = [mkBlock(10, { sequences: [{ id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [mkItem(30), mkItem(31)] }] })];
+  });
+  async function openFromPage(id = 30) {
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    pencil(id)!.focus();
+    pencil(id)!.click();
+    await settle();
+  }
+
+  it('Open, then ×: the modal closes, the sequence stays open, focus is back on the pencil', async () => {
+    await openFromPage();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Item 30');
+    expect(modal()!.querySelector('.item-ctx')!.textContent).toBe('static page · S1 · item 1 of 2');
+    xBtn().click();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+    expect(document.activeElement).toBe(pencil(30));
+  });
+
+  it('restore beats fallback: focus returns to what had it when the item opened', async () => {
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    const header = target.querySelector<HTMLElement>('#seq-20-header')!;
+    header.focus();
+    await navigate(ITEM(30));
+    await settle();
+    expect(modal()).not.toBeNull();
+    xBtn().click();
+    await waitPop();
+    expect(document.activeElement).toBe(header);
+  });
+
+  it('in-page open: ×, × and Escape call history.back() once and stop on the sequence', async () => {
+    await openFromPage();
+    const back = vi.spyOn(history, 'back');
+    xBtn().click();
+    xBtn().click();
+    esc();
+    expect(back).toHaveBeenCalledTimes(1);
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+  });
+
+  it('Escape closes; an auto-repeat Escape does not', async () => {
+    await openFromPage();
+    const back = vi.spyOn(history, 'back');
+    esc({ repeat: true });
+    expect(back).not.toHaveBeenCalled();
+    esc();
+    expect(back).toHaveBeenCalledTimes(1);
+    await waitPop();
+    expect(modal()).toBeNull();
+  });
+
+  it('a prompt cancelled on × re-arms it; the next confirmed × closes', async () => {
+    await openFromPage();
+    typeInto(titleField(), 'Draft');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const back = vi.spyOn(history, 'back');
+    xBtn().click();
+    await waitPop();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(titleField().value).toBe('Draft');
+    confirmSpy.mockReturnValue(true);
+    xBtn().click();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('deep link, then ×: the address is replaced with the sequence; history.back() is never used', async () => {
+    await navigate(ITEM(30), { force: true });
+    await renderRouted();
+    const back = vi.spyOn(history, 'back');
+    const replace = vi.spyOn(history, 'replaceState');
+    xBtn().click();
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith(null, '', SEQ);
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('deep link with a draft: × prompts, cancel keeps the draft and re-arms; Escape prompts again', async () => {
+    await navigate(ITEM(30), { force: true });
+    await renderRouted();
+    typeInto(titleField(), 'Draft');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    xBtn().click();
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(titleField().value).toBe('Draft');
+    esc();
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(titleField().value).toBe('Draft');
+  });
+
+  it('browser Back and the course link prompt while the modal has a draft; cancel keeps it', async () => {
+    await openFromPage();
+    typeInto(titleField(), 'Draft');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    history.back();
+    await waitPop();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(modal()).not.toBeNull();
+    target.querySelector<HTMLAnchorElement>('h1 a')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(titleField().value).toBe('Draft');
+  });
+
+  it('a stale item address toasts "Item not found." and replaces the address with the sequence', async () => {
+    await navigate(ITEM(999), { force: true });
+    await renderRouted();
+    await settle();
+    expect(msgs()).toContain('Item not found.');
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('delete: one confirm, frozen in flight, one replace+force close after which the reload lands, then toast and header focus', async () => {
+    const release = holdDelete(30);
+    let modalAtReload: boolean | null = null;
+    const inner = fetchSpy.getMockImplementation()!;
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/admin-tree') && modalAtReload === false) modalAtReload = modal() !== null;
+      return inner(url, init);
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await openFromPage();
+    const back = vi.spyOn(history, 'back');
+    const replace = vi.spyOn(history, 'replaceState');
+    trashBtn().click();
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith('Delete item "Item 30"? This cannot be undone.');
+    expect(modal()!.querySelector('div.modal-body')!.hasAttribute('inert')).toBe(true);
+    xBtn().click();
+    esc();
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(currentRoute.path).toBe(ITEM(30));
+    modalAtReload = false;           // arm: record the modal's presence at the next tree GET
+    release();
+    await settle();
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith(null, '', SEQ);
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+    expect(modalAtReload).toBe(false);   // the reload ran after the modal unmounted
+    expect(pencil(30)).toBeNull();
+    expect(msgs()).toContain('Item deleted');
+    expect(msgs()).not.toContain('Item not found.');
+    expect(document.activeElement).toBe(target.querySelector('#seq-20-header'));
+  });
+
+  it('a failed DELETE keeps the modal open and unfrozen, with focus on the trash', async () => {
+    serve((url, init) => (url === '/api/items/30' && init?.method === 'DELETE' ? jres({ detail: 'Nope' }, 409) : undefined));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await openFromPage();
+    trashBtn().click();
+    await settle();
+    await settle();
+    expect(msgs()).toContain('Nope');
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(modal()!.querySelector('div.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(xBtn().disabled).toBe(false);
+    expect(document.activeElement).toBe(trashBtn());
+  });
+
+  it('browser Back during the DELETE, then another item: not frozen, × works, and the late success never navigates', async () => {
+    const release = holdDelete(30);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await openFromPage(30);
+    trashBtn().click();
+    await settle();
+    history.back();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    pencil(31)!.focus();
+    pencil(31)!.click();
+    await settle();
+    expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Item 31');
+    expect(modal()!.querySelector('div.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(xBtn().disabled).toBe(false);
+    const back = vi.spyOn(history, 'back');
+    release();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(31));
+    expect(back).not.toHaveBeenCalled();
+    xBtn().click();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(currentRoute.path).toBe(SEQ);
+  });
+
+  it('the page behind cannot take focus while the modal is open', async () => {
+    await openFromPage();
+    target.querySelector<HTMLElement>('#seq-20-header')!.focus();
+    expect(modal()!.contains(document.activeElement)).toBe(true);
+  });
+
+  it('after creating an item the modal opens on it; closing lands focus on its Open pencil', async () => {
+    serve((url, init) => {
+      if (url === '/api/sequences/20/items' && init?.method === 'POST') {
+        tree.blocks[0].sequences[0].items.push(mkItem(99, { title: 'Fresh' }));
+        return jres({ id: 99 });
+      }
+      return undefined;
+    });
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="New item in Seq 20"]')!.click();
+    await settle();
+    const t = target.querySelector<HTMLInputElement>('input[aria-label="Item title"]')!;
+    typeInto(t, 'Fresh');
+    const create = [...t.form!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.trim() === 'Create')!;
+    create.focus();
+    t.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(99));
+    expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Fresh');
+    xBtn().click();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(document.activeElement).toBe(pencil(99));
+  });
+
+  it("after a deep-link close, focus lands on the closed item's Open pencil", async () => {
+    await navigate(ITEM(31), { force: true });
+    await renderRouted();
+    xBtn().click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(document.activeElement).toBe(pencil(31));
+  });
+
+  it('a tree reload with focus on body does not move focus', async () => {
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    (document.activeElement as HTMLElement | null)?.blur();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Move item down: Item 30"]')!.click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('the item is deleted elsewhere while its modal is open: the reload closes it with "Item not found.", no error', async () => {
+    await openFromPage();
+    const errors: unknown[] = [];
+    const onErr = (e: ErrorEvent) => { errors.push(e.error ?? e.message); };
+    window.addEventListener('error', onErr);
+    tree.blocks[0].sequences[0].items = [mkItem(31)];
+    await loadAdminTree(1, { force: true });
+    await settle();
+    await settle();
+    window.removeEventListener('error', onErr);
+    expect(errors).toEqual([]);
+    expect(msgs()).toContain('Item not found.');
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
   });
 });

@@ -76,7 +76,8 @@
       disabled={busy || !!structureReason || !canReorderDown}
       onclick={onMoveDown}
     />
-    <IconButton size="sm" glyph="pencil" title="Open" aria-label={`Open ${ariaName}`} disabled={busy} onclick={onOpen} />
+    <!-- id: the item modal's close falls back here (Slice-5b D18). -->
+    <IconButton id={`item-${item.id}-open`} size="sm" glyph="pencil" title="Open" aria-label={`Open ${ariaName}`} disabled={busy} onclick={onOpen} />
     <IconButton
       size="sm"
       glyph="trash"

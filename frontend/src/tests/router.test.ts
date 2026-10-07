@@ -51,7 +51,7 @@ describe('lib/router', () => {
       ['/courses/calc/edit/v/3',                                                  'VersionEditPage',  { courseSlug: 'calc', versionId: '3' }],
       ['/courses/calc/edit/v/3/blocks/12',                                        'VersionEditPage',  { courseSlug: 'calc', versionId: '3', blockId: '12' }],
       ['/courses/calc/edit/v/3/blocks/12/sequences/47',                           'VersionEditPage',  { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47' }],
-      ['/courses/calc/edit/v/3/blocks/12/sequences/47/items/87',                  'ItemEditPage',     { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' }],
+      ['/courses/calc/edit/v/3/blocks/12/sequences/47/items/87',                  'VersionEditPage',  { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' }],
     ] as const)('routes.ts wires %s → %s', (path, component, params) => {
       const m = matchRoute(appRoutes, path);
       expect(m?.route.component).toBe(component);

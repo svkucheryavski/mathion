@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { setContext, onDestroy, tick, untrack } from 'svelte';
+  import { setContext, onDestroy, onMount, tick, untrack } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
@@ -21,21 +21,23 @@
   import ItemEditorModal from '../../components/editor/ItemEditorModal.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import type { RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import type { AdminTreeItem } from '../../lib/types';
 
   type Props = {
     courseSlug: string;
     versionId: string;
     blockId?: string;
     sequenceId?: string;
+    // Slice-5b D1: the item route is served here too; the item opens in a modal.
+    itemId?: string;
   };
 
-  let { courseSlug, versionId, blockId, sequenceId }: Props = $props();
+  let { courseSlug, versionId, blockId, sequenceId, itemId }: Props = $props();
 
   const vid = $derived(Number(versionId));
   const vidValid = $derived(Number.isInteger(vid) && vid > 0);
   const routeBid = $derived(blockId ?? null);
   const routeSid = $derived(sequenceId ?? null);
+  const routeIid = $derived(itemId ?? null);
 
   // Provide dirty registry BEFORE any consumer mounts (provider-before-
   // consumers ordering per spec).
@@ -72,6 +74,23 @@
     if (routeBid !== null) untrack(() => { blocksFolded = false; });
   });
 
+  // ---- Slice-5b item modal (D7 close, D9 delete, D18 focus). Plain `let`s
+  //      where nothing renders from the value. ----
+  // D7: was the page mounted ON an item URL (deep link / reload)? Then × must
+  // replace to the sequence; every later open is in-page and × = Back.
+  let mountedOnItem = untrack(() => itemId) !== undefined;
+  let openedFromPage = false;
+  // Re-entrancy latch: a double ×, Escape-then-× or auto-repeat closes once.
+  let closing = false;
+  // D9: the item whose DELETE is in flight (freezes ITS modal only).
+  let deletingIid = $state<number | null>(null);
+  // D9: the item this page just deleted — its stale route is an expected close.
+  let deletedIid: number | null = null;
+  // D18: the one-shot close signal for the focus effect.
+  let lastClosedIid: string | null = null;
+  let justClosedItem = false;
+  let prevRouteIid: string | null = untrack(() => routeIid);
+
   // Load $effect — declared FIRST (declaration-order discipline:
   // load → validation → focus, see spec §"$effect declaration order").
   $effect(() => {
@@ -83,16 +102,38 @@
   // correction lands before the focus effect tries to find a toggle for a
   // stale entity. Uses effectiveTree (not tree) so stale-id checks aren't
   // run against the OLD version's blocks during preserved-instance nav.
+  const expansion = $derived(deriveExpansion(routeBid, routeSid, effectiveTree, routeIid));
   $effect(() => {
     if (!effectiveTree) return;
-    const expansion = deriveExpansion(routeBid, routeSid, effectiveTree);
-    if (expansion.staleBid || expansion.staleSid) {
+    const e = expansion;
+    if (e.staleBid || e.staleSid || e.staleIid) {
       handleStaleIdFallback(
-        { staleBid: expansion.staleBid, staleSid: expansion.staleSid },
-        { courseSlug, vid: String(vid), bid: routeBid },
+        { staleBid: e.staleBid, staleSid: e.staleSid, staleIid: e.staleIid },
+        { courseSlug, vid: String(vid), bid: routeBid, sid: routeSid, iid: routeIid, deletedIid },
         { pushToast, navigate },
       );
     }
+  });
+
+  // Item-route $effect (Slice-5b D7/D18) — declared after validation and
+  // BEFORE focus: the focus effect reads the one-shot flag set here.
+  $effect(() => {
+    const iid = routeIid;
+    untrack(() => {
+      if (iid !== prevRouteIid) closing = false;
+      if (iid !== null) {
+        openedFromPage = !mountedOnItem;
+      } else {
+        if (prevRouteIid !== null) {
+          lastClosedIid = prevRouteIid;
+          justClosedItem = true;
+        }
+        mountedOnItem = false;   // every later open is in-page
+        openedFromPage = false;
+        deletedIid = null;
+      }
+      prevRouteIid = iid;
+    });
   });
 
   // Focus $effect — declared THIRD. Tracks (routeBid, routeSid,
@@ -109,8 +150,15 @@
   $effect(() => {
     const bid = routeBid;
     const sid = routeSid;
+    const iid = routeIid;
     const t = effectiveTree;
-    if (!t) return;
+    // D18 one-shot, read untracked at the TOP: a tracked write-then-read
+    // would re-run this effect. Cleared on every early return below, so it
+    // can never outlive its close.
+    const closedNow = untrack(() => justClosedItem);
+    // An open item owns focus (its modal): never race it.
+    if (iid !== null) { justClosedItem = false; return; }
+    if (!t) { justClosedItem = false; return; }
 
     // Resolve deepest expanded headerId from current state.
     let headerId: string | null = null;
@@ -131,7 +179,32 @@
       // Collapsed back to version root — clear the memo so the next
       // expansion refocuses correctly.
       lastFocusedTarget = null;
+      justClosedItem = false;
       return;
+    }
+
+    if (closedNow) {
+      // An item just closed. FocusTrap has already restored focus to the
+      // opener, or to whatever the user had focused: leave it there. Only
+      // when focus fell to <body> (the opener is gone: a create form's
+      // button, a deep link) does the closed item's Open pencil take it, else
+      // the header. Never the scroll path below. The memo is set so a later
+      // reload does not refocus.
+      lastFocusedTarget = headerId;
+      const fallbackHeaderId = headerId;
+      const closedIid = lastClosedIid;
+      let cancelled = false;
+      void (async () => {
+        // Within this flush the modal's × is still mounted and focused.
+        await tick();
+        if (cancelled) return;
+        justClosedItem = false;
+        const active = document.activeElement;
+        if (active && active !== document.body) return;
+        const pencil = closedIid !== null ? document.getElementById(`item-${closedIid}-open`) : null;
+        (pencil ?? document.getElementById(fallbackHeaderId))?.focus();
+      })();
+      return () => { cancelled = true; };
     }
 
     // Skip refocus if route hasn't changed since the last auto-focus.
@@ -158,15 +231,73 @@
     return () => { cancelled = true; };
   });
 
-  // Slice-5b T3a: always null until T3b routes items here (deriveExpansion).
-  // $state, not a const: a `const … = null` narrows to `never` in the template.
-  let expandedItem = $state<AdminTreeItem | null>(null);
-
   let alive = true;
   onDestroy(() => { alive = false; clearEditorVersion(); });
 
   function stillOnVid(savedVid: number): boolean {
     return alive && vid === savedVid;
+  }
+
+  // D7: a guard cancelled at the prompt leaves the item open — re-arm ×.
+  onMount(() => {
+    const onPop = () => { closing = false; };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  });
+
+  function seqUrl(): string {
+    return `/courses/${courseSlug}/edit/v/${vid}/blocks/${routeBid}/sequences/${routeSid}`;
+  }
+
+  // D7: × and Escape. Back-equivalent when the item was opened in this page
+  // instance; otherwise (deep link / reload) replace the address with the
+  // sequence — × can never take the user out of the app. Guards run.
+  function requestCloseItem() {
+    if (closing) return;
+    if (deletingIid !== null && String(deletingIid) === routeIid) return;
+    closing = true;
+    if (openedFromPage) { history.back(); return; }
+    const from = routeIid;
+    void navigate(seqUrl(), { replace: true }).then(() => {
+      if (routeIid === from) closing = false;   // the prompt was cancelled
+    });
+  }
+
+  // D9: page-owned, so the reload, toast and focus survive the modal's unmount.
+  async function deleteOpenItem() {
+    const it = expansion.expandedItem;
+    if (!it || deletingIid !== null || !perms?.canEditStructure) return;
+    if (!confirm(`Delete item "${it.title}"? This cannot be undone.`)) return;
+    const id = it.id;
+    const savedVid = vid;
+    const savedSid = routeSid;
+    const seqPath = seqUrl();
+    deletingIid = id;
+    try {
+      await api.delete(`/api/items/${id}`);
+    } catch (e) {
+      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      // A 403/409 from a state change mid-confirm: perms must catch up.
+      if (stillOnVid(savedVid)) await loadAdminTree(savedVid, { force: true });
+      deletingIid = null;   // the modal refocuses its trash (or ×)
+      await tick();
+      return;
+    }
+    if (!stillOnVid(savedVid)) { deletingIid = null; return; }
+    if (routeIid === String(id)) {
+      deletedIid = id;
+      closing = true;
+      // Never history.back(): a Back the user queued while the DELETE was out
+      // would be followed by a second traversal past the sequence (D9).
+      void navigate(seqPath, { replace: true, force: true });
+      await tick();   // the modal unmounts before the reload lands
+    }
+    await loadAdminTree(savedVid, { force: true });
+    pushToast('Item deleted', 'success');
+    if (routeIid === null && stillOnVid(savedVid) && routeSid === savedSid) {
+      document.getElementById(`seq-${savedSid}-header`)?.focus();
+    }
+    deletingIid = null;
   }
 
   let creating = $state(false);
@@ -457,26 +588,26 @@
       {/if}
     </div>
 
-    {#if expandedItem}
-      {@const it = expandedItem}
-      {@const hostBlock = tree.blocks.find((b) => b.sequences.some((s) => s.id === it.sequence_id))}
-      {@const hostSeq = hostBlock?.sequences.find((s) => s.id === it.sequence_id)}
-      {#if hostBlock && hostSeq}
-        {#key it.id}
-          <ItemEditorModal
-            {vid}
-            version={v}
-            {perms}
-            seqIndex={hostBlock.sequences.indexOf(hostSeq) + 1}
-            item={it}
-            itemIndex={hostSeq.items.findIndex((x) => x.id === it.id) + 1}
-            itemCount={hostSeq.items.length}
-            {stillOnVid}
-            onRequestClose={() => (expandedItem = null)}
-            onDeleteItem={() => {}}
-          />
-        {/key}
-      {/if}
+    {#if expansion.expandedItem && expansion.expandedBlock && expansion.expandedSequence}
+      {@const it = expansion.expandedItem}
+      {@const hostBlock = expansion.expandedBlock}
+      {@const hostSeq = expansion.expandedSequence}
+      <!-- D1: the item opens over the page; keyed so drafts seed once per item. -->
+      {#key it.id}
+        <ItemEditorModal
+          {vid}
+          version={v}
+          {perms}
+          seqIndex={hostBlock.sequences.indexOf(hostSeq) + 1}
+          item={it}
+          itemIndex={hostSeq.items.indexOf(it) + 1}
+          itemCount={hostSeq.items.length}
+          {stillOnVid}
+          onRequestClose={requestCloseItem}
+          onDeleteItem={() => void deleteOpenItem()}
+          deleting={deletingIid === it.id}
+        />
+      {/key}
     {/if}
 
     <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
