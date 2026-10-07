@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1049
+EXPECTED_CHECKS=1148
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3877,6 +3877,58 @@ if [[ -n $REPLY ]]; then
   sweep AssetSidebar $H
 fi
 emoji_scan "MarkdownEditor / AssetSidebar" src/components/editor/MarkdownEditor.svelte src/components/editor/AssetSidebar.svelte
+
+echo
+echo "--- (aa) Slice-5b T1/T3a — ui/Modal ---"
+# Anchored on .modal-panel: three run modals also author .modal-backdrop (R8).
+own modal-panel Modal.svelte
+uniq1 modal-panel
+if [[ -n $REPLY ]]; then
+  N=Modal; H=$REPLY
+  d '\.modal-backdrop' '' 'position:fixed' 'top:0' 'right:0' 'bottom:0' 'left:0' 'z-index:100' 'display:flex' 'justify-content:center' 'align-items:flex-start' 'padding-top:26px' 'background:color-mix\(in srgb,var\(--text\) 34%,transparent\)' 'backdrop-filter:blur\(1px\)'
+  d '\.modal-panel' '' 'width:min\(var\(--modal-w\),100vw - 32px\)' 'max-height:min\(var\(--modal-h\),100vh - 52px\)' 'display:flex' 'flex-direction:column' 'overflow:hidden' 'background:var\(--surface\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius-lg\)' 'box-shadow:0 16px 44px #14182338'
+  d '\.modal-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:12px 14px 12px 16px' 'border-bottom:1px solid var\(--border\)'
+  d '\.modal-body' '' 'flex:1 1 auto' 'min-height:0' 'overflow:auto' 'padding:14px 16px' 'display:flex' 'flex-direction:column' 'gap:12px'
+  check "Modal .modal-body > * { flex:0 0 auto }" "\.modal-body\.${H}>\*\{flex:0 0 auto\}"
+  d '\.modal-foot' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:12px 16px' 'border-top:1px solid var\(--border\)' 'background:var\(--surface-3\)'
+  # Constraint 11: the ref-1684 shadow is the ONE hex allowed in Modal's rules.
+  modal_rules=$(grep -oE "[^{}]*\.${H}[^{]*\{[^}]*\}" $CSS)
+  if print -r -- "$modal_rules" | sed 's/box-shadow:0 16px 44px #14182338//g' | grep -qE '#[0-9a-fA-F]{3}'; then
+    echo "FAIL  Modal no hex beyond the ref-1684 shadow"; fail=1
+  else
+    echo "PASS  Modal no hex beyond the ref-1684 shadow"
+  fi
+  none "Modal no opacity dim"      "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*opacity:0?\.[0-9]"
+  none "Modal no rem font sizes"   "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  none "Modal backdrop is not a flat rgba scrim" "\.modal-backdrop\.${H}\{[^}]*background:rgba"
+fi
+emoji_scan "Modal" src/components/ui/Modal.svelte
+
+echo
+echo "--- (ac) Slice-5b T3a — ItemEditorModal (3c header, Title row, footer) ---"
+own item-ctx ItemEditorModal.svelte
+uniq1 item-ctx
+if [[ -n $REPLY ]]; then
+  N=ItemEditorModal; H=$REPLY
+  d '\.item-name' '' 'margin:0' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)' 'text-overflow:ellipsis'
+  d '\.item-ctx' '' 'font-size:11\.5px' 'color:var\(--muted\)' 'white-space:nowrap'
+  d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'gap:6px'
+  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
+  d '\.field-label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:var\(--control-font\)' 'caret-color:var\(--primary\)'
+  chk "\.plain-input\.${H}:focus-visible" 'outline:none' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  chk "\.plain-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
+  d '\.field-err' '' 'margin:0' 'font-size:12px' 'color:var\(--danger\)'
+  d '\.ro-value' '' 'font-size:13px' 'color:var\(--text\)'
+  d '\.ro-note' '' 'margin:0' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:13px' 'color:var\(--text\)'
+  d '\.dirty' '' 'flex:1' 'font-size:11\.5px' 'color:var\(--status-needs-revision-fg\)'
+  none "ItemEditorModal Title row has no 54px pencil slot (D2)" "\.field-row\.${H}\{[^}]*54px"
+  none "ItemEditorModal input padding is the token, not the 5a literal" "\.plain-input\.${H}\{[^}]*padding:0 10px"
+  none "ItemEditorModal dirty marker is not --gold-text" "\.dirty\.${H}\{[^}]*--gold-text"
+  none "ItemEditorModal no rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep ItemEditorModal $H
+fi
+emoji_scan "ItemEditorModal / PageBody / itemBody" src/components/editor/ItemEditorModal.svelte src/components/editor/item/PageBody.svelte src/lib/itemBody.ts
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

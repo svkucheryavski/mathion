@@ -16,8 +16,12 @@
   // create→navigate refresh). The parent stops rendering us then, but Svelte 5
   // re-runs our already-mounted $effect once with the changed prop before
   // teardown — so the effect AND template must tolerate a missing item.
-  let { item, versionId, editable }: {
+  let { item, versionId, editable, showTitle = true, uploadBusy = $bindable(false) }: {
     item: AdminTreeItem | undefined; versionId: number; editable: boolean;
+    // Slice-5b interim (T3a → T4): the item modal owns the Title row, and
+    // folds uploadBusy into its Save interlock (D10).
+    showTitle?: boolean;
+    uploadBusy?: boolean;
   } = $props();
 
   let source = $state<string | null>(null);
@@ -44,7 +48,6 @@
     return () => { stale = true; controller.abort(); };
   });
 
-  let uploadBusy = $state(false);
   let warnings = $state<string[]>([]);
   let uploadError = $state<string | null>(null);
 
@@ -125,7 +128,7 @@
 
 <section class="app-editor">
   {#if item}
-    <h3>{item.title}</h3>
+    {#if showTitle}<h3>{item.title}</h3>{/if}
     {#if status === 'ready' && source !== null}
       <InteractiveFrame scriptSource={source} title={item.title || 'Interactive app'} />
     {:else if status === 'error'}

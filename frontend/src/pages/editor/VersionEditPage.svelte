@@ -18,8 +18,10 @@
   import EmptyState from '../../components/ui/EmptyState.svelte';
   import IconButton from '../../components/ui/IconButton.svelte';
   import VersionBadges from '../../components/editor/VersionBadges.svelte';
+  import ItemEditorModal from '../../components/editor/ItemEditorModal.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import type { RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
+  import type { AdminTreeItem } from '../../lib/types';
 
   type Props = {
     courseSlug: string;
@@ -155,6 +157,10 @@
     })();
     return () => { cancelled = true; };
   });
+
+  // Slice-5b T3a: always null until T3b routes items here (deriveExpansion).
+  // $state, not a const: a `const … = null` narrows to `never` in the template.
+  let expandedItem = $state<AdminTreeItem | null>(null);
 
   let alive = true;
   onDestroy(() => { alive = false; clearEditorVersion(); });
@@ -450,6 +456,28 @@
         <Button variant="danger" disabled={busy} onclick={deleteVersion}>Delete</Button>
       {/if}
     </div>
+
+    {#if expandedItem}
+      {@const it = expandedItem}
+      {@const hostBlock = tree.blocks.find((b) => b.sequences.some((s) => s.id === it.sequence_id))}
+      {@const hostSeq = hostBlock?.sequences.find((s) => s.id === it.sequence_id)}
+      {#if hostBlock && hostSeq}
+        {#key it.id}
+          <ItemEditorModal
+            {vid}
+            version={v}
+            {perms}
+            seqIndex={hostBlock.sequences.indexOf(hostSeq) + 1}
+            item={it}
+            itemIndex={hostSeq.items.findIndex((x) => x.id === it.id) + 1}
+            itemCount={hostSeq.items.length}
+            {stillOnVid}
+            onRequestClose={() => (expandedItem = null)}
+            onDeleteItem={() => {}}
+          />
+        {/key}
+      {/if}
+    {/if}
 
     <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
   {/if}

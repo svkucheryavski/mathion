@@ -18,10 +18,12 @@
 
   let {
     question, vid, index, count, perms, assetContext, expanded, locked, confirmKeyChange,
-    onExpandToggle, onDelete, onMoveUp, onMoveDown,
+    onExpandToggle, onDelete, onMoveUp, onMoveDown, versionDisabled = false,
   }: {
     question: AuthoringQuestion; vid: number; index: number; count: number;
     perms: VersionPermissions; assetContext: AssetContext; expanded: boolean; locked: boolean;
+    // Slice-5b D6: plain source, no /render (a disabled version's /render is a 403).
+    versionDisabled?: boolean;
     confirmKeyChange: (questionId: number) => boolean;
     onExpandToggle: () => void; onDelete: () => void; onMoveUp: () => void; onMoveDown: () => void;
   } = $props();
@@ -399,10 +401,10 @@
         <p class="muted" data-testid="published-type-note">Type can't be changed. To replace this question, create a new version.</p>
       {/if}
       <label>Question text
-        <MarkdownEditor {assetContext} readOnly={!editable} disabled={textLocked} bind:value={draft.text_md} />
+        <MarkdownEditor {assetContext} plain={versionDisabled} readOnly={!editable} disabled={textLocked} bind:value={draft.text_md} />
       </label>
       <label>Explanation (optional)
-        <MarkdownEditor {assetContext} readOnly={!editable} disabled={textLocked} bind:value={draft.explanation_md} />
+        <MarkdownEditor {assetContext} plain={versionDisabled} readOnly={!editable} disabled={textLocked} bind:value={draft.explanation_md} />
       </label>
 
       {#if question.type === 'numeric_answer'}

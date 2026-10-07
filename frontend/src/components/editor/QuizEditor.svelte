@@ -19,10 +19,15 @@
 
   let {
     itemId, vid, itemTitle, version, perms, assetContext, quizDirty = $bindable(false),
+    showTitle = true, versionDisabled = false,
   }: {
     itemId: number; vid: number; itemTitle: string;
     version: AdminTreeVersion; perms: VersionPermissions; assetContext: AssetContext;
     quizDirty?: boolean;
+    // Slice-5b interim (T3a → T5a): the item modal owns the Title row.
+    showTitle?: boolean;
+    // Slice-5b D6: question editors show plain source, with no /render call.
+    versionDisabled?: boolean;
   } = $props();
   // ---- Dirty registry (own; ItemEditPage has no DIRTY_REGISTRY_KEY context) ----
   const registry = createDirtyRegistry();
@@ -236,15 +241,17 @@
 
 <section class="quiz-editor" aria-label="Quiz editor">
   {#if readOnlyAll}<p class="muted" data-testid="quiz-readonly">This version is read-only — editing is disabled.</p>{/if}
-  <div class="title-row">
-    <label>Quiz title
-      <input data-testid="quiz-title" bind:value={titleTracker.current.title} readonly={titleReadOnly} required />
-    </label>
-    {#if !titleReadOnly}
-      <Button onclick={saveTitle} disabled={!titleTracker.isDirty || titleBusy} loading={titleBusy}>Save title</Button>
-      <Button variant="ghost" onclick={discardTitle} disabled={!titleTracker.isDirty || titleBusy}>Discard</Button>
-    {/if}
-  </div>
+  {#if showTitle}
+    <div class="title-row">
+      <label>Quiz title
+        <input data-testid="quiz-title" bind:value={titleTracker.current.title} readonly={titleReadOnly} required />
+      </label>
+      {#if !titleReadOnly}
+        <Button onclick={saveTitle} disabled={!titleTracker.isDirty || titleBusy} loading={titleBusy}>Save title</Button>
+        <Button variant="ghost" onclick={discardTitle} disabled={!titleTracker.isDirty || titleBusy}>Discard</Button>
+      {/if}
+    </div>
+  {/if}
 
   {#if loadStatus === 'loading'}
     <p class="muted">Loading questions…</p>
@@ -266,6 +273,7 @@
               count={questions.length}
               {perms}
               {assetContext}
+              {versionDisabled}
               locked={questionsLocked}
               expanded={expandedId === q.id}
               {confirmKeyChange}

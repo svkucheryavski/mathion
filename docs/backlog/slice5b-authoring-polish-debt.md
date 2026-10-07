@@ -85,3 +85,27 @@ None blocks the slice; each is input for the final polish slice.
 - **Tests: the "focus after a confirmed delete" `settleAll`** is a fixed 4-microtask loop; an extra await
   in `confirmDelete` would turn them red (never falsely green).
 
+## T3a — ItemEditorModal + PageBody (interim quiz/app)
+
+- **ItemEditorModal: a mouse-clicked Save or Discard drops focus to `<body>`** (the button disables while
+  saving / once clean). The next ⌘S then misses the dialog scope and opens the browser's own Save
+  dialog; the next Tab starts behind the modal. Fix: in `save()`'s finally and `discard()`, refocus Title
+  (or Save / ×) when focus fell to `<body>`. (Both lanes.)
+- **ItemEditorModal: ⌘S is scoped to any `section.modal-panel`**, not this modal's own — a stacked modal
+  (Slice 6) would save the item underneath. Fix: compare against the own panel.
+- **PageBody: plain / readOnly branches have no accessible name** (the T2 hand-off was not applied here).
+  Fix: `role="group" aria-label="Content"` on a wrapper, or carry `ariaLabel` onto MarkdownEditor's `pre`.
+- **Header spacing: trash and × sit 10px apart** (Modal's head gap) where ref 1689 groups them at 6px.
+  Spec §2's "Modal adds ×" sanctions it. Fix: a Modal `actions` snippet rendered beside ×, or document it.
+- **PageBody `busy` can stick true** if the MarkdownEditor branch flips (editable → plain/readOnly)
+  mid-upload — not reachable in 5b. Fix: reset `uploading` on branch change / MarkdownEditor onDestroy.
+- **Interim (closes in T5a / T4 — reviewers there should check):** a disabled quiz shows two notes (the
+  modal's D6 note and QuizEditor's "This version is read-only"); quiz `questionsLocked`/`saveBusy` and the
+  app editor's own PATCHes are not folded into `bodyBusy`; `frozen` is not passed to QuizEditor /
+  InteractiveAppEditor during a title-only save.
+- **Gate (ac) gaps:** `.item-name` pins `text-overflow:ellipsis` but not `overflow:hidden`,
+  `white-space:nowrap`, `min-width:0`; `.plain-input` `width`/`box-sizing` and `.field` gap unpinned.
+- **Tests not yet written:** double Save / ⌘S while saving; ⌘S default-prevented when blocked; the
+  `'error'` refresh toast; the `!stillOnVid` "Saved" path; `reportSaveFailure` 403/409 forced reload;
+  the × fallback after the delete freeze; autofocus on a published version.
+
