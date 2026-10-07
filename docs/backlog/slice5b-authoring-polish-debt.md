@@ -201,3 +201,11 @@ None blocks the slice; each is input for the final polish slice.
 - **(Round 2) The post-await vid/alive guards return `'failed'` after a PATCH has landed** (QuestionAccordion `save()`: after the question PATCH and after each option PATCH). This is unobservable today, because `stillOnVid` is false there, so the modal skips both the reload and the toast. For consistency, return `'partial'`.
 - **(Round 2) A 403/409 after a landed part triggers two forced reloads.** The accordion's `fail()` reloads, and the modal reloads again on `'partial'`. This is harmless. Fix: skip the accordion's reload when `landed`.
 - **(Round 2) The partial-inside-a-question modal test doesn't assert `not.toContain('Saved')`.** The title-partial test does. Add the assertion.
+
+## T5b — Quiz structure with live drafts
+
+- **Marks stay editable while an option DELETE is in flight.** If C is deleted with no confirm while the author marks C, no option is left drafted correct. Save is then blocked by `markError`; this is visible and recoverable. With a D24 reset, a mark changed during the request is reset on success, against the D10 rule "a reset never wipes input made after the request left". Fix: add `mutating` to OptionRow's mark `disabled`.
+- **Question and option structure are not serialised against each other.** `structureDisabled` doesn't read the question's own `optionsLocked`, so "Delete question" is clickable while one of its option DELETEs is in flight. Nothing is corrupted: the stray resync 404s silently. Fix: add `optionsLocked` to `structureDisabled`.
+- **The D24 confirm text when the option has a text draft** is untested, and a whitespace-only draft reads `Delete option "   "?`. Fix: add a text draft on the deleted row in the D24 test, and fall back to the saved text when the draft trims to empty.
+- **A typed add form keeps × prompting after the footer Discard** (by design, D5). The footer then shows no "unsaved changes" while × still asks. Revisit in the Safari pass. A muted "unsent form" hint is an option.
+- **Closing while an add-question POST is in flight**: the guard prompts, the author confirms, the form collapses, and the question still lands server-side. This matches the 5a create forms.

@@ -11,8 +11,9 @@
   import type { AssetContext } from '../../lib/assetContext';
   import { ApiError } from '../../lib/api';
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
-  import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
-  import { QUIZ_SAVE_KEY, type QuizContributor, type QuizSaveHub } from '../../lib/quizSave';
+  import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
+  import { QUIZ_GUARD_KEY, QUIZ_SAVE_KEY, type QuizContributor, type QuizSaveHub } from '../../lib/quizSave';
+  import { unsavedSuffix } from '../../lib/editorReasons';
   import { patchItem, reportSaveFailure, type SaveOutcome } from '../../lib/itemBody';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
@@ -51,6 +52,10 @@
   };
   setContext(QUIZ_SAVE_KEY, hub);
   const ordered = () => [...contributors].sort((a, b) => a.order() - b.order());
+  // D5: the typed add-question / add-option forms. They make closing prompt
+  // (guardDirty) but never reach the footer or Save.
+  const guards = createDirtyRegistry();
+  setContext(QUIZ_GUARD_KEY, guards);
 
   const KEY_CONFIRM =
     'This quiz is published. Changing the answer key does not re-score students who already ' +
@@ -72,8 +77,7 @@
 
   // ---- The §2 body contract's bindables ----
   $effect(() => { saveDirty = registry.isAnyDirty(); });
-  // T5b adds the typed add-question / add-option forms here (QUIZ_GUARD_KEY).
-  $effect(() => { guardDirty = registry.isAnyDirty(); });
+  $effect(() => { guardDirty = registry.isAnyDirty() || guards.isAnyDirty(); });
   $effect(() => { busy = questionsLocked || [...contributors].some((c) => c.locked()); });
 
   async function load() {
@@ -107,8 +111,10 @@
     return false;
   }
 
+  // The footer Discard: save drafts only.
   export function discard(): void { registry.discardAll(); }
-  export function discardAll(): void { discard(); }
+  // A confirmed close (D5): save drafts, and the typed add forms collapse.
+  export function discardAll(): void { discard(); guards.discardAll(); }
 
   // §5.3: one D20 confirm, then the title, then the dirty questions in display
   // order. Stops at the first failure; 'partial' when anything had landed.
@@ -174,6 +180,14 @@
   function resetAddForm() {
     newText = ''; newNumeric = ''; newPrecision = 0; newAnswer = ''; addError = null;
   }
+  // The 5a create-form shim (D5): guard-dirty once something is typed.
+  const addFormGuard: RegisteredTracker = {
+    get isDirty() {
+      return adding && (newText.trim() !== '' || newNumeric.trim() !== '' || newAnswer.trim() !== '');
+    },
+    discard() { adding = false; resetAddForm(); },
+  };
+  $effect(() => { guards.register(addFormGuard); return () => guards.unregister(addFormGuard); });
 
   function buildCreateBody(): QuestionCreateBody {
     const base = { text_md: newText.trim(), type: newType };
@@ -212,7 +226,9 @@
   async function removeQuestion(qid: number) {
     if (questionsLocked || frozen || !perms.canEditStructure) return;
     if (!questions.some((x) => x.id === qid)) return;
-    if (!confirm('Delete this question? Its options and text are lost.')) return;
+    const c = [...contributors].find((x) => x.questionId === qid);
+    const title = c?.title() ?? `Question ${questions.findIndex((x) => x.id === qid) + 1}`;
+    if (!confirm(`Delete question "${title}"? This cannot be undone.` + unsavedSuffix(c?.isDirty ?? false))) return;
     const savedVid = vid;
     const idx = questions.findIndex((x) => x.id === qid);
     questionsLocked = true;

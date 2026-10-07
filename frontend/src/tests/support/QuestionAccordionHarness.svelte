@@ -5,7 +5,7 @@
   // the `onContributor` prop. Every other prop passes through.
   import { setContext, untrack } from 'svelte';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
-  import { QUIZ_SAVE_KEY, type QuizSaveHub } from '../../lib/quizSave';
+  import { QUIZ_GUARD_KEY, QUIZ_SAVE_KEY, type QuizSaveHub } from '../../lib/quizSave';
   import QuestionAccordion from '../../components/editor/QuestionAccordion.svelte';
   let props = $props();
   const registry = createDirtyRegistry();
@@ -15,6 +15,11 @@
     unregister() {},
   };
   setContext(QUIZ_SAVE_KEY, hub);
+  // T5b: the typed add-option form registers here (guard-dirty, never save-dirty).
+  const guards = createDirtyRegistry();
+  setContext(QUIZ_GUARD_KEY, guards);
+  untrack(() => props.onGuards)?.(guards);
 </script>
 <output data-testid="any-dirty">{registry.isAnyDirty() ? 'dirty' : 'clean'}</output>
+<output data-testid="guard-dirty">{guards.isAnyDirty() ? 'dirty' : 'clean'}</output>
 <QuestionAccordion {...props} />

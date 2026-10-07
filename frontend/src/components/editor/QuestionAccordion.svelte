@@ -13,7 +13,7 @@
   import type { AssetContext } from '../../lib/assetContext';
   import { ApiError } from '../../lib/api';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { QUIZ_SAVE_KEY, type QuizContributor, type QuizSaveHub } from '../../lib/quizSave';
+  import { QUIZ_GUARD_KEY, QUIZ_SAVE_KEY, type QuizContributor, type QuizSaveHub } from '../../lib/quizSave';
   import {
     updateQuestion, validateNumericAnswer,
     listOptions, createOption, updateOption, deleteOption, reorderOptions,
@@ -39,6 +39,9 @@
 
   const registry = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
   const hub = getContext<QuizSaveHub>(QUIZ_SAVE_KEY);
+  // T5b: the typed add-option form is guard-dirty (D5). Optional: a harness
+  // without it simply has no guard.
+  const guards = getContext<DirtyRegistry | undefined>(QUIZ_GUARD_KEY);
 
   // ---- Lifecycle guard (§4.1a): every post-await write checks
   //      `alive && vid === savedVid` (vid = the live route prop). ----
@@ -188,8 +191,9 @@
   let optionsLocked = $state(false);
   let optMutError = $state<string | null>(null);
   let optionAnnounce = $state('');
-  // The two-way lock stays until T5b: a dirty question locks option structure.
-  const optionsDisabled = $derived(optionsLocked || dirty || frozen);
+  // §5.4: drafts are keyed by id, so structure no longer waits for a clean
+  // question. Only an in-flight option mutation or a frozen modal locks it.
+  const optionsDisabled = $derived(optionsLocked || frozen);
   const canDeleteOption = (o: AuthoringOption) =>
     options.length === 1 || !(o.is_correct && correctCount === 1);   // C2 (§8.6): judged on SAVED marks
 
@@ -231,6 +235,17 @@
   let addingOption = $state(false);
   let newOptionText = $state('');
   const newOptionValid = $derived(newOptionText.trim().length >= 1 && newOptionText.length <= 500);
+  // The 5a create-form shim (D5): guard-dirty once something is typed; a
+  // confirmed close collapses the form. Never save-dirty.
+  const addOptionGuard: RegisteredTracker = {
+    get isDirty() { return addingOption && newOptionText.trim() !== ''; },
+    discard() { addingOption = false; newOptionText = ''; },
+  };
+  $effect(() => {
+    if (!guards) return;
+    guards.register(addOptionGuard);
+    return () => guards.unregister(addOptionGuard);
+  });
 
   async function addOption() {
     if (optionsDisabled || !perms.canEditStructure || !newOptionValid) return;
@@ -259,6 +274,12 @@
     if (optionsLocked || frozen || !perms.canEditStructure) return;
     const target = options.find((o) => o.id === oid);
     if (!target || !canDeleteOption(target)) return;
+    // D24: a mark draft could point at a deleted row, so this question's marks
+    // are reset by the delete, and the author is asked first. Text drafts survive.
+    const resetMarks = marksChanged;
+    if (resetMarks && !confirm(
+      `Delete option "${draftOf(target).text}"? This cannot be undone. Your unsaved correct-answer change will be reset.`,
+    )) return;
     const savedVid = vid;
     optMutError = null;
     optionsLocked = true;
@@ -268,6 +289,9 @@
       const idx = options.findIndex((o) => o.id === oid);
       const survivors = options.filter((o) => o.id !== oid);
       setOptions(survivors);
+      if (resetMarks) {
+        for (const o of options) { const d = optDrafts[o.id]; if (d) d.is_correct = o.is_correct; }
+      }
       const focusId = survivors[Math.min(idx, survivors.length - 1)]?.id;
       await tick();
       if (alive && vid === savedVid && focusId != null) bodyEl?.querySelector<HTMLElement>(`[data-option-id="${focusId}"]`)?.focus();
@@ -451,10 +475,10 @@
     }
   });
 
-  // §7.2: structure is off without the structure perm, while this question is
-  // dirty (until T5b), while a question add/delete/reorder is in flight
-  // (`locked`), and while the modal is frozen.
-  const structureDisabled = $derived(!perms.canEditStructure || dirty || locked || frozen);
+  // §7.2/§5.4: structure is off without the structure perm, while a question
+  // add/delete/reorder is in flight (`locked`), and while the modal is frozen.
+  // A dirty question no longer locks it (drafts are keyed by id).
+  const structureDisabled = $derived(!perms.canEditStructure || locked || frozen);
 
   const typeLabel: Record<AuthoringQuestion['type'], string> = {
     single_choice: 'Single choice', multiple_choice: 'Multiple choice',

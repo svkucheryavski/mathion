@@ -495,3 +495,97 @@ it('deleting the middle question focuses the surviving sibling\'s toggle', async
   expect(focused?.hasAttribute('aria-expanded')).toBe(true);
   expect(focused?.closest('[data-q-id]')?.getAttribute('data-q-id')).toBe('3');
 });
+
+// ---- Structure with live drafts (Slice-5b T5b, §5.4) ----
+
+it('deleting a question confirms with its title, plus the unsaved suffix when it has drafts', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, order: 1, text_md: 'A' }), q({ id: 2, order: 2, text_md: 'B' })]);
+  const del = vi.spyOn(qa, 'deleteQuestion').mockResolvedValue();
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const { target } = mountEditor();
+  await loaded();
+  await expandQ(target, 1);
+  setVal(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea'), 'A2');
+  inQ<HTMLButtonElement>(target, 1, 'button[aria-label="Delete question"]').click();
+  inQ<HTMLButtonElement>(target, 2, 'button[aria-label="Delete question"]').click();
+  expect(confirmSpy.mock.calls.map((c) => c[0])).toEqual([
+    'Delete question "A"? This cannot be undone. Unsaved edits may be lost.',
+    'Delete question "B"? This cannot be undone.',
+  ]);
+  expect(del).not.toHaveBeenCalled();
+});
+
+it('reordering keeps each draft on its question, and save() follows the new display order', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, order: 1, text_md: 'A' }), q({ id: 2, order: 2, text_md: 'B' })]);
+  vi.spyOn(qa, 'reorderQuestions').mockResolvedValue(undefined);
+  const log: number[] = [];
+  vi.spyOn(qa, 'updateQuestion').mockImplementation((qid: number, body: { text_md?: string }) => {
+    log.push(qid);
+    return Promise.resolve(q({ id: qid, text_md: body.text_md ?? '' }));
+  });
+  const { target, cmp } = mountEditor();
+  await loaded();
+  await expandQ(target, 1);
+  setVal(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea'), 'A2');
+  await expandQ(target, 2);
+  setVal(inQ<HTMLTextAreaElement>(target, 2, '[data-field="text"] textarea'), 'B2');
+  inQ<HTMLButtonElement>(target, 2, 'button[aria-label="Move up"]').click();
+  await loaded();
+  await expandQ(target, 1);
+  expect(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea').value).toBe('A2');
+  await cmp.save(undefined);
+  expect(log).toEqual([2, 1]);
+});
+
+it('adding a question keeps the drafts of the others', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1 })]);
+  vi.spyOn(qa, 'createQuestion').mockResolvedValue(
+    q({ id: 5, order: 2, type: 'text_answer', text_md: 'New', correct_text: 'a', correct_numeric: null, precision: null }));
+  vi.spyOn(store, 'loadAdminTree').mockResolvedValue('ok');
+  const { target, props } = mountEditor();
+  await loaded();
+  await expandQ(target, 1);
+  setVal(inQ<HTMLInputElement>(target, 1, '[data-testid="numeric-input"]'), '9');
+  openAddForm(target);
+  selectType(target, 'text_answer');
+  setInput(target, 'new-question-text', 'New');
+  setInput(target, 'new-text-answer', 'a');
+  clickByText(target, 'Add');
+  await loaded();
+  expect(props.saveDirty).toBe(true);
+  await expandQ(target, 1);
+  expect(inQ<HTMLInputElement>(target, 1, '[data-testid="numeric-input"]').value).toBe('9');
+});
+
+it('a typed add-question form is guard-dirty, not save-dirty; discard() keeps it, discardAll() collapses it', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
+  const { target, props, cmp } = mountEditor();
+  await loaded();
+  openAddForm(target);
+  expect(props.guardDirty).toBe(false);                   // open but empty
+  setInput(target, 'new-question-text', 'Half-typed');
+  expect(props.guardDirty).toBe(true);
+  expect(props.saveDirty).toBe(false);
+  cmp.discard();                                          // the footer Discard: save drafts only
+  flushSync();
+  expect(target.querySelector('[data-testid="new-question-text"]')).not.toBeNull();
+  cmp.discardAll();                                       // a confirmed close
+  flushSync();
+  expect(target.querySelector('[data-testid="new-question-text"]')).toBeNull();
+  expect(props.guardDirty).toBe(false);
+});
+
+it('an option structure op in flight makes busy true', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, type: 'single_choice', correct_numeric: null, precision: null })]);
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([
+    { id: 1, question_id: 1, text: 'A', is_correct: true, order: 1 },
+    { id: 2, question_id: 1, text: 'B', is_correct: false, order: 2 },
+  ]);
+  vi.spyOn(qa, 'deleteOption').mockReturnValue(new Promise(() => {}));
+  const { target, props } = mountEditor();
+  await loaded();
+  await expandQ(target, 1);
+  (target.querySelectorAll('[data-testid="option-row"]')[1].querySelector('button[aria-label="Delete option"]') as HTMLButtonElement).click();
+  flushSync();
+  expect(props.busy).toBe(true);
+});

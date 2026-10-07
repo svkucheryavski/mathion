@@ -883,4 +883,35 @@ describe('ItemEditorModal — quiz body (T5a)', () => {
     expect(document.activeElement).toBe(answerInput());
     expect(toastTexts()).toContain('Fix the highlighted fields');
   });
+
+  // ---- Structure with drafts (Slice-5b T5b) ----
+  it('a typed add-question form makes closing prompt but leaves the footer clean; a confirmed close collapses it', async () => {
+    serveQuiz([textQ]);
+    await render({ item: { type: 'quiz' } });
+    panel().querySelector<HTMLButtonElement>('button[aria-label="Add question"]')!.click();
+    flushSync();
+    type(panel().querySelector<HTMLInputElement>('[data-testid="new-question-text"]')!, 'Half-typed');
+    expect(anyDirty()).toBe('true');
+    expect(dirtyText()).toBe('');
+    expect(footBtn('Save').disabled).toBe(true);
+    expect(trash().disabled).toBe(true);                    // D9: guard-dirty blocks the delete
+    registry!.discardAll();
+    flushSync();
+    expect(panel().querySelector('[data-testid="new-question-text"]')).toBeNull();
+    expect(anyDirty()).toBe('false');
+  });
+
+  it('Save is disabled while a question add is in flight, even with a dirty title', async () => {
+    serveQuiz([textQ], (u, init) =>
+      (u.endsWith('/items/7/questions') && init?.method === 'POST' ? new Promise<Response>(() => {}) : undefined));
+    await render({ item: { type: 'quiz' } });
+    type(titleInput(), 'Quiz 2');
+    expect(footBtn('Save').disabled).toBe(false);
+    panel().querySelector<HTMLButtonElement>('button[aria-label="Add question"]')!.click();
+    flushSync();
+    type(panel().querySelector<HTMLInputElement>('[data-testid="new-question-text"]')!, 'Pick one');
+    [...panel().querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.trim() === 'Add')!.click();
+    await settle();
+    expect(footBtn('Save').disabled).toBe(true);
+  });
 });

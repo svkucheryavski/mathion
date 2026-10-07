@@ -17,8 +17,7 @@
     correct: boolean;
     // D10/D9: a Save or an item delete is in flight.
     frozen: boolean;
-    // Option structure is locked: a mutation in flight, a dirty question
-    // (until T5b) or a frozen modal.
+    // Option structure is locked: a mutation in flight, or a frozen modal.
     optionsLocked: boolean;
     canDelete: boolean;
     // An option mutation is in flight: the clicked structure button stays

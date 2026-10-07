@@ -3,6 +3,7 @@ import { mount, unmount, flushSync, tick } from 'svelte';
 import * as qa from '../lib/quizAuthoring';
 import type { AuthoringQuestion, AuthoringOption, OptionUpdateBody } from '../lib/quizAuthoring';
 import type { QuizContributor } from '../lib/quizSave';
+import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 import * as store from '../stores/currentEditorVersion.svelte';
 // The Harness provides the private dirty registry and the QUIZ_SAVE_KEY hub
@@ -145,10 +146,11 @@ it('an archived version: fields are read-only', () => {
   expect(numInput(target).readOnly).toBe(true);
 });
 
-it("a dirty question disables its own delete and reorder (two-way lock; T5b removes it)", () => {
-  const { target } = mountAccordion(q());
+it('a dirty question keeps its own delete and reorder enabled (§5.4: the two-way lock is gone)', () => {
+  const { target } = mountAccordion(q(), { count: 2, index: 2 });
   setVal(numInput(target), '7');
-  expect((target.querySelector('button[aria-label="Delete question"]') as HTMLButtonElement).disabled).toBe(true);
+  expect((target.querySelector('button[aria-label="Delete question"]') as HTMLButtonElement).disabled).toBe(false);
+  expect((target.querySelector('button[aria-label="Move up"]') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('the accordion-wide `locked` prop disables structural controls even when clean', () => {
@@ -397,12 +399,12 @@ it('resyncOptions discards a re-fetch that resolves after a vid change (§4.1a)'
   expect(orderReads).toBe(0);
 });
 
-it('a dirty question disables add-option (two-way lock; T5b removes it)', async () => {
+it('a dirty question keeps add-option enabled (§5.4)', async () => {
   vi.spyOn(qa, 'listOptions').mockResolvedValue([opt({ id: 1, text: 'A', is_correct: true, order: 1 })]);
   const { target } = mountAccordion(choiceQ());
   await loaded();
   setVal(textArea(target), 'Edited question body');
-  expect(addOptionBtn(target).disabled).toBe(true);
+  expect(addOptionBtn(target).disabled).toBe(false);
 });
 
 // ---- Correct marks are drafts (D25, §5.2) ----
@@ -768,4 +770,122 @@ it('focusFirstInvalid() on a collapsed question focuses the invalid field once i
   props.expanded = true;
   await loaded();
   expect(document.activeElement).toBe(numInput(target));
+});
+
+// ---- Structure with live drafts (Slice-5b T5b, §5.4, D24) ----
+
+const ABC = () => [
+  opt({ id: 1, text: 'A', is_correct: true, order: 1 }),
+  opt({ id: 2, text: 'B', is_correct: false, order: 2 }),
+  opt({ id: 3, text: 'C', is_correct: false, order: 3 }),
+];
+const rowBtn = (t: HTMLElement, row: number, label: string) =>
+  t.querySelectorAll('[data-testid="option-row"]')[row].querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
+
+it('with drafts, option add/delete/reorder stay usable and every draft stays on its own option', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(ABC());
+  vi.spyOn(qa, 'reorderOptions').mockResolvedValue(undefined as never);
+  vi.spyOn(qa, 'deleteOption').mockResolvedValue(undefined as never);
+  vi.spyOn(qa, 'createOption').mockResolvedValue(opt({ id: 4, text: 'D', is_correct: false, order: 4 }));
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const { target, c } = mountAccordion(choiceQ());
+  await loaded();
+  setVal(optInputs(target)[1], 'B2');                     // a text draft on B
+  rowBtn(target, 1, 'Move option up').click();            // B moves to the top
+  await loaded();
+  expect(optInputs(target).map((i) => i.value)).toEqual(['B2', 'A', 'C']);
+  rowBtn(target, 2, 'Delete option').click();             // delete C: no mark draft → no confirm
+  await loaded();
+  expect(confirmSpy).not.toHaveBeenCalled();
+  expect(optInputs(target).map((i) => i.value)).toEqual(['B2', 'A']);
+  addOptionBtn(target).click();
+  flushSync();
+  setVal(target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement, 'D');
+  addBtn(target).click();
+  await loaded();
+  expect(optInputs(target).map((i) => i.value)).toEqual(['B2', 'A', 'D']);
+  expect(c().isDirty).toBe(true);
+});
+
+it('a refetch keeps a dirty draft and lets the clean fields follow the server', async () => {
+  vi.spyOn(qa, 'listOptions')
+    .mockResolvedValueOnce(AB())
+    .mockResolvedValueOnce([opt({ id: 1, text: 'A*', is_correct: true, order: 1 }), opt({ id: 2, text: 'B', is_correct: false, order: 2 })]);
+  vi.spyOn(qa, 'reorderOptions').mockRejectedValue(new Error('boom'));   // the failure triggers the §6 resync
+  const { target } = mountAccordion(choiceQ());
+  await loaded();
+  setVal(optInputs(target)[1], 'B2');
+  rowBtn(target, 0, 'Move option down').click();
+  await loaded(); await loaded();
+  expect(optInputs(target).map((i) => i.value)).toEqual(['A*', 'B2']);
+});
+
+it('D24: with a mark draft, deleting an option asks first; Cancel sends nothing; OK deletes and resets only the marks', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(ABC());
+  const del = vi.spyOn(qa, 'deleteOption').mockResolvedValue(undefined as never);
+  const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  const { target, c } = mountAccordion(choiceQ());
+  await loaded();
+  setVal(optInputs(target)[0], 'A2');                     // a text draft (survives)
+  radios(target)[1].click();                              // a mark draft (B)
+  flushSync();
+  rowBtn(target, 2, 'Delete option').click();
+  await loaded();
+  expect(confirmSpy).toHaveBeenLastCalledWith(
+    'Delete option "C"? This cannot be undone. Your unsaved correct-answer change will be reset.');
+  expect(del).not.toHaveBeenCalled();
+  rowBtn(target, 2, 'Delete option').click();
+  await loaded(); await loaded();
+  expect(del).toHaveBeenCalledWith(3);
+  expect(radios(target).map((r) => r.checked)).toEqual([true, false]);   // marks back to saved
+  expect(optInputs(target)[0].value).toBe('A2');                         // the text draft survives
+  expect(c().keyChanged()).toBe(false);
+});
+
+it('D24: a failed delete leaves the mark drafts as they were', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(ABC());
+  vi.spyOn(qa, 'deleteOption').mockRejectedValue(new Error('boom'));
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const { target, c } = mountAccordion(choiceQ());
+  await loaded();
+  radios(target)[1].click();
+  flushSync();
+  rowBtn(target, 2, 'Delete option').click();
+  await loaded(); await loaded();
+  expect(radios(target).map((r) => r.checked)).toEqual([false, true, false]);
+  expect(c().keyChanged()).toBe(true);
+});
+
+it('a typed add-option form is guard-dirty but not save-dirty; the guard discard collapses it', async () => {
+  let guards!: DirtyRegistry;
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(AB());
+  const { target, c } = mountAccordion(choiceQ(), { onGuards: (g: DirtyRegistry) => { guards = g; } });
+  await loaded();
+  const guardDirty = () => target.querySelector('[data-testid="guard-dirty"]')!.textContent;
+  addOptionBtn(target).click();
+  flushSync();
+  expect(guardDirty()).toBe('clean');                     // open but empty
+  setVal(target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement, 'Half');
+  expect(guardDirty()).toBe('dirty');
+  expect(anyDirty(target)).toBe('clean');
+  expect(c().isDirty).toBe(false);
+  guards.discardAll();
+  flushSync();
+  expect(target.querySelector('[data-testid="new-option-text"]')).toBeNull();
+  expect(guardDirty()).toBe('clean');
+});
+
+it('locked() is true while an option mutation is in flight (it blocks the footer Save)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(AB());
+  let resolveDel!: () => void;
+  vi.spyOn(qa, 'deleteOption').mockReturnValue(new Promise((r) => { resolveDel = r as () => void; }));
+  const { target, c } = mountAccordion(choiceQ());
+  await loaded();
+  expect(c().locked()).toBe(false);
+  rowBtn(target, 1, 'Delete option').click();
+  flushSync();
+  expect(c().locked()).toBe(true);
+  resolveDel();
+  await loaded();
+  expect(c().locked()).toBe(false);
 });
