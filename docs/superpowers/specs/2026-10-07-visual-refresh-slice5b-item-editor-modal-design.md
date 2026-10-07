@@ -1,6 +1,6 @@
 # Visual Refresh — Slice 5b: Authoring — Item Editor Modal (3c + 3e + 3f) — Design Spec
 
-**Status:** Design — **rev 2** (brainstormed with the user 2026-10-07; self-checked; rev 2 folds the round-1 two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
+**Status:** Design — **rev 3** (brainstormed with the user 2026-10-07; self-checked; revs 2-3 fold two rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (artboard **3c** `:1649-1758` page, **3e** `:1759-1835` video, **3f** `:1836-1969` quiz; `ref NNNN` below are line numbers in that file) and `docs/design/visual-refresh/mathion-visual-spec.md` (§4 "Item editor modal (3c, 3e, 3f)" `:212-229`, Icon button `:168-181`, §3 colour of state `:110-133`, type-name rule `:230`). Where the two disagree, the spec's *rules* win over the artboard's *pixels*. **User decisions** (§Decisions) override both, and each override is recorded.
 
@@ -34,7 +34,14 @@ Additionally:
     - Two literal colour values are allowed, in exactly one file, `ui/Modal.svelte`. Each is annotated `/* ref 1684 */` and `/* ref 1682 */` (spec :216-217):
       - the panel shadow `0 16px 44px rgba(20,24,35,.22)`;
       - the backdrop `color-mix(in srgb, var(--text) 34%, transparent)` (= `rgba(22,24,29,.34)`).
-    - No other 5b-touched file may contain a *literal* colour (hex, `rgb(`/`rgba(`, a named colour, or a `var()` hex fallback). This also applies inside a `box-shadow`.
+    - No other 5b-touched file may contain a *literal* colour. A literal colour is any of:
+      - a hex value;
+      - `rgb(` / `rgba(` / `hsl(` / `hsla(`;
+      - a CSS named colour;
+      - a `var()` fallback that is any of the above.
+      
+      This also applies inside a `box-shadow`.
+    - **Not literal colours:** the keywords `transparent`, `currentColor` and `inherit`, and CSS system colours (`Highlight`, `CanvasText`, …) inside `@media (forced-colors: active)`. That last exemption is 5a Constraint 1's, used by `ItemTypePicker.svelte:59-61`. The (ag) scan implements exactly this definition.
     - `box-shadow` with token colours stays allowed: the D12 focus ring is the existing `base.css:21-25` / `InlineField.svelte:297` pattern, and the MarkdownEditor flash uses `--danger`.
     - Untouched files (`Toast`, the run modals, `Login`) are out of scope.
     - `Modal.svelte` may also carry `-webkit-backdrop-filter`, duplicating `backdrop-filter` for Safari < 18 (the user tests in Safari).
@@ -96,6 +103,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     - `QuizEditor` → `QuestionAccordion` → `MarkdownEditor plain`;
     - `PageBody` → `MarkdownEditor plain`;
     - `AppBody` → its preview gate.
+  - **Task:** the quiz leg (`QuizEditor` → `QuestionAccordion` → `MarkdownEditor plain`) lands in **T3a** together with the interim wiring, so a disabled-version quiz never calls `/render` between tasks (Constraint 14).
 - **D7 — Close semantics.** × and Escape call the page's `requestCloseItem()`:
   - **If the modal was opened from within this page instance** (an Open pencil, a create-item success, or Forward onto it), close = `history.back()`. Back and × then behave identically and history doesn't grow.
   - **Otherwise** (a deep link, or a reload on the item URL), close = `navigate(seqUrl, { replace: true })`.
@@ -116,12 +124,24 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     - else *"Delete this item"*.
   - **Ownership.** The delete flow lives in **`VersionEditPage`** (`deleteOpenItem()`), not in the modal. The modal's trash button just calls it. This matters because the modal unmounts as soon as the route leaves the item, and its `alive` flag would then skip the reload and the toast. The page's own `stillOnVid` gates every step, as `SequenceAccordion.deleteSeq` does (`:109-116`).
   - **On confirm** (`confirm('Delete item "…"? This cannot be undone.')`):
-    1. `DELETE /api/items/{id}`;
-    2. record `deletedIid = id`;
-    3. close the item. If it was opened in-page, use `history.back()` (the guard passes, since delete requires clean). Otherwise use `navigate(seqUrl, { replace: true, force: true })`;
-    4. force a tree reload;
-    5. toast "Item deleted".
-  - **Stale-item check.** It treats `staleIid === deletedIid` as an expected close in flight: no toast and no navigation. `deletedIid` clears when `routeIid` becomes `null`.
+    1. **Freeze the modal.** Set page state `deletingIid = id`, which the modal receives as `deleting`. While it is set:
+       - every input is read-only (as with `saving`, D10);
+       - Save, Discard, trash and × are disabled;
+       - Modal's Escape is ignored (`closeDisabled`);
+       - `requestCloseItem` returns early.
+       
+       Nothing can make the item dirty or issue a second close while the request is in flight.
+    2. `DELETE /api/items/{id}`.
+    3. **On failure:** the error toast, a forced reload (`stillOnVid`-gated), then clear `deletingIid`. The modal stays open.
+    4. **On success:** record `deletedIid = id`. Then:
+       - if `routeIid === String(id)` (the user hasn't already left with the browser's own Back), set `closing = true` and close the item:
+         - opened in-page → `history.back()`. The guard passes, since the frozen modal is clean;
+         - otherwise → `navigate(seqUrl, { replace: true, force: true })`;
+       - force a tree reload;
+       - toast "Item deleted";
+       - focus the sequence header (the deleted row's pencil is gone; D18);
+       - clear `deletingIid`.
+  - **Stale-item check.** It treats `staleIid && routeIid === String(deletedIid)` as an expected close in flight: no toast and no navigation. (`staleIid` is a boolean flag, like `staleBid` / `staleSid`.) `deletedIid` clears when `routeIid` becomes `null`.
   - Cost if wrong: one suppressed "Item not found." in a race nobody can trigger by hand.
 - **D10 — Footer Save.**
   - **One click sends everything.** The modal stays open, and **⌘S / Ctrl+S** inside the modal also saves.
@@ -135,9 +155,13 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
       - each invalid question's header shows the mono text `needs fixing` and `aria-invalid="true"` (not colour alone);
       - the toast reads "Fix the highlighted fields".
   - **Busy interlock.**
-    - While Save is running, every input in the modal is read-only, and every structure control (add/delete/reorder, upload/replace/remove) is disabled.
-    - Save, Discard and ⌘S are disabled while any structure operation, app-script upload or asset upload is in flight.
-    - Each body exposes a bindable `busy` for this.
+    - While Save is running, every input in the modal is **read-only without losing focus**:
+      - plain inputs get the `readonly` attribute, never `disabled` (a focused input that becomes disabled is blurred);
+      - `MarkdownEditor`s get the new `frozen` prop (T2): the textarea's `readonly` attribute, and drops, sidebar inserts and uploads blocked, like the existing `disabled` guards (`MarkdownEditor.svelte:67,184,204`). Its `readOnly` switches to preview and `disabled` blurs, so neither is used here.
+      
+      The main gesture (type, then ⌘S) keeps the caret where it was.
+    - Every structure control (add/delete/reorder, upload/replace/remove) is disabled while saving.
+    - Save, Discard and ⌘S are disabled while any structure operation, app-script upload or asset upload is in flight. Each body exposes a bindable `busy` for this, which includes every inner `MarkdownEditor`'s `uploading`.
     - So a Save never interleaves with a structure change, and a reset never wipes text typed after a request left.
   - **Partial failure.**
     - Requests go in a fixed order (§5.3), and each part that succeeds advances its saved baseline. **The save stops at the first failure.**
@@ -176,17 +200,23 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
   - While the modal is open, the document doesn't scroll (`overflow: hidden` on `<html>`, restored on close).
 - **D18 — Focus.**
   - **On open,** the Title input takes focus (`data-autofocus`) when editable, otherwise the × button.
-    - `Modal` passes `autofocusSelector="[data-autofocus], #<closeId>"` with `autofocusPriorityOrder`, and gives × a stable `id`.
+    - `Modal`'s **default** is `autofocusSelector = "[data-autofocus], #<closeId>"` with `autofocusPriorityOrder = true`. Both stay overridable props. × gets a stable per-instance `id` (`$props.id()`).
     - It never relies on FocusTrap's default selector, which would pick the header trash button (`FocusTrap.svelte:56-57`).
   - **Containment.** FocusTrap's Tab wrap only fires on the exact first or last focusable (`FocusTrap.svelte:24-37`). A disabled footer button, AssetSidebar's hidden file input, or an iframe can therefore let Tab escape to the page behind.
     - `Modal` adds a document `focusin` listener: if focus lands outside the panel, it is moved back to the first focusable in the panel (or to the last one, if focus left from the first).
+    - The listener returns immediately when `!panel.isConnected`. On teardown, Svelte detaches the DOM and runs FocusTrap's restore *before* Modal's own cleanup (`destroy_effect`), so the restore to the opener must not be fought.
     - With that, plus D8's backdrop `mousedown`, the page behind can't take focus or gain drafts.
   - **On close:**
-    - focus returns to the opener (the item's Open pencil) if it's still connected;
-    - otherwise it goes to the item's Open pencil if that exists (after a create-item success, the Create button is gone);
-    - otherwise to the sequence header (after a deep link or a delete).
+    - focus returns to the opener (the item's Open pencil) if it's still connected (FocusTrap's restore);
+    - otherwise it goes to the closed item's Open pencil, if that exists (after a create-item success, the Create button is gone);
+    - otherwise to the sequence header (after a deep link).
+    - After a delete, `deleteOpenItem` focuses the sequence header itself (D9).
     
-    Mechanism: the page's focus effect runs after the item closes. If `document.activeElement` is `body` or `null`, it resets `lastFocusedTarget` and applies this fallback.
+    **Mechanism:**
+    - The `routeIid` effect records `lastClosedIid` and sets a one-shot `justClosedItem` flag on the non-null → null transition.
+    - The focus effect consumes the flag **once**: only then, and only if `document.activeElement` is `body` or `null`, it resets `lastFocusedTarget` and applies the fallback.
+    - The fallback looks up the pencil by the new `id="item-{id}-open"` on `ItemRow`'s Open button (`ItemRow.svelte:79`).
+    - A tree reload without a close never runs the fallback, so it can't steal focus.
   - **The page's focus `$effect`** is skipped while an item is open, so it doesn't race the modal.
 - **D19 — Stale item addresses.**
   - This covers an item that no longer exists, belongs to another sequence, or has an invalid id.
@@ -206,8 +236,15 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
   - Cost if wrong: a taller open question, and one more fetch per question.
 - **D24 — Delete-option versus mark drafts.**
   - `canDeleteOption` (C2) judges the **saved** marks, because the delete acts on the server.
-  - If the question's mark drafts differ from saved, deleting **any** option first resets that question's mark drafts to saved, so no draft can point at a deleted row. Text drafts on the other options survive.
-  - The delete button's tooltip, when C2 blocks it, stays the existing reason. When drafts would be reset, the confirm reads `Delete option "…"? This cannot be undone.` followed by ` Your unsaved correct-answer change will be reset.`
+  - **When the question's mark drafts differ from saved,** deleting **any** option works like this:
+    1. confirm with `Delete option "…"? This cannot be undone. Your unsaved correct-answer change will be reset.`;
+    2. send the `DELETE`;
+    3. **on success**, reset that question's mark drafts to saved, so no draft can point at a deleted row;
+    4. **on failure**, leave everything as it was.
+    
+    Text drafts on the other options survive.
+  - **When no mark draft differs,** an option delete keeps today's behaviour: immediate, no confirm (`QuestionAccordion.svelte:200-203`).
+  - When C2 blocks the delete button, its tooltip stays the existing reason.
 - **D25 — The correct-row look follows the *draft* mark,** so the author sees what Save will send. After a partial single-choice failure (D10), the draft still shows exactly one correct row.
 
 ---
@@ -242,7 +279,8 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
 - `width = 920` (px), `maxHeight = 600` (px);
 - `onRequestClose: () => void`;
 - `closeOnBackdrop = false`;
-- `autofocusSelector?`, `autofocusPriorityOrder?` (passed to `FocusTrap`);
+- `autofocusSelector = "[data-autofocus], #<closeId>"`, `autofocusPriorityOrder = true` (passed to `FocusTrap`; D18);
+- `closeDisabled = false` (disables × and ignores Escape; used during a delete, D9);
 - snippets `header` (required), `children` (body), `footer?`.
 
 **DOM:**
@@ -267,13 +305,13 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
 
 **Behaviour:**
 - **Escape:** a `<svelte:window onkeydown>` in the bubble phase.
-  - It fires when `e.key === 'Escape' && !e.repeat && !e.isComposing && e.keyCode !== 229 && !e.defaultPrevented`. The `keyCode 229` check is Safari's IME signal, as in 5a's T1 backlog.
+  - It fires when `e.key === 'Escape' && !closeDisabled && !e.repeat && !e.isComposing && e.keyCode !== 229 && !e.defaultPrevented`. The `keyCode 229` check is Safari's IME signal, as in 5a's T1 backlog.
   - It then calls `preventDefault()` and `onRequestClose()`.
   - Inner widgets that own an Escape call `preventDefault()` first: InlineField (already), and AssetSidebar's inline delete confirm, which T2 adds (Escape = Cancel).
 - **Backdrop:**
   - `mousedown` on the backdrop itself calls `preventDefault()`, which keeps focus in the panel;
   - `click` closes only when `closeOnBackdrop` is set and the target is the backdrop itself.
-- **Focus containment:** the document `focusin` listener from D18. It is removed on destroy.
+- **Focus containment:** the document `focusin` listener from D18. It bails when the panel is disconnected, and is removed on destroy.
 - **Scroll lock:** on mount, save `document.documentElement.style.overflow` and set it to `hidden`; restore it on destroy.
 - Modal holds no dirty state; the parent decides what closing means.
 
@@ -289,7 +327,7 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
 - the autofocus priority is honoured, with × as the fallback;
 - the footer is omitted when no snippet is given.
 
-### 2. Hosting, routing, close — T3a
+### 2. Hosting, routing, close — T3b (host) + T3a (ItemEditorModal)
 
 **`routes.ts:14`** → `component: 'VersionEditPage'`. Svelte keeps the same page instance across all four editor patterns, because `App.svelte`'s `<Comp {...params}/>` keeps one constructor. On the item pattern `itemId` is a string; elsewhere it is `undefined`.
 
@@ -300,7 +338,7 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
   - Alongside it, `let openedFromPage = $state(false)`.
   - An `$effect` tracking `routeIid` sets `openedFromPage = routeIid !== null && !mountedOnItem`. Once `routeIid` becomes `null`, it sets `mountedOnItem = false` (so later opens count as in-page) and clears `closing` and `deletedIid`.
 - **`requestCloseItem()`:**
-  - if `closing`, return; otherwise set `closing = true`;
+  - if `closing` or `deletingIid !== null`, return; otherwise set `closing = true`;
   - if `openedFromPage`, `history.back()`;
   - else `navigate(seqUrl, { replace: true })` (guards run).
 
@@ -308,18 +346,18 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
 - **`deleteOpenItem()`** — D9.
 - **`deriveExpansion(routeBid, routeSid, effectiveTree, routeIid)`** (`routeIid` is **appended** as the last parameter, so the 9 existing tests stay valid) returns `expandedItem`. It also returns `staleIid` when the item is absent from the expanded sequence or the id is not a positive integer.
   - `handleStaleIdFallback` handles `staleIid` with "Item not found." and `navigate(seqUrl, { replace: true, force: true })`.
-  - It skips the toast and navigation when `staleIid === deletedIid` (D9).
+  - It skips the toast and navigation when `staleIid && routeIid === String(deletedIid)` (D9).
   - Precedence: `staleBid > staleSid > staleIid`.
 - **Template.** Inside the loaded `{:else}` branch, after the state bar: `{#if expandedItem}{#key expandedItem.id}<ItemEditorModal …/>{/key}{/if}`. The modal sits inside the page, so it shares the page's `DIRTY_REGISTRY_KEY` context.
 - **Focus `$effect`** (5a order: load → validation → focus) returns early while `routeIid !== null` (D18). It tracks `routeIid`.
   - After an in-page close, the existing `lastFocusedTarget` equality skips it, so `FocusTrap`'s restore-to-opener wins.
-  - If focus lands on `body` or `null` (the opener is gone, or after a deep link or delete), it resets `lastFocusedTarget` and applies D18's fallback: the item's Open pencil, else the sequence header.
+  - D18's fallback (closed item's Open pencil `#item-{lastClosedIid}-open`, else the sequence header) runs **only** when the one-shot `justClosedItem` flag is set and focus is on `body`/`null`; plain tree reloads never trigger it.
 - **Store.** `onDestroy(clearEditorVersion)` stays, and the comment is updated (D22).
 
 **Openers:** `SequenceAccordion.openItem` and the create-item success keep their plain `navigate(itemUrl)`. They now land on the same page instance, so there is no swap and no freeze.
 
 **`ItemEditorModal.svelte`:**
-- **Props:** `courseSlug`, `vid`, `version: AdminTreeVersion`, `perms`, `block`, `seq`, `seqIndex: number` (for "S1"), `item`, `itemIndex`, `itemCount`, `stillOnVid`, `onRequestClose`, `onDeleteItem` (the page's `deleteOpenItem`).
+- **Props:** `courseSlug`, `vid`, `version: AdminTreeVersion`, `perms`, `block`, `seq`, `seqIndex: number` (for "S1"), `item`, `itemIndex`, `itemCount`, `stillOnVid`, `onRequestClose`, `onDeleteItem` (the page's `deleteOpenItem`), `deleting: boolean` (D9 freeze — treated like `saving` for inputs, plus × / Escape / trash / Save / Discard disabled via `Modal closeDisabled`).
 - **Derived:** `versionDisabled = version.is_disabled` and `assetContext = $derived(courseAssetContext(vid))`. `assetContext` is memoised per `vid`, as ItemEditPage did at `:27-29`, and passed to the bodies.
 - **Header snippet:**
   - `ItemMark type={item.type} state="covered"` (22px tile, ref 1686);
@@ -348,12 +386,12 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
 
 **Save / discard protocol (the body contract):**
 - **Each body** exports:
-  - `save(titleDraft: string | undefined): Promise<'ok' | 'partial' | 'failed'>`;
+  - `save(titleDraft: string | undefined): Promise<{ outcome: 'ok' | 'partial' | 'failed'; savedTitle?: string }>` — `savedTitle` is the server's echo when the title part succeeded;
   - `discard(): void` (save drafts only);
   - `discardAll(): void` (also collapses typed create forms);
   - `validate(): boolean` (D10 scope);
   - bindable `saveDirty`, `guardDirty` and `busy` (any structure operation or upload in flight);
-  - a `saving` prop (from the modal) that makes its inputs read-only and its structure controls disabled (D10 interlock).
+  - a `frozen` prop (from the modal: `saving || deleting`) that makes its inputs read-only **without blurring** (`readonly` attribute; `MarkdownEditor frozen`) and its structure controls disabled (D10 interlock, D9).
 - **The modal** owns the title tracker and registers **one** `RegisteredTracker` in the page registry:
   - `isDirty = titleDirty || body.guardDirty`;
   - `discard()` (the guard's confirmed close) resets the title and calls `body.discardAll()`;
@@ -365,7 +403,7 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
   2. then `body.save(titleDirty ? title : undefined)`. **The body sends the title**:
      - page and video put it inside their single `PATCH`;
      - app and quiz send `PATCH {title}` first (§5.3 step 1);
-  3. the modal advances the title baseline when the body reports the title part succeeded.
+  3. the modal advances the title baseline from `savedTitle` when present.
 - **After a full or partial success**, `loadAdminTree(vid, { force: true })` is gated on `stillOnVid`. Baselines advance from the response or the fresh tree. The `'error'` and `'discarded'` refetch outcomes keep ItemEditPage's rules (`:169-203`). Then:
   - the toast "Saved", or the D10 partial-failure pop-up;
   - `PageBody` bumps its own `refreshKey` (it owns it and binds it to `MarkdownEditor`), so the sidebar's `used` badges refresh.
@@ -404,6 +442,7 @@ The tabs keep `aria-pressed`.
   - no tabs and no sidebar;
   - no `/render` call (the `onMount` `loadPreview` is skipped);
   - the source shown as `pre`-wrapped mono text in the card.
+- **New prop `frozen = false` (D10 interlock, D9):** the textarea gets the `readonly` attribute (focus and caret are kept); drops, sidebar inserts and uploads are blocked exactly like the existing `disabled` guards (`:67`, `:184`, `:204`); tabs stay usable. `uploading` stays bindable so bodies can fold it into `busy`.
 - **Delete** `#a33`, `#c62828`, the `var(--surface, #f7f7f7)` fallback (`:310`) and the `ui-monospace` literal; use `--danger`, `--surface` and `--font-mono`.
 
 **`AssetSidebar` restyle (3c):**
@@ -421,7 +460,7 @@ The tabs keep `aria-pressed`.
 - **The two-step inline delete confirm stays,** and gains Escape = Cancel (`preventDefault`, so the modal doesn't close; §1).
 - The `AssetSidebar.run-mode` tests (7) are updated for the IconButton change (D21).
 
-### 4. Video body (3e) and App body — T3b (video logic) + T4 (video card, App)
+### 4. Video body (3e) and App body — T3c (video logic) + T4 (video card, App)
 
 **`VideoBody.svelte`:**
 - **Fields:** a tracker `{ video_url }`, plus a **Video URL** `.field-row` (mono input, `type="url"`, required, `aria-label="Video URL"`) with the hint text below in 12px `--muted`: "Paste any YouTube or Vimeo URL — it is converted to embed form on save."
@@ -453,16 +492,16 @@ The tabs keep `aria-pressed`.
 - **`QuizEditor` keeps its private dirty registry** (`QuizEditor.svelte:27-30`) for the **save drafts** (question and option trackers). It implements the §2 body contract:
   - `saveDirty` = `registry.isAnyDirty()`;
   - `guardDirty` = `saveDirty` or a typed add-question / add-option form;
-  - `busy` = `questionsLocked` or any accordion's `optionsLocked`;
+  - `busy` = `questionsLocked`, or any contributor's `locked()` (its `optionsLocked` or an inner `MarkdownEditor` `uploading`);
   - plus `save`, `discard`, `discardAll` and `validate`.
   
   The add forms register their 5a-style create-tracker shims in a *second* private registry (the guard registry). That keeps them out of the footer and out of Save (D5).
 - **The modal's single page-registered tracker covers the quiz** (§2), so the page `DirtyGuard` sees quiz drafts. **There's no second guard:** `QuizEditor` mounts no `DirtyGuard`.
 - **Each `QuestionAccordion` keeps its draft and saved state** (`:45-57`), and its option trackers (`:105-124`), extended with `is_correct` per option.
   - These live in the accordion component, which stays mounted while its body is collapsed (`:80-84`).
-  - It receives `versionDisabled` (D6), `saving` (D10) and `expanded` / `onExpand`. `QuizEditor` keeps the single `expandedId` and sets it on a validation failure (D10).
+  - It receives `versionDisabled` (D6), `frozen` (D10/D9) and `expanded` / `onExpand`. `QuizEditor` keeps the single `expandedId` and sets it on a validation failure (D10).
 - **Each accordion registers a save contributor** with `QuizEditor` through a new context `QUIZ_SAVE_KEY`:
-  - `{ questionId, order(): number, isDirty, keyChanged(): boolean, validate(): boolean, focusFirstInvalid(): void, save(): Promise<'ok' | 'failed'>, discard() }`.
+  - `{ questionId, order(): number, isDirty, locked(): boolean, keyChanged(): boolean, validate(): boolean, focusFirstInvalid(): void, save(): Promise<'ok' | 'failed'>, discard() }`.
 
 #### 5.2 What becomes a draft
 These all stop being immediate writes:
@@ -532,7 +571,7 @@ Drafts are keyed by id:
   - ↑ ↓ (D16) and 🗑 `IconButton sm`.
 - **`QuestionTypePicker`** (in the add form): restyled like 5a's `ItemTypePicker` cards, with the labels `single choice` / `multiple choice` / `numeric answer` / `text answer`.
 - **Emoji removal:** all of 🗑 ↑ ↓ ▾ ▸ ✓ ◉ ☑ ✎ ＋ are removed from the quiz files.
-- **Non-token fallbacks removed:** `--text-muted` / `--success` fallbacks in `QuizEditor.svelte:320-321`, `QuestionAccordion.svelte:496-497` and `OptionRow.svelte:71-75` become `--muted` / `--status-accepted-fg`.
+- **Non-token fallbacks removed:** `--text-muted` / `--success` references and the `var(--danger, #c00)` hex fallbacks in `QuizEditor.svelte:320-321`, `QuestionAccordion.svelte:496-497` and `OptionRow.svelte:71-75` become `--muted` / `--status-accepted-fg` / bare `var(--danger)`.
 
 ---
 
@@ -552,34 +591,54 @@ Vitest/jsdom with mount, unmount and flushSync (no testing-library).
 - **T1 Modal:** the cases in §1.
 - **T2 MarkdownEditor / AssetSidebar:** the existing tests are kept with selectors updated (`MarkdownEditor` 26, `MarkdownEditor.run-mode` 5, `AssetSidebar` 23, `AssetSidebar.run-mode` 7). New tests:
   - `plain` makes no render call, shows no tabs or sidebar, and shows the source;
+  - `frozen` sets `readonly` on the textarea, keeps focus, and blocks drop/insert/upload;
   - the D11 hint;
   - delete via `IconButton`;
   - Escape on the inline delete confirm cancels it and is default-prevented;
   - no emoji.
-- **T3a host + modal + page:**
+- **T3a modal + page body (unit level, not yet routed):**
+  - `ItemEditorModal.svelte.test.ts`:
+    - the header, title row, footer and states;
+    - the body contract (`saveDirty` vs `guardDirty`, `savedTitle`);
+    - Save, Discard and ⌘S;
+    - the busy interlock: Save is disabled while the body is busy, and inputs are `readonly` while saving, **with focus kept in a focused textarea and input across a ⌘S save**;
+    - the `deleting` freeze;
+    - read-only published / archived / disabled, where disabled makes no render call (page **and** quiz);
+    - autofocus lands on Title, and on × when read-only (never the trash button);
+    - `refreshKey` increments after a page save;
+    - the interim quiz wiring: a question draft makes the item guard-dirty only (the footer stays clean), and the per-question Save still works;
+    - the interim app wiring.
+  - MarkdownEditor `frozen` tests (T2 owns the prop; T3a adds the integration).
+- **T3b routing + host:**
   - In `VersionEditPage.svelte.test.ts` (`renderRouted` gains `get itemId()`):
-    - opening via Open, then ×: the modal is gone, the sequence is still open, and focus is back on the Open pencil;
-    - in-page open, then × calls `history.back()` **once** even after a double × or Escape-then-×;
+    - opening via Open, then ×: the modal is gone, the sequence is still open, and focus is back on the Open pencil **via FocusTrap's restore**. The fallback must not run; assert this with a `justClosedItem` spy or a different fallback target;
+    - in-page open, then × calls `history.back()` **once**, even after a double × or Escape-then-×;
     - a cancelled prompt re-arms × (`closing` is cleared);
     - a deep link, then × replaces the address with the sequence address;
     - Escape (and not on `repeat`);
     - the dirty prompt on × / Escape / Back / the course link, with cancel keeping the drafts;
     - a stale item address gives the toast and the replace;
-    - delete: one confirm, the item closes, the reload runs **after the modal unmounted**, the toast "Item deleted" appears, and no "Item not found.";
-    - Save and Discard for a page;
-    - ⌘S;
-    - the busy interlock (Save disabled while the body is busy; inputs read-only while saving);
-    - read-only published / archived / disabled, where disabled makes no render call;
-    - `refreshKey` increments after a save;
-    - autofocus lands on Title, and on × when read-only (never the trash button);
+    - **delete:**
+      - one confirm;
+      - × and Escape are inert while the DELETE is unresolved, and **exactly one** history pop follows;
+      - the reload runs after the modal unmounted;
+      - the toast "Item deleted" appears, with no "Item not found.";
+      - focus lands on the sequence header;
+      - a failed DELETE keeps the modal open and unfrozen;
+    - browser Back during an unresolved DELETE: no second pop;
     - Tab from the last panel element can't reach the page behind;
-    - focus after a create-item close lands on the new item's Open pencil, and after a deep-link close on the sequence header.
-  - **Back-freeze regression, through `App.svelte`** (a new `tests/App.editorRoutes.svelte.test.ts` that mounts `App` and drives the real router; `renderRouted` mounts the page directly, so it can't reproduce the component swap):
+    - after a create-item close, focus lands on the new item's Open pencil (`#item-{id}-open`); after a deep-link close, on the sequence header;
+    - a tree reload (e.g. reorder) with focus on `body` does **not** move focus.
+  - **Back-freeze regression, through `App.svelte`** (a new `tests/App.editorRoutes.svelte.test.ts` that mounts `App` and drives the real router, like `SuperuserShell.svelte.test.ts`):
     - open an item, Back, then create another item without reloading: no thrown error, and the modal opens on the new item;
     - plus sequence → item → sequence → item.
-  - `deriveExpansion` and `handleStaleIdFallback` get item-level cases, including `deletedIid`; `router.test.ts:54` is updated.
-  - **Interim wiring** (Constraint 14): quiz and interactive-app items open in the modal and still pass their existing tests (§Task decomposition).
-- **T3b video:** Video URL Save/Discard, `videoUrlEmpty` blocks, normalise-on-save.
+    - **Prove it can fail:**
+      1. write it **first**, against today's routing (ItemEditPage still mapped), and confirm it fails;
+      2. after the switch, run a one-off mutation: map the item route to a stub page that reads the store and calls `clearEditorVersion` on destroy, and confirm the test fails again; then remove the stub.
+      
+      If jsdom can't reproduce the freeze in step 1, record that in the ledger and keep the test as a routing smoke test. The mutation step still runs.
+  - `deriveExpansion` and `handleStaleIdFallback` get item-level cases, including the `deletedIid` suppression; `router.test.ts:54` is updated.
+- **T3c video:** Video URL Save/Discard, `videoUrlEmpty` blocks, normalise-on-save.
 - **T4 Video card / App:**
   - the preview debounce;
   - the provider meta;
@@ -591,7 +650,7 @@ Vitest/jsdom with mount, unmount and flushSync (no testing-library).
   - `busy` during an upload disables Save;
   - disabled: no asset fetch;
   - no write after unmount.
-- **T5a quiz draft model + Save:**
+- **T5a quiz draft model + Save:** (plus: focus kept across ⌘S in a question editor)
   - one Save sends title → questions → options in the §5.3 order (single choice: true before false);
   - validation is dirty-scoped: a clean zero-option choice question does not block a title Save;
   - an invalid dirty question is expanded and focused, and shows `needs fixing`;
@@ -609,21 +668,22 @@ Vitest/jsdom with mount, unmount and flushSync (no testing-library).
 - **Gate:** sections (aa)-(ag), one per styling task, plus the `.notice` target update. Every new check is mutation-tested.
 - **Final:** the full suite, `npm run check` (0 errors; warnings must not grow), the gate, a whole-branch review, and the browser pass (Safari, step by step, with the user).
 
-## Task decomposition (9 tasks; carried into the implementation plan)
+## Task decomposition (10 tasks; carried into the implementation plan)
 
 Every task ends green (Constraint 14).
 
 | Task | Deliverable | Notes |
 |---|---|---|
-| **T1** | `ui/Modal.svelte` + tests + gate (aa) | Generic; no item knowledge |
-| **T2** | `MarkdownEditor` + `AssetSidebar` restyle (3c) + `plain` mode (D6) + the AssetSidebar Escape + gate (ab) | Also restyles MiniProjectModal's use (D21) |
-| **T3a** | Routing + `VersionEditPage` host (D7 latch, D9 page-owned delete, D18 focus, D19 stale item) + `ItemEditorModal` (header, Title, footer, body contract, interlock) + `PageBody` + the D22 contract + delete `ItemEditPage` and its tests + the App-level Back-freeze test + gate (ac) | **Interim wiring:** `quiz` mounts today's `QuizEditor` with `showTitle={false}`; the modal Save sends the title (`PATCH {title}`), `QuizEditor`'s `quizDirty` is bridged into `guardDirty`/`saveDirty`, and its per-question Save stays until T5a. `interactive_app` mounts today's `InteractiveAppEditor` under the modal Title, until T4 |
-| **T3b** | `VideoBody` logic (field, validation, normalise, save) | Card styling arrives in T4 |
+| **T1** | `ui/Modal.svelte` (+ `closeDisabled`, focus containment, autofocus default) + tests + gate (aa) | Generic; no item knowledge |
+| **T2** | `MarkdownEditor` + `AssetSidebar` restyle (3c) + `plain` (D6) + `frozen` (D10) + the AssetSidebar Escape + gate (ab) | Also restyles MiniProjectModal's use (D21) |
+| **T3a** | `ItemEditorModal` (header, Title, footer, body contract, interlock, `deleting` freeze) + `PageBody` + **interim wiring** + the D6 quiz `plain` leg + gate (ac) | Unit-tested, not yet routed. **Interim wiring** (quiz): mount today's `QuizEditor` with `showTitle={false}` and `versionDisabled`; the modal Save sends the title (`PATCH {title}`); `QuizEditor`'s `quizDirty` is bridged into **`guardDirty` only**; `saveDirty` = the title, and the footer's Discard resets only the title; per-question Save/Discard keep serving question drafts until T5a. **Interim wiring** (interactive app): mount today's `InteractiveAppEditor` under the modal Title, until T4 |
+| **T3b** | Routing + `VersionEditPage` host (D7 latch, D9 page-owned delete with freeze, D18 focus with `justClosedItem` + `ItemRow` pencil ids, D19 stale item) + delete `ItemEditPage` and its tests + the D22 contract + the App-level Back-freeze test (written first, mutation-proved) | |
+| **T3c** | `VideoBody` logic (field, validation, normalise, save) | Card styling arrives in T4 |
 | **T4** | Video preview card (3e) + `AppBody` (D4, D14, `busy`) replacing `InteractiveAppEditor` + the `VideoFrame` / `InteractiveFrame` `height` props + gate (ad) + the `.notice` target | |
-| **T5a** | Quiz draft model + one-Save orchestration (§5.1-5.3, D10 validation, D20, D25) | Removes the interim bridge and per-question Save |
-| **T5b** | Quiz structure with live drafts (§5.4, D24, add-form guard trackers, interlock) | |
+| **T5a** | Quiz draft model + one-Save orchestration (§5.1-5.3, D10 validation, D20, D25, `frozen`) | Removes the interim bridge and per-question Save |
+| **T5b** | Quiz structure with live drafts (§5.4, D24, add-form guard trackers, interlock, `locked()`) | |
 | **T6** | Quiz look (§5.5, D23) + `QuestionTypePicker` + gate (ae) | |
-| **T7** | Clean-up: stale comment references, close the backlog carry-overs, the final gate count (af: an emoji scan over every 5b file; ag: Constraint 11 literal-colour scan over every 5b-touched file) | |
+| **T7** | Clean-up: stale comment references, close the backlog carry-overs, the final gate count (af: an emoji scan over every 5b file; ag: the Constraint 11 literal-colour scan, with its exemptions, over every 5b-touched file) | |
 
 ## Review Focus (for the plan)
 1. Close semantics on a deep link vs. in-page (D7): × must never leave the app, including double × or Escape and a cancelled prompt.
@@ -666,6 +726,29 @@ Minors folded in:
 - `AssetSidebar.run-mode`;
 - the T3/T5 splits;
 - the `-webkit-backdrop-filter`.
+
+## Review resolutions (round 2, 2026-10-07: Opus + Fable on rev 2)
+
+Every round-1 Important finding was confirmed resolved, except the four below, which were resolved now. The new Important findings were all accepted:
+
+- **No protection while a DELETE is in flight** (both lanes): the D9 freeze (`deletingIid`, `closeDisabled`, `requestCloseItem` early-return), the `routeIid` check before closing, and the failure path.
+- **The interim quiz wiring lit up Save for drafts it couldn't send** (both lanes): bridge into `guardDirty` only (T3a), and the quiz `plain` leg moved into T3a.
+- **The named-colour ban forbade `transparent`, `currentColor` and system colours** (both lanes): Constraint 11's definition plus exemptions.
+- **"Read-only while saving" would blur or unmount the editor**: `MarkdownEditor frozen` and the `readonly` attribute (D10).
+- **The focus fallback fired on every tree reload**: the one-shot `justClosedItem` (D18).
+- **The Back-freeze test could pass trivially**: write it first and mutation-prove it (T3b).
+
+Minors folded in:
+- `savedTitle`;
+- `busy` includes uploads, and the contributor gains `locked()`;
+- the focus after delete;
+- the `focusin` teardown order;
+- the `staleIid` wording;
+- the D24 order and scope;
+- the hex fallbacks;
+- the Modal autofocus default;
+- the pencil ids;
+- T3 split into T3a/T3b/T3c.
 
 ## Git stacking
 Same local branch as 5a. One commit per task after its two-lane review is clean; no push and no merge.
