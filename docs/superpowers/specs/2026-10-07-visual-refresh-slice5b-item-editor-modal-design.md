@@ -1,6 +1,6 @@
 # Visual Refresh — Slice 5b: Authoring — Item Editor Modal (3c + 3e + 3f) — Design Spec
 
-**Status:** Design — **rev 7** (brainstormed with the user 2026-10-07; self-checked; revs 2-7 fold six rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
+**Status:** Design — **rev 7** (brainstormed with the user 2026-10-07; self-checked; revs 2-7 fold six rounds of two-lane review; round 7 clean in both lanes — see §Review resolutions). Next: user review → writing-plans.
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (artboard **3c** `:1649-1758` page, **3e** `:1759-1835` video, **3f** `:1836-1969` quiz; `ref NNNN` below are line numbers in that file) and `docs/design/visual-refresh/mathion-visual-spec.md` (§4 "Item editor modal (3c, 3e, 3f)" `:212-229`, Icon button `:168-181`, §3 colour of state `:110-133`, type-name rule `:230`). Where the two disagree, the spec's *rules* win over the artboard's *pixels*. **User decisions** (§Decisions) override both, and each override is recorded.
 
