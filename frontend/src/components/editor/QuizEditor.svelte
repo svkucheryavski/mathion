@@ -13,10 +13,11 @@
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { QUIZ_GUARD_KEY, QUIZ_SAVE_KEY, type QuizContributor, type QuizSaveHub } from '../../lib/quizSave';
-  import { unsavedSuffix } from '../../lib/editorReasons';
+  import { structureReason, unsavedSuffix } from '../../lib/editorReasons';
   import { patchItem, reportSaveFailure, type SaveOutcome } from '../../lib/itemBody';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import QuestionAccordion from './QuestionAccordion.svelte';
   import QuestionTypePicker from './QuestionTypePicker.svelte';
   import {
@@ -97,6 +98,23 @@
     }
   }
   onMount(() => { void load(); });
+
+  // After a failed structure op: refetch WITHOUT the loading state, so the
+  // keyed list stays mounted and every accordion keeps its drafts (§5.4). A
+  // failed refetch keeps the current list rather than wiping it.
+  async function resync() {
+    if (loadStatus !== 'loaded') { await load(); return; }
+    loadToken += 1;
+    const myToken = loadToken;
+    try {
+      const list = await listQuestions(itemId);
+      if (myToken !== loadToken) return;
+      questions = [...list].sort((a, b) => a.order - b.order);
+    } catch {
+      if (myToken !== loadToken) return;
+      pushToast("Couldn't reload the questions — reload the page to see the latest.", 'error');
+    }
+  }
 
   // ---- ItemBodyApi ----
 
@@ -215,7 +233,7 @@
       if (alive && vid === savedVid) {
         addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
         if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
-          await load();
+          await resync();
           if (alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
         }
       }
@@ -246,7 +264,7 @@
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-        await load();
+        await resync();
         if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
@@ -275,7 +293,7 @@
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-        await load();
+        await resync();
         if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
@@ -286,83 +304,141 @@
   function toggleExpand(qid: number) { expandedId = expandedId === qid ? null : qid; }
   const structureOff = $derived(!perms.canEditStructure);
   const readOnlyAll = $derived(!perms.canEditTextFields && !perms.canEditStructure);  // archived/disabled (§9)
+  // D15: the version's reason titles every disabled question arrow and trash.
+  const structReason = $derived(structureReason(version));
+  const uid = $props.id();
+
+  // The 5a collapsed-form toggle (+ ↔ ×): opening focuses the checked type;
+  // closing drops what was typed.
+  let addFormEl: HTMLFormElement | undefined = $state();
+  async function toggleAdd() {
+    if (questionsLocked || frozen || structureOff) return;
+    if (adding) { adding = false; resetAddForm(); return; }
+    adding = true;
+    await tick();
+    if (alive) addFormEl?.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.focus();
+  }
 </script>
 
+
 <section class="quiz-editor" aria-label="Quiz editor">
-  {#if readOnlyAll}<p class="muted" data-testid="quiz-readonly">This version is read-only — editing is disabled.</p>{/if}
+  {#if readOnlyAll}<p class="note" data-testid="quiz-readonly">This version is read-only — editing is disabled.</p>{/if}
+
+  <div class="questions-head">
+    <span class="questions-label">Questions</span>
+    {#if loadStatus === 'loaded'}<span class="mono q-count" data-testid="question-count">{questions.length}</span>{/if}
+    {#if !structureOff}
+      <span class="head-add">
+        <IconButton primary size="sm" glyph={adding ? 'close' : 'plus'}
+                    title={adding ? 'Cancel new question' : 'Add question'} aria-label="Add question"
+                    aria-expanded={adding} disabled={questionsLocked || frozen || loadStatus !== 'loaded'}
+                    onclick={() => void toggleAdd()} />
+      </span>
+    {/if}
+  </div>
+
+  {#if adding && !structureOff}
+    <form class="add-form" novalidate bind:this={addFormEl} onsubmit={(e) => { e.preventDefault(); void submitAdd(); }}>
+      <QuestionTypePicker bind:value={newType} disabled={questionsLocked || frozen} />
+      <input class="plain-input" data-testid="new-question-text" aria-label="Question text" placeholder="Question text"
+             bind:value={newText} readonly={questionsLocked || frozen} />
+      {#if newType === 'numeric_answer'}
+        <div class="field-row">
+          <label class="row-label" for={`${uid}-num`}>Answer</label>
+          <input id={`${uid}-num`} class="plain-input mono" data-testid="new-numeric" bind:value={newNumeric}
+                 readonly={questionsLocked || frozen} aria-invalid={!newNumericCheck.ok} />
+        </div>
+        <div class="field-row">
+          <label class="row-label" for={`${uid}-prec`}>Precision</label>
+          <input id={`${uid}-prec`} class="plain-input mono" data-testid="new-precision" type="number" min="0" max="10"
+                 bind:value={newPrecision} readonly={questionsLocked || frozen} aria-invalid={!newPrecisionValid} />
+        </div>
+        {#if newNumericError}<p class="err" role="alert">{newNumericError}</p>{/if}
+        {#if !newPrecisionValid}<p class="err" role="alert">Precision must be an integer <span class="mono">0–10</span>.</p>{/if}
+      {:else if newType === 'text_answer'}
+        <div class="field-row">
+          <label class="row-label" for={`${uid}-ans`}>Answer</label>
+          <input id={`${uid}-ans`} class="plain-input" data-testid="new-text-answer" bind:value={newAnswer}
+                 maxlength="500" readonly={questionsLocked || frozen} />
+        </div>
+      {:else}
+        <p class="muted">Add the answer options after creating the question.</p>
+      {/if}
+      {#if addError}<p class="err" role="alert">{addError}</p>{/if}
+      <div class="add-actions">
+        <Button type="submit" disabled={questionsLocked || frozen || !addValid}>Add</Button>
+      </div>
+    </form>
+  {/if}
 
   {#if loadStatus === 'loading'}
     <p class="muted">Loading questions…</p>
   {:else if loadStatus === 'error'}
     <p class="err" role="alert">{loadError}</p>
-    <Button variant="ghost" onclick={() => void load()}>Retry</Button>
+    <div><Button variant="ghost" onclick={() => void load()}>Retry</Button></div>
+  {:else if questions.length === 0}
+    <p class="muted">No questions yet.</p>
   {:else}
-    {#if questions.length === 0}
-      <p class="muted">No questions yet.</p>
-    {:else}
-      <p class="sr-only" aria-live="polite" data-testid="question-live">{questionAnnounce}</p>
-      <ol class="questions">
-        {#each questions as q, i (q.id)}
-          <li data-q-id={q.id}>
-            <QuestionAccordion
-              question={q}
-              {vid}
-              index={i + 1}
-              count={questions.length}
-              {perms}
-              {assetContext}
-              {versionDisabled}
-              {frozen}
-              locked={questionsLocked}
-              expanded={expandedId === q.id}
-              onExpandToggle={() => toggleExpand(q.id)}
-              onDelete={() => void removeQuestion(q.id)}
-              onMoveUp={() => void move(q.id, -1)}
-              onMoveDown={() => void move(q.id, 1)}
-            />
-          </li>
-        {/each}
-      </ol>
-    {/if}
-
-    {#if !structureOff}
-      {#if adding}
-        <div class="add-form">
-          <QuestionTypePicker bind:value={newType} disabled={questionsLocked || frozen} />
-          <label>Question text
-            <input data-testid="new-question-text" bind:value={newText} required />
-          </label>
-          {#if newType === 'numeric_answer'}
-            <label>Correct value
-              <input data-testid="new-numeric" bind:value={newNumeric} aria-invalid={!newNumericCheck.ok} />
-            </label>
-            <label>Precision (0–10)
-              <input data-testid="new-precision" type="number" min="0" max="10" bind:value={newPrecision} />
-            </label>
-            {#if newNumericError}<p class="err" role="alert">{newNumericError}</p>{/if}
-            {#if !newPrecisionValid}<p class="err" role="alert">Precision must be an integer 0–10.</p>{/if}
-          {:else if newType === 'text_answer'}
-            <label>Correct answer
-              <input data-testid="new-text-answer" bind:value={newAnswer} maxlength="500" />
-            </label>
-          {:else}
-            <p class="muted">Add the answer options after creating the question.</p>
-          {/if}
-          {#if addError}<p class="err" role="alert">{addError}</p>{/if}
-          <Button onclick={() => void submitAdd()} disabled={questionsLocked || frozen || !addValid}>Add</Button>
-          <Button variant="ghost" onclick={() => { adding = false; resetAddForm(); }}>Cancel</Button>
-        </div>
-      {:else}
-        <Button aria-label="Add question" onclick={() => { adding = true; }} disabled={questionsLocked || frozen}>＋ Add question</Button>
-      {/if}
-    {/if}
+    <p class="sr-only" aria-live="polite" data-testid="question-live">{questionAnnounce}</p>
+    <ol class="questions">
+      {#each questions as q, i (q.id)}
+        <li data-q-id={q.id}>
+          <QuestionAccordion
+            question={q}
+            {vid}
+            index={i + 1}
+            count={questions.length}
+            {perms}
+            {assetContext}
+            {versionDisabled}
+            {frozen}
+            {structReason}
+            locked={questionsLocked}
+            expanded={expandedId === q.id}
+            onExpandToggle={() => toggleExpand(q.id)}
+            onDelete={() => void removeQuestion(q.id)}
+            onMoveUp={() => void move(q.id, -1)}
+            onMoveDown={() => void move(q.id, 1)}
+          />
+        </li>
+      {/each}
+    </ol>
   {/if}
 </section>
 
 <style>
-  .quiz-editor { display: flex; flex-direction: column; gap: var(--space-3); }
-  .questions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-  .muted { color: var(--muted); }
-  .err { color: var(--danger); }
+  .quiz-editor { display: flex; flex-direction: column; gap: 12px; /* the 3f card gap (ref 1890) */ }
+  .questions-head { display: flex; align-items: center; gap: 10px; padding-top: 2px; /* ref 1885 */ }
+  .questions-label { font-size: 12.5px; font-weight: 600; color: var(--text); /* ref 1886 */ }
+  .q-count { font-size: 11.5px; color: var(--muted); /* ref 1887 */ }
+  .head-add { margin-left: auto; /* ref 1888 */ }
+  .questions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; /* ref 1890 */ }
+  .add-form { display: flex; flex-direction: column; gap: 8px; /* the 5a create-form gap */ }
+  .field-row { display: grid; grid-template-columns: 132px 1fr; align-items: center; gap: 12px; /* ref 1902 */ }
+  .row-label { font-size: 12.5px; color: var(--muted); /* ref 1903 */ }
+  /* D12: the 5a create-form input on the dense-control tokens. */
+  .plain-input {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--control-font);
+    caret-color: var(--primary);
+  }
+  .plain-input:focus-visible {
+    outline: none;
+    border: 1.5px solid var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft); /* D12 — InlineField's open editor */
+  }
+  .plain-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
+  .add-actions { display: flex; justify-content: flex-end; }
+  /* The information-banner form (ItemEditorModal .ro-note). */
+  .note { margin: 0; padding: 8px 12px; background: var(--surface-2); border-left: 3px solid var(--primary); font-size: 13px; color: var(--text); }
+  .muted { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .err { margin: 0; font-size: 12px; color: var(--danger); /* D12 */ }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

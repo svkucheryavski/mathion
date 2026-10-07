@@ -209,3 +209,24 @@ None blocks the slice; each is input for the final polish slice.
 - **The D24 confirm text when the option has a text draft** is untested, and a whitespace-only draft reads `Delete option "   "?`. Fix: add a text draft on the deleted row in the D24 test, and fall back to the saved text when the draft trims to empty.
 - **A typed add form keeps × prompting after the footer Discard** (by design, D5). The footer then shows no "unsaved changes" while × still asks. Revisit in the Safari pass. A muted "unsent form" hint is an option.
 - **Closing while an add-question POST is in flight**: the guard prompts, the author confirms, the form collapses, and the question still lands server-side. This matches the 5a create forms.
+
+## T6 — Quiz look (3f)
+
+- **The `+` / `×` add toggles set `aria-expanded` but not `aria-controls`** (QuizEditor's Add question, QuestionAccordion's Add option). `q-toggle` does set it. Fix: give each form an id and pass `aria-controls={adding ? formId : undefined}`.
+- **The toggles keep `aria-label="Add question"` / `"Add option"` while titled "Cancel new …".** A screen reader hears "Add question, expanded" for the close action. The aria-labels are frozen contracts, so this is acceptable. A later polish could add `aria-describedby` to the title.
+- **Escape on a typed add form prompts for the whole modal** instead of collapsing the form. 5a's collapsed forms behave the same. Fix: an Escape `onkeydown` on the `<form>` that calls `toggleAdd()` and prevents the default.
+- **Enter-submit is untested.** Add `form.requestSubmit()` tests: an invalid form sends no POST, and two synchronous submits send one POST. By reading, both guards hold.
+- **Three look claims have no discriminating test:**
+  - the option legend's `sr-only` class;
+  - `mono` on `.q-badge` / `.q-type` / `.q-count`.
+
+  Add `classList.contains(...)` assertions to the header tests.
+- **Gate (ae) leaves emitted rules unpinned:**
+  - `.q-toggle`: `padding:0` / `color:inherit` / `font:inherit` (the button reset);
+  - `.q-title`: `flex:1` / `min-width:0`;
+  - `.question`: `background`;
+  - `.questions-head`: `padding-top:2px`;
+  - `.mark`: `flex:0 0 auto`;
+  - QuestionTypePicker's visually-hidden input and its `:disabled label` (Constraint 2, the "no opacity dim" rule). This one deserves a `chk`.
+- **(Round 2) A resync never refreshes a surviving question's `saved` baseline or header snippet.** The accordion seeds them once, so a clean question doesn't pick up another admin's remote edit after a failed reorder, delete or add. The old remount path did pick it up. Later saving that question overwrites the remote edit (the API is last-writer-wins). The lanes split on this. One wants a `setOptions`-style merge: a clean field follows the server and a dirty field keeps its draft. The other wants D10, where baselines come only from PATCH echoes. Decide before changing it, and don't "fix" it silently.
+- **(Round 2) The resync-failure toast is `'error'`.** It stacks a second red toast under the operation's own error. The modal's equivalent secondary notice is `'info'`. Fix: `'info'`.

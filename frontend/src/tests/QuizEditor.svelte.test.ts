@@ -589,3 +589,88 @@ it('an option structure op in flight makes busy true', async () => {
   flushSync();
   expect(props.busy).toBe(true);
 });
+
+// ---- 3f look (Slice-5b T6, §5.5, D15) ----
+
+it('the Questions heading row shows the mono count; its + toggle opens and closes the add form', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1 }), q({ id: 2, order: 2 })]);
+  const { target } = mountEditor();
+  await loaded();
+  const head = target.querySelector('.questions-head') as HTMLElement;
+  expect(head.querySelector('.questions-label')!.textContent).toBe('Questions');
+  expect(head.querySelector('.q-count')!.textContent).toBe('2');
+  const toggle = head.querySelector('button[aria-label="Add question"]') as HTMLButtonElement;
+  expect(toggle.dataset.glyph).toBe('plus');
+  toggle.click();
+  await loaded();
+  expect(toggle.dataset.glyph).toBe('close');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect((document.activeElement as HTMLInputElement).name).toBe('question-type');
+  setInput(target, 'new-question-text', 'Half');
+  toggle.click();
+  flushSync();
+  expect(target.querySelector('[data-testid="new-question-text"]')).toBeNull();
+  toggle.click();
+  await loaded();
+  expect((target.querySelector('[data-testid="new-question-text"]') as HTMLInputElement).value).toBe('');
+});
+
+it('a published version titles every disabled question control with the structure reason (D15)', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1 }), q({ id: 2, order: 2 })]);
+  const { target } = mountEditor({ version: PUB, perms: versionPermissions(PUB) });
+  await loaded();
+  expect(target.querySelector('button[aria-label="Add question"]')).toBeNull();
+  const ctl = [...target.querySelectorAll(
+    'button[aria-label="Move up"], button[aria-label="Move down"], button[aria-label="Delete question"]')] as HTMLButtonElement[];
+  expect(ctl).toHaveLength(6);
+  for (const b of ctl) {
+    expect(b.disabled).toBe(true);
+    expect(b.title).toBe('Only a created version can change its structure');
+  }
+});
+
+it('the add form offers the lowercase type cards', async () => {
+  vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
+  const { target } = mountEditor();
+  await loaded();
+  openAddForm(target);
+  expect([...target.querySelectorAll('.qtype-picker label')].map((l) => l.textContent!.trim()))
+    .toEqual(['single choice', 'multiple choice', 'numeric answer', 'text answer']);
+});
+
+// ---- A failed structure op keeps the list mounted (§5.4: drafts survive) ----
+
+it('a failed reorder resyncs without unmounting: other drafts survive and stay save-dirty', async () => {
+  const list = vi.spyOn(qa, 'listQuestions').mockResolvedValue([q({ id: 1, order: 1, text_md: 'A' }), q({ id: 2, order: 2, text_md: 'B' })]);
+  vi.spyOn(qa, 'reorderQuestions').mockRejectedValue(new Error('network down'));
+  const { target, props } = mountEditor();
+  await loaded();
+  await expandQ(target, 1);
+  setVal(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea'), 'A2');
+  inQ<HTMLButtonElement>(target, 2, 'button[aria-label="Move up"]').click();
+  await loaded();
+  await loaded();
+  expect(list).toHaveBeenCalledTimes(2);                      // the resync ran
+  expect(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea').value).toBe('A2');
+  expect(props.saveDirty).toBe(true);
+  expect(toasts.list.map((t) => t.message)).toContain('Reorder failed');
+});
+
+it('a failed resync keeps the current list and drafts, and says so', async () => {
+  vi.spyOn(qa, 'listQuestions')
+    .mockResolvedValueOnce([q({ id: 1, order: 1, text_md: 'A' }), q({ id: 2, order: 2, text_md: 'B' })])
+    .mockRejectedValueOnce(new Error('still down'));
+  vi.spyOn(qa, 'deleteQuestion').mockRejectedValue(new Error('network down'));
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const { target, props } = mountEditor();
+  await loaded();
+  await expandQ(target, 1);
+  setVal(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea'), 'A2');
+  inQ<HTMLButtonElement>(target, 2, 'button[aria-label="Delete question"]').click();
+  await loaded();
+  await loaded();
+  expect(target.querySelectorAll('[data-q-id]')).toHaveLength(2);
+  expect(inQ<HTMLTextAreaElement>(target, 1, '[data-field="text"] textarea').value).toBe('A2');
+  expect(props.saveDirty).toBe(true);
+  expect(toasts.list.map((t) => t.message)).toContain("Couldn't reload the questions — reload the page to see the latest.");
+});

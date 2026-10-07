@@ -130,3 +130,26 @@ it('a read-only version: text readonly, mark disabled, no structure buttons', ()
   expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(true);
   expect(btn(target, 'Delete option')).toBeNull();
 });
+
+// ---- 3f look (Slice-5b T6, D16, D25, R12, R14) ----
+
+it('the structure controls are icon buttons titled with the boundary or the C2 reason (D16)', () => {
+  const a = mountRow({ index: 1, count: 2, canDelete: false });
+  expect(btn(a.target, 'Move option up').dataset.glyph).toBe('up');
+  expect(btn(a.target, 'Move option up').title).toBe('Move up — already first');
+  expect(btn(a.target, 'Move option down').title).toBe('Move down');
+  expect(btn(a.target, 'Delete option').dataset.glyph).toBe('trash');
+  expect(btn(a.target, 'Delete option').title)
+    .toBe("Can't delete the only correct option — mark another one correct and save first");
+  cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  const b = mountRow({ index: 2, count: 2, canDelete: true });
+  expect(btn(b.target, 'Move option down').title).toBe('Move down — already last');
+  expect(btn(b.target, 'Delete option').title).toBe('Delete option');
+});
+
+it('a row has no number prefix and no glyph text; the correct mark is the 3f pill (D25)', () => {
+  const { target } = mountRow({ correct: true });
+  expect(target.querySelector('.opt-num')).toBeNull();
+  expect(target.textContent).not.toMatch(/[←-⇿\u{1F5D1}]/u);
+  expect(target.querySelector('[data-testid="option-correct"]')!.classList.contains('correct-badge')).toBe(true);
+});

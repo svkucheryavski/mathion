@@ -889,3 +889,106 @@ it('locked() is true while an option mutation is in flight (it blocks the footer
   await loaded();
   expect(c().locked()).toBe(false);
 });
+
+// ---- 3f look (Slice-5b T6, §5.5, D15, D16, D23) ----
+
+it('the header toggle carries the Q badge and title, controls the body, and shows the lowercase type', () => {
+  const { target, props } = mountAccordion(q({ text_html: '<p>Area of a square</p>' }), { index: 2, count: 3, expanded: false });
+  const toggle = header(target).querySelector('button.q-toggle') as HTMLButtonElement;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.querySelector('.q-badge')!.textContent).toBe('Q2');
+  expect(toggle.querySelector('.q-title')!.textContent).toBe('Area of a square');
+  expect(header(target).querySelector('.q-type')!.textContent).toBe('numeric answer');
+  props.expanded = true;
+  flushSync();
+  const body = target.querySelector('.body') as HTMLElement;
+  expect(body.id).not.toBe('');
+  expect(toggle.getAttribute('aria-controls')).toBe(body.id);
+});
+
+it('names every type in lowercase (D15)', () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue([]);
+  const names: string[] = [];
+  for (const type of ['single_choice', 'multiple_choice', 'numeric_answer', 'text_answer'] as const) {
+    const { target } = mountAccordion(q({ type }), { expanded: false });
+    names.push(header(target).querySelector('.q-type')!.textContent!);
+    cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  }
+  expect(names).toEqual(['single choice', 'multiple choice', 'numeric answer', 'text answer']);
+});
+
+it('the arrows state the boundary; a version structure reason titles every control (D15, R12)', () => {
+  const title = (t: HTMLElement, l: string) => (t.querySelector(`button[aria-label="${l}"]`) as HTMLButtonElement).title;
+  const { target, props } = mountAccordion(q(), { index: 1, count: 2, expanded: false });
+  expect(title(target, 'Move up')).toBe('Move up — already first');
+  expect(title(target, 'Move down')).toBe('Move down');
+  expect(title(target, 'Delete question')).toBe('Delete question');
+  props.index = 2;
+  flushSync();
+  expect(title(target, 'Move up')).toBe('Move up');
+  expect(title(target, 'Move down')).toBe('Move down — already last');
+  props.structReason = 'Only a created version can change its structure';
+  flushSync();
+  for (const l of ['Move up', 'Move down', 'Delete question']) {
+    expect(title(target, l)).toBe('Only a created version can change its structure');
+  }
+});
+
+it('Question and Explanation stack their labels above editors named by ariaLabel (D23, R10)', () => {
+  const { target } = mountAccordion(q());
+  const text = target.querySelector('[data-field="text"]') as HTMLElement;
+  const expl = target.querySelector('[data-field="explanation"]') as HTMLElement;
+  expect(text.classList.contains('stack')).toBe(true);
+  expect(expl.classList.contains('stack')).toBe(true);
+  expect(text.firstElementChild!.textContent).toBe('Question');
+  expect(text.querySelector('textarea')!.getAttribute('aria-label')).toBe('Question text');
+  expect(expl.firstElementChild!.textContent).toBe('Explanation');
+  expect(expl.querySelector('textarea')!.getAttribute('aria-label')).toBe('Explanation');
+});
+
+it('numeric Answer and Precision are labelled D12 mono inputs in grid rows', () => {
+  const { target } = mountAccordion(q());
+  const num = numInput(target);
+  const prec = target.querySelector('[data-testid="precision-input"]') as HTMLInputElement;
+  for (const el of [num, prec]) {
+    expect(el.classList.contains('plain-input')).toBe(true);
+    expect(el.classList.contains('mono')).toBe(true);
+    expect(el.closest('.field-row')).not.toBeNull();
+  }
+  expect(num.labels![0].textContent).toBe('Answer');
+  expect(prec.labels![0].textContent).toBe('Precision');
+});
+
+it('the Options heading row toggles the add-option form (+ ↔ ×), focusing the field on open', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(AB());
+  const { target } = mountAccordion(choiceQ());
+  await loaded();
+  const head = target.querySelector('.opts-head') as HTMLElement;
+  expect(head.querySelector('.row-label')!.textContent).toBe('Options');
+  const toggle = addOptionBtn(target);
+  expect(head.contains(toggle)).toBe(true);
+  expect(toggle.dataset.glyph).toBe('plus');
+  toggle.click();
+  await loaded();
+  expect(toggle.dataset.glyph).toBe('close');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  const input = target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  setVal(input, 'Half');
+  toggle.click();
+  flushSync();
+  expect(target.querySelector('[data-testid="new-option-text"]')).toBeNull();
+  toggle.click();
+  await loaded();
+  expect((target.querySelector('[data-testid="new-option-text"]') as HTMLInputElement).value).toBe('');
+});
+
+it('renders no emoji or decorative glyphs; the controls are SVG icon buttons (Constraint 3)', async () => {
+  vi.spyOn(qa, 'listOptions').mockResolvedValue(AB());
+  const { target } = mountAccordion(choiceQ());
+  await loaded();
+  addOptionBtn(target).click();
+  await loaded();
+  expect(target.textContent).not.toMatch(/[\u{1F300}-\u{1FAFF}☀-➿⬀-⯿■-◿←-⇿＋×]/u);
+  expect(target.querySelectorAll('button[aria-label="Move up"] svg, button[aria-label="Delete question"] svg')).toHaveLength(2);
+});

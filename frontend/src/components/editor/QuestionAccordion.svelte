@@ -20,12 +20,14 @@
   } from '../../lib/quizAuthoring';
   import MarkdownEditor from './MarkdownEditor.svelte';
   import Button from '../ui/Button.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import OptionRow from './OptionRow.svelte';
 
   let {
     question, vid, index, count, perms, assetContext, expanded, locked,
     onExpandToggle, onDelete, onMoveUp, onMoveDown, versionDisabled = false, frozen = false,
+    structReason = null,
   }: {
     question: AuthoringQuestion; vid: number; index: number; count: number;
     perms: VersionPermissions; assetContext: AssetContext; expanded: boolean; locked: boolean;
@@ -35,7 +37,12 @@
     // Slice-5b D10/D9: a Save or an item delete is in flight. Inputs turn
     // read-only without losing focus; checkables and structure are disabled.
     frozen?: boolean;
+    // Slice-5b D15: why the version forbids structure changes (the title of
+    // every arrow and trash); null when it allows them.
+    structReason?: string | null;
   } = $props();
+  const uid = $props.id();
+  const bodyId = `${uid}-body`;
 
   const registry = getContext<DirtyRegistry>(DIRTY_REGISTRY_KEY);
   const hub = getContext<QuizSaveHub>(QUIZ_SAVE_KEY);
@@ -246,6 +253,15 @@
     guards.register(addOptionGuard);
     return () => guards.unregister(addOptionGuard);
   });
+  // The 5a collapsed-form toggle (+ ↔ ×): opening focuses the field; closing
+  // drops what was typed.
+  async function toggleAddOption() {
+    if (optionsDisabled || !perms.canEditStructure) return;
+    if (addingOption) { addingOption = false; newOptionText = ''; return; }
+    addingOption = true;
+    await tick();
+    if (alive) bodyEl?.querySelector<HTMLInputElement>('[data-testid="new-option-text"]')?.focus();
+  }
 
   async function addOption() {
     if (optionsDisabled || !perms.canEditStructure || !newOptionValid) return;
@@ -480,76 +496,122 @@
   // A dirty question no longer locks it (drafts are keyed by id).
   const structureDisabled = $derived(!perms.canEditStructure || locked || frozen);
 
+  // D15: lowercase mono type names (3f, ref 1894).
   const typeLabel: Record<AuthoringQuestion['type'], string> = {
-    single_choice: 'Single choice', multiple_choice: 'Multiple choice',
-    numeric_answer: 'Numeric', text_answer: 'Text',
+    single_choice: 'single choice', multiple_choice: 'multiple choice',
+    numeric_answer: 'numeric answer', text_answer: 'text answer',
   };
+  // D15 / R12: the version's reason first, then the boundary.
+  const upTitle = $derived(structReason ?? (index <= 1 ? 'Move up — already first' : 'Move up'));
+  const downTitle = $derived(structReason ?? (index >= count ? 'Move down — already last' : 'Move down'));
   const toleranceHint = $derived(`± ${5 * Math.pow(10, -(draft.precision + 1))}`);
 </script>
 
+
 <div class="question" class:expanded>
-  <div class="header" data-testid="question-header" aria-invalid={validated && needsFix ? 'true' : undefined}>
-    <button type="button" class="expand" aria-expanded={expanded} onclick={onExpandToggle}>{expanded ? '▾' : '▸'}</button>
-    <span class="num">{index}.</span>
-    <span class="badge">{typeLabel[question.type]}</span>
-    {#if isChoice}<span class="badge" data-testid="correct-count">{draftCorrectCount} correct</span>{/if}
-    <span class="snippet">{snippet || '(no text)'}</span>
+  <div class="q-head" data-testid="question-header" aria-invalid={validated && needsFix ? 'true' : undefined}>
+    <button type="button" class="q-toggle" aria-expanded={expanded} aria-controls={expanded ? bodyId : undefined}
+            onclick={onExpandToggle}>
+      <span class="mono q-badge">Q{index}</span>
+      <span class="q-title">{snippet || '(no text)'}</span>
+    </button>
     {#if validated && needsFix}<span class="mono needs-fix" data-testid="needs-fixing">needs fixing</span>{/if}
-    <span class="spacer"></span>
-    <button type="button" aria-label="Move up" disabled={structureDisabled || index <= 1} onclick={onMoveUp}>↑</button>
-    <button type="button" aria-label="Move down" disabled={structureDisabled || index >= count} onclick={onMoveDown}>↓</button>
-    <button type="button" aria-label="Delete question" disabled={structureDisabled} onclick={onDelete}>🗑</button>
+    {#if isChoice}<span class="mono q-meta" data-testid="correct-count">{draftCorrectCount} correct</span>{/if}
+    <span class="mono q-type">{typeLabel[question.type]}</span>
+    <span class="actions">
+      <IconButton size="sm" glyph="up" title={upTitle} aria-label="Move up"
+                  disabled={structureDisabled || index <= 1} onclick={onMoveUp} />
+      <IconButton size="sm" glyph="down" title={downTitle} aria-label="Move down"
+                  disabled={structureDisabled || index >= count} onclick={onMoveDown} />
+      <IconButton size="sm" glyph="trash" danger title={structReason ?? 'Delete question'} aria-label="Delete question"
+                  disabled={structureDisabled} onclick={onDelete} />
+    </span>
   </div>
 
   {#if expanded}
-    <div class="body" bind:this={bodyEl}>
-      <span class="readonly-type">Type: {typeLabel[question.type]} (fixed)</span>
+    <div class="body" id={bodyId} bind:this={bodyEl}>
       {#if isPublished}
-        <p class="muted" data-testid="published-type-note">Type can't be changed. To replace this question, create a new version.</p>
+        <p class="note" data-testid="published-type-note">Type can't be changed. To replace this question, create a new version.</p>
       {/if}
-      <div class="text-field" data-field="text">
-        <label>Question text
-          <MarkdownEditor {assetContext} plain={versionDisabled} readOnly={!editable} {frozen}
-                          bind:value={draft.text_md} bind:uploading={upText} />
-        </label>
+      <!-- D23: stacked, so the asset sidebar fits beside the pane. -->
+      <div class="stack" data-field="text">
+        <span class="row-label">Question</span>
+        <MarkdownEditor ariaLabel="Question text" {assetContext} plain={versionDisabled} readOnly={!editable} {frozen}
+                        bind:value={draft.text_md} bind:uploading={upText} />
         {#if showErrors && textError}<p class="err" role="alert" data-testid="text-error">{textError}</p>{/if}
       </div>
-      <label>Explanation (optional)
-        <MarkdownEditor {assetContext} plain={versionDisabled} readOnly={!editable} {frozen}
+      <div class="stack" data-field="explanation">
+        <span class="row-label">Explanation</span>
+        <MarkdownEditor ariaLabel="Explanation" {assetContext} plain={versionDisabled} readOnly={!editable} {frozen}
                         bind:value={draft.explanation_md} bind:uploading={upExpl} />
-      </label>
+      </div>
 
       {#if question.type === 'numeric_answer'}
-        <label>Correct value
-          <input data-testid="numeric-input" bind:value={draft.numericInput}
-                 readonly={!editable || frozen} aria-required="true" aria-invalid={!numericCheck.ok} />
-        </label>
-        <label>Precision (0–10)
-          <input data-testid="precision-input" type="number" min="0" max="10"
-                 readonly={!editable || frozen} aria-invalid={!precisionValid} bind:value={draft.precision} />
-        </label>
-        <small class="hint">Accepted within {toleranceHint}</small>
-        {#if numericError}<p class="err" role="alert">{numericError}</p>{/if}
-        {#if !precisionValid}<p class="err" role="alert">Precision must be an integer 0–10.</p>{/if}
+        <div class="field-row">
+          <label class="row-label" for={`${uid}-num`}>Answer</label>
+          <div class="field">
+            <input id={`${uid}-num`} class="plain-input mono" data-testid="numeric-input" bind:value={draft.numericInput}
+                   readonly={!editable || frozen} aria-required="true" aria-invalid={!numericCheck.ok}
+                   aria-describedby={numericError ? `${uid}-num-err` : undefined} />
+            {#if numericError}<p class="err" id={`${uid}-num-err`} role="alert">{numericError}</p>{/if}
+          </div>
+        </div>
+        <div class="field-row">
+          <label class="row-label" for={`${uid}-prec`}>Precision</label>
+          <div class="field">
+            <input id={`${uid}-prec`} class="plain-input mono" data-testid="precision-input" type="number" min="0" max="10"
+                   readonly={!editable || frozen} aria-invalid={!precisionValid} bind:value={draft.precision}
+                   aria-describedby={`${uid}-prec-hint`} />
+            <small class="hint" id={`${uid}-prec-hint`}>Accepted within <span class="mono">{toleranceHint}</span></small>
+            {#if !precisionValid}<p class="err" role="alert">Precision must be an integer <span class="mono">0–10</span>.</p>{/if}
+          </div>
+        </div>
       {:else if question.type === 'text_answer'}
-        <label>Correct answer
-          <input data-testid="text-answer-input" bind:value={draft.correct_text}
-                 readonly={!editable || frozen} maxlength="500" aria-required="true" aria-invalid={!textAnswerValid} />
-        </label>
-        <small class="hint">Case-insensitive, trimmed match. {draft.correct_text.length}/500</small>
-        {#if !textAnswerValid}<p class="err" role="alert">Enter 1–500 characters.</p>{/if}
+        <div class="field-row">
+          <label class="row-label" for={`${uid}-ans`}>Answer</label>
+          <div class="field">
+            <input id={`${uid}-ans`} class="plain-input" data-testid="text-answer-input" bind:value={draft.correct_text}
+                   readonly={!editable || frozen} maxlength="500" aria-required="true" aria-invalid={!textAnswerValid}
+                   aria-describedby={`${uid}-ans-hint`} />
+            <small class="hint" id={`${uid}-ans-hint`}>Case-insensitive, trimmed match. <span class="mono">{draft.correct_text.length}/500</span></small>
+            {#if !textAnswerValid}<p class="err" role="alert">Enter <span class="mono">1–500</span> characters.</p>{/if}
+          </div>
+        </div>
       {:else}
+        <div class="opts-head">
+          <span class="row-label opts-label">Options</span>
+          {#if showErrors && markError}<p class="err" role="alert" data-testid="mark-error">{markError}</p>{/if}
+          {#if perms.canEditStructure && optStatus === 'loaded'}
+            <span class="opts-add">
+              <IconButton primary size="sm" glyph={addingOption ? 'close' : 'plus'}
+                          title={addingOption ? 'Cancel new option' : 'Add option'} aria-label="Add option"
+                          aria-expanded={addingOption} disabled={optionsDisabled}
+                          onclick={() => void toggleAddOption()} />
+            </span>
+          {/if}
+        </div>
+        {#if addingOption}
+          <form class="add-form" novalidate onsubmit={(e) => { e.preventDefault(); void addOption(); }}>
+            <input class="plain-input" data-testid="new-option-text" aria-label="New option" placeholder="Option text"
+                   bind:value={newOptionText} maxlength="500" readonly={optionsDisabled} />
+            <div class="add-actions">
+              <Button type="submit" disabled={optionsDisabled || !newOptionValid}>Add</Button>
+            </div>
+          </form>
+        {/if}
         {#if optStatus === 'loading'}
           <p class="muted">Loading options…</p>
         {:else if optStatus === 'error'}
           <p class="err" role="alert" data-testid="option-load-error">{optError}</p>
-          <Button variant="ghost" onclick={() => void loadOptions()}>Retry</Button>
+          <div><Button variant="ghost" onclick={() => void loadOptions()}>Retry</Button></div>
         {:else}
           {#if options.length === 0}
             <p class="muted">No options yet.</p>
           {:else}
             <fieldset class="option-group" data-testid="option-group">
-              <legend>Answer options{question.type === 'single_choice' ? ' — select the correct option' : ' — select all correct options'}</legend>
+              <legend class="sr-only">{question.type === 'single_choice'
+                ? 'Answer options — select the correct option'
+                : 'Answer options — select all correct options'}</legend>
               <ol class="options">
                 {#each options as o, i (o.id)}
                   {@const d = optDrafts[o.id]}
@@ -571,24 +633,10 @@
                 {/each}
               </ol>
             </fieldset>
-            {#if showErrors && markError}<p class="err" role="alert" data-testid="mark-error">{markError}</p>{/if}
           {/if}
-          {#if isChoice && optStatus === 'loaded' && options.length < 2}<p class="muted" data-testid="few-options-warn">Add at least 2 options before publishing.</p>{/if}
+          {#if options.length < 2}<p class="muted" data-testid="few-options-warn">Add at least <span class="mono">2</span> options before publishing.</p>{/if}
           <p class="sr-only" aria-live="polite" data-testid="option-live">{optionAnnounce}</p>
           {#if optMutError}<p class="err" role="alert" data-testid="option-mut-error">{optMutError}</p>{/if}
-          {#if perms.canEditStructure}
-            {#if addingOption}
-              <div class="add-option">
-                <label>New option
-                  <input data-testid="new-option-text" bind:value={newOptionText} maxlength="500" readonly={optionsDisabled} />
-                </label>
-                <Button onclick={() => void addOption()} disabled={optionsDisabled || !newOptionValid}>Add</Button>
-                <Button variant="ghost" onclick={() => { addingOption = false; newOptionText = ''; }}>Cancel</Button>
-              </div>
-            {:else}
-              <Button aria-label="Add option" onclick={() => { addingOption = true; }} disabled={optionsDisabled}>＋ Add option</Button>
-            {/if}
-          {/if}
         {/if}
       {/if}
 
@@ -599,16 +647,67 @@
 </div>
 
 <style>
-  .question { border: 1px solid var(--border); border-radius: var(--radius); }
-  .header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); }
-  .body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
-  .spacer { flex: 1; }
-  .badge, .muted { font-size: 0.85em; color: var(--muted); }
+  /* 3f question card (ref 1890); #E9EBEF → --border (5a precedent). */
+  .question { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .q-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface); /* ref 1891 */ }
+  .question.expanded .q-head { background: var(--surface-2); border-bottom: 1px solid var(--border); /* ref 1891 */ }
+  /* The whole badge + title is the toggle (D15: no chevron). */
+  .q-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .q-badge { font-size: 11px; color: var(--primary); /* ref 1892 */ }
+  .q-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; /* ref 1893 */ }
+  .q-meta { font-size: 11.5px; color: var(--muted); /* R13, the ref 1894 type-name scale */ }
+  .q-type { font-size: 11.5px; color: var(--muted); /* ref 1894 */ }
   .needs-fix { font-size: 11.5px; color: var(--danger); }
-  .err { color: var(--danger); }
-  .options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-  .add-option { display: flex; align-items: end; gap: var(--space-2); }
-  .option-group { border: none; margin: 0; padding: 0; }
-  .option-group legend { font-size: 0.85em; color: var(--muted); padding: 0; }
+  .actions { display: flex; align-items: center; gap: 6px; /* ref 1895 */ }
+  .body { padding: 12px; display: flex; flex-direction: column; gap: 10px; /* ref 1901 */ }
+  /* D23: the label sits above a full-width editor (not the 132px grid). */
+  .stack { display: flex; flex-direction: column; gap: 4px; /* the 4px label/field step */ min-width: 0; }
+  .row-label { font-size: 12.5px; color: var(--muted); /* ref 1903 */ }
+  .field-row { display: grid; grid-template-columns: 132px 1fr; align-items: center; gap: 12px; /* ref 1902 */ }
+  .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  /* D12: the 5a create-form input on the dense-control tokens. */
+  .plain-input {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--control-font);
+    caret-color: var(--primary);
+  }
+  .plain-input:focus-visible {
+    outline: none;
+    border: 1.5px solid var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft); /* D12 — InlineField's open editor */
+  }
+  .plain-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
+  .hint { font-size: 12px; color: var(--muted); }
+  .err { margin: 0; font-size: 12px; color: var(--danger); /* D12 */ }
+  .muted { margin: 0; font-size: 12.5px; color: var(--muted); }
+  /* D6: the information-banner form (ItemEditorModal .ro-note). */
+  .note { margin: 0; padding: 8px 12px; background: var(--surface-2); border-left: 3px solid var(--primary); font-size: 13px; color: var(--text); }
+  .opts-head { display: flex; align-items: center; gap: 10px; /* ref 1907 */ }
+  .opts-label { flex: 0 0 auto; width: 132px; /* ref 1908 */ }
+  .opts-add { margin-left: auto; /* ref 1909 */ }
+  .add-form { display: flex; flex-direction: column; gap: 8px; /* the 5a create-form gap */ }
+  .add-actions { display: flex; justify-content: flex-end; }
+  .option-group { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; /* ref 1911 */ }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
