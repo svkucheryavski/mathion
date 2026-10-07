@@ -43,6 +43,16 @@
     return () => clearTimeout(handle);
   });
 
+  // D13: the provider only (no duration data). `previewUrl` already passed
+  // safeIframeUrl, so it parses.
+  function providerOf(url: string): string {
+    const host = new URL(url).hostname.toLowerCase();
+    if (/(^|\.)youtube(-nocookie)?\.com$/.test(host) || host === 'youtu.be') return 'youtube';
+    if (/(^|\.)vimeo\.com$/.test(host)) return 'vimeo';
+    return 'embed';
+  }
+  const provider = $derived(previewUrl ? providerOf(previewUrl) : null);
+
   export function validate(): boolean {
     // D10: only what this Save would send. The server requires a non-empty URL.
     urlError = tracker.isDirty && tracker.current.video_url.trim() === '' ? 'Video URL is required' : null;
@@ -100,9 +110,27 @@
   {/if}
 </div>
 
-{#if previewUrl}
-  <VideoFrame src={previewUrl} title={item.title || 'Video preview'} />
-{/if}
+<div class="video-preview">
+  <div class="preview-head">
+    <span class="preview-title">Preview</span>
+    {#if provider}<span class="mono preview-meta">{provider}</span>{/if}
+  </div>
+  <div class="preview-area">
+    {#if previewUrl}
+      <VideoFrame src={previewUrl} title={item.title || 'Video preview'} height={296} />
+    {:else}
+      <p class="preview-empty">No preview</p>
+    {/if}
+  </div>
+  <div class="preview-foot">
+    {#if previewUrl}
+      <span class="mono preview-status">embed resolved</span>
+      <a class="open-link" href={previewUrl} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+    {:else}
+      <span class="mono preview-status">no embed — paste a YouTube or Vimeo link</span>
+    {/if}
+  </div>
+</div>
 
 <style>
   /* The hint (and an error) always sit under the input, so centring would put the
@@ -138,4 +166,35 @@
   .field-err { margin: 0; font-size: 12px; color: var(--danger); }
   .field-hint { margin: 0; font-size: 12px; color: var(--muted); /* §4 */ }
   .ro-value { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+  .video-preview { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; /* ref 1813 */ }
+  .preview-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border); /* ref 1814 — #E9EBEF → --border */
+  }
+  .preview-title { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--text); /* ref 1815 */ }
+  .preview-meta { font-size: 11.5px; color: var(--muted); /* ref 1816 */ }
+  .preview-area { height: 296px; background: var(--surface-2); /* ref 1818 — D13 */ }
+  .preview-empty {
+    margin: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--muted); /* D13 */
+  }
+  .preview-foot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-soft);
+    background: var(--surface-3); /* ref 1821 — #F0F1F4 → --border-soft */
+  }
+  .preview-status { font-size: 11.5px; color: var(--muted); /* ref 1822 */ }
+  .open-link { margin-left: auto; font-size: 12.5px; color: var(--primary); /* ref 1823 */ }
 </style>

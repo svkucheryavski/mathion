@@ -12,7 +12,7 @@
   import PageBody from './item/PageBody.svelte';
   import VideoBody from './item/VideoBody.svelte';
   import QuizEditor from './QuizEditor.svelte';
-  import InteractiveAppEditor from '../items/InteractiveAppEditor.svelte';
+  import AppBody from './item/AppBody.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { structureReason } from '../../lib/editorReasons';
@@ -63,8 +63,9 @@
   let titleError = $state<string | null>(null);
   let titleEl = $state<HTMLInputElement>();
 
-  // ---- The type body (§2 contract). Quiz and app have none until T5a / T4;
-  //      VideoBody has no `busy` (nothing in it uploads). ----
+  // ---- The type body (§2 contract). The quiz has none until T5a. VideoBody
+  //      has no `busy` (nothing uploads); AppBody has no drafts (its script
+  //      row acts immediately), so it binds `busy` only. ----
   let body = $state<ItemBodyApi | null>(null);
   let bodySaveDirty = $state(false);
   let bodyGuardDirty = $state(false);
@@ -102,7 +103,7 @@
     return titleError === null;
   }
 
-  // Interim (quiz until T5a, app until T4): no body API, so the modal sends the title.
+  // Interim (quiz until T5a): no body API, so the modal sends the title.
   async function saveTitleOnly(titleDraft: string | undefined): Promise<SaveOutcome> {
     if (titleDraft === undefined) return { outcome: 'ok' };
     const savedVid = vid;
@@ -312,16 +313,16 @@
       bind:quizDirty={bodyGuardDirty}
     />
   {:else if item.type === 'interactive_app'}
-    <!-- Interim until T4. Not on a disabled version: its script fetch would 403. -->
-    {#if !versionDisabled}
-      <InteractiveAppEditor
-        {item}
-        versionId={vid}
-        editable={canEditText}
-        showTitle={false}
-        bind:uploadBusy={bodyBusy}
-      />
-    {/if}
+    <AppBody
+      bind:this={body}
+      {item}
+      {vid}
+      editable={canEditText}
+      {versionDisabled}
+      {frozen}
+      {stillOnVid}
+      bind:busy={bodyBusy}
+    />
   {:else}
     <p class="muted">This item type can't be edited here.</p>
   {/if}

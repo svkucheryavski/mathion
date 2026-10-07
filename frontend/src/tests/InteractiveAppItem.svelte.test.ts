@@ -187,8 +187,8 @@ it('puts the fetch-failure copy inside .notice (the class the gate anchors on)',
   // MiniProjectModal.create-edit.svelte.test.ts:548-551. The dropped italic is
   // guarded where it IS observable — in the built CSS, by the slice's per-task
   // dist gate (spec:197, T5 targets): a negative `font-style:italic` assertion
-  // hash-coupled to the `.interactive-app` anchor, since `.notice` is not
-  // component-unique (InteractiveAppEditor authors one and keeps its italic).
+  // hash-coupled to the `.interactive-app` anchor. (Until Slice 5b the editor
+  // authored a `.notice` too; its AppBody successor renamed it `.app-hint`.)
   fetchSpy.mockImplementation(routed(404));
   const target = mountItem({ item: appItem(), isCovered: false });
   await settle();

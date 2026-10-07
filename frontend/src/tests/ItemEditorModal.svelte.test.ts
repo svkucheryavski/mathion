@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import Harness from './support/ItemEditorModalHarness.svelte';
+import AppBody from '../components/editor/item/AppBody.svelte';
+import * as editorStore from '../stores/currentEditorVersion.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
@@ -381,15 +383,24 @@ describe('ItemEditorModal — interim wiring (T3a → T4 / T5a)', () => {
     expect(toastTexts()).toContain('Saved');
   });
 
-  it('app: the script editor mounts without its own title on an enabled version', async () => {
-    await render({ item: { type: 'interactive_app' } });
-    expect(panel().querySelector('.app-editor')).not.toBeNull();
-    expect(panel().querySelector('.app-editor h3')).toBeNull();
+  it('app: the App script row shows the filename with Replace and Remove; with none, Upload', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    expect(panel().querySelector('.script-name')!.textContent).toBe('app.js');
+    expect(panel().querySelector('.script-name')!.classList.contains('mono')).toBe(true);
+    const labels = [...panel().querySelectorAll<HTMLButtonElement>('.script-row button')].map((b) => b.textContent!.trim());
+    expect(labels).toEqual(['Replace', 'Remove']);
+    unmount(cmp!); cmp = null;
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    expect(panel().querySelector('.script-name')!.textContent).toBe('No script');
+    expect([...panel().querySelectorAll('.script-row button')].map((b) => b.textContent!.trim())).toEqual(['Upload']);
   });
 
-  it('app: nothing is mounted or fetched on a disabled version', async () => {
+  it('app: on a disabled version the script row is text, there is no preview card, and nothing is fetched', async () => {
     await render({ item: { type: 'interactive_app', script_url: 'app.js' }, version: { is_disabled: true } });
-    expect(panel().querySelector('.app-editor')).toBeNull();
+    expect(panel().querySelector('.script-name')!.textContent).toBe('app.js');
+    expect(panel().querySelector('.script-row button')).toBeNull();
+    expect(panel().querySelector('.app-preview')).toBeNull();
     expect(calls(/\/assets/).length).toBe(0);
   });
 });
@@ -482,5 +493,239 @@ describe('ItemEditorModal — ported from ItemEditPage.interactive (T3b)', () =>
   it('app: with no script the empty upload state shows', async () => {
     await render({ item: { type: 'interactive_app', script_url: null } });
     expect(panel().textContent).toContain('No app uploaded yet.');
+  });
+});
+
+describe('ItemEditorModal — video preview card (T4, D13)', () => {
+  const EMBED = 'https://www.youtube.com/embed/abc123';
+  const urlInput = () => panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!;
+
+  it('a resolvable URL: the 296px frame, the provider meta, "embed resolved" and Open in new tab', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    const card = panel().querySelector('.video-preview')!;
+    expect(card.querySelector('.preview-meta')!.textContent).toBe('youtube');
+    const frame = card.querySelector<HTMLElement>('.preview-area .frame')!;
+    expect(frame.classList.contains('fixed')).toBe(true);
+    expect(frame.style.getPropertyValue('--frame-h')).toBe('296px');
+    expect(card.querySelector('.preview-status')!.textContent).toBe('embed resolved');
+    const link = card.querySelector<HTMLAnchorElement>('a.open-link')!;
+    expect(link.textContent).toBe('Open in new tab');
+    expect(link.getAttribute('href')).toBe(EMBED);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('the provider meta reads vimeo and embed for those hosts', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: 'https://player.vimeo.com/video/42' } });
+    expect(panel().querySelector('.preview-meta')!.textContent).toBe('vimeo');
+    unmount(cmp!); cmp = null;
+    await render({ item: { type: 'video', content_md: null, video_url: 'https://media.example.org/v/1' } });
+    expect(panel().querySelector('.preview-meta')!.textContent).toBe('embed');
+  });
+
+  it('no embeddable URL: "No preview", the no-embed status, no link and no meta', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: 'not a url' } });
+    const card = panel().querySelector('.video-preview')!;
+    expect(card.querySelector('iframe')).toBeNull();
+    expect(card.querySelector('.preview-empty')!.textContent).toBe('No preview');
+    expect(card.querySelector('.preview-status')!.textContent).toBe('no embed — paste a YouTube or Vimeo link');
+    expect(card.querySelector('a')).toBeNull();
+    expect(card.querySelector('.preview-meta')).toBeNull();
+  });
+
+  it('the preview follows the URL 500ms after the last keystroke', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+      type(urlInput(), 'https://vimeo.com/77');
+      vi.advanceTimersByTime(499);
+      flushSync();
+      expect(panel().querySelector('iframe')!.getAttribute('src')).toBe(EMBED);
+      vi.advanceTimersByTime(1);
+      flushSync();
+      expect(panel().querySelector('iframe')!.getAttribute('src')).toBe('https://player.vimeo.com/video/77');
+      expect(panel().querySelector('.preview-meta')!.textContent).toBe('vimeo');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', () => {
+  const APP_ASSET = {
+    id: 5, version_id: 1, filename: 'new.js', file_size: 3, mime_type: 'application/javascript',
+    uploaded_at: '', uploaded_by: 1, is_referenced: false,
+  };
+  const jsFile = (text: string, name = 'new.js') => new File([text], name, { type: 'application/javascript' });
+  // jsdom fires FileReader.onload on a macrotask: drain macrotasks until `cond` holds.
+  async function waitUntil(cond: () => boolean, tries = 60): Promise<void> {
+    for (let i = 0; i < tries; i++) {
+      flushSync();
+      if (cond()) return;
+      await new Promise((r) => setTimeout(r));
+      await Promise.resolve();
+    }
+    flushSync();
+  }
+  function chooseFile(file: File) {
+    const input = panel().querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));   // Svelte delegates onchange: must bubble
+  }
+  const scriptBtn = (label: string) =>
+    [...panel().querySelectorAll<HTMLButtonElement>('.script-row button')].find((b) => b.textContent!.trim() === label)!;
+  const uploadPosts = () => calls(/\/api\/versions\/1\/assets$/, 'POST');
+  const serveUpload = (extra: (u: string, init?: RequestInit) => Promise<Response> | undefined = () => undefined) =>
+    serve((u, init) => extra(u, init) ?? (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? jres(APP_ASSET) : undefined));
+
+  it('Upload links the script, reloads the tree and toasts', async () => {
+    serveUpload();
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => calls(/\/admin-tree$/).length > 0);
+    await settle();
+    expect(uploadPosts().length).toBe(1);
+    expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
+    expect(toastTexts()).toContain('App uploaded');
+  });
+
+  it('busy: while the upload is out, Save and the script buttons are disabled', async () => {
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? new Promise(() => {}) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    type(titleInput(), 'App 2');
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => uploadPosts().length > 0);
+    expect(footBtn('Save').disabled).toBe(true);
+    expect(scriptBtn('Upload').disabled).toBe(true);
+  });
+
+  it('surfaces the heuristic warnings (non-blocking) and still uploads', async () => {
+    serveUpload();
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("import x from 'y'; fetch('/z')", 'm.js'));
+    await waitUntil(() => calls(/\/admin-tree$/).length > 0);
+    expect(panel().querySelector('.warnings')!.textContent).toContain('ES module');
+    expect(panel().querySelector('.warnings')!.textContent).toContain('Network');
+    expect(uploadPosts().length).toBe(1);
+  });
+
+  it('rejects an empty file before uploading', async () => {
+    serveUpload();
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile('', 'empty.js'));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    expect(panel().querySelector('.field-err')!.textContent).toContain('empty');
+    expect(uploadPosts().length).toBe(0);
+  });
+
+  it('a duplicate filename (409) shows the rename message', async () => {
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? jres({ detail: 'dupe' }, 409) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')", 'dupe.js'));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    expect(panel().querySelector('.field-err')!.textContent).toContain('already exists');
+  });
+
+  it('a failed link deletes the orphaned asset and does not reload', async () => {
+    serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'boom' }, 500) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => calls(/\/api\/assets\/5$/, 'DELETE').length > 0);
+    await settle();
+    expect(calls(/\/admin-tree$/).length).toBe(0);
+    expect(panel().querySelector('.field-err')).not.toBeNull();
+  });
+
+  it('a linked asset is kept when only the tree refresh fails', async () => {
+    serveUpload();
+    const load = vi.spyOn(editorStore, 'loadAdminTree').mockRejectedValue(new Error('refresh down'));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')", 'ok.js'));
+    await waitUntil(() => load.mock.calls.length > 0);
+    await settle();
+    expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
+    expect(calls(/\/api\/assets\/5$/, 'DELETE').length).toBe(0);
+  });
+
+  it('Remove confirms first: Cancel sends nothing; OK unlinks, reloads and toasts', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    expect(confirmSpy).toHaveBeenCalledWith('Remove the app script? Students will see an empty app.');
+    expect(patchBodies()).toEqual([]);
+    confirmSpy.mockReturnValue(true);
+    scriptBtn('Remove').click();
+    await settle();
+    await settle();
+    expect(patchBodies()).toEqual([{ script_url: null }]);
+    expect(calls(/\/admin-tree$/).length).toBe(1);
+    expect(toastTexts()).toContain('App removed');
+  });
+
+  it('the footer Save sends the title alone', async () => {
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    type(titleInput(), 'App 2');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ title: 'App 2' }]);
+    expect(dirtyText()).toBe('');
+  });
+
+  it('the ready preview: the 360px frame, the meta, and the blank-preview hint in the card footer', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    await settle();
+    const card = panel().querySelector('.app-preview')!;
+    expect(card.querySelector('.preview-meta')!.textContent).toBe('interactive app');
+    const frame = card.querySelector<HTMLElement>('.frame')!;
+    expect(frame.classList.contains('fixed')).toBe(true);
+    expect(frame.style.getPropertyValue('--frame-h')).toBe('360px');
+    expect(card.querySelector('.blank-hint')!.textContent).toContain('Blank preview?');
+  });
+
+  it('read-only with no script: "No app." and no script buttons', async () => {
+    await render({ item: { type: 'interactive_app', script_url: null }, version: { state: 'archived' } });
+    expect(panel().querySelector('.app-hint')!.textContent).toBe('No app.');
+    expect(panel().querySelector('.script-row button')).toBeNull();
+  });
+
+  it("a failed source fetch: \"couldn't be loaded\", and the stored filename is never a link", async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp('', 404)) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' }, version: { state: 'archived' } });
+    await settle();
+    expect(panel().querySelector('iframe')).toBeNull();
+    expect(panel().querySelector('.app-hint')!.textContent).toBe("This app couldn't be loaded.");
+    expect(panel().querySelectorAll('a').length).toBe(0);
+  });
+
+  it('closing the modal mid-upload still links the script and throws nothing', async () => {
+    let release!: () => void;
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST'
+      ? new Promise<Response>((r) => { release = () => r(resp(APP_ASSET)); }) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => uploadPosts().length > 0);
+    unmount(cmp!); cmp = null;
+    release();
+    await waitUntil(() => patchBodies().length > 0);
+    await settle();
+    expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
+    expect(calls(/\/api\/assets\/5$/, 'DELETE').length).toBe(0);
+  });
+
+  it('AppBody tolerates `item` going undefined (a dying branch re-running its effect)', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const p = $state<{ item: AdminTreeItem | undefined; vid: number; editable: boolean; versionDisabled: boolean; frozen: boolean; stillOnVid: () => boolean }>({
+      item: mkItem({ type: 'interactive_app', script_url: 'app.js' }), vid: 1, editable: true,
+      versionDisabled: false, frozen: false, stillOnVid: () => true,
+    });
+    const c = mount(AppBody, { target: host, props: p });
+    await settle();
+    expect(() => { p.item = undefined; flushSync(); }).not.toThrow();
+    unmount(c);
+    host.remove();
   });
 });

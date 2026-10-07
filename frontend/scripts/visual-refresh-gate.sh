@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1148
+EXPECTED_CHECKS=1248
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -888,7 +888,7 @@ ALL = rules(css)
 # One entry per pinned rule: (label, selector regex). Each must match exactly one
 # top-level rule and zero inside any at-rule.
 # (label, selector regex, how many top-level copies are legitimate).
-# .notice and .opts each have TWO rightful authors; everything else must be
+# .opts has TWO rightful authors; everything else must be
 # declared exactly once. A grep cannot see a duplicate or an @media override —
 # it still matches the ORIGINAL rule while the later one wins the cascade —
 # which is why every selector sections (g) and (h) pin is listed here.
@@ -936,10 +936,11 @@ TARGETS = [
     ('page list padding',     r'\.content\.svelte-[a-z0-9]+ ul,\.content\.svelte-[a-z0-9]+ ol$', 1),
     ('page ul markers',       r'\.content\.svelte-[a-z0-9]+ ul>li$', 1),
     ('page ol markers',       r'\.content\.svelte-[a-z0-9]+ ol>li$', 1),
-    # Two rightful authors each: .opts is Single+Multi; .notice is
-    # InteractiveAppItem + the out-of-scope InteractiveAppEditor.
+    # .opts has two rightful authors (Single+Multi). .notice had two until
+    # Slice 5b replaced InteractiveAppEditor with AppBody (whose rule is
+    # .app-hint), so InteractiveAppItem is now its only author.
     ('option groups',         r'\.opts\.svelte-[a-z0-9]+$', 2),
-    ('notices',               r'\.notice\.svelte-[a-z0-9]+$', 2),
+    ('notices',               r'\.notice\.svelte-[a-z0-9]+$', 1),
 ]
 
 bad = 0
@@ -1019,9 +1020,9 @@ check "watched row is inline-flex (else the SVG baseline-aligns, not centres)" \
       '\.watched\.svelte-[a-z0-9]+\{([^}]*;)?display:inline-flex[;}]'
 check "cover-hint is 12.5px --muted" \
       '\.cover-hint\.svelte-[a-z0-9]+\{([^}]*;)?font-size:12\.5px[;}]'
-# .notice is NOT component-unique: InteractiveAppEditor.svelte authors it too
-# (out of scope, and it legitimately keeps its italic). Anchor on the name-unique
-# .interactive-app hash, or this judges the wrong component.
+# .notice was not component-unique until Slice 5b (InteractiveAppEditor authored
+# one too). Stay anchored on the name-unique .interactive-app hash anyway, so a
+# future second author can never be the one judged here.
 ih=(${(f)"$(grep -ohE '\.interactive-app\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#ih[@]} -eq 1 ]]; then
   check "InteractiveAppItem .notice exists"              "\.notice\.${ih[1]}\{"
@@ -3929,6 +3930,65 @@ if [[ -n $REPLY ]]; then
   sweep ItemEditorModal $H
 fi
 emoji_scan "ItemEditorModal / PageBody / itemBody" src/components/editor/ItemEditorModal.svelte src/components/editor/item/PageBody.svelte src/lib/itemBody.ts
+
+echo
+echo "--- (ad) Slice-5b T4 — VideoBody card (3e), AppBody (D4), frame heights ---"
+own video-preview VideoBody.svelte
+uniq1 video-preview
+if [[ -n $REPLY ]]; then
+  N=VideoBody; H=$REPLY
+  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:baseline' 'gap:12px'
+  d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
+  chk "\.plain-input\.${H}:focus-visible" 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  d '\.field-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.video-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
+  d '\.preview-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
+  d '\.preview-title' '' 'flex:1' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.preview-meta' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.preview-area' '' 'height:296px' 'background:var\(--surface-2\)'
+  d '\.preview-empty' '' 'height:100%' 'display:flex' 'align-items:center' 'justify-content:center' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.preview-foot' '' 'display:flex' 'gap:12px' 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
+  d '\.preview-status' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.open-link' '' 'margin-left:auto' 'font-size:12\.5px' 'color:var\(--primary\)'
+  none "VideoBody preview footer rule is the soft one, not --border" "\.preview-foot\.${H}\{[^}]*border-top:1px solid var\(--border\)[;}]"
+  none "VideoBody URL row has no 54px pencil slot (D2)" "\.field-row\.${H}\{[^}]*54px"
+  none "VideoBody no rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep VideoBody $H
+fi
+
+own app-preview AppBody.svelte
+uniq1 app-preview
+if [[ -n $REPLY ]]; then
+  N=AppBody; H=$REPLY
+  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
+  d '\.script-row' '' 'display:flex' 'align-items:center' 'gap:9px'
+  d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
+  d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
+  d '\.preview-head' '' 'display:flex' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
+  d '\.preview-area' '' 'height:360px' 'background:var\(--surface-2\)'
+  d '\.app-hint' '' 'margin:0' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
+  d '\.warnings' '' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
+  d '\.preview-foot' '' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
+  d '\.blank-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  none "AppBody .notice renamed .app-hint (D4)" "\.notice\.${H}"
+  none "AppBody no italic notices" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-style:italic"
+  none "AppBody no rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
+  sweep AppBody $H
+fi
+
+# R3: the shared frames size themselves when given `height`; the student
+# defaults (16:9, 600px) stay. Anchored on each default rule's declarations,
+# since both components author `.frame`.
+VFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{position:relative;padding-bottom:56\.25%' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
+IFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{width:100%;height:600px' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#VFH[@]} -eq 1 && ${#IFH[@]} -eq 1 ]]; then
+  echo "PASS  VideoFrame and InteractiveFrame defaults resolve to one hash each"
+  N=VideoFrame; chk "\.frame\.fixed\.${VFH[1]}" 'padding-bottom:0' 'height:var\(--frame-h\)' 'margin-bottom:0'
+  N=InteractiveFrame; chk "\.frame\.fixed\.${IFH[1]}" 'height:var\(--frame-h\)' 'margin-bottom:0'
+else
+  echo "FAIL  frame defaults not unique (VideoFrame ${#VFH[@]}, InteractiveFrame ${#IFH[@]})"; fail=1
+fi
+emoji_scan "VideoBody / AppBody / frames" src/components/editor/item/VideoBody.svelte src/components/editor/item/AppBody.svelte src/components/items/VideoFrame.svelte src/components/items/InteractiveFrame.svelte
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

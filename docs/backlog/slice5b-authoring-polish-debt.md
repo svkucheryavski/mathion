@@ -155,3 +155,31 @@ None blocks the slice; each is input for the final polish slice.
   - Forward after a close reopens the item, and × then calls `history.back()` exactly once.
   - A deep-link delete keeps `[X, S]` and never calls `history.back()`.
   - A DELETE that fails while item B is open.
+
+## T4 — Video preview card, AppBody, frame heights
+
+- **The app preview restarts on every tree reload** (both lanes; this predates T4). AppBody's fetch effect reads `item?.script_url` off a fresh `item` object after every `loadAdminTree`. A title Save therefore refetches the source, unmounts the iframe and loses the app's state. Fix: `const filename = $derived(item?.script_url ?? null)` and read `filename` in the effect. Add a test: no second `/assets` GET after a title Save.
+- **The wrong message when the link PATCH fails** (predates T4). Scenario: the version is archived in another tab mid-upload. `PATCH script_url` returns 409, the user sees "A file with that name already exists…", and the 403/409 forced reload never happens. Fix: show the duplicate-name message only when `!uploaded`. On 403/409 with `stillOnVid`, force `loadAdminTree`.
+- **"App uploaded" / "App removed" toast success even when the refresh fails.** `loadAdminTree` returns `'error'` rather than rejecting, so the row keeps showing the stale value. Fix: check the result and use the modal's "(refresh failed — reload to see latest)" info toast. The "linked asset kept when only the refresh fails" test mocks a rejection that cannot occur in practice. It still guards the `linked` gate.
+- **AppBody `.field-err` sits under the label column**, not under the value as in the D12 Title/Video URL pattern. Fix: wrap `.script-row` and the error in a `.field` column, as VideoBody does.
+- **A file chosen while frozen is dropped silently.** The early return comes before `input.value = ''`. This is practically unreachable, because the input is disabled. Fix: clear `input.value` before the guard.
+- **Colour-mapping comments are misplaced** in the VideoBody and AppBody `.preview-foot` rules. "#F0F1F4 → --border-soft" belongs on `border-top`; the background's mapping is "#FCFCFD → --surface-3".
+- **(ad) frame-hash anchors depend on declaration order.** `\{position:relative;padding-bottom:56\.25%` / `\{width:100%;height:600px`: if either source rule is reordered, the check fails loudly, with a misleading "not unique (… 0)" message. Fix: `\{[^}]*padding-bottom:56\.25%` / `\{[^}]*height:600px`.
+- **(ad) pins are incomplete.**
+  - VideoBody:
+    - `.preview-foot` lacks `align-items`;
+    - `.preview-empty` lacks `margin:0`;
+    - `.plain-input[aria-invalid]`, `.field` and `.ro-value` are unpinned. The T3c debt asked for the full D12 set.
+  - AppBody:
+    - `.preview-head` lacks `align-items`/`gap`;
+    - `.preview-foot` lacks `display`/`gap`/`padding`;
+    - `.preview-title`, `.preview-meta` and `.field-label` are unpinned;
+    - `.script-name` lacks `overflow`/`white-space`/`min-width`.
+- **Tests not yet written:**
+  - `frozen` disables Upload/Replace/Remove (start a slow title Save);
+  - enabled → disabled while `ready` drops the card and fetches nothing more;
+  - the link `href` is the sanitized URL (use one that `safeIframeUrl` canonicalises, or assert before the debounce);
+  - the Replace label after a successful upload;
+  - `stillOnVid` false → no reload after upload/remove;
+  - a Replace mid-fetch aborts the earlier fetch.
+- **Not a defect** (ruled): one lane read `.warnings` bullets as colliding with the left rule, but `styles/reset.css:16` sets `ul { list-style: none; padding: 0 }`, so no markers render.
