@@ -183,3 +183,21 @@ None blocks the slice; each is input for the final polish slice.
   - `stillOnVid` false → no reload after upload/remove;
   - a Replace mid-fetch aborts the earlier fetch.
 - **Not a defect** (ruled): one lane read `.warnings` bullets as colliding with the left rule, but `styles/reset.css:16` sets `ul { list-style: none; padding: 0 }`, so no markers render.
+
+## T5a — Quiz drafts and one Save
+
+- **A stale `save-error` / `save-note` after the author types the value back.** A failed question that is typed back to its baseline is clean, so it is skipped by Save and by `discardAll`, and the red message stays until the accordion remounts. Fix: clear `lastError` / `saveNote` in an effect when `!dirty`.
+- **A two-correct single-choice key takes two clicks to repair.** When the server holds two correct options, the browser shows only the last radio (B) checked. Clicking B fires no `change` (OptionRow `onchange`), while the header still reads "2 correct". Fix: `onclick={() => onMark(true)}` on the radio. `mark()` is idempotent.
+- **The question editor isn't focused when it is on its Preview tab.** `focusInvalidNow` looks for `[data-field="text"] textarea`, which MarkdownEditor renders only in edit mode. The error text and header mark still show. Fix: switch the editor to edit mode, or focus its tab button.
+- **⌘S with focus on a correct-mark radio or checkbox drops focus to `<body>`.** `frozen` disables checkables, and a disabled control loses focus. This is the same family as the mouse-Save focus loss. Fix: refocus in the modal's `save()` `finally` when `activeElement === body`.
+- **The add-question inputs stay writable while frozen** (QuizEditor `new-question-text` / `new-numeric` / `new-precision` / `new-text-answer`). This is harmless because Save never sends them, and T5b rewrites these forms. Fix: `readonly={frozen}`.
+- **The toast "Save again to send the rest."** also appears when the failing question was the only dirty part. The wording is mandated by the brief.
+- **A test describes the server as trimming option text, but it doesn't.** QA test ~:289 says the server's normalised echo is written back, but `OptionUpdate.text` has no strip, so the real echo is `'Alpha '`. Behaviour matches the old blur-commit. Fix: reword the test, or trim client-side as the question fields do.
+- **Tests not yet written:**
+  - the `setOptions()` merge: dirty text on A, then a failed reorder and a resync with new server text for A and B. A keeps its draft, B follows the server, and only A is dirty;
+  - the full save-order rank: text-only after `false`, `{is_correct:true, text}` ranked with the trues, multiple-choice B:true before A:false;
+  - dirty-scoped validate against a clean-but-invalid question (numeric with `correct_numeric: null`). The current tests use a valid clean question, so removing `dirty &&` from `needsFix` stays green;
+  - contributor unregister on delete: the deleted question no longer counts for `busy` / `saveDirty` / `save()`.
+- **(Round 2) The post-await vid/alive guards return `'failed'` after a PATCH has landed** (QuestionAccordion `save()`: after the question PATCH and after each option PATCH). This is unobservable today, because `stillOnVid` is false there, so the modal skips both the reload and the toast. For consistency, return `'partial'`.
+- **(Round 2) A 403/409 after a landed part triggers two forced reloads.** The accordion's `fail()` reloads, and the modal reloads again on `'partial'`. This is harmless. Fix: skip the accordion's reload when `landed`.
+- **(Round 2) The partial-inside-a-question modal test doesn't assert `not.toContain('Saved')`.** The title-partial test does. Add the assertion.

@@ -352,7 +352,7 @@ describe('ItemEditorModal — read-only versions (T3a, D6)', () => {
 
   it('disabled quiz: expanding a question makes zero /render calls', async () => {
     await render({ item: { type: 'quiz' }, version: { is_disabled: true } });
-    panel().querySelector<HTMLButtonElement>('[data-testid="question-header"] button.expand')!.click();
+    panel().querySelector<HTMLButtonElement>('[data-testid="question-header"] button[aria-expanded]')!.click();
     await settle();
     expect(panel().querySelectorAll('[data-testid="markdown-plain"]').length).toBe(2);
     expect(calls(/\/render$/, 'POST').length).toBe(0);
@@ -360,29 +360,7 @@ describe('ItemEditorModal — read-only versions (T3a, D6)', () => {
   });
 });
 
-describe('ItemEditorModal — interim wiring (T3a → T4 / T5a)', () => {
-  it('quiz: a question draft makes the item guard-dirty only; the footer stays clean', async () => {
-    await render({ item: { type: 'quiz' } });
-    expect(panel().querySelector('[data-testid="quiz-title"]')).toBeNull();  // showTitle={false}
-    panel().querySelector<HTMLButtonElement>('[data-testid="question-header"] button.expand')!.click();
-    await settle();
-    type(panel().querySelector<HTMLTextAreaElement>('.question textarea')!, 'Edited');
-    await settle();
-    expect(anyDirty()).toBe('true');
-    expect(dirtyText()).toBe('');
-    expect(footBtn('Save').disabled).toBe(true);
-  });
-
-  it('quiz: the footer Save sends the title alone', async () => {
-    await render({ item: { type: 'quiz' } });
-    type(titleInput(), 'Quiz 2');
-    footBtn('Save').click();
-    await settle();
-    expect(patchBodies()).toEqual([{ title: 'Quiz 2' }]);
-    expect(dirtyText()).toBe('');
-    expect(toastTexts()).toContain('Saved');
-  });
-
+describe('ItemEditorModal — app script row (T4)', () => {
   it('app: the App script row shows the filename with Replace and Remove; with none, Upload', async () => {
     serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
     await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
@@ -727,5 +705,182 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(() => { p.item = undefined; flushSync(); }).not.toThrow();
     unmount(c);
     host.remove();
+  });
+});
+
+describe('ItemEditorModal — quiz body (T5a)', () => {
+  const numQ = { ...textQ, id: 52, type: 'numeric_answer', correct_text: null, correct_numeric: 3, precision: 0 };
+  const choiceQ = { ...textQ, id: 53, type: 'single_choice', correct_text: null };
+  const choiceOpts = [
+    { id: 61, question_id: 53, text: 'A', is_correct: true, order: 1 },
+    { id: 62, question_id: 53, text: 'B', is_correct: false, order: 2 },
+  ];
+  const tail = (u: unknown) => String(u).replace(/^.*\/api\//, '');
+  const qPatches = () => calls(/\/api\/questions\/\d+$/, 'PATCH').map(([u, init]) => [tail(u), JSON.parse(String(init!.body))]);
+  const optPatches = () => calls(/\/api\/options\/\d+$/, 'PATCH').map(([u, init]) => [tail(u), JSON.parse(String(init!.body))]);
+  // The quiz endpoints. A question or option PATCH echoes what was sent over
+  // the stored row (the server's echo); `extra` overrides a URL first.
+  function serveQuiz(questions: Record<string, unknown>[], extra: (u: string, init?: RequestInit) => Promise<Response> | undefined = () => undefined) {
+    serve((u, init) => {
+      const custom = extra(u, init);
+      if (custom) return custom;
+      if (u.endsWith('/items/7/questions')) return jres(questions);
+      if (u.endsWith('/questions/53/options')) return jres(choiceOpts);
+      const qm = /\/api\/questions\/(\d+)$/.exec(u);
+      if (qm && init?.method === 'PATCH') return jres({ ...questions.find((x) => x.id === Number(qm[1])), ...JSON.parse(String(init.body)) });
+      const om = /\/api\/options\/(\d+)$/.exec(u);
+      if (om && init?.method === 'PATCH') return jres({ ...choiceOpts.find((x) => x.id === Number(om[1])), ...JSON.parse(String(init.body)) });
+      return undefined;
+    });
+  }
+  const toggle = (i = 0) => panel().querySelectorAll<HTMLButtonElement>('[data-testid="question-header"] button[aria-expanded]')[i];
+  async function expand(i = 0) { toggle(i).click(); await settle(); }
+  const answerInput = () => panel().querySelector<HTMLInputElement>('[data-testid="text-answer-input"]')!;
+
+  it('a question draft marks the footer and the page registry dirty (the interim bridge is gone)', async () => {
+    serveQuiz([textQ]);
+    await render({ item: { type: 'quiz' } });
+    expect(panel().querySelector('[data-testid="quiz-title"]')).toBeNull();
+    await expand();
+    type(answerInput(), 'z');
+    expect(dirtyText()).toBe('unsaved changes');
+    expect(anyDirty()).toBe('true');
+    expect(footBtn('Save').disabled).toBe(false);
+  });
+
+  it('Save sends the title, then the question; the trimmed answer comes back clean', async () => {
+    serveQuiz([textQ]);
+    await render({ item: { type: 'quiz' } });
+    type(titleInput(), 'Quiz 2');
+    await expand();
+    type(answerInput(), '  y  ');
+    footBtn('Save').click();
+    await settle();
+    const order = (fetchSpy.mock.calls as Call[]).filter(([, i]) => i?.method === 'PATCH').map(([u]) => tail(u));
+    expect(order).toEqual(['items/7', 'questions/51']);
+    expect(patchBodies()).toEqual([{ title: 'Quiz 2' }]);
+    expect(qPatches()).toEqual([['questions/51', { correct_text: 'y' }]]);
+    expect(answerInput().value).toBe('y');
+    expect(dirtyText()).toBe('');
+    expect(anyDirty()).toBe('false');
+    expect(toastTexts()).toContain('Saved');
+    expect(calls(/\/admin-tree$/).length).toBe(1);
+  });
+
+  it('the footer Save sends the title alone when no question changed', async () => {
+    serveQuiz([textQ]);
+    await render({ item: { type: 'quiz' } });
+    type(titleInput(), 'Quiz 2');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ title: 'Quiz 2' }]);
+    expect(qPatches()).toEqual([]);
+    expect(dirtyText()).toBe('');
+  });
+
+  it('a numeric "2.50" saves as 2.5 and comes back clean', async () => {
+    serveQuiz([numQ]);
+    await render({ item: { type: 'quiz' } });
+    await expand();
+    const num = panel().querySelector<HTMLInputElement>('[data-testid="numeric-input"]')!;
+    type(num, '2.50');
+    footBtn('Save').click();
+    await settle();
+    expect(qPatches()).toEqual([['questions/52', { correct_numeric: 2.5, precision: 0 }]]);
+    expect(num.value).toBe('2.5');
+    expect(dirtyText()).toBe('');
+  });
+
+  it('⌘S in an option input saves; meanwhile the input is readonly with focus kept and the marks are disabled', async () => {
+    let release!: () => void;
+    serveQuiz([choiceQ], (u, init) => {
+      if (!(/\/api\/options\/61$/.test(u) && init?.method === 'PATCH')) return undefined;
+      return new Promise((r) => { release = () => r(resp({ ...choiceOpts[0], text: 'A2' })); });
+    });
+    await render({ item: { type: 'quiz' } });
+    await expand();
+    const optA = panel().querySelectorAll<HTMLInputElement>('[data-testid="option-text"]')[0];
+    optA.focus();
+    type(optA, 'A2');
+    const ev = new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true });
+    optA.dispatchEvent(ev);
+    await settle();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(optPatches()).toEqual([['options/61', { text: 'A2' }]]);
+    expect(optA.readOnly).toBe(true);
+    expect(document.activeElement).toBe(optA);
+    const radios = [...panel().querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.every((r) => r.disabled)).toBe(true);
+    radios[1].click();                              // a disabled input ignores click()
+    flushSync();
+    expect(radios[0].checked).toBe(true);
+    release();
+    await settle();
+    expect(optA.readOnly).toBe(false);
+    expect(document.activeElement).toBe(optA);
+    expect(dirtyText()).toBe('');
+  });
+
+  it('footer Discard and a confirmed close both reset question drafts', async () => {
+    serveQuiz([textQ]);
+    await render({ item: { type: 'quiz' } });
+    await expand();
+    type(answerInput(), 'z');
+    footBtn('Discard').click();
+    flushSync();
+    expect(answerInput().value).toBe('x');
+    expect(dirtyText()).toBe('');
+    type(answerInput(), 'w');
+    registry!.discardAll();
+    flushSync();
+    expect(answerInput().value).toBe('x');
+    expect(anyDirty()).toBe('false');
+  });
+
+  it('a question failing after the title saved is partial: the tree reloads, the toast names it, it stays dirty', async () => {
+    serveQuiz([textQ], (u, init) => (/\/api\/questions\/51$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'Nope' }, 422) : undefined));
+    await render({ item: { type: 'quiz' } });
+    type(titleInput(), 'Quiz 2');
+    await expand();
+    type(answerInput(), 'z');
+    footBtn('Save').click();
+    await settle();
+    expect(toastTexts()).toContain('Question 1: Nope — Save again to send the rest.');
+    expect(toastTexts()).not.toContain('Saved');
+    expect(calls(/\/admin-tree$/).length).toBe(1);        // the title part landed → reload (D10)
+    expect(titleInput().value).toBe('Quiz 2');
+    expect(dirtyText()).toBe('unsaved changes');          // the question is still dirty
+    expect(answerInput().value).toBe('z');
+  });
+
+  it('a question landing part of its PATCHes before failing is partial: the tree reloads (D10)', async () => {
+    serveQuiz([choiceQ], (u, init) => (/\/api\/options\/61$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'Boom' }, 422) : undefined));
+    await render({ item: { type: 'quiz' } });
+    await expand();
+    panel().querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();   // move the key A → B
+    await settle();
+    footBtn('Save').click();
+    await settle();
+    await settle();
+    expect(optPatches()).toEqual([['options/62', { is_correct: true }], ['options/61', { is_correct: false }]]);
+    expect(toastTexts()).toContain('Question 1: Boom — Save again to send the rest.');
+    expect(calls(/\/admin-tree$/).length).toBe(1);        // B:true landed → reload (D10)
+    expect(dirtyText()).toBe('unsaved changes');
+  });
+
+  it('an invalid question blocks Save: nothing is sent; it is expanded, marked and focused', async () => {
+    serveQuiz([textQ]);
+    await render({ item: { type: 'quiz' } });
+    await expand();
+    type(answerInput(), '');
+    await expand();                                       // collapse it again
+    footBtn('Save').click();
+    await settle();
+    expect(qPatches()).toEqual([]);
+    expect(patchBodies()).toEqual([]);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(panel().querySelector('[data-testid="needs-fixing"]')!.textContent).toBe('needs fixing');
+    expect(document.activeElement).toBe(answerInput());
+    expect(toastTexts()).toContain('Fix the highlighted fields');
   });
 });

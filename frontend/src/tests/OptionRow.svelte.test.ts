@@ -18,12 +18,12 @@ function mountRow(over: Record<string, unknown> = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props: any = $state({
     option: opt(), index: 1, count: 3, questionType: 'single_choice', perms: PERMS,
-    draft: opt().text, optionsLocked: false, canDelete: true, mutating: false,
-    onToggleCorrect: vi.fn(),
-    onCommitText: vi.fn(), onDelete: vi.fn(), onMoveUp: vi.fn(), onMoveDown: vi.fn(), ...over,
+    draft: opt().text, correct: false, frozen: false, optionsLocked: false, canDelete: true, mutating: false,
+    onMark: vi.fn(), onDelete: vi.fn(), onMoveUp: vi.fn(), onMoveDown: vi.fn(), ...over,
   });
   const cmp = mount(OptionRow, { target, props });
   cleanup = () => unmount(cmp);
+  flushSync();
   return { target, props };
 }
 const textInput = (t: HTMLElement) => t.querySelector('[data-testid="option-text"]') as HTMLInputElement;
@@ -31,28 +31,32 @@ const btn = (t: HTMLElement, label: string) => t.querySelector(`button[aria-labe
 
 it('renders the bound draft text', () => {
   const { target } = mountRow({ draft: 'Berlin' });
-  flushSync();
   expect(textInput(target).value).toBe('Berlin');
 });
 
-it('shows the ✓ correct marker only for correct options', () => {
-  const { target } = mountRow({ option: opt({ is_correct: true }) });
-  flushSync();
-  expect(target.querySelector('[data-testid="option-correct"]')).not.toBeNull();
-});
-
-it('blur on the text input fires onCommitText', () => {
-  const onCommitText = vi.fn();
-  const { target } = mountRow({ onCommitText });
-  flushSync();
+it('typing writes the bound draft; nothing is committed (the footer Save sends it)', () => {
+  const { target, props } = mountRow();
+  textInput(target).value = 'Rome';
+  textInput(target).dispatchEvent(new Event('input', { bubbles: true }));
   textInput(target).dispatchEvent(new Event('blur'));
-  expect(onCommitText).toHaveBeenCalledOnce();
+  flushSync();
+  expect(props.draft).toBe('Rome');
+  expect(props.onMark).not.toHaveBeenCalled();
 });
 
-it('↑/↓/🗑 fire their callbacks', () => {
+it('the correct badge and the row class follow the DRAFT mark, not the saved one (D25)', () => {
+  const a = mountRow({ correct: true, option: opt({ is_correct: false }) });
+  expect(a.target.querySelector('[data-testid="option-correct"]')!.textContent).toBe('correct');
+  expect(a.target.querySelector('.option')!.classList.contains('correct')).toBe(true);
+  cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  const b = mountRow({ correct: false, option: opt({ is_correct: true }) });
+  expect(b.target.querySelector('[data-testid="option-correct"]')).toBeNull();
+  expect(b.target.querySelector('.option')!.classList.contains('correct')).toBe(false);
+});
+
+it('↑/↓/delete fire their callbacks', () => {
   const onMoveUp = vi.fn(), onMoveDown = vi.fn(), onDelete = vi.fn();
   const { target } = mountRow({ index: 2, count: 3, onMoveUp, onMoveDown, onDelete });
-  flushSync();
   btn(target, 'Move option up').click();
   btn(target, 'Move option down').click();
   btn(target, 'Delete option').click();
@@ -61,78 +65,68 @@ it('↑/↓/🗑 fire their callbacks', () => {
   expect(onDelete).toHaveBeenCalledOnce();
 });
 
-it('optionsLocked disables every option control + makes the text read-only', () => {
+it('optionsLocked disables the structure buttons but leaves the text and the mark editable', () => {
   const { target } = mountRow({ index: 2, count: 3, optionsLocked: true });
-  flushSync();
-  expect(textInput(target).readOnly).toBe(true);
   expect(btn(target, 'Move option up').disabled).toBe(true);
   expect(btn(target, 'Delete option').disabled).toBe(true);
+  expect(textInput(target).readOnly).toBe(false);
+  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false);
+});
+
+it('frozen: the text is readonly without losing focus, and the mark is disabled (D10)', () => {
+  const { target, props } = mountRow();
+  textInput(target).focus();
+  props.frozen = true;
+  flushSync();
+  expect(textInput(target).readOnly).toBe(true);
+  expect(document.activeElement).toBe(textInput(target));
+  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(true);
 });
 
 it('canDelete=false disables only delete (C2)', () => {
-  const { target } = mountRow({ canDelete: false });
-  flushSync();
+  const { target } = mountRow({ index: 2, canDelete: false });
   expect(btn(target, 'Delete option').disabled).toBe(true);
+  expect(btn(target, 'Move option up').disabled).toBe(false);
 });
 
 it('reorder boundaries disable ↑ at top and ↓ at bottom', () => {
   const top = mountRow({ index: 1, count: 3 });
-  flushSync();
   expect(btn(top.target, 'Move option up').disabled).toBe(true);
   expect(btn(top.target, 'Move option down').disabled).toBe(false);
+  cleanup?.(); cleanup = null; document.body.innerHTML = '';
+  const bottom = mountRow({ index: 3, count: 3 });
+  expect(btn(bottom.target, 'Move option down').disabled).toBe(true);
 });
 
-it('single_choice renders a radio reflecting is_correct; click fires onToggleCorrect(true)', () => {
-  const onToggleCorrect = vi.fn();
-  const { target } = mountRow({ questionType: 'single_choice', option: opt({ is_correct: true }), onToggleCorrect });
-  flushSync();
+it('single_choice: a radio reflecting the draft mark; picking it calls onMark(true)', () => {
+  const onMark = vi.fn();
+  const { target } = mountRow({ questionType: 'single_choice', correct: false, onMark });
   const radio = target.querySelector('input[type="radio"]') as HTMLInputElement;
-  expect(radio.checked).toBe(true);
+  expect(radio.checked).toBe(false);
   radio.click();
-  expect(onToggleCorrect).toHaveBeenCalledWith(true);
+  expect(onMark).toHaveBeenCalledWith(true);
 });
 
-it('keyboard activation (Space/Enter → click event) routes through onToggleCorrect on radio', () => {
-  // jsdom fires a `click` event for keyboard Space/Enter on focused inputs — same path as mouse click.
-  // This verifies keyboard operation routes through our onclick handler (not a separate keydown path).
-  const onToggleCorrect = vi.fn();
-  const { target } = mountRow({ questionType: 'single_choice', option: opt({ is_correct: false }), onToggleCorrect });
-  flushSync();
-  const radio = target.querySelector('input[type="radio"]') as HTMLInputElement;
-  radio.focus();
-  radio.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  expect(onToggleCorrect).toHaveBeenCalledWith(true);
-  // Note: jsdom cannot distinguish keyboard vs mouse click at the event level; both produce a `click`
-  // event that our onclick handler intercepts. Manual smoke should confirm Space key on a focused
-  // radio fires onToggleCorrect (and does not scroll the page).
-});
-
-it('multiple_choice renders a checkbox; click fires onToggleCorrect(!is_correct), DOM unchanged (controlled)', () => {
-  const onToggleCorrect = vi.fn();
-  const { target } = mountRow({ questionType: 'multiple_choice', option: opt({ is_correct: true }), onToggleCorrect });
-  flushSync();
+it('multiple_choice: a checkbox reflecting the draft mark; clicking it calls onMark with the new state', () => {
+  const onMark = vi.fn();
+  const { target } = mountRow({ questionType: 'multiple_choice', correct: true, onMark });
   const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
   expect(box.checked).toBe(true);
-  // controlled input: onclick calls e.preventDefault() (cancels DOM toggle) then onToggleCorrect(!option.is_correct)
   box.click();
-  expect(onToggleCorrect).toHaveBeenCalledWith(false);  // !true = false
-  expect(box.checked).toBe(true);   // DOM stays at state-driven value (preventDefault)
+  expect(onMark).toHaveBeenCalledWith(false);
 });
 
-it('the correctness control is disabled while optionsLocked (dirty-form lock, not in flight)', () => {
-  // optionsLocked prop = optionsDisabled (mutex||dirty); mutating defaults false → "dirty, not in flight".
-  const { target } = mountRow({ questionType: 'single_choice', optionsLocked: true });
-  flushSync();
+it('mutating keeps the structure buttons natively enabled, so a clicked button keeps focus', () => {
+  // In flight the accordion passes optionsLocked AND mutating; its handlers
+  // guard re-entry. Disabling the clicked button would blur it to <body>.
+  const { target } = mountRow({ index: 2, count: 3, optionsLocked: true, mutating: true });
+  expect(btn(target, 'Move option up').disabled).toBe(false);
+});
+
+it('a read-only version: text readonly, mark disabled, no structure buttons', () => {
+  const RO = versionPermissions({ state: 'archived', is_disabled: false });
+  const { target } = mountRow({ perms: RO });
+  expect(textInput(target).readOnly).toBe(true);
   expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(true);
-});
-
-it('the correctness control is NOT natively disabled during an in-flight mutation (mutating=true)', () => {
-  // In flight: optionsLocked (mutex||dirty) AND mutating (raw mutex) both true.
-  // correctnessDisabled = !canEdit || (optionsLocked && !mutating) → false. The focused control
-  // must NOT be disabled mid-PATCH — disabling it blurs the control → focus drops to <body> → the
-  // page scrolls. This guards the controlled-input fix: a regression to `disabled={optionsLocked}`
-  // (dropping `&& !mutating`) would flip this to true and the focus/scroll bug returns.
-  const { target } = mountRow({ questionType: 'single_choice', optionsLocked: true, mutating: true });
-  flushSync();
-  expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false);
+  expect(btn(target, 'Delete option')).toBeNull();
 });

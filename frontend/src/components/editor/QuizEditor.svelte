@@ -1,54 +1,61 @@
 <script lang="ts">
+  // The quiz body (Slice-5b §5): implements ItemBodyApi (lib/itemBody.ts) for
+  // ItemEditorModal. Each QuestionAccordion owns its drafts and registers a
+  // save contributor (QUIZ_SAVE_KEY). The footer Save validates the dirty ones
+  // and sends them in display order after the title (§5.3). Structure (add /
+  // delete / reorder of questions) acts immediately.
   import { onMount, onDestroy, setContext, tick } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import type { AdminTreeVersion } from '../../lib/types';
   import type { VersionPermissions } from '../../lib/versionPermissions';
   import type { AssetContext } from '../../lib/assetContext';
   import { ApiError } from '../../lib/api';
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
-  import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
+  import { QUIZ_SAVE_KEY, type QuizContributor, type QuizSaveHub } from '../../lib/quizSave';
+  import { patchItem, reportSaveFailure, type SaveOutcome } from '../../lib/itemBody';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
   import QuestionAccordion from './QuestionAccordion.svelte';
   import QuestionTypePicker from './QuestionTypePicker.svelte';
   import {
-    listQuestions, createQuestion, deleteQuestion, reorderQuestions, renameItem,
+    listQuestions, createQuestion, deleteQuestion, reorderQuestions,
     validateNumericAnswer,
     type AuthoringQuestion, type QuestionType, type QuestionCreateBody,
   } from '../../lib/quizAuthoring';
 
   let {
-    itemId, vid, itemTitle, version, perms, assetContext, quizDirty = $bindable(false),
-    showTitle = true, versionDisabled = false,
+    itemId, vid, version, perms, assetContext, stillOnVid,
+    versionDisabled = false, frozen = false,
+    saveDirty = $bindable(false), guardDirty = $bindable(false), busy = $bindable(false),
   }: {
-    itemId: number; vid: number; itemTitle: string;
+    itemId: number; vid: number;
     version: AdminTreeVersion; perms: VersionPermissions; assetContext: AssetContext;
-    quizDirty?: boolean;
-    // Slice-5b interim (T3a → T5a): the item modal owns the Title row.
-    showTitle?: boolean;
-    // Slice-5b D6: question editors show plain source, with no /render call.
+    stillOnVid: (savedVid: number) => boolean;
+    // D6: question editors show plain source, with no /render call.
     versionDisabled?: boolean;
+    // D10/D9: a Save or an item delete is in flight.
+    frozen?: boolean;
+    saveDirty?: boolean; guardDirty?: boolean; busy?: boolean;
   } = $props();
-  // ---- Dirty registry (own; ItemEditPage has no DIRTY_REGISTRY_KEY context) ----
+
+  // ---- Save drafts (§5.1). This private registry shadows the page's, so the
+  //      modal's ONE page tracker covers the quiz. Each accordion registers one
+  //      tracker here and one save contributor on the hub. ----
   const registry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, registry);
-  $effect(() => { quizDirty = registry.isAnyDirty(); });
+  const contributors = new SvelteSet<QuizContributor>();
+  const hub: QuizSaveHub = {
+    register(c) { contributors.add(c); },
+    unregister(c) { contributors.delete(c); },
+  };
+  setContext(QUIZ_SAVE_KEY, hub);
+  const ordered = () => [...contributors].sort((a, b) => a.order() - b.order());
 
-  // ---- §8.7 published answer-key confirm latch. Per question, per mount: the
-  //      Set is recreated on every mount, and {#key item.id} remounts QuizEditor
-  //      on item navigation, so the latch resets exactly when the spec requires. ----
-  const keyConfirmed = new Set<number>();
-  function confirmKeyChange(questionId: number): boolean {
-    if (version.state !== 'published') return true;       // only published is guarded
-    if (keyConfirmed.has(questionId)) return true;        // already confirmed this mount
-    const ok = confirm(
-      'This quiz is published. Changing the answer key does not re-score students who already ' +
-      'attempted — their recorded scores keep the old key. To re-grade everyone, create a new ' +
-      'version instead. Continue?',
-    );
-    if (ok) keyConfirmed.add(questionId);
-    return ok;
-  }
+  const KEY_CONFIRM =
+    'This quiz is published. Changing the answer key does not re-score students who already ' +
+    'attempted — their recorded scores keep the old key. To re-grade everyone, create a new ' +
+    'version instead. Continue?';
 
   // ---- Lifecycle guard (§4.1a) ----
   let alive = true;
@@ -62,6 +69,12 @@
   let expandedId = $state<number | null>(null);
   let questionsLocked = $state(false); // serialize add/delete/reorder (§7.2)
   let questionAnnounce = $state('');
+
+  // ---- The §2 body contract's bindables ----
+  $effect(() => { saveDirty = registry.isAnyDirty(); });
+  // T5b adds the typed add-question / add-option forms here (QUIZ_GUARD_KEY).
+  $effect(() => { guardDirty = registry.isAnyDirty(); });
+  $effect(() => { busy = questionsLocked || [...contributors].some((c) => c.locked()); });
 
   async function load() {
     loadToken += 1;
@@ -81,36 +94,55 @@
   }
   onMount(() => { void load(); });
 
-  // ---- Quiz-title rename. `savedTitle` is the last-PERSISTED title — Discard
-  //      reverts to it, NOT to the `itemTitle` prop (which only catches up after
-  //      a successful forced reload; if that reload fails, the prop is stale). ----
-  let savedTitle = $state(itemTitle);
-  const titleTracker = makeDirtyTracker<{ title: string }>({ title: itemTitle });
-  let titleBusy = $state(false);
-  $effect(() => { registry.register(titleTracker); return () => registry.unregister(titleTracker); });
+  // ---- ItemBodyApi ----
 
-  async function saveTitle() {
-    if (titleBusy || !titleTracker.isDirty || !perms.canEditTextFields) return;
-    const savedVid = vid;
-    const next = titleTracker.current.title;
-    titleBusy = true;
-    try {
-      const res = await renameItem(itemId, next);     // server echoes the persisted title
-      if (alive && vid === savedVid) {
-        savedTitle = res.title;                        // advance baseline from the response
-        titleTracker.reset({ title: res.title });      // reset BEFORE the reload await
-        await loadAdminTree(savedVid, { force: true });
-      }
-    } catch (e) {
-      if (alive && vid === savedVid) {
-        pushToast(e instanceof ApiError ? e.displayMessage : 'Rename failed', 'error');
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409)) await loadAdminTree(savedVid, { force: true });
-      }
-    } finally {
-      if (alive) titleBusy = false;
-    }
+  // D10: every contributor validates (so each invalid question shows its
+  // errors); a clean one always passes. The first invalid question is
+  // expanded and its first invalid field focused.
+  export function validate(): boolean {
+    const bad = ordered().filter((c) => !c.validate());
+    if (bad.length === 0) return true;
+    bad[0].focusFirstInvalid();
+    expandedId = bad[0].questionId;
+    return false;
   }
-  function discardTitle() { titleTracker.reset({ title: savedTitle }); }
+
+  export function discard(): void { registry.discardAll(); }
+  export function discardAll(): void { discard(); }
+
+  // §5.3: one D20 confirm, then the title, then the dirty questions in display
+  // order. Stops at the first failure; 'partial' when anything had landed.
+  export async function save(titleDraft: string | undefined): Promise<SaveOutcome> {
+    const savedVid = vid;
+    const dirtyOnes = ordered().filter((c) => c.isDirty);
+    if (version.state === 'published' && dirtyOnes.some((c) => c.keyChanged()) && !confirm(KEY_CONFIRM)) {
+      return { outcome: 'failed' };
+    }
+    let savedTitle: string | undefined;
+    let progressed = false;
+    if (titleDraft !== undefined) {
+      try {
+        savedTitle = (await patchItem(itemId, { title: titleDraft })).title;
+        progressed = true;
+      } catch (e) {
+        reportSaveFailure(e, savedVid, stillOnVid);
+        return { outcome: 'failed' };
+      }
+    }
+    for (const c of dirtyOnes) {
+      if (!alive) return { outcome: progressed ? 'partial' : 'failed', savedTitle };
+      const r = await c.save();
+      if (r === 'ok') { progressed = true; continue; }
+      if (r === 'partial') progressed = true;
+      if (alive && stillOnVid(savedVid)) {
+        const n = questions.findIndex((x) => x.id === c.questionId) + 1;
+        pushToast(`Question ${n}: ${c.lastError ?? 'Save failed'} — Save again to send the rest.`, 'error');
+        expandedId = c.questionId;
+      }
+      return { outcome: progressed ? 'partial' : 'failed', savedTitle };
+    }
+    return { outcome: 'ok', savedTitle };
+  }
 
   // ---- Add-question form: collects the per-type CORRECT ANSWER at creation,
   //      because the backend does NOT validate correctness on create
@@ -135,7 +167,7 @@
     newText.trim() !== '' && (
       newType === 'numeric_answer' ? (newNumericCheck.ok && newPrecisionValid)
         : newType === 'text_answer' ? (newAnswer.trim().length >= 1 && newAnswer.length <= 500)
-          : true   // choice types: options (hence correctness) are added in Plan B
+          : true   // choice types: options (hence correctness) are added afterwards
     ),
   );
 
@@ -149,18 +181,18 @@
       return { ...base, correct_numeric: Number(newNumericCheck.canonical), precision: newPrecision };
     }
     if (newType === 'text_answer') return { ...base, correct_text: newAnswer.trim() };
-    return base;  // single_choice / multiple_choice — options added in Plan B
+    return base;  // single_choice / multiple_choice — options are added afterwards
   }
 
   async function submitAdd() {
-    if (questionsLocked || !perms.canEditStructure || !addValid) return;
-    const savedVid = vid;                            // capture live vid BEFORE await
+    if (questionsLocked || frozen || !perms.canEditStructure || !addValid) return;
+    const savedVid = vid;
     const body = buildCreateBody();
     addError = null;
     questionsLocked = true;
     try {
       const created = await createQuestion(itemId, body);
-      if (!(alive && vid === savedVid)) return;      // stale / navigated → discard
+      if (!(alive && vid === savedVid)) return;
       questions = [...questions, created].sort((a, b) => a.order - b.order);
       adding = false; resetAddForm();
       expandedId = created.id;                        // open the new question for editing
@@ -169,8 +201,8 @@
       if (alive && vid === savedVid) {
         addError = e instanceof ApiError ? e.displayMessage : 'Add failed';
         if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
-          await load();                                  // resync question list/order
-          if (alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §4.1a: re-check after load(); §10 re-gate
+          await load();
+          if (alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
         }
       }
     } finally { if (alive) questionsLocked = false; }
@@ -178,10 +210,10 @@
 
   // ---- Delete question ----
   async function removeQuestion(qid: number) {
-    if (questionsLocked || !perms.canEditStructure) return;
+    if (questionsLocked || frozen || !perms.canEditStructure) return;
     if (!questions.some((x) => x.id === qid)) return;
     if (!confirm('Delete this question? Its options and text are lost.')) return;
-    const savedVid = vid;                            // capture live vid BEFORE await
+    const savedVid = vid;
     const idx = questions.findIndex((x) => x.id === qid);
     questionsLocked = true;
     try {
@@ -192,25 +224,27 @@
       const focusId = questions[Math.min(idx, questions.length - 1)]?.id;
       await loadAdminTree(savedVid, { force: true });
       await tick();
-      if (alive && vid === savedVid && focusId != null) (document.querySelector(`[data-q-id="${focusId}"] .expand`) as HTMLElement | null)?.focus();
+      if (alive && vid === savedVid && focusId != null) {
+        document.querySelector<HTMLElement>(`[data-q-id="${focusId}"] [data-testid="question-header"] button[aria-expanded]`)?.focus();
+      }
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-        await load();                                 // resync the list (token-guarded)
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §4.1a: re-check after load()
+        await load();
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) questionsLocked = false;
     }
   }
 
-  // ---- Reorder question (↑/↓): optimistic local swap, POST full id-set ----
+  // ---- Reorder question (↑/↓): optimistic local swap, POST the full id-set ----
   async function move(qid: number, dir: -1 | 1) {
-    if (questionsLocked || !perms.canEditStructure) return;
+    if (questionsLocked || frozen || !perms.canEditStructure) return;
     const idx = questions.findIndex((x) => x.id === qid);
     const swap = idx + dir;
     if (idx < 0 || swap < 0 || swap >= questions.length) return;
-    const savedVid = vid;                            // capture live vid BEFORE await
+    const savedVid = vid;
     const next = [...questions];
     [next[idx], next[swap]] = [next[swap], next[idx]];
     questions = next.map((x, i) => ({ ...x, order: i + 1 }));
@@ -220,13 +254,13 @@
     questionsLocked = true;
     try {
       await reorderQuestions(itemId, order);
-      // success: optimistic state is authoritative; order is not shown in the
-      // admin tree, so no forced reload is needed.
+      // success: the optimistic state is authoritative; order is not shown in
+      // the admin tree, so no forced reload is needed.
     } catch (e) {
       if (alive && vid === savedVid) {
         pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-        await load();                                 // resync from server on error
-        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true }); // §4.1a: re-check after load()
+        await load();
+        if (e instanceof ApiError && (e.status === 403 || e.status === 409) && alive && vid === savedVid) await loadAdminTree(savedVid, { force: true });
       }
     } finally {
       if (alive) questionsLocked = false;
@@ -234,24 +268,12 @@
   }
 
   function toggleExpand(qid: number) { expandedId = expandedId === qid ? null : qid; }
-  const titleReadOnly = $derived(!perms.canEditTextFields);
   const structureOff = $derived(!perms.canEditStructure);
   const readOnlyAll = $derived(!perms.canEditTextFields && !perms.canEditStructure);  // archived/disabled (§9)
 </script>
 
 <section class="quiz-editor" aria-label="Quiz editor">
   {#if readOnlyAll}<p class="muted" data-testid="quiz-readonly">This version is read-only — editing is disabled.</p>{/if}
-  {#if showTitle}
-    <div class="title-row">
-      <label>Quiz title
-        <input data-testid="quiz-title" bind:value={titleTracker.current.title} readonly={titleReadOnly} required />
-      </label>
-      {#if !titleReadOnly}
-        <Button onclick={saveTitle} disabled={!titleTracker.isDirty || titleBusy} loading={titleBusy}>Save title</Button>
-        <Button variant="ghost" onclick={discardTitle} disabled={!titleTracker.isDirty || titleBusy}>Discard</Button>
-      {/if}
-    </div>
-  {/if}
 
   {#if loadStatus === 'loading'}
     <p class="muted">Loading questions…</p>
@@ -274,9 +296,9 @@
               {perms}
               {assetContext}
               {versionDisabled}
+              {frozen}
               locked={questionsLocked}
               expanded={expandedId === q.id}
-              {confirmKeyChange}
               onExpandToggle={() => toggleExpand(q.id)}
               onDelete={() => void removeQuestion(q.id)}
               onMoveUp={() => void move(q.id, -1)}
@@ -290,7 +312,7 @@
     {#if !structureOff}
       {#if adding}
         <div class="add-form">
-          <QuestionTypePicker bind:value={newType} disabled={questionsLocked} />
+          <QuestionTypePicker bind:value={newType} disabled={questionsLocked || frozen} />
           <label>Question text
             <input data-testid="new-question-text" bind:value={newText} required />
           </label>
@@ -308,14 +330,14 @@
               <input data-testid="new-text-answer" bind:value={newAnswer} maxlength="500" />
             </label>
           {:else}
-            <p class="muted">Add answer options after creating (next slice).</p>
+            <p class="muted">Add the answer options after creating the question.</p>
           {/if}
           {#if addError}<p class="err" role="alert">{addError}</p>{/if}
-          <Button onclick={() => void submitAdd()} disabled={questionsLocked || !addValid}>Add</Button>
+          <Button onclick={() => void submitAdd()} disabled={questionsLocked || frozen || !addValid}>Add</Button>
           <Button variant="ghost" onclick={() => { adding = false; resetAddForm(); }}>Cancel</Button>
         </div>
       {:else}
-        <Button onclick={() => { adding = true; }} disabled={questionsLocked}>＋ Add question</Button>
+        <Button aria-label="Add question" onclick={() => { adding = true; }} disabled={questionsLocked || frozen}>＋ Add question</Button>
       {/if}
     {/if}
   {/if}
@@ -323,9 +345,8 @@
 
 <style>
   .quiz-editor { display: flex; flex-direction: column; gap: var(--space-3); }
-  .title-row { display: flex; align-items: end; gap: var(--space-2); }
   .questions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-  .muted { color: var(--text-muted, #666); }
-  .err { color: var(--danger, #c00); }
+  .muted { color: var(--muted); }
+  .err { color: var(--danger); }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

@@ -63,9 +63,9 @@
   let titleError = $state<string | null>(null);
   let titleEl = $state<HTMLInputElement>();
 
-  // ---- The type body (§2 contract). The quiz has none until T5a. VideoBody
-  //      has no `busy` (nothing uploads); AppBody has no drafts (its script
-  //      row acts immediately), so it binds `busy` only. ----
+  // ---- The type body (§2 contract). VideoBody has no `busy` (nothing
+  //      uploads); AppBody has no drafts (its script row acts immediately), so
+  //      it binds `busy` only. ----
   let body = $state<ItemBodyApi | null>(null);
   let bodySaveDirty = $state(false);
   let bodyGuardDirty = $state(false);
@@ -103,7 +103,7 @@
     return titleError === null;
   }
 
-  // Interim (quiz until T5a): no body API, so the modal sends the title.
+  // No body (an item type this modal can't edit): the modal sends the title itself.
   async function saveTitleOnly(titleDraft: string | undefined): Promise<SaveOutcome> {
     if (titleDraft === undefined) return { outcome: 'ok' };
     const savedVid = vid;
@@ -300,17 +300,19 @@
       bind:guardDirty={bodyGuardDirty}
     />
   {:else if item.type === 'quiz'}
-    <!-- Interim until T5a: today's editor; question drafts feed guardDirty only. -->
     <QuizEditor
+      bind:this={body}
       itemId={item.id}
       {vid}
-      itemTitle={item.title}
       {version}
       {perms}
       {assetContext}
-      showTitle={false}
       {versionDisabled}
-      bind:quizDirty={bodyGuardDirty}
+      {frozen}
+      {stillOnVid}
+      bind:saveDirty={bodySaveDirty}
+      bind:guardDirty={bodyGuardDirty}
+      bind:busy={bodyBusy}
     />
   {:else if item.type === 'interactive_app'}
     <AppBody
