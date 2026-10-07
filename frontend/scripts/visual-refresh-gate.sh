@@ -455,6 +455,11 @@ GLOBAL_ALLOW = {
     ('src/components/editor/SequenceAccordion.svelte', '.inline-field:last-child'),
     # Slice-5a T6: the last item row drops its hairline (ref 1602).
     ('src/components/editor/SequenceAccordion.svelte', '.item-row'),
+    # Slice-5b T1: `.modal-body > :global(*)` (spec :220-221). Child-combinator
+    # scoped under the hashed `.modal-body`, so it reaches only the direct
+    # children of a modal body. A T3 question renders inside SequencePlayer,
+    # which never mounts a Modal.
+    ('src/components/ui/Modal.svelte', '*'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""

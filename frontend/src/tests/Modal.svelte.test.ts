@@ -1,0 +1,221 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mount, unmount, flushSync } from 'svelte';
+import Harness from './support/ModalHarness.svelte';
+
+let target: HTMLDivElement | null = null;
+let cmp: ReturnType<typeof mount> | null = null;
+
+async function settle() { for (let i = 0; i < 6; i++) await Promise.resolve(); flushSync(); }
+function render(over: Record<string, unknown> = {}) {
+  target = document.createElement('div');
+  document.body.appendChild(target);
+  const props = $state({ onRequestClose: vi.fn(), ...over });
+  cmp = mount(Harness, { target, props });
+  flushSync();
+  return props as { onRequestClose: ReturnType<typeof vi.fn> } & Record<string, unknown>;
+}
+afterEach(() => {
+  if (cmp) { unmount(cmp); cmp = null; }
+  target?.remove(); target = null;
+  document.documentElement.style.overflow = '';
+});
+
+const panel = () => document.querySelector<HTMLElement>('section.modal-panel')!;
+const backdrop = () => document.querySelector<HTMLElement>('div.modal-backdrop')!;
+const closeBtn = () => panel().querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+const byId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
+function esc(init: KeyboardEventInit = {}, on: EventTarget = window) {
+  const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
+  on.dispatchEvent(ev);
+  return ev;
+}
+
+describe('Modal — identity', () => {
+  it('is a labelled modal dialog with a focusable panel', () => {
+    render();
+    expect(panel().getAttribute('role')).toBe('dialog');
+    expect(panel().getAttribute('aria-modal')).toBe('true');
+    expect(panel().getAttribute('aria-labelledby')).toBe('mh-title');
+    expect(panel().getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('renders the footer only when a footer snippet is given', () => {
+    render({ withFooter: false });
+    expect(panel().querySelector('footer.modal-foot')).toBeNull();
+    unmount(cmp!); cmp = null; target!.remove();
+    render();
+    expect(panel().querySelector('footer.modal-foot [data-testid="save"]')).not.toBeNull();
+  });
+});
+
+describe('Modal — closing', () => {
+  it('× calls onRequestClose', () => {
+    const p = render();
+    closeBtn().click();
+    expect(p.onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Escape calls onRequestClose and is default-prevented', () => {
+    const p = render();
+    const ev = esc();
+    expect(p.onRequestClose).toHaveBeenCalledTimes(1);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it('Escape is ignored while composing, on keyCode 229, on repeat and after an inner preventDefault', () => {
+    const p = render();
+    esc({ isComposing: true });
+    const ime = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    Object.defineProperty(ime, 'keyCode', { value: 229 });
+    window.dispatchEvent(ime);
+    esc({ repeat: true });
+    const input = byId('title');
+    input.addEventListener('keydown', (e) => e.preventDefault());
+    esc({}, input);
+    expect(p.onRequestClose).not.toHaveBeenCalled();
+  });
+
+  it('closeDisabled disables × and ignores Escape', () => {
+    const p = render({ closeDisabled: true });
+    expect(closeBtn().disabled).toBe(true);
+    esc();
+    expect(p.onRequestClose).not.toHaveBeenCalled();
+  });
+
+  it('a backdrop click does nothing by default', () => {
+    const p = render();
+    backdrop().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(p.onRequestClose).not.toHaveBeenCalled();
+  });
+
+  it('closeOnBackdrop closes on a backdrop click, never on a click inside the panel', () => {
+    const p = render({ closeOnBackdrop: true });
+    panel().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    byId('title').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(p.onRequestClose).not.toHaveBeenCalled();
+    backdrop().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(p.onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('a backdrop mousedown is default-prevented; a panel mousedown is not', () => {
+    render();
+    const onBackdrop = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    backdrop().dispatchEvent(onBackdrop);
+    expect(onBackdrop.defaultPrevented).toBe(true);
+    const onPanel = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    byId('title').dispatchEvent(onPanel);
+    expect(onPanel.defaultPrevented).toBe(false);
+  });
+});
+
+describe('Modal — focus', () => {
+  it('autofocus lands on [data-autofocus], never on the header button', async () => {
+    render();
+    await settle();
+    expect(document.activeElement).toBe(byId('title'));
+  });
+
+  it('autofocus falls back to × when nothing is marked', async () => {
+    render({ autofocusTitle: false });
+    await settle();
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
+  it('focus that lands outside the panel is moved back to the first focusable', async () => {
+    render();
+    await settle();
+    byId('outside').focus();
+    expect(document.activeElement).toBe(byId('head-trash'));
+  });
+
+  it('focus that leaves from the first focusable goes to the last one', async () => {
+    render();
+    await settle();
+    const first = byId('head-trash');
+    byId('outside').dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: first }));
+    expect(document.activeElement).toBe(byId('save'));
+  });
+
+  it('when nothing inside can take focus, the panel itself takes it', async () => {
+    render({ bodyInert: true, closeDisabled: true, headDisabled: true, withFooter: false });
+    await settle();
+    byId('outside').focus();
+    expect(document.activeElement).toBe(panel());
+  });
+
+  it('bodyInert puts inert on the body only', () => {
+    render({ bodyInert: true });
+    expect(panel().querySelector('.modal-body')!.hasAttribute('inert')).toBe(true);
+    expect(panel().hasAttribute('inert')).toBe(false);
+    expect(panel().querySelector('.modal-head')!.hasAttribute('inert')).toBe(false);
+  });
+});
+
+describe('Modal — scroll lock', () => {
+  it('locks <html> overflow while open and restores the previous value on close', () => {
+    document.documentElement.style.overflow = 'scroll';
+    render();
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    unmount(cmp!); cmp = null;
+    expect(document.documentElement.style.overflow).toBe('scroll');
+  });
+});
+
+// ---- Review round 1 (T1-I1 Opus, T1-I1 Fable) ----
+
+function tab(shift = false) {
+  const ev = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
+  (document.activeElement ?? document.body).dispatchEvent(ev);
+  return ev;
+}
+
+describe('Modal — a hidden element is never a focus target (T3a clean page modal)', () => {
+  it('Shift+Tab from the first focusable wraps to the last VISIBLE one, not the hidden file input', async () => {
+    render({ saveDisabled: true, withHiddenFile: true });
+    await settle();
+    byId('head-trash').focus();
+    const ev = tab(true);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('last'));
+  });
+
+  it('Tab from the last visible focusable wraps to the first', async () => {
+    render({ saveDisabled: true, withHiddenFile: true });
+    await settle();
+    byId('last').focus();
+    const ev = tab();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('head-trash'));
+  });
+
+  it('focus escaping backwards from the first focusable lands on the last visible one', async () => {
+    render({ saveDisabled: true, withHiddenFile: true });
+    await settle();
+    byId('outside').dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: byId('head-trash') }));
+    expect(document.activeElement).toBe(byId('last'));
+  });
+});
+
+describe('Modal — stacking (only the top modal is live)', () => {
+  it('two open modals: the top one owns Escape and focus; the scroll lock survives out-of-order unmounts', async () => {
+    document.documentElement.style.overflow = 'scroll';
+    const pa = render();
+    await settle();
+    const t2 = document.createElement('div');
+    document.body.appendChild(t2);
+    const pb = $state({ onRequestClose: vi.fn() });
+    const b = mount(Harness, { target: t2, props: pb });
+    flushSync();
+    await settle();
+    const panels = document.querySelectorAll<HTMLElement>('section.modal-panel');
+    expect(panels[1].contains(document.activeElement)).toBe(true);
+    esc();
+    expect(pb.onRequestClose).toHaveBeenCalledTimes(1);
+    expect(pa.onRequestClose).not.toHaveBeenCalled();
+    unmount(cmp!); cmp = null;                            // the bottom one first
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    unmount(b);
+    t2.remove();
+    expect(document.documentElement.style.overflow).toBe('scroll');
+  });
+});

@@ -16,9 +16,12 @@
 
   function getFocusable(): HTMLElement[] {
     if (!containerEl) return [];
+    // A `hidden` element (e.g. a file input behind an upload button) or one in
+    // an `inert` subtree can't take focus: `.focus()` on it is a no-op, so it
+    // must never be the wrap target (Slice-5b T1 review).
     return Array.from(containerEl.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    ));
+    )).filter((el) => !el.closest('[hidden], [inert]'));
   }
 
   function onKeydown(e: KeyboardEvent) {
