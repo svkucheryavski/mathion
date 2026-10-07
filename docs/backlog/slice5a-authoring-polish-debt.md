@@ -146,8 +146,9 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
   runs per field), after the author already confirmed "Unsaved edits may be lost." Dedupe or word it once.
 - **Create inputs lack `maxlength={200}`** (create-block, create-sequence, create-item Title) while the matching
   inline fields have it; an over-long title round-trips to a Pydantic 422 message. Pre-existing.
-- **Every accordion expand / collapse prompts for an open dirty Version-info draft**, although the Version-info
-  card stays mounted and would keep it. D3 specifies this; revisit in the browser pass — likely surprising.
+- ~~**Every accordion expand / collapse prompts for an open dirty Version-info draft**~~ — **resolved, keep as
+  specified (D3).** Browser pass 2026-10-07: the user found the prompt natural ("prevent the next step if the
+  previous one is not complete"). No change.
 - **Remaining selector-exact gate negatives** (same class as the (x)/(z) fixes): (v) `.inline-field.H:focus`
   misses `.inline-field.open:focus` / `[role]:focus-visible`; (w) `.blocks-card.H{…margin-bottom}` misses the
   `margin` shorthand and descendant forms; the three "no rem font sizes" checks miss element selectors
@@ -163,3 +164,35 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
   covered only indirectly. One case — open the form, a publish lands, the form is gone — would pin it.
 - **Untested pre-existing 3a behaviours:** closing the duplicate row on a transition, and hiding the
   "+ New version" EmptyState action while the create form is open.
+
+## Browser pass (2026-10-07) — requirements carried to Slice 5b
+
+These two were found in the 5a browser pass. They live on the item-editor screen that 5b replaces with a modal,
+so they are 5b requirements, not 5a polish.
+
+- **Back from the item editor freezes the version editor (Critical for 5b).** `App.svelte` swaps
+  `ItemEditPage` → `VersionEditPage` as one dynamic component (`<Comp>`). Svelte builds the incoming page first
+  and renders it from the shared `currentEditorVersion` tree, but defers its top-level `$effect`s, including the
+  load effect. Then the outgoing page's `onDestroy(() => clearEditorVersion())` (`ItemEditPage.svelte:248`)
+  nulls the tree. In the deferred flush, `InlineField`'s `$effect` reads `VersionMetaForm`'s
+  `$derived(metaReason(version))` with `version` undefined. That happens before the parent's `!tree` skeleton
+  branch (`VersionEditPage.svelte:337`) re-evaluates in the next batch. The result is a `TypeError` in
+  `metaReason` (`editorReasons.ts:10`). The error aborts the flush, so the page's own load effect never runs, and
+  the page stays frozen until a reload. Reproduced in Chrome and Safari. The ordering comes from reading the
+  Svelte 5.55.5 source; it was not runtime-traced. Guarding the child would likely stop the crash, but would
+  leave a skeleton flash and a redundant refetch. The same clear-on-unmount and an unguarded
+  `$derived(versionPermissions(version))` exist on `main` (merge-base `378a566`), so the race is likely older
+  than 5a; it was not reproduced on `main`. The forward swap (`VersionEditPage` → `ItemEditPage`,
+  `VersionEditPage.svelte:160`) clears the tree under the mounted item page too; it does not throw today only
+  because `ItemEditPage`'s deriveds are guarded.
+  **5b requirement:** no editor page may clear the tree while another page that reads it is mounted. A modal that
+  keeps `VersionEditPage` mounted removes the swap. If any `/items/:id` deep-link route still mounts a separate
+  page, use an owner token (a page clears only the tree it still owns) or drop clear-on-unmount. Either way,
+  update the store's documented contract (`currentEditorVersion.svelte.ts:1-5`, `ItemEditPage.svelte:246-247`).
+  **Regression test:** open an item → close or Back → create another item without reloading.
+- **A disabled version's item shows an inline 403 instead of a rendered preview.**
+  `POST /api/versions/{id}/render` returns 403 "Version is disabled" (`versions.py:185-186`). `ItemEditPage`'s
+  read-only preview calls it and shows that message inline. This was specified on purpose (an earlier spec's §11
+  item 7, quoted at `ItemEditPage.svelte:308-313`), so it is a product decision to revisit, not a regression.
+  The row's Open pencil stays enabled by design (5a spec, ItemRow: "enabled unless busy"). 5b decides whether
+  to keep this, to relax the endpoint for read-only rendering, or to show the reason in the modal instead.
