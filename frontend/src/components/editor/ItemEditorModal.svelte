@@ -234,7 +234,7 @@
 <Modal
   labelledby={labelId}
   {onRequestClose}
-  closeDisabled={deleting}
+  closeDisabled={deleting || saving}
   bodyInert={deleting}
   header={head}
   footer={canEditText ? foot : undefined}

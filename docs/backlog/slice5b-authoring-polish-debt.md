@@ -198,7 +198,7 @@ None blocks the slice; each is input for the final polish slice.
   - the full save-order rank: text-only after `false`, `{is_correct:true, text}` ranked with the trues, multiple-choice B:true before A:false;
   - dirty-scoped validate against a clean-but-invalid question (numeric with `correct_numeric: null`). The current tests use a valid clean question, so removing `dirty &&` from `needsFix` stays green;
   - contributor unregister on delete: the deleted question no longer counts for `busy` / `saveDirty` / `save()`.
-- **(Round 2) The post-await vid/alive guards return `'failed'` after a PATCH has landed** (QuestionAccordion `save()`: after the question PATCH and after each option PATCH). This is unobservable today, because `stillOnVid` is false there, so the modal skips both the reload and the toast. For consistency, return `'partial'`.
+- **(Round 2) The post-await vid/alive guards return `'failed'` after a PATCH has landed** (QuestionAccordion `save()`: after the question PATCH and after each option PATCH). This is unobservable today, because `stillOnVid` is false there, so the modal skips both the reload and the toast. For consistency, return `'partial'`. *(Final review: the claim was wrong for an unmount while the page stays alive (close during Save). Fixed. × and Escape now freeze while saving, and an option plan always runs to the end once it starts.)*
 - **(Round 2) A 403/409 after a landed part triggers two forced reloads.** The accordion's `fail()` reloads, and the modal reloads again on `'partial'`. This is harmless. Fix: skip the accordion's reload when `landed`.
 - **(Round 2) The partial-inside-a-question modal test doesn't assert `not.toContain('Saved')`.** The title-partial test does. Add the assertion.
 
@@ -249,3 +249,13 @@ None blocks the slice; each is input for the final polish slice.
 
   None of these occurs in today's 17 files. Widen the scanner only if a later slice adds one of these shapes.
 - **Constraint 11's scope sentence lists "untouched files" as examples, not an enumeration.** The exemptions now live in two places: the spec line under Constraint 11 and the comment above `FILES_5B`. Slice 6 adds MiniProjectModal and the run modals back to (ag) when it restyles them (D21). Keep the two places in step.
+
+## Final whole-branch review — deferred minors
+
+- **A disabled quiz shows two notes** (both lanes). The modal's D6 note and QuizEditor's own "This version is read-only — editing is disabled." (`QuizEditor.svelte:325`) both appear. The T3a interim entry said this closes in T5a, but it didn't. Fix: render QuizEditor's `.note` only when `!versionDisabled` (archived keeps it).
+- **The trash, when disabled by `bodyBusy`/`frozen`, still reads "Delete this item"** (Fable). A disabled control should state its reason. Fix: a third title branch.
+- **A typed add-question/add-option form keeps the trash disabled while the footer shows nothing to discard** (Opus). The tooltip says "save or discard changes first", but Discard is disabled. This is the twin of the T5b footer-Discard vs × entry. Fix: a tooltip that names the open form.
+- **Plan ruling R15 is stale** (both lanes). Since the T5a fix, a question that landed part of its PATCHes returns `'partial'`. The spec was updated in T7; the plan wasn't. Doc-only.
+- **× has no reason tooltip while frozen** (saving/deleting). It is disabled with the plain "Close" title.
+- **⌘S with focus on × drops focus to `<body>`** (final round 2, Opus). Since the fix, × disables while saving, so focus on it falls to `<body>`, and the next ⌘S opens the browser's Save dialog. This is the same family as the mouse-Save focus loss (T3a entry, :90). The `save()` `finally` refocus suggested there covers this too.
+- **A server failure mid-plan after a confirmed browser Back is silent** (final round 2, Fable). The plan now finishes after unmount, but `QuizEditor.svelte:161` gates the partial-failure toast on `alive && stillOnVid`, so a failing `{is_correct:false}` PATCH leaves two correct options with no feedback. Rare: it needs both a confirmed discard and a server error. The Toaster is global. Fix: drop `alive &&` for the failure toast when `stillOnVid(savedVid)`.

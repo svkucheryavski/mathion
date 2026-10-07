@@ -313,6 +313,26 @@ describe('ItemEditorModal — deleting freeze (T3a, D9)', () => {
     expect(props.modal.onRequestClose).not.toHaveBeenCalled();
   });
 
+  it('while a Save is in flight: × disabled and Escape ignored; both return when it settles', async () => {
+    let release!: () => void;
+    serve((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? new Promise<Response>((r) => { release = () => r(resp({ ...mkItem(), title: 'Eigen' })); })
+      : undefined));
+    await render();
+    type(titleInput(), 'Eigen');
+    footBtn('Save').click();
+    await settle();
+    expect(closeBtn().disabled).toBe(true);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(props.modal.onRequestClose).not.toHaveBeenCalled();
+    release();
+    await settle();
+    await settle();
+    expect(closeBtn().disabled).toBe(false);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(props.modal.onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
   it('deleting true → false returns focus to the trash', async () => {
     await render();
     props.modal.deleting = true;
@@ -866,6 +886,27 @@ describe('ItemEditorModal — quiz body (T5a)', () => {
     expect(toastTexts()).toContain('Question 1: Boom — Save again to send the rest.');
     expect(calls(/\/admin-tree$/).length).toBe(1);        // B:true landed → reload (D10)
     expect(dirtyText()).toBe('unsaved changes');
+  });
+
+  it('a key move whose modal unmounts mid-save still sends the rest of the option plan (no two-correct key)', async () => {
+    let releaseB!: () => void;
+    serveQuiz([choiceQ], (u, init) => (/\/api\/options\/62$/.test(u) && init?.method === 'PATCH'
+      ? new Promise<Response>((r) => { releaseB = () => r(resp({ ...choiceOpts[1], is_correct: true })); })
+      : undefined));
+    await render({ item: { type: 'quiz' } });
+    await expand();
+    panel().querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();   // move the key A → B
+    await settle();
+    footBtn('Save').click();
+    await settle();
+    // Browser Back can't be frozen: the page guard confirms, discards, and the route unmounts the modal.
+    registry!.discardAll();
+    unmount(cmp!);
+    cmp = null;
+    releaseB();
+    await settle();
+    await settle();
+    expect(optPatches()).toEqual([['options/62', { is_correct: true }], ['options/61', { is_correct: false }]]);
   });
 
   it('an invalid question blocks Save: nothing is sent; it is expanded, marked and focused', async () => {

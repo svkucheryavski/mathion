@@ -364,7 +364,9 @@
   // the server's ">=1 correct" rule holds mid-sequence. Stops at the first
   // failure; every part that succeeded has already advanced its baseline.
   // Inputs are frozen while this runs, so the per-field write-back can never
-  // overwrite newer input.
+  // overwrite newer input. Once (b) starts it always finishes, even if the
+  // modal unmounts (browser Back can't be frozen): stopping between a key's
+  // true and false PATCHes would leave two correct options on the server.
   async function save(): Promise<'ok' | 'partial' | 'failed'> {
     if (!dirty) return 'ok';
     const savedVid = vid;
@@ -417,12 +419,12 @@
     for (const p of plan) {
       try {
         const u = await updateOption(p.id, p.b);
-        if (!(alive && vid === savedVid)) return 'failed';
+        landed = true;
+        if (!(alive && vid === savedVid)) continue;     // keep sending; no UI writes
         const d = optDrafts[u.id];
         if (d && 'text' in p.b) d.text = u.text;
         if (d && 'is_correct' in p.b) d.is_correct = u.is_correct;
         applyOption(u);
-        landed = true;
         if (p.b.is_correct === true) sentTrue = true;
       } catch (e) {
         // D10: the server briefly holds two correct options; the draft still
@@ -433,6 +435,7 @@
         return fail(e, savedVid, 'Save failed', landed);
       }
     }
+    if (!(alive && vid === savedVid)) return 'failed';
     validated = false;
     return 'ok';
   }
