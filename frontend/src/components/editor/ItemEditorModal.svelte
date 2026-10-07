@@ -10,6 +10,7 @@
   import Button from '../ui/Button.svelte';
   import ItemMark from '../course/ItemMark.svelte';
   import PageBody from './item/PageBody.svelte';
+  import VideoBody from './item/VideoBody.svelte';
   import QuizEditor from './QuizEditor.svelte';
   import InteractiveAppEditor from '../items/InteractiveAppEditor.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
@@ -62,7 +63,8 @@
   let titleError = $state<string | null>(null);
   let titleEl = $state<HTMLInputElement>();
 
-  // ---- The type body (§2 contract). Quiz and app have none until T5a / T4. ----
+  // ---- The type body (§2 contract). Quiz and app have none until T5a / T4;
+  //      VideoBody has no `busy` (nothing in it uploads). ----
   let body = $state<ItemBodyApi | null>(null);
   let bodySaveDirty = $state(false);
   let bodyGuardDirty = $state(false);
@@ -262,7 +264,13 @@
   </div>
 
   {#if versionDisabled}
-    <p class="ro-note">Preview is unavailable while this version is disabled — enable it to preview or edit.</p>
+    <!-- A video's preview is an external iframe and still shows (§4), so its
+         note names only editing (user, T3c review). -->
+    <p class="ro-note">
+      {item.type === 'video'
+        ? 'Editing is unavailable while this version is disabled — enable it to edit.'
+        : 'Preview is unavailable while this version is disabled — enable it to preview or edit.'}
+    </p>
   {/if}
 
   {#if item.type === 'static_page'}
@@ -278,6 +286,17 @@
       bind:saveDirty={bodySaveDirty}
       bind:guardDirty={bodyGuardDirty}
       bind:busy={bodyBusy}
+    />
+  {:else if item.type === 'video'}
+    <VideoBody
+      bind:this={body}
+      {item}
+      {vid}
+      editable={canEditText}
+      {frozen}
+      {stillOnVid}
+      bind:saveDirty={bodySaveDirty}
+      bind:guardDirty={bodyGuardDirty}
     />
   {:else if item.type === 'quiz'}
     <!-- Interim until T5a: today's editor; question drafts feed guardDirty only. -->

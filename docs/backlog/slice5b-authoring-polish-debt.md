@@ -109,3 +109,19 @@ None blocks the slice; each is input for the final polish slice.
   `'error'` refresh toast; the `!stillOnVid` "Saved" path; `reportSaveFailure` 403/409 forced reload;
   the × fallback after the delete freeze; autofocus on a published version.
 
+## T3c — VideoBody
+
+- **A server-rejected URL shows only a toast.** A scheme-less paste (`www.youtube.com/watch?v=…`),
+  `ftp://…`, an uppercase `HTTPS://`, or a URL over 500 characters passes `normalizeVideoUrl` unchanged
+  and the server 422s ("Please correct the highlighted fields" / "URL must start with http:// or
+  https://") with no inline error, `aria-invalid` or focus. Fix: mirror the backend's prefix and length
+  rules in `validate()`, or prefix `https://` for scheme-less YouTube/Vimeo URLs in `normalizeVideoUrl`.
+- **VideoBody duplicates ItemEditorModal's field CSS** (`.field-row`, `.field-label`, `.field`,
+  `.plain-input` ×3, `.field-err`, `.ro-value`). Until T4's (ad) they are unchecked; T4 must repeat the
+  full D12 `d`/`chk` set plus `sweep VideoBody`. Longer term: one shared field component (5a create form,
+  modal Title, VideoBody).
+- **A dirty-but-equivalent URL sends a no-op PATCH** (`  EMBED  ` normalises to the saved value). Harmless.
+- **Tests not yet written:** a non-identity echo (the write-back takes the server's string, not the sent
+  one); a failed PATCH keeps the draft dirty; empty title + empty URL (R9 focus ends on Title); the
+  500 ms debounce and the preview returning after Discard (T4 owns the card).
+

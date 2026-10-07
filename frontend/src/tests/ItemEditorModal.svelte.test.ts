@@ -393,3 +393,78 @@ describe('ItemEditorModal — interim wiring (T3a → T4 / T5a)', () => {
     expect(calls(/\/assets/).length).toBe(0);
   });
 });
+
+describe('ItemEditorModal — video body (T3c)', () => {
+  const WATCH = 'https://www.youtube.com/watch?v=abc123';
+  const EMBED = 'https://www.youtube.com/embed/abc123';
+  const urlInput = () => panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!;
+
+  it('shows the Video URL field with its hint; editing marks the footer dirty', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    expect(panel().querySelector('.item-ctx')!.textContent).toBe('video · S2 · item 3 of 4');
+    expect(urlInput().value).toBe(EMBED);
+    expect(urlInput().classList.contains('mono')).toBe(true);
+    expect(panel().querySelector('.field-hint')!.textContent).toBe(
+      'Paste any YouTube or Vimeo URL — it is converted to embed form on save.');
+    type(urlInput(), WATCH);
+    expect(dirtyText()).toBe('unsaved changes');
+  });
+
+  it('a pasted watch URL is sent in embed form and the echo leaves the form clean', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    type(urlInput(), `  ${WATCH.replace('abc123', 'xyz789')}  `);
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ video_url: 'https://www.youtube.com/embed/xyz789' }]);
+    expect(urlInput().value).toBe('https://www.youtube.com/embed/xyz789');
+    expect(dirtyText()).toBe('');
+    expect(toastTexts()).toContain('Saved');
+  });
+
+  it('an empty URL blocks Save with "Video URL is required" and focuses the field', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    type(urlInput(), '  ');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([]);
+    expect(urlInput().getAttribute('aria-invalid')).toBe('true');
+    expect(panel().querySelector('.field-err')!.textContent).toBe('Video URL is required');
+    expect(document.activeElement).toBe(urlInput());
+  });
+
+  it('a title-only change sends no video_url', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    type(titleInput(), 'Lecture 2');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ title: 'Lecture 2' }]);
+  });
+
+  it('Discard restores the saved URL and clears the error', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    type(urlInput(), '');
+    footBtn('Save').click();
+    await settle();
+    footBtn('Discard').click();
+    flushSync();
+    expect(urlInput().value).toBe(EMBED);
+    expect(panel().querySelector('.field-err')).toBeNull();
+  });
+
+  it('disabled: the video note says editing (not preview) is unavailable; the preview stays, nothing is fetched', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED }, version: { is_disabled: true } });
+    expect(panel().querySelector('.ro-note')!.textContent).toBe(
+      'Editing is unavailable while this version is disabled — enable it to edit.');
+    expect(panel().querySelector('iframe')!.getAttribute('src')).toBe(EMBED);
+    expect(calls(/\/render$/, 'POST').length).toBe(0);
+    expect(calls(/\/assets/).length).toBe(0);
+  });
+
+  it('archived: the URL is mono text and the preview still shows', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED }, version: { state: 'archived' } });
+    expect(urlInput()).toBeNull();
+    const ro = panel().querySelector('.ro-value.mono')!;
+    expect(ro.textContent).toBe(EMBED);
+    expect(panel().querySelector('iframe')!.getAttribute('src')).toBe(EMBED);
+  });
+});

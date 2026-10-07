@@ -5012,7 +5012,7 @@ own video-preview VideoBody.svelte
 uniq1 video-preview
 if [[ -n $REPLY ]]; then
   N=VideoBody; H=$REPLY
-  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
+  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:baseline' 'gap:12px'
   d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
   chk "\.plain-input\.${H}:focus-visible" 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
   d '\.field-hint' '' 'font-size:12px' 'color:var\(--muted\)'

@@ -98,6 +98,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
 - **D6 (user) — Disabled version: read-only text plus a calm note, with no server call.**
   - Page bodies and quiz question text show their markdown as plain mono text, and the interactive app shows no preview.
   - All carry the note *"Preview is unavailable while this version is disabled — enable it to preview or edit."*
+  - **Video (user, T3c review):** its preview is an external iframe and stays (§4), so a disabled video item's note reads *"Editing is unavailable while this version is disabled — enable it to edit."*
   - Nothing calls `/render` or fetches assets. The deliberate 403 (`backend/mathion/api/versions.py:185-186`) stays, but the UI no longer provokes it.
   - Archived versions still render (the server allows it).
   - **Plumbing.** `perms.canEditTextFields` is false for *both* archived and disabled (`versionPermissions.ts:22`), so it can't select plain mode. Instead an explicit `versionDisabled: boolean` (= `version.is_disabled`) is passed down:
