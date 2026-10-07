@@ -1,6 +1,6 @@
 # Visual Refresh — Slice 5b: Authoring — Item Editor Modal (3c + 3e + 3f) — Design Spec
 
-**Status:** Design — **rev 5** (brainstormed with the user 2026-10-07; self-checked; revs 2-5 fold four rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
+**Status:** Design — **rev 6** (brainstormed with the user 2026-10-07; self-checked; revs 2-6 fold five rounds of two-lane review — see §Review resolutions). Next: re-review → user review → writing-plans.
 
 **Authority:** `docs/design/visual-refresh/reference-screens.dc.html` (artboard **3c** `:1649-1758` page, **3e** `:1759-1835` video, **3f** `:1836-1969` quiz; `ref NNNN` below are line numbers in that file) and `docs/design/visual-refresh/mathion-visual-spec.md` (§4 "Item editor modal (3c, 3e, 3f)" `:212-229`, Icon button `:168-181`, §3 colour of state `:110-133`, type-name rule `:230`). Where the two disagree, the spec's *rules* win over the artboard's *pixels*. **User decisions** (§Decisions) override both, and each override is recorded.
 
@@ -43,7 +43,7 @@ Additionally:
       This also applies inside a `box-shadow`.
     - **Not literal colours:** the keywords `transparent`, `currentColor` and `inherit`, and CSS system colours (`Highlight`, `CanvasText`, …) inside `@media (forced-colors: active)`. That last exemption is 5a Constraint 1's, used by `ItemTypePicker.svelte:59-61`.
     - **Comments are exempt,** as in 5a Constraint 1 (e.g. `/* #E9EBEF → --border */` notes and the hexes in `MiniProjectDetailPage.svelte` comments).
-    - **The (ag) scan** strips `/* */` and `<!-- -->` comments first (not `//`: CSS has none, and stripping from `//` would eat the rest of any line holding `https://`), matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
+    - **The (ag) scan** strips `/* */` and `<!-- -->` comments first, plus `//` comments **only on lines where `//` is the first non-blank token**. It never strips mid-line `//`: CSS has none, and stripping it would eat the rest of any line holding `https://`. A trailing `//` comment after code must therefore not hold a colour literal (rule for 5b-touched files). The scan then matches named colours only in value position (after `:`, so `white-space` is not a hit), and reuses the 5a mechanism for the forced-colors scope.
     - `box-shadow` with token colours stays allowed: the D12 focus ring is the existing `base.css:21-25` / `InlineField.svelte:297` pattern, and the MarkdownEditor flash uses `--danger`.
     - Untouched files (`Toast`, the run modals, `Login`) are out of scope.
     - `Modal.svelte` may also carry `-webkit-backdrop-filter`, duplicating `backdrop-filter` for Safari < 18 (the user tests in Safari).
@@ -164,7 +164,7 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     - Every structure control (add/delete/reorder, upload/replace/remove) is disabled while saving.
     - Save, Discard and ⌘S are disabled while any structure operation, app-script upload or asset upload is in flight. Each body exposes a bindable `busy` for this, which includes every inner `MarkdownEditor`'s `uploading`.
     - **After a successful part,** `saved` takes the server's echo, and **each field that was in that request** gets `draft.x = saved.x`. This applies to every body: page, video, app title and quiz.
-      - This is needed because the client and server normalise: `correct_text` is trimmed, a numeric `"2.50"` comes back as `"2.5"`, the Video URL comes back in embed form, and strings are stripped server-side (`schemas.py:48`).
+      - This is needed because the client normalises before sending, and the server may normalise too: `correct_text` is trimmed, a numeric `"2.50"` comes back as `"2.5"`, and the Video URL comes back in embed form. Whatever the server echoes is written back.
       - It is safe because inputs are frozen while the request is out, so no newer input can be overwritten.
       - Fields that were not sent (other questions, untouched fields) keep their drafts. The whole-draft `draft = { ...saved }` (`QuestionAccordion.svelte:354`) and the whole-tracker `reset()` are replaced by this per-field write-back.
     - So a Save never interleaves with a structure change, and a reset never wipes input made after a request left.
@@ -219,8 +219,13 @@ User decisions (brainstorm 2026-10-07) are marked **(user)**. The rest are mine;
     
     **Mechanism:**
     - The `routeIid` effect records `lastClosedIid` and sets a one-shot `justClosedItem` flag on the non-null → null transition. It is **declared before** the focus effect (added to the 5a effect-order comment).
-    - The focus effect reads and clears the flag inside `untrack`, at the **top** of the effect, before the existing `lastFocusedTarget` equality skip (`VersionEditPage.svelte:136`). A tracked write-then-read would re-run it. When the flag was set, the equality skip is bypassed for that run. Its body/`null` check runs **after `await tick()`**, as today (`VersionEditPage.svelte:143-149`), because within the same flush the modal's × is still mounted and focused.
-    - Only when the flag was set and `document.activeElement` is `body` or `null` does it apply the fallback. The fallback **replaces** the existing header focus-and-scroll path for that run (a deep-link close would otherwise focus the header): it focuses the pencil or the header, sets `lastFocusedTarget` to the sequence header id so a later reload doesn't refocus, and returns.
+    - The focus effect reads the flag inside `untrack`, at the **top** of the effect, before the existing `lastFocusedTarget` equality skip (`VersionEditPage.svelte:136`). A tracked write-then-read would re-run it. When the flag is set, the equality skip is bypassed for that run.
+    - The flag is **cleared inside the async block, only when the close handling actually runs** (after the `cancelled` check, `:142-146`). A run cancelled by an overlapping tree reload therefore leaves it for the next run. Its body/`null` check runs **after `await tick()`**, as today (`VersionEditPage.svelte:143-149`), because within the same flush the modal's × is still mounted and focused.
+    - **When the flag is set, after `await tick()`:**
+      - if `document.activeElement` is `body` or `null`, apply the fallback (focus the pencil, else the header);
+      - **otherwise leave focus where it is.** FocusTrap has already restored it to the opener, or to whatever the user had focused.
+      
+      Either way, set `lastFocusedTarget` to the sequence-header id (so a later reload doesn't refocus) and **return**. The existing header focus-and-scroll path runs only when the flag is not set; it never overrides a close.
     - The fallback looks up the pencil by the new `id="item-{id}-open"` on `ItemRow`'s Open button (`ItemRow.svelte:79`).
     - A tree reload without a close never runs the fallback, so it can't steal focus.
   - **The page's focus `$effect`** is skipped while an item is open, so it doesn't race the modal.
@@ -318,6 +323,7 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
   - `mousedown` on the backdrop itself calls `preventDefault()`, which keeps focus in the panel;
   - `click` closes only when `closeOnBackdrop` is set and the target is the backdrop itself.
 - **Focus containment:** the document `focusin` listener from D18. It bails when the panel is disconnected, and is removed on destroy. The panel carries `tabindex="-1"` and is the **last-resort target**: when nothing inside can take focus (e.g. `bodyInert` with all buttons disabled), both the `focusin` handler and the Tab handling move focus to the panel itself.
+  - **Detection:** `querySelectorAll` still returns elements inside an `inert` subtree, and `.focus()` on them is a silent no-op. So the handler focuses the candidate, then checks `panel.contains(document.activeElement)`, and calls `panel.focus()` if not.
 - **`bodyInert = false`** puts `inert` on `div.modal-body` (D9).
 - **Scroll lock:** on mount, save `document.documentElement.style.overflow` and set it to `hidden`; restore it on destroy.
 - Modal holds no dirty state; the parent decides what closing means.
@@ -411,7 +417,11 @@ div.modal-backdrop (fixed, inset 0, z-index 100, backdrop colour + backdrop-filt
      - page and video put it inside their single `PATCH`;
      - app and quiz send `PATCH {title}` first (§5.3 step 1);
   3. the modal advances the title baseline from `savedTitle` when present.
-- **After a full or partial success**, `loadAdminTree(vid, { force: true })` is gated on `stillOnVid`. Baselines advance from the response or the fresh tree. The `'error'` and `'discarded'` refetch outcomes keep ItemEditPage's rules (`:169-203`). Then:
+- **After a full or partial success**, `loadAdminTree(vid, { force: true })` is gated on `stillOnVid`, and the body stays `frozen` until it settles.
+  - **Baselines come only from the PATCH responses** (D10 per-field write-back). The reload refreshes only the tree: the header, the item rows and the `used` badges. Nothing is reset from the fresh tree after it.
+  - From ItemEditPage's outcome handling (`:169-203`) only the toast wording is kept: `'error'` → "Saved (refresh failed — reload to see latest)"; `'discarded'` → no toast.
+  
+  Then:
   - the toast "Saved", or the D10 partial-failure pop-up;
   - `PageBody` bumps its own `refreshKey` (it owns it and binds it to `MarkdownEditor`), so the sidebar's `used` badges refresh.
 - **⌘S / Ctrl+S** inside the panel triggers Save (`preventDefault`), subject to the same disabled rules.
@@ -800,6 +810,19 @@ Minors folded in:
 - Constraint 11 doesn't strip `//`;
 - the T3a `expandedItem` typing and dead-branch props;
 - the interim app's `uploadBusy` bound to `busy`.
+
+## Review resolutions (round 5, 2026-10-07: Opus + Fable on rev 5)
+
+Both lanes confirmed the round-4 Important finding resolved. Fable found no Critical or Important issues.
+
+**Opus raised one Important finding, which was accepted.** Bypassing the equality skip let the header path override FocusTrap's restore after an in-page close. The fix: when the close flag is set, leave focus alone unless it is on `body`/`null`, then return (D18).
+
+Minors folded in:
+- baselines come only from the PATCH echo, with the reload frozen and refreshing the tree only (§2);
+- the `schemas.py:48` citation is dropped;
+- the containment handler verifies that focus actually landed;
+- the close flag is cleared only when its handling runs;
+- `//` comments are stripped only when they start a line.
 
 ## Git stacking
 Same local branch as 5a. One commit per task after its two-lane review is clean; no push and no merge.
