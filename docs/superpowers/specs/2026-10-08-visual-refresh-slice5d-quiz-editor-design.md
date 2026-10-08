@@ -1,12 +1,18 @@
 # Visual refresh — Slice 5d: a calm quiz editor (overview + small editing modals)
 
-**Status:** draft, rev 2. Written 2026-10-08 for the user's review. Rev 2 folds in three independent spec reviews (two Opus, one Fable) and the user's decision D12.
+**Status:** draft, rev 3. Written 2026-10-08 for the user's review.
+- Rev 2 folded in round 1 of the spec review (two Opus, one Fable) and the user's decision D12.
+- Rev 3 folds in round 2 (the same three angles, fresh reviewers) and the user's confirmation of D13.
+
 **Branch:** `feat/visual-refresh-slice5-authoring`. It stays local: no push, no merge. 5d lands on top of 5c (tip `2511015`).
 
 **Authority:**
 - The decisions below were made with the user on 2026-10-08.
 - The approved mockup is `.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/mockups/quiz-modal-5d.html` ("Nice!"). Its "± 0.01" Number line is stale; §Number below is the rule.
-- The approved design summary is `.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/5d-design.html` ("ok").
+- The approved design summary is `.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/5d-design.html` ("ok"). This spec supersedes it on three points:
+  - Controls the version forbids are hidden, not disabled (D13; the user confirmed it on 2026-10-08).
+  - An error in an edit that has a field shows inside the field, not as a toast.
+  - The discard prompt uses the existing DirtyGuard text.
 - For the quiz item, this spec replaces the 5b quiz sections (one footer Save, drafts, the question accordion, the typed add forms). Where it is silent, 5b and 5c still hold.
 
 ## Why
@@ -29,17 +35,20 @@ The user's (2026-10-08):
 - **D5 — Answers are edited in place** on the card.
 - **D6 — The explanation is edited in a small level-3 modal:** Markdown with preview, no images or files.
 - **D7 — The overview shows rendered text** (the HTML students get), except in disabled versions (§Version states).
-- **D12 — One small backend fix** (chosen over keeping 5b's two requests): marking an answer correct on a single-choice question clears the other correct answer in the same transaction (§Backend change). It is the only backend change in 5d.
+- **D12 — One small backend fix** (chosen over keeping 5b's two requests): marking an answer correct on a single-choice question clears the other correct answers in the same transaction (§Backend change). It is the only backend change in 5d.
+- **D13 — Hide what the version forbids** (the 5c rule; confirmed over the design summary's "disabled with a reason"). Controls the version state does not allow are not rendered. Disabled-with-reason is kept only for momentary or local blocks: a write in flight, a first/last arrow, the only correct answer, the last correct mark. **Exception:** the header trash (delete item) stays disabled with its reason (5b D9), because that header is shared with Page, Video and App.
 
 Made in the design and approved with it:
-- **D8 — Per-answer ↑ ↓ and delete appear on hover or keyboard focus** of the answer row. On devices without hover (`@media (hover: none)`) they are always shown.
-- **D9 — Light hints on choice questions** (§A question card). They inform; nothing is blocked.
+- **D8 — Per-answer ↑ ↓ and delete appear on hover or keyboard focus** of the answer row. They are hidden by opacity only: always in the tab order and the accessibility tree. On devices without hover (`@media (hover: none)`) they are always shown.
+- **D9 — Light hints on questions** (§A question card). They inform; nothing is blocked.
 - **D10 — One inline edit at a time** (§Unsaved work).
 - **D11 — The Markdown editor gains a "no assets" mode** for the explanation (§Level 3).
 
-Made in rev 2 from the reviews, following existing rules:
-- **D13 — Hide what the version forbids** (the 5c rule). Controls the version state does not allow are not rendered. Disabled-with-reason is only for momentary or local blocks: a write in flight, a first/last arrow, the only correct answer, the last correct mark.
-- **D14 — Kept from 5b:** the first answer added to an empty single-choice question is created correct (5b §8.4); the only correct answer cannot be deleted (5b C2); a question delete asks for confirmation; an answer delete does not.
+Made from the reviews, following existing rules:
+- **D14 — Kept from 5b:**
+  - The first answer added to an empty single-choice question is created correct (5b §8.4).
+  - The only correct answer cannot be deleted unless it is the question's only answer (5b C2, as implemented).
+  - A question delete asks for confirmation; an answer delete does not.
 
 ## Level 2 — the quiz modal
 
@@ -47,207 +56,429 @@ The modal shell, its header (type icon, title, context line "Vectors › Linear 
 
 ### Header and title
 
-- The title is an `h2`, the dialog's `aria-labelledby` target, with a ✎ beside it (only when the version allows text edits).
-- ✎ turns the title into an inline field **inside the same `h2`**, so the dialog keeps its label. The 5c D8 rules apply: Enter or ✓ saves (one PATCH via `renameItem`), Esc or ✕ cancels without a request, an error shows under the field, moving focus away leaves it open.
+- The title is an `h2`, the dialog's `aria-labelledby` target. A ✎ "Edit title" sits after it, only when the version allows text edits.
+- ✎ swaps the title text for an inline field. **Only the field goes inside the `h2`.** ✓, ✕ and any error render after the `h2` and wrap below it, never clipped. The dialog's name therefore stays the title.
+- The 5c D8 rules apply:
+  - Enter or ✓ saves (one PATCH via `renameItem`). An unchanged value closes silently without a request.
+  - Esc or ✕ cancels without a request.
+  - An error shows under the field.
+  - Moving focus away leaves the field open.
 - For quizzes only, the body's "Title" form row is removed. Page, Video and App keep it.
 
 ### No footer, and ⌘S
 
 - For a quiz, the item modal renders no Save/Discard footer. Page, Video and App keep theirs exactly as today.
-- ⌘S / Ctrl+S: in a level-3 modal it means Save. Anywhere else in the quiz modal it is swallowed (`preventDefault`), so the browser's own Save dialog never opens.
+- ⌘S / Ctrl+S: in a level-3 modal it means that modal's Save. Anywhere else in the quiz modal it is swallowed (`preventDefault`), so the browser's own Save dialog never opens.
+- The item modal's own ⌘S handler ignores key events coming from a level-3 panel.
 
 ### The header trash (delete item)
 
-- Disabled while any quiz write is in flight, and while an edit holds unsaved changes. Tooltip in the second case: "Delete this item — finish or discard the open edit first".
+Disabled (D13 exception) in two cases:
+- the version forbids it, with today's reason;
+- the quiz is **busy**: any quiz request is in flight (structure writes and text saves alike, counted by one in-flight counter) or an edit holds unsaved changes. Tooltip: "Delete this item — finish or discard the open edit first".
 
 ### First focus
 
-- On open, focus goes to the title's ✎. When the version allows no text edits, it goes to the first card (or the close button if the quiz is empty).
+- When the version allows text edits, focus goes to the title's ✎.
+- Otherwise it goes to × (the modal default).
+- Level-3 modals focus their textarea. The New question modal focuses the checked type radio.
 
 ### The body
 
-- **Questions row:** "Questions" + the count; on the right a primary "+ Add question" (only when the version allows structure edits). This top-right primary button is a deliberate exception to 5c D9's quiet "+ Add" lines: in the quiz overview, adding a question is the main action.
+- **Questions row:** "Questions" + the count. On the right, a primary "+ Add question", only when the version allows structure edits. It is disabled until the list has loaded.
+  - This top-right primary button is a deliberate exception to 5c D9's quiet "+ Add" lines: in the quiz overview, adding a question is the main action.
 - **Loading:** while the questions load, a skeleton. On failure: "Couldn't load the questions" + Retry.
 - **Empty:** "No questions yet."
 - **The list:** one card per question, in order, scrolling inside the modal body.
+- **The live region** (polite) is always rendered, whatever the list state.
 
 ### A question card
 
 The card is a list item, labelled by its rendered question text (`aria-labelledby`). From top to bottom:
 
 1. **Head row**
-   - a light ordinal "1." (`--ordinal`, aria-hidden, like the 5c block numbers);
-   - the question text, rendered (`text_html`);
-   - a type chip: "Single choice", "Multiple choice", "Number", "Text" (sans, not mono; the New-question type picker uses the same four labels);
-   - D9 hints, if any, next to the chip;
-   - actions: ✎ "Edit question 1" (opens level 3), ↑ "Move question 1 up", ↓ "Move question 1 down", delete "Delete question 1". The structure actions only when the version allows them (D13).
+   - A light ordinal "1." (`--ordinal`, aria-hidden, like the 5c block numbers).
+   - The question text, rendered (`text_html`).
+   - A type chip: "Single choice", "Multiple choice", "Number" or "Text" (sans, not mono).
+   - D9 hints, if any, next to the chip.
+   - Actions:
+     - ✎ "Edit question 1" (opens level 3);
+     - ↑ "Move question 1 up" and ↓ "Move question 1 down";
+     - delete "Delete question 1".
+
+     The structure actions are rendered only when the version allows them (D13).
    - Below 560px the chip, hints and actions wrap onto a second line under the text.
 2. **Answers** (§Answers).
 3. **Explanation**
    - Present when `explanation_md` is non-empty after trimming: a small muted panel, "Explanation" + the rendered `explanation_html`, with ✎ "Edit explanation for question 1".
-   - Absent: a quiet "+ Add explanation" link. Hidden when the version allows no text edits.
+   - Absent: a quiet "+ Add explanation" **button** (accessible name "Add explanation to question 1"). Hidden when the version allows no text edits.
 
-Rendered text in cards: images are capped at the card width; headings inside question text and explanations render at body size (no large headings in a card); links are live. Clicking the text does not edit it; only ✎ does.
+Rendered text in cards:
+- Images are capped at the card width.
+- Headings inside question text and explanations render at body size. They keep their tags, because they are the author's content.
+- Links open in a new tab (`target="_blank" rel="noopener noreferrer"`, added on the client), so a click never leaves the editor.
+- Clicking the text does not edit it; only ✎ does.
 
-**D9 hints** (choice questions, shown only once the answers have loaded):
-- "No answers yet": no answers;
-- "Add at least 2 answers": exactly one answer (publishing requires two, `versions.py`);
-- "No correct answer": answers but none correct (possible for multiple choice, whose new answers start not correct).
+**D9 hints:**
+- Choice questions, shown only once the answers have loaded:
+  - "No answers yet": no answers.
+  - "Add at least 2 answers": exactly one answer (publishing requires two, `versions.py`).
+  - "No correct answer": answers but none correct (possible for multiple choice, whose new answers start not correct).
+  - "More than one correct": a single-choice question with two or more correct answers (old data the 5b flow could leave; publishing rejects it).
+- Number: "Decimals not set" when `precision` is null (older data; such a question marks every answer wrong).
 
-**Number hint:** "Decimals not set" when `precision` is null (older data; such a question marks every answer wrong).
-
-**Formulas.** The app does not typeset formulas anywhere today: the server wraps `$…$` in `<span class="math">`, and no client code draws them, so students see LaTeX source. The cards show the same. Typesetting is a separate, later change, out of scope.
+**Formulas.** The app does not typeset formulas anywhere today. The server wraps `$…$` in `<span class="math">` and no client code draws it, so students see the LaTeX source. The cards show the same. Typesetting is a separate, later change, out of scope.
 
 ## Answers, edited in place
 
 ### Loading
 
 - Each card loads its own answers (`listOptions`; the question list does not include them).
-- While loading: "Loading answers…". On failure: "Couldn't load answers" + Retry. Hints and "+ Add answer" appear only once loaded.
+- While loading: "Loading answers…". On failure: "Couldn't load answers" + Retry.
+- Hints and "+ Add answer" appear only once the answers have loaded.
 
 ### Single and multiple choice
 
-- Each answer is a compact row: a correct-marker and the answer text. A correct answer is tinted green with its marker filled and a small "correct" tag.
-- **The marker is a button,** not a native radio or checkbox: `aria-pressed` = correct, accessible name `Correct answer: "11"`. Click, Enter or Space changes the key. Arrow keys do not.
-- **Edit the text:** the text is a button; click it or press Enter on it. It becomes an inline field (plain text, 1–500 characters, trimmed). Enter or ✓ saves, Esc or ✕ cancels, an error shows under the field.
-- **Correct, single choice:** clicking a not-correct answer makes it the one correct answer: one PATCH `is_correct: true`, and the server clears the old one in the same transaction (D12). Clicking the already-correct answer does nothing.
-- **Correct, multiple choice:** clicking toggles that answer. The last correct marker cannot be cleared (the server rejects it with 422): it is disabled with the tooltip "At least one answer must stay correct".
-- **Order and delete (D8):** ↑ ↓ and delete per row. Delete sends at once (no confirmation, as today). The only correct answer's delete is disabled with "Mark another answer correct first" (D14).
-- **"+ Add answer":** opens an inline row in place. Enter creates the answer and keeps the row open, empty and focused, for the next one; Esc or ✕ closes it. The first answer of an empty single-choice question is created correct (D14); every other new answer starts not correct.
+- **The row.** Each answer is a compact row: a correct-marker and the answer text. A correct answer is tinted green, with its marker filled and a small "correct" tag.
+- **The marker** is a button, not a native radio or checkbox.
+  - `aria-pressed` = correct.
+  - Accessible name `Mark "11" correct`. Answer text longer than 40 characters is cut with "…" in every accessible name.
+  - Click, Enter or Space changes the key. Arrow keys do not.
+- **Edit the text.**
+  - The text is a button named `Edit answer "11"`. Click it or press Enter on it, and it becomes an inline field (plain text, 1–500 characters, trimmed).
+  - Enter or ✓ saves; an unchanged value closes silently. Esc or ✕ cancels. An error shows under the field.
+- **Correct, single choice.**
+  - Clicking a not-correct answer makes it the one correct answer: one PATCH `is_correct: true`. The server clears every other correct answer in the same transaction (D12).
+  - Clicking an already-correct answer does nothing, unless another answer is also correct (old data). Then it sends the same PATCH, which leaves only this one correct.
+- **Correct, multiple choice.**
+  - Clicking toggles that answer.
+  - The last correct marker cannot be cleared (the server rejects it with 422). It is disabled with the tooltip "At least one answer must stay correct".
+- **Order and delete (D8).**
+  - Per row: ↑ `Move answer "11" up`, ↓ `Move answer "11" down`, delete `Delete answer "11"`.
+  - Delete sends at once, with no confirmation (as today).
+  - The only correct answer's delete is disabled with "Mark another answer correct first", unless it is the question's only answer (D14).
+- **"+ Add answer"** (accessible name "Add answer to question 1") opens an inline row in place.
+  - Enter creates the answer and keeps the row open, empty and focused for the next one. Esc or ✕ closes it.
+  - The first answer of an empty single-choice question is created correct (D14). Every other new answer starts not correct.
 
 ### Number
 
-- Reads: "Answer **5** · 2 decimals (± 0.005)". The value prints as stored (the canonical string, never exponent notation). Singular "1 decimal". The tolerance is `5·10^-(decimals+1)`, printed with `toFixed(decimals + 1)` (so 6 decimals reads "± 0.0000005", not "5e-7").
-- ✎ opens an inline editor: value and decimals (0–10), today's `validateNumericAnswer`. Enter or ✓ saves both in one PATCH, Esc or ✕ cancels.
+- **Reads:** "Answer **5** · 2 decimals (± 0.005)".
+  - The value is formatted with `Intl.NumberFormat('en-US', { useGrouping: false, maximumSignificantDigits: 15 })`, never in exponent notation.
+  - Singular "1 decimal".
+  - The tolerance is `5·10^-(decimals+1)`, printed with `toFixed(decimals + 1)`. So 6 decimals reads "± 0.0000005", not "5e-7".
+- **Old data:**
+  - A null value reads "Answer not set".
+  - A null `precision` reads "Answer **5** · decimals not set", and the hint shows.
+- **Editing:** ✎ "Edit the answer to question 1" opens an inline editor with two fields, labelled "Answer" and "Decimals" (0–10), checked by today's `validateNumericAnswer`.
+  - The fields start from the formatted value, or empty, and from the decimals, or 0.
+  - Enter or ✓ saves both in one PATCH; an unchanged pair closes silently. Esc or ✕ cancels.
 
 ### Text
 
-- Reads: "Answer **unit vector**". ✎ opens an inline field (1–500 characters, trimmed). Enter or ✓ saves, Esc or ✕ cancels.
+- **Reads:** "Answer **unit vector**". A null value reads "Answer not set".
+- **Editing:** ✎ opens an inline field labelled "Answer" (1–500 characters, trimmed), with today's muted hint "Case-insensitive, trimmed match.".
+  - Enter or ✓ saves; an unchanged value closes silently. Esc or ✕ cancels.
 
 ## Level 3 — the small modals
 
-All three are separate modals stacked on top of the quiz modal through the existing modal stack: focus is trapped in the top modal, Esc closes the top one only, and on close focus returns to the control that opened it.
+All three are separate modals stacked on top of the quiz modal through the existing modal stack.
 
-Shared rules:
-- Close (Cancel, ×, Esc) with changes asks the DirtyGuard prompt (§Unsaved work); without changes it just closes.
-- While Save runs: the editor is read-only, Save shows busy, and Cancel / × / Esc are disabled. Save is also disabled while an upload is running (the 5b rule).
-- On failure: the modal stays open with the text and shows the error inside it.
+**Stacking:**
+- Focus is trapped in the top modal only. `FocusTrap` acts only while its modal is the top one: today its document-level Tab handler does not check this, which this slice fixes.
+- Esc closes the top modal only.
+- On close, focus returns to the control that opened it. If that control is gone, focus goes to its replacement: ✎ ↔ "+ Add explanation" after an explanation is added or removed. Otherwise the §Focus fallback applies.
 
-The three modals:
-- **Question text** (760px wide). Title "Question N", subtitle the type. Body: the Markdown editor with Edit/Preview and the course-assets sidebar, as today. Footer: Cancel, Save. Empty after trimming → an inline error, nothing sent.
-- **Explanation** (560px wide). Title "Explanation · question N", the line "Shown to students after they answer." Body: the Markdown editor in its no-assets mode (D11): Edit/Preview, no sidebar, no drop zone, no paste or drop upload. Preview still renders through the server. Note under it: "Markdown and formulas. Images already in an explanation keep working; new ones cannot be added here." Footer: "Remove explanation" (danger, left; only when one exists; confirms), Cancel, Save. Saving text that is empty after trimming also removes it. Removal sends `explanation_md: null`.
-- **New question** (760px wide), §Adding a question.
+**Shared rules:**
+- Closing (Cancel, ×, Esc) with changes asks the DirtyGuard prompt (§Unsaved work). Without changes the modal just closes.
+- While Save runs:
+  - the editor is read-only;
+  - Save shows busy;
+  - Cancel, × and Esc are disabled.
+- Save is also disabled while an upload is running (the 5b rule).
+- On failure, the modal stays open with the text and shows the error inside it.
+
+**Question text** (760px wide)
+- Title "Question N", subtitle the type.
+- Body: the Markdown editor with Edit/Preview and the course-assets sidebar, as today.
+- Footer: Cancel, Save.
+- Empty after trimming: an inline error, nothing sent.
+
+**Explanation** (560px wide)
+- Title "Explanation · question N", and the line "Shown to students after they answer."
+- Body: the Markdown editor in its no-assets mode (D11). Edit/Preview stay. There is no sidebar, no drop zone and no upload path. The editor's window-level file-drop guard stays, so a dropped file never navigates away. Preview still renders through the server.
+- Note under the editor: "Markdown. Images already in an explanation keep working; new ones cannot be added here."
+- Footer:
+  - "Remove explanation" (danger, on the left), shown only when an explanation exists. It confirms with "Remove the explanation for question N?".
+  - Cancel, Save.
+- Saving text that is empty after trimming also removes the explanation. Removal sends `explanation_md: null`.
+
+**New question** (760px wide): see §Adding a question.
 
 ## Adding a question
 
 1. "+ Add question" opens the **New question** modal directly.
-2. Its first row is the type picker (the existing `QuestionTypePicker`, labels as the chips), defaulting to Single choice. Changing the type only switches the fields below it; it opens nothing.
-3. Below: the question text editor (with assets, as in the Question text modal); for Number also value + decimals; for Text also the answer. The defaults and validity rules are today's add-form rules.
-4. Footer: Cancel, "Add question" (disabled until valid). "Add question" creates the question in one request with all its fields. Cancel creates nothing. Files uploaded before Cancel stay in the course's assets (as with any upload today).
-5. The new card appears at the end of the list and scrolls into view. For a choice question its "+ Add answer" row opens with focus in it; otherwise focus goes to the new card's ✎.
+2. Its first row is the type picker: the existing `QuestionTypePicker`, relabelled to the chip labels "Single choice", "Multiple choice", "Number" and "Text". It defaults to Single choice.
+   - Changing the type only switches the fields below it. It opens nothing, and does not count as a change for the DirtyGuard prompt.
+3. Below the picker:
+   - the question text editor, with assets, as in the Question text modal;
+   - for Number, also "Answer" and "Decimals";
+   - for Text, also "Answer".
+
+   The defaults and validity rules are today's add-form rules.
+4. Footer: Cancel, and "Add question" (disabled until valid).
+   - "Add question" creates the question in one request with all its fields.
+   - Cancel creates nothing. Files uploaded before Cancel stay in the course's assets, as with any upload today.
+5. The new card appears at the end of the list and scrolls into view.
+   - For a choice question, once its answers have loaded, its "+ Add answer" row opens with focus in it. If the load fails, focus goes to the card's ✎.
+   - Otherwise focus goes to the new card's ✎.
 
 ## Backend change (D12)
 
-In `update_option` (`backend/mathion/api/questions.py`):
-- When the update sets `is_correct: true` and the question is `single_choice`, every other option of that question is set to `is_correct: false` in the same transaction. The question's option rows are locked first (`SELECT … FOR UPDATE`), so two concurrent clicks end with exactly one correct answer.
-- `create_option` applies the same rule when it creates a correct option on a single-choice question.
-- Unchanged: the response shape (the updated option), the 422 for clearing the last correct answer, the published-version field rules (`is_correct` stays editable there), the multiple-choice behaviour.
-- Tests: the move clears the old mark; one correct answer after two moves in a row; create-correct clears the old one; multiple choice unaffected; published version allowed; disabled 403 and archived 409 unchanged.
+In `backend/mathion/api/questions.py`, `update_option` (whenever the update touches `is_correct`) and `create_option` (always) do this:
 
-The frontend sends one request per key change and, on success, clears the other marks locally.
+1. **Lock the parent question row first.** Use `select(Question).where(Question.id == …).with_for_update().execution_options(populate_existing=True)`, the `mini_projects.py` pattern. This serialises every create and every correctness change on that question, including inserts. Locking only the option rows would not cover inserts.
+2. **Re-read** the target option and the question's options with `populate_existing=True`, so no stale row is used.
+3. **Apply the rule** for a single-choice question when the target becomes correct: clear every other option with one `UPDATE answer_options SET is_correct = false WHERE question_id = :q AND id <> :o`.
+
+The same lock also closes the existing race on the multiple-choice "at least one correct" check (two unticks at once).
+
+**Unchanged:**
+- the response shape (the updated or created option);
+- the 422 for clearing the last correct answer;
+- the published-version field rules (`is_correct` stays editable there);
+- multiple-choice behaviour apart from the lock.
+
+**Tests:**
+- the move clears the old mark;
+- create-correct clears the old mark;
+- old data with two correct answers becomes one after a PATCH;
+- multiple choice is unaffected;
+- a published version is allowed;
+- disabled (403) and archived (409) are unchanged;
+- **a real concurrency test** with the existing interleave harness (`advisory.interleave_hook`, as in `tests/test_concurrency_*.py`):
+  - two concurrent moves end with exactly one correct answer;
+  - two concurrent correct creates on an empty question end with exactly one.
+
+`test_questions_api.py` `test_update_option_is_correct_published` describes the old two-step swap ("temporarily 2 correct"). Update it to assert that the old answer is cleared after the first step.
+
+The frontend sends one request per key change. On success it clears the other marks locally.
 
 ## Saving, concurrency and errors
 
-- **One request per change**, against the existing endpoints (`renameItem`, `createQuestion`, `updateQuestion`, `deleteQuestion`, `reorderQuestions`, `createOption`, `updateOption`, `deleteOption`, `reorderOptions`). Number value + decimals are one PATCH.
-- **Two locks** (as today's `questionsLocked` / `optionsLocked`):
-  - per quiz: one question add / move / delete at a time;
-  - per question: one answer write at a time (add, move, delete, marker, Number or Text save). Its other answer controls are disabled meanwhile.
-  - Text-only saves (question text, explanation, an answer's text, the title) do not take a lock.
-- **Stale responses** are ignored after the modal closed or the version changed (today's `alive && vid === savedVid` guard). A write already sent still completes on the server.
-- **Errors:**
-  - an edit with a field (inline field, level-3 modal): the error shows inside it, the field stays open with the typed text, no toast;
-  - an action without a field (marker, move, delete, add answer row's create, question delete): a toast with the server's message;
-  - after a failed answer write: that question's answers are re-fetched; after a failed question structure write: the question list is re-fetched (today's `resync`);
-  - 403 or 409: also reload the version tree (`loadAdminTree(…, { force: true })`) so permissions re-derive; controls the new state forbids disappear (D13), and an open edit that can no longer save shows the error and can only be cancelled.
+**One request per change**, against the existing endpoints: `renameItem`, `createQuestion`, `updateQuestion`, `deleteQuestion`, `reorderQuestions`, `createOption`, `updateOption`, `deleteOption`, `reorderOptions`. Number value + decimals are one PATCH.
+
+**Two locks** (like today's `questionsLocked` / `optionsLocked`):
+- **Per quiz:** one question add, move or delete at a time.
+- **Per question:** one answer write at a time: add, move, delete, marker, answer-text save, Number save or Text save. A question's own move and delete also wait for its per-question lock, so they are disabled while one of its answer writes runs.
+- The question text, explanation and title saves take no lock. They still count toward **busy** (the header trash).
+
+**While a request runs:**
+- The control that started it stays enabled, and re-entry is blocked in its handler, so focus is never dropped. Its inputs become `readonly`, never `disabled`.
+- The question's other answer controls are disabled.
+- An inline field that is saving is read-only: ✓ shows busy, Enter is ignored, Esc and ✕ are disabled. It does not count as unsaved for the D10 prompt.
+- **Echoes write back only the fields their request carried.** An answer-text save updates only `text`, a marker save only `is_correct` (plus the local clear of the others), a Number save only value and decimals. This keeps a later write's result from being overwritten by an earlier echo (today's per-field write-back).
+
+**Stale responses** are ignored after the modal has closed or the version has changed (today's `alive && vid === savedVid` guard). A write already sent still completes on the server. A failed write's re-fetch is skipped when its question no longer exists.
+
+**Errors:**
+- An edit with a field (an inline field, a level-3 modal): the error shows inside it, and the field stays open with the typed text. No toast.
+- An action without a field (marker, move, delete, question delete): a toast with the server's message. The server's own texts say "option"; 5d leaves them as they are.
+- After a failed answer write, that question's answers are re-fetched. After a failed question structure write, the question list is re-fetched (today's `resync`).
+- On a 403 or 409, the version tree is also reloaded (`loadAdminTree(…, { force: true })`) so permissions re-derive. Controls the new state forbids disappear (D13).
+  - **An edit that is already open stays mounted whatever the new permissions.** Only its save is blocked: it shows the error and can only be cancelled. Typed text is never lost silently.
 - After a write that changes what the constructor shows (question count, title), the version tree is refreshed, as today.
-- **Announcements (new):** one polite live region in the quiz modal announces moves ("Moved question 2 up", "Moved answer 3 down") and successful saves ("Saved").
+
+**Announcements** (the polite live region):
+- "Question moved to position N of M" and "Answer moved to position N of M" (today's texts);
+- "Saved" after a successful save.
 
 ## Unsaved work
 
 Unsaved work can exist only in an open edit:
-- an inline field whose value differs from the saved one (title, answer text, Number, Text, the "+ Add answer" row with typed text);
-- a level-3 modal whose content differs from what it opened with.
+- an inline field whose value differs from the saved one: the title, an answer text, Number, Text, or the "+ Add answer" row with typed text;
+- a level-3 modal whose content differs from what it opened with. For New question, only the typed fields count; the type does not.
 
-Rules:
-- Every such edit reports to the page's DirtyRegistry (through the item modal's `guardDirty`), so closing the quiz modal, browser Back and in-app navigation all ask the existing DirtyGuard prompt: "Discard unsaved changes and continue?". The same text is used for every discard prompt in 5d.
-- **D10, one inline edit at a time:** while an inline edit holds changes, any other action in the quiz modal first asks the prompt: another inline edit, a ✎ that opens level 3, a marker, a structure button, "+ Add question", the title ✎, deleting the question or answer that holds it. Confirm discards the edit and continues the action; Cancel keeps the edit open. An open inline edit without changes closes silently when another action starts.
-- Esc inside an inline field cancels that field only (`preventDefault`, so the modal stays open).
+**Who owns it.** The quiz body keeps implementing `ItemBodyApi` and owns one **active edit** slot for D10. The header's inline title takes the same slot through the item modal. `discardAll()` (called by the page's discard) closes the active inline edit, any open level-3 modal and the inline title.
+
+**The rules:**
+- **Reporting.** Every edit with changes reports to the page's DirtyRegistry (through the item modal's `guardDirty`). So closing the quiz modal, browser Back and in-app navigation all ask the existing DirtyGuard prompt: "Discard unsaved changes and continue?". Every discard prompt in 5d uses this text.
+- **D10, one inline edit at a time.** While an inline edit holds changes, any other action in the quiz modal first asks the prompt. That includes:
+  - another inline edit;
+  - a ✎ that opens level 3;
+  - a marker or a structure button;
+  - "+ Add question";
+  - the title ✎;
+  - deleting the question or answer that holds the edit.
+
+  Confirm discards the edit and continues the action; Cancel keeps the edit open. An open inline edit without changes closes silently when another action starts.
+- **Order of prompts.** When a published-version key confirm also applies (§Version states), the D10 prompt comes first and the key confirm second.
+- **Esc** inside an inline field cancels that field only (`preventDefault`, so the modal stays open).
 
 ## Focus after each action
 
-- Inline save or cancel: back to the control that opened it (the answer text button, the Number/Text ✎, the title ✎).
-- Level-3 close: back to the ✎ or link that opened it.
-- Move: focus stays on the moved row's same arrow; if that arrow is now disabled (first/last), on the other arrow.
-- Delete an answer: the next answer's text button, else the previous one's, else "+ Add answer".
-- Delete a question: the next card's ✎, else the previous card's, else "+ Add question".
-- Add answer: the add row stays open and focused (§Answers).
-- New question: §Adding a question, step 5.
+- **Inline save or cancel:** back to the control that opened it: the answer text button, the Number/Text ✎ or the title ✎.
+- **Level-3 close:** back to the ✎ or button that opened it, or its replacement (§Level 3).
+- **Move:** after the DOM update (`tick()`), focus is set again on the moved row's same arrow and the card is scrolled to `block: 'nearest'`. If that arrow is now disabled (first/last), focus goes to the other arrow.
+- **Delete an answer:** the next answer's text button, else the previous one's, else "+ Add answer".
+- **Delete a question:** the next card's ✎, else the previous card's, else "+ Add question".
+- **Add answer:** the add row stays open and focused (§Answers).
+- **New question:** §Adding a question, step 5.
+- **Fallback.** Whenever the focused control disappears (Retry succeeded, a 403/409 hid it, its opener is gone), focus goes to that card's ✎, else "+ Add question", else ×.
 
 ## Version states
 
-- **Created:** everything editable.
-- **Published:**
-  - Text stays editable: the title, question text, explanation, answer texts.
-  - Structure is locked: "+ Add question", "+ Add answer", ↑ ↓ and delete of questions and answers are not rendered (D13).
-  - The answer key stays editable but each change asks today's confirmation first: the marker, the Number value or decimals, the Text answer. Text: "This quiz is published. Changing the answer key does not re-score students who already attempted — their recorded scores keep the old key. To re-grade everyone, create a new version instead. Continue?". Cancel sends nothing; a marker stays as it was, an inline Number/Text edit stays open with the typed value.
-- **Archived:** read-only. No edit controls are rendered; cards show rendered text.
-- **Disabled:** read-only, as archived, and cards show the plain Markdown source (`text_md`, `explanation_md`) under today's note "Preview is unavailable…", because the version's assets return 403 (5b D6).
+**Created:** everything is editable.
+
+**Published:**
+- Text stays editable: the title, question text, explanation and answer texts.
+- Structure is locked. "+ Add question", "+ Add answer", and ↑ ↓ and delete of questions and answers are not rendered (D13).
+- The answer key stays editable, but each change asks today's confirmation first. This covers the marker, the Number value or decimals, and the Text answer. The text: "This quiz is published. Changing the answer key does not re-score students who already attempted — their recorded scores keep the old key. To re-grade everyone, create a new version instead. Continue?".
+  - Cancel sends nothing. A marker stays as it was; an inline Number/Text edit stays open with the typed value.
+
+**Archived:** read-only. No edit controls are rendered, and cards show rendered text.
+
+**Disabled:** read-only, as archived. Cards show the plain Markdown source (`text_md`, `explanation_md`) under today's note "Preview is unavailable…", because the version's assets return 403 (5b D6).
 
 ## Code changes
 
-**New** (names indicative; the plan fixes them): the quiz overview body; the question card; the inline answer row (choice) and the inline Number / Text editors; the Question text, Explanation and New question modals; the inline title in the item modal header, for quizzes.
+**New** (names indicative; the plan fixes them):
+- the quiz overview body;
+- the question card;
+- the inline answer row (choice) and the inline Number and Text editors;
+- the Question text, Explanation and New question modals;
+- the inline title in the item modal header, for quizzes.
 
-**Removed:** `QuestionAccordion.svelte`, `OptionRow.svelte` and `lib/quizSave` (used only by the quiz editor and its tests); the quiz draft / one-Save machinery (`QUIZ_SAVE_KEY` / `QUIZ_GUARD_KEY`, the `QuizSaveHub` and its contributors, the quiz branch of the footer Save and ⌘S, the typed add forms and their guard shim); the quiz body's own DirtyRegistry, replaced by reporting to the page's registry through `guardDirty`.
+**Changed:**
+- `MarkdownEditor` gains the no-assets mode (D11).
+- `QuestionTypePicker` is relabelled; its test is updated.
+- `FocusTrap` acts only for the top modal.
+- `ItemEditorModal`:
+  - the quiz has no footer and no body Title row;
+  - its ⌘S handler ignores level-3 panels;
+  - the inline title is added.
 
-**Kept:** the modal shell, stacking and focus trap; `MarkdownEditor` (plus D11); `QuestionTypePicker`; the API helpers in `lib/quizAuthoring.ts` and `validateNumericAnswer`; the page DirtyRegistry and DirtyGuard.
+**Removed:**
+- `QuestionAccordion.svelte`, `OptionRow.svelte` and `lib/quizSave` (used only by the quiz editor, its tests and harness, and gate section (ae)).
+- The quiz draft / one-Save machinery: `QUIZ_SAVE_KEY` / `QUIZ_GUARD_KEY`, the `QuizSaveHub` and its contributors, the quiz branch of the footer Save and ⌘S, and the typed add forms and their guard shim.
+- The quiz body's own DirtyRegistry, replaced by reporting to the page's registry through `guardDirty`.
 
-**Backend:** `update_option` / `create_option` (D12) and their tests.
+**Kept:**
+- the modal shell and stacking;
+- `MarkdownEditor` (plus D11) and `QuestionTypePicker` (relabelled);
+- the API helpers in `lib/quizAuthoring.ts` and `validateNumericAnswer`;
+- `ItemBodyApi`;
+- the page DirtyRegistry and DirtyGuard.
+
+**Backend:** `update_option` and `create_option` (D12) and their tests.
 
 ## Process
 
 The 5c process holds:
-- Test-first per task: vitest (green = exit 0 and no "Errors"/"Unhandled" line), svelte-check (0 errors), the gate; backend tasks through `backend/.venv` pytest.
-- **The user judges the look:** every task that changes the screen ends with agent-browser screenshots in an overlay and needs the user's OK. Screenshots use a demo-course draft; nothing is saved into the user's own draft without asking.
-- Review lanes on the uncommitted diff until clean (Opus and Fable; Codex on selected steps, per the user); minors to a 5d backlog.
-- One commit per task, exact paths, trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Test-first per task: vitest (green = exit 0 and no "Errors"/"Unhandled" line), svelte-check (0 errors), the gate. Backend tasks run pytest through `backend/.venv`.
+- **The user judges the look.** Every task that changes the screen ends with agent-browser screenshots in an overlay and needs the user's OK. Screenshots use a demo-course draft; nothing is saved into the user's own draft without asking.
+- Review lanes on the uncommitted diff until clean: Opus and Fable, plus Codex on selected steps, per the user. Minors go to a 5d backlog.
+- One commit per task, with exact paths and the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
-**The gate.** The 5b quiz sections (accordion, option rows, footer quiz save) are rewritten for the new components. New checks keep the cross-codebase quality rules (tokens instead of literals, no emoji, no rem font sizes, forced-colors scope, focus rings) and the markup shape of the new components, as 5c did. No pixel pins for their own sake.
+**The gate.** The 5b quiz sections (accordion, option rows, footer quiz save; section (ae)) are rewritten for the new components. New checks keep the cross-codebase quality rules (tokens instead of literals, no emoji, no rem font sizes, forced-colors scope, focus rings) and the markup shape of the new components, as 5c did. No pixel pins for their own sake.
 
 ## Testing
 
-- **Backend (D12):** the six cases in §Backend change.
-- **Cards:** rendered text and explanation (present by `explanation_md` trim); ordinal, chip, hints (only after load); the Number "Decimals not set" hint; structure controls absent when published/archived/disabled; plain source when disabled.
-- **Loading:** question list and per-card answers: loading, failure, Retry.
-- **Choice answers:** inline edit save / cancel / error; marker is a button (`aria-pressed`, no arrow-key changes); single choice one PATCH and local clear; already-correct click is a no-op; multiple-choice last mark disabled with reason; add row stays open, first single-choice answer correct; ↑ ↓ delete revealed on hover and focus and always under `hover: none`; only-correct delete disabled.
-- **Number / Text:** display formats (precision 0, 1, 6; null), inline edit, validation, save, cancel.
-- **Level-3 modals:** save, cancel, prompt only with changes, busy freeze, upload blocks Save, required text, explanation remove / empty-save-removes as `null`, no assets in the explanation editor (no sidebar, no drop, no paste upload).
-- **Nested modals:** Tab and Shift+Tab stay in the top modal, Esc closes only it, focus returns to the opener.
-- **Adding:** New question opens directly; type change switches fields only; one create request with all fields; Cancel creates nothing; focus after add.
-- **Concurrency:** the two locks; stale responses after close ignored; 403/409 reload the tree.
-- **Published:** key confirm per change and Cancel behaviour; structure controls absent; text edits save.
-- **Unsaved work:** each edit kind reports dirty; DirtyGuard on close/Back; D10 prompt and the silent close of unchanged edits; Esc in a field keeps the modal open.
-- **Focus:** each rule in §Focus after each action.
-- **Header:** title inline edit keeps the `h2` label; first focus; trash gating; ⌘S swallowed / Save in level 3.
-- **Removed code:** no quiz footer; Page/Video/App footers, Title row and ⌘S unchanged (their tests keep passing).
-- Every existing behaviour test that still applies keeps passing.
+**Backend (D12):** the cases in §Backend change, including the concurrency test.
+
+**Cards:**
+- rendered text and explanation (present when `explanation_md` is non-empty after trimming);
+- ordinal, chip, and hints (only after load), including "More than one correct" and "Decimals not set";
+- links get `target="_blank"`;
+- structure controls absent when published, archived or disabled;
+- plain source when disabled.
+
+**Loading:** for the question list and each card's answers: loading, failure, Retry, and "+ Add question" disabled until loaded.
+
+**Choice answers:**
+- Inline edit: save, unchanged-close, cancel, error.
+- The marker is a button (`aria-pressed`, name `Mark "…" correct`, no arrow-key changes).
+- Single choice:
+  - one PATCH, then the local clear;
+  - an already-correct click is a no-op;
+  - with old two-correct data, the click sends the PATCH.
+- Multiple choice: the last mark is disabled with its reason.
+- Adding: the add row stays open; the first single-choice answer is correct.
+- ↑ ↓ and delete:
+  - revealed on hover and focus, by opacity only;
+  - always shown under `hover: none`;
+  - Shift+Tab from the next row's marker reaches this row's delete.
+- Delete rules: the only correct answer's delete is disabled, unless it is the only answer.
+- Accessible names truncate at 40 characters.
+
+**Number and Text:**
+- display formats: precision 0, 1 and 6; null precision; null value; `1e-7` shown without an exponent;
+- inline edit pre-fill, validation, save, unchanged-close and cancel.
+
+**Level-3 modals:**
+- save, cancel, and the prompt only with changes;
+- the busy freeze;
+- an upload blocks Save;
+- required text;
+- explanation: remove (with its confirm), and an empty save also removes, both sent as `null`;
+- no assets in the explanation editor: no sidebar, no drop upload, and a window drop does not navigate.
+
+**Nested modals:**
+- level 3 mounted inside level 2's DOM;
+- Tab and Shift+Tab stay in the top modal;
+- Esc closes only it;
+- ⌘S saves level 3 only;
+- focus returns to the opener or its replacement.
+
+**Adding:**
+- New question opens directly, with focus on the checked radio;
+- a type change switches fields only and is not dirty;
+- one create request with all fields;
+- Cancel creates nothing;
+- focus after add, including the answer-load failure path.
+
+**Concurrency:**
+- the two locks;
+- the started control keeps focus (not `disabled`);
+- double Enter sends one request;
+- an echo writes only its own fields;
+- stale responses after close are ignored;
+- a failed write's re-fetch is skipped for a deleted question;
+- 403/409 reloads the tree, and an open edit stays mounted.
+
+**Published:**
+- the key confirm on each change, and what Cancel does;
+- the D10 prompt comes before the key confirm;
+- structure controls absent;
+- text edits save.
+
+**Unsaved work:**
+- each edit kind reports dirty;
+- DirtyGuard on close and on Back;
+- the D10 prompt, and the silent close of unchanged edits;
+- a saving field does not prompt;
+- Esc in a field keeps the modal open;
+- `discardAll` closes every open edit.
+
+**Focus:** each rule in §Focus after each action, including the fallback.
+
+**Header:**
+- the inline title keeps the dialog name (✓ ✕ outside the `h2`);
+- first focus;
+- trash gating, including a lock-free text save in flight;
+- ⌘S swallowed, or Save in level 3.
+
+**Removed code:** no quiz footer. The Page, Video and App footers, Title row and ⌘S are unchanged, and their tests keep passing.
+
+Every existing behaviour test that still applies keeps passing.
 
 ## Out of scope
 
 - Formula typesetting anywhere in the app.
-- Changing a question's type after creation (the API has no such field; delete and re-add, as today).
-- Any backend change beyond D12.
+- Changing a question's type after creation. The API has no such field; delete and re-add, as today.
+- Any backend change beyond D12, including the wording of the server's error messages.
 - The student quiz view.
 
 ## Carried to the browser pass
 
-The 5d screens join the 5b/5c Safari pass with the user, together with the 5b carry-overs and the 5c phone-width backlog item (D8's always-shown answer controls on touch screens included).
+The 5d screens join the 5b/5c Safari pass with the user. They go together with the 5b carry-overs and the 5c phone-width backlog item, including D8's always-shown answer controls on touch screens.
