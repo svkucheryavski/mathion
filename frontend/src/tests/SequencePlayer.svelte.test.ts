@@ -105,15 +105,12 @@ describe('SequencePlayer breadcrumb (T1)', () => {
     expect(link!.textContent).toContain('Linear Algebra');
     expect(link!.textContent).not.toContain('←');
 
-    // block segment: ONE .crumb flex-item wrapping a mono B{order} + · title
+    // block segment: ONE .crumb flex-item reading "{order}. {title}", as the
+    // course page numbers its blocks (user, 2026-10-08) — no mono "B1" code.
     const crumb = nav!.querySelector('.crumb');
     expect(crumb).not.toBeNull();
-    const bMono = crumb!.querySelector('.mono');
-    expect(bMono).not.toBeNull();
-    expect(bMono!.classList.contains('mono')).toBe(true);
-    expect(bMono!.textContent).toBe('B1');
-    expect(crumb!.textContent).toContain('Vectors');
-    expect(crumb!.textContent).toContain('·');
+    expect(crumb!.textContent).toBe('1. Vectors');
+    expect(crumb!.querySelector('.mono')).toBeNull();
 
     // Last segment: the sequence TITLE (user, 2026-10-08). The course page no
     // longer shows S{order} codes, so "S1" here would be the only place a

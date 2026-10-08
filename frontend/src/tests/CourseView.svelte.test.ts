@@ -104,6 +104,84 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
   });
 });
 
+// User, 2026-10-08: the round back button (as on the admin versions page) and a
+// course-wide progress summary beside the info text.
+describe('CourseView header and course summary', () => {
+  const it2 = (id: number, type: 'static_page' | 'quiz') =>
+    ({ id, title: `I${id}`, slug: `i${id}`, order: id, type }) as never;
+  const entry = (covered: boolean, score: [number, number] | null) => ({
+    is_covered: covered, time_spent: 0, last_visited_at: null, attempt_count: score ? 1 : 0,
+    max_attempts: 3, last_score: score ? { correct: score[0], total: score[1] } : null, last_answers: null,
+  });
+  function seedCourse(blocks: unknown[], items: Record<string, unknown>, info_html = '<p>Hello</p>') {
+    __test__setSlots({
+      slug: 'course-x', versionId: 1,
+      course: { id: 1, slug: 'course-x', name: 'Course X' },
+      version: { id: 1, state: 'published', info_html, max_quiz_attempts: 3 },
+      blocks: blocks as never, state: { version_id: 1, items: items as never }, miniProjectsByBlockId: {},
+    });
+  }
+  const twoBlocks = [
+    { id: 1, title: 'A', slug: 'a', order: 1, info: '', info_html: '',
+      sequences: [{ id: 11, title: 'S', slug: 's', order: 1, items: [it2(1, 'static_page'), it2(2, 'quiz')] }] },
+    { id: 2, title: 'B', slug: 'b', order: 2, info: '', info_html: '',
+      sequences: [{ id: 21, title: 'T', slug: 't', order: 1, items: [it2(3, 'quiz'), it2(4, 'static_page')] }] },
+  ];
+
+  it('the way back is the round back button, not a "← Courses" text link', async () => {
+    seedCourse(twoBlocks, {});
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const back = target.querySelector('header button.icon-btn.round[data-glyph="back"]') as HTMLButtonElement;
+    expect(back).not.toBeNull();
+    expect(back.getAttribute('aria-label')).toBe('Back to courses');
+    expect(target.querySelector('header')!.textContent).not.toContain('Courses');
+  });
+
+  it('summarises the WHOLE course beside the info: items over every block, quiz score over the quizzes tried', async () => {
+    // 2 of 4 items → 50%; quizzes (3 + 1) / (4 + 4) = 50%.
+    seedCourse(twoBlocks, { '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(false, [1, 4]) });
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const top = target.querySelector('.top') as HTMLElement;
+    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['info', 'summary']);
+    const sum = top.querySelector('.summary') as HTMLElement;
+    expect((sum.querySelector('.sp') as HTMLElement).textContent).toBe('50%');
+    expect((sum.querySelector('.fill') as HTMLElement).style.width).toBe('50%');
+    expect((sum.querySelector('.sq') as HTMLElement).textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz score 50%');
+    expect(sum.querySelector('.sq svg polyline')).not.toBeNull();
+    // The figures are aria-hidden; one sentence states them for screen readers.
+    expect((sum.querySelector('.sr-only') as HTMLElement).textContent)
+      .toBe('Your progress: 2 of 4 items completed, quiz score 50%.');
+  });
+
+  it('no info text: the summary still shows, alone at the top', async () => {
+    seedCourse(twoBlocks, {}, '');
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const top = target.querySelector('.top') as HTMLElement;
+    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['summary']);
+    expect((top.querySelector('.sq') as HTMLElement).textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz score –');
+    // No check mark beside a dash: the row chip's "Quiz –" carries none either.
+    expect(top.querySelector('.sq svg')).toBeNull();
+  });
+
+  it('a course with no quizzes shows no quiz line', async () => {
+    seedCourse([{ ...twoBlocks[0], sequences: [{ id: 11, title: 'S', slug: 's', order: 1, items: [it2(1, 'static_page')] }] }], {});
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    expect(target.querySelector('.summary .sq')).toBeNull();
+    expect((target.querySelector('.summary .sr-only') as HTMLElement).textContent).toBe('Your progress: 0 of 1 item completed.');
+  });
+
+  it('no blocks: no summary (nothing to measure)', async () => {
+    seedCourse([], {});
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    expect(target.querySelector('.summary')).toBeNull();
+  });
+});
+
 describe('CourseView 9d states (Slice-4 T2)', () => {
   it('loading: Skeleton with 4 rows while loadCourse is in flight', () => {
     vi.mocked(loadCourse).mockReturnValueOnce(new Promise<void>(() => {}));

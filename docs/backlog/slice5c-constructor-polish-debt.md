@@ -96,3 +96,27 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **Player `h1` keeps `class="seq-title"` with no rule.** Kept as the tests' and the gate SIG's hook; harmless. (Opus lane, r1.)
 - **Breadcrumb with no block crumb** (no separator before the title) is unreachable: `currentBlock` is found from the same blocks the sequence is found in, so it exists whenever the sequence renders. (Opus lane, r1; checked.)
 - **`VersionState` omits `current_item_id`.** `StateJsonResponse` sends it (always `null` today); nothing reads it, and some fixtures add it with `as never`. Declare `current_item_id: number | null` when next touched. (Opus lane, r2.)
+
+## Student-view follow-up 2 (2026-10-08) — review-lane minors, deferred
+
+- **CourseView CSS has no gate pin** (both lanes): `h1 {font-size:18px}`, `.top` flex row and the
+  `@media (max-width:640px)` column stack are unpinned; only the round back-button markup is. A small
+  parse-based CourseView inventory like section (k) would hold them.
+- **Phone width is tight** (both lanes): at 390px a row/header title gets ~90-100px beside the 80px bar +
+  86px chip; 15px/600 block titles wrap to two lines, and a course with NO quizzes still reserves the
+  empty 86px chip slot on every line. Candidate: `@media (max-width:560px) .quiz-chip.empty { flex-basis:0 }`
+  (+ gap compensation) or a narrower chip. Decide during the Safari/phone pass.
+- **Heading / region names carry the progress phrase** (both lanes): the header button's aria-label is
+  also the `<h2>` name and, via `aria-labelledby`, the panel region name ("1. Vectors, 2 of 3 items
+  completed, quiz score 50%, region"). Alternative: `aria-describedby` to a hidden span keeps the
+  heading short. Kept because it is informative and the sr-only span form mis-announced in Chrome.
+- **Card / header for blocks with no items** (Opus): shows "0%" and announces "0 of 0 items completed".
+  Consider gating the card on `courseP.total > 0`.
+- **Empty block title** (Fable): the name would start "1. , 2 of 3 …"; MiniProjectLink falls back to
+  "Untitled block", BlockGroup does not (pre-existing visually).
+- **CourseProgress `.sr-only` has no positioned ancestor** (Fable): resolves against the ICB; harmless.
+  `.summary { position: relative }` would keep it local (gate pin changes).
+- **Test gaps** (Opus): no CourseView test for info text with zero blocks (the `{:else if}` branch);
+  ProgressMeter chip test re-renders after `unmount` without nulling `component`.
+- `theme-default.css` `--ordinal` comment says "the list order carries the position"; on the student
+  page the header aria-label now states "1. Title" instead. Reword when next touched.

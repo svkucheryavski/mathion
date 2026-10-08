@@ -7,6 +7,9 @@
   import EmptyState from '../components/ui/EmptyState.svelte';
   import ErrorState from '../components/ui/ErrorState.svelte';
   import Button from '../components/ui/Button.svelte';
+  import IconButton from '../components/ui/IconButton.svelte';
+  import CourseProgress from '../components/course/CourseProgress.svelte';
+  import { progressOf } from '../lib/progress';
 
   let { courseSlug }: { courseSlug: string } = $props();
 
@@ -26,6 +29,13 @@
       })
       .finally(() => { loading = false; });
   });
+
+  // The course-wide totals for the summary card: every item in every block.
+  const courseP = $derived(
+    currentCourse.value
+      ? progressOf(currentCourse.value.blocks.flatMap((b) => b.sequences.flatMap((s) => s.items)), currentCourse.value.state)
+      : null,
+  );
 
   // Page-level error copy (Slice-4 §2): the three branches, text verbatim.
   const errorTitle = $derived.by(() => {
@@ -52,11 +62,20 @@
       {/snippet}
     </ErrorState>
   {:else if currentCourse.value}
+    <!-- The admin versions page's heading: round back button + 18px title. -->
     <header>
-      <Button variant="ghost" onclick={() => navigate('/courses')}>← Courses</Button>
+      <IconButton round glyph="back" title="Back to courses" onclick={() => navigate('/courses')} />
       <h1>{currentCourse.value.course.name}</h1>
     </header>
-    {#if currentCourse.value.version.info_html}
+    {#if currentCourse.value.blocks.length > 0 && courseP}
+      <!-- Info text left, the course summary card right (user, 2026-10-08). -->
+      <div class="top">
+        {#if currentCourse.value.version.info_html}
+          <div class="info">{@html currentCourse.value.version.info_html}</div>
+        {/if}
+        <CourseProgress p={courseP} />
+      </div>
+    {:else if currentCourse.value.version.info_html}
       <div class="info">{@html currentCourse.value.version.info_html}</div>
     {/if}
     {#if currentCourse.value.blocks.length === 0}
@@ -71,6 +90,13 @@
 
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-3); }
+  /* The admin versions page's title size (VersionsPage .heading h1). */
+  h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
   .info { color: var(--muted); margin: var(--space-3) 0; }
+  .top { display: flex; align-items: flex-start; gap: 24px; margin-bottom: var(--space-3); }
+  .top .info { flex: 1 1 auto; min-width: 0; margin: 0; }
+  @media (max-width: 640px) {
+    .top { flex-direction: column; gap: var(--space-3); }
+  }
 </style>

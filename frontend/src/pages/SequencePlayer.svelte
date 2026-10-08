@@ -163,7 +163,8 @@
     </a>
     {#if currentBlock}
       <span class="sep" aria-hidden="true">/</span>
-      <span class="crumb"><span class="mono">B{currentBlock.order}</span> · {currentBlock.title}</span>
+      <!-- "1. Title", as the course page numbers its blocks (user, 2026-10-08). -->
+      <span class="crumb">{currentBlock.order}. {currentBlock.title}</span>
       <span class="sep" aria-hidden="true">/</span>
     {/if}
     <!-- Ends with the sequence TITLE, in bold (user, 2026-10-08): the course page

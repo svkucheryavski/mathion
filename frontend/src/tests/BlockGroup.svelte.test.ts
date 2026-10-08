@@ -317,20 +317,78 @@ describe('BlockGroup', () => {
     expect(panel.textContent).not.toContain('Read this first.');
   });
 
-  it('splits "B{order}. {title}" into a mono badge and a title, with no trailing period', () => {
-    // A rendered-copy change: `B1. Block 42` becomes `B1 Block 42`. The badge is
-    // ref 1565, the twin of the S-badge SequenceLink renders.
+  it('numbers the block "1." like the admin editor — a light, aria-hidden ordinal; no B-badge', () => {
+    // User, 2026-10-08: "B1" was the last structure code a student saw (the
+    // S-codes went first). The visible ordinal is aria-hidden; the button's
+    // aria-label states "1. Title" in words (the blocks are sibling sections,
+    // not a list, so nothing else would announce the number).
     const { btn } = mountBlock();
-    const badge = btn.querySelector('.badge') as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe('B1');
-    // The mono face comes from the GLOBAL `.mono` utility (base.css:10), which
-    // jsdom cannot see as CSS — so the class is the pin.
-    expect(badge.classList.contains('mono')).toBe(true);
-    // The header carries the badge and the title and NOTHING else: the chevron is
-    // an SVG and contributes no text, so any added glyph or restored period shows
-    // up here. (The T7 lesson: an element-only check cannot see a text node.)
-    expect(btn.textContent!.replace(/\s+/g, ' ').trim()).toBe('B1 Block 42');
-    expect(target.textContent).not.toContain('B1.');
+    expect(btn.querySelector('.badge')).toBeNull();
+    const num = btn.querySelector('.num') as HTMLElement;
+    expect(num.textContent).toBe('1.');
+    expect(num.getAttribute('aria-hidden')).toBe('true');
+    expect((btn.querySelector('.acc-title') as HTMLElement).textContent).toBe('Block 42');
+    expect(target.textContent).not.toContain('B1');
+  });
+
+  // Items for the block-total tests: sequence 101 holds items 1 (page) and
+  // 2 (quiz), sequence 102 holds item 3 (quiz). State in the literal API shape.
+  const it3 = (id: number, type: 'static_page' | 'quiz') =>
+    ({ id, title: `I${id}`, slug: `i${id}`, order: id, type }) as SequenceContent['items'][number];
+  const totalsBlock = (): BlockContent => ({
+    ...BASE_BLOCK,
+    sequences: [
+      { ...makeSequence(101, 1), items: [it3(1, 'static_page'), it3(2, 'quiz')] },
+      { ...makeSequence(102, 2), items: [it3(3, 'quiz')] },
+    ],
+  });
+  const entry = (covered: boolean, score: [number, number] | null) => ({
+    is_covered: covered, time_spent: 0, last_visited_at: null, attempt_count: score ? 1 : 0,
+    max_attempts: 3, last_score: score ? { correct: score[0], total: score[1] } : null, last_answers: null,
+  });
+  const totalsState: VersionState = {
+    version_id: 1,
+    items: { '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(false, [1, 4]) },
+  };
+  function mountTotals() {
+    component = mount(BlockGroup, {
+      target,
+      props: { courseSlug: 'course-a', block: totalsBlock(), state: totalsState, mpByBlockId: {} },
+    });
+    flushSync();
+    return target.querySelector('header h2 button.acc') as HTMLButtonElement;
+  }
+
+  it('shows the BLOCK totals in the header: items over every sequence, quiz score over the quizzes tried', () => {
+    // 2 of 3 items → 66%; quizzes (3 + 1) / (4 + 4) = 50%.
+    const btn = mountTotals();
+    const kids = Array.from(btn.children).map((e) => e.getAttribute('class')!.split(' ')[0]);
+    expect(kids).toEqual(['num', 'acc-title', 'progress', 'quiz-chip', 'chev']);
+    expect((btn.querySelector('.progress .pct') as HTMLElement).textContent).toBe('66%');
+    expect((btn.querySelector('.quiz-chip') as HTMLElement).textContent!.trim()).toBe('Quiz 50%');
+    // On the tinted strip the chip takes the light fill.
+    expect(btn.querySelector('.quiz-chip')!.classList.contains('on-strip')).toBe(true);
+  });
+
+  it('states the block totals in words as the button name, for screen readers', () => {
+    // The bar and chip are aria-hidden, so the name carries the phrase. An
+    // aria-label (SequenceLink's form), not a visually hidden span: Chrome
+    // blockifies an absolutely positioned span and announced "Title , 2 of 3".
+    // It starts with the visible title, so voice control still matches it.
+    const btn = mountTotals();
+    // The "1." is aria-hidden as a visual mark but IS in the name (Opus lane):
+    // the blocks are sibling sections, not a list, so nothing else states it,
+    // and the player crumb announces "1. Title" too.
+    expect(btn.getAttribute('aria-label')).toBe('1. Block 42, 2 of 3 items completed, quiz score 50%');
+    expect(btn.querySelector('.sr-only')).toBeNull();
+  });
+
+  it('keeps the totals in the header when the block is collapsed', () => {
+    const btn = mountTotals();
+    btn.click();
+    flushSync();
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    expect((btn.querySelector('.progress .pct') as HTMLElement).textContent).toBe('66%');
+    expect((btn.querySelector('.quiz-chip') as HTMLElement).textContent!.trim()).toBe('Quiz 50%');
   });
 });

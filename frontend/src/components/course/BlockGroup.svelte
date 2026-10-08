@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { BlockContent, VersionState, StudentMiniProjectListItem } from '../../lib/types';
+  import { progressOf, progressPhrase } from '../../lib/progress';
   import SequenceLink from './SequenceLink.svelte';
   import MiniProjectLink from './MiniProjectLink.svelte';
+  import ProgressMeter from './ProgressMeter.svelte';
 
   let {
     courseSlug,
@@ -23,6 +25,16 @@
   // two new `state_referenced_locally` ones.
   const btnId = $derived(`block-${block.id}-acc`);
   const panelId = $derived(`block-${block.id}-panel`);
+  // The block's totals over every sequence's items (user, 2026-10-08), shown in
+  // the header whether the block is open or closed — a subtotal above its rows.
+  const p = $derived(progressOf(block.sequences.flatMap((s) => s.items), vstate));
+  // The button's name: the title, then the totals in words (the bar and chip
+  // are aria-hidden). An aria-label as on SequenceLink, not a visually hidden
+  // span: Chrome blockifies an absolutely positioned span and read "Title , …".
+  // It starts with the visible "1. Title", so voice control still matches it.
+  // The number is in the name although `.num` is aria-hidden (Opus lane): the
+  // blocks are sibling sections, not a list, so nothing else states it.
+  const label = $derived(`${block.order}. ${block.title}, ${progressPhrase(p)}`);
 </script>
 
 <section class="block">
@@ -38,15 +50,15 @@
         class="acc"
         aria-expanded={expanded}
         aria-controls={panelId}
+        aria-label={label}
         onclick={() => (expanded = !expanded)}
       >
-        <!-- `B{order}` is a badge (ref 1565), not a prefix: the header used to
-             render one combined `B{order}. {title}` string. No trailing period —
-             the visible copy becomes `B1 Vectors`. Mono via the GLOBAL `.mono`
-             utility (base.css:10). (Its old twin, SequenceLink's S-badge, became an
-             open-book icon on 2026-10-08; block badges stay.) -->
-        <span class="badge mono">B{block.order}</span>
+        <!-- "1." like the admin editor (user, 2026-10-08): "B1" was the last
+             structure code a student saw. A light ordinal, aria-hidden: the
+             button's aria-label states "1. Title" in words. -->
+        <span class="num" aria-hidden="true">{block.order}.</span>
         <span class="acc-title">{block.title}</span>
+        <ProgressMeter {p} onStrip />
         <!-- One down-chevron, rotated when collapsed. A STATIC icon would drop the
              only visible collapsed cue, because `{expanded ? '▾' : '▸'}` encoded
              the state as direction and `aria-expanded` alone is invisible.
@@ -155,15 +167,15 @@
     flex: 1;
     min-width: 0;
   }
-  /* 14px explicitly: base.css:17 sets h2 to 15px, and the title inherits from
-     here (ref 1566). The badge overrides back down to 11px/500 below. */
+  /* 15px, the admin block-title size (user, 2026-10-08; was 14px, ref 1566).
+     The meter cells set their own sizes. */
   .acc {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 10px; /* ref 1564, badge↔title */
+    gap: 10px; /* ref 1564 */
     text-align: left;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     /* So the global :focus-visible halo (base.css:21-25) follows the card corner
        instead of drawing square. Exactly what D5 added to ItemIcon's button, and
@@ -180,18 +192,24 @@
      the `.chev` rule below it sits correctly at 13px in every case, and both are
      exact no-ops at ordinary title lengths — the short-title measurements are
      identical with and without them. The mirror image of the fix T7 needed on
-     SequenceLink's `.row-title`, where the title collapsed instead. */
+     SequenceLink's `.row-title`, where the title collapsed instead.
+     `flex: 1 1 auto` (2026-10-08): the title takes the free space, so the
+     totals sit in the bar/chip columns right before the chevron. */
   .acc-title {
+    flex: 1 1 auto;
     min-width: 0;
+    /* The totals sit to the right now: a long unbroken word must wrap, not
+       paint over the bar and chip (the admin AccordionHeader .title does too). */
+    overflow-wrap: anywhere;
   }
-  /* ref 1565. Its old twin, SequenceLink's `S{order}` badge, is gone (2026-10-08). */
-  .badge {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--primary);
-    background: var(--primary-soft);
-    padding: 2px 6px;
-    border-radius: var(--radius-pill);
+  /* The admin `.num` (AccordionHeader): 15px/600 in `--ordinal`, lighter than
+     `--muted` on purpose (decorative, aria-hidden). The -4px pulls the title in
+     to the admin's 6px spacing from the button's 10px gap. */
+  .num {
+    flex: none;
+    margin-right: -4px;
+    color: var(--ordinal);
+    font-variant-numeric: tabular-nums;
   }
   /* `color` is load-bearing: deleting the old `.toggle { color: var(--muted) }`
      and leaving this unstyled lets it inherit `--text` through reset.css:7's

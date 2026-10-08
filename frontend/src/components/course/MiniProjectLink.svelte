@@ -62,7 +62,9 @@
     display: flex;
     align-items: center;
     gap: 10px; /* ref 1572 */
-    padding: 8px 12px; /* ref 1572 */
+    /* The same 35px right edge as SequenceLink (the block header chevron's
+       width), so the status pill ends on the bar/chip column line. */
+    padding: 8px 35px 8px 12px;
     border-bottom: 1px solid var(--border-soft);
     color: var(--text);
   }
@@ -109,8 +111,10 @@
   .row-title {
     flex: 1 1 auto;
     min-width: 0;
-    font-size: 13.5px;
-    font-weight: 600;
+    /* A long unbroken word wraps instead of painting over the meter/pill. */
+    overflow-wrap: anywhere;
+    font-size: 14.5px;
+    font-weight: 400;
     color: var(--text);
   }
 </style>

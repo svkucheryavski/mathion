@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1373
+EXPECTED_CHECKS=1381
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -625,6 +625,10 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            # reading the rule as correct.
            'src/components/course/BlockGroup.svelte',
            'src/components/course/StatusPill.svelte',
+           # Student-view follow-up 2 (2026-10-08): the bar + chip pair and the
+           # course summary card are graded in section (j); same guard.
+           'src/components/course/ProgressMeter.svelte',
+           'src/components/course/CourseProgress.svelte',
            # The four components of the close-out. Computing TOKENS without them
            # left exactly two of their tokens unguarded: --btn-pad-sm (the T2
            # `.opt` padding, ref 2126) and --faint (the T1 `.crumbs .sep`, ref
@@ -1290,10 +1294,17 @@ const SPEC = {
   "ItemMark.svelte":        { nodes: BASE,                     tags: ["span", "svg", "line", "polygon", "polyline", "circle", "path"] },
   "ItemIcon.svelte":        { nodes: BASE,                     tags: ["button"] },
   // Student-view follow-up (user, 2026-10-08): the mark chain (EachBlock) is
-  // gone; a progress bar and a quiz chip (with its check svg) replace it. The
-  // fill width is per-row data -- the CourseCard `styleOn` form, pinned the same way.
-  "SequenceLink.svelte":    { nodes: BASE, tags: ["a", "span", "svg", "polyline"],
-                              styleOn: { "span:fill.class:done": "style=\"width:{barPct}%\"" } },
+  // gone; a progress bar and a quiz chip replace it. Follow-up 2 moved the pair
+  // into ProgressMeter (shared with the block header), so the row is glyph +
+  // title + component and carries no inline style any more.
+  "SequenceLink.svelte":    { nodes: BASE, tags: ["a", "span"] },
+  // The bar + chip pair. The fill width is per-row data -- the CourseCard
+  // `styleOn` form, pinned the same way.
+  "ProgressMeter.svelte":   { nodes: BASE, tags: ["span", "svg", "polyline"],
+                              styleOn: { "span:fill.class:done": "style=\"width:{p.barPct}%\"" } },
+  // The course summary card (follow-up 2): the same fill, same pin.
+  "CourseProgress.svelte":  { nodes: BASE, tags: ["div", "p", "span", "svg", "polyline", "b"],
+                              styleOn: { "span:fill.class:done": "style=\"width:{p.barPct}%\"" } },
   "MiniProjectLink.svelte": { nodes: BASE,                     tags: ["a", "span"] },
   // T8a allowed `HtmlTag` for the `{@html block.info_html}`; Slice-5c D7 removed
   // block info from every screen, so an `{@html}` here now reds.
@@ -1450,12 +1461,21 @@ const SIG = {
   "SequenceLink.svelte":
     ["a:row[class=\"row\" href aria-label onclick]",
      "span:seq-glyph[class=\"seq-glyph\" aria-hidden]", "ItemMark:[type=\"sequence\"]",
-     "span:row-title[class=\"row-title\"]", "span:progress[class=\"progress\" aria-hidden]",
+     "span:row-title[class=\"row-title\"]", "ProgressMeter:[{p}]"],
+  "ProgressMeter.svelte":
+    ["span:progress[class=\"progress\" aria-hidden]",
      "span:track[class=\"track\"]", "span:fill.class:done[class=\"fill\"]",
      "span:pct.mono[class=\"pct mono\"]",
-     "span:quiz-chip.class:none.class:empty[class=\"quiz-chip\" aria-hidden]", "#if:",
+     "span:quiz-chip.class:on-strip.class:none.class:empty[class=\"quiz-chip\" aria-hidden]", "#if:",
      "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:"],
+  "CourseProgress.svelte":
+    ["div:summary[class=\"summary\"]", "p:sl[class=\"sl\" aria-hidden]",
+     "div:sb[class=\"sb\" aria-hidden]", "span:track[class=\"track\"]",
+     "span:fill.class:done[class=\"fill\"]", "span:sp[class=\"sp\"]", "#if:",
+     "p:sq[class=\"sq\" aria-hidden]", "#if:",
+     "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "b:", "p:sr-only[class=\"sr-only\"]"],
   "MiniProjectLink.svelte":
     ["a:row.row-mp[class=\"row row-mp\" href aria-label]",
      "span:row-glyph[class=\"row-glyph\" aria-hidden]", "ItemMark:[type=\"mini_project\"]",
@@ -1466,7 +1486,7 @@ const SIG = {
   "SequencePlayer.svelte":
     ["#snippet:crumbs", "nav:crumbs[class=\"crumbs\" aria-label]", "a:[href onclick]", "#if:",
      "span:sep[class=\"sep\" aria-hidden]", "span:crumb[class=\"crumb\"]",
-     "span:mono[class=\"mono\"]", "span:sep[class=\"sep\" aria-hidden]",
+     "span:sep[class=\"sep\" aria-hidden]",
      "span:current[class=\"current\" aria-current=\"page\"]", "div:page[class=\"page\"]", "#if:",
      "Skeleton:", "#else:", "#if:", "ErrorState:[variant=\"page\" title message={errorMessage}]",
      "#snippet:action", "Button:[variant=\"secondary\" onclick]", "#else:", "#if:",
@@ -1578,8 +1598,9 @@ const SIG = {
      "span:sr-only[class=\"sr-only\"]"],
   "BlockGroup.svelte":
     ["section:block[class=\"block\"]", "header:", "h2:",
-     "button:acc[id class=\"acc\" aria-expanded aria-controls onclick]",
-     "span:badge.mono[class=\"badge mono\"]", "span:acc-title[class=\"acc-title\"]",
+     "button:acc[id class=\"acc\" aria-expanded aria-controls aria-label onclick]",
+     "span:num[class=\"num\" aria-hidden]", "span:acc-title[class=\"acc-title\"]",
+     "ProgressMeter:[{p} onStrip]",
      "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
      "ul:", "#each:", "li:",
@@ -1597,12 +1618,18 @@ const SIG = {
 const TEXT = {
   "ItemMark.svelte": [],
   "ItemIcon.svelte": [],
-  "SequenceLink.svelte":
-    ["span:row-title:{expr}", "span:pct.mono:{expr}", "span:pct.mono:%",
-     "span:quiz-chip.class:none.class:empty:Quiz", "span:quiz-chip.class:none.class:empty:{expr}",
-     "span:quiz-chip.class:none.class:empty:%", "span:quiz-chip.class:none.class:empty:Quiz –"],
+  "SequenceLink.svelte": ["span:row-title:{expr}"],
+  "ProgressMeter.svelte":
+    ["span:pct.mono:{expr}", "span:pct.mono:%",
+     "span:quiz-chip.class:on-strip.class:none.class:empty:Quiz",
+     "span:quiz-chip.class:on-strip.class:none.class:empty:{expr}",
+     "span:quiz-chip.class:on-strip.class:none.class:empty:%",
+     "span:quiz-chip.class:on-strip.class:none.class:empty:Quiz –"],
+  "CourseProgress.svelte":
+    ["p:sl:Your progress", "span:sp:{expr}", "span:sp:%", "p:sq:Quiz score", "b::{expr}",
+     "p:sr-only:Your progress:", "p:sr-only:{expr}", "p:sr-only:."],
   "MiniProjectLink.svelte": ["span:row-title:Mini-project:", "span:row-title:{expr}"],
-  "BlockGroup.svelte": ["span:badge.mono:B", "span:badge.mono:{expr}", "span:acc-title:{expr}"],
+  "BlockGroup.svelte": ["span:num:{expr}", "span:num:.", "span:acc-title:{expr}"],
   // No LITERAL entry on purpose -- the two below are `{expr}` markers. BOTH the
   // glyph and the label come through `{meta.token}` / `{meta.label}` from
   // LATEST_STATUS_META, so a LITERAL appearing here means someone hard-coded
@@ -1620,7 +1647,7 @@ const TEXT = {
   // only the cheaper hole: adding or removing an expression, which used to cost
   // nothing at all (codex, close-out round 3).
   "SequencePlayer.svelte":
-    ["a::{expr}", "span:sep:/", "span:mono:B", "span:mono:{expr}", "span:crumb:·",
+    ["a::{expr}", "span:sep:/", "span:crumb:{expr}", "span:crumb:.",
      "span:crumb:{expr}", "span:sep:/", "span:current:{expr}", "Button::Back to course",
      "Button::Back to course", "h1:seq-title.sr-only:{expr}", "h1:seq-title.sr-only:{expr}",
      "span:counter:Item", "span:counter:{expr}", "span:counter:of", "span:counter:{expr}",
@@ -1922,6 +1949,7 @@ for (const f of process.argv.slice(1)) {
 process.exit(bad);
 ' src/components/course/ItemMark.svelte src/components/course/ItemIcon.svelte \
   src/components/course/SequenceLink.svelte src/components/course/MiniProjectLink.svelte \
+  src/components/course/ProgressMeter.svelte src/components/course/CourseProgress.svelte \
   src/components/course/BlockGroup.svelte src/components/course/StatusPill.svelte \
   src/pages/SequencePlayer.svelte src/components/items/QuizItem.svelte \
   src/components/items/quiz/SingleChoiceQuestion.svelte \
@@ -2057,13 +2085,21 @@ echo
 echo "--- (j) T7 rows ---"
 # Anchors: each is authored by exactly ONE component and slice-introduced.
 # `.row` deliberately is NOT an anchor -- it is the 2-way collision itself.
-# SequenceLink anchors on `.track` since the student-view follow-up (user,
-# 2026-10-08) replaced its `.chain` with a progress bar.
-grep -qE '^[[:space:]]*\.track[[:space:]]*[,{]' src/components/course/SequenceLink.svelte \
-  || { echo "FAIL  .track is not authored as a rule in SequenceLink.svelte"; fail=1 }
+# Student-view follow-up 2 (user, 2026-10-08): the bar + chip pair moved out of
+# SequenceLink into ProgressMeter (shared with the block header), and the course
+# summary card CourseProgress joined. `.track`/`.fill` now exist in BOTH meter
+# components, so neither is an anchor; each component anchors on a class only
+# it authors: SequenceLink `.seq-glyph`, MiniProjectLink `.row-glyph`,
+# ProgressMeter `.quiz-chip`, CourseProgress `.summary`.
+grep -qE '^[[:space:]]*\.seq-glyph[[:space:]]*[,{]' src/components/course/SequenceLink.svelte \
+  || { echo "FAIL  .seq-glyph is not authored as a rule in SequenceLink.svelte"; fail=1 }
 grep -qE '^[[:space:]]*\.row-glyph[[:space:]]*[,{]' src/components/course/MiniProjectLink.svelte \
   || { echo "FAIL  .row-glyph is not authored as a rule in MiniProjectLink.svelte"; fail=1 }
-for cls in track row-glyph; do
+grep -qE '^[[:space:]]*\.quiz-chip[[:space:]]*[,{]' src/components/course/ProgressMeter.svelte \
+  || { echo "FAIL  .quiz-chip is not authored as a rule in ProgressMeter.svelte"; fail=1 }
+grep -qE '^[[:space:]]*\.summary[[:space:]]*[,{]' src/components/course/CourseProgress.svelte \
+  || { echo "FAIL  .summary is not authored as a rule in CourseProgress.svelte"; fail=1 }
+for cls in seq-glyph row-glyph quiz-chip summary; do
   owners=(${(f)"$(grep -rlE "^[[:space:]]*\.${cls}[[:space:]]*[,{]" src --include='*.svelte')"})
   if [[ ${#owners[@]} -eq 1 ]]; then
     echo "PASS  .${cls} is authored by exactly one component (${owners[1]:t})"
@@ -2071,17 +2107,20 @@ for cls in track row-glyph; do
     echo "FAIL  .${cls} is authored by ${#owners[@]} components: $owners"; fail=1
   fi
 done
-sq=(${(f)"$(grep -ohE '\.track\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+sq=(${(f)"$(grep -ohE '\.seq-glyph\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 mp=(${(f)"$(grep -ohE '\.row-glyph\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
-if [[ ${#sq[@]} -ne 1 || ${#mp[@]} -ne 1 || ${sq[1]} == ${mp[1]} ]]; then
-  echo "FAIL  T7 anchors not dist-unique/distinct (.track=${#sq[@]}: $sq, .row-glyph=${#mp[@]}: $mp)"; fail=1
+pm=(${(f)"$(grep -ohE '\.quiz-chip\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+cp=(${(f)"$(grep -ohE '\.summary\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+if [[ ${#sq[@]} -ne 1 || ${#mp[@]} -ne 1 || ${#pm[@]} -ne 1 || ${#cp[@]} -ne 1 \
+      || $(print -l ${sq[1]} ${mp[1]} ${pm[1]} ${cp[1]} | sort -u | wc -l) -ne 4 ]]; then
+  echo "FAIL  T7 anchors not dist-unique/distinct (.seq-glyph=${#sq[@]}: $sq, .row-glyph=${#mp[@]}: $mp, .quiz-chip=${#pm[@]}: $pm, .summary=${#cp[@]}: $cp)"; fail=1
 else
-  echo "PASS  T7 anchors resolve to one distinct hash each (.track ${sq[1]}, .row-glyph ${mp[1]})"
-  python3 - ${sq[1]} ${mp[1]} ${CSS[@]} <<'T7EOF'
+  echo "PASS  T7 anchors resolve to one distinct hash each (.seq-glyph ${sq[1]}, .row-glyph ${mp[1]}, .quiz-chip ${pm[1]}, .summary ${cp[1]})"
+  python3 - ${sq[1]} ${mp[1]} ${pm[1]} ${cp[1]} ${CSS[@]} <<'T7EOF'
 import re, sys
 from collections import Counter
-sq_h, mp_h = sys.argv[1], sys.argv[2]
-css = '\n'.join(open(p).read() for p in sys.argv[3:])
+sq_h, mp_h, pm_h, cp_h = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+css = '\n'.join(open(p).read() for p in sys.argv[5:])
 bad = 0
 
 def rules(text, anc=()):
@@ -2118,7 +2157,9 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 # Both rows' `.row` and `.row-title` are stated in FULL and identically, because
 # "the two row kinds agree" IS the pin -- they are <li> siblings in one BlockGroup
 # panel <ul>, and a drift in either makes the list read as two unrelated lists.
-ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 12px;'
+# Right padding 35px = header padding 12 + chevron 13 + gap 10, so the row
+# bar/chip columns sit exactly under the block header totals (follow-up 2).
+ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 35px 8px 12px;'
          'border-bottom:1px solid var(--border-soft);color:var(--text)')
 HOVER = 'background:var(--primary-soft);text-decoration:none'
 # An INSET ring, not the global outset one. base.css:21-25 gives every focusable
@@ -2142,7 +2183,11 @@ FCRING = 'outline:2px solid Highlight;outline-offset:-2px'
 # pill on the mini-project row), flex-grow stops applying and a basis-zero title
 # resolves to 0px. The auto basis shares the shrink instead. A revert to `flex:1` reads as a harmless cleanup in
 # review, which is why the basis is pinned here rather than left to the comment.
-TITLE = 'flex:1 1 auto;min-width:0;font-size:13.5px;font-weight:600;color:var(--text)'
+# 14.5px / 400 (follow-up 2, user): the admin sequence-row size, not bold.
+# `overflow-wrap:anywhere` (Fable lane, follow-up 2): one unbroken word longer
+# than the free width otherwise paints across the bar and chip columns.
+TITLE = ('flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-size:14.5px;font-weight:400;'
+         'color:var(--text)')
 SPECS = [
     ('SequenceLink', sq_h, [
         ('', '.row.%s' % sq_h, ROW),
@@ -2150,35 +2195,67 @@ SPECS = [
         ('', '.row.%s:focus-visible' % sq_h, FOCUS),
         (FC, '.row.%s:focus-visible' % sq_h, FCRING),
         # Student-view follow-up (user, 2026-10-08): the S-badge, mark chain
-        # and count became the open-book glyph, a progress bar and a quiz chip.
+        # and count became the open-book glyph, a progress bar and a quiz chip
+        # (the latter two now in ProgressMeter, below).
         # The glyph wrapper is the twin of MiniProjectLink .row-glyph.
         ('', '.seq-glyph.%s' % sq_h, 'display:inline-flex;flex:0 0 auto'),
         ('', '.row-title.%s' % sq_h, TITLE),
+    ]),
+    ('ProgressMeter', pm_h, [
         # A FIXED column so the bars line up row to row (layout A).
-        ('', '.progress.%s' % sq_h, 'display:flex;align-items:center;gap:8px;flex:0 0 150px'),
+        ('', '.progress.%s' % pm_h, 'display:flex;align-items:center;gap:8px;flex:0 0 150px'),
         # --border, not CourseCard --border-soft: the row hovers --primary-soft.
-        ('', '.track.%s' % sq_h,
+        ('', '.track.%s' % pm_h,
              'flex:1 1 auto;height:6px;border-radius:var(--radius-pill);'
              'background:var(--border);overflow:hidden'),
-        ('', '.fill.%s' % sq_h,
+        ('', '.fill.%s' % pm_h,
              'display:block;height:100%;border-radius:var(--radius-pill);background:var(--primary)'),
-        ('', '.fill.done.%s' % sq_h, 'background:var(--success)'),
+        ('', '.fill.done.%s' % pm_h, 'background:var(--success)'),
         # 11.5px: a progress ratio. Fixed width so 100% does not shift the bar.
-        ('', '.pct.%s' % sq_h, 'width:34px;text-align:right;font-size:11.5px;color:var(--muted)'),
-        ('', '.quiz-chip.%s' % sq_h,
+        # weight 400 explicitly: in the block header button it would inherit 600.
+        ('', '.pct.%s' % pm_h,
+             'width:34px;text-align:right;font-size:11.5px;font-weight:400;color:var(--muted)'),
+        ('', '.quiz-chip.%s' % pm_h,
              'box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;'
              'gap:4px;flex:0 0 86px;padding:2px 7px;border-radius:var(--radius-pill);'
              'background:var(--surface-2);font-size:11.5px;font-weight:500;color:var(--muted);'
              'white-space:nowrap'),
+        # On the tinted header strip the --surface-2 chip would vanish.
+        ('', '.quiz-chip.on-strip.%s' % pm_h, 'background:var(--surface)'),
         # ONE rule with a selector list, authored that way: "Quiz –" and the
         # empty slot carry no chip fill.
-        ('', '.quiz-chip.none.%s,.quiz-chip.empty.%s' % (sq_h, sq_h), 'background:none'),
-        ('@media (max-width:560px)', '.progress.%s' % sq_h, 'flex-basis:80px'),
+        ('', '.quiz-chip.none.%s,.quiz-chip.empty.%s' % (pm_h, pm_h), 'background:none'),
+        ('@media (max-width:560px)', '.progress.%s' % pm_h, 'flex-basis:80px'),
         # Forced colors repaint backgrounds: outline the track, paint the fill.
-        (FC, '.track.%s' % sq_h, 'border:1px solid CanvasText'),
+        (FC, '.track.%s' % pm_h, 'border:1px solid CanvasText'),
         # `.fill.done` too: its theme green out-specifies a bare `.fill`, so a
         # finished bar kept --success with adjustment off (Fable lane, r1).
-        (FC, '.fill.%s,.fill.done.%s' % (sq_h, sq_h), 'forced-color-adjust:none;background:CanvasText'),
+        (FC, '.fill.%s,.fill.done.%s' % (pm_h, pm_h), 'forced-color-adjust:none;background:CanvasText'),
+    ]),
+    ('CourseProgress', cp_h, [
+        # The summary card: right of the info text, full width on a phone.
+        ('', '.summary.%s' % cp_h,
+             'box-sizing:border-box;flex:none;width:250px;margin-left:auto;padding:10px 14px;'
+             'border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)'),
+        ('', '.sl.%s' % cp_h, 'margin:0 0 6px;font-size:11.5px;color:var(--muted)'),
+        ('', '.sb.%s' % cp_h, 'display:flex;align-items:center;gap:10px'),
+        # The row bar one step taller (8px): the course total.
+        ('', '.track.%s' % cp_h,
+             'flex:1 1 auto;height:8px;border-radius:var(--radius-pill);'
+             'background:var(--border);overflow:hidden'),
+        ('', '.fill.%s' % cp_h,
+             'display:block;height:100%;border-radius:var(--radius-pill);background:var(--primary)'),
+        ('', '.fill.done.%s' % cp_h, 'background:var(--success)'),
+        ('', '.sp.%s' % cp_h, 'font-size:15px;font-weight:600;font-variant-numeric:tabular-nums'),
+        ('', '.sq.%s' % cp_h,
+             'display:flex;align-items:center;gap:5px;margin:8px 0 0;font-size:12.5px;color:var(--muted)'),
+        ('', '.sq.%s b:where(.%s)' % (cp_h, cp_h), 'font-weight:600;color:var(--text)'),
+        ('', '.sr-only.%s' % cp_h,
+             'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;'
+             'clip-path:inset(50%);white-space:nowrap;border:0'),
+        ('@media (max-width:640px)', '.summary.%s' % cp_h, 'width:100%'),
+        (FC, '.track.%s' % cp_h, 'border:1px solid CanvasText'),
+        (FC, '.fill.%s,.fill.done.%s' % (cp_h, cp_h), 'forced-color-adjust:none;background:CanvasText'),
     ]),
     ('MiniProjectLink', mp_h, [
         ('', '.row.%s' % mp_h, ROW),
@@ -2340,18 +2417,22 @@ WANT = [
     # Without flex:1 the h2 shrink-wraps, `.acc width:100%` resolves against a
     # content-width box, and the chevron margin-left:auto has no free space.
     ('header.%s h2:where(.%s)' % (h, h), 'flex:1;min-width:0'),
-    # 14px explicitly -- base.css:17 makes an h2 15px and the title inherits here.
+    # 15px: the admin block-title size (AccordionHeader .title), follow-up 2.
     ('.acc.%s' % h,
      'width:100%;display:flex;align-items:center;gap:10px;text-align:left;'
-     'font-size:14px;font-weight:600;border-radius:var(--radius)'),
+     'font-size:15px;font-weight:600;border-radius:var(--radius)'),
     # Half of the long-title fix (2026-09-05 ruling): without it one unbroken word
-    # longer than the card carries the chevron outside the clipped card.
-    ('.acc-title.%s' % h, 'min-width:0'),
-    # Once the twin of the SequenceLink S-badge (now an icon, 2026-10-08);
-    # hash-coupled to .acc, NOT to .block.
-    ('.badge.%s' % h,
-     'font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);'
-     'padding:2px 6px;border-radius:var(--radius-pill)'),
+    # longer than the card carries the chevron outside the clipped card. `flex:1
+    # 1 auto` (follow-up 2): the title takes the free space so the totals sit in
+    # the row bar/chip columns.
+    # `overflow-wrap:anywhere` (Fable lane): with the totals to its right, an
+    # unbroken long word would otherwise paint over the bar and chip (the admin
+    # AccordionHeader .title carries the same).
+    ('.acc-title.%s' % h, 'flex:1 1 auto;min-width:0;overflow-wrap:anywhere'),
+    # The "B1" badge became the admin "1." ordinal (follow-up 2, user); the light
+    # --ordinal is decorative, aria-hidden. Hash-coupled to .acc, NOT to .block.
+    ('.num.%s' % h,
+     'flex:none;margin-right:-4px;color:var(--ordinal);font-variant-numeric:tabular-nums'),
     # `color` is load-bearing: reset.css:7 gives a button `color: inherit`, so an
     # unstyled chevron reads --text instead of --muted.
     # `flex:0 0 auto` is the other half: with no text to floor it this item shrank
@@ -3384,8 +3465,9 @@ for f in src/pages/CourseList.svelte src/pages/CourseView.svelte src/pages/Seque
     echo "PASS  ${f:t} does not import Spinner"
   fi
 done
-# The ← glyph left SequencePlayer's error actions (enumerated 12); CourseView's
-# `← Courses` header button is out of scope and must still be there.
+# The ← glyph left SequencePlayer's error actions (enumerated 12). CourseView's
+# `← Courses` text button became the admin round back button (student-view
+# follow-up 2, user 2026-10-08), so its text form must be gone.
 if sed 's#<!--.*-->##g' src/pages/SequencePlayer.svelte | grep -qE '← Course<'; then
   echo "FAIL  SequencePlayer still renders '← Course'"; fail=1
 else
@@ -3393,7 +3475,13 @@ else
 fi
 # perl -0 strips MULTI-line HTML comments too (a line-based sed let a commented-out
 # button inside `<!--\n…\n-->` keep the guard green — T2 codex round 2).
-perl -0pe 's/<!--.*?-->//gs' src/pages/CourseView.svelte | grep -qE '>← Courses<' && echo "PASS  CourseView header button untouched (out of scope)" || { echo "FAIL  CourseView '← Courses' header button changed — out of Slice-4 scope"; fail=1 }
+cv=$(perl -0pe 's/<!--.*?-->//gs' src/pages/CourseView.svelte)
+if print -r -- "$cv" | grep -qF '<IconButton round glyph="back" title="Back to courses" onclick={() => navigate('"'"'/courses'"'"')} />' \
+   && ! print -r -- "$cv" | grep -qF '← Courses'; then
+  echo "PASS  CourseView header is the admin round back button, no '← Courses' text"
+else
+  echo "FAIL  CourseView header back control is not the pinned round back button"; fail=1
+fi
 
 echo
 echo "--- (s) Slice-4 T3 mini-project page (frame, header, assignment, group, history) ---"

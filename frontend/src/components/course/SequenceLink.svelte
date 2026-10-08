@@ -1,51 +1,20 @@
 <script lang="ts">
   import type { SequenceContent, VersionState } from '../../lib/types';
   import { navigate } from '../../lib/router.svelte';
+  import { progressOf, progressPhrase } from '../../lib/progress';
   import ItemMark from './ItemMark.svelte';
+  import ProgressMeter from './ProgressMeter.svelte';
 
   let { courseSlug, sequence, state }: { courseSlug: string; sequence: SequenceContent; state: VersionState } = $props();
 
-  // Everything is `$derived`: as plain `const`s they read `$props()` once at
-  // init and captured only the initial value, so a parent swapping the
-  // sequence kept the old count and link.
-  const total = $derived(sequence.items.length);
-  const covered = $derived(
-    sequence.items.filter((it) => state.items[String(it.id)]?.is_covered).length,
-  );
-  // Rounded DOWN, so "100%" only appears once every item is done (199 of 200
-  // reads 99%). An empty sequence reads 0% and is not done.
-  const pct = $derived(total ? Math.floor((covered / total) * 100) : 0);
-  const done = $derived(total > 0 && covered === total);
-  // The fill alone gets CourseCard's visible minimum: a started sequence whose
-  // share rounds to 0% (1 of 220) still draws a 2% sliver, never an empty bar.
-  const barPct = $derived(covered > 0 ? Math.max(pct, 2) : 0);
-
-  // Quiz score (user, 2026-10-08): points earned ÷ points possible over the
-  // quizzes TRIED so far, each at its latest attempt. An untried quiz is left
-  // out rather than counted as 0 — students aren't sent its point total, and
-  // the bar already says how much is left. A zero-point quiz is skipped.
-  const hasQuiz = $derived(sequence.items.some((it) => it.type === 'quiz'));
-  const quizPct = $derived.by(() => {
-    let got = 0;
-    let max = 0;
-    for (const it of sequence.items) {
-      if (it.type !== 'quiz') continue;
-      const ls = state.items[String(it.id)]?.last_score;
-      if (!ls || ls.total <= 0) continue;
-      got += ls.correct;
-      max += ls.total;
-    }
-    return max > 0 ? Math.round((got / max) * 100) : null;
-  });
+  // `$derived`, not plain `const`s: those read `$props()` once at init, so a
+  // parent swapping the sequence kept the old figures and link. The rules
+  // (rounded-down share, 2% visible minimum, quiz score over the quizzes tried)
+  // live in lib/progress, shared with the block header and the course summary.
+  const p = $derived(progressOf(sequence.items, state));
   const href = $derived(`/courses/${courseSlug}/seq/${sequence.id}`);
-
-  // The row's accessible name. The bar and the chip are aria-hidden, so this is
-  // the only reading of both, in words.
-  const label = $derived(
-    `Sequence: ${sequence.title}, ` +
-      `${covered} of ${total} ${total === 1 ? 'item' : 'items'} completed` +
-      (quizPct !== null ? `, quiz score ${quizPct}%` : hasQuiz ? ', no quizzes tried yet' : ''),
-  );
+  // The bar and chip are aria-hidden, so this is the only reading of both.
+  const label = $derived(`Sequence: ${sequence.title}, ${progressPhrase(p)}`);
 </script>
 
 <a class="row" {href} aria-label={label} onclick={(e) => { e.preventDefault(); navigate(href); }}>
@@ -53,22 +22,8 @@
        not-yet outline: completion is the bar's job, as with the mini-project flag. -->
   <span class="seq-glyph" aria-hidden="true"><ItemMark type="sequence" /></span>
   <span class="row-title">{sequence.title}</span>
-  <!-- Replaces the per-item mark chain, which stopped scaling at ~20 items. The
-       ONE inline style in this component: the fill's width is per-row data
-       (CourseCard's bar uses the same pinned form). -->
-  <span class="progress" aria-hidden="true">
-    <span class="track"><span class="fill" class:done style="width:{barPct}%"></span></span>
-    <span class="pct mono">{pct}%</span>
-  </span>
-  <!-- Always rendered, even with no quizzes, so the bars line up row to row. -->
-  <span class="quiz-chip" class:none={hasQuiz && quizPct === null} class:empty={!hasQuiz} aria-hidden="true">
-    {#if quizPct !== null}
-      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,8.6 6.4,12 13,4.6" /></svg>
-      Quiz {quizPct}%
-    {:else if hasQuiz}
-      Quiz –
-    {/if}
-  </span>
+  <!-- Replaces the per-item mark chain, which stopped scaling at ~20 items. -->
+  <ProgressMeter {p} />
 </a>
 
 <style>
@@ -80,7 +35,9 @@
     display: flex;
     align-items: center;
     gap: 10px; /* ref 1572 */
-    padding: 8px 12px; /* ref 1572 */
+    /* 35px on the right = 12px + the block header's chevron (13px) and its
+       gap (10px), so the bar and chip columns line up with the header's. */
+    padding: 8px 35px 8px 12px;
     border-bottom: 1px solid var(--border-soft);
     color: var(--text);
   }
@@ -107,80 +64,16 @@
     flex: 0 0 auto;
   }
   /* `flex: 1 1 auto`, not `flex: 1` (basis 0): with an auto basis the title
-     shares the shrink instead of collapsing to zero width on a tight row. */
+     shares the shrink instead of collapsing to zero width on a tight row.
+     14.5px regular (user, 2026-10-08): the admin sequence-title size; not
+     bold, so the block headers carry the outline and the bars the emphasis. */
   .row-title {
     flex: 1 1 auto;
     min-width: 0;
-    font-size: 13.5px;
-    font-weight: 600;
+    /* A long unbroken word wraps instead of painting over the meter/pill. */
+    overflow-wrap: anywhere;
+    font-size: 14.5px;
+    font-weight: 400;
     color: var(--text);
-  }
-  /* A fixed column, so every row's bar lines up and a long course scans at a
-     glance (layout A, user 2026-10-08). */
-  .progress {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 150px;
-  }
-  .track {
-    flex: 1 1 auto;
-    height: 6px;
-    border-radius: var(--radius-pill);
-    /* `--border`, one step darker than CourseCard's `--border-soft` track: this
-       row turns `--primary-soft` on hover, where the softer track vanishes. */
-    background: var(--border);
-    overflow: hidden;
-  }
-  .fill {
-    display: block;
-    height: 100%;
-    border-radius: var(--radius-pill);
-    background: var(--primary);
-  }
-  /* A finished sequence turns green. */
-  .fill.done {
-    background: var(--success);
-  }
-  /* 11.5px: a progress ratio, like CourseCard's `.count`. Fixed width so
-     "100%" doesn't shift the bar left of its neighbours. */
-  .pct {
-    width: 34px;
-    text-align: right;
-    font-size: 11.5px;
-    color: var(--muted);
-  }
-  /* A small tinted chip (`--surface-2`, the block header strip's tint). Fixed
-     width for the same alignment reason as the bar. */
-  .quiz-chip {
-    box-sizing: border-box;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    flex: 0 0 86px;
-    padding: 2px 7px;
-    border-radius: var(--radius-pill);
-    background: var(--surface-2);
-    font-size: 11.5px;
-    font-weight: 500;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-  /* "Quiz –" and the empty slot carry no chip fill: nothing to report. */
-  .quiz-chip.none,
-  .quiz-chip.empty {
-    background: none;
-  }
-  @media (max-width: 560px) {
-    .progress { flex-basis: 80px; }
-  }
-  /* Forced colors repaint backgrounds, so the bar would vanish: outline the
-     track and paint the fill in the text colour. `.fill.done` is named too —
-     its green out-specifies a bare `.fill` and would survive with adjustment off. */
-  @media (forced-colors: active) {
-    .track { border: 1px solid CanvasText; }
-    .fill,
-    .fill.done { forced-color-adjust: none; background: CanvasText; }
   }
 </style>
