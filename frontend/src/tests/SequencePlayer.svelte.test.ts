@@ -89,7 +89,7 @@ afterEach(() => {
 });
 
 describe('SequencePlayer breadcrumb (T1)', () => {
-  it('renders a semantic breadcrumb with mono B/S badges and a title-only h1', () => {
+  it('renders a semantic breadcrumb ending in the sequence title, and a screen-reader-only h1', () => {
     seed();
     seedRoute(100, '#item=1001');
     const el = render('100');
@@ -115,13 +115,16 @@ describe('SequencePlayer breadcrumb (T1)', () => {
     expect(crumb!.textContent).toContain('Vectors');
     expect(crumb!.textContent).toContain('·');
 
-    // S segment: mono + current, "S{order}" with no trailing period
+    // Last segment: the sequence TITLE (user, 2026-10-08). The course page no
+    // longer shows S{order} codes, so "S1" here would be the only place a
+    // student met one. It is the current page, so it says so to AT.
     const current = nav!.querySelector('.current');
     expect(current).not.toBeNull();
-    expect(current!.classList.contains('mono')).toBe(true);
-    expect(current!.textContent).toBe('S1');
+    expect(current!.classList.contains('mono')).toBe(false);
+    expect(current!.textContent).toBe('What a vector is');
+    expect(current!.getAttribute('aria-current')).toBe('page');
 
-    // separators are their own flex items (one before block, one before S)
+    // separators are their own flex items (one before block, one before the title)
     expect(nav!.querySelectorAll('.sep').length).toBe(2);
 
     // direct-child flex-item ORDER (load-bearing): a → .sep → .crumb → .sep → .current
@@ -133,23 +136,27 @@ describe('SequencePlayer breadcrumb (T1)', () => {
     expect(kids[3].classList.contains('sep')).toBe(true);
     expect(kids[4].classList.contains('current')).toBe(true);
 
-    // h1 is the sequence title ONLY (S{order} moved into the crumb)
+    // The visible heading is gone (the crumb names the page), but the page keeps
+    // its h1 for screen-reader heading navigation: same text, visually hidden.
     const h1 = el.querySelector('h1.seq-title');
     expect(h1).not.toBeNull();
     expect(h1!.textContent).toBe('What a vector is');
+    expect(h1!.classList.contains('sr-only')).toBe(true);
+    expect(el.querySelectorAll('h1')).toHaveLength(1);
   });
 
-  it('empty-sequence branch shares the breadcrumb + title-only h1', () => {
+  it('empty-sequence branch shares the breadcrumb + screen-reader-only h1', () => {
     seed();
     seedRoute(300, '');
     const el = render('300');
 
     const nav = el.querySelector('nav.crumbs');
     expect(nav).not.toBeNull();
-    expect(nav!.querySelector('.current')!.textContent).toBe('S3');
+    expect(nav!.querySelector('.current')!.textContent).toBe('Empty seq');
 
     const h1 = el.querySelector('h1.seq-title');
     expect(h1!.textContent).toBe('Empty seq');
+    expect(h1!.classList.contains('sr-only')).toBe(true);
     expect(el.querySelector('.empty-state .title')!.textContent).toBe('This sequence has no items yet.');
   });
 });

@@ -1,14 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ItemMark from '../components/course/ItemMark.svelte';
-import type { Item, ItemMarkState } from '../lib/types';
+import type { ItemMarkState, ItemMarkType } from '../lib/types';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 
 /** `state` is genuinely optional here — omitting it is what exercises D5's
  *  `state = 'not-yet'` default, which the MiniProjectLink flag (T7) relies on. */
-function render(type: Item['type'], state?: ItemMarkState) {
+function render(type: ItemMarkType, state?: ItemMarkState) {
   host = document.createElement('div');
   document.body.appendChild(host);
   const props = state === undefined ? { type } : { type, state };
@@ -24,8 +24,10 @@ afterEach(() => {
 });
 
 describe('ItemMark', () => {
-  const types: Item['type'][] = [
-    'static_page', 'video', 'quiz', 'interactive_app', 'mini_project',
+  // `sequence` is not an item type: it marks a learning sequence's row on the
+  // student course page (the open book, user 2026-10-08), drawn in the same box.
+  const types: ItemMarkType[] = [
+    'static_page', 'video', 'quiz', 'interactive_app', 'mini_project', 'sequence',
   ];
 
   it('is a non-interactive <span>, hidden from AT, with no text node', () => {
@@ -84,7 +86,7 @@ describe('ItemMark', () => {
   // into a hollow outline with every test and the CSS gate still green, and that
   // coordinate drift passes just as quietly. The attribute set is compared
   // EXACTLY, so this reds on a dropped override, an added one, or a moved point.
-  const MARKS: Record<Item['type'], { tag: string; attrs: Record<string, string> }[]> = {
+  const MARKS: Record<ItemMarkType, { tag: string; attrs: Record<string, string> }[]> = {
     static_page: [
       { tag: 'line', attrs: { x1: '3', y1: '4', x2: '13', y2: '4' } },
       { tag: 'line', attrs: { x1: '3', y1: '8', x2: '13', y2: '8' } },
@@ -107,6 +109,11 @@ describe('ItemMark', () => {
     mini_project: [
       { tag: 'line', attrs: { x1: '4.2', y1: '2.4', x2: '4.2', y2: '13.6' } },
       { tag: 'polygon', attrs: { points: '4.2,3.2 12.4,5.8 4.2,8.4', fill: 'currentColor', stroke: 'none' } },
+    ],
+    // The open book: two pages meeting at a spine. Outline only — no fill.
+    sequence: [
+      { tag: 'path', attrs: { d: 'M8 4.6C6.4 3.5 4.6 3.1 2.6 3.3V12.7C4.6 12.5 6.4 12.9 8 14C9.6 12.9 11.4 12.5 13.4 12.7V3.3C11.4 3.1 9.6 3.5 8 4.6Z' } },
+      { tag: 'line', attrs: { x1: '8', y1: '4.6', x2: '8', y2: '14' } },
     ],
   };
 

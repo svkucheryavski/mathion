@@ -40,7 +40,7 @@ function seedCourse() {
     course: { id: 1, slug: 'c', name: 'C' },
     version: { id: 5 } as never,
     blocks: [],
-    state: { version_id: 5, current_item_id: null, items: { '7': { is_covered: false, time_spent_seconds: 0, last_visited_at: null, last_answers: null, attempt_count: 0, score_correct: null, score_total: null } } } as never,
+    state: { version_id: 5, current_item_id: null, items: { '7': { is_covered: false, time_spent: 0, last_visited_at: null, last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null } } } as never,
     miniProjectsByBlockId: {},
   });
 }

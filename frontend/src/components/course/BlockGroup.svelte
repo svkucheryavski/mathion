@@ -43,7 +43,8 @@
         <!-- `B{order}` is a badge (ref 1565), not a prefix: the header used to
              render one combined `B{order}. {title}` string. No trailing period —
              the visible copy becomes `B1 Vectors`. Mono via the GLOBAL `.mono`
-             utility (base.css:10), the twin of SequenceLink's S-badge. -->
+             utility (base.css:10). (Its old twin, SequenceLink's S-badge, became an
+             open-book icon on 2026-10-08; block badges stay.) -->
         <span class="badge mono">B{block.order}</span>
         <span class="acc-title">{block.title}</span>
         <!-- One down-chevron, rotated when collapsed. A STATIC icon would drop the
@@ -183,7 +184,7 @@
   .acc-title {
     min-width: 0;
   }
-  /* ref 1565 — the twin of SequenceLink's `S{order}` badge (ref 1573). */
+  /* ref 1565. Its old twin, SequenceLink's `S{order}` badge, is gone (2026-10-08). */
   .badge {
     font-size: 11px;
     font-weight: 500;

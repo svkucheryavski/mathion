@@ -1286,9 +1286,14 @@ let bad = 0;
 // construct legitimate in one of these is not thereby legitimate in another.
 const BASE = ["Fragment", "Text", "Comment", "ExpressionTag", "RegularElement", "Component", "IfBlock"];
 const SPEC = {
-  "ItemMark.svelte":        { nodes: BASE,                     tags: ["span", "svg", "line", "polygon", "polyline", "circle"] },
+  // `path`: the open book (the `sequence` mark, user 2026-10-08).
+  "ItemMark.svelte":        { nodes: BASE,                     tags: ["span", "svg", "line", "polygon", "polyline", "circle", "path"] },
   "ItemIcon.svelte":        { nodes: BASE,                     tags: ["button"] },
-  "SequenceLink.svelte":    { nodes: BASE.concat("EachBlock"), tags: ["a", "span"] },
+  // Student-view follow-up (user, 2026-10-08): the mark chain (EachBlock) is
+  // gone; a progress bar and a quiz chip (with its check svg) replace it. The
+  // fill width is per-row data -- the CourseCard `styleOn` form, pinned the same way.
+  "SequenceLink.svelte":    { nodes: BASE, tags: ["a", "span", "svg", "polyline"],
+                              styleOn: { "span:fill.class:done": "style=\"width:{barPct}%\"" } },
   "MiniProjectLink.svelte": { nodes: BASE,                     tags: ["a", "span"] },
   // T8a allowed `HtmlTag` for the `{@html block.info_html}`; Slice-5c D7 removed
   // block info from every screen, so an `{@html}` here now reds.
@@ -1424,8 +1429,8 @@ const SIG = {
     ["span:item-mark.{expr}[class=\"item-mark {state}\" aria-hidden]",
      "svg:[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width={type === '\''quiz'\'' ? '\''1.9'\'' : '\''1.6'\''} stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "#if:", "line:[x1=\"3\" y1=\"4\" x2=\"13\" y2=\"4\"]",
-     "line:[x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\"]",
-     "line:[x1=\"3\" y1=\"12\" x2=\"9\" y2=\"12\"]", "#else:", "#if:",
+     "line:[x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\"]", "line:[x1=\"3\" y1=\"12\" x2=\"9\" y2=\"12\"]",
+     "#else:", "#if:",
      "polygon:[points=\"5,3.4 13,8 5,12.6\" fill=\"currentColor\" stroke=\"none\"]", "#else:",
      "#if:", "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "line:[x1=\"4\" y1=\"2.6\" x2=\"4\" y2=\"13.4\"]",
@@ -1435,15 +1440,22 @@ const SIG = {
      "circle:[cx=\"8\" cy=\"5.4\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]",
      "circle:[cx=\"12\" cy=\"8.6\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"]", "#else:",
      "#if:", "line:[x1=\"4.2\" y1=\"2.4\" x2=\"4.2\" y2=\"13.6\"]",
-     "polygon:[points=\"4.2,3.2 12.4,5.8 4.2,8.4\" fill=\"currentColor\" stroke=\"none\"]"],
+     "polygon:[points=\"4.2,3.2 12.4,5.8 4.2,8.4\" fill=\"currentColor\" stroke=\"none\"]",
+     "#else:", "#if:",
+     "path:[d=\"M8 4.6C6.4 3.5 4.6 3.1 2.6 3.3V12.7C4.6 12.5 6.4 12.9 8 14C9.6 12.9 11.4 12.5 13.4 12.7V3.3C11.4 3.1 9.6 3.5 8 4.6Z\"]",
+     "line:[x1=\"8\" y1=\"4.6\" x2=\"8\" y2=\"14\"]"],
   "ItemIcon.svelte":
     ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label]",
      "ItemMark:[type={item.type} state={istate}]"],
   "SequenceLink.svelte":
-    ["a:row[class=\"row\" href aria-label onclick]", "span:badge.mono[class=\"badge mono\"]",
-     "span:row-title[class=\"row-title\"]", "span:chain[class=\"chain\" aria-hidden]", "#each:",
-     "ItemMark:[type={it.type} state={state.items[String(it.id)]?.is_covered ? '\''covered'\'' : '\''not-yet'\''}]",
-     "span:count.mono[class=\"count mono\"]"],
+    ["a:row[class=\"row\" href aria-label onclick]",
+     "span:seq-glyph[class=\"seq-glyph\" aria-hidden]", "ItemMark:[type=\"sequence\"]",
+     "span:row-title[class=\"row-title\"]", "span:progress[class=\"progress\" aria-hidden]",
+     "span:track[class=\"track\"]", "span:fill.class:done[class=\"fill\"]",
+     "span:pct.mono[class=\"pct mono\"]",
+     "span:quiz-chip.class:none.class:empty[class=\"quiz-chip\" aria-hidden]", "#if:",
+     "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:"],
   "MiniProjectLink.svelte":
     ["a:row.row-mp[class=\"row row-mp\" href aria-label]",
      "span:row-glyph[class=\"row-glyph\" aria-hidden]", "ItemMark:[type=\"mini_project\"]",
@@ -1455,13 +1467,14 @@ const SIG = {
     ["#snippet:crumbs", "nav:crumbs[class=\"crumbs\" aria-label]", "a:[href onclick]", "#if:",
      "span:sep[class=\"sep\" aria-hidden]", "span:crumb[class=\"crumb\"]",
      "span:mono[class=\"mono\"]", "span:sep[class=\"sep\" aria-hidden]",
-     "span:mono.current[class=\"mono current\"]", "div:page[class=\"page\"]", "#if:", "Skeleton:",
-     "#else:", "#if:", "ErrorState:[variant=\"page\" title message={errorMessage}]",
+     "span:current[class=\"current\" aria-current=\"page\"]", "div:page[class=\"page\"]", "#if:",
+     "Skeleton:", "#else:", "#if:", "ErrorState:[variant=\"page\" title message={errorMessage}]",
      "#snippet:action", "Button:[variant=\"secondary\" onclick]", "#else:", "#if:",
      "ErrorState:[variant=\"page\" title]", "#snippet:action",
      "Button:[variant=\"secondary\" onclick]", "#else:", "#if:", "@render:crumbs",
-     "h1:seq-title[class=\"seq-title\"]", "EmptyState:[title]", "#else:", "@render:crumbs",
-     "h1:seq-title[class=\"seq-title\"]", "nav:strip[class=\"strip\" aria-label]", "#each:",
+     "h1:seq-title.sr-only[class=\"seq-title sr-only\"]", "EmptyState:[title]", "#else:",
+     "@render:crumbs", "h1:seq-title.sr-only[class=\"seq-title sr-only\"]",
+     "nav:strip[class=\"strip\" aria-label]", "#each:",
      "ItemIcon:[item={it} state={iconState(it.id)} onclick]", "span:counter[class=\"counter\"]",
      "main:content[class=\"content\"]", "#if:",
      "ItemRouter:[item={currentItem} state={currentCourse.value.state}]", "footer:",
@@ -1585,8 +1598,9 @@ const TEXT = {
   "ItemMark.svelte": [],
   "ItemIcon.svelte": [],
   "SequenceLink.svelte":
-    ["span:badge.mono:S", "span:badge.mono:{expr}", "span:row-title:{expr}",
-     "span:count.mono:{expr}", "span:count.mono:/", "span:count.mono:{expr}"],
+    ["span:row-title:{expr}", "span:pct.mono:{expr}", "span:pct.mono:%",
+     "span:quiz-chip.class:none.class:empty:Quiz", "span:quiz-chip.class:none.class:empty:{expr}",
+     "span:quiz-chip.class:none.class:empty:%", "span:quiz-chip.class:none.class:empty:Quiz –"],
   "MiniProjectLink.svelte": ["span:row-title:Mini-project:", "span:row-title:{expr}"],
   "BlockGroup.svelte": ["span:badge.mono:B", "span:badge.mono:{expr}", "span:acc-title:{expr}"],
   // No LITERAL entry on purpose -- the two below are `{expr}` markers. BOTH the
@@ -1607,12 +1621,11 @@ const TEXT = {
   // nothing at all (codex, close-out round 3).
   "SequencePlayer.svelte":
     ["a::{expr}", "span:sep:/", "span:mono:B", "span:mono:{expr}", "span:crumb:·",
-     "span:crumb:{expr}", "span:sep:/", "span:mono.current:S", "span:mono.current:{expr}",
-     "Button::Back to course", "Button::Back to course",
-     "h1:seq-title:{expr}",
-     "h1:seq-title:{expr}", "span:counter:Item", "span:counter:{expr}", "span:counter:of",
-     "span:counter:{expr}", "Button::← Previous", "Button::Finish sequence",
-     "span:next-label:Next:", "span:next-title:{expr}", "span:next-label:→", "Button::Next →"],
+     "span:crumb:{expr}", "span:sep:/", "span:current:{expr}", "Button::Back to course",
+     "Button::Back to course", "h1:seq-title.sr-only:{expr}", "h1:seq-title.sr-only:{expr}",
+     "span:counter:Item", "span:counter:{expr}", "span:counter:of", "span:counter:{expr}",
+     "Button::← Previous", "Button::Finish sequence", "span:next-label:Next:",
+     "span:next-title:{expr}", "span:next-label:→", "Button::Next →"],
   "QuizItem.svelte":
     ["h2::{expr}", "h2::{expr}",
      "span:q-counter.mono:Question", "span:q-counter.mono:{expr}", "span:q-counter.mono:of",
@@ -2044,11 +2057,13 @@ echo
 echo "--- (j) T7 rows ---"
 # Anchors: each is authored by exactly ONE component and slice-introduced.
 # `.row` deliberately is NOT an anchor -- it is the 2-way collision itself.
-grep -qE '^[[:space:]]*\.chain[[:space:]]*[,{]' src/components/course/SequenceLink.svelte \
-  || { echo "FAIL  .chain is not authored as a rule in SequenceLink.svelte"; fail=1 }
+# SequenceLink anchors on `.track` since the student-view follow-up (user,
+# 2026-10-08) replaced its `.chain` with a progress bar.
+grep -qE '^[[:space:]]*\.track[[:space:]]*[,{]' src/components/course/SequenceLink.svelte \
+  || { echo "FAIL  .track is not authored as a rule in SequenceLink.svelte"; fail=1 }
 grep -qE '^[[:space:]]*\.row-glyph[[:space:]]*[,{]' src/components/course/MiniProjectLink.svelte \
   || { echo "FAIL  .row-glyph is not authored as a rule in MiniProjectLink.svelte"; fail=1 }
-for cls in chain row-glyph; do
+for cls in track row-glyph; do
   owners=(${(f)"$(grep -rlE "^[[:space:]]*\.${cls}[[:space:]]*[,{]" src --include='*.svelte')"})
   if [[ ${#owners[@]} -eq 1 ]]; then
     echo "PASS  .${cls} is authored by exactly one component (${owners[1]:t})"
@@ -2056,12 +2071,12 @@ for cls in chain row-glyph; do
     echo "FAIL  .${cls} is authored by ${#owners[@]} components: $owners"; fail=1
   fi
 done
-sq=(${(f)"$(grep -ohE '\.chain\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
+sq=(${(f)"$(grep -ohE '\.track\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 mp=(${(f)"$(grep -ohE '\.row-glyph\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#sq[@]} -ne 1 || ${#mp[@]} -ne 1 || ${sq[1]} == ${mp[1]} ]]; then
-  echo "FAIL  T7 anchors not dist-unique/distinct (.chain=${#sq[@]}: $sq, .row-glyph=${#mp[@]}: $mp)"; fail=1
+  echo "FAIL  T7 anchors not dist-unique/distinct (.track=${#sq[@]}: $sq, .row-glyph=${#mp[@]}: $mp)"; fail=1
 else
-  echo "PASS  T7 anchors resolve to one distinct hash each (.chain ${sq[1]}, .row-glyph ${mp[1]})"
+  echo "PASS  T7 anchors resolve to one distinct hash each (.track ${sq[1]}, .row-glyph ${mp[1]})"
   python3 - ${sq[1]} ${mp[1]} ${CSS[@]} <<'T7EOF'
 import re, sys
 from collections import Counter
@@ -2121,11 +2136,11 @@ FOCUS = 'box-shadow:inset 0 0 0 2px var(--primary)'
 # forced-colors exemption. Normalised (unspaced) form -- dist is minified.
 FC    = '@media (forced-colors:active)'
 FCRING = 'outline:2px solid Highlight;outline-offset:-2px'
-# `flex:1 1 auto`, NOT `flex:1`. The shorthand `flex:1` means basis ZERO, and
-# with `.chain` on an auto basis (28n-6 px) the row goes negative past ~24 items
-# on a 760px card / ~9 on a 340px one -- at which point flex-grow stops applying
-# and the title resolves to 0px with its text across the marks. The auto basis
-# shares the shrink instead. A revert to `flex:1` reads as a harmless cleanup in
+# `flex:1 1 auto`, NOT `flex:1`. The shorthand `flex:1` means basis ZERO; when
+# the row's other children outgrow it (the old `.chain` did past ~24 items on a
+# 760px card -- since 2026-10-08 it is a fixed bar + chip column, and a status
+# pill on the mini-project row), flex-grow stops applying and a basis-zero title
+# resolves to 0px. The auto basis shares the shrink instead. A revert to `flex:1` reads as a harmless cleanup in
 # review, which is why the basis is pinned here rather than left to the comment.
 TITLE = 'flex:1 1 auto;min-width:0;font-size:13.5px;font-weight:600;color:var(--text)'
 SPECS = [
@@ -2134,15 +2149,36 @@ SPECS = [
         ('', '.row.%s:hover' % sq_h, HOVER),
         ('', '.row.%s:focus-visible' % sq_h, FOCUS),
         (FC, '.row.%s:focus-visible' % sq_h, FCRING),
-        # ref 1573 -- the twin of T8a's B{order} badge.
-        ('', '.badge.%s' % sq_h,
-             'font-size:11px;font-weight:500;color:var(--primary);'
-             'background:var(--primary-soft);padding:2px 6px;border-radius:var(--radius-pill)'),
+        # Student-view follow-up (user, 2026-10-08): the S-badge, mark chain
+        # and count became the open-book glyph, a progress bar and a quiz chip.
+        # The glyph wrapper is the twin of MiniProjectLink .row-glyph.
+        ('', '.seq-glyph.%s' % sq_h, 'display:inline-flex;flex:0 0 auto'),
         ('', '.row-title.%s' % sq_h, TITLE),
-        # flex-wrap is the long-chain ruling: wrap and grow, no cap, no ellipsis.
-        ('', '.chain.%s' % sq_h, 'display:flex;gap:6px;flex-wrap:wrap'),
-        # 11.5px because this is a progress RATIO, not a positional counter.
-        ('', '.count.%s' % sq_h, 'font-size:11.5px;color:var(--muted)'),
+        # A FIXED column so the bars line up row to row (layout A).
+        ('', '.progress.%s' % sq_h, 'display:flex;align-items:center;gap:8px;flex:0 0 150px'),
+        # --border, not CourseCard --border-soft: the row hovers --primary-soft.
+        ('', '.track.%s' % sq_h,
+             'flex:1 1 auto;height:6px;border-radius:var(--radius-pill);'
+             'background:var(--border);overflow:hidden'),
+        ('', '.fill.%s' % sq_h,
+             'display:block;height:100%;border-radius:var(--radius-pill);background:var(--primary)'),
+        ('', '.fill.done.%s' % sq_h, 'background:var(--success)'),
+        # 11.5px: a progress ratio. Fixed width so 100% does not shift the bar.
+        ('', '.pct.%s' % sq_h, 'width:34px;text-align:right;font-size:11.5px;color:var(--muted)'),
+        ('', '.quiz-chip.%s' % sq_h,
+             'box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;'
+             'gap:4px;flex:0 0 86px;padding:2px 7px;border-radius:var(--radius-pill);'
+             'background:var(--surface-2);font-size:11.5px;font-weight:500;color:var(--muted);'
+             'white-space:nowrap'),
+        # ONE rule with a selector list, authored that way: "Quiz –" and the
+        # empty slot carry no chip fill.
+        ('', '.quiz-chip.none.%s,.quiz-chip.empty.%s' % (sq_h, sq_h), 'background:none'),
+        ('@media (max-width:560px)', '.progress.%s' % sq_h, 'flex-basis:80px'),
+        # Forced colors repaint backgrounds: outline the track, paint the fill.
+        (FC, '.track.%s' % sq_h, 'border:1px solid CanvasText'),
+        # `.fill.done` too: its theme green out-specifies a bare `.fill`, so a
+        # finished bar kept --success with adjustment off (Fable lane, r1).
+        (FC, '.fill.%s,.fill.done.%s' % (sq_h, sq_h), 'forced-color-adjust:none;background:CanvasText'),
     ]),
     ('MiniProjectLink', mp_h, [
         ('', '.row.%s' % mp_h, ROW),
@@ -2311,7 +2347,8 @@ WANT = [
     # Half of the long-title fix (2026-09-05 ruling): without it one unbroken word
     # longer than the card carries the chevron outside the clipped card.
     ('.acc-title.%s' % h, 'min-width:0'),
-    # The twin of the S-badge T7 renders; hash-coupled to .acc, NOT to .block.
+    # Once the twin of the SequenceLink S-badge (now an icon, 2026-10-08);
+    # hash-coupled to .acc, NOT to .block.
     ('.badge.%s' % h,
      'font-size:11px;font-weight:500;color:var(--primary);background:var(--primary-soft);'
      'padding:2px 6px;border-radius:var(--radius-pill)'),
@@ -2545,14 +2582,21 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 W = '.%s' % h
 WANT = [
     ('.page' + W, 'max-width:960px;margin:0 auto;padding:var(--space-3)'),
+    # Student-view follow-up (user, 2026-10-08): the crumb trail ends with the
+    # sequence title in bold 14px and the visible h1 is gone -- `baseline` keeps
+    # the 12.5px crumbs from sitting low beside it; 14px is the gap the h1 left.
     ('.crumbs' + W,
-     'display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12.5px;'
-     'color:var(--muted);margin-bottom:10px'),
+     'display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;font-size:12.5px;'
+     'color:var(--muted);margin-bottom:14px'),
     ('.crumbs%s a:where(%s)' % (W, W), 'color:var(--muted);text-decoration:none'),
     ('.crumbs%s a:where(%s):hover' % (W, W), 'color:var(--text);text-decoration:underline'),
     ('.crumbs%s .sep:where(%s)' % (W, W), 'color:var(--faint)'),
-    ('.crumbs%s .current:where(%s)' % (W, W), 'color:var(--text)'),
-    ('.seq-title' + W, 'margin:0 0 14px'),
+    ('.crumbs%s .current:where(%s)' % (W, W), 'color:var(--text);font-size:14px;font-weight:600'),
+    # The h1 stays for screen-reader heading navigation, visually hidden -- the
+    # same rule VersionsPage carries (no global class exists).
+    ('.sr-only' + W,
+     'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;'
+     'clip-path:inset(50%);white-space:nowrap;border:0'),
     ('.strip' + W,
      'display:flex;gap:6px;padding:0 0 14px;margin-bottom:20px;'
      'border-bottom:1px solid var(--border);align-items:center;flex-wrap:wrap'),

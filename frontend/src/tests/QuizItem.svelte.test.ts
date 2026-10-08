@@ -71,12 +71,12 @@ function mixedQuiz(id: number): QuizItemType {
 function entry(attemptCount: number): ItemStateEntry {
   return {
     is_covered: false,
-    time_spent_seconds: 0,
+    time_spent: 0,
     last_visited_at: null,
-    last_answers: null,
     attempt_count: attemptCount,
-    score_correct: null,
-    score_total: null,
+    max_attempts: MAX,
+    last_score: null,
+    last_answers: null,
   };
 }
 

@@ -58,6 +58,9 @@ export type SequenceContent = {
 // (which puts the class on its button) and the presentational `ItemMark`
 // (which paints the box). "not started" is prose only — never a literal value.
 export type ItemMarkState = 'covered' | 'current' | 'not-yet';
+// The marks ItemMark can draw: every item type, plus `sequence` (the open book
+// on a sequence's row in the student course view, user 2026-10-08).
+export type ItemMarkType = Item['type'] | 'sequence';
 
 // ---- Items: discriminated union over backend Item.type ----
 export type Item =
@@ -138,14 +141,18 @@ export type VersionState = {
   items: Record<string, ItemStateEntry>; // key is item_id as string
 };
 
+// Mirrors ItemStateResponse (backend/mathion/schemas.py) field for field. It
+// used to declare `time_spent_seconds` / `score_correct` / `score_total`, which
+// the API never sent; nothing read them until the course page's quiz chip,
+// which then showed "Quiz –" for every student (student-view review r1).
 export type ItemStateEntry = {
   is_covered: boolean;
-  time_spent_seconds: number;
+  time_spent: number;
   last_visited_at: string | null; // ISO datetime
-  last_answers: Record<string, number[] | string> | null;
   attempt_count: number;
-  score_correct: number | null;
-  score_total: number | null;
+  max_attempts: number;
+  last_score: { correct: number; total: number } | null; // latest quiz attempt
+  last_answers: Record<string, number[] | string> | null;
 };
 
 // ---- Quiz submit ----

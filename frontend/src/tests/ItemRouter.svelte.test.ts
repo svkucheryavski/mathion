@@ -33,8 +33,8 @@ it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedIte
     version_id: 1,
     items: {
       '5': {
-        is_covered: true, time_spent_seconds: 0, last_visited_at: null,
-        last_answers: null, attempt_count: 0, score_correct: null, score_total: null,
+        is_covered: true, time_spent: 0, last_visited_at: null,
+        last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null,
       },
     },
   };
@@ -73,8 +73,8 @@ it('dispatches a mini_project item to UnsupportedItem with type-neutral copy', (
     version_id: 1,
     items: {
       '11': {
-        is_covered: false, time_spent_seconds: 0, last_visited_at: null,
-        last_answers: null, attempt_count: 0, score_correct: null, score_total: null,
+        is_covered: false, time_spent: 0, last_visited_at: null,
+        last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null,
       },
     },
   };

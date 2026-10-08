@@ -109,12 +109,12 @@ export function recordItemVisit(itemId: number): void {
     // First visit — populate the slot so resume-here heuristic sees it.
     currentCourse.value.state.items[String(itemId)] = {
       is_covered: false,
-      time_spent_seconds: 0,
+      time_spent: 0,
       last_visited_at: new Date().toISOString(),
-      last_answers: null,
       attempt_count: 0,
-      score_correct: null,
-      score_total: null,
+      max_attempts: currentCourse.value.version.max_quiz_attempts,
+      last_score: null,
+      last_answers: null,
     };
   }
 }

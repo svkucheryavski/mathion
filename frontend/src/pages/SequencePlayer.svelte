@@ -166,7 +166,10 @@
       <span class="crumb"><span class="mono">B{currentBlock.order}</span> · {currentBlock.title}</span>
       <span class="sep" aria-hidden="true">/</span>
     {/if}
-    <span class="mono current">S{seq.order}</span>
+    <!-- Ends with the sequence TITLE, in bold (user, 2026-10-08): the course page
+         no longer shows S{order} codes, and this crumb now names the page, so
+         the visible h1 is gone (it stays for screen readers, below). -->
+    <span class="current" aria-current="page">{seq.title}</span>
   </nav>
 {/snippet}
 
@@ -187,11 +190,11 @@
     </ErrorState>
   {:else if sequence.items.length === 0}
     {@render crumbs(sequence)}
-    <h1 class="seq-title">{sequence.title}</h1>
+    <h1 class="seq-title sr-only">{sequence.title}</h1>
     <EmptyState title="This sequence has no items yet." />
   {:else}
     {@render crumbs(sequence)}
-    <h1 class="seq-title">{sequence.title}</h1>
+    <h1 class="seq-title sr-only">{sequence.title}</h1>
 
     <nav class="strip" aria-label="Items">
       {#each sequence.items as it (it.id)}
@@ -234,14 +237,16 @@
   /* Breadcrumb — scoped to .crumbs so it never reaches the sibling
      <nav class="strip"> Items row. flex-wrap is a mechanism addition
      (Constraint 5b) so a long block title wraps the row, not its own column. */
+  /* `baseline`, not `center`: the last crumb is 14px against 12.5px, and
+     centring would sit the smaller text visibly low. */
   .crumbs {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     flex-wrap: wrap;
     gap: 8px; /* ref 2107 */
     font-size: 12.5px; /* ref 2107 */
     color: var(--muted);
-    margin-bottom: 10px; /* ref 2107 */
+    margin-bottom: 14px; /* the gap the removed h1 left (ref 2110) */
   }
   /* Without this the course link inherits the global a{color:var(--primary)}
      and renders blue; ref 2108 shows --muted. The scoped `.crumbs a`
@@ -250,8 +255,20 @@
   .crumbs a { color: var(--muted); text-decoration: none; }
   .crumbs a:hover { color: var(--text); text-decoration: underline; }
   .crumbs .sep { color: var(--faint); }
-  .crumbs .current { color: var(--text); }
-  .seq-title { margin: 0 0 14px; /* ref 2110 */ }
+  .crumbs .current { color: var(--text); font-size: 14px; font-weight: 600; }
+  /* The page's h1, for screen-reader heading navigation only: the crumb above
+     names the page visually. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
   .strip {
     display: flex;
     gap: 6px; /* ref 2112 — no --space token is 6px */
@@ -273,7 +290,7 @@
      THE RULE, split by KIND rather than by scope: a POSITIONAL counter
      ("Item N of M", "Question N of M") is 12.5px; a PROGRESS RATIO
      ({covered}/{total}) stays 11.5px. So CourseCard.svelte:105 keeps 11.5px
-     because it is a ratio ("14/22 items"), and so will T7's SequenceLink .count
+     because it is a ratio ("14/22 items"), and so does SequenceLink's `.pct`
      — which is IN this slice, so "CourseCard is the one place left at 11.5px"
      (an earlier revision of this comment, and of spec:124) is FALSE. The two
      families never share a screen: ratios live on CourseList and CourseView,

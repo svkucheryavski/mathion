@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Item, ItemMarkState } from '../../lib/types';
+  import type { ItemMarkState, ItemMarkType } from '../../lib/types';
 
   // Presentational only (D5): a 22px square carrying an 11px type mark, in one
   // of three completion states. It takes no `class` and no other props — a
@@ -7,7 +7,7 @@
   //
   // `state` defaults so a consumer with no state to give — MiniProjectLink's
   // single flag (T7) — need not supply one.
-  let { type, state = 'not-yet' }: { type: Item['type']; state?: ItemMarkState } = $props();
+  let { type, state = 'not-yet' }: { type: ItemMarkType; state?: ItemMarkState } = $props();
 
   // Item-type marks are transcribed verbatim from the "Item types" card of the
   // visual-system reference (docs/design/visual-refresh/reference-screens.dc.html).
@@ -17,10 +17,10 @@
   // square's `color` via currentColor, which each state rule sets.
 </script>
 
-<!-- aria-hidden with NO text node: the chain of these in SequenceLink (T7)
-     carries no accessible name, because completion reaches assistive tech
-     through that row's `aria-label` ("… 2 of 3 items completed") instead. A
-     label here would be a second, unlabelled reading of the same fact. -->
+<!-- aria-hidden with NO text node: every consumer names the thing elsewhere —
+     ItemIcon's `aria-label`, the course rows' `aria-label` ("Sequence: …, 2 of 3
+     items completed"). A label here would be a second, unlabelled reading of
+     the same fact. -->
 <span class="item-mark {state}" aria-hidden="true">
   <svg
     width="11"
@@ -43,6 +43,9 @@
       <line x1="4" y1="2.6" x2="4" y2="13.4" /><line x1="8" y1="2.6" x2="8" y2="13.4" /><line x1="12" y1="2.6" x2="12" y2="13.4" /><circle cx="4" cy="10" r="1.9" fill="currentColor" stroke="none" /><circle cx="8" cy="5.4" r="1.9" fill="currentColor" stroke="none" /><circle cx="12" cy="8.6" r="1.9" fill="currentColor" stroke="none" />
     {:else if type === 'mini_project'}
       <line x1="4.2" y1="2.4" x2="4.2" y2="13.6" /><polygon points="4.2,3.2 12.4,5.8 4.2,8.4" fill="currentColor" stroke="none" />
+    {:else if type === 'sequence'}
+      <!-- Not an item type: the open book on a sequence's row (user, 2026-10-08). -->
+      <path d="M8 4.6C6.4 3.5 4.6 3.1 2.6 3.3V12.7C4.6 12.5 6.4 12.9 8 14C9.6 12.9 11.4 12.5 13.4 12.7V3.3C11.4 3.1 9.6 3.5 8 4.6Z" /><line x1="8" y1="4.6" x2="8" y2="14" />
     {/if}
   </svg>
 </span>
@@ -53,11 +56,10 @@
      another and render a visible double ring).
 
      `box-sizing` keeps the square fixed across states whose borders differ
-     (1px vs the current-state 1.5px). `flex: 0 0 auto` is load-bearing: as a
-     direct child of T7's `.chain` flex container the default `flex-shrink: 1`
-     would let these compress below the locked 22px on a tight line; both
-     reference tiles carry it. It is inert in the single-child `.icon` /
-     `.row-glyph` wrappers.
+     (1px vs the current-state 1.5px). `flex: 0 0 auto` keeps the locked 22px
+     wherever a mark lands as a flex child (the default `flex-shrink: 1` would
+     compress it on a tight line); both reference tiles carry it. It is inert in
+     the single-child `.icon` / `.row-glyph` / `.seq-glyph` wrappers.
 
      No `color` here on purpose — the mark colour belongs to the state rules
      below, and `state` defaults to `not-yet`, so one of them always applies. */
@@ -101,9 +103,8 @@
      system colours — so `covered` and `not-yet` collapse into one appearance and
      a sighted high-contrast user loses per-item completion entirely. Nothing
      else carries it: the mark is aria-hidden by design, and ItemIcon's `title` /
-     `aria-label` give the item's TITLE, not its state. T7 raises the stakes
-     again by removing SequenceLink's tick, leaving this chain as the primary
-     visual completion signal.
+     `aria-label` give the item's TITLE, not its state — and in the sequence
+     player's strip these marks ARE the per-item completion signal.
 
      border-WIDTH and border-STYLE are NOT forced, so each state is restated with
      a distinction that survives even a monochrome theme:

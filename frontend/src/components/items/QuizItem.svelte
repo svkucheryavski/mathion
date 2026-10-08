@@ -261,7 +261,7 @@
      that class is SequencePlayer's .counter, raised to 12.5px in the same edit
      so the two do not disagree ~40px apart on one screen. The rule that pairing
      establishes: positional counters 12.5px, progress ratios ({covered}/{total},
-     e.g. CourseCard.svelte:105 and T7's SequenceLink) stay at 11.5px. */
+     e.g. CourseCard.svelte:105 and SequenceLink's `.pct`) stay at 11.5px. */
   .q-counter { font-size: 12.5px; color: var(--muted); }
   .submit-row { display: flex; align-items: center; gap: 12px; /* ref 2132 */ }
   .hint { color: var(--muted); font-size: 12.5px; /* ref 2134 */ margin: 0; }

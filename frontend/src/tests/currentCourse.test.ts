@@ -75,7 +75,7 @@ describe('stores/currentCourse', () => {
       state: {
         version_id: 1,
         items: {
-          '42': { is_covered: false, time_spent_seconds: 0, last_visited_at: null, last_answers: null, attempt_count: 0, score_correct: null, score_total: null },
+          '42': { is_covered: false, time_spent: 0, last_visited_at: null, last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null },
         },
       },
       miniProjectsByBlockId: {},
@@ -94,7 +94,7 @@ describe('stores/currentCourse', () => {
       state: {
         version_id: 1,
         items: {
-          '42': { is_covered: false, time_spent_seconds: 0, last_visited_at: null, last_answers: null, attempt_count: 0, score_correct: null, score_total: null },
+          '42': { is_covered: false, time_spent: 0, last_visited_at: null, last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null },
         },
       },
       miniProjectsByBlockId: {},

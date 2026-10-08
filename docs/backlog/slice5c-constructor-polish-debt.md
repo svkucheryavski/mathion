@@ -88,3 +88,11 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **(ah) is source-level, not dist-level.** Its focus-token and canvas checks grep the `.svelte` / theme source, so a rule that compiles differently (e.g. `:global` rewritten) would pass. The (w) section pins the emitted `body:has(.canvas.dN.<hash>)` rules, so this is covered there; (ah) is the lighter, spec-named layer.
 - **(ah) canvas check counts, it doesn't bind.** `d[012]` × `--focus-(page|1|2)` counts 3, so d1 → `--focus-2` would still pass. Section (w) pins each depth's token on the compiled CSS, so nothing slips through; three single-line greps would make (ah) self-sufficient. (Fable lane, T6 r1.)
 - **(ah) slug check is narrow.** Its regex catches a selector at line start or a literal `class="…"`; `class:slug={…}`, a `class={…}` expression, `.title, .slug {` on one line or `:global(.slug)` would pass. AccordionHeader is also pinned at dist level by (x); ItemRow's dist pin covers `.item-slug` only. Fix: widen to `\.(slug|code|item-slug)\b` anywhere in `<style>` plus `class:(slug|code)`, or add `\.(slug|code)` to ItemRow's dist `none`. (Opus lane, T6 r1.)
+
+## Student-view follow-up (progress bars, book icon, player breadcrumb; user 2026-10-08)
+
+- **Quiz chip rounds, the bar floors.** `quizPct` uses `Math.round` (approved design), so 199/200 points reads "Quiz 100%" while the bar beside it only says 100% when every item is done. `Math.floor` would match the bar's honesty rule; left as designed. (Opus lane, r1.)
+- **"✓" next to "Quiz 0%".** The check is the quiz item-type glyph (the same mark the player strip uses for a quiz), but beside 0% it can read as "passed". Raised with the user. (Opus lane, r1.)
+- **Player `h1` keeps `class="seq-title"` with no rule.** Kept as the tests' and the gate SIG's hook; harmless. (Opus lane, r1.)
+- **Breadcrumb with no block crumb** (no separator before the title) is unreachable: `currentBlock` is found from the same blocks the sequence is found in, so it exists whenever the sequence renders. (Opus lane, r1; checked.)
+- **`VersionState` omits `current_item_id`.** `StateJsonResponse` sends it (always `null` today); nothing reads it, and some fixtures add it with `as never`. Declare `current_item_id: number | null` when next touched. (Opus lane, r2.)
