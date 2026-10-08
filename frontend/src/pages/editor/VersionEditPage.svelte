@@ -585,7 +585,8 @@
             {vid}
             version={v}
             {perms}
-            seqIndex={hostBlock.sequences.indexOf(hostSeq) + 1}
+            blockTitle={hostBlock.title}
+            seqTitle={hostSeq.title}
             item={it}
             itemIndex={hostSeq.items.indexOf(it) + 1}
             itemCount={hostSeq.items.length}

@@ -76,7 +76,7 @@ async function render(over: { item?: Partial<AdminTreeItem>; version?: Partial<A
   const version = mkVersion(over.version);
   const p = $state({
     modal: {
-      vid: 1, version, perms: versionPermissions(version), seqIndex: 2,
+      vid: 1, version, perms: versionPermissions(version), blockTitle: 'Vectors', seqTitle: 'Linear combinations',
       item: mkItem(over.item), itemIndex: 3, itemCount: 4,
       stillOnVid: () => true, onRequestClose: vi.fn(), onDeleteItem: vi.fn(), deleting: false,
       ...over.modal,
@@ -123,15 +123,15 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
 }
 
 describe('ItemEditorModal — header and Title (T3a)', () => {
-  it('header: covered mark, the name as the dialog label, the mono context and an enabled trash', async () => {
+  it('header: covered mark, the name as the dialog label, the path context (5c D11) and an enabled trash', async () => {
     await render();
     const name = panel().querySelector('h2.item-name')!;
     expect(name.textContent).toBe('Eigenvalues');
     expect(panel().getAttribute('aria-labelledby')).toBe(name.id);
     expect(panel().querySelector('.item-mark.covered')).not.toBeNull();
     const ctx = panel().querySelector('.item-ctx')!;
-    expect(ctx.textContent).toBe('static page · S2 · item 3 of 4');
-    expect(ctx.classList.contains('mono')).toBe(true);
+    expect(ctx.textContent).toBe('Vectors › Linear combinations · item 3 of 4');
+    expect(ctx.classList.contains('mono')).toBe(false);
     expect(trash().disabled).toBe(false);
     expect(trash().title).toBe('Delete this item');
   });
@@ -410,7 +410,7 @@ describe('ItemEditorModal — video body (T3c)', () => {
 
   it('shows the Video URL field with its hint; editing marks the footer dirty', async () => {
     await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
-    expect(panel().querySelector('.item-ctx')!.textContent).toBe('video · S2 · item 3 of 4');
+    expect(panel().querySelector('.item-ctx')!.textContent).toBe('Vectors › Linear combinations · item 3 of 4');
     expect(urlInput().value).toBe(EMBED);
     expect(urlInput().classList.contains('mono')).toBe(true);
     expect(panel().querySelector('.field-hint')!.textContent).toBe(

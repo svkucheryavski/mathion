@@ -8,7 +8,7 @@
   type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
   // prop type `value: ItemType` constrains it. Every call site
-  // (SequenceAccordion) binds `value`, so no default is needed.
+  // (NewItemModal) binds `value`, so no default is needed.
   let { value = $bindable() }: { value: ItemType } = $props();
 
   const TYPES: { value: ItemType; label: string }[] = [

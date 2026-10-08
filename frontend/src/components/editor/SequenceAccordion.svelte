@@ -1,17 +1,15 @@
 <script lang="ts">
-  import { getContext, onDestroy, tick, untrack } from 'svelte';
+  import { getContext, onDestroy, tick } from 'svelte';
   import AccordionHeader, { type HeaderMode } from './AccordionHeader.svelte';
   import ItemRow from './ItemRow.svelte';
-  import ItemTypePicker from './ItemTypePicker.svelte';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import NewItemModal from './NewItemModal.svelte';
+  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
-  import Button from '../ui/Button.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
 
   type Props = {
@@ -97,7 +95,7 @@
   }
 
   async function deleteSeq() {
-    if (creating || !canStructure || busy || createBusy || parentBusy || seq.items.length > 0) return;
+    if (creating || !canStructure || busy || parentBusy || seq.items.length > 0) return;
     if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`)) return;
     const savedVid = vid;
     const check = stillOnVid;
@@ -127,7 +125,7 @@
   // Not blocked by drafts (D3); a second reorder while one is in flight would
   // see a pre-swap snapshot of seq.items.
   async function reorderItem(idx: number, dir: -1 | 1) {
-    if (busy || createBusy || parentBusy) return;
+    if (busy || parentBusy) return;
     const items = [...seq.items];
     const target = idx + dir;
     if (target < 0 || target >= items.length) return;
@@ -170,149 +168,50 @@
     void navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}/sequences/${seq.id}/items/${itemId}`);
   }
 
-  // Inline create-item form
-  let creating = $state(false);
-  let newType = $state<'static_page' | 'video' | 'quiz' | 'interactive_app'>('static_page');
-  let newTitle = $state('');
-  let newContentMd = $state('');
-  let newVideoUrl = $state('');
-  let createErrors = $state<FieldErrors>({});
-  let createGlobalError = $state<string | null>(null);
-  let createBusy = $state(false);
-  let contentMdTouched = $state(false);
-  let formEl = $state<HTMLFormElement>();
-
-  $effect(() => {
-    if (creating && newType === 'static_page' && !contentMdTouched && newTitle) {
-      newContentMd = `# ${newTitle}\n`;
-    }
-  });
-
   // D6: why the header trash is blocked (null = it may delete). The version's
   // permission is not a reason here: without it the trash is hidden.
-  const deleteBlockedReason = $derived(
-    seq.items.length > 0
-      ? 'Remove its items first'
-      : creating
-        ? 'Cancel the new item first'
-        : null,
-  );
+  const deleteBlockedReason = $derived(seq.items.length > 0 ? 'Remove its items first' : null);
 
-  function resetCreateForm() {
-    newType = 'static_page';
-    newTitle = '';
-    newContentMd = '';
-    newVideoUrl = '';
-    contentMdTouched = false;
-    createErrors = {};
-    createGlobalError = null;
-  }
-
-  // Tracker shim for the create form: synthesized isDirty getter reads
-  // current state directly — NO reset()-on-keystroke (that would always
-  // make the tracker clean and break smoke 14b). discard() lets a confirmed
-  // DirtyGuard prompt really drop the draft (D3).
-  const createTracker: RegisteredTracker = {
-    get isDirty() {
-      return creating && (
-        newTitle.trim() !== '' ||
-        (newType === 'static_page' && newContentMd.trim() !== '' && newContentMd !== `# ${newTitle}\n`) ||
-        (newType === 'video' && newVideoUrl.trim() !== '')
-      );
-    },
-    discard() { resetCreateForm(); creating = false; },
-  };
-
-  // Registered only while the form is actually on screen.
-  $effect(() => {
-    if (!(creating && expanded)) return;
-    dirty.register(createTracker);
-    return () => dirty.unregister(createTracker);
-  });
-
-  // Collapse resets the form. Tracks only `expanded`.
-  $effect(() => {
-    if (!expanded) untrack(() => { if (creating) { resetCreateForm(); creating = false; } });
-  });
-
-  // Close + reset the create form if structure permission is revoked while
-  // the form is open (e.g., parent publishes the version mid-edit). Without
-  // this, the form would stay submittable even though the underlying
-  // permission has flipped.
-  $effect(() => {
-    if (!canStructure && creating) {
-      resetCreateForm();
-      creating = false;
-    }
-  });
-
+  // "+ Add item" (5c D10): the line opens the New item modal. `creating` = the
+  // modal is open; the modal owns the form and its guard tracker.
+  let creating = $state(false);
   let addLineEl = $state<HTMLButtonElement>();
 
-  async function openAdd() {
-    // Defense-in-depth: the line is disabled in these states, but a stale or
-    // programmatic click must not open a form that could not submit.
-    if (createBusy || busy || parentBusy || !canStructure) return;
-    creating = true;
-    await tick();
-    // The checked type radio is the form's first tab stop. Scoped to this
-    // form — several sequences' pickers share the radio group name.
-    formEl?.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.focus();
-  }
-
-  async function cancelAdd() {
-    if (createBusy) return;
-    resetCreateForm(); creating = false;
-    await tick();
-    addLineEl?.focus();
-  }
-
-  async function submitCreate() {
-    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim()) return;
+  // The modal owns the form; this owns the request, the reload and the
+  // navigation into the new item's editor (R1: push, so the item's × is Back).
+  // A failure throws back into the modal, which shows it on the fields.
+  async function createItem(body: Record<string, unknown>) {
     const savedVid = vid;
     const check = stillOnVid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
-    const body: Record<string, unknown> = { title: newTitle, type: newType };
-    if (newType === 'static_page') body.content_md = newContentMd;
-    if (newType === 'video') body.video_url = newVideoUrl;
-    createErrors = {};
-    createGlobalError = null;
-    createBusy = true;
-    try {
-      const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
-      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
-      resetCreateForm();
-      creating = false;
-      // Gated like the reload: a late success must not pull the author back
-      // into the old version's item editor.
-      if (check(savedVid)) void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
-    } catch (e) {
-      const known = newType === 'static_page'
-        ? ['title', 'content_md', 'type']
-        : newType === 'video'
-          ? ['title', 'video_url', 'type']
-          : ['title', 'type'];
-      const mapped = mapCreateError(e, known);
-      // The form closed while the POST was in flight (collapse, a confirmed
-      // discard, a read-only flip): there is no form to show the error on, and
-      // writing it would resurface stale on the next open — toast it instead.
-      if (!creating) {
-        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
-        return;
-      }
-      createErrors = mapped.fieldErrors;
-      // Fall back to a generic message if mapper produced nothing — without
-      // this, a 500 with no validation body silently swallows the failure.
-      createGlobalError = mapped.globalMessage
-        ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);
-      if (createGlobalError && Object.keys(mapped.fieldErrors).length === 0) {
-        pushToast(createGlobalError, 'error');
-      }
-    } finally {
-      createBusy = false;
-    }
+    const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
+    if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
+    creating = false;
+    // Let the modal unmount first: its guard tracker (dirty — the typed
+    // title) unregisters on teardown; navigating before that would prompt.
+    await tick();
+    // Gated like the reload: a late success must not pull the author back
+    // into the old version's item editor.
+    if (!check(savedVid)) return;
+    // 5b D18: closing the new item's editor focuses its ✎. The modal's
+    // teardown just handed focus back to its opener ("+ Add item" in Chrome,
+    // where a click focuses buttons; whatever held focus before in Safari);
+    // drop it, so the editor opens with no opener and its close falls through
+    // to the new item's ✎.
+    (document.activeElement as HTMLElement | null)?.blur();
+    void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
   }
+
+  async function closeNewItem() {
+    creating = false;
+    await tick();
+    addLineEl?.focus();
+  }
+
+  // Leaving the sequence or losing structure permission closes the modal.
+  $effect(() => { if (creating && (!expanded || !canStructure)) creating = false; });
 </script>
 
 <div class="seq-card" class:focus={mode === 'open-focus'}>
@@ -325,7 +224,7 @@
     slug={seq.slug}
     {index}
     {expanded}
-    busy={busy || createBusy || parentBusy}
+    busy={busy || parentBusy}
     {canStructure}
     {canEditTitle}
     canReorderUp={index > 1}
@@ -352,7 +251,7 @@
                 {canStructure}
                 canReorderUp={i > 0}
                 canReorderDown={i < seq.items.length - 1}
-                busy={busy || createBusy || parentBusy}
+                busy={busy || parentBusy}
                 onMoveUp={() => void reorderItem(i, -1)}
                 onMoveDown={() => void reorderItem(i, 1)}
                 onOpen={() => openItem(item.id)}
@@ -363,29 +262,18 @@
         </ul>
       {/if}
 
+      {#if canStructure}
+        <!-- After the list: new items land at the end (user, T3). -->
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => (creating = true)}>+ Add item</button>
+      {/if}
       {#if creating}
-        <form class="cr-form" bind:this={formEl} onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
-          <ItemTypePicker bind:value={newType} />
-          <input placeholder="Title" aria-label="Item title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
-          {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
-          {#if newType === 'static_page'}
-            <textarea placeholder="Content (markdown)" aria-label="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || busy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
-            {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
-          {:else if newType === 'video'}
-            <input type="url" placeholder="Video URL (https://…)" aria-label="Video URL" bind:value={newVideoUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
-            {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
-          {/if}
-          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-          <div class="cr-actions">
-            <Button variant="ghost" disabled={createBusy} onclick={() => void cancelAdd()}>Cancel</Button>
-            <Button type="submit" disabled={createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
-          </div>
-        </form>
-      {:else if canStructure}
-        <!-- "+ Add item" (user 2026-10-08: like + Add block / + Add sequence),
-             after the list — new items land at the end. Until T4's New item
-             modal it opens the inline form above. -->
-        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => void openAdd()}>+ Add item</button>
+        <NewItemModal
+          blockTitle={block.title}
+          seqTitle={seq.title}
+          position={seq.items.length + 1}
+          onCreate={createItem}
+          onClose={() => void closeNewItem()}
+        />
       {/if}
     </div>
   {/if}
@@ -415,22 +303,6 @@
     cursor: pointer;
   }
   .add-line:disabled { color: var(--muted); cursor: default; }
-  /* Create forms — shared look (spec §4). */
-  .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
-  .cr-form input,
-  .cr-form textarea {
-    box-sizing: border-box;
-    width: 100%;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
-    font-size: 13px;
-  }
-  .cr-form input { height: var(--control-h); padding: 0 10px; }
-  .cr-form textarea { height: auto; padding: 8px 10px; }
-  .cr-actions { display: flex; justify-content: flex-end; gap: 8px; }
-  .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
   .empty { margin: 0; font-size: 13px; color: var(--muted); }
   .items-list { display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 0; margin: 0; }
 </style>

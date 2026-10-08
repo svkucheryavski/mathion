@@ -119,8 +119,8 @@ describe('App editor routes — item route → VersionEditPage modal (Slice-5b T
     expect(target.querySelector('section.blocks')).not.toBeNull();   // the load ran: not stuck on the Skeleton
     [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!.click();
     await settle();
-    const title = target.querySelector<HTMLInputElement>('input[aria-label="Item title"]');
-    expect(title).not.toBeNull();                                   // the create form opens
+    const title = target.querySelector<HTMLInputElement>('section.modal-panel input[aria-label="Title"]');
+    expect(title).not.toBeNull();                                   // the New item modal opens (5c D10)
 
     // Stage 2 — the modal.
     title!.value = 'Fresh';

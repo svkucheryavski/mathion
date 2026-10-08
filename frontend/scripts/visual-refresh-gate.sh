@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1395
+EXPECTED_CHECKS=1377
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3739,18 +3739,12 @@ if [[ -n $REPLY ]]; then
   N=SequenceAccordion; H=$REPLY
   d '\.acc-body' '' 'padding:12px 14px' 'border-top:1px solid var\(--border-soft\)'
   none "SequenceAccordion no Items heading rules (5c T2)" "(\.items-head|h5)\.${H}"
-  CF="\.cr-form\.${H} input:where\(\.${H}\),\.cr-form\.${H} textarea:where\(\.${H}\)"
-  chk "$CF" 'box-sizing:border-box' 'width:100%' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
-  chk "\.cr-form\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
-  chk "\.cr-form\.${H} textarea:where\(\.${H}\)" 'height:auto' 'padding:8px 10px'
-  # The item create form until T4's New item modal, opened by "+ Add item" —
-  # a text line like + Add block / + Add sequence (user, 5c T3).
+  # "+ Add item" — a text line like + Add block / + Add sequence (user, 5c T3);
+  # T4: it opens the New item modal, so the inline create form is gone.
   d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:13px' 'font-weight:600'
   chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
   none "SequenceAccordion no interim + rule (5c T3)" "\.body-tools\.${H}"
-  d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
-  d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end' 'gap:8px'
-  chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
+  none "SequenceAccordion no inline create-form rules (5c T4: the New item modal)" "\.(cr-form|cr-actions|field-err|form-err)\.${H}"
   # 5c T3: item rows are separate boxes, spaced by the list gap.
   d '\.items-list' '' 'display:flex' 'flex-direction:column' 'gap:4px' 'list-style:none' 'padding:0' 'margin:0'
   none "SequenceAccordion no last-row hairline override (5c T3: rows are boxes)" "last-child>\.item-row"
@@ -3758,11 +3752,10 @@ if [[ -n $REPLY ]]; then
   # the translucent focus line, stronger when it is the focus.
   d '\.seq-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden'
   d '\.seq-card\.focus' '' 'background:var\(--focus-0\)' 'border-color:var\(--focus-line-strong\)' 'box-shadow:var\(--focus-shadow\)'
-  # Selector-agnostic: no OTHER rule authored by SequenceAccordion (except the
-  # create form's input/textarea rule, pinned above) may draw a full / left /
-  # right / bottom border; only `border-top` hairlines are allowed. (No
-  # `(^|[{}])` anchor: with grep -o the previous match eats the shared `}`.)
-  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -vE "^\.cr-form\.${H} (input|textarea):where\(\.${H}\)[,{]" | grep -vE "^\.seq-card\.${H}\{" | grep -E 'border(-(left|right|bottom))?:[^0]')
+  # Selector-agnostic: no OTHER rule authored by SequenceAccordion may draw a
+  # full / left / right / bottom border; only `border-top` hairlines are
+  # allowed. (No `(^|[{}])` anchor: with grep -o the previous match eats the shared `}`.)
+  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -vE "^\.seq-card\.${H}\{" | grep -E 'border(-(left|right|bottom))?:[^0]')
   if [[ -z $bad ]]; then echo "PASS  SequenceAccordion: no box / side border outside .seq-card"
   else echo "FAIL  SequenceAccordion: no box / side border outside .seq-card: $bad"; fail=1; fi
   body_common
@@ -3926,12 +3919,19 @@ emoji_scan "Modal" src/components/ui/Modal.svelte
 
 echo
 echo "--- (ac) Slice-5b T3a — ItemEditorModal (3c header, Title row, footer) ---"
+# 5c D11 (source): the context line is the path, not the mono "S1" code.
+if grep -qE 'class="mono item-ctx"|· S\{seqIndex\}' src/components/editor/ItemEditorModal.svelte; then
+  echo "FAIL  ItemEditorModal context line is the path, not mono S{n} (5c D11)"; fail=1
+else
+  echo "PASS  ItemEditorModal context line is the path, not mono S{n} (5c D11)"
+fi
 own item-ctx ItemEditorModal.svelte
 uniq1 item-ctx
 if [[ -n $REPLY ]]; then
   N=ItemEditorModal; H=$REPLY
   d '\.item-name' '' 'margin:0' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)' 'text-overflow:ellipsis'
-  d '\.item-ctx' '' 'font-size:11\.5px' 'color:var\(--muted\)' 'white-space:nowrap'
+  # 5c D11: the path ("Vectors › Linear combinations · item 1 of 2"), not mono.
+  d '\.item-ctx' '' 'font-size:12px' 'color:var\(--muted\)' 'white-space:nowrap' 'text-overflow:ellipsis'
   d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'gap:6px'
   d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
   d '\.field-label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
@@ -4102,6 +4102,8 @@ FILES_5B=(
   src/components/editor/QuizEditor.svelte src/components/editor/QuestionAccordion.svelte
   src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
   src/pages/MiniProjectDetailPage.svelte src/App.svelte
+  # 5c T4 (until T6 folds the 5c files into (ah)):
+  src/components/editor/NewItemModal.svelte
 )
 emoji_scan "all Slice-5b source files" $FILES_5B src/components/ui/FocusTrap.svelte src/lib/itemBody.ts src/lib/quizSave.ts \
   src/lib/deriveExpansion.ts src/lib/handleStaleIdFallback.ts src/routes.ts src/stores/currentEditorVersion.svelte.ts

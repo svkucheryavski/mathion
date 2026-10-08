@@ -48,3 +48,12 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **The page's focus return runs before the version check.** In VersionEditPage `submitCreateBlock`, the focus return runs before `if (!stillOnVid(savedVid)) return;`. A late success after a version switch could focus the new version's "+ Add block", but only when focus sat on `<body>`.
 - **Screen readers read "plus Add block".** Wrap the glyph: `<span aria-hidden="true">+</span> Add block`, and the same for sequence and item.
 - **Gate:** `.item-row` padding is deliberately unpinned (§Process). `gap:10px` was restored in r1.
+
+## T4
+
+- **Type picker stays live while a create is posting** (both lanes). Switching Page→Video mid-POST lets a different type show than the one sent, and a 422 is mapped against the new type (a `video_url` error then reaches the alert, still visible). Fix: snapshot `sentType` in `submit()` for `known`, and freeze the picker (`<fieldset disabled>` via a `disabled` prop) while busy.
+- **Video URL check is case-insensitive; the backend isn't** (both lanes). `HTTP://…` enables Create, then a 422 lands under the URL field. Drop the `/i` in NewItemModal and flip the test that asserts the uppercase form.
+- **Browser Back + confirmed discard during an in-flight create still opens the new item** (both lanes). `tracker.discard()` closes the modal while busy, the POST continues, and the late success navigates into the item. Inherited from the old inline form. Since the r2 Safari fix, the same late success also blurs whatever the author has focused since (focus loss only; no editor has a blur handler). Fix: remember whether the modal was still open (`const open = creating`) and skip both the blur and the navigate (toast "Item created") if not.
+- **Field errors are not announced** (the 409 "title taken" `<small>` has no `role="alert"`, focus stays put). Add `role="alert"` or focus the errored input; consider `required` on Title / Video URL as ItemEditorModal does.
+- **Test gaps:** "× and Escape are frozen" never dispatches Escape or checks Cancel; no test that a second Create/Enter while busy calls `onCreate` once; "Create is disabled until…" never checks the empty-title Page default.
+- **Title sent untrimmed** while the starter heading uses `title.trim()` (`"  Dot "` stored padded, heading `# Dot`). Pre-existing; send `title.trim()` and update the body test.

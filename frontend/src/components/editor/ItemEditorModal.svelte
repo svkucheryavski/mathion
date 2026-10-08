@@ -27,7 +27,9 @@
     vid: number;
     version: AdminTreeVersion;
     perms: VersionPermissions;
-    seqIndex: number;
+    // Slice-5c D11: the context line names the path, not "S1".
+    blockTitle: string;
+    seqTitle: string;
     item: AdminTreeItem;
     itemIndex: number;
     itemCount: number;
@@ -38,17 +40,13 @@
     deleting?: boolean;
   };
   let {
-    vid, version, perms, seqIndex, item, itemIndex, itemCount,
+    vid, version, perms, blockTitle, seqTitle, item, itemIndex, itemCount,
     stillOnVid, onRequestClose, onDeleteItem, deleting = false,
   }: Props = $props();
 
   const uid = $props.id();
   const labelId = `${uid}-name`;
   const titleErrId = `${uid}-title-err`;
-
-  const TYPE_WORDS: Record<AdminTreeItem['type'], string> = {
-    static_page: 'static page', video: 'video', quiz: 'quiz', interactive_app: 'interactive app',
-  };
 
   const versionDisabled = $derived(version.is_disabled);
   const canEditText = $derived(perms.canEditTextFields);
@@ -199,7 +197,7 @@
 {#snippet head()}
   <span class="mark-slot"><ItemMark type={item.type} state="covered" /></span>
   <h2 id={labelId} class="item-name">{item.title}</h2>
-  <span class="mono item-ctx">{TYPE_WORDS[item.type]} · S{seqIndex} · item {itemIndex} of {itemCount}</span>
+  <span class="item-ctx">{blockTitle} › {seqTitle} · item {itemIndex} of {itemCount}</span>
   <span class="head-actions">
     <IconButton
       glyph="trash"
@@ -342,7 +340,7 @@
     font-weight: 600;
     color: var(--text); /* ref 1687 */
   }
-  .item-ctx { font-size: 11.5px; color: var(--muted); white-space: nowrap; /* ref 1688 */ }
+  .item-ctx { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1689 */ }
   .field-row {
     display: grid;

@@ -87,11 +87,9 @@ function mountAccordion(seq: AdminTreeSequence = mkSeq(), version = mkVersion())
   return { target, stillOnVid, props };
 }
 // Slice-5c T3 (user 2026-10-08): "+ Add item" is a text line like + Add block /
-// + Add sequence; until T4's New item modal it opens the inline form.
+// + Add sequence; T4: it opens the New item modal.
 const addItem = (t: HTMLElement) => [...t.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!;
 const trash = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq"]')!;
-const createBtn = (t: HTMLElement) =>
-  [...t.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Create') as HTMLButtonElement;
 function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -189,80 +187,44 @@ describe('SequenceAccordion — header (Slice-5c T2)', () => {
   });
 });
 
-describe('SequenceAccordion — body (T5b)', () => {
-  it('"+ Add item" opens the form (the line hides) and focuses the checked type radio', async () => {
-    const { target } = mountAccordion();
+describe('SequenceAccordion — "+ Add item" opens the New item modal (Slice-5c T4)', () => {
+  const modalPanel = () => document.querySelector<HTMLElement>('section.modal-panel');
+  const modalTitle = () => modalPanel()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!;
+  function pickQuiz() {
+    const r = modalPanel()!.querySelector<HTMLInputElement>('input[type="radio"][value="quiz"]')!;
+    r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); flushSync();
+  }
+  const xBtn = () => modalPanel()!.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+
+  it('the line opens the modal: "New item", the path and the position; no inline form', async () => {
+    const { target } = mountAccordion(mkSeq({ items: [item] }));
     expect(addItem(target).textContent!.trim()).toBe('+ Add item');
-    expect(target.querySelector('button[aria-label="New item in Seq"]')).toBeNull();   // the interim + is gone
     addItem(target).click();
     await settle();
-    const checked = target.querySelector<HTMLInputElement>('form input[type="radio"]:checked')!;
-    expect(checked.value).toBe('static_page');
-    expect(document.activeElement).toBe(checked);
-    expect(addItem(target)).toBeUndefined();
+    expect(modalPanel()!.querySelector('h2')!.textContent).toBe('New item');
+    expect(modalPanel()!.querySelector('.ctx')!.textContent).toBe('Block › Seq · will be item 2 of 2');
+    expect(target.querySelector('form.cr-form')).toBeNull();
   });
 
-  it('Cancel closes the form without a request and returns focus to the line', async () => {
+  it('Create POSTs, reloads, closes the modal and PUSHES the item URL (R1)', async () => {
+    serve((u, i) => (u === '/api/sequences/2/items' && i?.method === 'POST' ? jres({ id: 77 }) : undefined));
     const { target } = mountAccordion();
+    const before = history.length;
     addItem(target).click();
     await settle();
-    type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'Draft');
-    const calls = fetchSpy.mock.calls.length;
-    [...target.querySelectorAll<HTMLButtonElement>('form button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
+    pickQuiz();
+    type(modalTitle(), 'Test');
+    modalTitle().form!.requestSubmit();
     await settle();
-    expect(target.querySelector('form')).toBeNull();
-    expect(fetchSpy.mock.calls.length).toBe(calls);
-    expect(document.activeElement).toBe(addItem(target));
+    const post = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/sequences/2/items' && (i as RequestInit)?.method === 'POST')!;
+    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ title: 'Test', type: 'quiz' });
+    expect(treeFetchPaths.length).toBe(1);
+    expect(modalPanel()).toBeNull();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2/items/77');
+    expect(history.length).toBe(before + 1);                 // a push, not a replace
   });
 
-  it('published: no "+ Add item"', () => {
-    const { target } = mountAccordion(mkSeq(), mkVersion({ state: 'published' }));
-    expect(addItem(target)).toBeUndefined();
-  });
-
-  it('the create form keeps its type-specific fields', async () => {
-    const { target } = mountAccordion();
-    addItem(target).click();
-    await settle();
-    expect(target.querySelector('form textarea[placeholder="Content (markdown)"]')).not.toBeNull();
-    target.querySelector<HTMLInputElement>('input[value="video"]')!.click(); flushSync();
-    expect(target.querySelector('form input[type="url"]')).not.toBeNull();
-    expect(target.querySelector('form textarea')).toBeNull();
-    target.querySelector<HTMLInputElement>('input[value="quiz"]')!.click(); flushSync();
-    expect(target.querySelector('form input[type="url"]')).toBeNull();
-    expect(target.querySelector('form textarea')).toBeNull();
-  });
-
-  it('creates an interactive_app with only title + type — no script_url, no URL field', async () => {
-    serve((url) => (url.endsWith('/api/sequences/2/items') ? jres({ id: 99 }) : undefined));
-    const { target } = mountAccordion();
-    addItem(target).click();
-    await settle();
-    target.querySelector<HTMLInputElement>('input[value="interactive_app"]')!.click(); flushSync();
-    expect(target.querySelector('input[type="url"]')).toBeNull();
-    type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'My app');
-    createBtn(target).click();
-    await settle();
-    const post = fetchSpy.mock.calls.find(
-      (c) => String(c[0]).includes('/api/sequences/2/items') && (c[1] as RequestInit)?.method === 'POST',
-    )!;
-    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ title: 'My app', type: 'interactive_app' });
-  });
-
-  it('collapse resets the create form', async () => {
-    const { target, props } = mountAccordion();
-    addItem(target).click();
-    await settle();
-    type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'Draft');
-    props.routeSid = null;
-    flushSync();
-    props.routeSid = '2';
-    flushSync();
-    expect(target.querySelector('form')).toBeNull();
-    expect(addItem(target)).toBeDefined();
-  });
-
-  it('a late create-item success after a version change neither reloads nor navigates', async () => {
+  it('a late create after a version change neither reloads nor navigates', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST'
       ? new Promise<void>((r) => { release = r; }).then(() => jres({ id: 99 }))
@@ -270,8 +232,9 @@ describe('SequenceAccordion — body (T5b)', () => {
     const { target, stillOnVid } = mountAccordion();
     addItem(target).click();
     await settle();
-    type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'New page');
-    createBtn(target).click();
+    pickQuiz();
+    type(modalTitle(), 'New quiz');
+    modalTitle().form!.requestSubmit();
     await settle();
     stillOnVid.mockReturnValue(false);
     release();
@@ -280,7 +243,25 @@ describe('SequenceAccordion — body (T5b)', () => {
     expect(treeFetchPaths).toEqual([]);
   });
 
-  it('a create failure after a collapse toasts and leaves no stale error for the next open', async () => {
+  it('a server error lands on the field and the modal stays open', async () => {
+    serve((u, i) => (u === '/api/sequences/2/items' && i?.method === 'POST'
+      ? jres({ detail: [{ loc: ['body', 'title'], msg: 'Too long' }] }, 422) : undefined));
+    const { target } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    pickQuiz();
+    type(modalTitle(), 'x');
+    modalTitle().form!.requestSubmit();
+    await settle();
+    // On the Title field (its <small>, via aria-describedby), not the alert line.
+    const fieldErr = document.getElementById(modalTitle().getAttribute('aria-describedby')!)!;
+    expect(fieldErr.tagName).toBe('SMALL');
+    expect(fieldErr.textContent).toContain('Too long');
+    expect(modalPanel()!.querySelector('[role="alert"]')).toBeNull();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
+  });
+
+  it('a create failure after a collapse toasts (the modal is gone)', async () => {
     clearToasts();
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST'
@@ -289,21 +270,46 @@ describe('SequenceAccordion — body (T5b)', () => {
     const { target, props } = mountAccordion();
     addItem(target).click();
     await settle();
-    type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'Dup');
-    createBtn(target).click();
+    pickQuiz();
+    type(modalTitle(), 'Dup');
+    modalTitle().form!.requestSubmit();
     await settle();
     props.routeSid = null;
     flushSync();
+    expect(modalPanel()).toBeNull();
     release();
     await settle();
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
+  });
+
+  it('collapse closes the modal; re-expanding, the line opens a fresh one', async () => {
+    const { target, props } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    type(modalTitle(), 'Draft');
+    props.routeSid = null;
+    flushSync();
+    expect(modalPanel()).toBeNull();
     props.routeSid = '2';
     flushSync();
     addItem(target).click();
     await settle();
-    expect(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!.value).toBe('');
-    expect(target.querySelector('.field-err')).toBeNull();
-    expect(target.querySelector('.form-err')).toBeNull();
+    expect(modalTitle().value).toBe('');
+  });
+
+  it('closing the modal returns focus to the line', async () => {
+    const { target } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    xBtn().click();
+    await settle();
+    expect(modalPanel()).toBeNull();
+    expect(document.activeElement).toBe(addItem(target));
+  });
+
+  it('published: no "+ Add item"', () => {
+    const { target } = mountAccordion(mkSeq(), mkVersion({ state: 'published' }));
+    expect(addItem(target)).toBeUndefined();
   });
 
   it('empty items: "No items yet." when editable, "No items." otherwise', () => {
@@ -331,14 +337,6 @@ describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
   it('published → no trash at all', () => {
     const { target } = mountAccordion(mkSeq({ items: [item] }), mkVersion({ state: 'published' }));
     expect(target.querySelector('button[aria-label="Delete sequence Seq"]')).toBeNull();
-  });
-
-  it('an open create form → disabled, "Cancel the new item first"', async () => {
-    const { target } = mountAccordion();
-    addItem(target).click();
-    await settle();
-    expect(trash(target).disabled).toBe(true);
-    expect(trash(target).title).toBe('Cancel the new item first');
   });
 
   it('success: navigates to the block (replace, no prompt) BEFORE the reload', async () => {
@@ -401,14 +399,6 @@ describe('SequenceAccordion — item rows (T6)', () => {
     const list = target.querySelector('.items-list')!;
     expect(list.compareDocumentPosition(addItem(target)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(list.contains(addItem(target))).toBe(false);
-  });
-
-  it('the opened create form sits after the item list too', async () => {
-    const { target } = mountAccordion(mkSeq({ items: [item] }));
-    addItem(target).click();
-    await settle();
-    const list = target.querySelector('.items-list')!;
-    expect(list.compareDocumentPosition(target.querySelector('form')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   const two = () => mkSeq({ items: [item, { ...item, id: 10, title: 'Two', slug: 'two', order: 2 }] });

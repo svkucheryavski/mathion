@@ -689,7 +689,7 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     await openFromPage();
     expect(currentRoute.path).toBe(ITEM(30));
     expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Item 30');
-    expect(modal()!.querySelector('.item-ctx')!.textContent).toBe('static page · S1 · item 1 of 2');
+    expect(modal()!.querySelector('.item-ctx')!.textContent).toBe('Block 10 › Seq 20 · item 1 of 2');   // 5c D11: the path
     xBtn().click();
     await waitPop();
     expect(currentRoute.path).toBe(SEQ);
@@ -888,7 +888,7 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(modal()!.contains(document.activeElement)).toBe(true);
   });
 
-  it('after creating an item the modal opens on it; closing lands focus on its Open pencil', async () => {
+  it('after creating an item (New item modal, 5c D10) the editor opens on it; × goes Back (R1 push) and lands focus on its Open pencil', async () => {
     serve((url, init) => {
       if (url === '/api/sequences/20/items' && init?.method === 'POST') {
         tree.blocks[0].sequences[0].items.push(mkItem(99, { title: 'Fresh' }));
@@ -898,17 +898,50 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     });
     await navigate(SEQ, { force: true });
     await renderRouted();
-    [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!.click();
+    const line = [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!;
+    line.focus();   // Chrome focuses a clicked button: it becomes the New item modal's opener
+    line.click();
     await settle();
-    const t = target.querySelector<HTMLInputElement>('input[aria-label="Item title"]')!;
+    expect(modal()!.querySelector('h2')!.textContent).toBe('New item');
+    const t = modal()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!;
     typeInto(t, 'Fresh');
-    const create = [...t.form!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.trim() === 'Create')!;
+    const before = history.length;
+    const create = [...modal()!.querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Create')!;
     create.focus();
-    t.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    create.click();
     await settle();
     await settle();
     expect(currentRoute.path).toBe(ITEM(99));
+    expect(history.length).toBe(before + 1);   // R1: a push, so the item's × is Back
     expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Fresh');
+    xBtn().click();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(document.activeElement).toBe(pencil(99));
+  });
+
+  it('after creating an item in Safari (a click does not focus the line) × still lands focus on its Open pencil (5c D10 / 5b D18)', async () => {
+    serve((url, init) => {
+      if (url === '/api/sequences/20/items' && init?.method === 'POST') {
+        tree.blocks[0].sequences[0].items.push(mkItem(99, { title: 'Fresh' }));
+        return jres({ id: 99 });
+      }
+      return undefined;
+    });
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    // Safari model: focus sits elsewhere (here the sequence header's ✎) and the click leaves it there,
+    // so that control becomes the New item modal's opener.
+    const other = target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!;
+    other.focus();
+    expect(document.activeElement).toBe(other);
+    [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!.click();
+    await settle();
+    typeInto(modal()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!, 'Fresh');
+    [...modal()!.querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Create')!.click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(99));
     xBtn().click();
     await waitPop();
     expect(currentRoute.path).toBe(SEQ);

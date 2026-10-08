@@ -49,9 +49,10 @@ The 5a/5b gate pinned the CSS against the written spec, but nobody looked at the
     - "+ Add item" is the same kind of quiet text line as the other two.
 - **D10 — Everything about items happens in modals.**
   - **"+ Add item"** opens a **New item** modal:
-    - four type cards: Page, Video, Quiz, App;
+    - four type choices: Page, Video, Quiz, Interactive app (compact pills, as before 5c; the user, 2026-10-08);
     - a Title field;
-    - the one extra field the backend requires for that type: Page → a content box, Video → a URL field, Quiz and App → nothing more.
+    - the one extra field the backend requires for that type: Video → a URL field; Page, Quiz and App → nothing more.
+    - *Amended by the user, 2026-10-08 (during T4):* a Page asks only for its title. It is created with the starter content "# Title" (the backend requires content), and the content is written in the item editor right after.
   - **Create** goes straight into the new item's editor modal, which is 5b's modal as it is.
   - Editing an item stays as in 5b.
 - **D11 — The item modal's context line names the path:** "Vectors › Linear combinations · item 1 of 2".
@@ -111,13 +112,14 @@ These come from `versionPermissions`; the rules don't change.
 - **Frame:** the 5b `Modal` frame.
 - **Header:** "New item" with the context "Vectors › Linear combinations · will be item N of N", and ×.
 - **Body:**
-  - The type cards come first. Page is selected by default. The control is one radio group with real `<input type="radio">`, styled as cards, keyboard-reachable.
-  - Then Title, then the type field: Page → "Content (markdown)", plain textarea, required; Video → "Video URL", required, `http(s)://`.
+  - The type cards come first. Page is selected by default. The control is one radio group with real `<input type="radio">`, styled as compact pills (mark + name on one line, as before 5c; the user, 2026-10-08), keyboard-reachable.
+  - Then Title, then, for Video only, "Video URL", required, `http(s)://`. A Page sends `content_md: "# <title>"`.
+  - A server error on a field the modal doesn't show goes to the alert line, never silently onto a hidden field.
 - **Footer:** Cancel and Create.
   - Create is disabled until the required fields are filled.
   - It shows the loading state while posting.
   - Server errors map to the fields (`mapCreateError`, as today).
-- **On success:** navigate to the new item's route with `replace`, so Back doesn't reopen the New item modal. The 5b editor modal opens. Close focus follows 5b D18 (the new item's ✎).
+- **On success:** navigate (push) to the new item's route. The New item modal is not a route, so Back can't reopen it, and the push lets the item's × return to the sequence (5b D7). The 5b editor modal opens. Close focus follows 5b D18 (the new item's ✎).
 - **Close:** ×, Esc or Cancel. If anything was typed, the discard prompt appears (the DirtyRegistry, as for other modals).
 
 ### Version settings modal (D12)
@@ -169,8 +171,8 @@ These come from `versionPermissions`; the rules don't change.
 - **Inline title.** Enter saves (one PATCH, tree reload), Esc cancels without a request, an error shows under the field, and an open field is guard-dirty.
 - **Add rows** for block and sequence: Enter creates, Esc cancels, and errors show.
 - **New item modal.**
-  - Per type, the right extra field is shown and required.
-  - Create posts the right body and replaces the URL with the item route.
+  - Per type, the right extra field is shown and required (Page: none; it sends the "# Title" starter).
+  - Create posts the right body and pushes the item route.
   - The editor modal opens on the new item.
   - Cancel with typed input prompts.
 - **Version settings.** The editable modal sends one PATCH with only the changed fields. The read-only modal has no footer.
