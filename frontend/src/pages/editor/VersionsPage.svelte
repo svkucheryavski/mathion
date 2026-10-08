@@ -37,8 +37,10 @@
   // preventing double-submit / racing transitions on the same row.
   let busy = $state(false);
 
-  // Create form — collapsed behind the `+` toggle (visual-spec §5.3).
+  // Create form — collapsed behind the "+ Add version" line under the list
+  // (5c follow-up: the editor's add lines; it was a `+` in the Versions row).
   let creating = $state(false);
+  let addLineEl = $state<HTMLButtonElement>();
   let info_md = $state('');
   let max_quiz_attempts = $state<number | null>(3);
   let newLabel = $state('');
@@ -67,16 +69,25 @@
     max_quiz_attempts = 3;
   }
 
-  async function toggleCreate() {
-    if (busy) return;
-    if (creating) {
-      resetCreateForm();
-      creating = false;
-      return;
-    }
+  async function openCreate() {
+    if (busy || creating) return;
     creating = true;
     await tick();
     newLabelEl?.focus();
+  }
+
+  async function cancelCreate() {
+    resetCreateForm();
+    creating = false;
+    await tick();
+    addLineEl?.focus();
+  }
+
+  // Escape in a field cancels, as the editor's add rows do.
+  function escCancels(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || e.isComposing || busy) return;
+    e.preventDefault();
+    void cancelCreate();
   }
 
   async function createVersion() {
@@ -182,10 +193,6 @@
   <Button variant="secondary" onclick={() => navigate('/courses')}>Back to courses</Button>
 {/snippet}
 
-{#snippet newVersionAction()}
-  <Button onclick={() => void toggleCreate()} disabled={busy}>+ New version</Button>
-{/snippet}
-
 <div class="page">
   {#if error && !loading}
     <ErrorState variant="page" title="Couldn't load" message={error.message} action={backToCourses} />
@@ -196,37 +203,10 @@
     <div class="heading">
       <IconButton round glyph="back" title="Back to courses" onclick={() => navigate('/courses')} />
       <h1>{course.name}</h1>
+      <span class="hchip">{versions.length} {versions.length === 1 ? 'version' : 'versions'}</span>
     </div>
-    <div class="versions-head">
-      <h2>Versions</h2>
-      <span class="mono count">{versions.length}</span>
-      <span class="push">
-        <IconButton
-          primary
-          glyph={creating ? 'close' : 'plus'}
-          title={creating ? 'Cancel new version' : 'New version'}
-          aria-label="New version"
-          aria-expanded={creating}
-          disabled={busy}
-          onclick={() => void toggleCreate()}
-        />
-      </span>
-    </div>
-    {#if creating}
-      <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
-        <label>Label (optional)
-          <input class="new-label" type="text" maxlength="200" bind:value={newLabel} bind:this={newLabelEl} />
-        </label>
-        <label>Info (markdown)
-          <textarea bind:value={info_md} rows="3"></textarea>
-        </label>
-        <label>Max quiz attempts
-          <!-- Raw <input> — `Input.svelte` lacks min/max (spec Constraint 6). -->
-          <input class="mono" type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} />
-        </label>
-        <div class="submit"><Button type="submit" disabled={busy} loading={busy}>Create</Button></div>
-      </form>
-    {/if}
+    <!-- The visible "Versions" row is gone (5c follow-up); the outline keeps h1 > h2. -->
+    <h2 class="sr-only">Versions</h2>
     {#if loading}
       <Skeleton rows={3} />
     {:else if versions.length === 0}
@@ -234,7 +214,6 @@
         icon="list"
         title="No versions yet"
         hint="A version holds the blocks, sequences and items students see. Create one to start authoring."
-        action={creating ? undefined : newVersionAction}
       />
     {:else}
       <ul class="vlist">
@@ -242,8 +221,11 @@
           {@const dupReason = duplicateVersionReason(v)}
           {@const delReason = deleteVersionReason(v)}
           <li class="vrow">
-            <span class="mono vnum" class:off={v.is_disabled}>v{v.id}</span>
-            {#if v.label}<span class="vlabel">{v.label}</span>{/if}
+            <!-- 5c follow-up (user): the label is the row title, as a block's; it opens the version like the pencil. -->
+            <button type="button" class="vtitle" class:untitled={!v.label} class:off={v.is_disabled} disabled={busy}
+              aria-label={v.label ? undefined : `v${v.id} (no label)`}
+              onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)}>{v.label || '(no label)'}</button>
+            <span class="hchip">v{v.id}</span>
             <span class="badges"><VersionBadges state={v.state} isDisabled={v.is_disabled} /></span>
             <span class="slots">
               <IconButton size="sm" glyph="pencil" title="Open" aria-label="Open v{v.id}" disabled={busy}
@@ -275,22 +257,67 @@
         {/each}
       </ul>
     {/if}
+    {#if creating}
+      <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
+        <label>Label (optional)
+          <input class="new-label" type="text" maxlength="200" bind:value={newLabel} bind:this={newLabelEl} onkeydown={escCancels} />
+        </label>
+        <label>Info (markdown)
+          <textarea bind:value={info_md} rows="3" onkeydown={escCancels}></textarea>
+        </label>
+        <label>Max quiz attempts
+          <!-- Raw <input> — `Input.svelte` lacks min/max (spec Constraint 6). -->
+          <input class="mono" type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} onkeydown={escCancels} />
+        </label>
+        <div class="submit">
+          <Button variant="ghost" disabled={busy} onclick={() => void cancelCreate()}>Cancel</Button>
+          <Button type="submit" disabled={busy} loading={busy}>Create</Button>
+        </div>
+      </form>
+    {:else}
+      <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openCreate()}>+ Add version</button>
+    {/if}
   {/if}
 </div>
 
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  /* h1 / h2 metrics come from base.css (21px/600/-.015em, 15px/600 — ref 1474, 1477). */
+  /* 5c follow-up (user): the editor's page shade, so the course page and the
+     version page read alike. `.page` stays scoped: the rule ends with the page. */
+  :global(body):has(.page) { background: var(--focus-page); }
+  /* The h1 is 18px (below); the h2 is visually hidden (.sr-only). 5c follow-up. */
   .heading { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; /* ref 1472 */ }
-  .versions-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; /* ref 1476 */ }
-  .count { font-size: 11.5px; /* ref 1478 */ color: var(--muted); }
-  .push { margin-left: auto; display: flex; /* ref 1479 */ }
+  /* 5c follow-up (user): the version page's title size (VersionEditPage .editor-heading h1). */
+  .heading h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
+  /* The count as a heading chip — VersionEditPage .hchip, same look. */
+  .hchip {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--muted);
+    border: 1px solid var(--focus-line);
+    white-space: nowrap;
+  }
+  /* Visually hidden, still announced (VersionEditPage .sr-only; no global class exists). */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
   .create {
     display: flex;
     flex-direction: column;
     gap: 8px; /* the 8px create-form gap (spec §4 Create forms) */
     padding: 14px;
-    margin-bottom: 12px; /* the list's 12px rhythm (ref 1476) */
+    margin-top: 6px; /* the list's row gap: it opens where "+ Add version" was */
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
@@ -311,34 +338,54 @@
   .create input,
   .dup input { height: var(--control-h); padding: 0 10px; }
   .create textarea { padding: 8px 10px; }
-  .submit { display: flex; justify-content: flex-end; }
-  .vlist {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    overflow: hidden; /* ref 1481 */
+  .submit { display: flex; justify-content: flex-end; gap: 8px; }
+  /* "+ Add version" — the editor's quiet add line (VersionEditPage .add-line, 5c D9). */
+  .add-line {
+    margin-top: 4px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
   }
+  .add-line:disabled { color: var(--muted); cursor: default; }
+  /* 5c follow-up (user): separate boxed rows, like the block list (BlockAccordion .block-card). */
+  .vlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .vrow {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 9px 12px 9px 14px; /* ref 1482 */
-    border-bottom: 1px solid var(--border-soft);
+    border: 1px solid var(--focus-line);
+    border-radius: var(--radius);
+    background: var(--focus-0);
   }
-  .vlist > li:last-child { border-bottom: 0; }
-  .vnum { font-size: 13px; /* ref 1483 */ color: var(--text); }
-  /* D5: a disabled version recedes by its number dropping to --muted (ref 1495). */
-  .vnum.off { color: var(--muted); }
-  .vlabel { font-size: 13px; /* ref 1484 */ color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  /* The block row title (AccordionHeader .toggle / .title): 15px semibold, a bare button. */
+  .vtitle {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .vtitle:disabled { cursor: default; }
+  /* "(no label)" and D5's disabled version (ref 1495) recede to --muted. */
+  .vtitle.untitled,
+  .vtitle.off { color: var(--muted); }
   .badges { margin-left: auto; display: flex; /* ref 1485 */ }
   .slots { display: flex; gap: 6px; margin-left: 22px; /* ref 1486 */ }
   .dup-row {
     padding: 9px 12px 9px 14px; /* the row inset (ref 1482) */
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--border-soft);
+    background: var(--focus-0); /* white on the shaded page, as the rows and the create form */
+    border: 1px solid var(--focus-line);
+    border-radius: var(--radius);
   }
   .dup { display: flex; align-items: flex-end; gap: 8px; /* the 8px create-form gap */ }
   .dup label { flex: 1; min-width: 0; }

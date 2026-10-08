@@ -92,7 +92,7 @@ describe('VersionsPage — Duplicate', () => {
     await settle();
 
     // label renders in the row (spec frontend requirement)
-    expect(target.querySelector('.vlabel')?.textContent).toBe('Fall');
+    expect(target.querySelector('.vtitle')?.textContent).toBe('Fall');
 
     clickByLabel(target, 'Duplicate v7');
     await settle();
@@ -135,11 +135,11 @@ describe('VersionsPage — Duplicate', () => {
     expect((inputs[0] as HTMLInputElement).value).toBe('Copy of B');
   });
 
-  it('the + New version form sends the optional label', async () => {
+  it('the + Add version form sends the optional label', async () => {
     postMock.mockResolvedValue({ id: 99 });
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
     await settle();
-    clickByLabel(target, 'New version');
+    clickButtonByText(target, '+ Add version');
     await settle();
     const labelInput = target.querySelector<HTMLInputElement>('input.new-label');
     if (!labelInput) throw new Error('new-version label input missing');

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1337
+EXPECTED_CHECKS=1361
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -458,6 +458,10 @@ GLOBAL_ALLOW = {
     # so the rule matches only while VersionEditPage is mounted; no quiz
     # question renders under it (the editor never mounts SequencePlayer).
     ('src/pages/editor/VersionEditPage.svelte', 'body'),
+    # 5c follow-up (user, 2026-10-08): the versions list takes the editor's
+    # page shade. `:global(body):has(.page)` keeps `.page` SCOPED, so it matches
+    # only while VersionsPage is mounted; that page never renders a quiz.
+    ('src/pages/editor/VersionsPage.svelte', 'body'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -3551,23 +3555,39 @@ if [[ -n $REPLY ]]; then
   sweep VersionBadges $H
 fi
 
-own versions-head VersionsPage.svelte
-uniq1 versions-head
+own vlist VersionsPage.svelte
+uniq1 vlist
 if [[ -n $REPLY ]]; then
   N=VersionsPage; H=$REPLY
   d '\.heading' '' 'display:flex' 'align-items:center' 'gap:10px' 'margin-bottom:16px'
-  d '\.versions-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'margin-bottom:12px'
-  d '\.count' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.push' '' 'margin-left:auto'
-  d '\.vlist' '' 'list-style:none' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'overflow:hidden'
-  d '\.vrow' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:9px 12px 9px 14px' 'border-bottom:1px solid var\(--border-soft\)'
-  chk "\.vlist\.${H}>li:where\(\.${H}\):last-child" 'border-bottom:0'
-  d '\.vnum' '' 'font-size:13px' 'color:var\(--text\)'
-  d '\.vnum\.off' '' 'color:var\(--muted\)'
-  d '\.vlabel' '' 'font-size:13px' 'color:var\(--muted\)'
+  # 5c follow-up (user, 2026-10-08): the version page's 18px title, the count as
+  # its .hchip, no visible Versions row; "+ Add version" is the editor's add line.
+  chk "\.heading\.${H} h1:where\(\.${H}\)" 'font-size:18px'
+  d '\.hchip' '' 'font-size:11px' 'padding:2px 7px' 'border-radius:3px' 'background:var\(--surface-2\)' 'color:var\(--muted\)' 'border:1px solid var\(--focus-line\)'
+  d '\.sr-only' '' 'position:absolute' 'width:1px' 'height:1px' 'overflow:hidden' 'clip-path:inset\(50%\)'
+  none "VersionsPage has no Versions row (.versions-head / .count / .push)" "\.(versions-head|count|push)\.${H}"
+  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
+  d '\.add-line' ':disabled' 'color:var\(--muted\)'
+  d '\.create' '' 'margin-top:6px' 'border:1px solid var\(--border\)' 'background:var\(--surface\)'
+  # 5c follow-up (user, 2026-10-08): the list reads like the block list — separate
+  # boxed rows with a 6px gap on the shaded page, not one bordered box.
+  d '\.vlist' '' 'list-style:none' 'display:flex' 'flex-direction:column' 'gap:6px'
+  none "VersionsPage .vlist is no longer one bordered box" "\.vlist\.${H}\{[^}]*(border|background|overflow):"
+  d '\.vrow' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:9px 12px 9px 14px' \
+                'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:var\(--focus-0\)'
+  none "VersionsPage no list-divider rule (.vlist > li)" "\.vlist\.${H}>li"
+  none "VersionsPage rows carry no divider border-bottom" "\.(vrow|dup-row)\.${H}\{[^}]*border-bottom:"
+  chk "body:has\(\.page\.${H}\)" 'background:var\(--focus-page\)'
+  none "VersionsPage no fully-global body:has(.page) (.page stays scoped)" "body:has\(\.page\)"
+  # 5c follow-up (user, 2026-10-08): the label is the row title (the block title's
+  # 15px/600), the id a .hchip after it; "(no label)" and a disabled version are muted.
+  d '\.vtitle' '' 'border:0' 'background:transparent' 'color:var\(--text\)' 'font-size:15px' 'font-weight:600' 'cursor:pointer'
+  chk "\.vtitle\.untitled\.${H},\.vtitle\.off\.${H}" 'color:var\(--muted\)'
+  none "VersionsPage has no .vnum / .vlabel (the id is a chip, the label the title)" "\.(vnum|vlabel)\.${H}"
   d '\.badges' '' 'margin-left:auto'
   d '\.slots' '' 'display:flex' 'gap:6px' 'margin-left:22px'
-  d '\.dup-row' '' 'padding:9px 12px 9px 14px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.dup-row' '' 'padding:9px 12px 9px 14px' 'background:var\(--focus-0\)' \
+                   'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)'
   none "VersionsPage pre-Slice-5a .badge rules gone" "\.badge\.${H}"
   sweep VersionsPage $H
 fi

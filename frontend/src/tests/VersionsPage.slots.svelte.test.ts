@@ -72,12 +72,24 @@ describe('VersionsPage — heading (3a)', () => {
     expect(navigateMock).toHaveBeenCalledWith('/courses');
   });
 
-  it('shows the version count in .mono', async () => {
+  // 5c follow-up (user, 2026-10-08): the count is a heading chip, as the version
+  // page's "max N quiz attempts"; the Versions row (h2 + count + "+") is gone.
+  it('the version count is a chip after the course name; "Versions" stays as a hidden h2', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 5 })];
     await render();
-    const count = target.querySelector('.count')!;
-    expect(count.textContent).toBe('2');
-    expect(count.classList.contains('mono')).toBe(true);
+    const chips = [...target.querySelectorAll('.heading .hchip')];
+    expect(chips.map((c) => c.textContent)).toEqual(['2 versions']);
+    const h2 = target.querySelector('h2')!;
+    expect(h2.textContent).toBe('Versions');
+    expect(h2.classList.contains('sr-only')).toBe(true);
+    expect(target.querySelector('.versions-head')).toBeNull();
+    expect(byLabel('New version')).toBeNull();
+  });
+
+  it('the chip is singular for one version', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    expect(target.querySelector('.heading .hchip')!.textContent).toBe('1 version');
   });
 });
 
@@ -118,14 +130,45 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
     expect(byLabel('Delete v9')!.title).toBe('Delete — enable the version first');
   });
 
-  it('a disabled version number takes the muted hook (D5)', async () => {
-    versionsPageState.versions = [mkVersion({ id: 3, is_disabled: true }), mkVersion({ id: 4 })];
+  // 5c follow-up (user, 2026-10-08): the row reads like a block row — the label
+  // as the title (a button that opens the version), then the id as a chip.
+  it('a row is: the label as a title button, then a v{id} chip, then the state badge', async () => {
+    versionsPageState.versions = [mkVersion({ id: 11, label: 'Draft B' })];
     await render();
-    const nums = [...target.querySelectorAll('.vnum')];
-    expect(nums.map((n) => n.textContent)).toEqual(['v3', 'v4']);
-    expect(nums[0].classList.contains('off')).toBe(true);
-    expect(nums[1].classList.contains('off')).toBe(false);
-    expect(nums[0].classList.contains('mono')).toBe(true);
+    const row = byLabel('Open v11')!.closest('li')!;
+    const title = row.querySelector<HTMLButtonElement>('button.vtitle')!;
+    expect(title.textContent).toBe('Draft B');
+    const chip = row.querySelector('.hchip')!;
+    expect(chip.textContent).toBe('v11');
+    const badge = row.querySelector('.vbadge')!;
+    const follows = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(title, chip) && follows(chip, badge)).toBe(true);
+    expect(row.querySelector('.vnum')).toBeNull();
+  });
+
+  it('clicking the title opens the version, as the pencil does', async () => {
+    versionsPageState.versions = [mkVersion({ id: 11, label: 'Draft B' })];
+    await render();
+    target.querySelector<HTMLButtonElement>('button.vtitle')!.click();
+    expect(navigateMock).toHaveBeenCalledWith('/courses/c/edit/v/11');
+  });
+
+  it('a version without a label shows a muted "(no label)" placeholder, named with its id', async () => {
+    versionsPageState.versions = [mkVersion({ id: 10, label: '' })];
+    await render();
+    const title = target.querySelector<HTMLButtonElement>('button.vtitle')!;
+    expect(title.textContent).toBe('(no label)');
+    expect(title.classList.contains('untitled')).toBe(true);
+    expect(title.getAttribute('aria-label')).toBe('v10 (no label)');
+  });
+
+  it('a disabled version title takes the muted hook (D5)', async () => {
+    versionsPageState.versions = [mkVersion({ id: 3, label: 'A', is_disabled: true }), mkVersion({ id: 4, label: 'B' })];
+    await render();
+    const titles = [...target.querySelectorAll('button.vtitle')];
+    expect(titles[0].classList.contains('off')).toBe(true);
+    expect(titles[1].classList.contains('off')).toBe(false);
+    expect([...target.querySelectorAll('.vrow .hchip')].map((c) => c.textContent)).toEqual(['v3', 'v4']);
   });
 
   it('Open navigates to the editor', async () => {
@@ -136,30 +179,54 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
   });
 });
 
-describe('VersionsPage — collapsed create form (§5.3)', () => {
-  it('starts collapsed; + opens it, focuses Label, swaps to close; close resets the fields', async () => {
+// 5c follow-up (user, 2026-10-08): "+ Add version" is a quiet line UNDER the
+// list, as "+ Add block" / "+ Add sequence"; the form opens in its place.
+const addLine = () => target.querySelector<HTMLButtonElement>('button.add-line');
+const after = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
+  it('sits after the list; opens the form in its place with Label focused', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 })];
     await render();
     expect(target.querySelector('form.create')).toBeNull();
-    const toggle = byLabel('New version')!;
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.classList.contains('primary')).toBe(true);
-    toggle.click();
+    const line = addLine()!;
+    expect(line.textContent).toBe('+ Add version');
+    expect(after(target.querySelector('ul.vlist')!, line)).toBe(true);
+    line.click();
+    await settle();
+    const form = target.querySelector('form.create')!;
+    expect(after(target.querySelector('ul.vlist')!, form)).toBe(true);
+    expect(addLine()).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('input.new-label'));
+  });
+
+  it('Cancel closes the form, focuses the line again and resets the fields', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    addLine()!.click();
     await settle();
     const label = target.querySelector<HTMLInputElement>('input.new-label')!;
-    expect(document.activeElement).toBe(label);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle.getAttribute('data-glyph')).toBe('close');
-    expect(toggle.title).toBe('Cancel new version');
     label.value = 'Draft';
     label.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    toggle.click();
+    [...target.querySelectorAll<HTMLButtonElement>('form.create button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
     await settle();
     expect(target.querySelector('form.create')).toBeNull();
-    toggle.click();
+    expect(document.activeElement).toBe(addLine());
+    addLine()!.click();
     await settle();
     expect(target.querySelector<HTMLInputElement>('input.new-label')!.value).toBe('');
+  });
+
+  it('Escape in the form cancels it', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    addLine()!.click();
+    await settle();
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    target.querySelector('input.new-label')!.dispatchEvent(ev);
+    await settle();
+    expect(target.querySelector('form.create')).toBeNull();
+    expect(document.activeElement).toBe(addLine());
   });
 });
 
@@ -177,7 +244,8 @@ describe('VersionsPage — states (9d)', () => {
     versionsPageState.loading = true;
     await render();
     expect(target.querySelector('h1')!.textContent).toBe('Applied Linear Algebra');
-    expect(target.querySelector('.versions-head')).not.toBeNull();
+    expect(target.querySelector('.heading .hchip')).not.toBeNull();
+    expect(addLine()).not.toBeNull();
     expect(target.querySelector('.skeleton')).not.toBeNull();
     expect(byLabel('Open v7')).toBeNull();
   });
@@ -201,15 +269,16 @@ describe('VersionsPage — states (9d)', () => {
     expect(navigateMock).toHaveBeenCalledWith('/courses');
   });
 
-  it('empty renders the header plus an EmptyState whose action opens the form', async () => {
+  it('empty renders an EmptyState (no button of its own) with "+ Add version" under it', async () => {
     await render();
-    expect(target.querySelector('h2')!.textContent).toBe('Versions');
+    expect(target.querySelector('.heading .hchip')!.textContent).toBe('0 versions');
     const es = target.querySelector('.empty-state')!;
     expect(es.querySelector('.title')!.textContent).toBe('No versions yet');
     expect(es.querySelector('.tile')).not.toBeNull();
     expect(es.querySelector('.hint')!.textContent).toMatch(/^A version holds the blocks/);
-    const act = [...es.querySelectorAll('button')].find((b) => b.textContent?.trim() === '+ New version')!;
-    act.click();
+    expect(es.querySelector('button')).toBeNull();
+    expect(after(es, addLine()!)).toBe(true);
+    addLine()!.click();
     await settle();
     expect(target.querySelector('form.create')).not.toBeNull();
   });
@@ -266,7 +335,7 @@ describe('VersionsPage — row actions through the slots', () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
-  it('while a request is in flight every slot and the + are disabled', async () => {
+  it('while a request is in flight every slot and "+ Add version" are disabled', async () => {
     let release!: () => void;
     postMock.mockReturnValue(new Promise<undefined>((r) => { release = () => r(undefined); }));
     versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8 })];
@@ -274,7 +343,8 @@ describe('VersionsPage — row actions through the slots', () => {
     byLabel('Disable v7')!.click();
     await settle();
     for (const id of [7, 8]) expect(slots(id).every((b) => b.disabled)).toBe(true);
-    expect(byLabel('New version')!.disabled).toBe(true);
+    expect([...target.querySelectorAll<HTMLButtonElement>('button.vtitle')].every((b) => b.disabled)).toBe(true);
+    expect(addLine()!.disabled).toBe(true);
     release();
     await settle();
     expect(byLabel('Open v8')!.disabled).toBe(false);

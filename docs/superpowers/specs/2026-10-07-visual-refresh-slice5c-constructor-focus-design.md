@@ -138,6 +138,14 @@ These come from `versionPermissions`; the rules don't change.
 - `BlockGroup` stops rendering `info_html`, along with the empty-strip guard that went with it.
 - Version info in `CourseView` is unchanged: it's version info, not block info.
 
+## Versions page follow-up (the user's, 2026-10-08, after T5)
+
+The course page's versions list is brought in line with the version page. This supersedes the Versions header in the Slice-5a spec (`h2` + `.count` + `+` with `aria-expanded`).
+- **Page shade and rows.** The page takes `--focus-page`. Each version is a separate boxed row, 6px apart, like the block rows. The duplicate form is a matching white box.
+- **Heading.** The course name is 18px, as on the version page. The count is a chip ("2 versions"). The visible Versions row is gone, and its `h2` stays for screen readers only.
+- **"+ Add version".** A quiet line under the list, like "+ Add block", opens the create form in its place. The form has Cancel, and Escape cancels too. The empty state has no button of its own.
+- **Rows.** The label is the row title (block-title size). Clicking it opens the version, like the pencil. A `v{id}` chip follows it.
+
 ## What is removed
 
 - **`VersionMetaForm` as an inline card.** It is replaced by the version settings modal.

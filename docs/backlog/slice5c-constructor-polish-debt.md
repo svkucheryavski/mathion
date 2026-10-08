@@ -69,3 +69,9 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **Gate anchor `.ro` is generic (r1).** VersionSettingsModal's token pins anchor on `.ro`; rename the class to `.vs-ro` so the pin can't match another component's `.ro`.
 - **Test gaps (r1):** double Save while busy (the button path; the Enter path is pinned); Escape while saving does nothing; the "Saved (refresh failed …)" info toast; "Save failed" toast after an unmount mid-PATCH; the "Saved" toast after a version switch; the version-switch page test should also assert the `v2` chip.
 - **Safari IME commit Enter can save (r2, Opus).** Safari may fire the composition-commit Enter with `isComposing` false and `keyCode` 229, so a Japanese/Chinese label could save early. Add `|| e.keyCode === 229` to `onEnter` (Modal.svelte guards Escape this way); AccordionHeader's Enter has no IME guard at all — fix both together.
+
+## Versions page follow-up (2026-10-08)
+
+- **The row title can't open in a new tab (r1, Opus).** It is a `<button>` that calls `navigate`. VersionEditPage's h1 uses `<a href>` plus a modifier-aware click handler; do the same here.
+- **The create form box differs from the rows (r1, Opus).** `.create` keeps `--border` / `--surface`, while the rows and the duplicate row use `--focus-line` / `--focus-0`. Align them if every white box on the shaded page should match.
+- **Duplicated CSS (r1, Opus).** `.hchip` and `.sr-only` are copied verbatim in VersionEditPage and VersionsPage, and the gate pins both copies. Consider a shared class.
