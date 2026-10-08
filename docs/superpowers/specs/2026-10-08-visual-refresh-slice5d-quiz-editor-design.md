@@ -1,8 +1,9 @@
 # Visual refresh — Slice 5d: a calm quiz editor (overview + small editing modals)
 
-**Status:** draft, rev 3. Written 2026-10-08 for the user's review.
+**Status:** draft, rev 4. Written 2026-10-08 for the user's review.
 - Rev 2 folded in round 1 of the spec review (two Opus, one Fable) and the user's decision D12.
-- Rev 3 folds in round 2 (the same three angles, fresh reviewers) and the user's confirmation of D13.
+- Rev 3 folded in round 2 (the same three angles, fresh reviewers) and the user's confirmation of D13.
+- Rev 4 folds in round 3.
 
 **Branch:** `feat/visual-refresh-slice5-authoring`. It stays local: no push, no merge. 5d lands on top of 5c (tip `2511015`).
 
@@ -69,13 +70,15 @@ The modal shell, its header (type icon, title, context line "Vectors › Linear 
 
 - For a quiz, the item modal renders no Save/Discard footer. Page, Video and App keep theirs exactly as today.
 - ⌘S / Ctrl+S: in a level-3 modal it means that modal's Save. Anywhere else in the quiz modal it is swallowed (`preventDefault`), so the browser's own Save dialog never opens.
-- The item modal's own ⌘S handler ignores key events coming from a level-3 panel.
+- The item modal's own ⌘S handler ignores key events coming from a level-3 panel. The rule: it acts only when the nearest `section.modal-panel`'s `aria-labelledby` equals the item modal's own `labelId`.
 
 ### The header trash (delete item)
 
 Disabled (D13 exception) in two cases:
 - the version forbids it, with today's reason;
-- the quiz is **busy**: any quiz request is in flight (structure writes and text saves alike, counted by one in-flight counter) or an edit holds unsaved changes. Tooltip: "Delete this item — finish or discard the open edit first".
+- the quiz is **busy**. Each cause has its own tooltip:
+  - any quiz request is in flight (structure writes and text saves alike, counted by one in-flight counter): "Delete this item — wait for the save to finish";
+  - an edit holds unsaved changes: "Delete this item — finish or discard the open edit first".
 
 ### First focus
 
@@ -116,7 +119,7 @@ The card is a list item, labelled by its rendered question text (`aria-labelledb
 Rendered text in cards:
 - Images are capped at the card width.
 - Headings inside question text and explanations render at body size. They keep their tags, because they are the author's content.
-- Links open in a new tab (`target="_blank" rel="noopener noreferrer"`, added on the client), so a click never leaves the editor.
+- Links open in a new tab, so a click never leaves the editor. The server's sanitiser already adds `rel="noopener noreferrer"` (`markdown.py`). The client adds only `target="_blank"`, through an attachment that runs again whenever the HTML changes.
 - Clicking the text does not edit it; only ✎ does.
 
 **D9 hints:**
@@ -142,10 +145,10 @@ Rendered text in cards:
 - **The row.** Each answer is a compact row: a correct-marker and the answer text. A correct answer is tinted green, with its marker filled and a small "correct" tag.
 - **The marker** is a button, not a native radio or checkbox.
   - `aria-pressed` = correct.
-  - Accessible name `Mark "11" correct`. Answer text longer than 40 characters is cut with "…" in every accessible name.
+  - Accessible name `Mark "11" correct`. In the names of the marker, ↑ ↓ and delete, answer text longer than 40 characters is cut with "…".
   - Click, Enter or Space changes the key. Arrow keys do not.
 - **Edit the text.**
-  - The text is a button named `Edit answer "11"`. Click it or press Enter on it, and it becomes an inline field (plain text, 1–500 characters, trimmed).
+  - The text is a button whose name is the **full** answer text, with "Edit answer" given as a visually hidden prefix. This way a screen reader can always hear the whole answer. Click it or press Enter on it, and it becomes an inline field (plain text, 1–500 characters, trimmed).
   - Enter or ✓ saves; an unchanged value closes silently. Esc or ✕ cancels. An error shows under the field.
 - **Correct, single choice.**
   - Clicking a not-correct answer makes it the one correct answer: one PATCH `is_correct: true`. The server clears every other correct answer in the same transaction (D12).
@@ -172,12 +175,12 @@ Rendered text in cards:
   - A null `precision` reads "Answer **5** · decimals not set", and the hint shows.
 - **Editing:** ✎ "Edit the answer to question 1" opens an inline editor with two fields, labelled "Answer" and "Decimals" (0–10), checked by today's `validateNumericAnswer`.
   - The fields start from the formatted value, or empty, and from the decimals, or 0.
-  - Enter or ✓ saves both in one PATCH; an unchanged pair closes silently. Esc or ✕ cancels.
+  - Enter or ✓ saves both in one PATCH. An unchanged pair closes silently. A value is unchanged when `validateNumericAnswer(typed).canonical` equals the canonical form of the stored value, so "5.0" against a stored 5 counts as unchanged. Esc or ✕ cancels.
 
 ### Text
 
 - **Reads:** "Answer **unit vector**". A null value reads "Answer not set".
-- **Editing:** ✎ opens an inline field labelled "Answer" (1–500 characters, trimmed), with today's muted hint "Case-insensitive, trimmed match.".
+- **Editing:** ✎ "Edit the answer to question 1" (the same name as for Number) opens an inline field labelled "Answer" (1–500 characters, trimmed), with today's muted hint "Case-insensitive, trimmed match.".
   - Enter or ✓ saves; an unchanged value closes silently. Esc or ✕ cancels.
 
 ## Level 3 — the small modals
@@ -185,7 +188,10 @@ Rendered text in cards:
 All three are separate modals stacked on top of the quiz modal through the existing modal stack.
 
 **Stacking:**
-- Focus is trapped in the top modal only. `FocusTrap` acts only while its modal is the top one: today its document-level Tab handler does not check this, which this slice fixes.
+- Focus is trapped in the top modal only. Today `FocusTrap`'s document-level Tab handler does not check which modal is on top. This slice fixes it:
+  - `FocusTrap` gains an optional `active` getter;
+  - `Modal` passes its own "am I the top modal" check;
+  - without the prop, `FocusTrap` behaves exactly as today. Its other users (the run modals, `DashboardSidePanel`, `VersionEditPage`, and so on) are unchanged.
 - Esc closes the top modal only.
 - On close, focus returns to the control that opened it. If that control is gone, focus goes to its replacement: ✎ ↔ "+ Add explanation" after an explanation is added or removed. Otherwise the §Focus fallback applies.
 
@@ -237,8 +243,10 @@ All three are separate modals stacked on top of the quiz modal through the exist
 
 In `backend/mathion/api/questions.py`, `update_option` (whenever the update touches `is_correct`) and `create_option` (always) do this:
 
-1. **Lock the parent question row first.** Use `select(Question).where(Question.id == …).with_for_update().execution_options(populate_existing=True)`, the `mini_projects.py` pattern. This serialises every create and every correctness change on that question, including inserts. Locking only the option rows would not cover inserts.
-2. **Re-read** the target option and the question's options with `populate_existing=True`, so no stale row is used.
+1. **Lock the parent question row first, before anything is applied.** Use `select(Question).where(Question.id == …).with_for_update().execution_options(populate_existing=True)`, the `mini_projects.py` pattern.
+   - This serialises every create and every correctness change on that question, including inserts. Locking only the option rows would not cover inserts.
+   - Nothing is written for the option before the lock is held: the lock and the re-read come before today's setattr loop. Writing first would take the answer row's lock before the question's, and two requests could deadlock.
+2. **Re-read** the target option and the question's options with `populate_existing=True`, so no stale row is used. If the question or the option is gone under the lock, return 404.
 3. **Apply the rule** for a single-choice question when the target becomes correct: clear every other option with one `UPDATE answer_options SET is_correct = false WHERE question_id = :q AND id <> :o`.
 
 The same lock also closes the existing race on the multiple-choice "at least one correct" check (two unticks at once).
@@ -256,7 +264,10 @@ The same lock also closes the existing race on the multiple-choice "at least one
 - multiple choice is unaffected;
 - a published version is allowed;
 - disabled (403) and archived (409) are unchanged;
-- **a real concurrency test** with the existing interleave harness (`advisory.interleave_hook`, as in `tests/test_concurrency_*.py`):
+- **a real concurrency test** with the existing interleave harness (as in `tests/test_concurrency_*.py`).
+  - Both endpoints call `advisory.interleave_hook("…")` right after the question-row lock.
+  - The call goes through the module attribute, not a name imported directly, so the tests' monkeypatch takes effect.
+  - The test cases:
   - two concurrent moves end with exactly one correct answer;
   - two concurrent correct creates on an empty question end with exactly one.
 
@@ -270,13 +281,20 @@ The frontend sends one request per key change. On success it clears the other ma
 
 **Two locks** (like today's `questionsLocked` / `optionsLocked`):
 - **Per quiz:** one question add, move or delete at a time.
-- **Per question:** one answer write at a time: add, move, delete, marker, answer-text save, Number save or Text save. A question's own move and delete also wait for its per-question lock, so they are disabled while one of its answer writes runs.
+- **Per question:** one answer write at a time: add, move, delete, marker, answer-text save, Number save or Text save.
+  - A question's own move and delete also need its per-question lock. They are disabled while one of its answer writes runs.
+  - While they run, they hold that lock, so its answer controls are disabled meanwhile.
 - The question text, explanation and title saves take no lock. They still count toward **busy** (the header trash).
 
 **While a request runs:**
 - The control that started it stays enabled, and re-entry is blocked in its handler, so focus is never dropped. Its inputs become `readonly`, never `disabled`.
 - The question's other answer controls are disabled.
-- An inline field that is saving is read-only: ✓ shows busy, Enter is ignored, Esc and ✕ are disabled. It does not count as unsaved for the D10 prompt.
+- **A saving inline field** (and the inline title while it saves):
+  - It is read-only, ✓ shows busy and Enter is ignored.
+  - ✕ is disabled. Esc is swallowed (`preventDefault`) and does nothing, so it never reaches the modal.
+  - It is never closed by another action. Until it settles, every action that would open or start another edit is ignored: the D10 list in §Unsaved work, including the ✎s and the markers.
+  - On success it closes (the focus rules apply). On failure it stays open with the error and the typed text, and becomes an unsaved edit again.
+  - Closing the quiz modal or leaving the page during the save does not prompt, because the request is already sent and completes on the server. A late failure then shows as a toast (as `AccordionHeader` does today).
 - **Echoes write back only the fields their request carried.** An answer-text save updates only `text`, a marker save only `is_correct` (plus the local clear of the others), a Number save only value and decimals. This keeps a later write's result from being overwritten by an earlier echo (today's per-field write-back).
 
 **Stale responses** are ignored after the modal has closed or the version has changed (today's `alive && vid === savedVid` guard). A write already sent still completes on the server. A failed write's re-fetch is skipped when its question no longer exists.
@@ -297,9 +315,11 @@ The frontend sends one request per key change. On success it clears the other ma
 
 Unsaved work can exist only in an open edit:
 - an inline field whose value differs from the saved one: the title, an answer text, Number, Text, or the "+ Add answer" row with typed text;
-- a level-3 modal whose content differs from what it opened with. For New question, only the typed fields count; the type does not.
+- a level-3 modal whose content differs from what it opened with. For New question, any field other than the type that differs from its default counts (text, Answer, Decimals); the type alone does not.
 
-**Who owns it.** The quiz body keeps implementing `ItemBodyApi` and owns one **active edit** slot for D10. The header's inline title takes the same slot through the item modal. `discardAll()` (called by the page's discard) closes the active inline edit, any open level-3 modal and the inline title.
+**Who owns it.**
+- The quiz body keeps implementing `ItemBodyApi` and owns one **active edit** slot for D10.
+- The header's inline title takes the same slot through the item modal. For this, `ItemBodyApi` gains one optional member that the quiz body implements; Page, Video and App leave it out. The plan names it. `discardAll()` (called by the page's discard) closes the active inline edit, any open level-3 modal and the inline title.
 
 **The rules:**
 - **Reporting.** Every edit with changes reports to the page's DirtyRegistry (through the item modal's `guardDirty`). So closing the quiz modal, browser Back and in-app navigation all ask the existing DirtyGuard prompt: "Discard unsaved changes and continue?". Every discard prompt in 5d uses this text.
@@ -319,7 +339,7 @@ Unsaved work can exist only in an open edit:
 
 - **Inline save or cancel:** back to the control that opened it: the answer text button, the Number/Text ✎ or the title ✎.
 - **Level-3 close:** back to the ✎ or button that opened it, or its replacement (§Level 3).
-- **Move:** after the DOM update (`tick()`), focus is set again on the moved row's same arrow and the card is scrolled to `block: 'nearest'`. If that arrow is now disabled (first/last), focus goes to the other arrow.
+- **Move:** the move is optimistic, as today. After the local swap and its DOM update (`tick()`), not after the response, focus is set again on the moved row's same arrow and the card is scrolled to `block: 'nearest'`. If that arrow is now disabled (first/last), focus goes to the other arrow.
 - **Delete an answer:** the next answer's text button, else the previous one's, else "+ Add answer".
 - **Delete a question:** the next card's ✎, else the previous card's, else "+ Add question".
 - **Add answer:** the add row stays open and focused (§Answers).
@@ -337,6 +357,8 @@ Unsaved work can exist only in an open edit:
   - Cancel sends nothing. A marker stays as it was; an inline Number/Text edit stays open with the typed value.
 
 **Archived:** read-only. No edit controls are rendered, and cards show rendered text.
+- The marker is a static mark: no button and no `aria-pressed`, but "correct" is still conveyed in text.
+- The answer text is plain text, not an "Edit answer" button.
 
 **Disabled:** read-only, as archived. Cards show the plain Markdown source (`text_md`, `explanation_md`) under today's note "Preview is unavailable…", because the version's assets return 403 (5b D6).
 
@@ -352,7 +374,8 @@ Unsaved work can exist only in an open edit:
 **Changed:**
 - `MarkdownEditor` gains the no-assets mode (D11).
 - `QuestionTypePicker` is relabelled; its test is updated.
-- `FocusTrap` acts only for the top modal.
+- `FocusTrap` gains the optional `active` prop, which `Modal` passes.
+- `ItemBodyApi` gains the optional active-edit member.
 - `ItemEditorModal`:
   - the quiz has no footer and no body Title row;
   - its ⌘S handler ignores level-3 panels;
@@ -441,6 +464,8 @@ The 5c process holds:
 - the two locks;
 - the started control keeps focus (not `disabled`);
 - double Enter sends one request;
+- a saving field ignores Esc (and the modal stays open), and blocks other edit-opening actions until it settles;
+- a saving field reopens with its error on failure, and a close during the save gives a toast on late failure;
 - an echo writes only its own fields;
 - stale responses after close are ignored;
 - a failed write's re-fetch is skipped for a deleted question;
