@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1377
+EXPECTED_CHECKS=1337
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -448,8 +448,6 @@ GLOBAL_ALLOW = {
     ('src/pages/MiniProjectDetailPage.svelte', 'ul > li'),
     ('src/pages/MiniProjectDetailPage.svelte', 'ol > li'),
     ('src/pages/MiniProjectDetailPage.svelte', 'code'),
-    # Slice-5a T3: the last InlineField row drops its divider (ref 1548).
-    ('src/components/editor/VersionMetaForm.svelte', '.inline-field:last-child'),
     # Slice-5b T1: `.modal-body > :global(*)` (spec :220-221). Child-combinator
     # scoped under the hashed `.modal-body`, so it reaches only the direct
     # children of a modal body. A T3 question renders inside SequencePlayer,
@@ -511,9 +509,12 @@ else:
 # rather than silent drift. See the note at the top of reset.css.
 # The :root hash moved on 2026-10-08 (8872e5cb -> 58c75427, theme-default.css):
 # Slice-5c T1 added the six --focus-* tokens. That is the ONLY change.
+# It then moved twice in T5 (58c75427 -> 712f8080 -> 255b1037): +--focus-page
+# (the page shade with nothing open), then +--focus-row (rows at the focus
+# level). Each time the new token was the ONLY change.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
-    ('', ':focus-visible', '1684b043'), ('', ':root', '58c75427'),
+    ('', ':focus-visible', '1684b043'), ('', ':root', '255b1037'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
@@ -3541,6 +3542,8 @@ if [[ -n $REPLY ]]; then
   N=VersionBadges; H=$REPLY
   d '\.vbadges' '' 'display:inline-flex' 'gap:6px'
   d '\.vbadge' '' 'font-size:11px' 'font-weight:500' 'padding:3px 8px' 'border-radius:3px' 'white-space:nowrap'
+  # 5c T5: the heading's outlined badges (visible on the shaded page).
+  d '\.vbadge\.outlined' '' 'border:1px solid var\(--focus-line\)'
   d '\.created' '' 'background:var\(--state-created-bg\)' 'color:var\(--state-created-fg\)'
   d '\.published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
   d '\.archived' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
@@ -3575,44 +3578,26 @@ else
 fi
 
 echo
-echo "--- (v) Slice-5a T3 — InlineField, Version info card, editor heading + banners (3b shell) ---"
-own inline-field InlineField.svelte
-uniq1 inline-field
-if [[ -n $REPLY ]]; then
-  N=InlineField; H=$REPLY
-  d '\.inline-field' '' 'display:grid' 'grid-template-columns:132px 1fr 54px' 'gap:12px' 'align-items:baseline' 'padding:9px 0' 'border-bottom:1px solid var\(--border-soft\)'
-  d '\.inline-field\.open' '' 'align-items:start'
-  d '\.label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
-  chk "\.open\.${H} \.label:where\(\.${H}\)"    'padding-top:6px'
-  chk "\.open\.ta\.${H} \.label:where\(\.${H}\)" 'padding-top:9px'
-  d '\.value' '' 'min-width:0' 'font-size:13px' 'line-height:1\.55' 'color:var\(--text\)' 'white-space:pre-wrap' 'overflow-wrap:anywhere'
-  d '\.not-set' '' 'color:var\(--muted\)'
-  d '\.slot' '' 'display:flex' 'justify-content:flex-end' 'gap:6px' 'align-self:center'
-  chk "\.open\.${H} \.slot:where\(\.${H}\)"    'align-self:start' 'padding-top:3px'
-  chk "\.open\.ta\.${H} \.slot:where\(\.${H}\)" 'padding-top:7px'
-  # The open-editor treatment (ref 1544) — one selector list covers input + textarea.
-  ED="\.editor\.${H} input:where\(\.${H}\),\.editor\.${H} textarea:where\(\.${H}\)"
-  chk "$ED" 'box-sizing:border-box' 'width:100%' 'border:1\.5px solid var\(--primary\)' 'border-radius:var\(--radius\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text-2\)' 'font-size:13px'
-  chk "\.editor\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
-  chk "\.editor\.${H} textarea:where\(\.${H}\)" 'padding:8px 10px' 'line-height:1\.6' 'resize:vertical'
-  d '\.err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
-  d '\.sr-only' '' 'position:absolute' 'width:1px' 'height:1px' 'overflow:hidden' 'clip-path:inset\(50%\)' 'white-space:nowrap'
-  none "InlineField .sr-only uses no opacity" "\.sr-only\.${H}\{[^}]*opacity"
-  # D12: the parking row gets NO outline/ring of its own.
-  none "InlineField row has no focus styling of its own" "\.inline-field\.${H}:focus"
-  sweep InlineField $H
+echo "--- (v) Slice-5a T3 / 5c T5 — editor heading + banners, version settings modal (3b shell) ---"
+# 5c T5 (D12): the Version info card is gone; its fields live in VersionSettingsModal.
+if [[ -e src/components/editor/VersionMetaForm.svelte ]] || grep -q 'VersionMetaForm\|meta-card' src/pages/editor/VersionEditPage.svelte; then
+  echo "FAIL  VersionEditPage no Version info card (5c T5: VersionSettingsModal)"; fail=1
+else
+  echo "PASS  VersionEditPage no Version info card (5c T5: VersionSettingsModal)"
 fi
-
-own meta-card VersionMetaForm.svelte
-uniq1 meta-card
+own ro VersionSettingsModal.svelte
+uniq1 ro
 if [[ -n $REPLY ]]; then
-  N=VersionMetaForm; H=$REPLY
-  d '\.meta-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:16px 18px' 'margin-bottom:18px'
-  d '\.card-head' '' 'display:flex' 'align-items:center' 'gap:8px' 'margin-bottom:4px'
-  d 'h2' '' 'font-size:14px'
-  d '\.fields' '' 'display:flex' 'flex-direction:column'
-  chk "\.fields\.${H}>\.inline-field:last-child" 'border-bottom:0'
-  sweep VersionMetaForm $H
+  N=VersionSettingsModal; H=$REPLY
+  # Tokens only (5c §Process): the 5b item-modal field look, the read-only list.
+  d '\.field-label' '' 'color:var\(--muted\)'
+  d '\.plain-input' '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:var\(--control-font\)'
+  chk "\.plain-input\.${H}:focus-visible" 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  chk "\.plain-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
+  d '\.field-err' '' 'color:var\(--danger\)'
+  chk "\.ro\.${H} dt:where\(\.${H}\)" 'color:var\(--muted\)'
+  chk "\.ro\.${H} dd:where\(\.${H}\)" 'color:var\(--text\)' 'overflow-wrap:anywhere'
+  sweep VersionSettingsModal $H
 fi
 
 own editor-heading VersionEditPage.svelte
@@ -3620,12 +3605,19 @@ uniq1 editor-heading
 if [[ -n $REPLY ]]; then
   N=VersionEditPage; H=$REPLY
   d '\.editor-heading' '' 'display:flex' 'align-items:center' 'gap:10px' 'margin-bottom:18px'
-  chk "\.editor-heading\.${H} h1:where\(\.${H}\)" 'font-size:20px'
+  # 5c T5 (user): the title line a step smaller, the content below it a step larger.
+  chk "\.editor-heading\.${H} h1:where\(\.${H}\)" 'font-size:18px'
   chk "\.editor-heading\.${H} a:where\(\.${H}\)"  'color:var\(--primary\)' 'text-decoration:none'
   chk "\.editor-heading\.${H} a:where\(\.${H}\):hover" 'text-decoration:underline'
   d '\.vlabel' '' 'color:var\(--text\)'
-  d '\.vid' '' 'font-size:12px' 'color:var\(--muted\)'
-  d '\.banner' '' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:13px' 'color:var\(--text\)'
+  # 5c T5 (user): v{id} and the attempt limit are quiet chips beside the state badge, not mono text.
+  d '\.hchip' '' 'font-size:11px' 'background:var\(--surface-2\)' 'color:var\(--muted\)' 'border:1px solid var\(--focus-line\)'
+  none "VersionEditPage no mono .vid in the heading (5c T5)" "\.vid\.${H}"
+  # 5c T5: the settings ✎ sits at the heading's far right.
+  d '\.head-push' '' 'margin-left:auto'
+  # 5c T5 (user): non-empty version info, muted, under the heading.
+  d '\.vinfo' '' 'font-size:14px' 'color:var\(--muted\)'
+  d '\.banner' '' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:14px' 'color:var\(--text\)'
   none "VersionEditPage pre-Slice-5a .state-* badges gone" "\.state-(created|published|archived)\.${H}"
   none "VersionEditPage .banner.err gone"                  "\.banner\.err\.${H}"
   sweep VersionEditPage $H
@@ -3636,7 +3628,7 @@ echo
 # convention (not a component) between VersionEditPage and BlockAccordion
 # (N/H set by caller). Tokens only; pixel paddings stay unpinned (5c §Process).
 add_row_common() {
-  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:13px' 'font-weight:600'
+  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
   chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
   d '\.add-row' '' 'display:flex'
   # Load-bearing layout (review T3): the field fills the row.
@@ -3655,9 +3647,11 @@ if [[ -n $REPLY ]]; then
   none "VersionEditPage has no .blocks-card / .card-head (5c T1)" "\.(blocks-card|card-head)\.${H}"
   # The card head's h2 lives on as a visually hidden heading (outline h1 > h2 > h3).
   d '\.sr-only' '' 'position:absolute' 'width:1px' 'height:1px' 'overflow:hidden' 'clip-path:inset\(50%\)'
+  # 5c T5 (user): with nothing open the page is one half-step darker, so the white block rows stand out.
+  chk "body:has\(\.canvas\.d0\.${H}\)" 'background:var\(--focus-page\)'
   chk "body:has\(\.canvas\.d1\.${H}\)" 'background:var\(--focus-1\)'
   chk "body:has\(\.canvas\.d2\.${H}\)" 'background:var\(--focus-2\)'
-  none "VersionEditPage no fully-global body:has() (5c R3: .canvas stays scoped)" "body:has\(\.canvas\.d[12]\)"
+  none "VersionEditPage no fully-global body:has() (5c R3: .canvas stays scoped)" "body:has\(\.canvas\.d[012]\)"
   add_row_common
   d '\.blocks-list' '' 'list-style:none' 'padding:0' 'margin:0'
   d '\.state-actions' '' 'display:flex' 'align-items:center' 'gap:10px' 'justify-content:flex-end' 'margin-top:20px' 'padding-top:14px' 'border-top:1px solid var\(--border\)'
@@ -3690,10 +3684,10 @@ if [[ -n $REPLY ]]; then
   none "AccordionHeader no hover background on any rule" "(^|[{}])[^{}]*\.${H}[^{]*:hover[^{]*\{[^}]*background"
   # 5c D5: no position code, no slug.
   none "AccordionHeader no .code / .slug rules (5c D5)" "\.(code|slug)\.${H}"
-  d '\.title' '' 'font-size:14px' 'font-weight:600'
-  chk "\.seq\.${H} \.title:where\(\.${H}\)" 'font-size:13\.5px'
+  d '\.title' '' 'font-size:15px' 'font-weight:600'
+  chk "\.seq\.${H} \.title:where\(\.${H}\)" 'font-size:14\.5px'
   d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
-  # 5c D8: the inline title field — InlineField's open-editor ring, tokens only.
+  # 5c D8: the inline title field — the open-editor ring, tokens only.
   d '\.title-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text\)'
   d '\.err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
   none "AccordionHeader pre-5a .accordion-row gone" "\.accordion-row\.${H}"
@@ -3712,7 +3706,7 @@ echo "--- (y) Slice-5a T5b — accordion bodies: inline fields, create forms, de
 body_common() {
   # 5c T2: the title moved into the header (D8), delete into the header (D6).
   none "$N no .fields / .del-footer / .del-text rules (5c T2)" "\.(fields|del-footer|del-text)\.${H}"
-  d '\.empty' '' 'margin:0' 'font-size:13px' 'color:var\(--muted\)'
+  d '\.empty' '' 'margin:0' 'font-size:14px' 'color:var\(--muted\)'
   none "$N pre-5a .meta/.row/.head/.create/.danger rules gone" "\.(meta|row|head|create|danger)\.${H}[{ ,:>]"
   none "$N no rem font sizes"                                "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
   sweep $N $H
@@ -3723,6 +3717,8 @@ uniq1 block-card
 if [[ -n $REPLY ]]; then
   N=BlockAccordion; H=$REPLY
   d '\.block-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden' 'margin-bottom:6px'
+  # 5c T5 (user): a focus-level row is white on the shaded page.
+  d '\.block-card\.at-focus' '' 'background:var\(--focus-0\)'
   d '\.block-card\.parent' '' 'background:var\(--focus-1\)'
   d '\.block-card\.focus' '' 'background:var\(--focus-0\)' 'border-color:var\(--focus-line-strong\)' 'box-shadow:var\(--focus-shadow\)'
   d '\.acc-body' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'padding:12px 14px'
@@ -3741,7 +3737,7 @@ if [[ -n $REPLY ]]; then
   none "SequenceAccordion no Items heading rules (5c T2)" "(\.items-head|h5)\.${H}"
   # "+ Add item" — a text line like + Add block / + Add sequence (user, 5c T3);
   # T4: it opens the New item modal, so the inline create form is gone.
-  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:13px' 'font-weight:600'
+  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
   chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
   none "SequenceAccordion no interim + rule (5c T3)" "\.body-tools\.${H}"
   none "SequenceAccordion no inline create-form rules (5c T4: the New item modal)" "\.(cr-form|cr-actions|field-err|form-err)\.${H}"
@@ -3752,6 +3748,8 @@ if [[ -n $REPLY ]]; then
   # the translucent focus line, stronger when it is the focus.
   d '\.seq-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden'
   d '\.seq-card\.focus' '' 'background:var\(--focus-0\)' 'border-color:var\(--focus-line-strong\)' 'box-shadow:var\(--focus-shadow\)'
+  # 5c T5 (user): rows inside an open (white) container are tinted, so they stand out from it.
+  d '\.seq-card\.at-focus' '' 'background:var\(--focus-row\)'
   # Selector-agnostic: no OTHER rule authored by SequenceAccordion may draw a
   # full / left / right / bottom border; only `border-top` hairlines are
   # allowed. (No `(^|[{}])` anchor: with grep -o the previous match eats the shared `}`.)
@@ -3768,11 +3766,11 @@ uniq1 item-row
 if [[ -n $REPLY ]]; then
   N=ItemRow; H=$REPLY
   # 5c T3: each row is its own box on the focus panel; no slug (D5).
-  d '\.item-row' '' 'display:flex' 'align-items:center' 'gap:10px' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
-  d '\.item-title' '' 'font-size:13px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.item-row' '' 'display:flex' 'align-items:center' 'gap:10px' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:var\(--focus-row\)'
+  d '\.item-title' '' 'font-size:14px' 'font-weight:600' 'color:var\(--text\)'
   none "ItemRow no .item-slug rule (5c D5)" "\.item-slug\.${H}"
   d '\.sep' '' 'color:var\(--faint\)'
-  d '\.q-count' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.q-count' '' 'font-size:13px' 'color:var\(--muted\)'
   d '\.actions' '' 'margin-left:auto' 'display:flex' 'align-items:center' 'gap:6px'
   none "ItemRow pre-5a .glyph rule gone"  "\.glyph\.${H}"
   none "ItemRow no rem font sizes"         "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
@@ -4103,7 +4101,7 @@ FILES_5B=(
   src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
   src/pages/MiniProjectDetailPage.svelte src/App.svelte
   # 5c T4 (until T6 folds the 5c files into (ah)):
-  src/components/editor/NewItemModal.svelte
+  src/components/editor/NewItemModal.svelte src/components/editor/VersionSettingsModal.svelte
 )
 emoji_scan "all Slice-5b source files" $FILES_5B src/components/ui/FocusTrap.svelte src/lib/itemBody.ts src/lib/quizSave.ts \
   src/lib/deriveExpansion.ts src/lib/handleStaleIdFallback.ts src/routes.ts src/stores/currentEditorVersion.svelte.ts

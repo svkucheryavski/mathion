@@ -84,7 +84,8 @@
       return;
     }
     // keyCode 229 is Safari's IME-composition signal; inner widgets that own
-    // an Escape (InlineField, AssetSidebar's inline confirm) preventDefault first.
+    // an Escape (AccordionHeader's title field, AssetSidebar's inline
+    // confirm) preventDefault first.
     if (e.key !== 'Escape' || closeDisabled || e.repeat || e.isComposing || e.keyCode === 229 || e.defaultPrevented) return;
     e.preventDefault();
     onRequestClose();

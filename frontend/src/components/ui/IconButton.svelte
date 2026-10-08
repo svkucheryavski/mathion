@@ -35,7 +35,7 @@
     'aria-controls'?: string;
     id?: string;
     tabindex?: number;
-    // Bindable ref to the <button> — InlineField returns focus here.
+    // Bindable ref to the <button>, for callers that return focus to it.
     element?: HTMLButtonElement;
   };
   let {

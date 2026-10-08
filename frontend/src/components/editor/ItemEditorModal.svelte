@@ -366,7 +366,7 @@
   .plain-input:focus-visible {
     outline: none;
     border: 1.5px solid var(--primary);
-    box-shadow: 0 0 0 3px var(--primary-soft); /* D12 — InlineField's open editor */
+    box-shadow: 0 0 0 3px var(--primary-soft); /* D12 — the open-editor ring */
   }
   .plain-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .field-err { margin: 0; font-size: 12px; color: var(--danger); /* D12 */ }

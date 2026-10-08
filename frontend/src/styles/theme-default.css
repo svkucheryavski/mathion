@@ -9,6 +9,8 @@
   /* Slice-5c focus by depth: the open container is --focus-0; each level
      further out is one step darker (spec D1/D2). */
   --focus-0: var(--surface);
+  --focus-row: #F4F5F8;      /* a row inside an open (white) container: a tint, so it stands out (user, T5) */
+  --focus-page: #F2F3F6;     /* the page with nothing open: a half-step under --focus-1, so white rows stand out (user, T5) */
   --focus-1: #EEF0F3;
   --focus-2: #E1E4E9;
   --focus-line: rgba(20, 24, 35, 0.11);      /* borders that stay visible on every shade */

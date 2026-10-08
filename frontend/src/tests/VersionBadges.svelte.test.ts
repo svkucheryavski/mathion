@@ -5,10 +5,10 @@ import VersionBadges from '../components/editor/VersionBadges.svelte';
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 
-function render(state: 'created' | 'published' | 'archived', isDisabled: boolean) {
+function render(state: 'created' | 'published' | 'archived', isDisabled: boolean, outlined = false) {
   host = document.createElement('div');
   document.body.appendChild(host);
-  component = mount(VersionBadges, { target: host, props: { state, isDisabled } });
+  component = mount(VersionBadges, { target: host, props: { state, isDisabled, outlined } });
   flushSync();
   return [...host.querySelectorAll<HTMLElement>('.vbadge')];
 }
@@ -36,4 +36,9 @@ describe('VersionBadges (Slice-5a §1.4, D5)', () => {
       }
     });
   }
+  it('outlined (the editor heading, 5c T5): every badge carries the outline; off by default', () => {
+    expect(render('created', true, true).every((b) => b.classList.contains('outlined'))).toBe(true);
+    unmount(component!); component = null; host.remove();
+    expect(render('created', false).some((b) => b.classList.contains('outlined'))).toBe(false);
+  });
 });

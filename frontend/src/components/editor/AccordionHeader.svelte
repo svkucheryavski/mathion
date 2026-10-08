@@ -140,7 +140,7 @@
     void commitRename();
   }
 
-  // Unsaved registration, as InlineField: optional outside the editor.
+  // Unsaved registration: optional outside the editor.
   const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
   const tracker: RegisteredTracker = {
     get isDirty() { return renaming && draft.trim() !== (title ?? '').trim(); },
@@ -275,8 +275,8 @@
     text-align: left;
     cursor: pointer;
   }
-  .title { font-size: 14px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-  .seq .title { font-size: 13.5px; }
+  .title { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .seq .title { font-size: 14.5px; }
   .actions { display: flex; align-items: center; gap: 6px; }
   .rename { flex: 1 1 auto; min-width: 0; }
   .title-input {
@@ -286,12 +286,12 @@
     padding: 0 var(--control-pad-x);
     border: 1.5px solid var(--primary);
     border-radius: var(--radius);
-    box-shadow: 0 0 0 3px var(--primary-soft); /* InlineField's open editor */
+    box-shadow: 0 0 0 3px var(--primary-soft); /* the open-editor ring */
     background: var(--surface);
     color: var(--text);
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
   }
-  .seq .title-input { font-size: 13.5px; }
+  .seq .title-input { font-size: 14.5px; }
   .err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
 </style>

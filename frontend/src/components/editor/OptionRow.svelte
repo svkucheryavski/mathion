@@ -101,7 +101,7 @@
   .opt-input:focus-visible {
     outline: none;
     border: 1.5px solid var(--primary);
-    box-shadow: 0 0 0 3px var(--primary-soft); /* D12 — InlineField's open editor */
+    box-shadow: 0 0 0 3px var(--primary-soft); /* D12 — the open-editor ring */
     background: var(--surface);
   }
   .opt-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }

@@ -72,7 +72,8 @@
 </div>
 
 <style>
-  /* Slice-5c: each row is its own box on the focus panel (constructor-v3). */
+  /* Slice-5c: each row is its own box on the focus panel (constructor-v3),
+     tinted so it stands out from the white panel (user, T5). */
   .item-row {
     display: flex;
     align-items: center;
@@ -80,10 +81,10 @@
     padding: 6px 10px;
     border: 1px solid var(--focus-line);
     border-radius: var(--radius);
-    background: var(--surface);
+    background: var(--focus-row);
   }
-  .item-title { min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; /* ref 1590 */ }
+  .item-title { min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; /* ref 1590 */ }
   .sep { color: var(--faint); /* ref 1606 — the separator use of --faint */ }
-  .q-count { font-size: 12px; color: var(--muted); /* ref 1606 */ }
+  .q-count { font-size: 13px; color: var(--muted); /* ref 1606 */ }
   .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1593 */ }
 </style>

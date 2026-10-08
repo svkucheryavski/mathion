@@ -434,12 +434,15 @@ describe('BlockAccordion — focus shading (Slice-5c T1)', () => {
     mountBlock();
     expect(card().classList.contains('focus')).toBe(false);
     expect(card().classList.contains('parent')).toBe(false);
+    // 5c T5 (user): a focus-level row is white on the shaded page.
+    expect(card().classList.contains('at-focus')).toBe(true);
   });
   it('open with no sequence open: the focus', async () => {
     mountBlock();
     await navigate('/courses/c/edit/v/1/blocks/3'); await settle();
     expect(card().classList.contains('focus')).toBe(true);
     expect(card().classList.contains('parent')).toBe(false);
+    expect(card().classList.contains('at-focus')).toBe(false);
   });
   it('open with one of its sequences open: the parent shade, not the focus', async () => {
     mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
@@ -514,7 +517,8 @@ describe('BlockAccordion — header (Slice-5c T2)', () => {
     await expand();
     mountBlock();
     await settle();
-    expect(target.querySelector('#block-3-panel .inline-field')).toBeNull();
+    // The old rows were InlineField inputs (deleted in T5); no field may come back.
+    expect(target.querySelector('#block-3-panel input, #block-3-panel textarea')).toBeNull();
     expect(target.querySelector('.del-footer')).toBeNull();
   });
 

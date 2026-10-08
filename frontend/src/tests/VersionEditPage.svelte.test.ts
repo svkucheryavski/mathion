@@ -9,7 +9,7 @@ import type { AdminTree, AdminTreeBlock, AdminTreeItem, AdminTreeSequence, Admin
 import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 
 // Capture the page's real registry so a test can register a dirty tracker
-// without depending on which body (old panel / InlineField) a block renders.
+// without depending on which body a block renders.
 const hoisted = vi.hoisted(() => ({ registry: null as DirtyRegistry | null }));
 vi.mock('../lib/dirtyRegistry.svelte', async (importOriginal) => {
   const m = await importOriginal<typeof import('../lib/dirtyRegistry.svelte')>();
@@ -89,10 +89,35 @@ describe('VersionEditPage — heading (3b, §5.2)', () => {
     const a = h1.querySelector('a')!;
     expect(a.getAttribute('href')).toBe('/courses/c/edit');
     expect(a.title).toBe('Back to versions');
-    const vid = target.querySelector('.editor-heading .vid')!;
-    expect(vid.textContent).toBe('v1');
-    expect(vid.classList.contains('mono')).toBe(true);
-    expect(target.querySelector('.editor-heading .vbadge')!.textContent).toBe('created');
+    // 5c T5 (user): the id and the attempt limit are quiet chips around the state badge, not mono text.
+    expect(target.querySelector('.editor-heading .vid')).toBeNull();
+    const chips = [...target.querySelectorAll('.editor-heading .hchip, .editor-heading .vbadge')].map((c) => c.textContent);
+    expect(chips).toEqual(['v1', 'max 3 quiz attempts', 'created']);   // state last (user, T5)
+    // On the shaded page the state badge carries the chips' outline, or it would vanish.
+    expect(target.querySelector('.editor-heading .vbadge')!.classList.contains('outlined')).toBe(true);
+  });
+
+  it('non-empty version info shows as muted rendered text between the heading and the blocks (5c T5, user)', async () => {
+    tree.version = mkVersion({ info_md: 'Hi **all**', info_html: '<p>Hi <strong>all</strong></p>' });
+    await render();
+    const info = target.querySelector('.vinfo')!;
+    expect(info.querySelector('strong')!.textContent).toBe('all');   // rendered, not the markdown source
+    expect(info.textContent).not.toContain('**');
+    const heading = target.querySelector('.editor-heading')!;
+    const blocks = target.querySelector('section.blocks')!;
+    expect(heading.compareDocumentPosition(info) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(info.compareDocumentPosition(blocks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('empty version info renders nothing', async () => {
+    await render();
+    expect(target.querySelector('.vinfo')).toBeNull();
+  });
+
+  it('a limit of one reads "max 1 quiz attempt"', async () => {
+    tree.version = mkVersion({ max_quiz_attempts: 1 });
+    await render();
+    expect([...target.querySelectorAll('.editor-heading .hchip')].map((c) => c.textContent)).toEqual(['v1', 'max 1 quiz attempt']);
   });
 
   it('without a label the h1 is the course link only', async () => {
@@ -164,63 +189,64 @@ describe('VersionEditPage — page states (9d)', () => {
   });
 });
 
-describe('VersionEditPage — Version info card', () => {
-  const field = (label: string) =>
-    [...target.querySelectorAll<HTMLElement>('.meta-card .inline-field')].find((f) => f.querySelector('.label')?.textContent === label)!;
+describe('VersionEditPage — version settings (Slice-5c T5)', () => {
+  const gear = () => target.querySelector<HTMLButtonElement>('.editor-heading button[aria-label="Version settings"]')!;
+  const settingsPanel = () => document.querySelector<HTMLElement>('section.modal-panel');
 
-  it('renders three inline fields, editable on a created version', async () => {
+  it('the heading ✎ opens the settings modal; the old Version info card is gone', async () => {
     await render();
-    const labels = [...target.querySelectorAll('.meta-card .inline-field .label')].map((l) => l.textContent);
-    expect(labels).toEqual(['Label', 'Info (markdown)', 'Max quiz attempts']);
-    expect(field('Label').querySelector<HTMLButtonElement>('button[data-glyph="pencil"]')!.disabled).toBe(false);
+    expect(target.querySelector('.meta-card')).toBeNull();
+    gear().click(); await settle();
+    expect(settingsPanel()!.querySelector('h2')!.textContent).toBe('Version settings');
+    expect(settingsPanel()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!.value).toBe('Autumn 2026 revision');
+    expect(settingsPanel()!.querySelector('footer.modal-foot')).not.toBeNull();
   });
 
-  it('a published version still shows the fields, pencils disabled with the reason (D4)', async () => {
-    tree.version = mkVersion({ state: 'published' });
+  it.each([
+    ['published', { state: 'published' as const }],
+    ['archived', { state: 'archived' as const }],
+    ['disabled', { is_disabled: true }],
+  ])('on a %s version the modal opens read-only', async (_n, over) => {
+    tree.version = mkVersion(over);
     await render();
-    const pencil = field('Label').querySelector<HTMLButtonElement>('button[data-glyph="pencil"]')!;
-    expect(pencil.disabled).toBe(true);
-    expect(pencil.title).toBe('Only a created version can change its info');
+    gear().click(); await settle();
+    expect(settingsPanel()!.querySelector('footer.modal-foot')).toBeNull();
+    expect(settingsPanel()!.querySelector('input, textarea')).toBeNull();
+    expect(settingsPanel()!.textContent).toContain('Autumn 2026 revision');
   });
 
-  it('folding keeps an open dirty draft mounted (D3)', async () => {
+  it('a save PATCHes the version, refreshes the heading and returns focus to ✎', async () => {
+    serve((url, init) => {
+      if (url === '/api/versions/1' && init?.method === 'PATCH') { tree.version = mkVersion({ label: 'Spring' }); return jres(tree.version); }
+      return undefined;
+    });
     await render();
-    field('Label').querySelector<HTMLButtonElement>('button[data-glyph="pencil"]')!.click();
-    await settle();
-    const input = field('Label').querySelector('input')!;
-    input.value = 'Draft';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    const fold = target.querySelector<HTMLButtonElement>('button[aria-label="Collapse version info"]')!;
-    expect(fold.getAttribute('aria-expanded')).toBe('true');
-    fold.click();
-    flushSync();
-    const body = document.getElementById(fold.getAttribute('aria-controls')!)!;
-    expect(body.hidden).toBe(true);
-    expect(body.contains(input)).toBe(true);
-    expect(input.value).toBe('Draft');
-    expect(target.querySelector('button[aria-label="Expand version info"]')!.getAttribute('aria-expanded')).toBe('false');
+    gear().click(); await settle();
+    const lbl = settingsPanel()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!;
+    lbl.value = 'Spring'; lbl.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    [...settingsPanel()!.querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Save')!.click();
+    await settle(); await settle();
+    expect(settingsPanel()).toBeNull();
+    expect(target.querySelector('h1')!.textContent).toBe('Applied Linear Algebra · Spring');
+    expect(document.activeElement).toBe(gear());
   });
 
-  it('a confirmed navigation discards the open draft (onDiscard → discardAll)', async () => {
+  it('an open modal is guard-dirty once edited', async () => {
     await render();
-    field('Label').querySelector<HTMLButtonElement>('button[data-glyph="pencil"]')!.click();
+    gear().click(); await settle();
+    const lbl = settingsPanel()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!;
+    lbl.value = 'X'; lbl.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(hoisted.registry!.isAnyDirty()).toBe(true);
+  });
+
+  it('switching to another version closes the modal', async () => {
+    const props = await renderReactive();
+    gear().click(); await settle();
+    expect(settingsPanel()).not.toBeNull();
+    tree = { ...tree, version: mkVersion({ id: 2 }) };
+    props.versionId = '2';
     await settle();
-    const input = field('Label').querySelector('input')!;
-    input.value = 'Draft';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    await navigate('/courses/c/edit/v/1/blocks/10');
-    await settle();
-    expect(field('Label').querySelector('input')).toBeNull();
-    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    // The draft really went: the next navigation does not prompt again (Review Focus 3).
-    await navigate('/courses/c/edit/v/1');
-    await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(settingsPanel()).toBeNull();
   });
 });
 
@@ -235,17 +261,11 @@ async function renderReactive(init: PageProps = { courseSlug: 'c', versionId: '1
   return props;
 }
 
-function openLabelDraft() {
-  const row = [...target.querySelectorAll<HTMLElement>('.meta-card .inline-field')].find((f) => f.querySelector('.label')?.textContent === 'Label')!;
-  row.querySelector<HTMLButtonElement>('button[data-glyph="pencil"]')!.click();
-}
+// Some open draft on the page (5c T5: the Version info card that used to
+// supply one is gone; any registered dirty tracker is the same to the page).
 async function makeDirty() {
-  openLabelDraft();
+  hoisted.registry!.register({ isDirty: true });
   await settle();
-  const input = target.querySelector<HTMLInputElement>('.meta-card .inline-field input')!;
-  input.value = 'Draft';
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
 }
 const btnByText = (text: string) =>
   [...target.querySelectorAll<HTMLButtonElement>('.state-actions button')].find((b) => b.textContent?.trim() === text);
@@ -525,11 +545,11 @@ describe('VersionEditPage — a late transition / delete after a version switch 
     await settle();
     props.versionId = '2';
     await settle();
-    expect(target.querySelector('.editor-heading .vid')!.textContent).toBe('v2');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v2');
     release();
     await settle();
     expect(target.querySelector('.skeleton')).toBeNull();
-    expect(target.querySelector('.editor-heading .vid')!.textContent).toBe('v2');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v2');
     expect(fetchSpy.mock.calls.filter(([u]) => String(u) === '/api/versions/1/admin-tree')).toHaveLength(1);
   });
 
@@ -544,7 +564,7 @@ describe('VersionEditPage — a late transition / delete after a version switch 
     release();
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
-    expect(target.querySelector('.editor-heading .vid')!.textContent).toBe('v2');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v2');
   });
 });
 
@@ -1005,6 +1025,24 @@ describe('VersionEditPage — focus by depth (Slice-5c T1)', () => {
     expect(depthOf()).toEqual(['d0']);
     history.forward(); await waitPop();
     expect(depthOf()).toEqual(['d1']);
+  });
+
+  it('closed blocks are white rows only at the focus level (5c T5, user): all with nothing open, none once a block is open', async () => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    expect(target.querySelectorAll('.block-card.at-focus').length).toBe(2);
+    await navigate('/courses/c/edit/v/1/blocks/10'); await settle();
+    expect(target.querySelectorAll('.block-card.at-focus').length).toBe(0);   // 11 is outside: the page's shade
+  });
+
+  it('sequence rows are tinted only at the focus level (5c T5, user): all with the block open, none once a sequence is open', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20, { ...seq20, id: 21, title: 'Seq 21', slug: 's21', order: 2 }] })];
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    expect(target.querySelectorAll('.seq-card.at-focus').length).toBe(2);
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20'); await settle();
+    expect(target.querySelectorAll('.seq-card.at-focus').length).toBe(0);   // 21 is outside: the block's shade
   });
 
   it('exactly one container is the focus at every depth', async () => {

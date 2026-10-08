@@ -214,7 +214,7 @@
   $effect(() => { if (creating && (!expanded || !canStructure)) creating = false; });
 </script>
 
-<div class="seq-card" class:focus={mode === 'open-focus'}>
+<div class="seq-card" class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'}>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -286,6 +286,8 @@
     background: transparent;
     overflow: hidden;
   }
+  /* 5c T5 (user): a focus-level row inside the open (white) block is tinted. */
+  .seq-card.at-focus { background: var(--focus-row); }
   .seq-card.focus {
     background: var(--focus-0);
     border-color: var(--focus-line-strong);
@@ -298,11 +300,11 @@
     border: 0;
     background: transparent;
     color: var(--primary);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
   }
   .add-line:disabled { color: var(--muted); cursor: default; }
-  .empty { margin: 0; font-size: 13px; color: var(--muted); }
+  .empty { margin: 0; font-size: 14px; color: var(--muted); }
   .items-list { display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 0; margin: 0; }
 </style>

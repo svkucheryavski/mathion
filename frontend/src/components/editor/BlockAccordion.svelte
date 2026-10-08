@@ -283,7 +283,7 @@
   }
 </script>
 
-<div class="block-card" class:focus={mode === 'open-focus'} class:parent={mode === 'open-parent'}>
+<div class="block-card" class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'} class:parent={mode === 'open-parent'}>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -371,6 +371,8 @@
     overflow: hidden;
     margin-bottom: 6px;
   }
+  /* 5c T5 (user): a focus-level row is white, so it stands out on the shaded page. */
+  .block-card.at-focus { background: var(--focus-0); }
   .block-card.parent { background: var(--focus-1); }
   .block-card.focus {
     background: var(--focus-0);
@@ -385,7 +387,7 @@
     border: 0;
     background: transparent;
     color: var(--primary);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
   }
@@ -401,9 +403,9 @@
     border-radius: var(--radius);
     background: var(--surface);
     color: var(--text);
-    font-size: 13px;
+    font-size: 14px;
   }
   .add-err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
-  .empty { margin: 0; font-size: 13px; color: var(--muted); }
+  .empty { margin: 0; font-size: 14px; color: var(--muted); }
   .seqs-list { display: flex; flex-direction: column; gap: 10px; list-style: none; padding: 0; margin: 0; /* ref 1570 rhythm */ }
 </style>

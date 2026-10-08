@@ -10,7 +10,7 @@
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
-  import VersionMetaForm from '../../components/editor/VersionMetaForm.svelte';
+  import VersionSettingsModal from '../../components/editor/VersionSettingsModal.svelte';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
   import Skeleton from '../../components/ui/Skeleton.svelte';
@@ -331,6 +331,16 @@
     }
   });
 
+  // ---- Slice-5c D12: version settings modal. ----
+  let settingsOpen = $state(false);
+  let settingsBtn = $state<HTMLButtonElement>();
+  // Declared LAST: a version switch (instance preserved) closes the modal, so
+  // it never edits one version while showing another.
+  $effect(() => {
+    void vid;
+    untrack(() => { settingsOpen = false; });
+  });
+
   async function openAdd() {
     if (createBusy || busy || !perms?.canEditStructure) return;
     creating = true;
@@ -490,15 +500,24 @@
       {/if}
       <div class="editor-heading">
         <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
-        <span class="mono vid">v{v.id}</span>
-        <VersionBadges state={v.state} isDisabled={v.is_disabled} />
+        <!-- 5c T5 (user): the id and the attempt limit as quiet chips, then the state badge last. -->
+        <span class="hchip">v{v.id}</span>
+        <span class="hchip">max {v.max_quiz_attempts} quiz {v.max_quiz_attempts === 1 ? 'attempt' : 'attempts'}</span>
+        <VersionBadges state={v.state} isDisabled={v.is_disabled} outlined />
+        <!-- 5c D12: version settings live in a modal, opened here. -->
+        <span class="head-push">
+          <IconButton size="sm" glyph="pencil" title="Version settings" aria-label="Version settings"
+            bind:element={settingsBtn} onclick={() => (settingsOpen = true)} />
+        </span>
       </div>
+      {#if v.info_html}
+        <!-- 5c T5 (user): the version's info, rendered (sanitized server-side, as CourseView), muted. -->
+        <div class="vinfo">{@html v.info_html}</div>
+      {/if}
 
       {#if v.is_disabled}
         <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
       {/if}
-
-      <VersionMetaForm {vid} version={v} />
 
       <section class="blocks" aria-labelledby={blocksHeadingId}>
         <!-- 5c: the card head is gone, but block h3s keep an h2 parent. -->
@@ -598,6 +617,11 @@
         {/key}
       {/if}
 
+      {#if settingsOpen}
+        <VersionSettingsModal {vid} version={v} editable={perms.canEditVersionMeta} {stillOnVid}
+          onClose={() => { settingsOpen = false; void tick().then(() => settingsBtn?.focus()); }} />
+      {/if}
+
       <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
     </div>
   {/if}
@@ -606,18 +630,31 @@
 <style>
   .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
   .editor-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; /* ref 1525 */ }
-  .editor-heading h1 { font-size: 20px; /* ref 1526 — base.css h1 is 21px */ min-width: 0; overflow-wrap: anywhere; }
+  .editor-heading h1 { font-size: 18px; /* 5c T5 (user): a step under ref 1526's 20px */ min-width: 0; overflow-wrap: anywhere; }
   .editor-heading a { color: var(--primary); text-decoration: none; /* ref 1526 */ }
   .editor-heading a:hover { text-decoration: underline; }
+  .head-push { margin-left: auto; display: flex; }
+  /* Pulled up under the heading (its 18px gap), so it reads as the heading's subtitle. */
+  .vinfo { margin: -8px 0 18px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
   .vlabel { color: var(--text); /* ref 1526 */ }
-  .vid { font-size: 12px; /* ref 1527 */ color: var(--muted); }
+  /* The state badge's size and shape (VersionBadges .vbadge), neutral; the 1px line keeps it visible on --focus-page. */
+  .hchip {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--muted);
+    border: 1px solid var(--focus-line);
+    white-space: nowrap;
+  }
   /* §4 precondition banner, information form. */
   .banner {
     margin: 0 0 18px; /* the 18px section rhythm (ref 1525) */
     padding: 8px 12px;
     background: var(--surface-2);
     border-left: 3px solid var(--primary);
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text);
   }
   .refresh-err { margin-bottom: 18px; /* the 18px section rhythm (ref 1525) */ }
@@ -637,6 +674,7 @@
   /* R3: the page shade spans the viewport. body:has() needs no JS and ends
      with the page (no .canvas → no rule). `.canvas` stays scoped, so the rule
      matches only while THIS page is mounted. */
+  :global(body):has(.canvas.d0) { background: var(--focus-page); }
   :global(body):has(.canvas.d1) { background: var(--focus-1); }
   :global(body):has(.canvas.d2) { background: var(--focus-2); }
   /* "+ Add block" (5c D9): a quiet line; its row is a field with ✓ ✕. */
@@ -646,7 +684,7 @@
     border: 0;
     background: transparent;
     color: var(--primary);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
   }
@@ -662,7 +700,7 @@
     border-radius: var(--radius);
     background: var(--surface);
     color: var(--text);
-    font-size: 13px;
+    font-size: 14px;
   }
   .add-err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
   .blocks-list { list-style: none; padding: 0; margin: 0; }

@@ -181,7 +181,8 @@ describe('SequenceAccordion — header (Slice-5c T2)', () => {
 
   it('the body has no title field row, no Items heading and no delete footer', () => {
     const { target } = mountAccordion();
-    expect(target.querySelector('.inline-field')).toBeNull();
+    // The old row was an InlineField input (deleted in T5); no field may come back.
+    expect(target.querySelector('input, textarea')).toBeNull();
     expect(target.querySelector('h5')).toBeNull();
     expect(target.querySelector('.del-footer')).toBeNull();
   });
@@ -446,5 +447,11 @@ describe('SequenceAccordion — focus shading (Slice-5c T1)', () => {
     expect(target.querySelector('.seq-card')!.classList.contains('focus')).toBe(false);
     props.routeSid = '77'; flushSync();
     expect(target.querySelector('.seq-card')!.classList.contains('focus')).toBe(false);
+  });
+  it('a collapsed row at the focus level is tinted (at-focus); the open sequence is not (5c T5, user)', () => {
+    const { target, props } = mountAccordion();
+    expect(target.querySelector('.seq-card')!.classList.contains('at-focus')).toBe(false);
+    props.routeSid = null; flushSync();
+    expect(target.querySelector('.seq-card')!.classList.contains('at-focus')).toBe(true);
   });
 });

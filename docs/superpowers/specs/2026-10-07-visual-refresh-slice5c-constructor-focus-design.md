@@ -70,7 +70,7 @@ The 5a/5b gate pinned the CSS against the written spec, but nobody looked at the
 | an item | the modal | the existing backdrop over all of the above | |
 
 - **Expansion stays URL-driven** (`/blocks/:b`, `/blocks/:b/sequences/:s`, `/…/items/:i`), as 5a/5b built it. At most one block and one sequence are open, so there is always exactly one focus path.
-- **Shades are new theme tokens** in `theme-default.css`: `--focus-0` (= `--surface`), `--focus-1` and `--focus-2`. Starting values come from the mockup (`#eef0f3`, `#e1e4e9`) and are tuned in the browser pass with the user.
+- **Shades are new theme tokens** in `theme-default.css`: `--focus-0` (= `--surface`), `--focus-1` and `--focus-2`. *Amended by the user, 2026-10-08 (T5):* with nothing open the page itself is `--focus-page` (#F2F3F6, a half-step under `--focus-1`), so the white block rows stand out from it. Inside an open (white) container, its focus-level rows (sequence rows of the open block, item rows of the open sequence) are tinted `--focus-row` (#F4F5F8) for the same reason. Starting values come from the mockup (`#eef0f3`, `#e1e4e9`) and are tuned in the browser pass with the user.
 - **Panel borders** use a translucent line, so they stay visible on every shade. The focus panel gets a slightly stronger border and a soft shadow.
 - **There is no dark theme today,** so none is designed here.
 
@@ -89,10 +89,10 @@ The header reads: title, then ✎ ↑ ↓ 🗑, then ⌄ (collapse). Rules for t
 - The trash follows D6.
 - The ✎ field (D8):
   - It is required, with a maximum of 200 characters.
-  - On save it sends one PATCH and reloads the tree, as InlineField does today.
+  - On save it sends one PATCH and reloads the tree, as the old InlineField did.
   - While the field is open, it counts as unsaved for the navigation guard, as today.
   - A save error shows under the field.
-  - Moving focus away leaves the field open: no auto-save, no auto-cancel (InlineField today has no blur handler).
+  - Moving focus away leaves the field open: no auto-save, no auto-cancel (the old InlineField had no blur handler).
 
 ### Permission states
 
@@ -127,11 +127,11 @@ These come from `versionPermissions`; the rules don't change.
 - **Header:** "Version settings" and ×.
 - **Fields:**
   - Label (plain input);
-  - Info (MarkdownEditor, plain; no asset sidebar needed);
+  - Info (a plain monospace textarea; R2 of the plan);
   - Max quiz attempts (number, 1–10).
 - **Footer:** Discard and Save. Save sends one PATCH with the changed fields.
 - **When not editable:** the same modal, read-only, with no footer.
-- **The heading** keeps the course name, label, `v{id}` and state badges.
+- **The heading** keeps the course name and label. *Amended by the user, 2026-10-08 (T5):* the id and the attempt limit are quiet chips, then the state badge last: `[v11] [max 3 quiz attempts] [created]` (not mono text). Non-empty version info shows under the heading as muted rendered text (the sanitized `info_html`, as CourseView), before the blocks. The title line is a step smaller (h1 18px) and the content below it a step larger (info, block/sequence/item titles, "+ Add …" lines and empty notes +1px).
 
 ### Student view
 
@@ -145,6 +145,7 @@ These come from `versionPermissions`; the rules don't change.
 - **AccordionHeader:** the slug, the `B1`/`S1` badge and the controls outside the focus.
 - **Block and sequence bodies:** the inline Title/Info field rows, the create forms (replaced by D9 rows and the D10 modal) and the delete footers.
 - **The block Info field** in the constructor and the student view (D7).
+- **`InlineField`** (component and tests). After T5 nothing imports it, so it was deleted (the user's call, 2026-10-08).
 
 ## Out of scope
 
