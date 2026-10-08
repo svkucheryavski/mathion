@@ -84,14 +84,9 @@
     </h2>
   </header>
   <!-- The panel and ITS CONTENTS are always rendered; only `hidden` gates
-       visibility. The former outer `{#if expanded}` is gone entirely, which is
-       what keeps `aria-controls` from dangling in the collapsed state. The inner
-       `{#if block.info_html}` is RETAINED — without it the padded `.info` would
-       draw an empty strip above the first row of every block with no info. -->
+       visibility (keeps `aria-controls` valid when collapsed). Block info is
+       not shown (Slice-5c D7; the data stays). -->
   <div id={panelId} role="region" aria-labelledby={btnId} hidden={!expanded}>
-    {#if block.info_html}
-      <div class="info">{@html block.info_html}</div>
-    {/if}
     <ul>
       {#each block.sequences as s (s.id)}
         <li><SequenceLink {courseSlug} sequence={s} state={vstate} /></li>
@@ -214,18 +209,6 @@
      states a single source of truth. -90deg points it left-to-right. */
   .acc .chev.collapsed {
     transform: rotate(-90deg);
-  }
-  /* Padding lives here, not on the panel: the panel carries none so the rows stay
-     flush to the card edge. `margin: 0` zeroes the old `var(--space-2) 0`.
-
-     12px horizontally, NOT `var(--space-3)`'s 16px. This sits in the same panel as
-     the rows, whose `padding: 8px 12px` is ref 1572, and at 16px the info text
-     began 4px to the right of every row badge under it. Vertical stays
-     `var(--space-2)`, which has no such neighbour to align to. */
-  .info {
-    color: var(--muted);
-    padding: var(--space-2) 12px; /* ref 1572 — the rows in this same panel */
-    margin: 0;
   }
   /* The rows carry `border-bottom: 1px solid var(--border-soft)` and `.block`
      carries its own `--border`, so the last row would draw a hairline directly

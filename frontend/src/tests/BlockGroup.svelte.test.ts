@@ -199,9 +199,9 @@ describe('BlockGroup', () => {
     // `querySelector` takes the first match, so a second `role="region"` passed
     // BOTH lanes while taking the panel's `border-top` separator and adding an
     // unnamed second landmark; reproduced by mutation on the <ul>. `mountBlock`
-    // renders neither the `.info` div nor the mini-project <li>, so those two
-    // branches are covered by the every-branch test below — a separate mount
-    // because `mountBlock` hardcodes `mpByBlockId: {}`.
+    // does not render the mini-project <li>, so that branch is covered by the
+    // every-branch test below — a separate mount because `mountBlock` hardcodes
+    // `mpByBlockId: {}`. (The `.info` branch is gone: Slice-5c D7.)
     expect(target.querySelectorAll('[role="region"]')).toHaveLength(1);
     // The old glyph span is gone with the chevron that replaced it.
     expect(target.querySelector('.toggle')).toBeNull();
@@ -209,28 +209,29 @@ describe('BlockGroup', () => {
 
   it('renders exactly one role="region" with every panel branch present', () => {
     // The assertion above runs against `mountBlock`, whose fixture has
-    // `info_html: ''` and `mpByBlockId: {}` — so neither the `.info` div nor the
-    // mini-project <li> is in the DOM at that moment, and `role="region"` on
-    // either passed BOTH lanes (reproduced by mutation on `.info`: 10/10 tests,
-    // gate ALL PASS). It is not cosmetic: `.info` measured a second 1px
-    // `--border` hairline directly under the panel's own separator — the exact
-    // double-line defect round 3 was raised to remove — plus a nested unnamed
-    // landmark. This mount renders every branch instead.
+    // `mpByBlockId: {}` — so the mini-project <li> is not in the DOM at that
+    // moment, and `role="region"` on it would pass unseen (the same hole was
+    // reproduced by mutation on the since-removed `.info` div: 10/10 tests,
+    // gate ALL PASS). This mount renders every branch the panel still has.
     //
-    // The three presence assertions are load-bearing, not decoration: without
-    // them a fixture change that stopped rendering a branch would silently
-    // return this test to the hole it exists to close, and it would still pass.
+    // The presence assertions are load-bearing, not decoration: without them a
+    // fixture change that stopped rendering a branch would silently return this
+    // test to the hole it exists to close, and it would still pass. Slice-5c D7
+    // removed the `.info` branch: the fixture still sets info_html, and the test
+    // now pins that it stays unrendered.
     component = mount(BlockGroup, {
       target,
       props: {
         courseSlug: 'course-a',
-        block: { ...BASE_BLOCK, info_html: '<p>x</p>' },
+        block: { ...BASE_BLOCK, info_html: '<p>BLOCK-INFO-MARKER</p>' },
         state: BASE_STATE,
         mpByBlockId: { [String(BASE_BLOCK.id)]: BASE_MP },
       },
     });
     flushSync();
-    expect(target.querySelector('.info')).not.toBeNull();
+    // Slice-5c D7: block info is never shown, even when info_html is set.
+    expect(target.querySelector('.info')).toBeNull();
+    expect(target.textContent).not.toContain('BLOCK-INFO-MARKER');
     expect(target.querySelector('.row-mp')).not.toBeNull();
     expect(target.querySelectorAll('section.block > [role="region"] > ul > li')).toHaveLength(3);
     expect(target.querySelectorAll('[role="region"]')).toHaveLength(1);
@@ -310,20 +311,10 @@ describe('BlockGroup', () => {
     expect(agree()).toBe(true);
   });
 
-  it('renders .info only when block.info_html is non-empty', () => {
-    // Only the OUTER {#if expanded} is dropped; this inner guard is retained.
-    // Without it the pinned `.info { padding: 8px 16px }` would draw an empty
-    // padded strip above the first row of every block that has no info — and
-    // BASE_BLOCK has `info_html: ''`, so the baseline suite would not notice.
-    const { panel } = mountBlock();
+  it('never renders block info, even when info_html is set (Slice-5c D7)', () => {
+    const { panel } = mountBlock({ info_html: '<p>Read this first.</p>' });
     expect(panel.querySelector('.info')).toBeNull();
-    unmount(component);
-    target.innerHTML = '';
-
-    const withInfo = mountBlock({ info_html: '<p>Read this first.</p>' });
-    const info = withInfo.panel.querySelector('.info') as HTMLElement;
-    expect(info).not.toBeNull();
-    expect(info.textContent).toContain('Read this first.');
+    expect(panel.textContent).not.toContain('Read this first.');
   });
 
   it('splits "B{order}. {title}" into a mono badge and a title, with no trailing period', () => {

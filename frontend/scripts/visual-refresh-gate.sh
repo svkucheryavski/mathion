@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1367
+EXPECTED_CHECKS=1373
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -1290,8 +1290,8 @@ const SPEC = {
   "ItemIcon.svelte":        { nodes: BASE,                     tags: ["button"] },
   "SequenceLink.svelte":    { nodes: BASE.concat("EachBlock"), tags: ["a", "span"] },
   "MiniProjectLink.svelte": { nodes: BASE,                     tags: ["a", "span"] },
-  // T8a. `HtmlTag` is the `{@html block.info_html}` the component already had —
-  // backend-sanitised markdown, the same limitation the header records above.
+  // T8a allowed `HtmlTag` for the `{@html block.info_html}`; Slice-5c D7 removed
+  // block info from every screen, so an `{@html}` here now reds.
   // `hiddenOn` is the panel and ONLY the panel: `hidden={!expanded}` IS the
   // pinned collapse mechanism there, while a `hidden` anywhere else in this
   // component would switch an element off where no CSS lane can see it. It
@@ -1349,7 +1349,7 @@ const SPEC = {
   // with the gate green and all 1349 tests passing (reviewer, round 3).
   "NumericQuestion.svelte": { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"] },
   "TextQuestion.svelte":    { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"] },
-  "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock", "HtmlTag"),
+  "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
                               hiddenOn: { "div:": "hidden={!expanded}" } },
@@ -1569,7 +1569,7 @@ const SIG = {
      "span:badge.mono[class=\"badge mono\"]", "span:acc-title[class=\"acc-title\"]",
      "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
-     "#if:", "div:info[class=\"info\"]", "@html:block.info_html", "ul:", "#each:", "li:",
+     "ul:", "#each:", "li:",
      "SequenceLink:[courseSlug sequence={s} state={vstate}]", "#if:", "li:",
      "MiniProjectLink:[courseSlug item={mpByBlockId[String(block.id)]}]"],
 };
@@ -2322,11 +2322,7 @@ WANT = [
     ('.acc.%s .chev:where(.%s)' % (h, h), 'color:var(--muted);margin-left:auto;flex:0 0 auto'),
     # The rotation IS the visible collapsed cue -- aria-expanded alone is invisible.
     ('.acc.%s .chev.collapsed:where(.%s)' % (h, h), 'transform:rotate(-90deg)'),
-    # Padding lives here, never on the panel: the rows must stay edge-flush.
-    # 12px, NOT var(--space-3)'s 16px: this sits in the same panel as the rows,
-    # whose `padding: 8px 12px` is ref 1572, and at 16px the info text started 4px
-    # right of every row badge below it.
-    ('.info.%s' % h, 'color:var(--muted);padding:var(--space-2) 12px;margin:0'),
+    # Slice-5c D7: the `.info` rule is gone with block info (any return reds the inventory).
     # The last-row hairline would otherwise double against the card border.
     ('ul.%s li:where(.%s):last-child .row' % (h, h), 'border-bottom:0'),
 ]
@@ -4126,18 +4122,21 @@ FILES_5B=(
   src/components/editor/QuizEditor.svelte src/components/editor/QuestionAccordion.svelte
   src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
   src/pages/MiniProjectDetailPage.svelte src/App.svelte
-  # 5c T4 (until T6 folds the 5c files into (ah)):
-  src/components/editor/NewItemModal.svelte src/components/editor/VersionSettingsModal.svelte
 )
 emoji_scan "all Slice-5b source files" $FILES_5B src/components/ui/FocusTrap.svelte src/lib/itemBody.ts src/lib/quizSave.ts \
   src/lib/deriveExpansion.ts src/lib/handleStaleIdFallback.ts src/routes.ts src/stores/currentEditorVersion.svelte.ts
 
 echo
 echo "--- (ag) Slice-5b T7 — no literal colour in a 5b-touched CSS context (Constraint 11) ---"
-python3 - $FILES_5B <<'AG'
+# colour_scan LABEL FILE... — Constraint 11 over the CSS contexts of FILE...
+# (shared by (ag) for the 5b files and (ah) for the 5c files; 5c T6).
+colour_scan() {
+  local label=$1; shift
+  python3 - "$label" "$@" <<'AG'
 import re, sys
 # Constraint 11 (spec §Global Constraints): no literal colour in a CSS context
-# of a 5b-touched file. CSS contexts = <style> blocks and inline style="…".
+# of a touched file. CSS contexts = <style> blocks and inline style="…".
+LABEL, FILES = sys.argv[1], sys.argv[2:]
 NAMED = set('''aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue
 blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan
 darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen
@@ -4201,16 +4200,53 @@ def hits(path):
     return found
 
 bad = 0
-for p in sys.argv[1:]:
+for p in FILES:
     h = hits(p)
     if h:
         bad = 1
         print('FAIL  %s holds a literal colour in a CSS context: %s' % (p.rsplit('/', 1)[-1], '; '.join(h[:3])))
 if not bad:
-    print('PASS  no literal colour in any CSS context of the %d 5b-touched files (Constraint 11)' % (len(sys.argv) - 1))
+    print('PASS  no literal colour in any CSS context of the %d %s files (Constraint 11)' % (len(FILES), LABEL))
 sys.exit(bad)
 AG
-[[ $? -eq 0 ]] || fail=1
+  [[ $? -eq 0 ]] || fail=1
+}
+colour_scan 5b-touched $FILES_5B
+
+echo
+echo "--- (ah) Slice-5c T6 — focus tokens, no literal colours, no emoji in 5c files ---"
+# Every component Slice 5c touched (T1-T6 and the user's follow-ups).
+FILES_5C=(
+  src/pages/editor/VersionEditPage.svelte src/pages/editor/VersionsPage.svelte
+  src/components/editor/AccordionHeader.svelte src/components/editor/BlockAccordion.svelte
+  src/components/editor/SequenceAccordion.svelte src/components/editor/ItemRow.svelte
+  src/components/editor/ItemTypePicker.svelte src/components/editor/NewItemModal.svelte
+  src/components/editor/VersionSettingsModal.svelte src/components/editor/VersionBadges.svelte
+  src/components/editor/ItemEditorModal.svelte src/components/course/BlockGroup.svelte
+)
+emoji_scan "all Slice-5c files" $FILES_5C
+colour_scan 5c-touched $FILES_5C
+# Each focus token is defined exactly once in the theme (the shades the 5c CSS reads).
+ftok=0
+for t in 0 1 2 page row line line-strong shadow; do
+  [[ $(grep -cE "^[[:space:]]*--focus-${t}:" src/styles/theme-default.css) -eq 1 ]] || ftok=1
+done
+if [[ $ftok -eq 0 ]]; then echo "PASS  the eight --focus-* tokens are each defined once in the theme"
+else echo "FAIL  the eight --focus-* tokens are each defined once in the theme"; fail=1; fi
+# R3 / T1 ruling: the canvas shades <body> through a scoped :has() and the tokens only.
+if [[ $(grep -cE ':global\(body\):has\(\.canvas\.d[012]\)[[:space:]]*\{[[:space:]]*background:[[:space:]]*var\(--focus-(page|1|2)\);?[[:space:]]*\}' src/pages/editor/VersionEditPage.svelte) -eq 3 ]]; then
+  echo "PASS  the canvas shades the body only through the focus tokens (d0/d1/d2)"
+else echo "FAIL  the canvas shades the body only through the focus tokens (d0/d1/d2)"; fail=1; fi
+# The focus container's border: one rule each in the block and sequence accordions.
+fls=$(cat src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte | grep -c 'var(--focus-line-strong)')
+if [[ $fls -eq 2 ]]; then echo "PASS  the focus panels take --focus-line-strong (block + sequence)"
+else echo "FAIL  the focus panels take --focus-line-strong (block + sequence): $fls"; fail=1; fi
+# 5c D5: no slug or position-code element in the constructor rows (CSS selectors
+# at a line start, or a class attribute; `item.slug` in script is data, not UI).
+if grep -qE '^[[:space:]]*\.(slug|code|item-slug)\b|class="[^"]*\b(slug|code|item-slug)\b' \
+     src/components/editor/AccordionHeader.svelte src/components/editor/ItemRow.svelte; then
+  echo "FAIL  no slug or code badge in the constructor rows (5c D5)"; fail=1
+else echo "PASS  no slug or code badge in the constructor rows (5c D5)"; fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

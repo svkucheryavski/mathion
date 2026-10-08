@@ -3,6 +3,12 @@
 Review findings graded Minor during the Slice-5b per-task reviews (first-party Opus + Fable second lane).
 None blocks the slice; each is input for the final polish slice.
 
+*Checked at Slice-5c T6 (2026-10-08):* no entry here was resolved by 5c. The
+"label baseline" Safari check is VideoBody's Video URL row (`align-items: baseline`),
+which 5c did not touch, so it stays a Safari-pass item. The removed constructor
+parts (Version info card, inline Title/Info rows, delete footers, slug and `B1`
+badges) never had entries here.
+
 ## T1 — Modal shell
 
 - **Modal: autofocus on a disabled or inert target.** FocusTrap's priority chain picks the first
@@ -119,7 +125,8 @@ None blocks the slice; each is input for the final polish slice.
 - **VideoBody duplicates ItemEditorModal's field CSS** (`.field-row`, `.field-label`, `.field`,
   `.plain-input` ×3, `.field-err`, `.ro-value`). Until T4's (ad) they are unchecked; T4 must repeat the
   full D12 `d`/`chk` set plus `sweep VideoBody`. Longer term: one shared field component (5a create form,
-  modal Title, VideoBody).
+  modal Title, VideoBody). *5c added a fourth copy:* VersionSettingsModal's `.field-row` / `.plain-input` /
+  `.field-err` (5c T5).
 - **A dirty-but-equivalent URL sends a no-op PATCH** (`  EMBED  ` normalises to the saved value). Harmless.
 - **Tests not yet written:** a non-identity echo (the write-back takes the server's string, not the sent
   one); a failed PATCH keeps the draft dirty; empty title + empty URL (R9 focus ends on Title); the

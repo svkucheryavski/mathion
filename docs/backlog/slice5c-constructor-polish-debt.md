@@ -82,3 +82,9 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **The modal shows one field error at a time (r1, Opus).** A blank Label and an invalid attempts value show only the label error; the attempts error appears on the next Save. Set both before returning.
 - **The label error isn't announced either (r1, Fable).** It is the same gap as the attempts error (see §T5). Fix both together by focusing the first invalid field.
 - **A redundant fallback name (r1, Fable).** An empty label renders "Version 10 (v10)". It only fires on data the migration has already renamed.
+
+## T6 — block info off, gate (ah)
+
+- **(ah) is source-level, not dist-level.** Its focus-token and canvas checks grep the `.svelte` / theme source, so a rule that compiles differently (e.g. `:global` rewritten) would pass. The (w) section pins the emitted `body:has(.canvas.dN.<hash>)` rules, so this is covered there; (ah) is the lighter, spec-named layer.
+- **(ah) canvas check counts, it doesn't bind.** `d[012]` × `--focus-(page|1|2)` counts 3, so d1 → `--focus-2` would still pass. Section (w) pins each depth's token on the compiled CSS, so nothing slips through; three single-line greps would make (ah) self-sufficient. (Fable lane, T6 r1.)
+- **(ah) slug check is narrow.** Its regex catches a selector at line start or a literal `class="…"`; `class:slug={…}`, a `class={…}` expression, `.title, .slug {` on one line or `:global(.slug)` would pass. AccordionHeader is also pinned at dist level by (x); ItemRow's dist pin covers `.item-slug` only. Fix: widen to `\.(slug|code|item-slug)\b` anywhere in `<style>` plus `class:(slug|code)`, or add `\.(slug|code)` to ItemRow's dist `none`. (Opus lane, T6 r1.)
