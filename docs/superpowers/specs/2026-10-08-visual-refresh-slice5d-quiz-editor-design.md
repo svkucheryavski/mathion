@@ -291,7 +291,7 @@ The frontend sends one request per key change. On success it clears the other ma
 
 **While a request runs:**
 - The control that started it stays enabled, and re-entry is blocked in its handler, so focus is never dropped. Its inputs become `readonly`, never `disabled`.
-- The question's other answer controls are disabled. **Exception:** during its own move, both arrows of the moved answer row or question card stay enabled, despite the per-question and per-quiz locks, with re-entry blocked in the handler. Only the first/last rule disables one of them, so focus can always land on the other arrow.
+- The question's other answer controls are disabled. **Exception:** during its own move, both arrows of the moved answer row or question card stay enabled, despite the per-question and per-quiz locks, with re-entry blocked in the handler. Only the first/last rule disables one of them, so focus can always land on the other arrow. Accepted trade-off: a second arrow click during that one request is ignored without a disabled look. The arrows stay enabled only so that focus never drops.
 - **A saving inline field** (and the inline title while it saves):
   - It is read-only, ✓ shows busy and Enter is ignored.
   - ✕ is disabled. Esc is swallowed (`preventDefault`) and does nothing, so it never reaches the modal.
@@ -306,7 +306,7 @@ The frontend sends one request per key change. On success it clears the other ma
   - Closing the quiz modal or leaving the page during the save does not prompt, because the request is already sent and completes on the server. A late failure then shows as a toast (as `AccordionHeader` does today).
 - **Echoes write back only the fields their request carried.** An answer-text save updates only `text`, a marker save only `is_correct` (plus the local clear of the others), a Number save only value and decimals. This keeps a later write's result from being overwritten by an earlier echo (today's per-field write-back).
 
-**Stale responses** make no UI writes into the modal after it has closed or the version has changed (today's `alive && vid === savedVid` guard). One exception: a failed save still pushes the global toast (§While a request runs), unless the version has changed (`stillOnVid`). A write already sent still completes on the server. A failed write's re-fetch is skipped when its question no longer exists.
+**Stale responses** make no UI writes into the modal after it has closed or the version has changed (today's `alive && vid === savedVid` guard). One exception: a failed save always pushes the global toast (§While a request runs), even after the modal closed, the page was left or the version changed, as `AccordionHeader` does today. The author must always learn that an edit was not saved. A write already sent still completes on the server. A failed write's re-fetch is skipped when its question no longer exists.
 
 **Errors:**
 - An edit with a field (an inline field, a level-3 modal): the error shows inside it, and the field stays open with the typed text. No toast.
