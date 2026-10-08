@@ -1,4 +1,6 @@
-from mathion.models import Item
+from sqlalchemy import update
+
+from mathion.models import AnswerOption, Item
 
 
 def _make_quiz_via_api(admin_client):
@@ -180,7 +182,8 @@ def test_update_option(admin_client):
 
 
 def test_update_option_is_correct_published(admin_client):
-    """is_correct can be changed in published state."""
+    """is_correct can be changed in published state; on single choice the old
+    correct answer is cleared in the same request (5d D12)."""
     ids = _make_quiz_via_api(admin_client)
     q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
         "text_md": "Q?", "type": "single_choice",
@@ -189,13 +192,11 @@ def test_update_option_is_correct_published(admin_client):
     opt2 = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False}).json()
     admin_client.post(f"/api/versions/{ids['version']['id']}/publish")
 
-    # Make B correct too (swap step 1 — temporarily 2 correct, publish validation catches this)
     response = admin_client.patch(f"/api/options/{opt2['id']}", json={"is_correct": True})
     assert response.status_code == 200
-    # Make A incorrect (swap step 2 — back to exactly 1 correct)
-    response = admin_client.patch(f"/api/options/{opt1['id']}", json={"is_correct": False})
-    assert response.status_code == 200
-    assert response.json()["is_correct"] is False
+    assert response.json()["is_correct"] is True
+    marks = {o["id"]: o["is_correct"] for o in admin_client.get(f"/api/questions/{q['id']}/options").json()}
+    assert marks == {opt1["id"]: False, opt2["id"]: True}
 
 
 def test_update_option_cannot_remove_last_correct(admin_client):
@@ -310,3 +311,65 @@ def test_update_option_archived_blocked(admin_client):
     admin_client.post(f"/api/versions/{ids['version']['id']}/archive")
     response = admin_client.patch(f"/api/options/{opt['id']}", json={"text": "Updated"})
     assert response.status_code == 409
+
+
+def _single_choice(admin_client, *marks):
+    """A single-choice question with one option per mark, created in order."""
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opts = [
+        admin_client.post(f"/api/questions/{q['id']}/options", json={"text": f"O{i}", "is_correct": m}).json()
+        for i, m in enumerate(marks)
+    ]
+    return q, opts
+
+
+def _marks(admin_client, qid):
+    return [o["is_correct"] for o in admin_client.get(f"/api/questions/{qid}/options").json()]
+
+
+def test_single_choice_mark_correct_clears_the_old_one(admin_client):
+    q, (a, b, c) = _single_choice(admin_client, True, False, False)
+    r = admin_client.patch(f"/api/options/{c['id']}", json={"is_correct": True})
+    assert r.status_code == 200
+    assert _marks(admin_client, q["id"]) == [False, False, True]
+
+
+def test_single_choice_create_correct_clears_the_old_one(admin_client):
+    q, _ = _single_choice(admin_client, True, False)
+    r = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "New", "is_correct": True})
+    assert r.status_code == 201
+    assert _marks(admin_client, q["id"]) == [False, False, True]
+
+
+def test_single_choice_repairs_two_correct_answers(admin_client, db):
+    """Old data (the 5b two-step swap could leave it) has two correct answers;
+    marking one of them correct leaves only that one."""
+    q, (a, b) = _single_choice(admin_client, True, False)
+    db.execute(update(AnswerOption).where(AnswerOption.id == b["id"]).values(is_correct=True))
+    db.commit()
+    assert _marks(admin_client, q["id"]) == [True, True]
+    r = admin_client.patch(f"/api/options/{a['id']}", json={"is_correct": True})
+    assert r.status_code == 200
+    assert _marks(admin_client, q["id"]) == [True, False]
+
+
+def test_multiple_choice_keeps_every_mark(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "multiple_choice",
+    }).json()
+    a = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": True}).json()
+    b = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "B", "is_correct": False}).json()
+    assert admin_client.patch(f"/api/options/{b['id']}", json={"is_correct": True}).status_code == 200
+    assert _marks(admin_client, q["id"]) == [True, True]
+    assert admin_client.patch(f"/api/options/{a['id']}", json={"is_correct": False}).status_code == 200
+    assert admin_client.patch(f"/api/options/{b['id']}", json={"is_correct": False}).status_code == 422
+
+
+def test_text_only_update_does_not_touch_the_marks(admin_client):
+    q, (a, b) = _single_choice(admin_client, True, False)
+    assert admin_client.patch(f"/api/options/{b['id']}", json={"text": "Renamed"}).status_code == 200
+    assert _marks(admin_client, q["id"]) == [True, False]

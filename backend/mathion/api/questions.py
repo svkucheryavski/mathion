@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.text_utils import bump_content_updated_at
 from mathion.api.lookups import INT4_MAX, get_or_404
 from mathion.api.authz import require_course_admin
@@ -43,6 +44,41 @@ def _get_version_for_option(db: Session, option_id: int) -> tuple[AnswerOption, 
     block = get_or_404(db, Block, seq.block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     return option, version
+
+
+def _lock_question(db: Session, question_id: int) -> Question:
+    """5d D12: serialise every write to one question's answer rows (create,
+    correctness change, delete, reorder, and deleting the question itself;
+    ancestor deletes reach the answer rows only through the database cascade,
+    after the question row — see Question.options passive_deletes).
+    Taken BEFORE any answer row is written: a writer holding answer rows while
+    waiting for the question row would deadlock against a correctness change,
+    which holds the question and then clears the other marks.
+    populate_existing refreshes a row this session already holds."""
+    question = db.execute(
+        select(Question)
+        .where(Question.id == question_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+    # Through the module attribute, so the concurrency tests' monkeypatch applies.
+    advisory.interleave_hook("option_after_question_lock")
+    return question
+
+
+def _clear_other_correct(db: Session, question_id: int, keep_id: int) -> None:
+    """A single-choice question has one correct answer: the one just marked."""
+    db.execute(
+        update(AnswerOption)
+        .where(
+            AnswerOption.question_id == question_id,
+            AnswerOption.id != keep_id,
+            AnswerOption.is_correct.is_(True),   # touch (and lock) only the marks that change
+        )
+        .values(is_correct=False)
+    )
 
 
 @router.post("/api/items/{item_id}/questions", status_code=201, response_model=QuestionResponse)
@@ -141,6 +177,9 @@ def delete_question(question_id: int, db: Session = Depends(get_db), user: User 
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete questions in 'created' state")
+    # Lock first, so the delete serialises with correctness changes (D12); the
+    # database cascade then removes the answer rows after the question row.
+    _lock_question(db, question_id)
     db.delete(question)
     db.commit()
 
@@ -181,20 +220,23 @@ def create_option(question_id: int, data: OptionCreate, db: Session = Depends(ge
     if question.type not in ("single_choice", "multiple_choice"):
         raise HTTPException(status_code=409, detail="Options are only for choice-type questions")
 
+    question = _lock_question(db, question_id)
     current_max_order = db.scalar(select(func.max(AnswerOption.order)).where(AnswerOption.question_id == question_id)) or 0
     if current_max_order >= INT4_MAX:
         raise HTTPException(
             status_code=409,
             detail="Cannot add another option: the order sequence is exhausted.",
         )
-    next_order = current_max_order + 1
     option = AnswerOption(
         question_id=question_id,
         text=data.text,
         is_correct=data.is_correct,
-        order=next_order,
+        order=current_max_order + 1,
     )
     db.add(option)
+    db.flush()
+    if option.is_correct and question.type == "single_choice":
+        _clear_other_correct(db, question_id, option.id)
     db.commit()
     db.refresh(option)
     return option
@@ -225,18 +267,35 @@ def update_option(option_id: int, data: OptionUpdate, db: Session = Depends(get_
         if disallowed:
             raise HTTPException(status_code=409, detail=f"Cannot edit {disallowed} in published state")
 
+    question = None
+    if "is_correct" in updates:
+        question = _lock_question(db, option.question_id)
+        option = db.execute(
+            select(AnswerOption)
+            .where(AnswerOption.id == option_id)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if option is None:
+            raise HTTPException(status_code=404, detail="Option not found")
+
     for field, value in updates.items():
         setattr(option, field, value)
 
-    # Validate: cannot remove the last correct option
-    if "is_correct" in updates and not option.is_correct:
-        # Option was just set to False — check at least one correct remains
-        all_options = db.execute(
-            select(AnswerOption).where(AnswerOption.question_id == option.question_id)
-        ).scalars().all()
-        correct_count = sum(1 for o in all_options if o.is_correct)
-        if correct_count == 0:
-            raise HTTPException(status_code=422, detail="At least one option must be correct")
+    if question is not None:
+        if option.is_correct:
+            if question.type == "single_choice":
+                db.flush()
+                _clear_other_correct(db, question.id, option.id)
+        else:
+            # Cannot remove the last correct option (autoflush sends ours first).
+            correct_count = db.scalar(
+                select(func.count()).select_from(AnswerOption).where(
+                    AnswerOption.question_id == option.question_id,
+                    AnswerOption.is_correct.is_(True),
+                )
+            )
+            if correct_count == 0:
+                raise HTTPException(status_code=422, detail="At least one option must be correct")
 
     db.commit()
     db.refresh(option)
@@ -251,6 +310,12 @@ def delete_option(option_id: int, db: Session = Depends(get_db), user: User = De
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only delete options in 'created' state")
+    _lock_question(db, option.question_id)   # D12 lock order
+    option = db.execute(
+        select(AnswerOption).where(AnswerOption.id == option_id).execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if option is None:
+        raise HTTPException(status_code=404, detail="Option not found")
     db.delete(option)
     db.commit()
 
@@ -263,6 +328,7 @@ def reorder_options(question_id: int, data: ReorderRequest, db: Session = Depend
         raise HTTPException(status_code=403, detail="Version is disabled")
     if version.state != "created":
         raise HTTPException(status_code=409, detail="Can only reorder options in 'created' state")
+    _lock_question(db, question_id)   # D12 lock order; the id check below then sees a settled set
 
     incoming_ids = {e.id for e in data.order}
     incoming_orders = [e.order for e in data.order]
