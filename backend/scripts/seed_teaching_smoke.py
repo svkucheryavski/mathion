@@ -76,6 +76,7 @@ def seed() -> None:
         version = CourseVersion(
             course_id=course.id,
             state="published",
+            label="Version 1",
             info_md=info_md,
             info_html=render_markdown(info_md),
             published_at=datetime.now(timezone.utc),

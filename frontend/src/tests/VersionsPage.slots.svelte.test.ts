@@ -139,7 +139,7 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
     const title = row.querySelector<HTMLButtonElement>('button.vtitle')!;
     expect(title.textContent).toBe('Draft B');
     const chip = row.querySelector('.hchip')!;
-    expect(chip.textContent).toBe('v11');
+    expect(chip.textContent).toBe('v. 11'); // "v. N" (user, 2026-10-08)
     const badge = row.querySelector('.vbadge')!;
     const follows = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
     expect(follows(title, chip) && follows(chip, badge)).toBe(true);
@@ -153,13 +153,22 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
     expect(navigateMock).toHaveBeenCalledWith('/courses/c/edit/v/11');
   });
 
-  it('a version without a label shows a muted "(no label)" placeholder, named with its id', async () => {
+  // Two versions may share a label ("Copy of …"): the title's name carries the id
+  // so a screen reader can tell them apart (review, both lanes).
+  it("the title's accessible name carries the id", async () => {
+    versionsPageState.versions = [mkVersion({ id: 11, label: 'Fall' }), mkVersion({ id: 12, label: 'Fall' })];
+    await render();
+    expect([...target.querySelectorAll('button.vtitle')].map((b) => b.getAttribute('aria-label'))).toEqual(['Fall (v11)', 'Fall (v12)']);
+  });
+
+  // The label is mandatory and the migration names old versions "Version <id>";
+  // an empty one can't arrive, but must not render an empty button if it does.
+  it('an empty label falls back to "Version <id>", the migration\'s name', async () => {
     versionsPageState.versions = [mkVersion({ id: 10, label: '' })];
     await render();
     const title = target.querySelector<HTMLButtonElement>('button.vtitle')!;
-    expect(title.textContent).toBe('(no label)');
-    expect(title.classList.contains('untitled')).toBe(true);
-    expect(title.getAttribute('aria-label')).toBe('v10 (no label)');
+    expect(title.textContent).toBe('Version 10');
+    expect(title.getAttribute('aria-label')).toBe('Version 10 (v10)');
   });
 
   it('a disabled version title takes the muted hook (D5)', async () => {
@@ -168,7 +177,7 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
     const titles = [...target.querySelectorAll('button.vtitle')];
     expect(titles[0].classList.contains('off')).toBe(true);
     expect(titles[1].classList.contains('off')).toBe(false);
-    expect([...target.querySelectorAll('.vrow .hchip')].map((c) => c.textContent)).toEqual(['v3', 'v4']);
+    expect([...target.querySelectorAll('.vrow .hchip')].map((c) => c.textContent)).toEqual(['v. 3', 'v. 4']);
   });
 
   it('Open navigates to the editor', async () => {
@@ -215,6 +224,28 @@ describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
     addLine()!.click();
     await settle();
     expect(target.querySelector<HTMLInputElement>('input.new-label')!.value).toBe('');
+  });
+
+  // The label is mandatory (user, 2026-10-08).
+  it('the Label field is required: Create stays disabled until it has text', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    addLine()!.click();
+    await settle();
+    const form = target.querySelector('form.create')!;
+    const label = form.querySelector<HTMLInputElement>('input.new-label')!;
+    expect(label.closest('label')!.firstChild!.textContent!.trim()).toBe('Label');
+    expect(label.required).toBe(true);
+    const create = [...form.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Create')!;
+    expect(create.disabled).toBe(true);
+    label.value = '   ';
+    label.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(create.disabled).toBe(true);
+    label.value = 'Spring';
+    label.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(create.disabled).toBe(false);
   });
 
   it('Escape in the form cancels it', async () => {

@@ -131,7 +131,7 @@ These come from `versionPermissions`; the rules don't change.
   - Max quiz attempts (number, 1–10).
 - **Footer:** Discard and Save. Save sends one PATCH with the changed fields.
 - **When not editable:** the same modal, read-only, with no footer.
-- **The heading** keeps the course name and label. *Amended by the user, 2026-10-08 (T5):* the id and the attempt limit are quiet chips, then the state badge last: `[v11] [max 3 quiz attempts] [created]` (not mono text). Non-empty version info shows under the heading as muted rendered text (the sanitized `info_html`, as CourseView), before the blocks. The title line is a step smaller (h1 18px) and the content below it a step larger (info, block/sequence/item titles, "+ Add …" lines and empty notes +1px).
+- **The heading** keeps the course name and label. *Amended by the user, 2026-10-08 (T5):* the id and the attempt limit are quiet chips, then the state badge last: `[v. 11] [max 3 quiz attempts] [created]` (not mono text; "v. N" with a dot and space, the user's 2026-10-08 follow-up). Non-empty version info shows under the heading as muted rendered text (the sanitized `info_html`, as CourseView), before the blocks. The title line is a step smaller (h1 18px) and the content below it a step larger (info, block/sequence/item titles, "+ Add …" lines and empty notes +1px).
 
 ### Student view
 
@@ -144,13 +144,13 @@ The course page's versions list is brought in line with the version page. This s
 - **Page shade and rows.** The page takes `--focus-page`. Each version is a separate boxed row, 6px apart, like the block rows. The duplicate form is a matching white box.
 - **Heading.** The course name is 18px, as on the version page. The count is a chip ("2 versions"). The visible Versions row is gone, and its `h2` stays for screen readers only.
 - **"+ Add version".** A quiet line under the list, like "+ Add block", opens the create form in its place. The form has Cancel, and Escape cancels too. The empty state has no button of its own.
-- **Rows.** The label is the row title (block-title size). Clicking it opens the version, like the pencil. A `v{id}` chip follows it.
+- **Rows.** The label is the row title (block-title size). Clicking it opens the version, like the pencil. A `v. {id}` chip follows it.
 
 ## What is removed
 
 - **`VersionMetaForm` as an inline card.** It is replaced by the version settings modal.
 - **The "Blocks" card head** with its collapse chevron and filled "+". The blocks list is now the page body.
-- **AccordionHeader:** the slug, the `B1`/`S1` badge and the controls outside the focus.
+- **AccordionHeader:** the slug, the `B1`/`S1` badge and the controls outside the focus. *Amended by the user, 2026-10-08:* a block's title is numbered by its position, "1. Vectors" (muted number, title size). Sequences and items have no number, and the accessible name stays the title.
 - **Block and sequence bodies:** the inline Title/Info field rows, the create forms (replaced by D9 rows and the D10 modal) and the delete footers.
 - **The block Info field** in the constructor and the student view (D7).
 - **`InlineField`** (component and tests). After T5 nothing imports it, so it was deleted (the user's call, 2026-10-08).

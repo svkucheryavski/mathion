@@ -24,6 +24,7 @@
   const uid = $props.id();
   const labelId = `${uid}-label`;
   const attemptsErrId = `${uid}-attempts-err`;
+  const labelErrId = `${uid}-label-err`;
   // Seeded once per open (the modal mounts per open).
   const initial = untrack(() => ({ label: version.label, info: version.info_md, attempts: String(version.max_quiz_attempts) }));
   let label = $state(initial.label);
@@ -31,6 +32,7 @@
   // A string draft (no bind: on type=number, which would coerce it to a number).
   let attempts = $state(initial.attempts);
   let attemptsError = $state<string | null>(null);
+  let labelError = $state<string | null>(null);
   let globalError = $state<string | null>(null);
   let saving = $state(false);
   let alive = true;
@@ -54,7 +56,7 @@
 
   function discard() {
     label = initial.label; info = initial.info; attempts = initial.attempts;
-    attemptsError = null; globalError = null;
+    attemptsError = null; labelError = null; globalError = null;
   }
 
   // Enter in a one-line field saves, as the old card did: the footer Save sits
@@ -67,6 +69,11 @@
 
   async function save() {
     if (!dirty || saving) return;
+    // The label is mandatory (user, 2026-10-08): it can't be cleared.
+    if (label.trim() === '') {
+      labelError = 'Label is required';
+      return;
+    }
     const n = Number(attempts);
     if (!(attempts.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 10)) {
       attemptsError = 'Max quiz attempts must be a whole number between 1 and 10';
@@ -112,9 +119,16 @@
   header={head} footer={editable ? foot : undefined}>
   {#if editable}
     <div class="form">
-      <div class="field-row">
+      <!-- top + line: the label stays level with the input when the error shows below it. -->
+      <div class="field-row top line">
         <span class="field-label">Label</span>
-        <input class="plain-input" data-autofocus aria-label="Label" maxlength={200} bind:value={label} readonly={saving} onkeydown={onEnter} />
+        <div class="field">
+          <input class="plain-input" data-autofocus aria-label="Label" maxlength={200} required bind:value={label} readonly={saving}
+            aria-invalid={labelError ? 'true' : undefined}
+            aria-describedby={labelError ? labelErrId : undefined}
+            oninput={() => { labelError = null; }} onkeydown={onEnter} />
+          {#if labelError}<small id={labelErrId} class="field-err">{labelError}</small>{/if}
+        </div>
       </div>
       <div class="field-row top">
         <span class="field-label">Info</span>

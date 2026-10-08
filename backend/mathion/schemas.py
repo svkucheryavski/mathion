@@ -52,7 +52,8 @@ class VersionCreate(BaseModel):
     info_md: str = ""
     max_quiz_attempts: int = Field(default=3, ge=1, le=10)
     copy_assets_from: int | None = None
-    label: str = Field(default="", max_length=200)
+    # Mandatory (user, 2026-10-08); stripped first, so whitespace-only is empty.
+    label: str = Field(min_length=1, max_length=200)
 
     @field_validator("label", mode="before")
     @classmethod
@@ -63,7 +64,8 @@ class VersionCreate(BaseModel):
 class VersionUpdate(BaseModel):
     info_md: str | None = None
     max_quiz_attempts: int | None = Field(default=None, ge=1, le=10)
-    label: str | None = Field(default=None, max_length=200)
+    # Omitted or null leaves it unchanged; it can't be cleared (mandatory).
+    label: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("label", mode="before")
     @classmethod
@@ -72,7 +74,7 @@ class VersionUpdate(BaseModel):
 
 
 class VersionDuplicateRequest(BaseModel):
-    label: str = Field(default="", max_length=200)
+    label: str = Field(min_length=1, max_length=200)
 
     @field_validator("label", mode="before")
     @classmethod

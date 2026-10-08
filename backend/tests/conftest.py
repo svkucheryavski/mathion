@@ -374,7 +374,7 @@ def seed_publishable_version(admin_client, db):
             "/api/courses", json={"slug": slug, "name": name, "description": ""}
         ).json()
         version = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         block = Block(version_id=version["id"], title="B", slug="b", order=1)
         db.add(block); db.flush()
@@ -648,7 +648,7 @@ def seed_student_in_two_courses(admin_client, db):
                 "/api/courses", json={"slug": slug, "name": name, "description": ""}
             ).json()
             version = admin_client.post(
-                f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+                f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
             ).json()
             from mathion.models import Block as _Block, Sequence as _Seq, Item as _Item
             b1 = _Block(version_id=version["id"], title="B1", slug="b1", order=1)

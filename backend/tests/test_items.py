@@ -57,7 +57,7 @@ def test_create_interactive_app(db):
 
 def _setup_sequence(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     return seq, version
@@ -151,7 +151,7 @@ def test_api_list_items_nonexistent_sequence(admin_client):
 def test_api_duplicate_item_slug_within_sequence(admin_client):
     """Creating two items whose titles produce the same slug in the same sequence must return 409."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -253,7 +253,7 @@ def test_api_create_static_page_with_script_url_rejected(admin_client):
 
 def test_api_create_item_derives_slug_from_title(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -269,7 +269,7 @@ def test_api_create_item_derives_slug_from_title(admin_client):
 
 def test_api_create_item_rejects_extra_slug_field(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -285,7 +285,7 @@ def test_api_create_item_rejects_extra_slug_field(admin_client):
 
 def test_api_create_item_empty_slug_after_slugify(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -299,7 +299,7 @@ def test_api_create_item_empty_slug_after_slugify(admin_client):
 
 def test_api_create_item_title_too_long_for_slug(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -313,7 +313,7 @@ def test_api_create_item_title_too_long_for_slug(admin_client):
 
 def test_api_update_item_title_edit_re_derives_slug(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -334,7 +334,7 @@ def test_api_update_item_collision_via_autoflush_returns_409(admin_client):
     The endpoint's explicit db.flush() right after slug assignment is
     what catches this — verify by exercising the exact path."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -354,7 +354,7 @@ def test_api_update_item_collision_via_autoflush_returns_409(admin_client):
 def test_api_update_item_info_only_does_not_re_derive_slug(admin_client):
     """content_md-only edit with title resent unchanged keeps slug stable."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -373,7 +373,7 @@ def test_api_update_item_info_only_does_not_re_derive_slug(admin_client):
 def test_api_update_item_equivalent_after_slugify_is_no_op_for_slug(admin_client):
     """Title 'Foo Bar' -> 'Foo Bar!' both slugify to 'foo-bar'; slug write is identical."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -387,7 +387,7 @@ def test_api_update_item_equivalent_after_slugify_is_no_op_for_slug(admin_client
 
 def test_api_update_item_explicit_null_title_returns_422(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -400,7 +400,7 @@ def test_api_update_item_explicit_null_title_returns_422(admin_client):
 
 def test_api_update_item_rejects_extra_slug_field(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -416,7 +416,7 @@ def test_api_update_item_unchanged_title_preserves_legacy_slug(admin_client, db)
     """Legacy custom slug preserved on unchanged-title PATCH (spec lines 56, 142)."""
     from mathion.models import Item
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item_resp = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -435,7 +435,7 @@ def test_api_update_item_unchanged_title_preserves_legacy_slug(admin_client, db)
 
 def test_api_update_item_empty_slug_after_slugify(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -448,7 +448,7 @@ def test_api_update_item_empty_slug_after_slugify(admin_client):
 
 def test_api_update_item_title_too_long_for_slug(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -463,7 +463,7 @@ def test_api_update_item_title_edit_on_published_re_derives_slug(admin_client, d
     """title is in _ITEM_EDITABLE_PUBLISHED, so published versions still re-derive."""
     from mathion.models import CourseVersion
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -484,7 +484,7 @@ def test_api_update_item_missing_asset_rolls_back_flushed_slug(admin_client, db)
     slug/title write doesn't persist in the (test) shared session."""
     from mathion.models import Item
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -513,7 +513,7 @@ def test_api_update_item_invariant_422_rolls_back_flushed_slug(admin_client, db)
     db.rollback() before each invariant raise to enforce this."""
     from mathion.models import Item
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "S", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1"}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S1"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={

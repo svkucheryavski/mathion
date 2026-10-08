@@ -54,7 +54,7 @@ def seed() -> None:
 
         info_md = "Minimal published version for run-management T18 smoke testing."
         version = CourseVersion(
-            course_id=course.id, state="published",
+            course_id=course.id, state="published", label="Version 1",
             info_md=info_md, info_html=render_markdown(info_md),
             published_at=datetime.now(timezone.utc),
         )

@@ -91,7 +91,7 @@
   }
 
   async function createVersion() {
-    if (!course) return;
+    if (!course || !newLabel.trim()) return; // the label is mandatory
     // bind:value on <input type="number"> yields null when empty and NaN on
     // partial input; decimals (e.g. 5.5) parse cleanly but the backend
     // requires int (Pydantic ge=1/le=10) and 422s with an opaque message.
@@ -171,6 +171,7 @@
   }
 
   async function duplicateVersion(v: Version) {
+    if (!dupLabel.trim()) return; // the label is mandatory
     // Pin id + slug before the await (prop-change-mid-await guard, mirroring
     // createVersion above).
     const savedId = v.id;
@@ -220,12 +221,15 @@
         {#each versions as v (v.id)}
           {@const dupReason = duplicateVersionReason(v)}
           {@const delReason = deleteVersionReason(v)}
+          {@const vtitle = v.label || `Version ${v.id}`}
           <li class="vrow">
-            <!-- 5c follow-up (user): the label is the row title, as a block's; it opens the version like the pencil. -->
-            <button type="button" class="vtitle" class:untitled={!v.label} class:off={v.is_disabled} disabled={busy}
-              aria-label={v.label ? undefined : `v${v.id} (no label)`}
-              onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)}>{v.label || '(no label)'}</button>
-            <span class="hchip">v{v.id}</span>
+            <!-- 5c follow-up (user): the label is the row title, as a block's; it opens the version like the pencil.
+                 The label is mandatory; "Version <id>" (the backfill's name) only guards an empty one.
+                 The name carries the id: two versions may share a label. -->
+            <button type="button" class="vtitle" class:off={v.is_disabled} disabled={busy}
+              aria-label={`${vtitle} (v${v.id})`}
+              onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)}>{vtitle}</button>
+            <span class="hchip">v. {v.id}</span>
             <span class="badges"><VersionBadges state={v.state} isDisabled={v.is_disabled} /></span>
             <span class="slots">
               <IconButton size="sm" glyph="pencil" title="Open" aria-label="Open v{v.id}" disabled={busy}
@@ -247,9 +251,9 @@
             <li class="dup-row">
               <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
                 <label>New draft label
-                  <input class="dup-label" type="text" maxlength="200" bind:value={dupLabel} bind:this={dupInputEl} disabled={busy} />
+                  <input class="dup-label" type="text" maxlength="200" required bind:value={dupLabel} bind:this={dupInputEl} disabled={busy} />
                 </label>
-                <Button type="submit" disabled={busy} loading={busy}>Create copy</Button>
+                <Button type="submit" disabled={busy || !dupLabel.trim()} loading={busy}>Create copy</Button>
                 <Button variant="ghost" onclick={() => (duplicatingId = null)} disabled={busy}>Cancel</Button>
               </form>
             </li>
@@ -259,8 +263,8 @@
     {/if}
     {#if creating}
       <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
-        <label>Label (optional)
-          <input class="new-label" type="text" maxlength="200" bind:value={newLabel} bind:this={newLabelEl} onkeydown={escCancels} />
+        <label>Label
+          <input class="new-label" type="text" maxlength="200" required bind:value={newLabel} bind:this={newLabelEl} onkeydown={escCancels} />
         </label>
         <label>Info (markdown)
           <textarea bind:value={info_md} rows="3" onkeydown={escCancels}></textarea>
@@ -271,7 +275,7 @@
         </label>
         <div class="submit">
           <Button variant="ghost" disabled={busy} onclick={() => void cancelCreate()}>Cancel</Button>
-          <Button type="submit" disabled={busy} loading={busy}>Create</Button>
+          <Button type="submit" disabled={busy || !newLabel.trim()} loading={busy}>Create</Button>
         </div>
       </form>
     {:else}
@@ -376,8 +380,7 @@
     cursor: pointer;
   }
   .vtitle:disabled { cursor: default; }
-  /* "(no label)" and D5's disabled version (ref 1495) recede to --muted. */
-  .vtitle.untitled,
+  /* D5: a disabled version recedes to --muted (ref 1495). */
   .vtitle.off { color: var(--muted); }
   .badges { margin-left: auto; display: flex; /* ref 1485 */ }
   .slots { display: flex; gap: 6px; margin-left: 22px; /* ref 1486 */ }

@@ -4,7 +4,7 @@ from mathion.models import Item
 def _make_quiz_via_api(admin_client):
     """Create course -> version -> block -> sequence -> quiz item via API, return IDs."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
         "title": "B1", "info": "",
     }).json()
@@ -33,7 +33,7 @@ def test_create_question(admin_client):
 def test_create_question_not_quiz_item(admin_client):
     """Cannot add questions to non-quiz items."""
     course = admin_client.post("/api/courses", json={"slug": "c1", "name": "C", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={

@@ -24,6 +24,7 @@
   --muted: #5A616E;           /* ALL functional secondary text — AA on white */
   --faint: #B4B9C4;           /* disabled glyphs, breadcrumb separators ONLY */
   --placeholder: #9AA0AC;     /* input placeholders ONLY */
+  --ordinal: #959BA7;         /* block numbers "1." ONLY: lighter than --muted, near --placeholder (user, 2026-10-08). Below AA (~2.9:1) ON PURPOSE: decorative, aria-hidden, the list order carries the position. Don't "fix" it. */
 
   /* --- lines --- */
   --border: #E3E5EA;          /* card and section borders */

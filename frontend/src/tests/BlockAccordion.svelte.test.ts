@@ -471,11 +471,14 @@ describe('BlockAccordion — header (Slice-5c T2)', () => {
   const trash = () => target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Vectors"]');
   async function expand() { await navigate('/courses/c/edit/v/1/blocks/3', { force: true }); await settle(); }
 
-  it('title only in the header: no B{index} badge, no slug', () => {
+  // User, 2026-10-08: the block is numbered "2. Vectors" (its position), still no B2 badge.
+  it('the header is "{index}. title": no B{index} badge, no slug', () => {
     mountBlock(mkBlock(), { index: 2, blockCount: 3 });
     const toggle = target.querySelector<HTMLButtonElement>('#block-3-header')!;
     expect(toggle.parentElement!.tagName).toBe('H3');
-    expect(toggle.textContent!.trim()).toBe('Vectors');
+    expect(toggle.querySelector('.num')!.textContent).toBe('2.');
+    expect(toggle.querySelector('.title')!.textContent).toBe('Vectors');
+    expect(toggle.textContent).not.toContain('B2');
     expect(target.querySelector('.code, .slug')).toBeNull();
   });
 

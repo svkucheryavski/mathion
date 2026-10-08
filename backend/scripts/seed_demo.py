@@ -96,7 +96,7 @@ def seed() -> None:
 
         info_md = "Welcome to the **demo course**. Use it to exercise the student UI."
         version = CourseVersion(
-            course_id=course.id, state="published",
+            course_id=course.id, state="published", label="Version 1",
             info_md=info_md, info_html=render_markdown(info_md),
             published_at=datetime.now(timezone.utc),
         )

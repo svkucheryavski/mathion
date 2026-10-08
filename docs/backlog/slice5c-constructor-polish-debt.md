@@ -75,3 +75,10 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **The row title can't open in a new tab (r1, Opus).** It is a `<button>` that calls `navigate`. VersionEditPage's h1 uses `<a href>` plus a modifier-aware click handler; do the same here.
 - **The create form box differs from the rows (r1, Opus).** `.create` keeps `--border` / `--surface`, while the rows and the duplicate row use `--focus-line` / `--focus-0`. Align them if every white box on the shaded page should match.
 - **Duplicated CSS (r1, Opus).** `.hchip` and `.sr-only` are copied verbatim in VersionEditPage and VersionsPage, and the gate pins both copies. Consider a shared class.
+
+## Mandatory version label, "v. N" chips, block numbers (2026-10-08)
+
+- **The backfill migration test downgrades to a fixed revision (r1, Opus).** `test_migration_version_label_backfill.py` downgrades to `67e8294b4267`. Once a later migration exists, that also runs the later migration's downgrade just to retest this backfill. Revisit then: call the migration's `upgrade()` directly, or pin the test to the two-revision window.
+- **The modal shows one field error at a time (r1, Opus).** A blank Label and an invalid attempts value show only the label error; the attempts error appears on the next Save. Set both before returning.
+- **The label error isn't announced either (r1, Fable).** It is the same gap as the attempts error (see §T5). Fix both together by focusing the first invalid field.
+- **A redundant fallback name (r1, Fable).** An empty label renders "Version 10 (v10)". It only fires on data the migration has already renamed.

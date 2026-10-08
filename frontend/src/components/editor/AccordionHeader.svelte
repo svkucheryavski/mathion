@@ -169,12 +169,20 @@
     aria-label={ariaName}
     onclick={onToggle}
   >
-    <span class="title">{visibleTitle}</span>
+    {@render num()}<span class="title">{visibleTitle}</span>
   </button>
+{/snippet}
+
+<!-- User, 2026-10-08: a block is numbered "1. Title" (its list position);
+     sequences and items are not. The accessible name stays the title, and the
+     number is aria-hidden so it isn't read before the rename field either. -->
+{#snippet num()}
+  {#if level === 'block'}<span class="num" aria-hidden="true">{index}.</span>{/if}
 {/snippet}
 
 <div class="acc-row" class:block={level === 'block'} class:seq={level === 'sequence'}>
   {#if renaming}
+    {@render num()}
     <div class="rename">
       <input
         bind:this={inputEl}
@@ -277,6 +285,7 @@
   }
   .title { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
   .seq .title { font-size: 14.5px; }
+  .num { flex: none; margin-right: 6px; font-size: 15px; font-weight: 600; color: var(--ordinal); font-variant-numeric: tabular-nums; }
   .actions { display: flex; align-items: center; gap: 6px; }
   .rename { flex: 1 1 auto; min-width: 0; }
   .title-input {

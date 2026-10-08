@@ -70,7 +70,7 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
 @router.post("/api/versions/{version_id}/duplicate", status_code=201, response_model=VersionResponse)
 def duplicate_version(
     version_id: int,
-    data: VersionDuplicateRequest = VersionDuplicateRequest(),
+    data: VersionDuplicateRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

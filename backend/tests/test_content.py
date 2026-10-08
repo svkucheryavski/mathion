@@ -4,7 +4,7 @@ from mathion.models import AnswerOption, Item, Question
 def _build_course_with_quiz(admin_client, db):
     """Create a course with one block, one sequence, a static page and a quiz with questions."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Applied Statistics", "description": "Desc"}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": "Welcome"}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": "Welcome"}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={
         "title": "Descriptive Stats", "info": "Goals",
     }).json()
@@ -97,7 +97,7 @@ def test_content_json_404(admin_client):
 def test_content_json_draft_version_returns_403(admin_client):
     """Content endpoint returns 403 for a version in 'created' (draft) state."""
     course = admin_client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 403
 
@@ -105,7 +105,7 @@ def test_content_json_draft_version_returns_403(admin_client):
 def test_content_json_empty_published_version(admin_client):
     """Content endpoint returns 200 with an empty blocks array for a published version with no blocks."""
     course = admin_client.post("/api/courses", json={"slug": "empty", "name": "Empty Course", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 200
@@ -118,7 +118,7 @@ def test_content_json_empty_published_version(admin_client):
 def test_content_json_disabled_version_returns_403(admin_client):
     """Content endpoint returns 403 for a disabled version."""
     course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(f"/api/versions/{version['id']}/disable")
     response = admin_client.get(f"/api/versions/{version['id']}/content")
     assert response.status_code == 403

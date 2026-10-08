@@ -224,10 +224,10 @@ class TestVersionsListTeacherAccess:
     ):
         course, v1 = seed_publishable_version()
         v2 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         v3 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         # Teacher's only run is pinned to v2
         run = admin_client.post(
@@ -253,7 +253,7 @@ class TestVersionsListTeacherAccess:
         from mathion.models import Run
         course, v1 = seed_publishable_version()
         v2 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         r1 = admin_client.post(
             f"/api/courses/{course['id']}/runs",
@@ -283,7 +283,7 @@ class TestVersionsListTeacherAccess:
         # Course with a draft version. Pin a teacher run to it.
         course, _ = seed_publishable_version()
         v_draft = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         # Don't publish v_draft; it stays in 'created' state.
         from mathion.models import Run
@@ -324,10 +324,10 @@ class TestVersionsListTeacherAccess:
     ):
         course, v1 = seed_publishable_version()
         v2 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         v3 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         r = admin_client.get(f"/api/courses/{course['id']}/versions")
         assert r.status_code == 200
@@ -385,7 +385,7 @@ class TestBlocksListTeacherAccess:
         from mathion.models import Run
         course, _ = seed_publishable_version()
         v_draft = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         run = admin_client.post(
             f"/api/courses/{course['id']}/runs",
@@ -404,7 +404,7 @@ class TestBlocksListTeacherAccess:
         from mathion.models import Run
         course, v1 = seed_publishable_version()
         v2 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         run = admin_client.post(
             f"/api/courses/{course['id']}/runs",
@@ -509,7 +509,7 @@ class TestServeAssetTeacherAccess:
         from mathion.models import Run
         course, v1 = seed_publishable_version()
         v2 = admin_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         ).json()
         run = admin_client.post(
             f"/api/courses/{course['id']}/runs",
@@ -618,7 +618,7 @@ class TestCascadeGuards:
         db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
         db.commit()
         r = teacher_client.post(
-            f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+            f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
         )
         assert r.status_code == 403
 

@@ -90,6 +90,20 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     footBtn('Save')!.click(); await settle();
     expect(patches()).toEqual([['/api/versions/1', { max_quiz_attempts: 4 }]]);
   });
+  // The label is mandatory (user, 2026-10-08): it can't be cleared.
+  it('an empty Label shows "Label is required" on the field and sends nothing', async () => {
+    render();
+    type(input('Label'), '   ');
+    footBtn('Save')!.click(); await settle();
+    expect(patches()).toEqual([]);
+    const lab = input('Label');
+    expect(lab.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(lab.getAttribute('aria-describedby')!)!.textContent).toBe('Label is required');
+    type(lab, 'L2');
+    expect(lab.getAttribute('aria-invalid')).toBeNull();
+    footBtn('Save')!.click(); await settle();
+    expect(patches()).toEqual([['/api/versions/1', { label: 'L2' }]]);
+  });
   it('a failed PATCH keeps the modal open with the message', async () => {
     fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? jres({ detail: 'Nope' }, 409) : jres({})));
     const p = render();

@@ -936,7 +936,7 @@ def test_detail_idor_cross_version_block_slug_returns_404(
     ), None
     course_y_id = course_y.json()["id"]
     version_y = admin_client.post(
-        f"/api/courses/{course_y_id}/versions", json={"info_md": ""}
+        f"/api/courses/{course_y_id}/versions", json={"label": "L", "info_md": ""}
     ).json()
     block_y = Block(
         version_id=version_y["id"], title="B", slug="b", order=1,

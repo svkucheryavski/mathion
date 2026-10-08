@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1361
+EXPECTED_CHECKS=1367
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -515,10 +515,12 @@ else:
 # Slice-5c T1 added the six --focus-* tokens. That is the ONLY change.
 # It then moved twice in T5 (58c75427 -> 712f8080 -> 255b1037): +--focus-page
 # (the page shade with nothing open), then +--focus-row (rows at the focus
-# level). Each time the new token was the ONLY change.
+# level). Each time the new token was the ONLY change. Then once more on the
+# 5c follow-up (255b1037 -> aaed0f95): +--ordinal (the block numbers "1."),
+# again the ONLY change (dropping it reproduces 255b1037).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
-    ('', ':focus-visible', '1684b043'), ('', ':root', '255b1037'),
+    ('', ':focus-visible', '1684b043'), ('', ':root', 'aaed0f95'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
@@ -3580,9 +3582,11 @@ if [[ -n $REPLY ]]; then
   chk "body:has\(\.page\.${H}\)" 'background:var\(--focus-page\)'
   none "VersionsPage no fully-global body:has(.page) (.page stays scoped)" "body:has\(\.page\)"
   # 5c follow-up (user, 2026-10-08): the label is the row title (the block title's
-  # 15px/600), the id a .hchip after it; "(no label)" and a disabled version are muted.
+  # 15px/600), the id a .hchip after it; a disabled version is muted. The label is
+  # mandatory (2026-10-08), so there is no "(no label)" placeholder.
   d '\.vtitle' '' 'border:0' 'background:transparent' 'color:var\(--text\)' 'font-size:15px' 'font-weight:600' 'cursor:pointer'
-  chk "\.vtitle\.untitled\.${H},\.vtitle\.off\.${H}" 'color:var\(--muted\)'
+  d '\.vtitle\.off' '' 'color:var\(--muted\)'
+  none "VersionsPage has no .untitled placeholder (the label is mandatory)" "\.untitled\.${H}"
   none "VersionsPage has no .vnum / .vlabel (the id is a chip, the label the title)" "\.(vnum|vlabel)\.${H}"
   d '\.badges' '' 'margin-left:auto'
   d '\.slots' '' 'display:flex' 'gap:6px' 'margin-left:22px'
@@ -3706,6 +3710,8 @@ if [[ -n $REPLY ]]; then
   none "AccordionHeader no .code / .slug rules (5c D5)" "\.(code|slug)\.${H}"
   d '\.title' '' 'font-size:15px' 'font-weight:600'
   chk "\.seq\.${H} \.title:where\(\.${H}\)" 'font-size:14\.5px'
+  # User, 2026-10-08: blocks are numbered "1. Title", muted, at the title's size.
+  d '\.num' '' 'margin-right:6px' 'font-size:15px' 'font-weight:600' 'color:var\(--ordinal\)' 'font-variant-numeric:tabular-nums'
   d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
   # 5c D8: the inline title field — the open-editor ring, tokens only.
   d '\.title-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text\)'

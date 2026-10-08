@@ -92,7 +92,7 @@ describe('VersionEditPage — heading (3b, §5.2)', () => {
     // 5c T5 (user): the id and the attempt limit are quiet chips around the state badge, not mono text.
     expect(target.querySelector('.editor-heading .vid')).toBeNull();
     const chips = [...target.querySelectorAll('.editor-heading .hchip, .editor-heading .vbadge')].map((c) => c.textContent);
-    expect(chips).toEqual(['v1', 'max 3 quiz attempts', 'created']);   // state last (user, T5)
+    expect(chips).toEqual(['v. 1', 'max 3 quiz attempts', 'created']);   // state last (user, T5); "v. N" (user, 2026-10-08)
     // On the shaded page the state badge carries the chips' outline, or it would vanish.
     expect(target.querySelector('.editor-heading .vbadge')!.classList.contains('outlined')).toBe(true);
   });
@@ -117,7 +117,7 @@ describe('VersionEditPage — heading (3b, §5.2)', () => {
   it('a limit of one reads "max 1 quiz attempt"', async () => {
     tree.version = mkVersion({ max_quiz_attempts: 1 });
     await render();
-    expect([...target.querySelectorAll('.editor-heading .hchip')].map((c) => c.textContent)).toEqual(['v1', 'max 1 quiz attempt']);
+    expect([...target.querySelectorAll('.editor-heading .hchip')].map((c) => c.textContent)).toEqual(['v. 1', 'max 1 quiz attempt']);
   });
 
   it('without a label the h1 is the course link only', async () => {
@@ -545,11 +545,11 @@ describe('VersionEditPage — a late transition / delete after a version switch 
     await settle();
     props.versionId = '2';
     await settle();
-    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v2');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v. 2');
     release();
     await settle();
     expect(target.querySelector('.skeleton')).toBeNull();
-    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v2');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v. 2');
     expect(fetchSpy.mock.calls.filter(([u]) => String(u) === '/api/versions/1/admin-tree')).toHaveLength(1);
   });
 
@@ -564,7 +564,7 @@ describe('VersionEditPage — a late transition / delete after a version switch 
     release();
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
-    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v2');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v. 2');
   });
 });
 

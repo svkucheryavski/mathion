@@ -151,6 +151,23 @@ describe('VersionsPage — Duplicate', () => {
     expect(postMock).toHaveBeenCalledWith('/api/courses/1/versions', expect.objectContaining({ label: 'First' }));
   });
 
+  // The label is mandatory (user, 2026-10-08).
+  it('Create copy is disabled while the new label is blank', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    const input = target.querySelector<HTMLInputElement>('input.dup-label')!;
+    const copy = () => [...target.querySelectorAll<HTMLButtonElement>('form.dup button')].find((b) => b.textContent?.trim() === 'Create copy')!;
+    expect(copy().disabled).toBe(false);
+    expect(input.required).toBe(true);
+    input.value = '  ';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(copy().disabled).toBe(true);
+  });
+
   it('clamps prefill to 200 chars when label exceeds 200', async () => {
     const longLabel = 'x'.repeat(300);
     versionsPageState.versions = [mkVersion({ id: 7, label: longLabel })];

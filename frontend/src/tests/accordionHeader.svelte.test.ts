@@ -41,6 +41,34 @@ const trash = () => btn('Delete sequence Linear combinations');
 function type(v: string) { const el = input()!; el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); }
 function key(k: string) { input()!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); flushSync(); }
 
+// User, 2026-10-08: a block's title is numbered "1. Title"; sequences and items are not.
+describe('AccordionHeader — block number', () => {
+  const blk = { level: 'block' as const, title: 'Vectors', slug: 'vectors', index: 3 };
+  for (const mode of ['row-focus', 'row-outside', 'open-focus', 'open-parent'] as HeaderMode[]) {
+    it(`a block header shows "3." before the title (${mode})`, () => {
+      render({ ...blk, mode });
+      const num = target.querySelector('.num')!;
+      expect(num.textContent).toBe('3.');
+      expect((num.compareDocumentPosition(target.querySelector('.title')!) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+      // The accessible name stays the title (the number is the list position).
+      expect(target.querySelector('button.toggle')!.getAttribute('aria-label')).toBe('Vectors');
+    });
+  }
+  it('the number stays while the block title is being edited', async () => {
+    render(blk);
+    btn('Edit the block title')!.click(); await settle();
+    expect(input()).not.toBeNull();
+    expect(target.querySelector('.num')!.textContent).toBe('3.');
+    // Outside the aria-labelled toggle now: hidden, so "3." isn't read before the field (review r1).
+    expect(target.querySelector('.num')!.getAttribute('aria-hidden')).toBe('true');
+  });
+  it('a sequence header has no number', () => {
+    render({ index: 2 });
+    expect(target.querySelector('.num')).toBeNull();
+    expect(target.querySelector('.acc-row')!.textContent).not.toContain('2.');
+  });
+});
+
 describe('AccordionHeader — title only, no badge or slug (D5)', () => {
   it('shows the title; no B/S code, no /slug', () => {
     render();

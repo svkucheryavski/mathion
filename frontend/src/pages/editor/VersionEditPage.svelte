@@ -501,7 +501,7 @@
       <div class="editor-heading">
         <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
         <!-- 5c T5 (user): the id and the attempt limit as quiet chips, then the state badge last. -->
-        <span class="hchip">v{v.id}</span>
+        <span class="hchip">v. {v.id}</span>
         <span class="hchip">max {v.max_quiz_attempts} quiz {v.max_quiz_attempts === 1 ? 'attempt' : 'attempts'}</span>
         <VersionBadges state={v.state} isDisabled={v.is_disabled} outlined />
         <!-- 5c D12: version settings live in a modal, opened here. -->
