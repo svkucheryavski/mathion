@@ -3,7 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import BlockAccordion from '../components/editor/BlockAccordion.svelte';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { currentEditorVersion } from '../stores/currentEditorVersion.svelte';
-import { navigate, currentRoute, matchRoute, registerNavigationGuard, __resetGuardsForTests } from '../lib/router.svelte';
+import { navigate, currentRoute, matchRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { routes } from '../routes';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { AdminTree, AdminTreeBlock, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
@@ -104,32 +104,24 @@ function mountBlock(block: AdminTreeBlock = mkBlock(), over: { index?: number; b
   flushSync();
 }
 
-const field = (label: string) =>
-  [...target.querySelectorAll<HTMLElement>('#block-3-panel .inline-field')].find((f) => f.querySelector('.label')?.textContent === label)!;
 function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 }
-// Open the block-title InlineField and leave a changed draft in it.
+// Open the header's inline title (5c D8) and leave a changed draft in it.
+const titleInput = () => target.querySelector<HTMLInputElement>('input[aria-label="Block title"]');
 async function dirtyBlockTitle() {
-  field('Block title').querySelector<HTMLButtonElement>('button[aria-label="Edit the block title"]')!.click();
+  target.querySelector<HTMLButtonElement>('button[aria-label="Edit the block title"]')!.click();
   await settle();
-  type(field('Block title').querySelector('input')!, 'Changed');
+  type(titleInput()!, 'Changed');
 }
+const enter = (el: HTMLElement) => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 
 const plus = () => target.querySelector<HTMLButtonElement>('button[aria-label="New sequence in Vectors"]')!;
 const createTitle = () => target.querySelector<HTMLInputElement>('input[placeholder="Title"]');
 
 describe('BlockAccordion — header (T5a)', () => {
-  it('the header is an <h3> toggle with the B{index} badge and the slug', () => {
-    mountBlock(mkBlock(), { index: 2, blockCount: 3 });
-    const toggle = target.querySelector<HTMLButtonElement>('#block-3-header')!;
-    expect(toggle.parentElement!.tagName).toBe('H3');
-    expect(toggle.querySelector('.code')!.textContent).toBe('B2');
-    expect(toggle.querySelector('.slug')!.textContent).toBe('/vectors');
-  });
-
   it('arrows always render: boundary titles on an editable version', () => {
     mountBlock(mkBlock(), { index: 1, blockCount: 1 });
     const up = target.querySelector<HTMLButtonElement>('[aria-label="Move block up: Vectors"]')!;
@@ -138,17 +130,6 @@ describe('BlockAccordion — header (T5a)', () => {
     expect(up.title).toBe('Move up — already first');
     expect(down.disabled).toBe(true);
     expect(down.title).toBe('Move down — already last');
-  });
-
-  it('a published version keeps the arrows and the + with the structure reason', () => {
-    currentEditorVersion.value!.version = mkVersion({ state: 'published' });
-    mountBlock(mkBlock(), { index: 2, blockCount: 3 });
-    const reason = 'Only a created version can change its structure';
-    const up = target.querySelector<HTMLButtonElement>('[aria-label="Move block up: Vectors"]')!;
-    expect(up.disabled).toBe(true);
-    expect(up.title).toBe(reason);
-    expect(plus().disabled).toBe(true);
-    expect(plus().title).toBe(reason);
   });
 
   it('the old in-body "+ New sequence" button is gone', async () => {
@@ -176,32 +157,6 @@ describe('BlockAccordion — header (T5a)', () => {
     expect(createTitle()).toBeNull();
   });
 
-  it('+ on a collapsed block expands it, then opens the form with Title focused', async () => {
-    mountBlock();
-    expect(createTitle()).toBeNull();
-    plus().click();
-    await settle();
-    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3');
-    expect(document.activeElement).toBe(createTitle());
-    expect(plus().getAttribute('aria-expanded')).toBe('true');
-  });
-
-  it('+ on a collapsed block with a cancelled guard prompt changes nothing', async () => {
-    registerNavigationGuard(() => false);
-    mountBlock();
-    plus().click();
-    await settle();
-    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
-    expect(createTitle()).toBeNull();
-    expect(plus().getAttribute('aria-expanded')).toBe('false');
-    // Nothing latent either: expanding later must not reveal a pre-opened form.
-    __resetGuardsForTests();
-    target.querySelector<HTMLButtonElement>('#block-3-header')!.click();
-    await settle();
-    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3');
-    expect(createTitle()).toBeNull();
-  });
-
   it('a reorder is not blocked by an open draft (D3)', async () => {
     await navigate('/courses/c/edit/v/1/blocks/3', { force: true });
     mountBlock(mkBlock({ sequences: [
@@ -219,33 +174,10 @@ describe('BlockAccordion — header (T5a)', () => {
 
 describe('BlockAccordion — body (T5b)', () => {
   const trash = () => target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Vectors"]')!;
-  const delText = () => target.querySelector('#block-3-panel > .del-footer .del-text')!.textContent;
   async function expand() {
     await navigate('/courses/c/edit/v/1/blocks/3', { force: true });
     await settle();
   }
-
-  it('title and info are inline fields; a title commit PATCHes {title} only, then reloads', async () => {
-    await expand();
-    mountBlock();
-    await settle();
-    const labels = [...target.querySelectorAll('#block-3-panel .inline-field .label')].map((l) => l.textContent);
-    expect(labels).toEqual(['Block title', 'Info (markdown)']);
-    await dirtyBlockTitle();
-    field('Block title').querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-    const patch = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/blocks/3' && (i as RequestInit)?.method === 'PATCH')!;
-    expect(JSON.parse((patch[1] as RequestInit).body as string)).toEqual({ title: 'Changed' });
-    expect(treeFetchPaths.length).toBe(1);
-  });
-
-  it('a published version keeps the text fields editable (textReason)', async () => {
-    currentEditorVersion.value!.version = mkVersion({ state: 'published' });
-    await expand();
-    mountBlock();
-    await settle();
-    expect(field('Block title').querySelector<HTMLButtonElement>('button[aria-label="Edit the block title"]')!.disabled).toBe(false);
-  });
 
   it('collapse resets the create-sequence form', async () => {
     await expand();
@@ -275,37 +207,14 @@ describe('BlockAccordion — body (T5b)', () => {
     expect(registry.isAnyDirty()).toBe(false);
   });
 
-  it('delete footer precedence: reason → sequences → open form → enabled', async () => {
-    await expand();
-    mountBlock();
-    await settle();
-    expect(trash().disabled).toBe(false);
-    expect(trash().title).toBe('Delete this block');
-    expect(delText()).toBe('Delete this block');
-    plus().click();
-    await settle();
-    expect(trash().disabled).toBe(true);
-    expect(delText()).toBe('Delete this block — cancel the new sequence first');
-    teardown();
-    mountBlock(mkBlock({ sequences: [mkSeq(7)] }));
-    await settle();
-    expect(trash().disabled).toBe(true);
-    expect(delText()).toBe('Delete this block — remove its sequences first');
-    teardown();
-    currentEditorVersion.value!.version = mkVersion({ is_disabled: true });
-    mountBlock(mkBlock({ sequences: [mkSeq(7)] }));
-    await settle();
-    expect(trash().title).toBe('Delete this block — enable the version first');
-    expect(delText()).toBe('Delete this block — enable the version first');
-  });
-
   it('delete success: navigates to the version (replace, no prompt) BEFORE the reload', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const replaceSpy = vi.spyOn(history, 'replaceState');
     await expand();
     mountBlock();
     await settle();
-    await dirtyBlockTitle();
+    // Some other draft on the page (the header rename swaps the trash for ✓ ✕).
+    registry.register({ isDirty: true, discard: () => {} });
     trash().click();
     await settle();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
@@ -348,20 +257,6 @@ describe('BlockAccordion — body (T5b)', () => {
     expect(treeFetchPaths).toEqual(['/courses/c/edit/v/1']);
   });
 
-  it('an info commit PATCHes {info} only', async () => {
-    await expand();
-    mountBlock();
-    await settle();
-    field('Info (markdown)').querySelector<HTMLButtonElement>('button[aria-label="Edit the block info"]')!.click();
-    await settle();
-    const ta = field('Info (markdown)').querySelector('textarea')!;
-    type(ta, 'New info');
-    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
-    await settle();
-    const patch = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/blocks/3' && (i as RequestInit)?.method === 'PATCH')!;
-    expect(JSON.parse((patch[1] as RequestInit).body as string)).toEqual({ info: 'New info' });
-  });
-
   it('a late title commit after an unmount does not reload', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/blocks/3' && init?.method === 'PATCH'
@@ -371,7 +266,7 @@ describe('BlockAccordion — body (T5b)', () => {
     mountBlock();
     await settle();
     await dirtyBlockTitle();
-    field('Block title').querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    enter(titleInput()!);
     await settle();
     teardown();
     release();
@@ -465,5 +360,139 @@ describe('BlockAccordion — focus shading (Slice-5c T1)', () => {
     await navigate('/courses/c/edit/v/1/blocks/99'); await settle();
     expect(card().classList.contains('focus')).toBe(false);
     expect(card().classList.contains('parent')).toBe(false);
+  });
+});
+
+describe('BlockAccordion — header (Slice-5c T2)', () => {
+  const pencil = () => target.querySelector<HTMLButtonElement>('button[aria-label="Edit the block title"]');
+  const up = () => target.querySelector<HTMLButtonElement>('button[aria-label="Move block up: Vectors"]');
+  const trash = () => target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Vectors"]');
+  async function expand() { await navigate('/courses/c/edit/v/1/blocks/3', { force: true }); await settle(); }
+
+  it('title only in the header: no B{index} badge, no slug', () => {
+    mountBlock(mkBlock(), { index: 2, blockCount: 3 });
+    const toggle = target.querySelector<HTMLButtonElement>('#block-3-header')!;
+    expect(toggle.parentElement!.tagName).toBe('H3');
+    expect(toggle.textContent!.trim()).toBe('Vectors');
+    expect(target.querySelector('.code, .slug')).toBeNull();
+  });
+
+  it('collapsed at the version focus: ↑ ↓, no ✎, no trash, no +', () => {
+    mountBlock(mkBlock(), { index: 2, blockCount: 3 });
+    expect(up()).not.toBeNull();
+    expect(pencil()).toBeNull();
+    expect(trash()).toBeNull();
+    expect(target.querySelector('button[aria-label="New sequence in Vectors"]')).toBeNull();
+  });
+
+  it('open block: ✎ renames with a {title} PATCH, then reloads', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    await dirtyBlockTitle();
+    enter(titleInput()!);
+    await settle();
+    const patch = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/blocks/3' && (i as RequestInit)?.method === 'PATCH')!;
+    expect(JSON.parse((patch[1] as RequestInit).body as string)).toEqual({ title: 'Changed' });
+    expect(treeFetchPaths.length).toBe(1);
+    expect(titleInput()).toBeNull();
+  });
+
+  it('a failed rename keeps the field open with the server message', async () => {
+    serve((url, init) => (url === '/api/blocks/3' && init?.method === 'PATCH' ? jres({ detail: 'Title already taken' }, 409) : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    await dirtyBlockTitle();
+    enter(titleInput()!);
+    await settle();
+    expect(titleInput()!.value).toBe('Changed');
+    expect(target.querySelector('.acc-row .err')!.textContent).toBe('Title already taken');
+    expect(treeFetchPaths).toEqual([]);
+  });
+
+  it('the body has no Title/Info field rows and no delete footer', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    expect(target.querySelector('#block-3-panel .inline-field')).toBeNull();
+    expect(target.querySelector('.del-footer')).toBeNull();
+  });
+
+  it('the header trash: enabled on an empty block; "Cancel the new sequence first" while the form is open', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    expect(trash()!.disabled).toBe(false);
+    expect(trash()!.title).toBe('Delete this block');
+    plus().click();
+    await settle();
+    expect(trash()!.disabled).toBe(true);
+    expect(trash()!.title).toBe('Cancel the new sequence first');
+  });
+
+  it('the header trash: disabled "Remove its sequences first" while sequences remain', async () => {
+    await expand();
+    mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
+    await settle();
+    expect(trash()!.disabled).toBe(true);
+    expect(trash()!.title).toBe('Remove its sequences first');
+  });
+
+  it('published: ✎ only — no arrows, no trash, no +', async () => {
+    currentEditorVersion.value!.version = mkVersion({ state: 'published' });
+    await expand();
+    mountBlock();
+    await settle();
+    expect(pencil()).not.toBeNull();
+    expect(pencil()!.disabled).toBe(false);
+    expect(up()).toBeNull();
+    expect(trash()).toBeNull();
+    expect(plus()).toBeNull();
+  });
+
+  it('archived and disabled: no ✎, no arrows, no trash', async () => {
+    for (const v of [mkVersion({ state: 'archived' }), mkVersion({ is_disabled: true })]) {
+      currentEditorVersion.value!.version = v;
+      await expand();
+      mountBlock();
+      await settle();
+      expect(pencil()).toBeNull();
+      expect(up()).toBeNull();
+      expect(trash()).toBeNull();
+      teardown();
+    }
+  });
+
+  it('another block open: this one is a title-only row', async () => {
+    currentEditorVersion.value!.blocks = [mkBlock(), mkBlock({ id: 99, title: 'Matrices', slug: 'matrices' })];
+    mountBlock();
+    await navigate('/courses/c/edit/v/1/blocks/99'); await settle();
+    expect(up()).toBeNull();
+    expect(target.querySelectorAll('.acc-row .actions button').length).toBe(0);
+  });
+
+  it('a stale block id (no such block) keeps the rows at the focus level (no flicker of controls)', async () => {
+    mountBlock();
+    await navigate('/courses/c/edit/v/1/blocks/999'); await settle();
+    expect(up()).not.toBeNull();
+  });
+
+  it('a sequence open: the block header shows the title and the chevron only', async () => {
+    mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
+    await navigate('/courses/c/edit/v/1/blocks/3/sequences/5'); await settle();
+    const glyphs = [...target.querySelectorAll('.block-card > .acc-row .actions button')]
+      .map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['chevron']);
+  });
+
+  it('a rename open when a sequence opens closes (the block left the focus)', async () => {
+    mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
+    await expand();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Edit the block title"]')!.click();
+    await settle();
+    expect(titleInput()).not.toBeNull();
+    await navigate('/courses/c/edit/v/1/blocks/3/sequences/5', { force: true }); await settle();
+    expect(titleInput()).toBeNull();
   });
 });

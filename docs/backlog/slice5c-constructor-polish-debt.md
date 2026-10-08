@@ -18,3 +18,25 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **`created` badge vs `--focus-1`.** On the block depth the grey state badge
   nearly blends into the page shade (still readable). Re-check in the browser
   pass; tune `--focus-1` or the badge fill with the user.
+
+## T2 — headers, inline title, header delete
+
+- **Safari IME on the inline title.** `AccordionHeader` bails on `e.isComposing`
+  only; WebKit's confirming Enter has `isComposing=false`, `keyCode=229`, so
+  a CJK author's Enter-to-convert commits a half-typed title (Esc can cancel
+  the rename). Fix: `if (e.isComposing || e.keyCode === 229) return;` — the
+  same debt exists in `InlineField` (Modal already guards it).
+- **Read-only flip drops a dirty title silently.** InlineField toasted
+  "Editing closed — this version is no longer editable" and refocused its row;
+  the header closes the field without a message (focus may fall to `<body>`).
+- **✎ enabled-but-inert while a closed rename is still saving** (Back mid-save,
+  then Forward before the PATCH settles): `disabled={busy || saving}`.
+- **Guard prompt during an in-flight save.** The tracker stays dirty while
+  `saving`, so navigating prompts "Discard…", yet the PATCH still lands
+  (InlineField parity). Option: `renaming && !saving && …`.
+- **The panel's label dangles while renaming.** The heading + toggle are
+  swapped for the input, so `role=region aria-labelledby={headerId}` points at
+  a missing element for the duration. Keep the heading and put the input in it.
+- **Focus after a header block delete** falls to `<body>` (the URL replaces to
+  the version, no header to focus). Same as the pre-T2 footer; focus the next
+  block's toggle or the page heading.

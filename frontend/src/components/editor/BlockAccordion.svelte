@@ -5,7 +5,7 @@
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
-  import { structureReason, textReason, unsavedSuffix } from '../../lib/editorReasons';
+  import { unsavedSuffix } from '../../lib/editorReasons';
   import { labelFor } from '../../lib/labelFor';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
@@ -13,7 +13,6 @@
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import Button from '../ui/Button.svelte';
   import IconButton from '../ui/IconButton.svelte';
-  import InlineField from '../ui/InlineField.svelte';
   import type { AdminTreeBlock } from '../../lib/types';
 
   type Props = {
@@ -48,10 +47,16 @@
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — BlockAccordion must mount under VersionEditPage');
 
   const expanded = $derived(String(block.id) === routeBid);
-  // Slice-5c D1/D4: where this block sits relative to the focus.
+  // Slice-5c D1/D4: where this block sits relative to the focus. A collapsed
+  // block is "outside" only while ANOTHER block of the loaded tree is really
+  // open — a stale route id (about to fall back) keeps the rows at the focus
+  // level, so their controls don't flicker off for a frame.
   const seqOpen = $derived(expanded && block.sequences.some((s) => String(s.id) === routeSid));
+  const otherOpen = $derived(
+    routeBid !== null && (currentEditorVersion.value?.blocks.some((b) => String(b.id) === routeBid) ?? false),
+  );
   const mode: HeaderMode = $derived(
-    expanded ? (seqOpen ? 'open-parent' : 'open-focus') : (routeBid === null ? 'row-focus' : 'row-outside'),
+    expanded ? (seqOpen ? 'open-parent' : 'open-focus') : (otherOpen ? 'row-outside' : 'row-focus'),
   );
   const headerId = $derived(`block-${String(block.id)}-header`);
   const panelId = $derived(`block-${String(block.id)}-panel`);
@@ -59,8 +64,7 @@
   const version = $derived(currentEditorVersion.value?.version ?? null);
   const perms = $derived(version ? versionPermissions(version) : null);
   const canStructure = $derived(perms?.canEditStructure ?? false);
-  const structReason = $derived(version ? structureReason(version) : null);
-  const txtReason = $derived(version ? textReason(version) : null);
+  const canEditTitle = $derived(perms?.canEditTextFields ?? false);
   const name = $derived(labelFor(block.title, block.slug, `block ${index}`));
 
   function toggle() {
@@ -94,12 +98,12 @@
     return alive && vid === savedVid;
   }
 
-  // One field per PATCH (D2). A PATCH failure propagates to InlineField
-  // (inline error); only the follow-up refresh is guarded.
-  async function patchBlock(field: { title: string } | { info: string }) {
+  // D8: the header's inline title. One PATCH; a failure propagates to the
+  // header (inline error); only the follow-up refresh is guarded.
+  async function renameBlock(title: string) {
     const savedVid = vid;
     const savedBid = block.id;
-    await api.patch(`/api/blocks/${savedBid}`, field);
+    await api.patch(`/api/blocks/${savedBid}`, { title });
     if (!stillOnVid(savedVid)) return;
     const result = await loadAdminTree(savedVid, { force: true });
     if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
@@ -172,16 +176,14 @@
   let createBusy = $state(false);
   let titleEl = $state<HTMLInputElement>();
 
-  // Footer text mirrors the trash button's title (ref 1610). Precedence:
-  // structure reason → sequences remain → create form open → enabled.
-  const deleteText = $derived(
-    structReason
-      ? `Delete this block — ${structReason[0].toLowerCase()}${structReason.slice(1)}`
-      : block.sequences.length > 0
-        ? 'Delete this block — remove its sequences first'
-        : creating
-          ? 'Delete this block — cancel the new sequence first'
-          : 'Delete this block',
+  // D6: why the header trash is blocked (null = it may delete). The version's
+  // permission is not a reason here: without it the trash is hidden.
+  const deleteBlockedReason = $derived(
+    block.sequences.length > 0
+      ? 'Remove its sequences first'
+      : creating
+        ? 'Cancel the new sequence first'
+        : null,
   );
 
   function resetCreate() {
@@ -201,15 +203,16 @@
 
   // Registered only while the form is actually on screen.
   $effect(() => {
-    if (!(creating && expanded)) return;
+    if (!(creating && mode === 'open-focus')) return;
     dirty.register(createTracker);
     return () => dirty.unregister(createTracker);
   });
 
-  // Collapse resets the form: a collapsed block shows no form, so a latent
-  // open one must not reappear on the next expansion. Tracks only `expanded`.
+  // Leaving the focus (collapse, or one of its sequences opens) resets the
+  // form: it is only offered at the focus (5c D4), and a latent open one must
+  // not reappear later. Tracks only `mode`.
   $effect(() => {
-    if (!expanded) untrack(() => { if (creating) { resetCreate(); creating = false; } });
+    if (mode !== 'open-focus') untrack(() => { if (creating) { resetCreate(); creating = false; } });
   });
 
   // Close + reset the create form if structure permission is revoked while
@@ -230,21 +233,6 @@
     // discarding validation errors and unregistering the create tracker.
     if (createBusy || busy || parentBusy) return;
     if (creating) { resetCreate(); creating = false; return; }
-    creating = true;
-    await tick();
-    titleEl?.focus();
-  }
-
-  // The header `+` (ref 1568). On a collapsed block it first expands the block
-  // through the router (so the DirtyGuard prompt still applies), then opens
-  // the form only if the expansion actually landed — a cancelled prompt
-  // leaves everything unchanged.
-  async function onPlus() {
-    if (structReason || createBusy || busy || parentBusy) return;
-    if (expanded) { await toggleCreate(); return; }
-    await navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}`);
-    await tick();
-    if (!expanded) return;
     creating = true;
     await tick();
     titleEl?.focus();
@@ -292,53 +280,40 @@
     {headerId}
     {panelId}
     level="block"
+    {mode}
     title={block.title}
     slug={block.slug}
     {index}
     {expanded}
-    badge={`B${index}`}
     busy={busy || createBusy || parentBusy}
-    structureReason={structReason}
+    {canStructure}
+    {canEditTitle}
     canReorderUp={index > 1}
     canReorderDown={index < blockCount}
+    {deleteBlockedReason}
     onToggle={toggle}
     {onMoveUp}
     {onMoveDown}
-  >
-    {#snippet extra()}
-      <IconButton
-        size="sm"
-        glyph={creating && expanded ? 'close' : 'plus'}
-        title={structReason ?? (creating && expanded ? 'Cancel new sequence' : 'New sequence')}
-        aria-label={`New sequence in ${name}`}
-        aria-expanded={creating && expanded}
-        disabled={!!structReason || busy || createBusy || parentBusy}
-        onclick={() => void onPlus()}
-      />
-    {/snippet}
-  </AccordionHeader>
+    onDelete={() => void deleteBlock()}
+    onRename={renameBlock}
+  />
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
-      <div class="fields">
-        <InlineField
-          label="Block title"
-          value={block.title}
-          required
-          maxlength={200}
-          editTitle="Edit the block title"
-          disabledReason={txtReason}
-          onCommit={(p) => patchBlock({ title: String(p) })}
-        />
-        <InlineField
-          label="Info (markdown)"
-          value={block.info}
-          kind="textarea"
-          editTitle="Edit the block info"
-          disabledReason={txtReason}
-          onCommit={(p) => patchBlock({ info: String(p) })}
-        />
-      </div>
+      {#if mode === 'open-focus' && canStructure}
+        <!-- Interim until T3's "+ Add sequence" row (ledger: T2). -->
+        <div class="body-tools">
+          <IconButton
+            size="sm"
+            glyph={creating ? 'close' : 'plus'}
+            title={creating ? 'Cancel new sequence' : 'New sequence'}
+            aria-label={`New sequence in ${name}`}
+            aria-expanded={creating}
+            disabled={busy || createBusy || parentBusy}
+            onclick={() => void toggleCreate()}
+          />
+        </div>
+      {/if}
 
       {#if creating}
         <form class="cr-form" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
@@ -383,18 +358,6 @@
           {/each}
         </ul>
       {/if}
-
-      <div class="del-footer">
-        <IconButton
-          glyph="trash"
-          danger
-          title={deleteText}
-          aria-label={`Delete block ${name}`}
-          disabled={!!structReason || block.sequences.length > 0 || creating || busy || createBusy || parentBusy}
-          onclick={() => void deleteBlock()}
-        />
-        <span class="del-text">{deleteText}</span>
-      </div>
     </div>
   {/if}
 </div>
@@ -414,8 +377,7 @@
     box-shadow: var(--focus-shadow);
   }
   .acc-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; /* ref 1570 */ }
-  .fields { display: flex; flex-direction: column; }
-  .fields > :global(.inline-field:last-child) { border-bottom: 0; /* ref 1548 */ }
+  .body-tools { display: flex; justify-content: flex-end; }
   /* Create forms — shared look (spec §4). */
   .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
   .cr-form input {
@@ -433,13 +395,4 @@
   .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
   .empty { margin: 0; font-size: 13px; color: var(--muted); }
   .seqs-list { display: flex; flex-direction: column; gap: 10px; list-style: none; padding: 0; margin: 0; /* ref 1570 rhythm */ }
-  .del-footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border-soft); /* ref 1609 */
-  }
-  .del-text { font-size: 12.5px; color: var(--muted); /* ref 1610 */ }
 </style>

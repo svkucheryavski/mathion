@@ -501,7 +501,7 @@ async function renderRouted() {
 }
 
 describe('VersionEditPage — a create-sequence draft and a confirmed collapse (D3)', () => {
-  it('collapse with a confirmed prompt drops the draft; the next + opens an empty form without a prompt', async () => {
+  it('collapse with a confirmed prompt drops the draft; re-expanding, + opens an empty form without a prompt', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
     await renderRouted();
@@ -516,8 +516,10 @@ describe('VersionEditPage — a create-sequence draft and a confirmed collapse (
     await settle();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
-    plus().click(); // collapsed block: expands, then opens the form
+    // 5c: a collapsed block carries no + — expand it, then open the form.
+    target.querySelector<HTMLButtonElement>('#block-10-header')!.click();
     await settle();
+    plus().click();
     await settle();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');

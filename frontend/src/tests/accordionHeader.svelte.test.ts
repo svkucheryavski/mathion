@@ -1,173 +1,277 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync, createRawSnippet } from 'svelte';
-import AccordionHeader from '../components/editor/AccordionHeader.svelte';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mount, unmount, flushSync } from 'svelte';
+import AccordionHeader, { type HeaderMode } from '../components/editor/AccordionHeader.svelte';
+import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
+import { ApiError } from '../lib/api';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
-// Slice-5a T5a: the header is a section heading wrapping the accessible
-// toggle; the reorder arrows ALWAYS render (disabled with a reason at the
-// boundary or when structure is forbidden); the chevron is a pointer-only
-// convenience (D14).
+// Slice-5c T2: the header shows the title only (D5); its controls depend on
+// where it sits relative to the focus (D4) and on the version's permissions;
+// the open node carries ✎ (inline title, D8) and its own trash (D6). The
+// chevron stays a pointer-only convenience (5a D14).
 
-let cleanup: (() => void) | null = null;
-afterEach(() => {
-  cleanup?.();
-  cleanup = null;
-  document.body.innerHTML = '';
-});
+let target: HTMLDivElement;
+let cmp: ReturnType<typeof mount> | null = null;
+let registry: DirtyRegistry;
+async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
+afterEach(() => { if (cmp) unmount(cmp); cmp = null; target?.remove(); clearToasts(); vi.restoreAllMocks(); });
 
-function mountHeader(overrides: Record<string, unknown> = {}) {
-  const target = document.createElement('div');
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function render(over: Record<string, any> = {}) {
+  target = document.createElement('div');
   document.body.appendChild(target);
-  const cmp = mount(AccordionHeader, {
-    target,
-    props: {
-      headerId: 'h1',
-      panelId: 'p1',
-      level: 'block',
-      badge: 'B2',
-      title: 'Intro',
-      slug: 'intro',
-      index: 2, // middle row by default
-      expanded: false,
-      busy: false,
-      structureReason: null,
-      canReorderUp: true,
-      canReorderDown: true,
-      onToggle: () => {},
-      onMoveUp: () => {},
-      onMoveDown: () => {},
-      ...overrides,
-    } as never,
+  registry = createDirtyRegistry();
+  const props = $state({
+    headerId: 'h', panelId: 'p', level: 'sequence' as 'block' | 'sequence', mode: 'open-focus' as HeaderMode, title: 'Linear combinations' as string | null,
+    slug: 'linear-combinations' as string | null, index: 1, expanded: true, busy: false, canStructure: true, canEditTitle: true,
+    canReorderUp: true, canReorderDown: true, deleteBlockedReason: null as string | null,
+    onToggle: vi.fn(), onMoveUp: vi.fn(), onMoveDown: vi.fn(), onDelete: vi.fn(),
+    onRename: vi.fn((_t: string) => Promise.resolve()), ...over,
   });
-  cleanup = () => { void unmount(cmp); };
+  cmp = mount(AccordionHeader, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
   flushSync();
-  return target;
+  return props;
 }
+const btn = (label: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+const pencil = () => btn('Edit the sequence title');
+const input = () => target.querySelector<HTMLInputElement>('input.title-input');
+const up = () => btn('Move sequence up: Linear combinations');
+const down = () => btn('Move sequence down: Linear combinations');
+const trash = () => btn('Delete sequence Linear combinations');
+function type(v: string) { const el = input()!; el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); }
+function key(k: string) { input()!.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); flushSync(); }
 
-const up = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('[aria-label^="Move block up"], [aria-label^="Move sequence up"]')!;
-const down = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('[aria-label^="Move block down"], [aria-label^="Move sequence down"]')!;
-const chevron = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('button[aria-hidden="true"]')!;
-
-describe('AccordionHeader — heading + toggle', () => {
-  it('a block toggle sits inside an <h3> with the accordion ARIA contract', () => {
-    const t = mountHeader();
-    const btn = t.querySelector<HTMLButtonElement>('#h1')!;
-    expect(btn.parentElement!.tagName).toBe('H3');
-    expect(btn.getAttribute('aria-expanded')).toBe('false');
-    expect(btn.getAttribute('aria-controls')).toBe('p1');
-    expect(btn.getAttribute('aria-label')).toBe('Intro');
+describe('AccordionHeader — title only, no badge or slug (D5)', () => {
+  it('shows the title; no B/S code, no /slug', () => {
+    render();
+    expect(target.querySelector('.title')!.textContent).toBe('Linear combinations');
+    expect(target.querySelector('.code')).toBeNull();
+    expect(target.querySelector('.slug')).toBeNull();
+    expect(target.textContent).not.toContain('/linear-combinations');
   });
-
-  it('a sequence toggle sits inside an <h4>', () => {
-    const t = mountHeader({ level: 'sequence', badge: 'S1' });
-    expect(t.querySelector('#h1')!.parentElement!.tagName).toBe('H4');
-    expect(t.querySelector('.acc-row')!.classList.contains('seq')).toBe(true);
+  it('keeps the heading toggle and its ARIA contract (block → h3, sequence → h4)', () => {
+    render({ level: 'block', title: 'Vectors' });
+    const t = target.querySelector<HTMLButtonElement>('#h')!;
+    expect(t.parentElement!.tagName).toBe('H3');
+    expect(t.getAttribute('aria-expanded')).toBe('true');
+    expect(t.getAttribute('aria-controls')).toBe('p');
+    expect(t.getAttribute('aria-label')).toBe('Vectors');
   });
-
-  it('the toggle shows the mono code badge, the title and the mono slug (aria-hidden)', () => {
-    const t = mountHeader();
-    const btn = t.querySelector('#h1')!;
-    const code = btn.querySelector('.code')!;
-    expect(code.textContent).toBe('B2');
-    expect(code.classList.contains('mono')).toBe(true);
-    expect(btn.querySelector('.title')!.textContent).toBe('Intro');
-    const slug = btn.querySelector('.slug')!;
-    expect(slug.textContent).toBe('/intro');
-    expect(slug.classList.contains('mono')).toBe(true);
-    expect(slug.getAttribute('aria-hidden')).toBe('true');
+  it('the toggle calls onToggle; the chevron is pointer-only (tabindex -1, aria-hidden)', () => {
+    const p = render({ level: 'sequence' });
+    expect(target.querySelector('#h')!.parentElement!.tagName).toBe('H4');
+    target.querySelector<HTMLButtonElement>('#h')!.click();
+    expect(p.onToggle).toHaveBeenCalledTimes(1);
+    const chev = target.querySelector<HTMLButtonElement>('button[data-glyph="chevron"]')!;
+    expect(chev.getAttribute('tabindex')).toBe('-1');
+    expect(chev.getAttribute('aria-hidden')).toBe('true');
+    chev.click();
+    expect(p.onToggle).toHaveBeenCalledTimes(2);
   });
-
-  it('falls back to a positional placeholder when title and slug are empty', () => {
-    const t = mountHeader({ title: '', slug: '' });
-    expect(t.querySelector('#h1 .title')!.textContent).toBe('(block 2)');
-    expect(t.querySelector('#h1')!.getAttribute('aria-label')).toBe('block 2');
-    expect(t.querySelector('#h1 .slug')).toBeNull();
-  });
-
-  it('only an expanded block header carries the open (border) hook', () => {
-    expect(mountHeader().querySelector('.acc-row')!.classList.contains('open')).toBe(false);
-    cleanup?.();
-    expect(mountHeader({ expanded: true }).querySelector('.acc-row')!.classList.contains('open')).toBe(true);
-  });
-});
-
-describe('AccordionHeader — reorder arrows (always rendered)', () => {
-  it('a middle row has both arrows enabled with plain titles and named labels', () => {
-    const t = mountHeader();
-    expect(up(t).disabled).toBe(false);
-    expect(up(t).title).toBe('Move up');
-    expect(up(t).getAttribute('aria-label')).toBe('Move block up: Intro');
-    expect(down(t).disabled).toBe(false);
-    expect(down(t).title).toBe('Move down');
-    expect(down(t).getAttribute('aria-label')).toBe('Move block down: Intro');
-  });
-
-  it('the first row keeps a disabled up arrow titled "already first"', () => {
-    const t = mountHeader({ canReorderUp: false });
-    expect(up(t).disabled).toBe(true);
-    expect(up(t).title).toBe('Move up — already first');
-    expect(down(t).disabled).toBe(false);
-  });
-
-  it('the last row keeps a disabled down arrow titled "already last"', () => {
-    const t = mountHeader({ canReorderDown: false });
-    expect(down(t).disabled).toBe(true);
-    expect(down(t).title).toBe('Move down — already last');
-    expect(up(t).disabled).toBe(false);
-  });
-
-  it('a structure reason disables both arrows and wins over the boundary title', () => {
-    const reason = 'Only a created version can change its structure';
-    const t = mountHeader({ structureReason: reason, canReorderUp: false });
-    expect(up(t).disabled).toBe(true);
-    expect(up(t).title).toBe(reason);
-    expect(down(t).disabled).toBe(true);
-    expect(down(t).title).toBe(reason);
-  });
-
-  it('busy disables both arrows; titles stay the normal ones', () => {
-    const t = mountHeader({ busy: true });
-    expect(up(t).disabled).toBe(true);
-    expect(up(t).title).toBe('Move up');
-    expect(down(t).disabled).toBe(true);
-  });
-
-  it('clicking an enabled arrow calls its handler', () => {
-    const onMoveUp = vi.fn();
-    const onMoveDown = vi.fn();
-    const t = mountHeader({ onMoveUp, onMoveDown });
-    up(t).click();
-    down(t).click();
-    expect(onMoveUp).toHaveBeenCalledOnce();
-    expect(onMoveDown).toHaveBeenCalledOnce();
-  });
-});
-
-describe('AccordionHeader — chevron (D14) and extra', () => {
-  it('the chevron is out of the tab order, hidden from AT, and swaps glyph + title', () => {
-    let t = mountHeader();
-    expect(chevron(t).tabIndex).toBe(-1);
-    expect(chevron(t).dataset.glyph).toBe('chevron-right');
-    expect(chevron(t).title).toBe('Expand');
-    cleanup?.();
-    t = mountHeader({ expanded: true });
-    expect(chevron(t).dataset.glyph).toBe('chevron');
-    expect(chevron(t).title).toBe('Collapse');
-  });
-
-  it('the chevron toggles, and its mousedown never takes focus', () => {
-    const onToggle = vi.fn();
-    const t = mountHeader({ onToggle });
+  it('the chevron never takes focus on mousedown (5a D14) and swaps Collapse / Expand', () => {
+    const p = render();
+    const chev = () => target.querySelector<HTMLButtonElement>('button[data-glyph^="chevron"]')!;
     const md = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-    chevron(t).dispatchEvent(md);
+    chev().dispatchEvent(md);
     expect(md.defaultPrevented).toBe(true);
-    chevron(t).click();
-    expect(onToggle).toHaveBeenCalledOnce();
+    expect(chev().title).toBe('Collapse');
+    p.expanded = false; p.mode = 'row-focus'; flushSync();
+    expect(chev().title).toBe('Expand');
+    expect(chev().getAttribute('data-glyph')).toBe('chevron-right');
   });
+  it('without title and slug: "(sequence 1)" visible, "sequence 1" as the name', () => {
+    render({ title: null, slug: null });
+    expect(target.querySelector('.title')!.textContent).toBe('(sequence 1)');
+    expect(target.querySelector('#h')!.getAttribute('aria-label')).toBe('sequence 1');
+  });
+});
 
-  it('renders `extra` between the down arrow and the chevron', () => {
-    const extra = createRawSnippet(() => ({ render: () => '<button class="probe">+</button>' }));
-    const t = mountHeader({ extra });
-    const glyphs = [...t.querySelectorAll('.actions > button')].map((b) => (b as HTMLElement).dataset.glyph ?? b.className);
-    expect(glyphs).toEqual(['up', 'down', 'probe', 'chevron-right']);
+describe('AccordionHeader — controls per mode (D4, D6)', () => {
+  it('open-focus: ✎ ↑ ↓ trash and the chevron, in that order', () => {
+    render();
+    const glyphs = [...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['pencil', 'up', 'down', 'trash', 'chevron']);
+  });
+  it('row-focus: ↑ ↓ and the chevron only (no ✎, no trash)', () => {
+    render({ mode: 'row-focus', expanded: false });
+    const glyphs = [...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['up', 'down', 'chevron-right']);
+  });
+  it('row-outside: the title only, no buttons besides the toggle', () => {
+    render({ mode: 'row-outside', expanded: false });
+    expect(target.querySelectorAll('.actions button').length).toBe(0);
+  });
+  it('open-parent: the title and the chevron only', () => {
+    render({ mode: 'open-parent' });
+    const glyphs = [...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['chevron']);
+  });
+  it('published (canStructure false, canEditTitle true): ✎ only', () => {
+    render({ canStructure: false });
+    expect(pencil()).not.toBeNull();
+    expect(up()).toBeNull();
+    expect(down()).toBeNull();
+    expect(trash()).toBeNull();
+  });
+  it('archived / disabled (both false): nothing but the chevron', () => {
+    render({ canStructure: false, canEditTitle: false });
+    const glyphs = [...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['chevron']);
+  });
+  it('a blocked delete stays visible, disabled, with the reason as its title', () => {
+    render({ deleteBlockedReason: 'Remove its items first' });
+    expect(trash()!.disabled).toBe(true);
+    expect(trash()!.title).toBe('Remove its items first');
+  });
+  it('an allowed delete: titled "Delete this sequence"; the trash calls onDelete', () => {
+    const p = render();
+    expect(trash()!.title).toBe('Delete this sequence');
+    trash()!.click();
+    expect(p.onDelete).toHaveBeenCalledTimes(1);
+  });
+  it('boundary arrows stay rendered, disabled with "already first/last"', () => {
+    render({ canReorderUp: false, canReorderDown: false });
+    expect(up()!.disabled).toBe(true);
+    expect(up()!.title).toBe('Move up — already first');
+    expect(down()!.disabled).toBe(true);
+    expect(down()!.title).toBe('Move down — already last');
+  });
+  it('arrows call onMoveUp / onMoveDown', () => {
+    const p = render();
+    up()!.click();
+    down()!.click();
+    expect(p.onMoveUp).toHaveBeenCalledTimes(1);
+    expect(p.onMoveDown).toHaveBeenCalledTimes(1);
+  });
+  it('busy disables ✎, the arrows and the trash', () => {
+    render({ busy: true });
+    expect(pencil()!.disabled).toBe(true);
+    expect(up()!.disabled).toBe(true);
+    expect(down()!.disabled).toBe(true);
+    expect(trash()!.disabled).toBe(true);
+  });
+});
+
+describe('AccordionHeader — inline title (D8)', () => {
+  it('✎ turns the title into a focused field holding the title; the toggle leaves', async () => {
+    render();
+    pencil()!.click(); await settle();
+    expect(input()!.value).toBe('Linear combinations');
+    expect(input()!.getAttribute('aria-label')).toBe('Sequence title');
+    expect(document.activeElement).toBe(input());
+    expect(target.querySelector('#h')).toBeNull();
+  });
+  it('Enter saves through onRename with the trimmed title, then closes and refocuses ✎', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('  Combinations  '); key('Enter'); await settle();
+    expect(p.onRename).toHaveBeenCalledWith('Combinations');
+    expect(input()).toBeNull();
+    expect(document.activeElement).toBe(pencil());
+  });
+  it('✓ saves like Enter', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('Combinations');
+    btn('Save the sequence title')!.click(); await settle();
+    expect(p.onRename).toHaveBeenCalledWith('Combinations');
+    expect(input()).toBeNull();
+  });
+  it('Esc cancels without a request and refocuses ✎', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('X'); key('Escape'); await settle();
+    expect(p.onRename).not.toHaveBeenCalled();
+    expect(input()).toBeNull();
+    expect(document.activeElement).toBe(pencil());
+  });
+  it('✕ cancels like Esc', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('X');
+    btn('Cancel editing the sequence title')!.click(); await settle();
+    expect(p.onRename).not.toHaveBeenCalled();
+    expect(input()).toBeNull();
+  });
+  it('Esc does not bubble (an enclosing handler must not see it)', async () => {
+    render();
+    const spy = vi.fn();
+    window.addEventListener('keydown', spy);
+    pencil()!.click(); await settle();
+    key('Escape');
+    window.removeEventListener('keydown', spy);
+    expect(spy).not.toHaveBeenCalled();
+  });
+  it('an empty title is refused in place', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('   '); key('Enter'); await settle();
+    expect(p.onRename).not.toHaveBeenCalled();
+    expect(target.querySelector('.err')!.textContent).toBe('Title is required');
+    expect(input()!.getAttribute('aria-invalid')).toBe('true');
+  });
+  it('an unchanged title closes without a request', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    key('Enter'); await settle();
+    expect(p.onRename).not.toHaveBeenCalled();
+    expect(input()).toBeNull();
+  });
+  it('error keeps the field open with the message and the draft; typing clears it', async () => {
+    render({ onRename: vi.fn(() => Promise.reject(new Error('nope'))) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(input()!.value).toBe('New');
+    expect(target.querySelector('.err')!.textContent).toBe('Save failed');
+    expect(document.activeElement).toBe(input());
+    type('Newer');
+    expect(target.querySelector('.err')).toBeNull();
+  });
+  it('an API error shows its message', async () => {
+    render({ onRename: vi.fn(() => Promise.reject(new ApiError(409, 'Title already taken'))) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(target.querySelector('.err')!.textContent).toBe('Title already taken');
+  });
+  it('while saving, a second Enter sends nothing and the field is read-only', async () => {
+    let release!: () => void;
+    const p = render({ onRename: vi.fn(() => new Promise<void>((r) => { release = r; })) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(input()!.readOnly).toBe(true);
+    key('Enter'); await settle();
+    expect(p.onRename).toHaveBeenCalledTimes(1);
+    release(); await settle();
+    expect(input()).toBeNull();
+  });
+  it('rename is guard-dirty only when the draft differs; discardAll closes it', async () => {
+    render();
+    pencil()!.click(); await settle();
+    expect(registry.isAnyDirty()).toBe(false);
+    type('Changed');
+    expect(registry.isAnyDirty()).toBe(true);
+    registry.discardAll(); flushSync();
+    expect(input()).toBeNull();
+  });
+  it('read-only flip closes the field', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    p.canEditTitle = false; flushSync();
+    expect(input()).toBeNull();
+  });
+  it('leaving the focus closes the field', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    p.mode = 'open-parent'; flushSync();
+    expect(input()).toBeNull();
+  });
+  it('a failure after the field closed (e.g. Back mid-save) toasts instead', async () => {
+    let reject!: (e: unknown) => void;
+    const p = render({ onRename: vi.fn(() => new Promise<void>((_r, j) => { reject = j; })) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    p.mode = 'open-parent'; flushSync();
+    reject(new Error('x')); await settle();
+    expect(toasts.list.map((t) => t.message)).toContain('Save failed');
   });
 });

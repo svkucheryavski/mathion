@@ -96,12 +96,29 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   flushSync();
 }
 
-describe('SequenceAccordion — header (T5a)', () => {
-  it('the header is an <h4> toggle with the S{index} badge; arrows render at the boundary', () => {
+const titleInput = (t: HTMLElement) => t.querySelector<HTMLInputElement>('input[aria-label="Sequence title"]');
+async function renameTo(t: HTMLElement, v: string) {
+  t.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!.click();
+  await settle();
+  type(titleInput(t)!, v);
+  titleInput(t)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle();
+}
+const headerGlyphs = (t: HTMLElement) =>
+  [...t.querySelectorAll('.seq-card > .acc-row .actions button')].map((b) => b.getAttribute('data-glyph'));
+
+describe('SequenceAccordion — header (Slice-5c T2)', () => {
+  it('the header is an <h4> toggle with the title only (no S{index} badge, no slug)', () => {
     const { target } = mountAccordion();
     const toggle = target.querySelector<HTMLButtonElement>('#seq-2-header')!;
     expect(toggle.parentElement!.tagName).toBe('H4');
-    expect(toggle.querySelector('.code')!.textContent).toBe('S1');
+    expect(toggle.textContent!.trim()).toBe('Seq');
+    expect(target.querySelector('.code, .slug')).toBeNull();
+  });
+
+  it('open: ✎ ↑ ↓ trash ⌄; boundary arrows disabled with "already first/last"', () => {
+    const { target } = mountAccordion();
+    expect(headerGlyphs(target)).toEqual(['pencil', 'up', 'down', 'trash', 'chevron']);
     const up = target.querySelector<HTMLButtonElement>('[aria-label="Move sequence up: Seq"]')!;
     const down = target.querySelector<HTMLButtonElement>('[aria-label="Move sequence down: Seq"]')!;
     expect(up.disabled).toBe(true);
@@ -110,60 +127,69 @@ describe('SequenceAccordion — header (T5a)', () => {
     expect(down.title).toBe('Move down — already last');
   });
 
-  it('on a published version the header arrows carry the structure reason', () => {
-    const { target } = mountAccordion(mkSeq(), mkVersion({ state: 'published' }));
-    for (const dir of ['up', 'down']) {
-      const b = target.querySelector<HTMLButtonElement>(`[aria-label="Move sequence ${dir}: Seq"]`)!;
-      expect(b.disabled).toBe(true);
-      expect(b.title).toBe('Only a created version can change its structure');
-    }
+  it('published: ✎ only; archived and disabled: nothing but the chevron', () => {
+    let { target } = mountAccordion(mkSeq(), mkVersion({ state: 'published' }));
+    expect(headerGlyphs(target)).toEqual(['pencil', 'chevron']);
+    cleanup?.();
+    ({ target } = mountAccordion(mkSeq(), mkVersion({ state: 'archived' })));
+    expect(headerGlyphs(target)).toEqual(['chevron']);
+    cleanup?.();
+    ({ target } = mountAccordion(mkSeq(), mkVersion({ is_disabled: true })));
+    expect(headerGlyphs(target)).toEqual(['chevron']);
   });
-});
 
-describe('SequenceAccordion — body (T5b)', () => {
-  it('the sequence title is an inline field; a commit PATCHes {title} only, then reloads', async () => {
+  it('collapsed with no sequence open: ↑ ↓ and the chevron (a row at the focus)', () => {
+    const { target, props } = mountAccordion();
+    props.routeSid = null; flushSync();
+    expect(headerGlyphs(target)).toEqual(['up', 'down', 'chevron-right']);
+  });
+
+  it('a sibling sequence open: this one is a title-only row', () => {
+    const { target, props } = mountAccordion();
+    props.block = { ...props.block, sequences: [...props.block.sequences, mkSeq({ id: 5, title: 'Other', slug: 'other' })] };
+    props.routeSid = '5'; flushSync();
+    expect(headerGlyphs(target)).toEqual([]);
+  });
+
+  it('a stale sequence id (no such sequence) keeps the row at the focus level', () => {
+    const { target, props } = mountAccordion();
+    props.routeSid = '77'; flushSync();
+    expect(headerGlyphs(target)).toEqual(['up', 'down', 'chevron-right']);
+  });
+
+  it('✎ renames with a {title} PATCH to the sequence, then reloads', async () => {
     const { target } = mountAccordion();
-    const row = target.querySelector<HTMLElement>('.inline-field')!;
-    expect(row.querySelector('.label')!.textContent).toBe('Sequence title');
-    row.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!.click();
-    await settle();
-    const input = row.querySelector<HTMLInputElement>('input')!;
-    type(input, 'Renamed');
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
+    await renameTo(target, 'Renamed');
     const patch = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/sequences/2' && (i as RequestInit)?.method === 'PATCH')!;
     expect(JSON.parse((patch[1] as RequestInit).body as string)).toEqual({ title: 'Renamed' });
     expect(treeFetchPaths.length).toBe(1);
+    expect(titleInput(target)).toBeNull();
   });
 
-  it('a late title commit after a version change does not reload', async () => {
+  it('a late rename after a version change does not reload', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2' && init?.method === 'PATCH'
       ? new Promise<void>((r) => { release = r; }).then(() => jres({}))
       : undefined));
     const { target, stillOnVid } = mountAccordion();
-    target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!.click();
-    await settle();
-    const input = target.querySelector<HTMLInputElement>('.inline-field input')!;
-    type(input, 'Renamed');
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
+    await renameTo(target, 'Renamed');
     stillOnVid.mockReturnValue(false);
     release();
     await settle();
     expect(treeFetchPaths).toEqual([]);
   });
 
-  it('an archived version shows the title as text with a disabled pencil and reason', () => {
-    const { target } = mountAccordion(mkSeq(), mkVersion({ state: 'archived' }));
-    const pencil = target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!;
-    expect(pencil.disabled).toBe(true);
-    expect(pencil.title).toBe('Archived versions are read-only');
-  });
-
-  it('Items is an <h5>; the + opens the form and focuses the checked type radio', async () => {
+  it('the body has no title field row, no Items heading and no delete footer', () => {
     const { target } = mountAccordion();
-    expect(target.querySelector('.items-head h5')!.textContent).toBe('Items');
+    expect(target.querySelector('.inline-field')).toBeNull();
+    expect(target.querySelector('h5')).toBeNull();
+    expect(target.querySelector('.del-footer')).toBeNull();
+  });
+});
+
+describe('SequenceAccordion — body (T5b)', () => {
+  it('the + opens the form and focuses the checked type radio', async () => {
+    const { target } = mountAccordion();
     expect(plus(target).title).toBe('New item');
     plus(target).click();
     await settle();
@@ -271,35 +297,30 @@ describe('SequenceAccordion — body (T5b)', () => {
   });
 });
 
-describe('SequenceAccordion — delete footer (T5b)', () => {
-  const text = (t: HTMLElement) => t.querySelector('.del-text')!.textContent;
-
-  it('enabled: the trash and its text read "Delete this sequence"', () => {
+describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
+  it('enabled on an empty sequence: titled "Delete this sequence"', () => {
     const { target } = mountAccordion();
     expect(trash(target).disabled).toBe(false);
     expect(trash(target).title).toBe('Delete this sequence');
-    expect(text(target)).toBe('Delete this sequence');
   });
 
-  it('items remain → "remove its items first" (ref 1610)', () => {
+  it('items remain → disabled, "Remove its items first"', () => {
     const { target } = mountAccordion(mkSeq({ items: [item] }));
     expect(trash(target).disabled).toBe(true);
-    expect(trash(target).title).toBe('Delete this sequence — remove its items first');
-    expect(text(target)).toBe('Delete this sequence — remove its items first');
+    expect(trash(target).title).toBe('Remove its items first');
   });
 
-  it('the structure reason wins over items remaining', () => {
+  it('published → no trash at all', () => {
     const { target } = mountAccordion(mkSeq({ items: [item] }), mkVersion({ state: 'published' }));
-    expect(text(target)).toBe('Delete this sequence — only a created version can change its structure');
-    expect(trash(target).disabled).toBe(true);
+    expect(target.querySelector('button[aria-label="Delete sequence Seq"]')).toBeNull();
   });
 
-  it('an open create form → "cancel the new item first"', async () => {
+  it('an open create form → disabled, "Cancel the new item first"', async () => {
     const { target } = mountAccordion();
     plus(target).click();
     await settle();
     expect(trash(target).disabled).toBe(true);
-    expect(text(target)).toBe('Delete this sequence — cancel the new item first');
+    expect(trash(target).title).toBe('Cancel the new item first');
   });
 
   it('success: navigates to the block (replace, no prompt) BEFORE the reload', async () => {
@@ -389,7 +410,7 @@ describe('SequenceAccordion — item rows (T6)', () => {
     const { target } = mountAccordion(mkSeq({ items: [item] }));
     target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!.click();
     await settle();
-    type(target.querySelector<HTMLInputElement>('.inline-field input')!, 'Dirty');
+    type(titleInput(target)!, 'Dirty');
     target.querySelector<HTMLButtonElement>('button[aria-label="Delete Page"]')!.click();
     expect(confirmSpy).toHaveBeenCalledWith('Delete "Page"? This cannot be undone.');
   });

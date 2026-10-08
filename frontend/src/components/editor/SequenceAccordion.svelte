@@ -6,7 +6,7 @@
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
-  import { structureReason, textReason, unsavedSuffix } from '../../lib/editorReasons';
+  import { structureReason, unsavedSuffix } from '../../lib/editorReasons';
   import { labelFor } from '../../lib/labelFor';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
@@ -14,7 +14,6 @@
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import Button from '../ui/Button.svelte';
   import IconButton from '../ui/IconButton.svelte';
-  import InlineField from '../ui/InlineField.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
 
   type Props = {
@@ -60,8 +59,11 @@
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — SequenceAccordion must mount under VersionEditPage');
 
   const expanded = $derived(String(block.id) === routeBid && String(seq.id) === routeSid);
-  // Slice-5c D1/D4: a sequence is only visible while its block is open.
-  const mode: HeaderMode = $derived(expanded ? 'open-focus' : (routeSid === null ? 'row-focus' : 'row-outside'));
+  // Slice-5c D1/D4: a sequence is only visible while its block is open; it is
+  // "outside" only while a SIBLING really is open — a stale route id (about
+  // to fall back) keeps the rows at the focus level, controls included.
+  const siblingOpen = $derived(routeSid !== null && block.sequences.some((s) => String(s.id) === routeSid));
+  const mode: HeaderMode = $derived(expanded ? 'open-focus' : (siblingOpen ? 'row-outside' : 'row-focus'));
   const headerId = $derived(`seq-${String(seq.id)}-header`);
   const panelId = $derived(`seq-${String(seq.id)}-panel`);
 
@@ -69,7 +71,7 @@
   const perms = $derived(version ? versionPermissions(version) : null);
   const canStructure = $derived(perms?.canEditStructure ?? false);
   const structReason = $derived(version ? structureReason(version) : null);
-  const txtReason = $derived(version ? textReason(version) : null);
+  const canEditTitle = $derived(perms?.canEditTextFields ?? false);
   const name = $derived(labelFor(seq.title, seq.slug, `sequence ${index}`));
 
   function toggle() {
@@ -86,12 +88,13 @@
   let alive = true;
   onDestroy(() => { alive = false; });
 
-  // One field per PATCH (D2). A PATCH failure propagates to InlineField.
-  async function patchSeq(field: { title: string }) {
+  // D8: the header's inline title. One PATCH; a failure propagates to the
+  // header (inline error); only the follow-up refresh is guarded.
+  async function renameSeq(title: string) {
     const savedVid = vid;
     const check = stillOnVid;
     const savedSid = seq.id;
-    await api.patch(`/api/sequences/${savedSid}`, field);
+    await api.patch(`/api/sequences/${savedSid}`, { title });
     if (!check(savedVid)) return;
     const result = await loadAdminTree(savedVid, { force: true });
     if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
@@ -189,16 +192,14 @@
     }
   });
 
-  // Footer text mirrors the trash button's title (ref 1610). Precedence:
-  // structure reason → items remain → create form open → enabled.
-  const deleteText = $derived(
-    structReason
-      ? `Delete this sequence — ${structReason[0].toLowerCase()}${structReason.slice(1)}`
-      : seq.items.length > 0
-        ? 'Delete this sequence — remove its items first'
-        : creating
-          ? 'Delete this sequence — cancel the new item first'
-          : 'Delete this sequence',
+  // D6: why the header trash is blocked (null = it may delete). The version's
+  // permission is not a reason here: without it the trash is hidden.
+  const deleteBlockedReason = $derived(
+    seq.items.length > 0
+      ? 'Remove its items first'
+      : creating
+        ? 'Cancel the new item first'
+        : null,
   );
 
   function resetCreateForm() {
@@ -254,7 +255,7 @@
     // already disabled in these states, but a stale/programmatic click
     // would otherwise unmount the form during an in-flight POST,
     // discarding validation errors and unregistering the create tracker.
-    if (createBusy || busy || parentBusy || structReason) return;
+    if (createBusy || busy || parentBusy || !canStructure) return;
     if (creating) { resetCreateForm(); creating = false; return; }
     creating = true;
     await tick();
@@ -317,46 +318,40 @@
     {headerId}
     {panelId}
     level="sequence"
+    {mode}
     title={seq.title}
     slug={seq.slug}
     {index}
     {expanded}
-    badge={`S${index}`}
     busy={busy || createBusy || parentBusy}
-    structureReason={structReason}
+    {canStructure}
+    {canEditTitle}
     canReorderUp={index > 1}
     canReorderDown={index < sequenceCount}
+    {deleteBlockedReason}
     onToggle={toggle}
     {onMoveUp}
     {onMoveDown}
+    onDelete={() => void deleteSeq()}
+    onRename={renameSeq}
   />
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
-      <div class="fields">
-        <InlineField
-          label="Sequence title"
-          value={seq.title}
-          required
-          maxlength={200}
-          editTitle="Edit the sequence title"
-          disabledReason={txtReason}
-          onCommit={(p) => patchSeq({ title: String(p) })}
-        />
-      </div>
-
-      <div class="items-head">
-        <h5>Items</h5>
-        <IconButton
-          primary
-          glyph={creating ? 'close' : 'plus'}
-          title={structReason ?? (creating ? 'Cancel new item' : 'New item')}
-          aria-label={`New item in ${name}`}
-          aria-expanded={creating}
-          disabled={!!structReason || busy || createBusy || parentBusy}
-          onclick={() => void toggleCreate()}
-        />
-      </div>
+      {#if canStructure}
+        <!-- Interim until T4's "+ Add item" line (ledger: T2). -->
+        <div class="body-tools">
+          <IconButton
+            size="sm"
+            glyph={creating ? 'close' : 'plus'}
+            title={creating ? 'Cancel new item' : 'New item'}
+            aria-label={`New item in ${name}`}
+            aria-expanded={creating}
+            disabled={busy || createBusy || parentBusy}
+            onclick={() => void toggleCreate()}
+          />
+        </div>
+      {/if}
 
       {#if creating}
         <form class="cr-form" bind:this={formEl} onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
@@ -399,18 +394,6 @@
           {/each}
         </ul>
       {/if}
-
-      <div class="del-footer">
-        <IconButton
-          glyph="trash"
-          danger
-          title={deleteText}
-          aria-label={`Delete sequence ${name}`}
-          disabled={!!structReason || seq.items.length > 0 || creating || busy || createBusy || parentBusy}
-          onclick={() => void deleteSeq()}
-        />
-        <span class="del-text">{deleteText}</span>
-      </div>
     </div>
   {/if}
 </div>
@@ -428,10 +411,7 @@
     box-shadow: var(--focus-shadow);
   }
   .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
-  .fields { display: flex; flex-direction: column; }
-  .fields > :global(.inline-field:last-child) { border-bottom: 0; /* ref 1548 */ }
-  .items-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; /* ref 1584 */ }
-  h5 { margin: 0; font-size: 13px; font-weight: 600; /* ref 1585 */ }
+  .body-tools { display: flex; justify-content: flex-end; margin-bottom: 4px; }
   /* Create forms — shared look (spec §4). */
   .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
   .cr-form input,
@@ -451,13 +431,4 @@
   .empty { margin: 0; font-size: 13px; color: var(--muted); }
   .items-list { list-style: none; padding: 0; margin: 0; }
   .items-list > li:last-child > :global(.item-row) { border-bottom: 0; /* ref 1602 */ }
-  .del-footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border-soft); /* ref 1609 */
-  }
-  .del-text { font-size: 12.5px; color: var(--muted); /* ref 1610 */ }
 </style>

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1414
+EXPECTED_CHECKS=1391
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -450,9 +450,6 @@ GLOBAL_ALLOW = {
     ('src/pages/MiniProjectDetailPage.svelte', 'code'),
     # Slice-5a T3: the last InlineField row drops its divider (ref 1548).
     ('src/components/editor/VersionMetaForm.svelte', '.inline-field:last-child'),
-    # Slice-5a T5b: same last-row rule in the accordion bodies.
-    ('src/components/editor/BlockAccordion.svelte', '.inline-field:last-child'),
-    ('src/components/editor/SequenceAccordion.svelte', '.inline-field:last-child'),
     # Slice-5a T6: the last item row drops its hairline (ref 1602).
     ('src/components/editor/SequenceAccordion.svelte', '.item-row'),
     # Slice-5b T1: `.modal-body > :global(*)` (spec :220-221). Child-combinator
@@ -3669,29 +3666,28 @@ else
 fi
 
 echo
-echo "--- (x) Slice-5a T5a — accordion headers (3b) ---"
+echo "--- (x) Slice-5a T5a / 5c T2 — accordion headers ---"
 own acc-row AccordionHeader.svelte
 uniq1 acc-row
 if [[ -n $REPLY ]]; then
   N=AccordionHeader; H=$REPLY
-  d '\.acc-row' '' 'display:flex' 'align-items:center' 'gap:10px'
-  d '\.block' '' 'padding:9px 12px' 'background:var\(--surface-2\)'
-  d '\.block\.open' '' 'border-bottom:1px solid var\(--border\)'
-  # D10: only an EXPANDED block header carries the bottom edge; the sequence header none.
-  # Selector-agnostic (spec Testing): any rule whose subject is the bare collapsed `.block`
-  # (descendant / pseudo forms included) — `.block.open.H` is the one allowed edge.
-  none "AccordionHeader collapsed block header has no border" "(^|[{}])[^{}]*\.block\.${H}[^{]*\{[^}]*border"
-  d '\.seq' '' 'padding:8px 12px' 'background:var\(--surface\)'
+  # 5c T2: no strip tint and no header edges — the row takes its panel's shade (D1).
+  d '\.acc-row' '' 'display:flex' 'align-items:center' 'gap:10px' 'min-height:40px' 'padding:6px 12px'
+  none "AccordionHeader no strip background on .block/.seq (5c D1)" "(^|[{}])[^{}]*\.(block|seq)\.${H}\{[^}]*background"
+  none "AccordionHeader no border on any .block rule" "(^|[{}])[^{}]*\.block(\.[a-z-]+)*\.${H}[^{]*\{[^}]*border"
   none "AccordionHeader no border on any .seq rule, incl. .seq.open (D10)" "(^|[{}])[^{}]*\.seq(\.[a-z-]+)*\.${H}[^{]*\{[^}]*border"
   none "AccordionHeader .acc-row carries no border" "(^|[{}])[^{}]*\.acc-row(\.[a-z-]+)*\.${H}[^{]*\{[^}]*border"
   d '\.hd' '' 'margin:0' 'flex:1 1 auto' 'min-width:0' 'font:inherit'
-  d '\.toggle' '' 'display:flex' 'align-items:center' 'gap:10px' 'width:100%' 'padding:0' 'border:0' 'background:transparent' 'color:var\(--text\)' 'text-align:left' 'cursor:pointer'
+  d '\.toggle' '' 'display:flex' 'align-items:center' 'width:100%' 'min-height:28px' 'padding:0' 'border:0' 'background:transparent' 'color:var\(--text\)' 'text-align:left' 'cursor:pointer'
   none "AccordionHeader no hover background on any rule" "(^|[{}])[^{}]*\.${H}[^{]*:hover[^{]*\{[^}]*background"
-  d '\.code' '' 'font-size:11px' 'font-weight:500' 'color:var\(--primary\)' 'background:var\(--primary-soft\)' 'padding:2px 6px' 'border-radius:3px'
+  # 5c D5: no position code, no slug.
+  none "AccordionHeader no .code / .slug rules (5c D5)" "\.(code|slug)\.${H}"
   d '\.title' '' 'font-size:14px' 'font-weight:600'
   chk "\.seq\.${H} \.title:where\(\.${H}\)" 'font-size:13\.5px'
-  d '\.slug' '' 'font-size:12px' 'color:var\(--muted\)'
   d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
+  # 5c D8: the inline title field — InlineField's open-editor ring, tokens only.
+  d '\.title-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text\)'
+  d '\.err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
   none "AccordionHeader pre-5a .accordion-row gone" "\.accordion-row\.${H}"
   sweep AccordionHeader $H
 fi
@@ -3706,14 +3702,13 @@ echo
 echo "--- (y) Slice-5a T5b — accordion bodies: inline fields, create forms, delete footers (3b) ---"
 # body_common LABEL — the rules BlockAccordion and SequenceAccordion share (N/H set by caller).
 body_common() {
-  d '\.fields' '' 'display:flex' 'flex-direction:column'
-  chk "\.fields\.${H}>\.inline-field:last-child" 'border-bottom:0'
+  # 5c T2: the title moved into the header (D8), delete into the header (D6).
+  none "$N no .fields / .del-footer / .del-text rules (5c T2)" "\.(fields|del-footer|del-text)\.${H}"
+  d '\.body-tools' '' 'display:flex' 'justify-content:flex-end'
   d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
   d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end'
   chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
   d '\.empty' '' 'margin:0' 'font-size:13px' 'color:var\(--muted\)'
-  d '\.del-footer' '' 'display:flex' 'align-items:center' 'gap:8px' 'margin-top:14px' 'padding-top:12px' 'border-top:1px solid var\(--border-soft\)'
-  d '\.del-text' '' 'font-size:12\.5px' 'color:var\(--muted\)'
   none "$N pre-5a .meta/.row/.head/.create/.danger rules gone" "\.(meta|row|head|create|danger)\.${H}[{ ,:>]"
   none "$N no rem font sizes"                                "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
   sweep $N $H
@@ -3732,13 +3727,12 @@ if [[ -n $REPLY ]]; then
   body_common
 fi
 
-own items-head SequenceAccordion.svelte
-uniq1 items-head
+own seq-card SequenceAccordion.svelte
+uniq1 seq-card
 if [[ -n $REPLY ]]; then
   N=SequenceAccordion; H=$REPLY
   d '\.acc-body' '' 'padding:12px 14px' 'border-top:1px solid var\(--border-soft\)'
-  d '\.items-head' '' 'display:flex' 'align-items:center' 'justify-content:space-between' 'margin-bottom:4px'
-  d 'h5' '' 'margin:0' 'font-size:13px' 'font-weight:600'
+  none "SequenceAccordion no Items heading rules (5c T2)" "(\.items-head|h5)\.${H}"
   CF="\.cr-form\.${H} input:where\(\.${H}\),\.cr-form\.${H} textarea:where\(\.${H}\)"
   chk "$CF" 'box-sizing:border-box' 'width:100%' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
   chk "\.cr-form\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
@@ -3780,7 +3774,7 @@ if [[ -n $REPLY ]]; then
   sweep ItemRow $H
 fi
 # The parent drops the last row's hairline (ref 1602), hash-coupled to SequenceAccordion.
-uniq1 items-head
+uniq1 seq-card
 if [[ -n $REPLY ]]; then
   N=SequenceAccordion; H=$REPLY
   chk "\.items-list\.${H}>li:where\(\.${H}\):last-child>\.item-row" 'border-bottom:0'
