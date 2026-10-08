@@ -3404,7 +3404,7 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
     caret-color: var(--primary);
   }
   .inline-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
-  @media (forced-colors: active) { .inline-input:focus-visible { outline: 2px solid Highlight; } }
+  @media (forced-colors: active) { .inline-input:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; } }
   .inline-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .inline-err { font-size: 12px; color: var(--danger); }
   .inline-hint { font-size: 12px; color: var(--muted); }
@@ -4246,7 +4246,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
   }
   .key-dec { width: 64px; }
   .key-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
-  @media (forced-colors: active) { .key-input:focus-visible { outline: 2px solid Highlight; } }
+  @media (forced-colors: active) { .key-input:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; } }
   .key-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .key-err { font-size: 12px; color: var(--danger); }
 </style>
@@ -5568,7 +5568,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   }
   .nq-dec { width: 64px; }
   .nq-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
-  @media (forced-colors: active) { .nq-input:focus-visible { outline: 2px solid Highlight; } }
+  @media (forced-colors: active) { .nq-input:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; } }
   .nq-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .nq-err { margin: 0; font-size: 12px; color: var(--danger); }
   .nq-hint { margin: 0; font-size: 12px; color: var(--muted); }
@@ -6060,6 +6060,9 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
   against future code; they are not evidence of current behaviour. Kept as pins.
 - Plan review (Fable M-D): `locked()` awaits `reload()` after every failure, including 422 validation errors —
   one extra GET per validation error; harmless (rows keyed by id, the field keeps its text).
+- Plan review (Opus round 3, mA/mB): a SUCCESS after the modal stopped being live but stayed mounted (only if it
+  outlives a vid change, which `{#key it.id}` prevents today) leaves level-3 / create `saving` true, and an
+  InlineEdit open with a value that looks unsaved. Harden if the modal ever outlives a version change.
 - Plan review (Fable M7): the T3 Step 10 microtask fallback for `newTabLinks` is insurance only; `{@attach}` already
   runs after the `{@html}` block on create and update.
 ```
