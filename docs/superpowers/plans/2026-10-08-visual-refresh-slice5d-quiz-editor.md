@@ -1210,14 +1210,14 @@ export class InlineEdit<T> {
       const m = e instanceof ApiError ? e.displayMessage : 'Save failed';
       // A save always reports its failure: inline while the field is open on
       // this version, otherwise as a toast (spec §While a request runs).
+      this.saving = false;   // never left "Saving…" (a field that outlived its version can still cancel)
       if (!this.#alive || !o.edits.live()) { pushToast(m, 'error'); return; }
-      this.saving = false;
       this.error = m;
       return;
     }
     o.edits.say('Saved');
-    if (!this.#alive || !o.edits.live()) return;
     this.saving = false;
+    if (!this.#alive || !o.edits.live()) return;
     if (o.after === 'reset') this.value = o.initial;
     else o.close(true);
   }
@@ -1554,7 +1554,10 @@ export function resp(body: unknown, status = 200): Response {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response;
 }
-export async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
+// 30 microtask rounds: a failed answer write runs request → track → locked's
+// awaited reload → send → track → commit before the field shows its error.
+// Intermediate states are always tested with hold(), so a deep settle hides nothing.
+export async function settle() { for (let i = 0; i < 30; i++) await Promise.resolve(); flushSync(); }
 
 export function q(over: Partial<AuthoringQuestion> & { id: number }): AuthoringQuestion {
   return {
@@ -3401,6 +3404,7 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
     caret-color: var(--primary);
   }
   .inline-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+  @media (forced-colors: active) { .inline-input:focus-visible { outline: 2px solid Highlight; } }
   .inline-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .inline-err { font-size: 12px; color: var(--danger); }
   .inline-hint { font-size: 12px; color: var(--muted); }
@@ -3612,7 +3616,7 @@ to
       throw e;
     } finally {
       ctx.busyQuestions.delete(q.id);
-      if (alive()) op = null;
+      if (mounted) op = null;   // mounted, not alive(): the lock state must always reset
     }
   }
   // An action without a field reports its failure as a toast — always, even
@@ -3828,10 +3832,10 @@ Expected: PASS. If any test asserts a behaviour the spec states differently, the
   check "ChoiceRow row actions show on hover (D8)" "\.ans-row\.${H}:hover \.row-acts:where\(\.${H}\)\{opacity:1\}"
   check "ChoiceRow row actions show on keyboard focus (D8)" "\.ans-row\.${H}:focus-within \.row-acts:where\(\.${H}\)\{opacity:1\}"
   check "ChoiceRow row actions always shown without hover (D8)" "@media \(hover: ?none\)\{\.row-acts\.${H}\{opacity:1\}"
-  d '\.ans-row:not\(\.ok\):hover' '' 'background:var\(--focus-row\)'
+  d '\.ans-row' ':not\(\.ok\):hover' 'background:var\(--focus-row\)'
 ```
 
-> Note: `d '\.ans-row:not\(\.ok\):hover'` expects the emitted form `.ans-row.svelte-H:not(.ok):hover{…}`. Svelte scopes `:not(.ok)` as `:not(.ok.svelte-H)` in some versions. If the row FAILs, grep the dist CSS for `ans-row`, use the emitted selector through `chk`, and record a ledger ruling.
+> Svelte 5.55 emits `.ans-row.svelte-H:not(.ok):hover{…}`, so the suffix argument carries `:not(.ok):hover`.
 
 After the `own key-line` block, add the InlineInput block:
 
@@ -3849,7 +3853,7 @@ if [[ -n $REPLY ]]; then
 fi
 ```
 
-Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && zsh scripts/visual-refresh-gate.sh > ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log 2>&1; tail -3 ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
+Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && W=/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus && TMPDIR=$W/tmp zsh scripts/visual-refresh-gate.sh > $W/tmp/gate.log 2>&1; tail -3 $W/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
 
 - [ ] **Step 8: Full verification.** vitest, svelte-check and the gate.
 
@@ -4242,6 +4246,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
   }
   .key-dec { width: 64px; }
   .key-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+  @media (forced-colors: active) { .key-input:focus-visible { outline: 2px solid Highlight; } }
   .key-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .key-err { font-size: 12px; color: var(--danger); }
 </style>
@@ -4262,7 +4267,7 @@ Expected: PASS.
   none "KeyAnswer no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
 ```
 
-Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && zsh scripts/visual-refresh-gate.sh > ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log 2>&1; tail -3 ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
+Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && W=/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus && TMPDIR=$W/tmp zsh scripts/visual-refresh-gate.sh > $W/tmp/gate.log 2>&1; tail -3 $W/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
 
 - [ ] **Step 6: Full verification.** vitest, svelte-check and the gate.
 
@@ -4612,9 +4617,9 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
       ctx.say('Saved');
       if (alive()) onClose(true);
     } catch (e) {
-      const m = ctx.failed(e, q.id);
+      const m = ctx.failed(e, qid);
       // A failed save always reports: inside the modal, or as a toast once it is gone.
-      if (!alive()) { pushToast(m, 'error'); return; }
+      if (!alive()) { saving = false; pushToast(m, 'error'); return; }
       saving = false;
       error = m;
     }
@@ -4728,8 +4733,8 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
       ctx.say('Saved');
       if (alive()) onClose(true);
     } catch (e) {
-      const m = ctx.failed(e, q.id);
-      if (!alive()) { pushToast(m, 'error'); return; }
+      const m = ctx.failed(e, qid);
+      if (!alive()) { saving = false; pushToast(m, 'error'); return; }
       saving = false;
       error = m;
     }
@@ -4983,7 +4988,7 @@ if [[ -n $REPLY ]]; then
 fi
 ```
 
-Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && zsh scripts/visual-refresh-gate.sh > ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log 2>&1; tail -3 ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
+Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && W=/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus && TMPDIR=$W/tmp zsh scripts/visual-refresh-gate.sh > $W/tmp/gate.log 2>&1; tail -3 $W/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
 
 - [ ] **Step 8: Full verification.** vitest, svelte-check and the gate.
 
@@ -5024,7 +5029,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - T7: `QuestionCard`;
   - `createQuestion`, `deleteQuestion`, `reorderQuestions`, `listQuestions`.
 - Produces:
-  - `QuestionCard` props `{ q, n, count, moving, autoAdd, onAutoAddDone, onMove, onDelete }`.
+  - `QuestionCard` props `{ q, n, count, moving, deleting, autoAdd, onAutoAddDone, onMove, onDelete }`.
   - `ChoiceAnswers` props add `autoAdd?: boolean; onAutoAddDone?: () => void`.
   - `NewQuestionModal` props `{ onCreate: (body: QuestionCreateBody) => Promise<void>; onClose: (refocus: boolean) => void }`; `onCreate` throws on failure, and on success the quiz body unmounts the modal itself.
   - "+ Add question" is a primary `Button` inside `span.q-add`, which T3's `focusFallback` already queries.
@@ -5479,7 +5484,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
       await onCreate(body());
     } catch (e) {
       const m = e instanceof ApiError ? e.displayMessage : 'Add failed';
-      if (!alive()) { pushToast(m, 'error'); return; }
+      if (!alive()) { saving = false; pushToast(m, 'error'); return; }
       saving = false;
       error = m;
     }
@@ -5563,6 +5568,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   }
   .nq-dec { width: 64px; }
   .nq-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+  @media (forced-colors: active) { .nq-input:focus-visible { outline: 2px solid Highlight; } }
   .nq-input[aria-invalid="true"] { border: 1.5px solid var(--danger); }
   .nq-err { margin: 0; font-size: 12px; color: var(--danger); }
   .nq-hint { margin: 0; font-size: 12px; color: var(--muted); }
@@ -5725,6 +5731,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     try {
       const created = await edits.track(createQuestion(itemId, body));
       if (!live()) return;
+      ++loadToken;   // a resync from an earlier failed create must not overwrite this card
       questions = sorted([...questions, created]);
       autoAddId = isChoice(created) ? created.id : null;
       adding = false;                          // close the modal before moving focus
@@ -5982,7 +5989,7 @@ if [[ -n $REPLY ]]; then
 fi
 ```
 
-Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && zsh scripts/visual-refresh-gate.sh > ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log 2>&1; tail -3 ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
+Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && W=/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus && TMPDIR=$W/tmp zsh scripts/visual-refresh-gate.sh > $W/tmp/gate.log 2>&1; tail -3 $W/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals the number of rows this step added. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
 
 - [ ] **Step 9: Full verification.** vitest, svelte-check and the gate.
 
@@ -6032,7 +6039,7 @@ if grep -l "Discard unsaved changes and continue" $FILES_5D >/dev/null 2>&1; the
 else echo "PASS  5d components use DISCARD_PROMPT, not a copied prompt text"; fi
 ```
 
-Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && zsh scripts/visual-refresh-gate.sh > ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log 2>&1; tail -3 ../.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals 3. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
+Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && W=/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-10-07-visual-refresh-slice5c-constructor-focus && TMPDIR=$W/tmp zsh scripts/visual-refresh-gate.sh > $W/tmp/gate.log 2>&1; tail -3 $W/tmp/gate.log`). Expected: it fails only with `ran N checks, expected <previous count>`, where N − previous equals 3. Set `EXPECTED_CHECKS=N`, re-run, and expect `ALL PASS (N checks)`. Record N in the ledger.
 
 - [ ] **Step 2: The backlog.** Create `docs/backlog/slice5d-quiz-editor-debt.md`:
 
@@ -6051,6 +6058,8 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
 <!-- one bullet per deferred review minor, added task by task -->
 - Plan review (Fable M6): the arrow-key marker test, the T4 ⌘S test and the "structure controls absent" tests pin
   against future code; they are not evidence of current behaviour. Kept as pins.
+- Plan review (Fable M-D): `locked()` awaits `reload()` after every failure, including 422 validation errors —
+  one extra GET per validation error; harmless (rows keyed by id, the field keeps its text).
 - Plan review (Fable M7): the T3 Step 10 microtask fallback for `newTabLinks` is insurance only; `{@attach}` already
   runs after the `{@html}` block on create and update.
 ```
