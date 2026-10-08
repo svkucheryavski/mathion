@@ -1,4 +1,4 @@
-import type { Item, VersionState } from './types';
+import type { BlockContent, Item, VersionState } from './types';
 
 // Progress and quiz score over any set of items (user, 2026-10-08): a sequence
 // row, a block header and the course summary all call progressOf over their own
@@ -53,4 +53,15 @@ export function progressPhrase(p: Progress): string {
     `${p.covered} of ${p.total} ${p.total === 1 ? 'item' : 'items'} completed` +
     (p.quizPct !== null ? `, quiz score ${p.quizPct}%` : p.hasQuiz ? ', no quizzes tried yet' : '')
   );
+}
+
+/** The block the course page opens on load (user, 2026-10-08): the first one
+ *  with an item not yet completed. A block with no items has nothing to do and
+ *  is skipped; null when every block is finished (all start collapsed). */
+export function firstUnfinishedBlockId(blocks: BlockContent[], state: VersionState): number | null {
+  for (const b of blocks) {
+    const p = progressOf(b.sequences.flatMap((s) => s.items), state);
+    if (p.total > 0 && !p.done) return b.id;
+  }
+  return null;
 }

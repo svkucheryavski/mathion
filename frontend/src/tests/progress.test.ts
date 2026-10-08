@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { progressOf, progressPhrase } from '../lib/progress';
-import type { Item, VersionState } from '../lib/types';
+import { progressOf, progressPhrase, firstUnfinishedBlockId } from '../lib/progress';
+import type { BlockContent, Item, VersionState } from '../lib/types';
 
 // The one place progress and quiz score are computed (user, 2026-10-08): a
 // sequence row, a block header and the course summary all call progressOf
@@ -67,5 +67,27 @@ describe('progressPhrase', () => {
   it('"item" for exactly one, "items" for zero and more', () => {
     expect(progressPhrase(progressOf([item(1)], vstate([1])))).toBe('1 of 1 item completed');
     expect(progressPhrase(progressOf([], vstate([])))).toBe('0 of 0 items completed');
+  });
+});
+
+describe('firstUnfinishedBlockId', () => {
+  // The block the course page opens on load (user, 2026-10-08): the first one
+  // whose items are not all completed; every other block starts collapsed.
+  const block = (id: number, items: Item[]): BlockContent =>
+    ({ id, title: `B${id}`, slug: `b${id}`, order: id, info: '', info_html: '',
+       sequences: [{ id: id * 10, title: 'S', slug: 's', order: 1, items }] }) as BlockContent;
+
+  it('picks the first block with an unfinished item', () => {
+    const blocks = [block(1, [item(1), item(2)]), block(2, [item(3)]), block(3, [item(4)])];
+    expect(firstUnfinishedBlockId(blocks, vstate([1, 2]))).toBe(2);
+    expect(firstUnfinishedBlockId(blocks, vstate([1]))).toBe(1);
+  });
+
+  it('skips a block with no items: there is nothing to do there', () => {
+    expect(firstUnfinishedBlockId([block(1, []), block(2, [item(1)])], vstate([]))).toBe(2);
+  });
+
+  it('null when every block is finished (all start collapsed)', () => {
+    expect(firstUnfinishedBlockId([block(1, [item(1)]), block(2, [])], vstate([1]))).toBeNull();
   });
 });

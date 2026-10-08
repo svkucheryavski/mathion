@@ -14,7 +14,7 @@ vi.mock('../stores/currentCourse.svelte', async (importOriginal) => {
   };
 });
 
-import { __test__setSlots, loadCourse } from '../stores/currentCourse.svelte';
+import { __test__setSlots, loadCourse, markItemCovered } from '../stores/currentCourse.svelte';
 import { ApiError } from '../lib/api';
 import CourseView from '../pages/CourseView.svelte';
 import type { StudentMiniProjectListItem } from '../lib/types';
@@ -98,8 +98,13 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
     // unguarded (BlockGroup's own test pins `panel.hidden`), but an assertion
     // that READS as a visibility check and is not one is worse than none, so it
     // is strengthened here rather than left to look like something it isn't.
+    // Since 2026-10-08 a block with no items starts collapsed (only the first
+    // unfinished block opens on load), so open it the way a student would.
     const region = link.closest('[role="region"]') as HTMLElement | null;
     expect(region).not.toBeNull();
+    expect(region!.hidden).toBe(true);
+    (target.querySelector('.all-toggle button') as HTMLButtonElement).click();
+    flushSync();
     expect(region!.hidden).toBe(false);
   });
 });
@@ -179,6 +184,79 @@ describe('CourseView header and course summary', () => {
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
     expect(target.querySelector('.summary')).toBeNull();
+  });
+
+  // Collapse/expand all + the current block (user, 2026-10-08): with every block
+  // open the page read too busy, so only the first unfinished block opens on
+  // load and one small button closes or opens them all.
+  const panels = () =>
+    Array.from(target.querySelectorAll('section.block [role="region"]')).map((e) => !(e as HTMLElement).hidden);
+  const toggle = () => target.querySelector('.all-toggle button') as HTMLButtonElement;
+  const header = (i: number) => target.querySelectorAll('section.block button.acc')[i] as HTMLButtonElement;
+  async function mountWith(items: Record<string, unknown>) {
+    seedCourse(twoBlocks, items);
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+  }
+
+  it('opens only the first unfinished block on load', async () => {
+    await mountWith({ '1': entry(true, null), '2': entry(true, [3, 4]) }); // block 1 done
+    expect(panels()).toEqual([false, true]);
+    expect(toggle().textContent!.trim()).toBe('Collapse all');
+  });
+
+  it('every block finished: all start collapsed and the button offers "Expand all"', async () => {
+    await mountWith({ '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(true, [1, 4]), '4': entry(true, null) });
+    expect(panels()).toEqual([false, false]);
+    expect(toggle().textContent!.trim()).toBe('Expand all');
+  });
+
+  it('"Collapse all" closes every block, then "Expand all" opens every block', async () => {
+    await mountWith({});
+    expect(panels()).toEqual([true, false]);
+    toggle().click();
+    flushSync();
+    expect(panels()).toEqual([false, false]);
+    expect(toggle().textContent!.trim()).toBe('Expand all');
+    toggle().click();
+    flushSync();
+    expect(panels()).toEqual([true, true]);
+    expect(toggle().textContent!.trim()).toBe('Collapse all');
+  });
+
+  it('a header still toggles its own block, and the button label follows', async () => {
+    await mountWith({});
+    header(0).click();
+    flushSync();
+    expect(panels()).toEqual([false, false]);
+    expect(toggle().textContent!.trim()).toBe('Expand all');
+    header(1).click();
+    flushSync();
+    expect(panels()).toEqual([false, true]);
+    expect(toggle().textContent!.trim()).toBe('Collapse all');
+  });
+
+  it('the default is applied ONCE per load: progress made afterwards never re-opens or closes a block', async () => {
+    // Block 1 is current on load. The student closes it, then finishes it (the
+    // player marks items covered in the store). Re-applying the default would
+    // now open block 2; the open set must stay exactly as the student left it.
+    await mountWith({ '1': entry(false, null), '2': entry(false, null) });
+    expect(panels()).toEqual([true, false]);
+    header(0).click();
+    flushSync();
+    markItemCovered(1);
+    markItemCovered(2);
+    flushSync();
+    expect(panels()).toEqual([false, false]);
+    // ...while the meters DO follow the progress.
+    expect((target.querySelector('section.block .acc .pct') as HTMLElement).textContent).toBe('100%');
+  });
+
+  it('no blocks: no collapse/expand button', async () => {
+    seedCourse([], {});
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    expect(target.querySelector('.all-toggle')).toBeNull();
   });
 });
 

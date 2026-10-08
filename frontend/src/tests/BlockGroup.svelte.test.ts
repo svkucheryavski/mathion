@@ -262,6 +262,25 @@ describe('BlockGroup', () => {
     expect(panel.hidden).toBe(false);
   });
 
+  it('takes its open state from the `expanded` prop and still toggles itself', () => {
+    // Collapse/expand all (user, 2026-10-08): CourseView owns which blocks are
+    // open (the current block on load) and binds `expanded`. Unbound, the block
+    // starts open as before.
+    component = mount(BlockGroup, {
+      target,
+      props: { courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE, mpByBlockId: {}, expanded: false },
+    });
+    flushSync();
+    const btn = target.querySelector('header h2 button.acc') as HTMLButtonElement;
+    const panel = target.querySelector('[role="region"]') as HTMLElement;
+    expect(panel.hidden).toBe(true);
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    btn.click();
+    flushSync();
+    expect(panel.hidden).toBe(false);
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('rotates the chevron exactly when the header reads collapsed', () => {
     // `{expanded ? "▾" : "▸"}` encoded the state as DIRECTION, so a static SVG
     // would drop the only VISIBLE collapsed cue and leave just aria-expanded.

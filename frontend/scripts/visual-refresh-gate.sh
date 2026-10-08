@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1381
+EXPECTED_CHECKS=1382
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3481,6 +3481,15 @@ if print -r -- "$cv" | grep -qF '<IconButton round glyph="back" title="Back to c
   echo "PASS  CourseView header is the admin round back button, no '← Courses' text"
 else
   echo "FAIL  CourseView header back control is not the pinned round back button"; fail=1
+fi
+# Collapse / expand all (user, 2026-10-08): ONE quiet control over every block,
+# the shared ghost Button (no hand-rolled button styling), and it is the FIRST
+# child of `.all-toggle` (matched across the two lines, not just both present).
+if [[ $(print -r -- "$cv" | grep -cF '<Button variant="ghost" onclick={() => setAll(!anyOpen)}>{anyOpen ? '"'"'Collapse all'"'"' : '"'"'Expand all'"'"'}</Button>') -eq 1 ]] \
+   && print -r -- "$cv" | perl -0ne 'exit(m{<div class="all-toggle">\s*<Button variant="ghost" onclick=\{\(\) => setAll\(!anyOpen\)\}>} ? 0 : 1)'; then
+  echo "PASS  CourseView collapse/expand-all is the one ghost Button inside .all-toggle"
+else
+  echo "FAIL  CourseView collapse/expand-all control is not the pinned ghost Button"; fail=1
 fi
 
 echo

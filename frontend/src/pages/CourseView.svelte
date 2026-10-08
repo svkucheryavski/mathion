@@ -9,17 +9,32 @@
   import Button from '../components/ui/Button.svelte';
   import IconButton from '../components/ui/IconButton.svelte';
   import CourseProgress from '../components/course/CourseProgress.svelte';
-  import { progressOf } from '../lib/progress';
+  import { progressOf, firstUnfinishedBlockId } from '../lib/progress';
 
   let { courseSlug }: { courseSlug: string } = $props();
 
   let loading = $state(true);
   let error = $state<{ status: number; message: string } | null>(null);
 
+  // Which blocks are open, by block id (user, 2026-10-08). Set ONCE per load:
+  // the first unfinished block opens, the rest start collapsed. After that it
+  // is the student's: nothing re-closes a block as their progress changes.
+  let open = $state<Record<number, boolean>>({});
+  const anyOpen = $derived(currentCourse.value?.blocks.some((b) => open[b.id]) ?? false);
+  function setAll(v: boolean) {
+    for (const b of currentCourse.value?.blocks ?? []) open[b.id] = v;
+  }
+
   $effect(() => {
     loading = true;
     error = null;
     loadCourse(courseSlug)
+      .then(() => {
+        const c = currentCourse.value;
+        if (!c) return;
+        const current = firstUnfinishedBlockId(c.blocks, c.state);
+        open = Object.fromEntries(c.blocks.map((b) => [b.id, b.id === current]));
+      })
       .catch((e: unknown) => {
         if (e instanceof ApiError) {
           error = { status: e.status, message: e.displayMessage };
@@ -81,8 +96,14 @@
     {#if currentCourse.value.blocks.length === 0}
       <EmptyState title="This course has no published blocks yet." />
     {:else}
+      <!-- One small control over every block (user, 2026-10-08): "Collapse all"
+           while any block is open, "Expand all" when none is. -->
+      <div class="all-toggle">
+        <Button variant="ghost" onclick={() => setAll(!anyOpen)}>{anyOpen ? 'Collapse all' : 'Expand all'}</Button>
+      </div>
       {#each currentCourse.value.blocks as b (b.id)}
-        <BlockGroup {courseSlug} block={b} state={currentCourse.value.state} mpByBlockId={currentCourse.value.miniProjectsByBlockId} />
+        <BlockGroup {courseSlug} block={b} state={currentCourse.value.state} mpByBlockId={currentCourse.value.miniProjectsByBlockId}
+          bind:expanded={() => open[b.id] ?? false, (v) => (open[b.id] = v)} />
       {/each}
     {/if}
   {/if}
@@ -96,6 +117,9 @@
   .info { color: var(--muted); margin: var(--space-3) 0; }
   .top { display: flex; align-items: flex-start; gap: 24px; margin-bottom: var(--space-3); }
   .top .info { flex: 1 1 auto; min-width: 0; margin: 0; }
+  /* Right-aligned over the blocks' chevron column; the -6px pulls it up beside
+     the summary card's bottom margin so it reads as part of the list. */
+  .all-toggle { display: flex; justify-content: flex-end; margin: -6px 0 4px; }
   @media (max-width: 640px) {
     .top { flex-direction: column; gap: var(--space-3); }
   }

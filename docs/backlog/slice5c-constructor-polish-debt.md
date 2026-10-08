@@ -120,3 +120,18 @@ rule (Critical/Important are fixed in-task; Minor lands here).
   ProgressMeter chip test re-renders after `unmount` without nulling `component`.
 - `theme-default.css` `--ordinal` comment says "the list order carries the position"; on the student
   page the header aria-label now states "1. Title" instead. Reword when next touched.
+
+## Collapse / expand all (follow-up 3, 2026-10-08) — review-lane minors, deferred
+
+- **Aborted load still runs its `.then`/`.finally`** (both lanes): on a `courseSlug` change A→B the
+  store aborts A, A's promise resolves, its `.then` recomputes `open` from the old snapshot (overwritten
+  by B's later `.then`; harmless) and its `.finally` drops `loading` early (pre-existing). Fix: a
+  `cancelled` flag returned from the effect cleanup, checked in `.then` and `.finally`.
+- **No test for a `courseSlug` change on a live CourseView** (Opus).
+- **`.all-toggle { margin: -6px 0 4px }` assumes `.top` (and its margin-bottom) renders** (Fable): true
+  whenever blocks exist today; note the coupling if `.top` becomes conditional. Its CSS is unpinned
+  (same gap as the other CourseView CSS above).
+- "Right-aligned over the chevron column" is approximate (Opus): the ghost button's text is inset by
+  `--btn-pad-sm` from the card edge, not centred on the chevron. Cosmetic.
+- A block whose only content is a mini-project starts collapsed (as designed: mini-project status does
+  not count toward "unfinished"). Revisit if students miss mini-projects.

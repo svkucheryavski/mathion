@@ -10,14 +10,17 @@
     block,
     state: vstate,
     mpByBlockId,
+    // Bindable (user, 2026-10-08): CourseView decides which blocks start open
+    // (the current block) and drives "Collapse all / Expand all". Unbound, a
+    // block starts open; the header click toggles it either way.
+    expanded = $bindable(true),
   }: {
     courseSlug: string;
     block: BlockContent;
     state: VersionState;
     mpByBlockId?: Record<string, StudentMiniProjectListItem>;
+    expanded?: boolean;
   } = $props();
-
-  let expanded = $state(true);
 
   // `$derived`, not plain `const`s: a parent re-keying its {#each} swaps `block`,
   // and captured ids would leave `aria-controls` pointing at another card's panel.
