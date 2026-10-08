@@ -1,9 +1,9 @@
 # Visual refresh — Slice 5d: a calm quiz editor (overview + small editing modals)
 
-**Status:** draft, rev 4. Written 2026-10-08 for the user's review.
+**Status:** draft, rev 5. Written 2026-10-08 for the user's review.
 - Rev 2 folded in round 1 of the spec review (two Opus, one Fable) and the user's decision D12.
 - Rev 3 folded in round 2 (the same three angles, fresh reviewers) and the user's confirmation of D13.
-- Rev 4 folds in round 3.
+- Rev 4 folded in round 3; rev 5 folds in round 4.
 
 **Branch:** `feat/visual-refresh-slice5-authoring`. It stays local: no push, no merge. 5d lands on top of 5c (tip `2511015`).
 
@@ -79,6 +79,8 @@ Disabled (D13 exception) in two cases:
 - the quiz is **busy**. Each cause has its own tooltip:
   - any quiz request is in flight (structure writes and text saves alike, counted by one in-flight counter): "Delete this item — wait for the save to finish";
   - an edit holds unsaved changes: "Delete this item — finish or discard the open edit first".
+
+  When both causes hold at once, the unsaved-edit tooltip wins, because it is the one the author has to act on.
 
 ### First focus
 
@@ -201,6 +203,7 @@ All three are separate modals stacked on top of the quiz modal through the exist
   - the editor is read-only;
   - Save shows busy;
   - Cancel, × and Esc are disabled.
+  - Closing the quiz modal or leaving the page does not prompt for this modal, and a late failure toasts. This is the same rule as a saving inline field (§While a request runs).
 - Save is also disabled while an upload is running (the 5b rule).
 - On failure, the modal stays open with the text and shows the error inside it.
 
@@ -288,16 +291,22 @@ The frontend sends one request per key change. On success it clears the other ma
 
 **While a request runs:**
 - The control that started it stays enabled, and re-entry is blocked in its handler, so focus is never dropped. Its inputs become `readonly`, never `disabled`.
-- The question's other answer controls are disabled.
+- The question's other answer controls are disabled. **Exception:** during its own move, both arrows of the moved answer row or question card stay enabled, despite the per-question and per-quiz locks, with re-entry blocked in the handler. Only the first/last rule disables one of them, so focus can always land on the other arrow.
 - **A saving inline field** (and the inline title while it saves):
   - It is read-only, ✓ shows busy and Enter is ignored.
   - ✕ is disabled. Esc is swallowed (`preventDefault`) and does nothing, so it never reaches the modal.
-  - It is never closed by another action. Until it settles, every action that would open or start another edit is ignored: the D10 list in §Unsaved work, including the ✎s and the markers.
+  - It is never closed by another action. Until it settles, the **edit-opening** controls are disabled with the tooltip "Wait for the save to finish". These are:
+    - every ✎ (question, explanation, Number, Text, title);
+    - the answer text buttons;
+    - the markers;
+    - the three "+ Add …" controls.
+
+    Moves and deletes follow the locks alone.
   - On success it closes (the focus rules apply). On failure it stays open with the error and the typed text, and becomes an unsaved edit again.
   - Closing the quiz modal or leaving the page during the save does not prompt, because the request is already sent and completes on the server. A late failure then shows as a toast (as `AccordionHeader` does today).
 - **Echoes write back only the fields their request carried.** An answer-text save updates only `text`, a marker save only `is_correct` (plus the local clear of the others), a Number save only value and decimals. This keeps a later write's result from being overwritten by an earlier echo (today's per-field write-back).
 
-**Stale responses** are ignored after the modal has closed or the version has changed (today's `alive && vid === savedVid` guard). A write already sent still completes on the server. A failed write's re-fetch is skipped when its question no longer exists.
+**Stale responses** make no UI writes into the modal after it has closed or the version has changed (today's `alive && vid === savedVid` guard). One exception: a failed save still pushes the global toast (§While a request runs), unless the version has changed (`stillOnVid`). A write already sent still completes on the server. A failed write's re-fetch is skipped when its question no longer exists.
 
 **Errors:**
 - An edit with a field (an inline field, a level-3 modal): the error shows inside it, and the field stays open with the typed text. No toast.
