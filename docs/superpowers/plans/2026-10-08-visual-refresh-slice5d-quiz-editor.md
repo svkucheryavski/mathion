@@ -69,9 +69,13 @@
 - **R3 — The optional `ItemBodyApi` member is `edits?: QuizEdits`** (the spec: "the plan names it").
 - **R4 — New quiz components live in `src/components/editor/quiz/`.** The body is `QuizBody.svelte`, and the name `QuizEditor` is retired.
 - **R5 — ✓ shows "busy" through its tooltip and name, "Saving…".** `IconButton` has no loading state, and adding one would change a shared component for one use.
-- **R6 — Focus fallback is explicit.** `QuizBody.focusFallback(qid)` runs after a Retry, after a 403/409 reload, and after a level-3 close whose opener is gone. There is no DOM observer.
+- **R6 — Focus fallback is explicit.** `QuizBody.focusFallback(qid)` runs after a Retry, after a level-3 close whose opener is gone, and after a 403/409 tree reload: `ctx.failed(e, qid)` waits for the reload and a `tick()`, then falls back only when focus sits on `<body>`. There is no DOM observer.
 - **R7 — The question delete confirm keeps today's text:** `Delete question "<first 80 characters of the text>"? This cannot be undone.`
 - **R8 — A failed Number/Text answer save re-fetches nothing.** Those answers are question fields, and the field keeps the typed value and the error. The spec's "re-fetch that question's answers" applies to choice answers.
+- **R10 — An edit left open through a 403/409 can only be cancelled.** The spec: "Only its save is blocked: it shows the error and can only be cancelled." Every save checks the current permission: `InlineEdit` takes `allowed()`, and the level-3 and New question saves check `ctx.canText` / `ctx.canStruct`. ✓ / Save is then disabled with the new tooltip `FORBIDDEN_TITLE` = "This version can no longer be edited".
+  - *Cost if wrong:* one tooltip string.
+- **R11 — Moves and deletes follow their locks alone** (spec §While a request runs). They call `edits.requestStructure()`, which lets them through while another edit saves, without closing it; otherwise the D10 prompt applies. Edit-opening actions keep `request()`.
+- **R12 — Stale responses use version-aware liveness.** `QuizEdits` takes `live()` (`alive && stillOnVid(savedVid)`), and every quiz component's `alive()` is `mounted && ctx.live()`. A failure after either check fails is a toast.
 - **R9 — Gate anchors use 5d-unique class names** (`.qcard`, `.ans-row`, …), so `own` / `uniq1` resolve each to one file. Each task adds its own rows and bumps `EXPECTED_CHECKS` by exactly the number of rows it added minus the rows it removed.
 
 ## Review Focus
@@ -96,7 +100,7 @@ These are the five failure modes most likely to bite an author. Each is pinned b
 **Frontend libraries**
 - Create `frontend/src/lib/quizFormat.ts` with the chip labels, the Number formatting, hints, `cutName` and `sameNumber`. Test: `frontend/src/lib/quizFormat.test.ts`.
 - Create `frontend/src/lib/newTabLinks.ts`, the attachment that sets `target="_blank"` on links.
-- Create `frontend/src/lib/quizEdits.svelte.ts` with `QuizEdits`, `InlineEdit`, `DISCARD_PROMPT`, `WAIT_TITLE` and `KEY_CONFIRM`. Test: `frontend/src/tests/quizEdits.test.ts`.
+- Create `frontend/src/lib/quizEdits.svelte.ts` with `QuizEdits`, `InlineEdit`, `DISCARD_PROMPT`, `WAIT_TITLE`, `FORBIDDEN_TITLE` and `KEY_CONFIRM`. Test: `frontend/src/tests/quizEdits.test.ts`.
 - Modify `frontend/src/lib/itemBody.ts`: `ItemBodyApi.edits?: QuizEdits`.
 
 **Frontend shared UI**
@@ -549,12 +553,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `sameNumber(typed: string, stored: number | null): boolean`
   - `newTabLinks(html: string): (el: HTMLElement) => void`
   - `class QuizEdits`, with:
-    - `active: EditHandle | null`
+    - `constructor(live?: () => boolean)` and `live(): boolean` (R12)
+    - `active: EditHandle | null` (`$state.raw`: handles keep their identity)
     - `inFlight: boolean`
     - `locked: boolean`
     - `dirty: boolean`
     - `message: string`, `say(text: string)` (the live region; a successful `InlineEdit` save says "Saved")
-    - `request(id?: string): boolean`
+    - `request(id?: string): boolean` (edit-opening actions, D10)
+    - `requestStructure(): boolean` (moves and deletes, R11)
     - `open(h)`, `release(h)`, `discardAll()`
     - `track<T>(p: Promise<T>): Promise<T>`
   - `type EditHandle = { readonly id: string; readonly dirty: boolean; readonly saving: boolean; close(refocus: boolean): void }`
@@ -563,12 +569,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     - `error: string | null`
     - `saving: boolean`
     - `handle: EditHandle`
+    - `canSave: boolean` (from the optional `allowed()` option, R10)
     - `attach(): () => void`
     - `cancel()`
     - `commit(): Promise<void>`
     - `keydown(e: KeyboardEvent)`
   - `type InlineOptions<T>`
-  - `DISCARD_PROMPT`, `WAIT_TITLE`, `KEY_CONFIRM` (strings).
+  - `DISCARD_PROMPT`, `WAIT_TITLE`, `FORBIDDEN_TITLE`, `KEY_CONFIRM` (strings).
   - `FocusTrap` prop `active?: () => boolean`.
   - `MarkdownEditor` prop `noAssets?: boolean`.
 
@@ -818,6 +825,20 @@ describe('QuizEdits (D10)', () => {
     expect(e.active).toBeNull();
   });
 
+  it('a move or delete passes a saving edit untouched; otherwise it is D10', () => {
+    const e = new QuizEdits();
+    const saving = handle({ dirty: true, saving: true });
+    e.open(saving.h);
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    expect(e.requestStructure()).toBe(true);
+    expect(saving.close).not.toHaveBeenCalled();
+    expect(e.active).toBe(saving.h);
+    const changed = handle({ dirty: true }, 'b');
+    e.open(changed.h);
+    expect(e.requestStructure()).toBe(false);
+    expect(ask).toHaveBeenCalledWith(DISCARD_PROMPT);
+  });
+
   it('say clears the message, then sets it', async () => {
     const e = new QuizEdits();
     e.say('Saved');
@@ -939,6 +960,39 @@ describe('InlineEdit', () => {
     expect(toasts.list.map((t) => t.message)).toEqual(['Boom']);
   });
 
+  it('a failure after the version changed is a toast, even while attached', async () => {
+    let live = true;
+    const edits = new QuizEdits(() => live);
+    let reject!: (e: unknown) => void;
+    const ed = new InlineEdit<string>({
+      id: 'x', edits, initial: 'old', same: (a, b) => a === b, check: () => null,
+      send: () => new Promise<void>((_, r) => { reject = r; }), close: vi.fn(),
+    });
+    ed.attach();
+    ed.value = 'new';
+    const p = ed.commit();
+    live = false;
+    reject(new ApiError(500, 'Boom'));
+    await p;
+    expect(toasts.list.map((t) => t.message)).toEqual(['Boom']);
+    expect(ed.error).toBeNull();
+  });
+
+  it('a save the version no longer allows sends nothing; the field and its text stay', async () => {
+    let ok = true;
+    const { ed, send, close } = make({ allowed: () => ok });
+    expect(ed.canSave).toBe(true);
+    ed.value = 'new';
+    ok = false;
+    expect(ed.canSave).toBe(false);
+    await ed.commit();
+    expect(send).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(ed.value).toBe('new');
+    ed.cancel();
+    expect(close).toHaveBeenCalledWith(true);
+  });
+
   it("after: 'reset' keeps the field open and empties it", async () => {
     const { ed, close } = make({ initial: '', after: 'reset' });
     ed.value = 'A';
@@ -992,6 +1046,8 @@ import { pushToast } from '../stores/toasts.svelte';
 
 export const DISCARD_PROMPT = 'Discard unsaved changes and continue?';
 export const WAIT_TITLE = 'Wait for the save to finish';
+// An edit that stayed open through a 403/409 permission flip: it can only be cancelled (R10).
+export const FORBIDDEN_TITLE = 'This version can no longer be edited';
 export const KEY_CONFIRM =
   'This quiz is published. Changing the answer key does not re-score students who already ' +
   'attempted — their recorded scores keep the old key. To re-grade everyone, create a new ' +
@@ -1006,7 +1062,13 @@ export type EditHandle = {
 };
 
 export class QuizEdits {
-  active = $state<EditHandle | null>(null);
+  /** The modal is still showing this version (spec §Stale responses: `alive && vid === savedVid`). */
+  readonly live: () => boolean;
+  constructor(live: () => boolean = () => true) { this.live = live; }
+
+  // RAW, never $state: $state would wrap each plain handle in a new proxy, so
+  // release(h) / `active === h` would never match and the slot would leak.
+  active = $state.raw<EditHandle | null>(null);
   /** The quiz's polite live-region text; QuizBody renders it. */
   message = $state('');
   #pending = $state(0);
@@ -1029,6 +1091,12 @@ export class QuizEdits {
     if (a.dirty && !window.confirm(DISCARD_PROMPT)) return false;
     this.#drop(a);
     return true;
+  }
+
+  /** A move or delete follows its locks alone (spec §While a request runs): a
+   *  saving edit lets it through untouched; otherwise the D10 rule applies. */
+  requestStructure(): boolean {
+    return this.active?.saving ? true : this.request();
   }
 
   open(h: EditHandle): void { this.active = h; }
@@ -1073,6 +1141,9 @@ export type InlineOptions<T> = {
   check: (v: T) => string | null;
   // A published answer key asks first; false keeps the field open, unsent.
   confirmSend?: () => boolean;
+  // False once a 403/409 reload took away the right to this save: the field
+  // stays open with its text (never lost silently) but can only be cancelled.
+  allowed?: () => boolean;
   // Throws on failure (an ApiError's message is shown).
   send: (v: T) => Promise<void>;
   // The owner unmounts the field. `refocus`: return focus to its opener.
@@ -1120,8 +1191,11 @@ export class InlineEdit<T> {
     if (!this.saving) this.#o.close(true);
   }
 
+  /** The version still allows this save; ✓ is disabled with FORBIDDEN_TITLE otherwise. */
+  get canSave(): boolean { return this.#o.allowed?.() ?? true; }
+
   async commit(): Promise<void> {
-    if (this.saving) return;
+    if (this.saving || !this.canSave) return;
     const o = this.#o;
     // Unchanged first: an untouched empty Text key closes rather than erroring.
     if (o.unchanged ? o.unchanged(this.value) : o.same(this.value, o.initial)) { o.close(true); return; }
@@ -1134,15 +1208,15 @@ export class InlineEdit<T> {
       await o.edits.track(o.send(this.value));
     } catch (e) {
       const m = e instanceof ApiError ? e.displayMessage : 'Save failed';
-      // A save always reports its failure: inline while the field is open,
-      // otherwise as a toast (spec §While a request runs).
-      if (!this.#alive) { pushToast(m, 'error'); return; }
+      // A save always reports its failure: inline while the field is open on
+      // this version, otherwise as a toast (spec §While a request runs).
+      if (!this.#alive || !o.edits.live()) { pushToast(m, 'error'); return; }
       this.saving = false;
       this.error = m;
       return;
     }
     o.edits.say('Saved');
-    if (!this.#alive) return;
+    if (!this.#alive || !o.edits.live()) return;
     this.saving = false;
     if (o.after === 'reset') this.value = o.initial;
     else o.close(true);
@@ -1168,7 +1242,9 @@ export class InlineEdit<T> {
 - [ ] **Step 8: Run it to see it pass**
 
 Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europe/Copenhagen npx vitest run src/tests/quizEdits.test.ts`
-Expected: PASS (21 tests).
+Expected: PASS (24 tests).
+
+> The identity assertions (`toBe(h)`, `release clears only its own handle`) are the guard against a proxied slot. If they fail, the fix is `$state.raw`, never loosening them to `toEqual`.
 
 - [ ] **Step 9: Write the failing FocusTrap / nested-modal tests.**
 
@@ -1206,7 +1282,7 @@ Expected: PASS (21 tests).
   // Slice-5d: a level-3 modal mounted INSIDE a level-2 modal's DOM, as the
   // quiz cards mount theirs.
   import Modal from '../../components/ui/Modal.svelte';
-  let { inner = true, onOuterClose = () => {}, onInnerClose = () => {} }:
+  let { inner = false, onOuterClose = () => {}, onInnerClose = () => {} }:
     { inner?: boolean; onOuterClose?: () => void; onInnerClose?: () => void } = $props();
 </script>
 
@@ -1232,7 +1308,14 @@ describe('Modal — nested level-3 inside level-2 (5d)', () => {
     document.body.appendChild(host);
     const onOuterClose = vi.fn();
     const onInnerClose = vi.fn();
-    const cmp = mount(NestedHarness, { target: host, props: { onOuterClose, onInnerClose } });
+    // The outer modal settles first, then level 3 opens over it — as in the app.
+    // Mounting both at once would run the inner onMount first and leave the
+    // OUTER modal on top of the stack.
+    const props = $state({ inner: false, onOuterClose, onInnerClose });
+    const cmp = mount(NestedHarness, { target: host, props });
+    flushSync();
+    await Promise.resolve();
+    props.inner = true;
     flushSync();
     await Promise.resolve();
     const innerPanel = document.querySelector<HTMLElement>('section[aria-labelledby="inner-t"]')!;
@@ -1821,6 +1904,8 @@ describe('Quiz overview (5d T3)', () => {
     byName(panel(), 'Retry')!.click();
     await settle();
     expect(cards().length).toBe(1);
+    // Focus never drops to <body>: the fallback (no ✎ yet in T3, so ×).
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
   });
 
   it('a card\'s answers: "Loading answers…", then "Couldn\'t load answers" + Retry', async () => {
@@ -1834,6 +1919,8 @@ describe('Quiz overview (5d T3)', () => {
     byName(cards()[0], 'Retry')!.click();
     await settle();
     expect(rows(cards()[0]).length).toBe(1);
+    // Focus never drops to <body>: the fallback (no ✎ yet in T3, so ×).
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
   });
 
   it('an empty quiz says so', async () => {
@@ -1885,8 +1972,10 @@ export type QuizCtx = {
   readonly quizLock: boolean;     // the per-quiz lock (question add, move, delete)
   live(): boolean;                // still mounted and still on this version
   say(message: string): void;     // the polite live region
-  // The message for a failed request; on 403/409 also reloads the tree (perms re-derive).
-  failed(e: unknown): string;
+  // The message for a failed request. On 403/409 it also reloads the tree, so
+  // permissions re-derive; if that removed the focused control, focus falls back
+  // to question `qid`'s ✎, else "+ Add question", else × (R6).
+  failed(e: unknown, qid?: number | null): string;
   // Write echo fields back into the question list (only the fields a request carried).
   patch(qid: number, fields: Partial<AuthoringQuestion>): void;
   hasQuestion(qid: number): boolean;
@@ -1933,7 +2022,8 @@ export type QuizCtx = {
     guardDirty?: boolean; busy?: boolean;
   } = $props();
 
-  export const edits = new QuizEdits();
+  // `live` is read only after a request settles, when everything below exists.
+  export const edits = new QuizEdits(() => live());
   export async function save(_titleDraft: string | undefined): Promise<SaveOutcome> { return { outcome: 'ok' }; }
   export function validate(): boolean { return true; }
   export function discard(): void { edits.discardAll(); }
@@ -1944,6 +2034,8 @@ export type QuizCtx = {
 
   const savedVid = untrack(() => vid);
   let alive = true;
+  // Still showing this version (spec §Stale responses: today's `alive && vid === savedVid`).
+  const live = () => alive && stillOnVid(savedVid);
   let loadToken = 0;
   onDestroy(() => { alive = false; loadToken++; });
 
@@ -1974,14 +2066,14 @@ export type QuizCtx = {
   async function retry() {
     await load();
     await tick();
-    if (!alive) return;
+    if (!live()) return;
     if (status === 'error') retryWrap?.querySelector('button')?.focus();
     else void focusFallback(questions[0]?.id ?? null);
   }
 
   async function focusFallback(qid: number | null) {
     await tick();
-    if (!alive || !rootEl) return;
+    if (!live() || !rootEl) return;
     const card = qid == null ? null : rootEl.querySelector(`[data-q-id="${qid}"]`);
     const target =
       card?.querySelector<HTMLElement>('.qhead button[data-glyph="pencil"]:not([disabled])')
@@ -2000,16 +2092,21 @@ export type QuizCtx = {
     get disabled() { return versionDisabled; },
     busyQuestions,
     get quizLock() { return quizLock; },
-    live: () => alive && stillOnVid(savedVid),
+    live,
     say: (message) => edits.say(message),
-    failed(e) {
+    failed(e, qid = null) {
       if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
-        void loadAdminTree(savedVid, { force: true });
+        void loadAdminTree(savedVid, { force: true }).then(async () => {
+          await tick();
+          if (!live()) return;
+          const a = document.activeElement;
+          if (a === null || a === document.body) void focusFallback(qid);
+        });
       }
       return e instanceof ApiError ? e.displayMessage : 'Save failed';
     },
     patch(qid, fields) {
-      if (alive) questions = questions.map((x) => (x.id === qid ? { ...x, ...fields } : x));
+      if (live()) questions = questions.map((x) => (x.id === qid ? { ...x, ...fields } : x));
     },
     hasQuestion: (qid) => questions.some((x) => x.id === qid),
     focusFallback: (qid) => { void focusFallback(qid); },
@@ -2153,9 +2250,11 @@ export type QuizCtx = {
   const ctx = getContext<QuizCtx>(QUIZ_CTX);
 
   let status = $state<'loading' | 'loaded' | 'error'>('loading');
-  let alive = true;
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
   let token = 0;
-  onDestroy(() => { alive = false; token++; });
+  onDestroy(() => { mounted = false; token++; });
 
   async function load() {
     const my = ++token;
@@ -2174,7 +2273,7 @@ export type QuizCtx = {
 
   async function retry() {
     await load();
-    if (alive && status === 'loaded') ctx.focusFallback(q.id);
+    if (alive() && status === 'loaded') ctx.focusFallback(q.id);
   }
 </script>
 
@@ -2422,7 +2521,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes:
-  - T2: `QuizEdits.request/locked/dirty/inFlight/say`, `InlineEdit`, `WAIT_TITLE`;
+  - T2: `QuizEdits.request/locked/dirty/inFlight/say`, `InlineEdit` (with `allowed`), `WAIT_TITLE`, `FORBIDDEN_TITLE`;
   - T3: `QuizBody` `edits` export;
   - `renameItem(itemId, title)` from `lib/quizAuthoring.ts`.
 - Produces:
@@ -2632,7 +2731,7 @@ Expected: FAIL. There is no "Edit title" button yet.
 
 ```ts
   import { ApiError } from '../../lib/api';
-  import { InlineEdit, WAIT_TITLE } from '../../lib/quizEdits.svelte';
+  import { FORBIDDEN_TITLE, InlineEdit, WAIT_TITLE } from '../../lib/quizEdits.svelte';
   import { renameItem } from '../../lib/quizAuthoring';
 ```
 
@@ -2662,10 +2761,11 @@ Expected: FAIL. There is no "Edit title" button yet.
       initial: shownTitle,
       same: (a, b) => a.trim() === b.trim(),
       check: (v) => (v.trim() === '' ? 'Title is required' : null),
+      allowed: () => perms.canEditTextFields,
       send: async (v) => {
         try {
           const echo = await renameItem(item.id, v.trim());
-          if (alive) shownTitle = echo.title;
+          if (alive && stillOnVid(savedVid)) shownTitle = echo.title;
           if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
         } catch (e) {
           if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
@@ -2747,8 +2847,9 @@ Expected: FAIL. There is no "Edit title" button yet.
     {:else}{isQuiz ? shownTitle : item.title}{/if}
   </h2>
   {#if titleEdit}
-    <IconButton glyph="check" size="sm" title={titleEdit.saving ? 'Saving…' : 'Save title'}
-                onclick={() => void titleEdit?.commit()} />
+    <IconButton glyph="check" size="sm"
+                title={titleEdit.saving ? 'Saving…' : titleEdit.canSave ? 'Save title' : FORBIDDEN_TITLE}
+                disabled={!titleEdit.canSave} onclick={() => void titleEdit?.commit()} />
     <IconButton glyph="close" size="sm" title="Cancel" disabled={titleEdit.saving}
                 onclick={() => titleEdit?.cancel()} />
   {:else if isQuiz && canEditText}
@@ -2817,11 +2918,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `frontend/src/components/editor/quiz/InlineInput.svelte`
 - Replace: `frontend/src/components/editor/quiz/ChoiceAnswers.svelte`, `frontend/src/components/editor/quiz/ChoiceRow.svelte` (whole files)
 - Create: `frontend/src/tests/ChoiceAnswers.svelte.test.ts`
+- Modify: `frontend/src/tests/QuizOverview.svelte.test.ts` (one assertion: the answer button's text now carries the hidden "Edit answer" prefix)
 - Modify: `frontend/scripts/visual-refresh-gate.sh` ((ai) rows)
 
 **Interfaces:**
 - Consumes:
-  - T2: `InlineEdit`, `KEY_CONFIRM`, `WAIT_TITLE`, `cutName`, `DISCARD_PROMPT`;
+  - T2: `InlineEdit` (with `allowed`), `requestStructure`, `KEY_CONFIRM`, `WAIT_TITLE`, `FORBIDDEN_TITLE`, `cutName`, `DISCARD_PROMPT`;
   - T3: `QuizCtx` (`edits`, `busyQuestions`, `canText`, `canStruct`, `published`, `failed`, `hasQuestion`, `say`, `focusFallback`);
   - `listOptions`, `createOption`, `updateOption`, `deleteOption`, `reorderOptions`.
 - Produces:
@@ -3243,7 +3345,7 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
   // InlineEdit; this takes the edit slot while mounted and focuses the field.
   import { untrack } from 'svelte';
   import IconButton from '../../ui/IconButton.svelte';
-  import type { InlineEdit } from '../../../lib/quizEdits.svelte';
+  import { FORBIDDEN_TITLE, type InlineEdit } from '../../../lib/quizEdits.svelte';
 
   let { edit, label, saveTitle = 'Save', maxlength = 500, hint = undefined }: {
     edit: InlineEdit<string>; label: string; saveTitle?: string; maxlength?: number; hint?: string;
@@ -3271,7 +3373,8 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
       oninput={() => { edit.error = null; }}
       {@attach attach}
     />
-    <IconButton glyph="check" size="sm" title={edit.saving ? 'Saving…' : saveTitle} onclick={() => void edit.commit()} />
+    <IconButton glyph="check" size="sm" title={edit.saving ? 'Saving…' : edit.canSave ? saveTitle : FORBIDDEN_TITLE}
+                disabled={!edit.canSave} onclick={() => void edit.commit()} />
     <IconButton glyph="close" size="sm" title="Cancel" disabled={edit.saving} onclick={() => edit.cancel()} />
   </span>
   {#if edit.error}
@@ -3408,6 +3511,18 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
 </style>
 ```
 
+- [ ] **Step 4b: Update T3's answer-row assertion.** In a created version the answer is now a button whose text starts with the hidden "Edit answer" prefix. In `frontend/src/tests/QuizOverview.svelte.test.ts`, test `answer rows: text, and a "correct" tag on the correct one`, change
+
+```ts
+    expect(text(r1.querySelector('.ans-text'))).toBe('Eleven');
+```
+
+to
+
+```ts
+    expect(text(r1.querySelector('.ans-text'))).toBe('Edit answer Eleven');   // the hidden prefix + the answer (T5)
+```
+
 - [ ] **Step 5: Replace `frontend/src/components/editor/quiz/ChoiceAnswers.svelte`:**
 
 ```svelte
@@ -3441,9 +3556,11 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
   let addEdit = $state<InlineEdit<string> | null>(null);
   let listEl = $state<HTMLElement>();
   let addWrap = $state<HTMLElement>();
-  let alive = true;
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
   let token = 0;
-  onDestroy(() => { alive = false; token++; });
+  onDestroy(() => { mounted = false; token++; });
 
   const multiple = $derived(q.type === 'multiple_choice');
   const correctCount = $derived((options ?? []).filter((o) => o.is_correct).length);
@@ -3467,17 +3584,17 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
 
   async function retry() {
     await load();
-    if (alive && status === 'loaded') ctx.focusFallback(q.id);
+    if (alive() && status === 'loaded') ctx.focusFallback(q.id);
   }
 
   // After a failed write: the server's truth, without the loading state (an
   // open field stays mounted). Skipped when the question itself is gone.
   async function reload() {
-    if (!alive || !ctx.hasQuestion(q.id)) return;
+    if (!alive() || !ctx.hasQuestion(q.id)) return;
     const my = ++token;
     try {
       const list = await listOptions(q.id);
-      if (my === token && alive) options = sortByOrder(list);
+      if (my === token && alive()) options = sortByOrder(list);
     } catch { /* keep what is shown; the failure was already reported */ }
   }
 
@@ -3488,12 +3605,14 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
     try {
       return await ctx.edits.track(run());
     } catch (e) {
-      ctx.failed(e);          // 403/409: the tree reloads, so permissions re-derive
-      void reload();
+      ctx.failed(e, q.id);    // 403/409: the tree reloads, so permissions re-derive
+      // Awaited while the lock is still held: a retry cannot succeed before this
+      // older snapshot lands and be overwritten by it.
+      await reload();
       throw e;
     } finally {
       ctx.busyQuestions.delete(q.id);
-      if (alive) op = null;
+      if (alive()) op = null;
     }
   }
   // An action without a field reports its failure as a toast — always, even
@@ -3530,14 +3649,14 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
   // Back to the opener, or the §Focus fallback when it is gone or disabled.
   async function focusText(id: number) {
     await tick();
-    if (!alive) return;
+    if (!alive()) return;
     const el = rowEl(id)?.querySelector<HTMLButtonElement>('button.ans-edit');
     if (el && !el.disabled) el.focus();
     else ctx.focusFallback(q.id);
   }
   async function focusAdd() {
     await tick();
-    if (!alive) return;
+    if (!alive()) return;
     const b = addBtn();
     if (b && !b.disabled) b.focus();
     else ctx.focusFallback(q.id);
@@ -3552,11 +3671,12 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
     if (!ctx.edits.request()) return;                     // D10 first …
     if (ctx.published && !window.confirm(KEY_CONFIRM)) return;   // … then the key confirm
     const echo = await act(`mark:${o.id}`, () => updateOption(o.id, { is_correct: next }));
-    if (!echo || !alive) return;
+    if (!echo || !alive()) return;
     // Only is_correct is written back; single choice clears the others (D12).
     options = (options ?? []).map((x) =>
       x.id === o.id ? { ...x, is_correct: echo.is_correct }
         : !multiple && echo.is_correct ? { ...x, is_correct: false } : x);
+    ctx.say('Saved');
   }
 
   // ---- The inline text edit ----
@@ -3570,9 +3690,10 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
       initial: o.text,
       same: (a, b) => a.trim() === b.trim(),
       check: (v) => (v.trim() === '' ? 'Enter the answer text' : null),
+      allowed: () => ctx.canText,
       send: async (v) => {
         const echo = await locked(`text:${o.id}`, () => updateOption(o.id, { text: v.trim() }));
-        if (alive) options = (options ?? []).map((x) => (x.id === o.id ? { ...x, text: echo.text } : x));
+        if (alive()) options = (options ?? []).map((x) => (x.id === o.id ? { ...x, text: echo.text } : x));
       },
       close: (refocus) => {
         editId = null;
@@ -3592,10 +3713,11 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
       initial: '',
       same: (a, b) => a.trim() === b.trim(),     // empty = unchanged: Enter closes the row
       check: () => null,
+      allowed: () => ctx.canStruct,
       send: async (v) => {
         const first = !multiple && (options ?? []).length === 0;   // D14
         const created = await locked('add', () => createOption(q.id, { text: v.trim(), is_correct: first }));
-        if (!alive) return;
+        if (!alive()) return;
         options = [...(options ?? []), created];
         void tick().then(() => addWrap?.querySelector<HTMLInputElement>('input')?.focus());
       },
@@ -3614,7 +3736,7 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
     const i = cur.findIndex((x) => x.id === o.id);
     const j = i + dir;
     if (i < 0 || j < 0 || j >= cur.length) return;
-    if (!ctx.edits.request()) return;
+    if (!ctx.edits.requestStructure()) return;   // moves follow their locks alone
     const next = [...cur];
     [next[i], next[j]] = [next[j]!, next[i]!];
     options = next.map((x, k) => ({ ...x, order: k + 1 }));
@@ -3633,11 +3755,11 @@ Expected: FAIL. Most tests fail, because there are no `button.ans-mark`, `button
   // ---- Delete: no confirmation (D14) ----
   async function remove(o: AuthoringOption) {
     if (op !== null || deleteReason(o) !== null) return;
-    if (!ctx.edits.request()) return;
+    if (!ctx.edits.requestStructure()) return;   // deletes follow their locks alone
     const ids = (options ?? []).map((x) => x.id);
     const idx = ids.indexOf(o.id);
     const ok = await act(`delete:${o.id}`, async () => { await deleteOption(o.id); return true; });
-    if (!ok || !alive) return;
+    if (!ok || !alive()) return;
     options = (options ?? []).filter((x) => x.id !== o.id);
     await tick();
     const nextId = ids[idx + 1] ?? ids[idx - 1];
@@ -3703,8 +3825,8 @@ Expected: PASS. If any test asserts a behaviour the spec states differently, the
 
 ```zsh
   d '\.row-acts' '' 'opacity:0' 'margin-left:auto'
-  check "ChoiceRow row actions show on hover (D8)" "\.ans-row\.${H}:hover \.row-acts\.${H}[^{]*\{opacity:1\}"
-  check "ChoiceRow row actions show on keyboard focus (D8)" "\.ans-row\.${H}:focus-within \.row-acts\.${H}\{opacity:1\}"
+  check "ChoiceRow row actions show on hover (D8)" "\.ans-row\.${H}:hover \.row-acts:where\(\.${H}\)\{opacity:1\}"
+  check "ChoiceRow row actions show on keyboard focus (D8)" "\.ans-row\.${H}:focus-within \.row-acts:where\(\.${H}\)\{opacity:1\}"
   check "ChoiceRow row actions always shown without hover (D8)" "@media \(hover: ?none\)\{\.row-acts\.${H}\{opacity:1\}"
   d '\.ans-row:not\(\.ok\):hover' '' 'background:var\(--focus-row\)'
 ```
@@ -3745,7 +3867,7 @@ Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend &&
   - Commit:
 
 ```bash
-cd /Users/svkucheryavski/Documents/Developing/mathion && git add frontend/src/components/editor/quiz/InlineInput.svelte frontend/src/components/editor/quiz/ChoiceRow.svelte frontend/src/components/editor/quiz/ChoiceAnswers.svelte frontend/src/tests/ChoiceAnswers.svelte.test.ts frontend/scripts/visual-refresh-gate.sh && git commit -m "feat(editor): Slice 5d T5 — choice answers edited in place: marker, text, add, move, delete
+cd /Users/svkucheryavski/Documents/Developing/mathion && git add frontend/src/components/editor/quiz/InlineInput.svelte frontend/src/components/editor/quiz/ChoiceRow.svelte frontend/src/components/editor/quiz/ChoiceAnswers.svelte frontend/src/tests/ChoiceAnswers.svelte.test.ts frontend/src/tests/QuizOverview.svelte.test.ts frontend/scripts/visual-refresh-gate.sh && git commit -m "feat(editor): Slice 5d T5 — choice answers edited in place: marker, text, add, move, delete
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3761,7 +3883,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes:
-  - T2: `InlineEdit` (with `unchanged`), `KEY_CONFIRM`, `WAIT_TITLE`, `sameNumber`, `formatNumber`, `decimalsText`, `toleranceText`;
+  - T2: `InlineEdit` (with `unchanged`, `allowed`), `KEY_CONFIRM`, `WAIT_TITLE`, `FORBIDDEN_TITLE`, `sameNumber`, `formatNumber`, `decimalsText`, `toleranceText`;
   - T3: `QuizCtx.patch` / `failed` / `busyQuestions` / `published` / `canText`;
   - T5: `InlineInput`;
   - `updateQuestion`, `validateNumericAnswer`.
@@ -3952,7 +4074,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
   import { getContext, onDestroy, tick, untrack } from 'svelte';
   import IconButton from '../../ui/IconButton.svelte';
   import InlineInput from './InlineInput.svelte';
-  import { InlineEdit, KEY_CONFIRM, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
+  import { FORBIDDEN_TITLE, InlineEdit, KEY_CONFIRM, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { decimalsText, formatNumber, sameNumber, toleranceText } from '../../../lib/quizFormat';
   import {
@@ -3963,8 +4085,10 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
   const ctx = getContext<QuizCtx>(QUIZ_CTX);
   const uid = $props.id();
   const errId = `${uid}-err`;
-  let alive = true;
-  onDestroy(() => { alive = false; });
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
+  onDestroy(() => { mounted = false; });
 
   type NumDraft = { v: string; d: string };
   let numEdit = $state<InlineEdit<NumDraft> | null>(null);
@@ -3987,7 +4111,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
   // Back to ✎, or the §Focus fallback when a 403/409 reload removed it.
   async function refocusPencil() {
     await tick();
-    if (!alive) return;
+    if (!alive()) return;
     if (pencil?.isConnected && !pencil.disabled) pencil.focus();
     else ctx.focusFallback(q.id);
   }
@@ -4001,7 +4125,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
       for (const k of Object.keys(body)) fields[k] = echo[k as keyof AuthoringQuestion];
       ctx.patch(q.id, fields as Partial<AuthoringQuestion>);
     } catch (e) {
-      ctx.failed(e);   // 403/409: the tree reloads; the editor stays open with the error
+      ctx.failed(e, q.id);   // 403/409: the tree reloads; the editor stays open with the error
       throw e;
     } finally {
       ctx.busyQuestions.delete(q.id);
@@ -4026,6 +4150,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
         return decimalsOk(x.d) ? null : 'Decimals must be a whole number from 0 to 10.';
       },
       confirmSend: confirmKey,
+      allowed: () => ctx.canText,
       send: (x) => {
         const c = validateNumericAnswer(x.v);
         return sendKey({ correct_numeric: c.ok ? Number(c.canonical) : null, precision: Number(x.d) });
@@ -4044,6 +4169,7 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
       same: (a, b) => a.trim() === b.trim(),
       check: (v) => (v.trim() === '' ? 'Enter the answer' : null),
       confirmSend: confirmKey,
+      allowed: () => ctx.canText,
       send: (v) => sendKey({ correct_text: v.trim() }),
       close: (refocus) => { textEdit = null; if (refocus) void refocusPencil(); },
     });
@@ -4072,8 +4198,9 @@ Expected: FAIL. There is no "Edit the answer to question 1" button yet; only the
                readonly={numEdit.saving} bind:value={numEdit.value.d} onkeydown={(e) => numEdit?.keydown(e)}
                oninput={() => { if (numEdit) numEdit.error = null; }} />
       </label>
-      <IconButton glyph="check" size="sm" title={numEdit.saving ? 'Saving…' : 'Save answer'}
-                  onclick={() => void numEdit?.commit()} />
+      <IconButton glyph="check" size="sm"
+                  title={numEdit.saving ? 'Saving…' : numEdit.canSave ? 'Save answer' : FORBIDDEN_TITLE}
+                  disabled={!numEdit.canSave} onclick={() => void numEdit?.commit()} />
       <IconButton glyph="close" size="sm" title="Cancel" disabled={numEdit.saving} onclick={() => numEdit?.cancel()} />
     </div>
     {#if numEdit.error}<span class="key-err" id={errId} role="alert">{numEdit.error}</span>{/if}
@@ -4163,11 +4290,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `frontend/src/components/editor/quiz/QuestionTextModal.svelte`, `ExplanationModal.svelte`
 - Replace: `frontend/src/components/editor/quiz/QuestionCard.svelte` (whole file: adds ✎ "Edit question N", the explanation ✎ / "+ Add explanation", and the level-3 mounts)
 - Create: `frontend/src/tests/QuizModals.svelte.test.ts`
+- Modify: `frontend/src/tests/QuizOverview.svelte.test.ts` (the two Retry focus assertions now expect the card's ✎)
 - Modify: `frontend/scripts/visual-refresh-gate.sh` ((ai) rows)
 
 **Interfaces:**
 - Consumes:
-  - T2: `DISCARD_PROMPT`, `WAIT_TITLE`, `EditHandle`, and MarkdownEditor `noAssets`;
+  - T2: `DISCARD_PROMPT`, `WAIT_TITLE`, `FORBIDDEN_TITLE`, `EditHandle`, and MarkdownEditor `noAssets`;
   - T3: `QuizCtx` (`edits`, `patch`, `failed`, `say`, `focusFallback`, `assetContext`, `canText`, `disabled`);
   - T4: the item modal ignores ⌘S from other panels;
   - `updateQuestion`.
@@ -4433,7 +4561,7 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   import Modal from '../../ui/Modal.svelte';
   import Button from '../../ui/Button.svelte';
   import MarkdownEditor from '../MarkdownEditor.svelte';
-  import { DISCARD_PROMPT, type EditHandle } from '../../../lib/quizEdits.svelte';
+  import { DISCARD_PROMPT, FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { TYPE_LABEL } from '../../../lib/quizFormat';
   import { pushToast } from '../../../stores/toasts.svelte';
@@ -4451,7 +4579,9 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   let saving = $state(false);
   let uploading = $state(false);
   let error = $state<string | null>(null);
-  let alive = true;
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
 
   const handle: EditHandle = {
     id: `qtext-${qid}`,
@@ -4461,7 +4591,7 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   };
   $effect(() => {
     untrack(() => ctx.edits.open(handle));
-    return () => { alive = false; ctx.edits.release(handle); };
+    return () => { mounted = false; ctx.edits.release(handle); };
   });
 
   function requestClose() {
@@ -4471,7 +4601,7 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   }
 
   async function save() {
-    if (saving || uploading) return;
+    if (saving || uploading || !ctx.canText) return;   // R10: a lost right leaves Cancel only
     if (value.trim() === '') { error = 'Enter the question text'; return; }
     if (value === initial) { onClose(true); return; }
     error = null;
@@ -4480,11 +4610,11 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
       const echo = await ctx.edits.track(updateQuestion(qid, { text_md: value }));
       ctx.patch(qid, { text_md: echo.text_md, text_html: echo.text_html });
       ctx.say('Saved');
-      if (alive) onClose(true);
+      if (alive()) onClose(true);
     } catch (e) {
-      const m = ctx.failed(e);
+      const m = ctx.failed(e, q.id);
       // A failed save always reports: inside the modal, or as a toast once it is gone.
-      if (!alive) { pushToast(m, 'error'); return; }
+      if (!alive()) { pushToast(m, 'error'); return; }
       saving = false;
       error = m;
     }
@@ -4510,8 +4640,9 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
 {#snippet foot()}
   <span class="qt-gap"></span>
   <Button variant="ghost" disabled={saving} onclick={requestClose}>Cancel</Button>
-  <Button variant="primary" loading={saving} disabled={uploading}
-          title={uploading ? 'Wait for the upload to finish' : undefined} onclick={() => void save()}>Save</Button>
+  <Button variant="primary" loading={saving} disabled={uploading || !ctx.canText}
+          title={!ctx.canText ? FORBIDDEN_TITLE : uploading ? 'Wait for the upload to finish' : undefined}
+          onclick={() => void save()}>Save</Button>
 {/snippet}
 
 <Modal
@@ -4549,7 +4680,7 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   import Modal from '../../ui/Modal.svelte';
   import Button from '../../ui/Button.svelte';
   import MarkdownEditor from '../MarkdownEditor.svelte';
-  import { DISCARD_PROMPT, type EditHandle } from '../../../lib/quizEdits.svelte';
+  import { DISCARD_PROMPT, FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { pushToast } from '../../../stores/toasts.svelte';
   import { updateQuestion, type AuthoringQuestion } from '../../../lib/quizAuthoring';
@@ -4567,7 +4698,9 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   let value = $state(initial);
   let saving = $state(false);
   let error = $state<string | null>(null);
-  let alive = true;
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
 
   const handle: EditHandle = {
     id: `qexpl-${qid}`,
@@ -4577,7 +4710,7 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   };
   $effect(() => {
     untrack(() => ctx.edits.open(handle));
-    return () => { alive = false; ctx.edits.release(handle); };
+    return () => { mounted = false; ctx.edits.release(handle); };
   });
 
   function requestClose() {
@@ -4593,23 +4726,23 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
       const echo = await ctx.edits.track(updateQuestion(qid, { explanation_md: md }));
       ctx.patch(qid, { explanation_md: echo.explanation_md, explanation_html: echo.explanation_html });
       ctx.say('Saved');
-      if (alive) onClose(true);
+      if (alive()) onClose(true);
     } catch (e) {
-      const m = ctx.failed(e);
-      if (!alive) { pushToast(m, 'error'); return; }
+      const m = ctx.failed(e, q.id);
+      if (!alive()) { pushToast(m, 'error'); return; }
       saving = false;
       error = m;
     }
   }
 
   function save() {
-    if (saving) return;
+    if (saving || !ctx.canText) return;   // R10: a lost right leaves Cancel only
     if (value === initial) { onClose(true); return; }
     void send(value.trim() === '' ? null : value);
   }
 
   function remove() {
-    if (saving) return;
+    if (saving || !ctx.canText) return;
     if (!window.confirm(`Remove the explanation for question ${n}?`)) return;
     void send(null);
   }
@@ -4632,11 +4765,13 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
 
 {#snippet foot()}
   {#if exists}
-    <Button variant="danger" disabled={saving} onclick={remove}>Remove explanation</Button>
+    <Button variant="danger" disabled={saving || !ctx.canText} title={ctx.canText ? undefined : FORBIDDEN_TITLE}
+            onclick={remove}>Remove explanation</Button>
   {/if}
   <span class="ex-gap"></span>
   <Button variant="ghost" disabled={saving} onclick={requestClose}>Cancel</Button>
-  <Button variant="primary" loading={saving} onclick={save}>Save</Button>
+  <Button variant="primary" loading={saving} disabled={!ctx.canText} title={ctx.canText ? undefined : FORBIDDEN_TITLE}
+          onclick={save}>Save</Button>
 {/snippet}
 
 <Modal
@@ -4661,6 +4796,20 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   .ex-note { margin: 0; font-size: 12px; color: var(--muted); }
   .ex-err { margin: 0; font-size: 12px; color: var(--danger); }
 </style>
+```
+
+- [ ] **Step 4b: Retry now lands on the card's ✎.** In `frontend/src/tests/QuizOverview.svelte.test.ts`, in both Retry tests (`question list: a skeleton, …` and `a card's answers: …`), replace
+
+```ts
+    // Focus never drops to <body>: the fallback (no ✎ yet in T3, so ×).
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+```
+
+with
+
+```ts
+    // Focus never drops to <body>: the fallback is the card's ✎ (T7).
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
 ```
 
 - [ ] **Step 5: Replace `frontend/src/components/editor/quiz/QuestionCard.svelte`:**
@@ -4688,8 +4837,10 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
   const ctx = getContext<QuizCtx>(QUIZ_CTX);
   const uid = $props.id();
   const textId = `${uid}-text`;
-  let alive = true;
-  onDestroy(() => { alive = false; });
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
+  onDestroy(() => { mounted = false; });
 
   const choice = $derived(q.type === 'single_choice' || q.type === 'multiple_choice');
   let options = $state<AuthoringOption[] | null>(null);
@@ -4709,7 +4860,7 @@ Expected: FAIL. There is no "Edit question 1" button yet. "an echo writes back o
     l3 = null;
     if (!refocus) return;
     await tick();
-    if (!alive || !cardEl) return;
+    if (!alive() || !cardEl) return;
     const target = cardEl.querySelector<HTMLButtonElement>(
       kind === 'text' ? '.qhead button[data-glyph="pencil"]'
         : '.qexpl button[data-glyph="pencil"], button.qexpl-add',
@@ -4848,7 +4999,7 @@ Run the gate (`cd /Users/svkucheryavski/Documents/Developing/mathion/frontend &&
   - Commit:
 
 ```bash
-cd /Users/svkucheryavski/Documents/Developing/mathion && git add frontend/src/components/editor/quiz/QuestionTextModal.svelte frontend/src/components/editor/quiz/ExplanationModal.svelte frontend/src/components/editor/quiz/QuestionCard.svelte frontend/src/tests/QuizModals.svelte.test.ts frontend/scripts/visual-refresh-gate.sh && git commit -m "feat(editor): Slice 5d T7 — level-3 modals for question text and explanation
+cd /Users/svkucheryavski/Documents/Developing/mathion && git add frontend/src/components/editor/quiz/QuestionTextModal.svelte frontend/src/components/editor/quiz/ExplanationModal.svelte frontend/src/components/editor/quiz/QuestionCard.svelte frontend/src/tests/QuizModals.svelte.test.ts frontend/src/tests/QuizOverview.svelte.test.ts frontend/scripts/visual-refresh-gate.sh && git commit -m "feat(editor): Slice 5d T7 — level-3 modals for question text and explanation
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -4886,7 +5037,7 @@ import {
   QuizServer, q, opt, renderQuiz, cleanup, settle, panel, topPanel, cards, rows, byName, typeInto, press, live,
   toastTexts, text, mkVersion,
 } from './support/quizHarness.svelte';
-import { DISCARD_PROMPT, WAIT_TITLE } from '../lib/quizEdits.svelte';
+import { DISCARD_PROMPT, FORBIDDEN_TITLE, WAIT_TITLE } from '../lib/quizEdits.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 
 afterEach(cleanup);
@@ -5188,9 +5339,34 @@ describe('403/409 and the focus fallback (5d T8)', () => {
     await settle();
     expect(byName(cards()[0], 'Edit question 1')).toBeUndefined();
     expect(f().value).toBe('new');
+    // R10: the field can now only be cancelled — ✓ is disabled and Enter sends nothing.
+    const sent = s.writes().length;
+    expect(byName(cards()[0], FORBIDDEN_TITLE)!.disabled).toBe(true);
+    press(f(), 'Enter');
+    await settle();
+    expect(s.writes().length).toBe(sent);
+    expect(f().value).toBe('new');
     press(f(), 'Escape');
     await settle();
     expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+  });
+
+  it('a 409 that removed the focused control moves focus to the card\'s ✎ (R6)', async () => {
+    const s = new QuizServer([q({ id: 1 })], [opt(11, 1, 'Eleven', true), opt(12, 1, 'Twelve')]);
+    const hold = s.hold('POST', /\/options\/reorder$/);
+    const r = await renderQuiz(s);
+    byName(rows(cards()[0])[0], 'Move answer "Eleven" down')!.click();
+    await settle();
+    // Eleven is now last, so its "down" is disabled and focus sits on its "up".
+    expect(document.activeElement).toBe(byName(rows(cards()[0])[1], 'Move answer "Eleven" up'));
+    // The reload says published: the arrows go (D13), and focus with them.
+    const published = mkVersion({ state: 'published' });
+    r.props.modal.version = published;
+    r.props.modal.perms = versionPermissions(published);
+    hold.fail(409, 'Version is not editable');
+    for (let i = 0; i < 3; i++) await settle();   // reject → tree reload → tick → fallback
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+    expect(toastTexts()).toEqual(['Version is not editable']);
   });
 
   it('a failed write\'s re-fetch is skipped when its question is gone', async () => {
@@ -5234,7 +5410,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   import MarkdownEditor from '../MarkdownEditor.svelte';
   import QuestionTypePicker from '../QuestionTypePicker.svelte';
   import { ApiError } from '../../../lib/api';
-  import { DISCARD_PROMPT, type EditHandle } from '../../../lib/quizEdits.svelte';
+  import { DISCARD_PROMPT, FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { pushToast } from '../../../stores/toasts.svelte';
   import { validateNumericAnswer, type QuestionCreateBody, type QuestionType } from '../../../lib/quizAuthoring';
@@ -5255,7 +5431,9 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   let saving = $state(false);
   let uploading = $state(false);
   let error = $state<string | null>(null);
-  let alive = true;
+  let mounted = true;
+  // Mounted AND still showing this version (spec §Stale responses).
+  const alive = () => mounted && ctx.live();
 
   const numCheck = $derived(validateNumericAnswer(numeric));
   const numError = $derived(numeric.trim() !== '' && !numCheck.ok ? numCheck.reason : null);
@@ -5275,7 +5453,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   };
   $effect(() => {
     untrack(() => ctx.edits.open(handle));
-    return () => { alive = false; ctx.edits.release(handle); };
+    return () => { mounted = false; ctx.edits.release(handle); };
   });
 
   function requestClose() {
@@ -5294,14 +5472,14 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   }
 
   async function save() {
-    if (saving || uploading || !valid) return;
+    if (saving || uploading || !valid || !ctx.canStruct) return;   // R10
     error = null;
     saving = true;
     try {
       await onCreate(body());
     } catch (e) {
       const m = e instanceof ApiError ? e.displayMessage : 'Add failed';
-      if (!alive) { pushToast(m, 'error'); return; }
+      if (!alive()) { pushToast(m, 'error'); return; }
       saving = false;
       error = m;
     }
@@ -5325,7 +5503,8 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
 {#snippet foot()}
   <span class="nq-gap"></span>
   <Button variant="ghost" disabled={saving} onclick={requestClose}>Cancel</Button>
-  <Button variant="primary" loading={saving} disabled={!valid || uploading} onclick={() => void save()}>Add question</Button>
+  <Button variant="primary" loading={saving} disabled={!valid || uploading || !ctx.canStruct}
+          title={ctx.canStruct ? undefined : FORBIDDEN_TITLE} onclick={() => void save()}>Add question</Button>
 {/snippet}
 
 <Modal
@@ -5432,7 +5611,8 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     guardDirty?: boolean; busy?: boolean;
   } = $props();
 
-  export const edits = new QuizEdits();
+  // `live` is read only after a request settles, when everything below exists.
+  export const edits = new QuizEdits(() => live());
   export async function save(_titleDraft: string | undefined): Promise<SaveOutcome> { return { outcome: 'ok' }; }
   export function validate(): boolean { return true; }
   export function discard(): void { edits.discardAll(); }
@@ -5443,6 +5623,8 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
 
   const savedVid = untrack(() => vid);
   let alive = true;
+  // Still showing this version (spec §Stale responses: today's `alive && vid === savedVid`).
+  const live = () => alive && stillOnVid(savedVid);
   let loadToken = 0;
   onDestroy(() => { alive = false; loadToken++; });
 
@@ -5450,6 +5632,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   let status = $state<'loading' | 'loaded' | 'error'>('loading');
   let quizLock = $state(false);
   let movingId = $state<number | null>(null);
+  let deletingId = $state<number | null>(null);   // its trash stays enabled (focus never drops)
   let adding = $state(false);
   let autoAddId = $state<number | null>(null);
   const busyQuestions = new SvelteSet<number>();
@@ -5477,7 +5660,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   async function retry() {
     await load();
     await tick();
-    if (!alive) return;
+    if (!live()) return;
     if (status === 'error') retryWrap?.querySelector('button')?.focus();
     else void focusFallback(questions[0]?.id ?? null);
   }
@@ -5488,24 +5671,31 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     const my = ++loadToken;
     try {
       const list = await listQuestions(itemId);
-      if (my === loadToken && alive) questions = sorted(list);
+      if (my === loadToken && live()) questions = sorted(list);
     } catch {
-      if (my === loadToken && alive) {
+      if (my === loadToken && live()) {
         pushToast("Couldn't reload the questions — reload the page to see the latest.", 'error');
       }
     }
   }
 
-  function failed(e: unknown): string {
+  // On 403/409 the tree reloads so permissions re-derive; when that removed the
+  // focused control, focus falls back (R6).
+  function failed(e: unknown, qid: number | null = null): string {
     if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
-      void loadAdminTree(savedVid, { force: true });
+      void loadAdminTree(savedVid, { force: true }).then(async () => {
+        await tick();
+        if (!live()) return;
+        const a = document.activeElement;
+        if (a === null || a === document.body) void focusFallback(qid);
+      });
     }
     return e instanceof ApiError ? e.displayMessage : 'Save failed';
   }
 
   async function focusFallback(qid: number | null) {
     await tick();
-    if (!alive || !rootEl) return;
+    if (!live() || !rootEl) return;
     const card = qid == null ? null : rootEl.querySelector(`[data-q-id="${qid}"]`);
     const target =
       card?.querySelector<HTMLElement>('.qhead button[data-glyph="pencil"]:not([disabled])')
@@ -5528,27 +5718,28 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     adding = false;
     if (!refocus) return;
     await tick();
-    if (alive) void focusFallback(null);
+    if (live()) void focusFallback(null);
   }
   async function create(body: QuestionCreateBody) {
     quizLock = true;
     try {
       const created = await edits.track(createQuestion(itemId, body));
-      if (!alive) return;
+      if (!live()) return;
       questions = sorted([...questions, created]);
       autoAddId = isChoice(created) ? created.id : null;
       adding = false;                          // close the modal before moving focus
       if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });   // questions_count
       edits.say('Saved');
       await tick();
-      if (!alive) return;
+      if (!live()) return;
       const card = rootEl?.querySelector<HTMLElement>(`[data-q-id="${created.id}"]`);
       card?.scrollIntoView?.({ block: 'nearest' });
-      // A choice card focuses its own "+ Add answer" row once its answers load.
-      if (!isChoice(created)) void focusFallback(created.id);
+      // Focus the new card's ✎ now (no gap on <body>); a choice card's
+      // "+ Add answer" row takes focus over once its answers load.
+      void focusFallback(created.id);
     } catch (e) {
       failed(e);                 // 403/409: the tree reloads
-      if (alive) void resync();  // spec: a failed structure write re-fetches the list
+      if (live()) void resync();  // spec: a failed structure write re-fetches the list
       throw e;                   // the modal shows the error inside
     } finally {
       quizLock = false;
@@ -5561,7 +5752,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     const i = questions.findIndex((x) => x.id === qid);
     const j = i + dir;
     if (i < 0 || j < 0 || j >= questions.length) return;
-    if (!edits.request()) return;
+    if (!edits.requestStructure()) return;   // moves follow their locks alone
     const next = [...questions];
     [next[i], next[j]] = [next[j]!, next[i]!];
     questions = next.map((x, k) => ({ ...x, order: k + 1 }));
@@ -5571,6 +5762,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     busyQuestions.add(qid);
     movingId = qid;
     const done = edits.track(reorderQuestions(itemId, order));
+    done.catch(() => {});   // handled by the `await done` below; no unhandled-rejection window
     await tick();
     const card = rootEl?.querySelector<HTMLElement>(`[data-q-id="${qid}"]`);
     const same = card?.querySelector<HTMLButtonElement>(`.qhead button[data-glyph="${dir < 0 ? 'up' : 'down'}"]`);
@@ -5580,8 +5772,8 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     try {
       await done;
     } catch (e) {
-      pushToast(failed(e), 'error');
-      if (alive) await resync();
+      pushToast(failed(e, qid), 'error');
+      if (live()) await resync();
     } finally {
       busyQuestions.delete(qid);
       if (alive) { quizLock = false; movingId = null; }
@@ -5593,24 +5785,27 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     if (quizLock || busyQuestions.has(qid)) return;
     const idx = questions.findIndex((x) => x.id === qid);
     if (idx < 0) return;
-    if (!edits.request()) return;
-    const title = questions[idx]!.text_html.replace(/<[^>]*>/g, '').trim().slice(0, 80) || `Question ${idx + 1}`;
+    if (!edits.requestStructure()) return;   // deletes follow their locks alone
+    // Inert parse (no image loads), so entities read as characters.
+    const plain = new DOMParser().parseFromString(questions[idx]!.text_html, 'text/html').body.textContent ?? '';
+    const title = plain.replace(/\s+/g, ' ').trim().slice(0, 80) || `Question ${idx + 1}`;
     if (!window.confirm(`Delete question "${title}"? This cannot be undone.`)) return;
     const ids = questions.map((x) => x.id);
     quizLock = true;
     busyQuestions.add(qid);
+    deletingId = qid;
     try {
       await edits.track(deleteQuestion(qid));
-      if (!alive) return;
+      if (!live()) return;
       questions = questions.filter((x) => x.id !== qid);
       if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
       void focusFallback(ids[idx + 1] ?? ids[idx - 1] ?? null);
     } catch (e) {
-      pushToast(failed(e), 'error');
-      if (alive) await resync();
+      pushToast(failed(e, qid), 'error');
+      if (live()) await resync();
     } finally {
       busyQuestions.delete(qid);
-      if (alive) quizLock = false;
+      if (alive) { quizLock = false; deletingId = null; }
     }
   }
 
@@ -5624,11 +5819,11 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
     get disabled() { return versionDisabled; },
     busyQuestions,
     get quizLock() { return quizLock; },
-    live: () => alive && stillOnVid(savedVid),
+    live,
     say: (message) => edits.say(message),
     failed,
     patch(qid, fields) {
-      if (alive) questions = questions.map((x) => (x.id === qid ? { ...x, ...fields } : x));
+      if (live()) questions = questions.map((x) => (x.id === qid ? { ...x, ...fields } : x));
     },
     hasQuestion: (qid) => questions.some((x) => x.id === qid),
     focusFallback: (qid) => { void focusFallback(qid); },
@@ -5664,6 +5859,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
           n={i + 1}
           count={questions.length}
           moving={movingId === q.id}
+          deleting={deletingId === q.id}
           autoAdd={autoAddId === q.id}
           onAutoAddDone={() => { autoAddId = null; }}
           onMove={(d) => void move(q.id, d)}
@@ -5698,11 +5894,12 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
 
 ```ts
   let {
-    q, n, count, moving = false, autoAdd = false, onAutoAddDone = () => {}, onMove, onDelete,
+    q, n, count, moving = false, deleting = false, autoAdd = false, onAutoAddDone = () => {}, onMove, onDelete,
   }: {
     q: AuthoringQuestion; n: number; count: number;
-    // This card's own move is in flight: its arrows stay enabled (focus never drops).
-    moving?: boolean;
+    // This card's own move / delete is in flight: the control that started it
+    // stays enabled, re-entry is blocked in QuizBody (focus never drops).
+    moving?: boolean; deleting?: boolean;
     // A just-created choice question opens its "+ Add answer" row once loaded.
     autoAdd?: boolean; onAutoAddDone?: () => void;
     onMove: (dir: -1 | 1) => void; onDelete: () => void;
@@ -5716,6 +5913,7 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
   const structWait = $derived(ctx.quizLock || ctx.busyQuestions.has(q.id) ? WAIT_TITLE : null);
   const upReason = $derived((moving ? null : structWait) ?? (n === 1 ? 'Move up — already first' : null));
   const downReason = $derived((moving ? null : structWait) ?? (n === count ? 'Move down — already last' : null));
+  const deleteReason = $derived(deleting ? null : structWait);
 ```
 
   3. Inside `<span class="qacts">`, after the `{#if ctx.canText} … {/if}` pencil, add:
@@ -5726,8 +5924,8 @@ Expected: FAIL. There is no "+ Add question" and no question arrows yet. "a 409 
                       aria-label={`Move question ${n} up`} disabled={upReason !== null} onclick={() => onMove(-1)} />
           <IconButton glyph="down" size="sm" borderless title={downReason ?? 'Move down'}
                       aria-label={`Move question ${n} down`} disabled={downReason !== null} onclick={() => onMove(1)} />
-          <IconButton glyph="trash" size="sm" borderless danger title={structWait ?? 'Delete question'}
-                      aria-label={`Delete question ${n}`} disabled={structWait !== null} onclick={onDelete} />
+          <IconButton glyph="trash" size="sm" borderless danger title={deleteReason ?? 'Delete question'}
+                      aria-label={`Delete question ${n}`} disabled={deleteReason !== null} onclick={onDelete} />
         {/if}
 ```
 
@@ -5851,6 +6049,10 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
 
 ## Minors
 <!-- one bullet per deferred review minor, added task by task -->
+- Plan review (Fable M6): the arrow-key marker test, the T4 ⌘S test and the "structure controls absent" tests pin
+  against future code; they are not evidence of current behaviour. Kept as pins.
+- Plan review (Fable M7): the T3 Step 10 microtask fallback for `newTabLinks` is insurance only; `{@attach}` already
+  runs after the `{@html}` block on create and update.
 ```
 
 Add each task's deferred minors as bullets when the task closes; T1–T8 already list them in the ledger.
