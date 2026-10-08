@@ -62,18 +62,6 @@
 
   let busy = $state(false);
 
-  // Blocks card fold (§3 T4): component-local, default open, body stays
-  // mounted (D3). Declared before the load effect: it only reads routeBid.
-  const uid = $props.id();
-  const blocksBodyId = `${uid}-blocks`;
-  let blocksFolded = $state(false);
-  // Unfold on every change of the route block id (deep link, Back/forward
-  // A → B) so the focus $effect never targets a header inside a hidden body.
-  // Tracks ONLY routeBid — the user can still fold while a block is expanded.
-  $effect(() => {
-    if (routeBid !== null) untrack(() => { blocksFolded = false; });
-  });
-
   // ---- Slice-5b item modal (D7 close, D9 delete, D18 focus). Plain `let`s
   //      where nothing renders from the value. ----
   // D7: was the page mounted ON an item URL (deep link / reload)? Then × must
@@ -103,6 +91,10 @@
   // stale entity. Uses effectiveTree (not tree) so stale-id checks aren't
   // run against the OLD version's blocks during preserved-instance nav.
   const expansion = $derived(deriveExpansion(routeBid, routeSid, effectiveTree, routeIid));
+  const uid = $props.id();
+  const blocksHeadingId = `${uid}-blocks`;
+  // Slice-5c D1: how far the focus sits from the page (0 page, 1 block, 2 sequence).
+  const depth = $derived(expansion.expandedSequence ? 2 : expansion.expandedBlock ? 1 : 0);
   $effect(() => {
     if (!effectiveTree) return;
     const e = expansion;
@@ -335,11 +327,9 @@
     }
   });
 
-  // Opening also unfolds the card — a hidden Title could not take focus.
   async function toggleCreate() {
     if (createBusy || busy || blockReason) return;
     if (creating) { resetCreate(); creating = false; return; }
-    blocksFolded = false;
     creating = true;
     await tick();
     titleEl?.focus();
@@ -478,37 +468,29 @@
   {:else if !v || !perms}
     <Skeleton rows={4} />
   {:else}
-    {#if loadError}
-      <div class="refresh-err">
-        <ErrorState variant="inline" title="Couldn't refresh this version" message={loadError} onretry={() => void loadAdminTree(vid, { force: true })} />
+    <div class="canvas" class:d0={depth === 0} class:d1={depth === 1} class:d2={depth === 2}>
+      {#if loadError}
+        <div class="refresh-err">
+          <ErrorState variant="inline" title="Couldn't refresh this version" message={loadError} onretry={() => void loadAdminTree(vid, { force: true })} />
+        </div>
+      {/if}
+      <div class="editor-heading">
+        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
+        <span class="mono vid">v{v.id}</span>
+        <VersionBadges state={v.state} isDisabled={v.is_disabled} />
       </div>
-    {/if}
-    <div class="editor-heading">
-      <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
-      <span class="mono vid">v{v.id}</span>
-      <VersionBadges state={v.state} isDisabled={v.is_disabled} />
-    </div>
 
-    {#if v.is_disabled}
-      <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
-    {/if}
+      {#if v.is_disabled}
+        <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
+      {/if}
 
-    <VersionMetaForm {vid} version={v} />
+      <VersionMetaForm {vid} version={v} />
 
-    <section class="blocks-card">
-      <div class="card-head">
-        <h2>Blocks</h2>
-        <IconButton
-          size="sm"
-          borderless
-          glyph={blocksFolded ? 'chevron-right' : 'chevron'}
-          title={blocksFolded ? 'Expand' : 'Collapse'}
-          aria-label={blocksFolded ? 'Expand blocks' : 'Collapse blocks'}
-          aria-expanded={!blocksFolded}
-          aria-controls={blocksBodyId}
-          onclick={() => (blocksFolded = !blocksFolded)}
-        />
-        <span class="push">
+      <section class="blocks" aria-labelledby={blocksHeadingId}>
+        <!-- 5c: the card head is gone, but block h3s keep an h2 parent. -->
+        <h2 id={blocksHeadingId} class="sr-only">Blocks</h2>
+        <!-- Interim until T3's "+ Add block" row (ledger: T1 ruling). -->
+        <div class="blocks-tools">
           <IconButton
             primary
             glyph={creating ? 'close' : 'plus'}
@@ -518,11 +500,7 @@
             disabled={!!blockReason || busy || createBusy}
             onclick={() => void toggleCreate()}
           />
-        </span>
-      </div>
-
-      <!-- No display rule on the element carrying `hidden` (§3). -->
-      <div id={blocksBodyId} hidden={blocksFolded}>
+        </div>
         {#if creating}
           <form class="cr-form" onsubmit={(e) => { e.preventDefault(); void submitCreateBlock(); }}>
             <input
@@ -564,53 +542,53 @@
             {/each}
           </ul>
         {/if}
+      </section>
+
+      <div class="state-actions">
+        {#if perms.canPublish}
+          <Button variant="primary" disabled={busy} onclick={() => transition('publish')}>Publish</Button>
+        {/if}
+        {#if perms.canArchive}
+          <Button variant="secondary" disabled={busy} onclick={() => transition('archive')}>Archive</Button>
+        {/if}
+        {#if perms.canRevert}
+          <Button variant="secondary" disabled={busy} onclick={() => transition('revert')}>Revert</Button>
+        {/if}
+        {#if perms.canDisable}
+          <Button variant="ghost" disabled={busy} onclick={() => transition('disable')}>Disable</Button>
+        {/if}
+        {#if perms.canEnable}
+          <Button variant="ghost" disabled={busy} onclick={() => transition('enable')}>Enable</Button>
+        {/if}
+        {#if perms.canDeleteVersion}
+          <Button variant="danger" disabled={busy} onclick={deleteVersion}>Delete</Button>
+        {/if}
       </div>
-    </section>
 
-    <div class="state-actions">
-      {#if perms.canPublish}
-        <Button variant="primary" disabled={busy} onclick={() => transition('publish')}>Publish</Button>
+      {#if expansion.expandedItem && expansion.expandedBlock && expansion.expandedSequence}
+        {@const it = expansion.expandedItem}
+        {@const hostBlock = expansion.expandedBlock}
+        {@const hostSeq = expansion.expandedSequence}
+        <!-- D1: the item opens over the page; keyed so drafts seed once per item. -->
+        {#key it.id}
+          <ItemEditorModal
+            {vid}
+            version={v}
+            {perms}
+            seqIndex={hostBlock.sequences.indexOf(hostSeq) + 1}
+            item={it}
+            itemIndex={hostSeq.items.indexOf(it) + 1}
+            itemCount={hostSeq.items.length}
+            {stillOnVid}
+            onRequestClose={requestCloseItem}
+            onDeleteItem={() => void deleteOpenItem()}
+            deleting={deletingIid === it.id}
+          />
+        {/key}
       {/if}
-      {#if perms.canArchive}
-        <Button variant="secondary" disabled={busy} onclick={() => transition('archive')}>Archive</Button>
-      {/if}
-      {#if perms.canRevert}
-        <Button variant="secondary" disabled={busy} onclick={() => transition('revert')}>Revert</Button>
-      {/if}
-      {#if perms.canDisable}
-        <Button variant="ghost" disabled={busy} onclick={() => transition('disable')}>Disable</Button>
-      {/if}
-      {#if perms.canEnable}
-        <Button variant="ghost" disabled={busy} onclick={() => transition('enable')}>Enable</Button>
-      {/if}
-      {#if perms.canDeleteVersion}
-        <Button variant="danger" disabled={busy} onclick={deleteVersion}>Delete</Button>
-      {/if}
+
+      <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
     </div>
-
-    {#if expansion.expandedItem && expansion.expandedBlock && expansion.expandedSequence}
-      {@const it = expansion.expandedItem}
-      {@const hostBlock = expansion.expandedBlock}
-      {@const hostSeq = expansion.expandedSequence}
-      <!-- D1: the item opens over the page; keyed so drafts seed once per item. -->
-      {#key it.id}
-        <ItemEditorModal
-          {vid}
-          version={v}
-          {perms}
-          seqIndex={hostBlock.sequences.indexOf(hostSeq) + 1}
-          item={it}
-          itemIndex={hostSeq.items.indexOf(it) + 1}
-          itemCount={hostSeq.items.length}
-          {stillOnVid}
-          onRequestClose={requestCloseItem}
-          onDeleteItem={() => void deleteOpenItem()}
-          deleting={deletingIid === it.id}
-        />
-      {/key}
-    {/if}
-
-    <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
   {/if}
 </div>
 
@@ -632,15 +610,25 @@
     color: var(--text);
   }
   .refresh-err { margin-bottom: 18px; /* the 18px section rhythm (ref 1525) */ }
-  .blocks-card {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    padding: 16px 18px; /* ref 1555 */
+  /* Visually hidden, still announced (no global .sr-only class exists). No
+     opacity — the gate sweeps for it. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
-  .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; /* ref 1556 */ }
-  h2 { font-size: 14px; /* ref 1557 — base.css h2 is 15px */ }
-  .push { margin-left: auto; display: flex; /* ref 1559 */ }
+  /* R3: the page shade spans the viewport. body:has() needs no JS and ends
+     with the page (no .canvas → no rule). `.canvas` stays scoped, so the rule
+     matches only while THIS page is mounted. */
+  :global(body):has(.canvas.d1) { background: var(--focus-1); }
+  :global(body):has(.canvas.d2) { background: var(--focus-2); }
+  .blocks-tools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
   /* Create forms — shared look (spec §4). */
   .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
   .cr-form input {

@@ -252,58 +252,15 @@ const btnByText = (text: string) =>
 const posts = () => fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST').map(([u]) => String(u));
 
 describe('VersionEditPage — Blocks card (T4)', () => {
-  const fold = () => target.querySelector<HTMLButtonElement>('.blocks-card .card-head button[aria-controls]')!;
-  const body = () => document.getElementById(fold().getAttribute('aria-controls')!)!;
   const plus = () => target.querySelector<HTMLButtonElement>('button[aria-label="New block"]')!;
 
-  it('folds and unfolds; the body stays mounted', async () => {
-    await render();
-    expect(fold().getAttribute('aria-label')).toBe('Collapse blocks');
-    expect(fold().title).toBe('Collapse');
-    fold().click();
-    flushSync();
-    expect(body().hidden).toBe(true);
-    expect(body().querySelector('.blocks-list')).not.toBeNull();
-    expect(fold().getAttribute('aria-label')).toBe('Expand blocks');
-    expect(fold().getAttribute('aria-expanded')).toBe('false');
-    expect(fold().dataset.glyph).toBe('chevron-right');
-  });
-
-  it('a route expansion unfolds a folded card, and so does block A → block B', async () => {
-    tree.blocks = [mkBlock(10), mkBlock(11)];
-    const props = await renderReactive();
-    fold().click();
-    flushSync();
-    expect(body().hidden).toBe(true);
-    props.blockId = '10';
-    await settle();
-    expect(body().hidden).toBe(false);
-    fold().click();
-    flushSync();
-    expect(body().hidden).toBe(true);
-    props.blockId = '11';
-    await settle();
-    expect(body().hidden).toBe(false);
-  });
-
-  it('folding while a block is expanded stays folded', async () => {
-    const props = await renderReactive({ courseSlug: 'c', versionId: '1', blockId: '10' });
-    expect(props.blockId).toBe('10');
-    fold().click();
-    await settle();
-    expect(body().hidden).toBe(true);
-  });
-
-  it('create-block starts collapsed; + opens it, unfolds the card and focuses Title', async () => {
+  it('create-block starts collapsed; + opens it and focuses Title', async () => {
     await render();
     expect(target.querySelector('.cr-form')).toBeNull();
     expect(plus().title).toBe('New block');
     expect(plus().getAttribute('aria-expanded')).toBe('false');
-    fold().click();
-    flushSync();
     plus().click();
     await settle();
-    expect(body().hidden).toBe(false);
     const title = target.querySelector<HTMLInputElement>('.cr-form input')!;
     expect(document.activeElement).toBe(title);
     expect(plus().getAttribute('aria-label')).toBe('New block');
@@ -377,13 +334,13 @@ describe('VersionEditPage — Blocks card (T4)', () => {
   it('empty: "No blocks yet" on a created version, "This version has no blocks." otherwise', async () => {
     tree.blocks = [];
     await render();
-    expect(target.querySelector('.blocks-card .empty-state .title')!.textContent).toBe('No blocks yet');
+    expect(target.querySelector('section.blocks .empty-state .title')!.textContent).toBe('No blocks yet');
     unmount(component!);
     component = null;
     tree.version = mkVersion({ state: 'archived' });
     clearEditorVersion();
     await render();
-    expect(target.querySelector('.blocks-card .empty-state .title')!.textContent).toBe('This version has no blocks.');
+    expect(target.querySelector('section.blocks .empty-state .title')!.textContent).toBe('This version has no blocks.');
   });
 });
 
@@ -925,5 +882,79 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(msgs()).toContain('Item not found.');
     expect(currentRoute.path).toBe(SEQ);
     expect(modal()).toBeNull();
+  });
+});
+
+// ---- Slice-5c T1: focus by depth ----
+describe('VersionEditPage — focus by depth (Slice-5c T1)', () => {
+  const seq20: AdminTreeSequence = { id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] };
+  const canvas = () => target.querySelector('.canvas')!;
+  const depthOf = () => ['d0', 'd1', 'd2'].filter((c) => canvas().classList.contains(c));
+
+  it('depth classes follow navigation: d0 → d1 → d2 → d1 → d0 (Back included)', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    await renderRouted();
+    expect(depthOf()).toEqual(['d0']);
+    await navigate('/courses/c/edit/v/1/blocks/10'); await settle();
+    expect(depthOf()).toEqual(['d1']);
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20'); await settle();
+    expect(depthOf()).toEqual(['d2']);
+    history.back(); await waitPop();
+    expect(depthOf()).toEqual(['d1']);
+    history.back(); await waitPop();
+    expect(depthOf()).toEqual(['d0']);
+    history.forward(); await waitPop();
+    expect(depthOf()).toEqual(['d1']);
+  });
+
+  it('exactly one container is the focus at every depth', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] }), mkBlock(11)];
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20', { force: true });
+    await renderRouted();
+    expect(target.querySelectorAll('.focus').length).toBe(1);
+    expect(target.querySelector('.seq-card.focus')).not.toBeNull();
+    expect(target.querySelectorAll('.block-card.parent').length).toBe(1);
+    await navigate('/courses/c/edit/v/1/blocks/10'); await settle();
+    expect(target.querySelectorAll('.focus').length).toBe(1);
+    expect(target.querySelector('.block-card.focus')).not.toBeNull();
+    expect(target.querySelector('.block-card.parent')).toBeNull();
+    await navigate('/courses/c/edit/v/1'); await settle();
+    expect(target.querySelectorAll('.focus, .parent').length).toBe(0);
+  });
+
+  it('an h2 named Blocks (visually hidden) labels section.blocks, so block h3s keep their parent level', async () => {
+    await render();
+    const sec = target.querySelector<HTMLElement>('section.blocks')!;
+    const h2 = document.getElementById(sec.getAttribute('aria-labelledby')!)!;
+    expect(h2.tagName).toBe('H2');
+    expect(h2.textContent).toBe('Blocks');
+    expect(h2.classList.contains('sr-only')).toBe(true);
+    expect(sec.firstElementChild).toBe(h2);
+  });
+
+  it('a stale sequence id falls back to its block: d1, the block is the one focus', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/999', { force: true });
+    await renderRouted();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(depthOf()).toEqual(['d1']);
+    expect(target.querySelectorAll('.focus').length).toBe(1);
+    expect(target.querySelector('.block-card.focus')).not.toBeNull();
+  });
+
+  it('the Blocks card head and its fold are gone', async () => {
+    await render();
+    expect(target.querySelector('.blocks-card')).toBeNull();
+    expect(target.querySelector('button[aria-label="Collapse blocks"]')).toBeNull();
+    expect(target.querySelector('section.blocks .blocks-list')).not.toBeNull();
+  });
+
+  it('a stale block id falls back and the canvas returns to d0', async () => {
+    await navigate('/courses/c/edit/v/1/blocks/999', { force: true });
+    await renderRouted();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(depthOf()).toEqual(['d0']);
   });
 });

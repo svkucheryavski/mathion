@@ -106,7 +106,7 @@ describe('App editor routes — item route → VersionEditPage modal (Slice-5b T
   it('sequence → item → Back leaves a live page; a created item then opens in the modal', async () => {
     component = mount(App, { target });
     await settle();
-    expect(target.querySelector('.blocks-card')).not.toBeNull();
+    expect(target.querySelector('section.blocks')).not.toBeNull();
 
     // Stage 1 — the freeze.
     openBtn(30).click();
@@ -116,7 +116,7 @@ describe('App editor routes — item route → VersionEditPage modal (Slice-5b T
     await waitPop();
     expect(errors).toEqual([]);
     expect(currentRoute.path).toBe(SEQ);
-    expect(target.querySelector('.blocks-card')).not.toBeNull();   // the load ran: not stuck on the Skeleton
+    expect(target.querySelector('section.blocks')).not.toBeNull();   // the load ran: not stuck on the Skeleton
     target.querySelector<HTMLButtonElement>('button[aria-label="New item in Seq 20"]')!.click();
     await settle();
     const title = target.querySelector<HTMLInputElement>('input[aria-label="Item title"]');
@@ -141,7 +141,7 @@ describe('App editor routes — item route → VersionEditPage modal (Slice-5b T
     await settle();
     history.back();
     await waitPop();
-    expect(target.querySelector('.blocks-card')).not.toBeNull();
+    expect(target.querySelector('section.blocks')).not.toBeNull();
     openBtn(31).click();
     await settle();
     expect(currentRoute.path).toBe(`${SEQ}/items/31`);

@@ -1,3 +1,10 @@
+<script module lang="ts">
+  // Where a block / sequence header sits relative to the focus (Slice-5c D4):
+  // a row inside the focus container, a row outside it, the open node that IS
+  // the focus, or the open node above it (the block of an open sequence).
+  export type HeaderMode = 'row-focus' | 'row-outside' | 'open-focus' | 'open-parent';
+</script>
+
 <script lang="ts">
   // Block / sequence accordion header (3b, ref 1564-1568 block, 1572-1576
   // sequence). The accessible toggle is the title button inside the section

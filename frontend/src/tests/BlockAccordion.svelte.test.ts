@@ -433,3 +433,37 @@ describe('BlockAccordion — body (T5b)', () => {
     expect(target.querySelector('#block-3-panel > .empty')!.textContent).toBe('No sequences.');
   });
 });
+
+describe('BlockAccordion — focus shading (Slice-5c T1)', () => {
+  const card = () => target.querySelector('.block-card')!;
+  it('collapsed with no block open: a row at the focus level, no shade', () => {
+    mountBlock();
+    expect(card().classList.contains('focus')).toBe(false);
+    expect(card().classList.contains('parent')).toBe(false);
+  });
+  it('open with no sequence open: the focus', async () => {
+    mountBlock();
+    await navigate('/courses/c/edit/v/1/blocks/3'); await settle();
+    expect(card().classList.contains('focus')).toBe(true);
+    expect(card().classList.contains('parent')).toBe(false);
+  });
+  it('open with one of its sequences open: the parent shade, not the focus', async () => {
+    mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
+    await navigate('/courses/c/edit/v/1/blocks/3/sequences/5'); await settle();
+    expect(card().classList.contains('parent')).toBe(true);
+    expect(card().classList.contains('focus')).toBe(false);
+  });
+  it('a collapsed parent loses the shade (sequence closed → the block is the focus again)', async () => {
+    mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
+    await navigate('/courses/c/edit/v/1/blocks/3/sequences/5'); await settle();
+    await navigate('/courses/c/edit/v/1/blocks/3'); await settle();
+    expect(card().classList.contains('focus')).toBe(true);
+    expect(card().classList.contains('parent')).toBe(false);
+  });
+  it('another block open: no shade on this one', async () => {
+    mountBlock();
+    await navigate('/courses/c/edit/v/1/blocks/99'); await settle();
+    expect(card().classList.contains('focus')).toBe(false);
+    expect(card().classList.contains('parent')).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getContext, onDestroy, tick, untrack } from 'svelte';
-  import AccordionHeader from './AccordionHeader.svelte';
+  import AccordionHeader, { type HeaderMode } from './AccordionHeader.svelte';
   import SequenceAccordion from './SequenceAccordion.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
@@ -48,6 +48,11 @@
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — BlockAccordion must mount under VersionEditPage');
 
   const expanded = $derived(String(block.id) === routeBid);
+  // Slice-5c D1/D4: where this block sits relative to the focus.
+  const seqOpen = $derived(expanded && block.sequences.some((s) => String(s.id) === routeSid));
+  const mode: HeaderMode = $derived(
+    expanded ? (seqOpen ? 'open-parent' : 'open-focus') : (routeBid === null ? 'row-focus' : 'row-outside'),
+  );
   const headerId = $derived(`block-${String(block.id)}-header`);
   const panelId = $derived(`block-${String(block.id)}-panel`);
 
@@ -282,7 +287,7 @@
   }
 </script>
 
-<div class="block-card">
+<div class="block-card" class:focus={mode === 'open-focus'} class:parent={mode === 'open-parent'}>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -396,11 +401,17 @@
 
 <style>
   .block-card {
-    border: 1px solid var(--border);
+    border: 1px solid var(--focus-line);
     border-radius: var(--radius);
-    background: var(--surface);
+    background: transparent; /* a row takes its container's shade (5c D1) */
     overflow: hidden;
-    margin-bottom: 10px; /* ref 1563 */
+    margin-bottom: 6px;
+  }
+  .block-card.parent { background: var(--focus-1); }
+  .block-card.focus {
+    background: var(--focus-0);
+    border-color: var(--focus-line-strong);
+    box-shadow: var(--focus-shadow);
   }
   .acc-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; /* ref 1570 */ }
   .fields { display: flex; flex-direction: column; }

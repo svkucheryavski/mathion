@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1404
+EXPECTED_CHECKS=1414
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -460,6 +460,11 @@ GLOBAL_ALLOW = {
     # children of a modal body. A T3 question renders inside SequencePlayer,
     # which never mounts a Modal.
     ('src/components/ui/Modal.svelte', '*'),
+    # Slice-5c T1 (R3): `:global(body):has(.canvas.dN)` — the page shade. The
+    # `.canvas` inside :has() stays SCOPED (compiled `.canvas.dN.svelte-<h>`),
+    # so the rule matches only while VersionEditPage is mounted; no quiz
+    # question renders under it (the editor never mounts SequencePlayer).
+    ('src/pages/editor/VersionEditPage.svelte', 'body'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -509,9 +514,11 @@ else:
 # `-webkit-font-smoothing: antialiased` and both lost it. That is the ONLY
 # change; the freeze existing is what made it a deliberate two-line edit here
 # rather than silent drift. See the note at the top of reset.css.
+# The :root hash moved on 2026-10-08 (8872e5cb -> 58c75427, theme-default.css):
+# Slice-5c T1 added the six --focus-* tokens. That is the ONLY change.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
-    ('', ':focus-visible', '1684b043'), ('', ':root', '8872e5cb'),
+    ('', ':focus-visible', '1684b043'), ('', ':root', '58c75427'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
@@ -3630,17 +3637,19 @@ if [[ -n $REPLY ]]; then
 fi
 
 echo
-echo "--- (w) Slice-5a T4 — Blocks card, create-block form, state-action bar (3b) ---"
-own blocks-card VersionEditPage.svelte
+echo "--- (w) Slice-5a T4 / 5c T1 — the canvas (focus by depth), create-block form, state-action bar ---"
 own state-actions VersionEditPage.svelte
-uniq1 blocks-card
+uniq1 state-actions
 if [[ -n $REPLY ]]; then
   N=VersionEditPage; H=$REPLY
-  d '\.blocks-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:16px 18px'
-  none "VersionEditPage .blocks-card has no margin-bottom (last card)" "\.blocks-card\.${H}\{[^}]*margin-bottom"
-  d '\.card-head' '' 'display:flex' 'align-items:center' 'gap:8px' 'margin-bottom:10px'
-  d 'h2' '' 'font-size:14px'
-  d '\.push' '' 'margin-left:auto' 'display:flex'
+  # 5c T1: no Blocks card — the list is the page body; the shade is on <body>.
+  none "VersionEditPage has no .blocks-card / .card-head (5c T1)" "\.(blocks-card|card-head)\.${H}"
+  # The card head's h2 lives on as a visually hidden heading (outline h1 > h2 > h3).
+  d '\.sr-only' '' 'position:absolute' 'width:1px' 'height:1px' 'overflow:hidden' 'clip-path:inset\(50%\)'
+  chk "body:has\(\.canvas\.d1\.${H}\)" 'background:var\(--focus-1\)'
+  chk "body:has\(\.canvas\.d2\.${H}\)" 'background:var\(--focus-2\)'
+  none "VersionEditPage no fully-global body:has() (5c R3: .canvas stays scoped)" "body:has\(\.canvas\.d[12]\)"
+  d '\.blocks-tools' '' 'display:flex' 'justify-content:flex-end' 'margin-bottom:8px'
   d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
   chk "\.cr-form\.${H} input:where\(\.${H}\)" 'box-sizing:border-box' 'width:100%' 'height:var\(--control-h\)' 'padding:0 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
   d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end'
@@ -3714,7 +3723,9 @@ own block-card BlockAccordion.svelte
 uniq1 block-card
 if [[ -n $REPLY ]]; then
   N=BlockAccordion; H=$REPLY
-  d '\.block-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'overflow:hidden' 'margin-bottom:10px'
+  d '\.block-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden' 'margin-bottom:6px'
+  d '\.block-card\.parent' '' 'background:var\(--focus-1\)'
+  d '\.block-card\.focus' '' 'background:var\(--focus-0\)' 'border-color:var\(--focus-line-strong\)' 'box-shadow:var\(--focus-shadow\)'
   d '\.acc-body' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'padding:12px 14px'
   chk "\.cr-form\.${H} input:where\(\.${H}\)" 'box-sizing:border-box' 'width:100%' 'height:var\(--control-h\)' 'padding:0 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
   d '\.seqs-list' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'list-style:none' 'padding:0' 'margin:0'
@@ -3733,14 +3744,17 @@ if [[ -n $REPLY ]]; then
   chk "\.cr-form\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
   chk "\.cr-form\.${H} textarea:where\(\.${H}\)" 'height:auto' 'padding:8px 10px'
   d '\.items-list' '' 'list-style:none' 'padding:0' 'margin:0'
-  # D10: the sequence has no card border of its own — selector-agnostic: no rule
-  # authored by SequenceAccordion (except the create form's input/textarea rule,
-  # pinned above) may draw a full / left / right / bottom border; only `border-top`
-  # hairlines (the body, the delete footer) are allowed. (No `(^|[{}])` anchor: with
-  # grep -o the previous match eats the shared `}`.)
-  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -vE "^\.cr-form\.${H} (input|textarea):where\(\.${H}\)[,{]" | grep -E 'border(-(left|right|bottom))?:[^0]')
-  if [[ -z $bad ]]; then echo "PASS  SequenceAccordion: no box / side border on any rule (D10)"
-  else echo "FAIL  SequenceAccordion: no box / side border on any rule (D10): $bad"; fail=1; fi
+  # 5c T1 (supersedes 5a D10): the sequence is a panel with its own border —
+  # the translucent focus line, stronger when it is the focus.
+  d '\.seq-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden'
+  d '\.seq-card\.focus' '' 'background:var\(--focus-0\)' 'border-color:var\(--focus-line-strong\)' 'box-shadow:var\(--focus-shadow\)'
+  # Selector-agnostic: no OTHER rule authored by SequenceAccordion (except the
+  # create form's input/textarea rule, pinned above) may draw a full / left /
+  # right / bottom border; only `border-top` hairlines are allowed. (No
+  # `(^|[{}])` anchor: with grep -o the previous match eats the shared `}`.)
+  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -vE "^\.cr-form\.${H} (input|textarea):where\(\.${H}\)[,{]" | grep -vE "^\.seq-card\.${H}\{" | grep -E 'border(-(left|right|bottom))?:[^0]')
+  if [[ -z $bad ]]; then echo "PASS  SequenceAccordion: no box / side border outside .seq-card"
+  else echo "FAIL  SequenceAccordion: no box / side border outside .seq-card: $bad"; fail=1; fi
   body_common
 fi
 

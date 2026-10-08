@@ -394,3 +394,14 @@ describe('SequenceAccordion — item rows (T6)', () => {
     expect(confirmSpy).toHaveBeenCalledWith('Delete "Page"? This cannot be undone.');
   });
 });
+
+describe('SequenceAccordion — focus shading (Slice-5c T1)', () => {
+  it('the open sequence is the focus; collapsed, it has no shade', () => {
+    const { target, props } = mountAccordion();
+    expect(target.querySelector('.seq-card')!.classList.contains('focus')).toBe(true);
+    props.routeSid = null; flushSync();
+    expect(target.querySelector('.seq-card')!.classList.contains('focus')).toBe(false);
+    props.routeSid = '77'; flushSync();
+    expect(target.querySelector('.seq-card')!.classList.contains('focus')).toBe(false);
+  });
+});

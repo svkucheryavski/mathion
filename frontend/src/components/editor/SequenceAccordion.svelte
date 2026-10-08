@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getContext, onDestroy, tick, untrack } from 'svelte';
-  import AccordionHeader from './AccordionHeader.svelte';
+  import AccordionHeader, { type HeaderMode } from './AccordionHeader.svelte';
   import ItemRow from './ItemRow.svelte';
   import ItemTypePicker from './ItemTypePicker.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
@@ -60,6 +60,8 @@
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — SequenceAccordion must mount under VersionEditPage');
 
   const expanded = $derived(String(block.id) === routeBid && String(seq.id) === routeSid);
+  // Slice-5c D1/D4: a sequence is only visible while its block is open.
+  const mode: HeaderMode = $derived(expanded ? 'open-focus' : (routeSid === null ? 'row-focus' : 'row-outside'));
   const headerId = $derived(`seq-${String(seq.id)}-header`);
   const panelId = $derived(`seq-${String(seq.id)}-panel`);
 
@@ -310,8 +312,7 @@
   }
 </script>
 
-<!-- D10: no card border — nesting is carried by indentation, badges and tints. -->
-<div>
+<div class="seq-card" class:focus={mode === 'open-focus'}>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -415,6 +416,17 @@
 </div>
 
 <style>
+  .seq-card {
+    border: 1px solid var(--focus-line);
+    border-radius: var(--radius);
+    background: transparent;
+    overflow: hidden;
+  }
+  .seq-card.focus {
+    background: var(--focus-0);
+    border-color: var(--focus-line-strong);
+    box-shadow: var(--focus-shadow);
+  }
   .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
   .fields { display: flex; flex-direction: column; }
   .fields > :global(.inline-field:last-child) { border-bottom: 0; /* ref 1548 */ }

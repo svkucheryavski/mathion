@@ -2285,8 +2285,8 @@ FILES_5C=(
 emoji_scan "all Slice-5c files" $FILES_5C
 chk "the --focus-0/1/2 tokens are defined in the theme" \
   "$(grep -cE '^\s*--focus-(0|1|2):' src/styles/theme-default.css)" "3"
-chk "the canvas shades the body only through the tokens (R3)" \
-  "$(grep -cE 'body:has\(\.canvas\.d[12]\)\)\s*\{\s*background:\s*var\(--focus-[12]\)' src/pages/editor/VersionEditPage.svelte)" "2"
+chk "the canvas shades the body only through the tokens (R3; T1 ruling: scoped :has)" \
+  "$(grep -cE ':global\(body\):has\(\.canvas\.d[12]\)\s*\{\s*background:\s*var\(--focus-[12]\)' src/pages/editor/VersionEditPage.svelte)" "2"
 chk "focus panels use --focus-0 + --focus-line-strong" \
   "$(grep -c 'var(--focus-line-strong)' src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte | awk -F: '{s+=$2} END {print s}')" "2"
 none "no slug or code badge in the constructor rows" '\.(slug|code|item-slug)\b' \

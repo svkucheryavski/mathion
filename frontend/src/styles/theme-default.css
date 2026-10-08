@@ -6,6 +6,14 @@
   --surface: #FFFFFF;         /* cards, rows, inputs */
   --surface-2: #F5F6F9;       /* table headers, accordion header strips */
   --surface-3: #FCFCFD;       /* nested/inset panels */
+  /* Slice-5c focus by depth: the open container is --focus-0; each level
+     further out is one step darker (spec D1/D2). */
+  --focus-0: var(--surface);
+  --focus-1: #EEF0F3;
+  --focus-2: #E1E4E9;
+  --focus-line: rgba(20, 24, 35, 0.11);      /* borders that stay visible on every shade */
+  --focus-line-strong: #B9C2CF;              /* the focus container's border */
+  --focus-shadow: 0 1px 4px rgba(20, 24, 35, 0.08);
 
   /* --- text --- */
   --text: #16181D;
