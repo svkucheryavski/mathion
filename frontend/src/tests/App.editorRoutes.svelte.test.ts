@@ -117,7 +117,7 @@ describe('App editor routes — item route → VersionEditPage modal (Slice-5b T
     expect(errors).toEqual([]);
     expect(currentRoute.path).toBe(SEQ);
     expect(target.querySelector('section.blocks')).not.toBeNull();   // the load ran: not stuck on the Skeleton
-    target.querySelector<HTMLButtonElement>('button[aria-label="New item in Seq 20"]')!.click();
+    [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!.click();
     await settle();
     const title = target.querySelector<HTMLInputElement>('input[aria-label="Item title"]');
     expect(title).not.toBeNull();                                   // the create form opens

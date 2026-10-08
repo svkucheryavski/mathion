@@ -40,3 +40,11 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **Focus after a header block delete** falls to `<body>` (the URL replaces to
   the version, no header to focus). Same as the pre-T2 footer; focus the next
   block's toggle or the page heading.
+
+## T3
+
+- **Enter on "+ Add …" right after a create is swallowed.** Focus returns to the line, but `createBusy` stays true through the follow-up `loadAdminTree`. `openAdd` bails, and the line isn't disabled (disabling it would drop the returned focus). Fix: a separate "posting" flag, so `openAdd` is allowed once the POST itself is done. Keep `createBusy` on reorder/header gating. (BlockAccordion, VersionEditPage.)
+- **No test for a permission flip closing an open add row.** The `canStructure`-flip effects in BlockAccordion and VersionEditPage still close the new rows, but no test covers "row open → version published → row gone, tracker unregistered".
+- **The page's focus return runs before the version check.** In VersionEditPage `submitCreateBlock`, the focus return runs before `if (!stillOnVid(savedVid)) return;`. A late success after a version switch could focus the new version's "+ Add block", but only when focus sat on `<body>`.
+- **Screen readers read "plus Add block".** Wrap the glyph: `<span aria-hidden="true">+</span> Add block`, and the same for sequence and item.
+- **Gate:** `.item-row` padding is deliberately unpinned (§Process). `gap:10px` was restored in r1.

@@ -4,7 +4,7 @@
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
-  import { structureReason, unsavedSuffix } from '../../lib/editorReasons';
+  import { unsavedSuffix } from '../../lib/editorReasons';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
   import { deriveExpansion } from '../../lib/deriveExpansion';
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
@@ -49,7 +49,6 @@
   const v = $derived(tree?.version);
   const slugMatches = $derived(!!tree && tree.course.slug === courseSlug);
   const perms = $derived(v ? versionPermissions(v) : null);
-  const blockReason = $derived(v ? structureReason(v) : null);
 
   // Tree that actually matches the URL we're rendering. During navigation
   // (X → Y, instance preserved) the store still holds X's tree until the
@@ -292,12 +291,17 @@
     deletingIid = null;
   }
 
+  // "+ Add block" (5c D9): a quiet line after the list opens an inline title
+  // row — Enter or ✓ creates, Esc or ✕ cancels. Shown at every depth (the
+  // user's call, 2026-10-08: blocks are always one click from being added).
   let creating = $state(false);
   let newTitle = $state('');
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
   let titleEl = $state<HTMLInputElement>();
+  let addLineEl = $state<HTMLButtonElement>();
+  const addErrId = `${uid}-add-err`;
 
   function resetCreate() {
     newTitle = ''; createErrors = {}; createGlobalError = null;
@@ -327,12 +331,18 @@
     }
   });
 
-  async function toggleCreate() {
-    if (createBusy || busy || blockReason) return;
-    if (creating) { resetCreate(); creating = false; return; }
+  async function openAdd() {
+    if (createBusy || busy || !perms?.canEditStructure) return;
     creating = true;
     await tick();
     titleEl?.focus();
+  }
+
+  async function cancelAdd() {
+    if (createBusy) return;
+    resetCreate(); creating = false;
+    await tick();
+    addLineEl?.focus();
   }
 
   async function submitCreateBlock() {
@@ -342,8 +352,12 @@
     createGlobalError = null;
     createBusy = true;
     try {
-      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle, info: '' });
+      await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle });   // no info (5c D7)
       newTitle = ''; creating = false;
+      // The row is gone; give a keyboard author the line back for the next
+      // one — unless focus already moved somewhere on purpose.
+      await tick();
+      if (document.activeElement === document.body) addLineEl?.focus();
       if (!stillOnVid(savedVid)) return;
       await loadAdminTree(savedVid, { force: true });
       pushToast('Block created', 'success');
@@ -489,37 +503,6 @@
       <section class="blocks" aria-labelledby={blocksHeadingId}>
         <!-- 5c: the card head is gone, but block h3s keep an h2 parent. -->
         <h2 id={blocksHeadingId} class="sr-only">Blocks</h2>
-        <!-- Interim until T3's "+ Add block" row (ledger: T1 ruling). -->
-        <div class="blocks-tools">
-          <IconButton
-            primary
-            glyph={creating ? 'close' : 'plus'}
-            title={blockReason ?? (creating ? 'Cancel new block' : 'New block')}
-            aria-label="New block"
-            aria-expanded={creating}
-            disabled={!!blockReason || busy || createBusy}
-            onclick={() => void toggleCreate()}
-          />
-        </div>
-        {#if creating}
-          <form class="cr-form" onsubmit={(e) => { e.preventDefault(); void submitCreateBlock(); }}>
-            <input
-              bind:this={titleEl}
-              placeholder="Title"
-              aria-label="Block title"
-              bind:value={newTitle}
-              required
-              disabled={createBusy || busy}
-              oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }}
-            />
-            {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
-            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <div class="cr-actions">
-              <Button type="submit" disabled={createBusy || busy || !perms?.canEditStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
-            </div>
-          </form>
-        {/if}
-
         {#if tree.blocks.length === 0}
           <EmptyState title={v.state === 'created' ? 'No blocks yet' : 'This version has no blocks.'} />
         {:else}
@@ -541,6 +524,33 @@
               </li>
             {/each}
           </ul>
+        {/if}
+
+        {#if perms.canEditStructure}
+          {#if creating}
+            <form class="add-row" onsubmit={(e) => { e.preventDefault(); void submitCreateBlock(); }}>
+              <div class="add-field">
+                <input
+                  bind:this={titleEl}
+                  class="add-input"
+                  placeholder="New block title"
+                  aria-label="New block title"
+                  aria-invalid={createErrors.title || createGlobalError ? 'true' : undefined}
+                  aria-describedby={createErrors.title || createGlobalError ? addErrId : undefined}
+                  bind:value={newTitle}
+                  maxlength={200}
+                  readonly={createBusy}
+                  onkeydown={(e) => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); void cancelAdd(); } }}
+                  oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; createGlobalError = null; }}
+                />
+                {#if createErrors.title || createGlobalError}<p id={addErrId} class="add-err" role="alert">{createErrors.title || createGlobalError}</p>{/if}
+              </div>
+              <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create block" disabled={createBusy || busy || !newTitle.trim()} />
+              <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new block" disabled={createBusy} onclick={() => void cancelAdd()} />
+            </form>
+          {:else}
+            <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openAdd()}>+ Add block</button>
+          {/if}
         {/if}
       </section>
 
@@ -628,22 +638,32 @@
      matches only while THIS page is mounted. */
   :global(body):has(.canvas.d1) { background: var(--focus-1); }
   :global(body):has(.canvas.d2) { background: var(--focus-2); }
-  .blocks-tools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-  /* Create forms — shared look (spec §4). */
-  .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
-  .cr-form input {
+  /* "+ Add block" (5c D9): a quiet line; its row is a field with ✓ ✕. */
+  .add-line {
+    margin-top: 4px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .add-line:disabled { color: var(--muted); cursor: default; }
+  .add-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+  .add-field { flex: 1 1 auto; min-width: 0; }
+  .add-input {
     box-sizing: border-box;
     width: 100%;
     height: var(--control-h);
-    padding: 0 10px;
-    border: 1px solid var(--border-strong);
+    padding: 0 var(--control-pad-x);
+    border: 1.5px solid var(--primary);
     border-radius: var(--radius);
     background: var(--surface);
     color: var(--text);
     font-size: 13px;
   }
-  .cr-actions { display: flex; justify-content: flex-end; }
-  .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
+  .add-err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
   .blocks-list { list-style: none; padding: 0; margin: 0; }
   .state-actions {
     display: flex;

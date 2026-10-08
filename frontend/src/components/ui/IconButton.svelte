@@ -22,6 +22,8 @@
     // the filled create / save control (ref 1479, 1546).
     round?: boolean;
     primary?: boolean;
+    // Slice-5c: the ✓ of an inline "+ Add …" row submits its form.
+    type?: 'button' | 'submit';
     onclick?: () => void;
     onmousedown?: (e: MouseEvent) => void;
     // Forward aria-label so an icon-only button can announce a purpose distinct
@@ -45,6 +47,7 @@
     danger = false,
     round = false,
     primary = false,
+    type = 'button',
     onclick = undefined,
     onmousedown = undefined,
     'aria-label': ariaLabel = undefined,
@@ -59,7 +62,7 @@
 
 <button
   bind:this={element}
-  type="button"
+  {type}
   class="icon-btn {size}"
   class:danger
   class:borderless

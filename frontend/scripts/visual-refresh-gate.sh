@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1391
+EXPECTED_CHECKS=1395
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -450,8 +450,6 @@ GLOBAL_ALLOW = {
     ('src/pages/MiniProjectDetailPage.svelte', 'code'),
     # Slice-5a T3: the last InlineField row drops its divider (ref 1548).
     ('src/components/editor/VersionMetaForm.svelte', '.inline-field:last-child'),
-    # Slice-5a T6: the last item row drops its hairline (ref 1602).
-    ('src/components/editor/SequenceAccordion.svelte', '.item-row'),
     # Slice-5b T1: `.modal-body > :global(*)` (spec :220-221). Child-combinator
     # scoped under the hashed `.modal-body`, so it reaches only the direct
     # children of a modal body. A T3 question renders inside SequencePlayer,
@@ -3634,7 +3632,21 @@ if [[ -n $REPLY ]]; then
 fi
 
 echo
-echo "--- (w) Slice-5a T4 / 5c T1 — the canvas (focus by depth), create-block form, state-action bar ---"
+# add_row_common — the 5c T3 "+ Add …" line and its title row, shared by
+# convention (not a component) between VersionEditPage and BlockAccordion
+# (N/H set by caller). Tokens only; pixel paddings stay unpinned (5c §Process).
+add_row_common() {
+  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:13px' 'font-weight:600'
+  chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
+  d '\.add-row' '' 'display:flex'
+  # Load-bearing layout (review T3): the field fills the row.
+  d '\.add-field' '' 'flex:1 1 auto' 'min-width:0'
+  d '\.add-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)'
+  d '\.add-err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
+  none "$N no create-form / interim + rules (5c T3)" "\.(cr-form|cr-actions|field-err|form-err|blocks-tools|body-tools)\.${H}"
+}
+
+echo "--- (w) Slice-5a T4 / 5c T1 / 5c T3 — the canvas (focus by depth), + Add block, state-action bar ---"
 own state-actions VersionEditPage.svelte
 uniq1 state-actions
 if [[ -n $REPLY ]]; then
@@ -3646,11 +3658,7 @@ if [[ -n $REPLY ]]; then
   chk "body:has\(\.canvas\.d1\.${H}\)" 'background:var\(--focus-1\)'
   chk "body:has\(\.canvas\.d2\.${H}\)" 'background:var\(--focus-2\)'
   none "VersionEditPage no fully-global body:has() (5c R3: .canvas stays scoped)" "body:has\(\.canvas\.d[12]\)"
-  d '\.blocks-tools' '' 'display:flex' 'justify-content:flex-end' 'margin-bottom:8px'
-  d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
-  chk "\.cr-form\.${H} input:where\(\.${H}\)" 'box-sizing:border-box' 'width:100%' 'height:var\(--control-h\)' 'padding:0 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
-  d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end'
-  chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
+  add_row_common
   d '\.blocks-list' '' 'list-style:none' 'padding:0' 'margin:0'
   d '\.state-actions' '' 'display:flex' 'align-items:center' 'gap:10px' 'justify-content:flex-end' 'margin-top:20px' 'padding-top:14px' 'border-top:1px solid var\(--border\)'
   # The pre-T4 rules are gone (old .blocks/.head/.create/.empty, rem font sizes).
@@ -3704,10 +3712,6 @@ echo "--- (y) Slice-5a T5b — accordion bodies: inline fields, create forms, de
 body_common() {
   # 5c T2: the title moved into the header (D8), delete into the header (D6).
   none "$N no .fields / .del-footer / .del-text rules (5c T2)" "\.(fields|del-footer|del-text)\.${H}"
-  d '\.body-tools' '' 'display:flex' 'justify-content:flex-end'
-  d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
-  d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end'
-  chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
   d '\.empty' '' 'margin:0' 'font-size:13px' 'color:var\(--muted\)'
   none "$N pre-5a .meta/.row/.head/.create/.danger rules gone" "\.(meta|row|head|create|danger)\.${H}[{ ,:>]"
   none "$N no rem font sizes"                                "\.[a-z-]+\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
@@ -3722,7 +3726,9 @@ if [[ -n $REPLY ]]; then
   d '\.block-card\.parent' '' 'background:var\(--focus-1\)'
   d '\.block-card\.focus' '' 'background:var\(--focus-0\)' 'border-color:var\(--focus-line-strong\)' 'box-shadow:var\(--focus-shadow\)'
   d '\.acc-body' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'padding:12px 14px'
-  chk "\.cr-form\.${H} input:where\(\.${H}\)" 'box-sizing:border-box' 'width:100%' 'height:var\(--control-h\)' 'padding:0 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
+  add_row_common
+  # .acc-body is a flex column: without this the line stretches full width (review T3).
+  d '\.add-line' '' 'align-self:flex-start'
   d '\.seqs-list' '' 'display:flex' 'flex-direction:column' 'gap:10px' 'list-style:none' 'padding:0' 'margin:0'
   body_common
 fi
@@ -3737,7 +3743,17 @@ if [[ -n $REPLY ]]; then
   chk "$CF" 'box-sizing:border-box' 'width:100%' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
   chk "\.cr-form\.${H} input:where\(\.${H}\)"    'height:var\(--control-h\)' 'padding:0 10px'
   chk "\.cr-form\.${H} textarea:where\(\.${H}\)" 'height:auto' 'padding:8px 10px'
-  d '\.items-list' '' 'list-style:none' 'padding:0' 'margin:0'
+  # The item create form until T4's New item modal, opened by "+ Add item" —
+  # a text line like + Add block / + Add sequence (user, 5c T3).
+  d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:13px' 'font-weight:600'
+  chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
+  none "SequenceAccordion no interim + rule (5c T3)" "\.body-tools\.${H}"
+  d '\.cr-form' '' 'display:flex' 'flex-direction:column' 'gap:8px' 'padding:12px 0'
+  d '\.cr-actions' '' 'display:flex' 'justify-content:flex-end' 'gap:8px'
+  chk "\.field-err\.${H},\.form-err\.${H}" 'margin:0' 'font-size:12\.5px' 'color:var\(--danger\)'
+  # 5c T3: item rows are separate boxes, spaced by the list gap.
+  d '\.items-list' '' 'display:flex' 'flex-direction:column' 'gap:4px' 'list-style:none' 'padding:0' 'margin:0'
+  none "SequenceAccordion no last-row hairline override (5c T3: rows are boxes)" "last-child>\.item-row"
   # 5c T1 (supersedes 5a D10): the sequence is a panel with its own border —
   # the translucent focus line, stronger when it is the focus.
   d '\.seq-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden'
@@ -3758,9 +3774,10 @@ own item-row ItemRow.svelte
 uniq1 item-row
 if [[ -n $REPLY ]]; then
   N=ItemRow; H=$REPLY
-  d '\.item-row' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 0' 'border-bottom:1px solid var\(--border-soft\)'
+  # 5c T3: each row is its own box on the focus panel; no slug (D5).
+  d '\.item-row' '' 'display:flex' 'align-items:center' 'gap:10px' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
   d '\.item-title' '' 'font-size:13px' 'font-weight:600' 'color:var\(--text\)'
-  d '\.item-slug' '' 'font-size:12px' 'color:var\(--muted\)'
+  none "ItemRow no .item-slug rule (5c D5)" "\.item-slug\.${H}"
   d '\.sep' '' 'color:var\(--faint\)'
   d '\.q-count' '' 'font-size:12px' 'color:var\(--muted\)'
   d '\.actions' '' 'margin-left:auto' 'display:flex' 'align-items:center' 'gap:6px'
@@ -3772,12 +3789,6 @@ if [[ -n $REPLY ]]; then
   if [[ -z $bad ]]; then echo "PASS  ItemRow: .sep is only ever coloured --faint"
   else echo "FAIL  ItemRow: .sep is only ever coloured --faint: ${(f)bad}"; fail=1; fi
   sweep ItemRow $H
-fi
-# The parent drops the last row's hairline (ref 1602), hash-coupled to SequenceAccordion.
-uniq1 seq-card
-if [[ -n $REPLY ]]; then
-  N=SequenceAccordion; H=$REPLY
-  chk "\.items-list\.${H}>li:where\(\.${H}\):last-child>\.item-row" 'border-bottom:0'
 fi
 
 own type-picker ItemTypePicker.svelte

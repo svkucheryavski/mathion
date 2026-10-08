@@ -6,12 +6,10 @@
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
-  import { labelFor } from '../../lib/labelFor';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
-  import Button from '../ui/Button.svelte';
   import IconButton from '../ui/IconButton.svelte';
   import type { AdminTreeBlock } from '../../lib/types';
 
@@ -65,7 +63,6 @@
   const perms = $derived(version ? versionPermissions(version) : null);
   const canStructure = $derived(perms?.canEditStructure ?? false);
   const canEditTitle = $derived(perms?.canEditTextFields ?? false);
-  const name = $derived(labelFor(block.title, block.slug, `block ${index}`));
 
   function toggle() {
     if (expanded) {
@@ -168,13 +165,16 @@
     }
   }
 
-  // Inline create-sequence form
+  // "+ Add sequence" (5c D9): a quiet line after the list opens an inline
+  // title row — Enter or ✓ creates, Esc or ✕ cancels.
   let creating = $state(false);
   let newTitle = $state('');
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
   let titleEl = $state<HTMLInputElement>();
+  let addLineEl = $state<HTMLButtonElement>();
+  const addErrId = $derived(`block-${String(block.id)}-add-err`);
 
   // D6: why the header trash is blocked (null = it may delete). The version's
   // permission is not a reason here: without it the trash is hidden.
@@ -226,16 +226,20 @@
     }
   });
 
-  async function toggleCreate() {
-    // Defense-in-depth: refuse mid-flight toggles. The toggle button is
-    // already disabled in these states, but a stale/programmatic click
-    // would otherwise unmount the form during an in-flight POST,
-    // discarding validation errors and unregistering the create tracker.
-    if (createBusy || busy || parentBusy) return;
-    if (creating) { resetCreate(); creating = false; return; }
+  async function openAdd() {
+    // Defense-in-depth: the line is disabled in these states, but a stale or
+    // programmatic click must not open a row that could not submit.
+    if (createBusy || busy || parentBusy || !canStructure) return;
     creating = true;
     await tick();
     titleEl?.focus();
+  }
+
+  async function cancelAdd() {
+    if (createBusy) return;
+    resetCreate(); creating = false;
+    await tick();
+    addLineEl?.focus();
   }
 
   async function submitCreate() {
@@ -248,6 +252,10 @@
     try {
       await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle });
       resetCreate(); creating = false;
+      // The row is gone; give a keyboard author the line back for the next
+      // one — unless focus already moved somewhere on purpose.
+      await tick();
+      if (document.activeElement === document.body) addLineEl?.focus();
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }
@@ -300,40 +308,6 @@
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
-      {#if mode === 'open-focus' && canStructure}
-        <!-- Interim until T3's "+ Add sequence" row (ledger: T2). -->
-        <div class="body-tools">
-          <IconButton
-            size="sm"
-            glyph={creating ? 'close' : 'plus'}
-            title={creating ? 'Cancel new sequence' : 'New sequence'}
-            aria-label={`New sequence in ${name}`}
-            aria-expanded={creating}
-            disabled={busy || createBusy || parentBusy}
-            onclick={() => void toggleCreate()}
-          />
-        </div>
-      {/if}
-
-      {#if creating}
-        <form class="cr-form" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
-          <input
-            bind:this={titleEl}
-            placeholder="Title"
-            aria-label="Sequence title"
-            bind:value={newTitle}
-            required
-            disabled={createBusy || busy || parentBusy}
-            oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }}
-          />
-          {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
-          {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-          <div class="cr-actions">
-            <Button type="submit" disabled={createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
-          </div>
-        </form>
-      {/if}
-
       {#if block.sequences.length === 0}
         <p class="empty">{canStructure ? 'No sequences yet.' : 'No sequences.'}</p>
       {:else}
@@ -358,6 +332,33 @@
           {/each}
         </ul>
       {/if}
+
+      {#if mode === 'open-focus' && canStructure}
+        {#if creating}
+          <form class="add-row" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
+            <div class="add-field">
+              <input
+                bind:this={titleEl}
+                class="add-input"
+                placeholder="New sequence title"
+                aria-label="New sequence title"
+                aria-invalid={createErrors.title || createGlobalError ? 'true' : undefined}
+                aria-describedby={createErrors.title || createGlobalError ? addErrId : undefined}
+                bind:value={newTitle}
+                maxlength={200}
+                readonly={createBusy}
+                onkeydown={(e) => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); void cancelAdd(); } }}
+                oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; createGlobalError = null; }}
+              />
+              {#if createErrors.title || createGlobalError}<p id={addErrId} class="add-err" role="alert">{createErrors.title || createGlobalError}</p>{/if}
+            </div>
+            <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create sequence" disabled={createBusy || busy || parentBusy || !newTitle.trim()} />
+            <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new sequence" disabled={createBusy} onclick={() => void cancelAdd()} />
+          </form>
+        {:else}
+          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => void openAdd()}>+ Add sequence</button>
+        {/if}
+      {/if}
     </div>
   {/if}
 </div>
@@ -377,22 +378,32 @@
     box-shadow: var(--focus-shadow);
   }
   .acc-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; /* ref 1570 */ }
-  .body-tools { display: flex; justify-content: flex-end; }
-  /* Create forms — shared look (spec §4). */
-  .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
-  .cr-form input {
+  /* "+ Add sequence" (5c D9): a quiet line; its row is a field with ✓ ✕. */
+  .add-line {
+    align-self: flex-start;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .add-line:disabled { color: var(--muted); cursor: default; }
+  .add-row { display: flex; align-items: flex-start; gap: 6px; }
+  .add-field { flex: 1 1 auto; min-width: 0; }
+  .add-input {
     box-sizing: border-box;
     width: 100%;
     height: var(--control-h);
-    padding: 0 10px;
-    border: 1px solid var(--border-strong);
+    padding: 0 var(--control-pad-x);
+    border: 1.5px solid var(--primary);
     border-radius: var(--radius);
     background: var(--surface);
     color: var(--text);
     font-size: 13px;
   }
-  .cr-actions { display: flex; justify-content: flex-end; }
-  .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
+  .add-err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
   .empty { margin: 0; font-size: 13px; color: var(--muted); }
   .seqs-list { display: flex; flex-direction: column; gap: 10px; list-style: none; padding: 0; margin: 0; /* ref 1570 rhythm */ }
 </style>

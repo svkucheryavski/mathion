@@ -18,7 +18,7 @@ function mountRow(over: Record<string, unknown> = {}) {
   document.body.appendChild(target);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props: any = $state({
-    item: item(), index: 1, structureReason: null, canReorderUp: true,
+    item: item(), index: 1, canStructure: true, canReorderUp: true,
     canReorderDown: true, busy: false,
     onMoveUp: vi.fn(), onMoveDown: vi.fn(), onOpen: vi.fn(), onDelete: vi.fn(), ...over,
   });
@@ -75,14 +75,10 @@ describe('ItemRow — 3b treatment (T6)', () => {
     expect(EMOJI.test(target.textContent ?? '')).toBe(false);
   });
 
-  it('title, mono slug (aria-hidden), and for a quiz the faint separator + mono count', () => {
+  it('title, and for a quiz the faint separator + mono count', () => {
     const { target } = mountRow();
     flushSync();
     expect(target.querySelector('.item-title')!.textContent).toBe('Pop quiz');
-    const slug = target.querySelector('.item-slug')!;
-    expect(slug.textContent).toBe('/pop-quiz');
-    expect(slug.classList.contains('mono')).toBe(true);
-    expect(slug.getAttribute('aria-hidden')).toBe('true');
     expect(target.querySelector('.sep')!.getAttribute('aria-hidden')).toBe('true');
     expect(count(target)!.classList.contains('mono')).toBe(true);
   });
@@ -108,17 +104,6 @@ describe('ItemRow — 3b treatment (T6)', () => {
     expect(slot(target, 'down').title).toBe('Move down — already last');
   });
 
-  it('a structure reason disables ↑ ↓ delete with the reason; Open stays enabled', () => {
-    const reason = 'Only a created version can change its structure';
-    const { target } = mountRow({ structureReason: reason, canReorderUp: false });
-    flushSync();
-    for (const g of ['up', 'down', 'trash']) {
-      expect(slot(target, g).disabled).toBe(true);
-      expect(slot(target, g).title).toBe(reason);
-    }
-    expect(slot(target, 'pencil').disabled).toBe(false);
-  });
-
   it('the mark is the item\'s own type (compared with a standalone ItemMark)', () => {
     for (const type of ['quiz', 'video'] as const) {
       const { target } = mountRow({ item: item({ type }) });
@@ -132,11 +117,10 @@ describe('ItemRow — 3b treatment (T6)', () => {
     }
   });
 
-  it('with no title and no slug: "(item N)" visibly, no slug, slot names end in the plain placeholder', () => {
+  it('with no title and no slug: "(item N)" visibly, slot names end in the plain placeholder', () => {
     const { target } = mountRow({ item: item({ title: '', slug: '' }), index: 2 });
     flushSync();
     expect(target.querySelector('.item-title')!.textContent).toBe('(item 2)');
-    expect(target.querySelector('.item-slug')).toBeNull();
     expect([...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('aria-label'))).toEqual([
       'Move item up: item 2', 'Move item down: item 2', 'Open item 2', 'Delete item 2',
     ]);
@@ -157,5 +141,28 @@ describe('ItemRow — 3b treatment (T6)', () => {
     slot(target, 'pencil').click();
     slot(target, 'trash').click();
     expect([onMoveUp, onMoveDown, onOpen, onDelete].map((f) => f.mock.calls.length)).toEqual([1, 1, 1, 1]);
+  });
+});
+
+describe('ItemRow — Slice-5c T3', () => {
+  it('no slug in the row', () => {
+    const { target } = mountRow();
+    flushSync();
+    expect(target.querySelector('.item-slug')).toBeNull();
+    expect(target.textContent).not.toContain('/');
+  });
+
+  it('canStructure false (published / archived): ✎ only — no ↑ ↓ trash', () => {
+    const { target } = mountRow({ canStructure: false });
+    flushSync();
+    const labels = [...target.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
+    expect(labels).toEqual([expect.stringMatching(/^Open /)]);
+  });
+
+  it('canStructure true: ↑ ↓ ✎ trash in that order', () => {
+    const { target } = mountRow();
+    flushSync();
+    const glyphs = [...target.querySelectorAll('button')].map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['up', 'down', 'pencil', 'trash']);
   });
 });

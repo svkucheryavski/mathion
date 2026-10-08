@@ -43,6 +43,10 @@ The 5a/5b gate pinned the CSS against the written spec, but nobody looked at the
   - Enter or ✓ saves; Esc or ✕ cancels.
   - There is no settings modal for blocks or sequences.
 - **D9 — "+ Add block" / "+ Add sequence" are inline title rows** at their focus level: type the title, press Enter.
+  - *Amended by the user, 2026-10-08 (during T3):*
+    - Every "+ Add …" line sits **after** the list it adds to, because new children appear at the end.
+    - **"+ Add block" is visible at every depth,** not only when nothing is open. This is the one exception to D4.
+    - "+ Add item" is the same kind of quiet text line as the other two.
 - **D10 — Everything about items happens in modals.**
   - **"+ Add item"** opens a **New item** modal:
     - four type cards: Page, Video, Quiz, App;

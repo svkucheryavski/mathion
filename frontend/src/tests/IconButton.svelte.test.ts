@@ -124,3 +124,32 @@ describe('IconButton', () => {
     expect(onmousedown).toHaveBeenCalledTimes(1);
   });
 });
+
+// Slice-5c T3: the inline "+ Add …" rows submit through their ✓ IconButton.
+describe('IconButton — type (Slice-5c T3)', () => {
+  function inForm(props: Record<string, unknown>) {
+    const form = document.createElement('form');
+    const onsubmit = vi.fn((e: Event) => e.preventDefault());
+    form.addEventListener('submit', onsubmit);
+    host = document.createElement('div');
+    host.appendChild(form);
+    document.body.appendChild(host);
+    component = mount(IconButton, { target: form, props: props as ComponentProps<typeof IconButton> });
+    flushSync();
+    return { btn: form.querySelector('button') as HTMLButtonElement, onsubmit };
+  }
+
+  it('defaults to type="button": a click does not submit its form', () => {
+    const { btn, onsubmit } = inForm({ glyph: 'check', title: 'Create' });
+    expect(btn.type).toBe('button');
+    btn.click();
+    expect(onsubmit).not.toHaveBeenCalled();
+  });
+
+  it('type="submit" submits its form', () => {
+    const { btn, onsubmit } = inForm({ glyph: 'check', title: 'Create', type: 'submit' });
+    expect(btn.type).toBe('submit');
+    btn.click();
+    expect(onsubmit).toHaveBeenCalledTimes(1);
+  });
+});

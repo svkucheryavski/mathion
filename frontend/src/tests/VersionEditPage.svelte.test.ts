@@ -251,53 +251,120 @@ const btnByText = (text: string) =>
   [...target.querySelectorAll<HTMLButtonElement>('.state-actions button')].find((b) => b.textContent?.trim() === text);
 const posts = () => fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST').map(([u]) => String(u));
 
-describe('VersionEditPage — Blocks card (T4)', () => {
-  const plus = () => target.querySelector<HTMLButtonElement>('button[aria-label="New block"]')!;
+describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
+  const addLine = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add block'));
+  const addInput = () => target.querySelector<HTMLInputElement>('input[aria-label="New block title"]');
+  const typeTitle = (v: string) => {
+    addInput()!.value = v;
+    addInput()!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
 
-  it('create-block starts collapsed; + opens it and focuses Title', async () => {
-    await render();
-    expect(target.querySelector('.cr-form')).toBeNull();
-    expect(plus().title).toBe('New block');
-    expect(plus().getAttribute('aria-expanded')).toBe('false');
-    plus().click();
+  it('shown at every depth on a created version, after the blocks list (user 2026-10-08)', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [{ id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] }] })];
+    const props = await renderReactive();
+    const after = () => {
+      const list = target.querySelector('section.blocks .blocks-list')!;
+      expect(list.compareDocumentPosition(addLine()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(list.contains(addLine()!)).toBe(false);
+    };
+    after();
+    expect(target.querySelector('button[aria-label="New block"]')).toBeNull();   // the T1 interim + is gone
+    props.blockId = '10';
     await settle();
-    const title = target.querySelector<HTMLInputElement>('.cr-form input')!;
-    expect(document.activeElement).toBe(title);
-    expect(plus().getAttribute('aria-label')).toBe('New block');
-    expect(plus().title).toBe('Cancel new block');
-    expect(plus().dataset.glyph).toBe('close');
-    expect(plus().getAttribute('aria-expanded')).toBe('true');
-    plus().click();
+    expect(target.querySelector('.canvas.d1')).not.toBeNull();
+    after();
+    props.sequenceId = '20';
     await settle();
-    expect(target.querySelector('.cr-form')).toBeNull();
+    expect(target.querySelector('.canvas.d2')).not.toBeNull();   // a real depth 2, not a stale-id fallback
+    after();
   });
 
-  it('+ is always rendered; on a published version it is disabled with the structure reason', async () => {
+  it('an open row is not closed by a depth change (the line is not tied to the focus)', async () => {
+    // Empty row: a typed one would go through the guard prompt on a real navigate.
+    const props = await renderReactive();
+    addLine()!.click();
+    await settle();
+    props.blockId = '10';
+    await settle();
+    expect(addInput()).not.toBeNull();
+  });
+
+  it('after a create, focus returns to the line for the next one', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('published: no "+ Add block"', async () => {
     tree.version = mkVersion({ state: 'published' });
     await render();
-    expect(plus().disabled).toBe(true);
-    expect(plus().title).toBe('Only a created version can change its structure');
+    expect(addLine()).toBeUndefined();
   });
 
-  it('+ is not blocked by an open draft (D3)', async () => {
+  it('the line opens a focused title row; submit POSTs {title} only — no info (D7)', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    expect(document.activeElement).toBe(addInput());
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const post = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/versions/1/blocks' && (i as RequestInit)?.method === 'POST')!;
+    expect(JSON.parse(String((post[1] as RequestInit).body))).toEqual({ title: 'Matrices' });   // no info (D7)
+    expect(addInput()).toBeNull();
+  });
+
+  it('Esc closes the row without a request and returns focus to the line', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('x');
+    const calls = fetchSpy.mock.calls.length;
+    addInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(addInput()).toBeNull();
+    expect(fetchSpy.mock.calls.length).toBe(calls);
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('a server error shows under the row', async () => {
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? jres({ detail: [{ loc: ['body', 'title'], msg: 'Too long' }] }, 422)
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('x');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const err = target.querySelector('section.blocks .add-err')!;
+    expect(err.textContent).toContain('Too long');
+    expect(addInput()!.getAttribute('aria-invalid')).toBe('true');
+    expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
+    expect(err.id).not.toBe('');
+  });
+
+  it('the line is not blocked by an open draft (D3)', async () => {
     await render();
     await makeDirty();
-    expect(plus().disabled).toBe(false);
+    expect(addLine()!.disabled).toBe(false);
   });
 
-  it('a confirmed navigation discards a typed create-block title', async () => {
+  it('a typed title is guard-dirty; a confirmed navigation discards it', async () => {
     await render();
-    plus().click();
+    addLine()!.click();
     await settle();
-    const title = target.querySelector<HTMLInputElement>('.cr-form input')!;
-    title.value = 'New block';
-    title.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    typeTitle('New block');
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await navigate('/courses/c/edit/v/1/blocks/10');
     await settle();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(target.querySelector('.cr-form')).toBeNull();
+    expect(addInput()).toBeNull();
     await navigate('/courses/c/edit/v/1');
     expect(confirmSpy).toHaveBeenCalledTimes(1);
   });
@@ -309,26 +376,24 @@ describe('VersionEditPage — Blocks card (T4)', () => {
       ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'Title already taken' }, 409))
       : undefined));
     await render();
-    plus().click();
+    addLine()!.click();
     await settle();
-    const title = target.querySelector<HTMLInputElement>('.cr-form input')!;
-    title.value = 'Intro';
-    title.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    title.form!.requestSubmit();
+    typeTitle('Intro');
+    addInput()!.form!.requestSubmit();
     await settle();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     await navigate('/courses/c/edit/v/1/blocks/10');
     await settle();
-    expect(target.querySelector('.cr-form')).toBeNull();
+    expect(addInput()).toBeNull();
     release();
     await settle();
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
-    plus().click();
+    await navigate('/courses/c/edit/v/1');
     await settle();
-    expect(target.querySelector<HTMLInputElement>('.cr-form input')!.value).toBe('');
-    expect(target.querySelector('.cr-form .field-err')).toBeNull();
-    expect(target.querySelector('.cr-form .form-err')).toBeNull();
+    addLine()!.click();
+    await settle();
+    expect(addInput()!.value).toBe('');
+    expect(target.querySelector('section.blocks .add-err')).toBeNull();
   });
 
   it('empty: "No blocks yet" on a created version, "This version has no blocks." otherwise', async () => {
@@ -505,8 +570,8 @@ describe('VersionEditPage — a create-sequence draft and a confirmed collapse (
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
     await renderRouted();
-    const plus = () => target.querySelector<HTMLButtonElement>('button[aria-label="New sequence in Block 10"]')!;
-    const title = () => target.querySelector<HTMLInputElement>('input[aria-label="Sequence title"]');
+    const plus = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add sequence'))!;
+    const title = () => target.querySelector<HTMLInputElement>('input[aria-label="New sequence title"]');
     plus().click();
     await settle();
     title()!.value = 'Draft';
@@ -516,7 +581,7 @@ describe('VersionEditPage — a create-sequence draft and a confirmed collapse (
     await settle();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
-    // 5c: a collapsed block carries no + — expand it, then open the form.
+    // 5c: a collapsed block carries no "+ Add sequence" — expand it, then open the row.
     target.querySelector<HTMLButtonElement>('#block-10-header')!.click();
     await settle();
     plus().click();
@@ -833,7 +898,7 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     });
     await navigate(SEQ, { force: true });
     await renderRouted();
-    target.querySelector<HTMLButtonElement>('button[aria-label="New item in Seq 20"]')!.click();
+    [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!.click();
     await settle();
     const t = target.querySelector<HTMLInputElement>('input[aria-label="Item title"]')!;
     typeInto(t, 'Fresh');

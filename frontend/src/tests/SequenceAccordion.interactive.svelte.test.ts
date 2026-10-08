@@ -86,7 +86,9 @@ function mountAccordion(seq: AdminTreeSequence = mkSeq(), version = mkVersion())
   flushSync();
   return { target, stillOnVid, props };
 }
-const plus = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('button[aria-label="New item in Seq"]')!;
+// Slice-5c T3 (user 2026-10-08): "+ Add item" is a text line like + Add block /
+// + Add sequence; until T4's New item modal it opens the inline form.
+const addItem = (t: HTMLElement) => [...t.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!;
 const trash = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq"]')!;
 const createBtn = (t: HTMLElement) =>
   [...t.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Create') as HTMLButtonElement;
@@ -188,23 +190,39 @@ describe('SequenceAccordion — header (Slice-5c T2)', () => {
 });
 
 describe('SequenceAccordion — body (T5b)', () => {
-  it('the + opens the form and focuses the checked type radio', async () => {
+  it('"+ Add item" opens the form (the line hides) and focuses the checked type radio', async () => {
     const { target } = mountAccordion();
-    expect(plus(target).title).toBe('New item');
-    plus(target).click();
+    expect(addItem(target).textContent!.trim()).toBe('+ Add item');
+    expect(target.querySelector('button[aria-label="New item in Seq"]')).toBeNull();   // the interim + is gone
+    addItem(target).click();
     await settle();
     const checked = target.querySelector<HTMLInputElement>('form input[type="radio"]:checked')!;
     expect(checked.value).toBe('static_page');
     expect(document.activeElement).toBe(checked);
-    expect(plus(target).dataset.glyph).toBe('close');
-    expect(plus(target).title).toBe('Cancel new item');
-    expect(plus(target).getAttribute('aria-label')).toBe('New item in Seq');
-    expect(plus(target).getAttribute('aria-expanded')).toBe('true');
+    expect(addItem(target)).toBeUndefined();
+  });
+
+  it('Cancel closes the form without a request and returns focus to the line', async () => {
+    const { target } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'Draft');
+    const calls = fetchSpy.mock.calls.length;
+    [...target.querySelectorAll<HTMLButtonElement>('form button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
+    await settle();
+    expect(target.querySelector('form')).toBeNull();
+    expect(fetchSpy.mock.calls.length).toBe(calls);
+    expect(document.activeElement).toBe(addItem(target));
+  });
+
+  it('published: no "+ Add item"', () => {
+    const { target } = mountAccordion(mkSeq(), mkVersion({ state: 'published' }));
+    expect(addItem(target)).toBeUndefined();
   });
 
   it('the create form keeps its type-specific fields', async () => {
     const { target } = mountAccordion();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     expect(target.querySelector('form textarea[placeholder="Content (markdown)"]')).not.toBeNull();
     target.querySelector<HTMLInputElement>('input[value="video"]')!.click(); flushSync();
@@ -218,7 +236,7 @@ describe('SequenceAccordion — body (T5b)', () => {
   it('creates an interactive_app with only title + type — no script_url, no URL field', async () => {
     serve((url) => (url.endsWith('/api/sequences/2/items') ? jres({ id: 99 }) : undefined));
     const { target } = mountAccordion();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     target.querySelector<HTMLInputElement>('input[value="interactive_app"]')!.click(); flushSync();
     expect(target.querySelector('input[type="url"]')).toBeNull();
@@ -233,7 +251,7 @@ describe('SequenceAccordion — body (T5b)', () => {
 
   it('collapse resets the create form', async () => {
     const { target, props } = mountAccordion();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'Draft');
     props.routeSid = null;
@@ -241,7 +259,7 @@ describe('SequenceAccordion — body (T5b)', () => {
     props.routeSid = '2';
     flushSync();
     expect(target.querySelector('form')).toBeNull();
-    expect(plus(target).getAttribute('aria-expanded')).toBe('false');
+    expect(addItem(target)).toBeDefined();
   });
 
   it('a late create-item success after a version change neither reloads nor navigates', async () => {
@@ -250,7 +268,7 @@ describe('SequenceAccordion — body (T5b)', () => {
       ? new Promise<void>((r) => { release = r; }).then(() => jres({ id: 99 }))
       : undefined));
     const { target, stillOnVid } = mountAccordion();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'New page');
     createBtn(target).click();
@@ -269,7 +287,7 @@ describe('SequenceAccordion — body (T5b)', () => {
       ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'Title already taken' }, 409))
       : undefined));
     const { target, props } = mountAccordion();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     type(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!, 'Dup');
     createBtn(target).click();
@@ -281,7 +299,7 @@ describe('SequenceAccordion — body (T5b)', () => {
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
     props.routeSid = '2';
     flushSync();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     expect(target.querySelector<HTMLInputElement>('input[placeholder="Title"]')!.value).toBe('');
     expect(target.querySelector('.field-err')).toBeNull();
@@ -317,7 +335,7 @@ describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
 
   it('an open create form → disabled, "Cancel the new item first"', async () => {
     const { target } = mountAccordion();
-    plus(target).click();
+    addItem(target).click();
     await settle();
     expect(trash(target).disabled).toBe(true);
     expect(trash(target).title).toBe('Cancel the new item first');
@@ -371,12 +389,26 @@ describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
 });
 
 describe('SequenceAccordion — item rows (T6)', () => {
-  it('passes the structure reason to item rows (published: delete disabled, open enabled)', () => {
+  it('published: item rows show ✎ only — no arrows, no trash (Slice-5c T3)', () => {
     const { target } = mountAccordion(mkSeq({ items: [item] }), mkVersion({ state: 'published' }));
-    const del = target.querySelector<HTMLButtonElement>('button[aria-label="Delete Page"]')!;
-    expect(del.disabled).toBe(true);
-    expect(del.title).toBe('Only a created version can change its structure');
+    expect(target.querySelector('button[aria-label="Delete Page"]')).toBeNull();
+    expect(target.querySelector('button[aria-label="Move item up: Page"]')).toBeNull();
     expect(target.querySelector<HTMLButtonElement>('button[aria-label="Open Page"]')!.disabled).toBe(false);
+  });
+
+  it('item rows sit in a list with a gap, and "+ Add item" comes after the list (Slice-5c T3, user 2026-10-08)', () => {
+    const { target } = mountAccordion(mkSeq({ items: [item, { ...item, id: 10, title: 'Two', slug: 'two', order: 2 }] }));
+    const list = target.querySelector('.items-list')!;
+    expect(list.compareDocumentPosition(addItem(target)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.contains(addItem(target))).toBe(false);
+  });
+
+  it('the opened create form sits after the item list too', async () => {
+    const { target } = mountAccordion(mkSeq({ items: [item] }));
+    addItem(target).click();
+    await settle();
+    const list = target.querySelector('.items-list')!;
+    expect(list.compareDocumentPosition(target.querySelector('form')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   const two = () => mkSeq({ items: [item, { ...item, id: 10, title: 'Two', slug: 'two', order: 2 }] });

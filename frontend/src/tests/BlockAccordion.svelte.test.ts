@@ -118,8 +118,9 @@ async function dirtyBlockTitle() {
 }
 const enter = (el: HTMLElement) => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 
-const plus = () => target.querySelector<HTMLButtonElement>('button[aria-label="New sequence in Vectors"]')!;
-const createTitle = () => target.querySelector<HTMLInputElement>('input[placeholder="Title"]');
+// Slice-5c T3: the inline "+ Add sequence" line and the title row it opens.
+const addLine = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add sequence'));
+const addInput = () => target.querySelector<HTMLInputElement>('input[aria-label="New sequence title"]');
 
 describe('BlockAccordion — header (T5a)', () => {
   it('arrows always render: boundary titles on an editable version', () => {
@@ -138,23 +139,6 @@ describe('BlockAccordion — header (T5a)', () => {
     await settle();
     expect([...target.querySelectorAll('button')].some((b) => b.textContent?.includes('New sequence'))).toBe(false);
     expect(target.querySelector('#block-3-panel h3')).toBeNull();
-  });
-
-  it('+ on an expanded block toggles the create form and focuses Title', async () => {
-    await navigate('/courses/c/edit/v/1/blocks/3', { force: true });
-    mountBlock();
-    await settle();
-    expect(plus().title).toBe('New sequence');
-    expect(plus().getAttribute('aria-expanded')).toBe('false');
-    plus().click();
-    await settle();
-    expect(document.activeElement).toBe(createTitle());
-    expect(plus().dataset.glyph).toBe('close');
-    expect(plus().title).toBe('Cancel new sequence');
-    expect(plus().getAttribute('aria-expanded')).toBe('true');
-    plus().click();
-    await settle();
-    expect(createTitle()).toBeNull();
   });
 
   it('a reorder is not blocked by an open draft (D3)', async () => {
@@ -183,27 +167,27 @@ describe('BlockAccordion — body (T5b)', () => {
     await expand();
     mountBlock();
     await settle();
-    plus().click();
+    addLine()!.click();
     await settle();
-    type(createTitle()!, 'Draft');
+    type(addInput()!, 'Draft');
     await navigate('/courses/c/edit/v/1', { force: true });
     await settle();
     await expand();
-    expect(createTitle()).toBeNull();
-    expect(plus().getAttribute('aria-expanded')).toBe('false');
+    expect(addInput()).toBeNull();
+    expect(addLine()).toBeDefined();
   });
 
   it('a confirmed navigation discards a typed create-sequence title (createTracker.discard)', async () => {
     await expand();
     mountBlock();
     await settle();
-    plus().click();
+    addLine()!.click();
     await settle();
-    type(createTitle()!, 'Draft');
+    type(addInput()!, 'Draft');
     expect(registry.isAnyDirty()).toBe(true);
     registry.discardAll();
     flushSync();
-    expect(createTitle()).toBeNull();
+    expect(addInput()).toBeNull();
     expect(registry.isAnyDirty()).toBe(false);
   });
 
@@ -298,10 +282,10 @@ describe('BlockAccordion — body (T5b)', () => {
     await expand();
     mountBlock();
     await settle();
-    plus().click();
+    addLine()!.click();
     await settle();
-    type(createTitle()!, 'Dup');
-    createTitle()!.form!.requestSubmit();
+    type(addInput()!, 'Dup');
+    addInput()!.form!.requestSubmit();
     await settle();
     await navigate('/courses/c/edit/v/1', { force: true });
     await settle();
@@ -309,11 +293,10 @@ describe('BlockAccordion — body (T5b)', () => {
     await settle();
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
     await expand();
-    plus().click();
+    addLine()!.click();
     await settle();
-    expect(createTitle()!.value).toBe('');
-    expect(target.querySelector('#block-3-panel .field-err')).toBeNull();
-    expect(target.querySelector('#block-3-panel .form-err')).toBeNull();
+    expect(addInput()!.value).toBe('');
+    expect(target.querySelector('#block-3-panel .add-err')).toBeNull();
   });
 
   it('empty sequences: "No sequences yet." when editable, "No sequences." otherwise', async () => {
@@ -326,6 +309,122 @@ describe('BlockAccordion — body (T5b)', () => {
     mountBlock();
     await settle();
     expect(target.querySelector('#block-3-panel > .empty')!.textContent).toBe('No sequences.');
+  });
+});
+
+describe('BlockAccordion — "+ Add sequence" (Slice-5c T3)', () => {
+  async function expand() {
+    await navigate('/courses/c/edit/v/1/blocks/3', { force: true });
+    await settle();
+  }
+  const submitBtn = () => target.querySelector<HTMLButtonElement>('button[aria-label="Create sequence"]');
+
+  it('shown only on the open-focus block of an editable version', async () => {
+    mountBlock(mkBlock({ sequences: [mkSeq(5)] }));
+    expect(addLine()).toBeUndefined();                  // collapsed
+    await expand();
+    expect(addLine()).toBeDefined();
+    await navigate('/courses/c/edit/v/1/blocks/3/sequences/5', { force: true });
+    await settle();
+    expect(addLine()).toBeUndefined();                  // a sequence holds the focus
+  });
+
+  it('the line sits after the sequences list (new sequences land at the end)', async () => {
+    await expand();
+    mountBlock(mkBlock({ sequences: [mkSeq(5), mkSeq(6)] }));
+    await settle();
+    const list = target.querySelector('#block-3-panel .seqs-list')!;
+    expect(list.compareDocumentPosition(addLine()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.contains(addLine()!)).toBe(false);
+  });
+
+  it('the line opens a focused title row; submit creates {title} and reloads', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    expect(document.activeElement).toBe(addInput());
+    expect(addLine()).toBeUndefined();
+    type(addInput()!, 'Span');
+    const treeCalls = treeFetchPaths.length;
+    addInput()!.form!.requestSubmit(); await settle();
+    const post = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/blocks/3/sequences' && i?.method === 'POST')!;
+    expect(JSON.parse(String(post[1].body))).toEqual({ title: 'Span' });
+    expect(treeFetchPaths.length).toBe(treeCalls + 1);
+    expect(addInput()).toBeNull();
+  });
+
+  it('after a create, focus returns to the line for the next one', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('✓ is a submit button, disabled until a title is typed', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    expect(submitBtn()!.type).toBe('submit');
+    expect(submitBtn()!.disabled).toBe(true);
+    type(addInput()!, 'Span');
+    expect(submitBtn()!.disabled).toBe(false);
+    submitBtn()!.click(); await settle();
+    expect(fetchSpy.mock.calls.some(([u, i]) => String(u) === '/api/blocks/3/sequences' && i?.method === 'POST')).toBe(true);
+  });
+
+  it('Esc closes the row without a request and returns focus to the line', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'x');
+    const calls = fetchSpy.mock.calls.length;
+    addInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await settle();
+    expect(addInput()).toBeNull();
+    expect(fetchSpy.mock.calls.length).toBe(calls);
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('✕ closes the row and returns focus to the line', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new sequence"]')!.click(); await settle();
+    expect(addInput()).toBeNull();
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('a typed title is guard-dirty; a confirmed discard closes the row', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    expect(registry.isAnyDirty()).toBe(false);
+    type(addInput()!, 'x');
+    expect(registry.isAnyDirty()).toBe(true);
+    registry.discardAll(); flushSync();
+    expect(addInput()).toBeNull();
+  });
+
+  it('a server error shows under the row', async () => {
+    serve((u, i) => (u === '/api/blocks/3/sequences' && i?.method === 'POST' ? jres({ detail: [{ loc: ['body', 'title'], msg: 'Too long' }] }, 422) : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'x');
+    addInput()!.form!.requestSubmit(); await settle();
+    const err = target.querySelector('.add-err')!;
+    expect(err.textContent).toContain('Too long');
+    expect(addInput()!.getAttribute('aria-invalid')).toBe('true');
+    expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
+    expect(err.id).toBe('block-3-add-err');
   });
 });
 
@@ -382,7 +481,7 @@ describe('BlockAccordion — header (Slice-5c T2)', () => {
     expect(up()).not.toBeNull();
     expect(pencil()).toBeNull();
     expect(trash()).toBeNull();
-    expect(target.querySelector('button[aria-label="New sequence in Vectors"]')).toBeNull();
+    expect(addLine()).toBeUndefined();
   });
 
   it('open block: ✎ renames with a {title} PATCH, then reloads', async () => {
@@ -425,7 +524,7 @@ describe('BlockAccordion — header (Slice-5c T2)', () => {
     await settle();
     expect(trash()!.disabled).toBe(false);
     expect(trash()!.title).toBe('Delete this block');
-    plus().click();
+    addLine()!.click();
     await settle();
     expect(trash()!.disabled).toBe(true);
     expect(trash()!.title).toBe('Cancel the new sequence first');
@@ -448,7 +547,7 @@ describe('BlockAccordion — header (Slice-5c T2)', () => {
     expect(pencil()!.disabled).toBe(false);
     expect(up()).toBeNull();
     expect(trash()).toBeNull();
-    expect(plus()).toBeNull();
+    expect(addLine()).toBeUndefined();
   });
 
   it('archived and disabled: no ✎, no arrows, no trash', async () => {

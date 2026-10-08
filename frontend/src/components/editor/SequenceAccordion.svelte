@@ -6,14 +6,12 @@
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
-  import { structureReason, unsavedSuffix } from '../../lib/editorReasons';
-  import { labelFor } from '../../lib/labelFor';
+  import { unsavedSuffix } from '../../lib/editorReasons';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import Button from '../ui/Button.svelte';
-  import IconButton from '../ui/IconButton.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
 
   type Props = {
@@ -70,9 +68,7 @@
   const version = $derived(currentEditorVersion.value?.version ?? null);
   const perms = $derived(version ? versionPermissions(version) : null);
   const canStructure = $derived(perms?.canEditStructure ?? false);
-  const structReason = $derived(version ? structureReason(version) : null);
   const canEditTitle = $derived(perms?.canEditTextFields ?? false);
-  const name = $derived(labelFor(seq.title, seq.slug, `sequence ${index}`));
 
   function toggle() {
     if (expanded) {
@@ -250,18 +246,24 @@
     }
   });
 
-  async function toggleCreate() {
-    // Defense-in-depth: refuse mid-flight toggles. The toggle button is
-    // already disabled in these states, but a stale/programmatic click
-    // would otherwise unmount the form during an in-flight POST,
-    // discarding validation errors and unregistering the create tracker.
+  let addLineEl = $state<HTMLButtonElement>();
+
+  async function openAdd() {
+    // Defense-in-depth: the line is disabled in these states, but a stale or
+    // programmatic click must not open a form that could not submit.
     if (createBusy || busy || parentBusy || !canStructure) return;
-    if (creating) { resetCreateForm(); creating = false; return; }
     creating = true;
     await tick();
     // The checked type radio is the form's first tab stop. Scoped to this
     // form — several sequences' pickers share the radio group name.
     formEl?.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.focus();
+  }
+
+  async function cancelAdd() {
+    if (createBusy) return;
+    resetCreateForm(); creating = false;
+    await tick();
+    addLineEl?.focus();
   }
 
   async function submitCreate() {
@@ -338,19 +340,27 @@
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
-      {#if canStructure}
-        <!-- Interim until T4's "+ Add item" line (ledger: T2). -->
-        <div class="body-tools">
-          <IconButton
-            size="sm"
-            glyph={creating ? 'close' : 'plus'}
-            title={creating ? 'Cancel new item' : 'New item'}
-            aria-label={`New item in ${name}`}
-            aria-expanded={creating}
-            disabled={busy || createBusy || parentBusy}
-            onclick={() => void toggleCreate()}
-          />
-        </div>
+      {#if seq.items.length === 0}
+        <p class="empty">{canStructure ? 'No items yet.' : 'No items.'}</p>
+      {:else}
+        <ul class="items-list">
+          {#each seq.items as item, i (item.id)}
+            <li>
+              <ItemRow
+                {item}
+                index={i + 1}
+                {canStructure}
+                canReorderUp={i > 0}
+                canReorderDown={i < seq.items.length - 1}
+                busy={busy || createBusy || parentBusy}
+                onMoveUp={() => void reorderItem(i, -1)}
+                onMoveDown={() => void reorderItem(i, 1)}
+                onOpen={() => openItem(item.id)}
+                onDelete={() => void deleteItem(item.id, item.title)}
+              />
+            </li>
+          {/each}
+        </ul>
       {/if}
 
       {#if creating}
@@ -367,32 +377,15 @@
           {/if}
           {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
           <div class="cr-actions">
+            <Button variant="ghost" disabled={createBusy} onclick={() => void cancelAdd()}>Cancel</Button>
             <Button type="submit" disabled={createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
           </div>
         </form>
-      {/if}
-
-      {#if seq.items.length === 0}
-        <p class="empty">{canStructure ? 'No items yet.' : 'No items.'}</p>
-      {:else}
-        <ul class="items-list">
-          {#each seq.items as item, i (item.id)}
-            <li>
-              <ItemRow
-                {item}
-                index={i + 1}
-                structureReason={structReason}
-                canReorderUp={i > 0}
-                canReorderDown={i < seq.items.length - 1}
-                busy={busy || createBusy || parentBusy}
-                onMoveUp={() => void reorderItem(i, -1)}
-                onMoveDown={() => void reorderItem(i, 1)}
-                onOpen={() => openItem(item.id)}
-                onDelete={() => void deleteItem(item.id, item.title)}
-              />
-            </li>
-          {/each}
-        </ul>
+      {:else if canStructure}
+        <!-- "+ Add item" (user 2026-10-08: like + Add block / + Add sequence),
+             after the list — new items land at the end. Until T4's New item
+             modal it opens the inline form above. -->
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => void openAdd()}>+ Add item</button>
       {/if}
     </div>
   {/if}
@@ -411,7 +404,17 @@
     box-shadow: var(--focus-shadow);
   }
   .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
-  .body-tools { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  .add-line {
+    margin-top: 8px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .add-line:disabled { color: var(--muted); cursor: default; }
   /* Create forms — shared look (spec §4). */
   .cr-form { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
   .cr-form input,
@@ -426,9 +429,8 @@
   }
   .cr-form input { height: var(--control-h); padding: 0 10px; }
   .cr-form textarea { height: auto; padding: 8px 10px; }
-  .cr-actions { display: flex; justify-content: flex-end; }
+  .cr-actions { display: flex; justify-content: flex-end; gap: 8px; }
   .field-err, .form-err { margin: 0; font-size: 12.5px; color: var(--danger); }
   .empty { margin: 0; font-size: 13px; color: var(--muted); }
-  .items-list { list-style: none; padding: 0; margin: 0; }
-  .items-list > li:last-child > :global(.item-row) { border-bottom: 0; /* ref 1602 */ }
+  .items-list { display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 0; margin: 0; }
 </style>
