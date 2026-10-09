@@ -4,6 +4,7 @@
 import { api, ApiError } from './api';
 import { loadAdminTree } from '../stores/currentEditorVersion.svelte';
 import { pushToast } from '../stores/toasts.svelte';
+import type { QuizEdits } from './quizEdits.svelte';
 
 export type SaveOutcome = {
   outcome: 'ok' | 'partial' | 'failed';
@@ -20,6 +21,9 @@ export type ItemBodyApi = {
   discardAll(): void;
   // D10: check only what this Save would send; show inline errors; focus the first.
   validate(): boolean;
+  // Slice-5d (R3): the quiz body's one open-edit slot. The modal's inline title
+  // takes it too. Page, Video and App leave it out.
+  edits?: QuizEdits;
 };
 
 // PATCH /api/items/{id} → ItemResponse (the fields the editor reads back).

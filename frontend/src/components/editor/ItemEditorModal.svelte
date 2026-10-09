@@ -20,6 +20,9 @@
   import { patchItem, reportSaveFailure, type ItemBodyApi, type SaveOutcome } from '../../lib/itemBody';
   import { loadAdminTree, type LoadResult } from '../../stores/currentEditorVersion.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { ApiError } from '../../lib/api';
+  import { FORBIDDEN_TITLE, InlineEdit, WAIT_TITLE } from '../../lib/quizEdits.svelte';
+  import { renameItem } from '../../lib/quizAuthoring';
   import type { AdminTreeItem, AdminTreeVersion } from '../../lib/types';
   import type { VersionPermissions } from '../../lib/versionPermissions';
 
@@ -47,6 +50,7 @@
   const uid = $props.id();
   const labelId = `${uid}-name`;
   const titleErrId = `${uid}-title-err`;
+  const titleEditId = `${uid}-title-edit`;
 
   const versionDisabled = $derived(version.is_disabled);
   const canEditText = $derived(perms.canEditTextFields);
@@ -79,6 +83,61 @@
 
   let alive = true;
   onDestroy(() => { alive = false; });
+
+  // ---- Slice-5d: the quiz's inline title (5c D8 rules). It takes the quiz
+  //      body's one edit slot, so D10 and the page's DirtyGuard cover it. ----
+  const quizEdits = $derived(isQuiz ? (body?.edits ?? null) : null);
+  let shownTitle = $state(untrack(() => item.title));   // the last server echo
+  let titleEdit = $state<InlineEdit<string> | null>(null);
+  let titleEditBtn = $state<HTMLButtonElement>();
+  // A tree reload (renamed elsewhere) shows through while no edit is open.
+  $effect(() => {
+    const t = item.title;
+    untrack(() => { if (!titleEdit) shownTitle = t; });
+  });
+
+  function openTitle() {
+    if (!quizEdits || titleEdit || deleting || quizEdits.locked) return;
+    if (!quizEdits.request()) return;
+    const savedVid = vid;
+    titleEdit = new InlineEdit<string>({
+      id: 'title',
+      edits: quizEdits,
+      initial: shownTitle,
+      same: (a, b) => a.trim() === b.trim(),
+      check: (v) => (v.trim() === '' ? 'Title is required' : null),
+      allowed: () => perms.canEditTextFields,
+      send: async (v) => {
+        try {
+          const echo = await renameItem(item.id, v.trim());
+          if (alive && stillOnVid(savedVid)) shownTitle = echo.title;
+          if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
+            void loadAdminTree(savedVid, { force: true });
+          }
+          throw e;
+        }
+      },
+      close: (refocus) => {
+        titleEdit = null;
+        if (!refocus) return;
+        // Back to ✎ — or to × when a 403/409 reload removed it.
+        void tick().then(() => {
+          if (!alive) return;
+          if (titleEditBtn?.isConnected) titleEditBtn.focus();
+          else trashEl?.closest('section.modal-panel')
+            ?.querySelector<HTMLElement>('header.modal-head button[aria-label="Close"]')?.focus();
+        });
+      },
+    });
+  }
+  // The field focuses itself and holds the slot while mounted.
+  const attachTitle = (el: HTMLInputElement) => {
+    el.focus();
+    el.select();
+    return untrack(() => titleEdit!.attach());
+  };
 
   // ---- One tracker in the page registry (D5): the page's DirtyGuard prompts
   //      on ×, Escape, Back and every in-app navigation. ----
@@ -161,17 +220,27 @@
 
   // ⌘S / Ctrl+S inside this dialog only (D10). Default-prevented even when
   // blocked, so the browser's own Save dialog never opens over the editor.
+  // Slice-5d: a level-3 modal on top handles its own ⌘S, and a quiz has no
+  // Save, so there it is only swallowed.
   function onWindowKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-    if (!(e.target instanceof Element) || !e.target.closest('section.modal-panel')) return;
+    if (!(e.target instanceof Element)) return;
+    if (e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
     e.preventDefault();
-    void save();
+    if (!isQuiz) void save();
   }
 
   // ---- D9: the header trash. The page owns the delete flow. ----
   const structReason = $derived(structureReason(version));
+  // Slice-5d: a quiz names which wait applies; the unsaved edit wins, because
+  // it is the one the author has to act on.
   const trashTitle = $derived(
-    structReason ?? (guardDirty ? 'Delete this item — save or discard changes first' : 'Delete this item'),
+    structReason ?? (
+      guardDirty
+        ? (isQuiz ? 'Delete this item — finish or discard the open edit first'
+                  : 'Delete this item — save or discard changes first')
+        : isQuiz && bodyBusy ? 'Delete this item — wait for the save to finish' : 'Delete this item'
+    ),
   );
   const trashDisabled = $derived(!!structReason || guardDirty || bodyBusy || frozen);
   let trashEl = $state<HTMLButtonElement>();
@@ -198,7 +267,38 @@
 
 {#snippet head()}
   <span class="mark-slot"><ItemMark type={item.type} state="covered" /></span>
-  <h2 id={labelId} class="item-name">{item.title}</h2>
+  <h2 id={labelId} class="item-name" class:editing={!!titleEdit}>
+    {#if titleEdit}
+      <input
+        class="plain-input title-input"
+        type="text"
+        aria-label="Title"
+        maxlength="200"
+        readonly={titleEdit.saving}
+        aria-invalid={titleEdit.error ? 'true' : undefined}
+        aria-describedby={titleEdit.error ? titleErrId : undefined}
+        bind:value={
+          // Null-safe: Svelte re-reads a bound value a tick after each input,
+          // and Esc or a page discard can close the edit within that tick.
+          () => titleEdit?.value ?? '', (v) => { if (titleEdit) titleEdit.value = v; }
+        }
+        onkeydown={(e) => titleEdit?.keydown(e)}
+        oninput={() => { if (titleEdit) titleEdit.error = null; }}
+        {@attach attachTitle}
+      />
+    {:else}{isQuiz ? shownTitle : item.title}{/if}
+  </h2>
+  {#if titleEdit}
+    <IconButton glyph="check" size="sm"
+                title={titleEdit.saving ? 'Saving…' : titleEdit.canSave ? 'Save title' : FORBIDDEN_TITLE}
+                disabled={!titleEdit.canSave} onclick={() => void titleEdit?.commit()} />
+    <IconButton glyph="close" size="sm" title="Cancel" disabled={titleEdit.saving}
+                onclick={() => titleEdit?.cancel()} />
+  {:else if isQuiz && canEditText}
+    <IconButton glyph="pencil" size="sm" borderless id={titleEditId} bind:element={titleEditBtn}
+                title={quizEdits?.locked ? WAIT_TITLE : 'Edit title'} aria-label="Edit title"
+                disabled={!!quizEdits?.locked || deleting} onclick={openTitle} />
+  {/if}
   <span class="item-ctx">{blockTitle} › {seqTitle} · item {itemIndex} of {itemCount}</span>
   <span class="head-actions">
     <IconButton
@@ -233,12 +333,14 @@
 
 <Modal
   labelledby={labelId}
+  autofocusSelector={`#${titleEditId}, [data-autofocus], header.modal-head button[aria-label="Close"]`}
   {onRequestClose}
   closeDisabled={deleting || saving}
   bodyInert={deleting}
   header={head}
   footer={canEditText && !isQuiz ? foot : undefined}
 >
+  {#if titleEdit?.error}<p class="field-err" id={titleErrId} role="alert">{titleEdit.error}</p>{/if}
   {#if !isQuiz}
     <div class="field-row">
       <span class="field-label">Title</span>
@@ -342,6 +444,10 @@
     font-weight: 600;
     color: var(--text); /* ref 1687 */
   }
+  /* Slice-5d: the open title field's focus ring must not be clipped. */
+  .item-name.editing { overflow: visible; flex: 1 1 160px; min-width: 120px; }
+  /* Fills its slot and shrinks with it, so ✓ / ✕ never sit on top of it on a narrow window. */
+  .title-input { box-sizing: border-box; width: 100%; min-width: 0; font-size: 14px; font-weight: 600; }
   .item-ctx { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1689 */ }
   .field-row {

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1313
+EXPECTED_CHECKS=1315
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4098,6 +4098,8 @@ uniq1 item-ctx
 if [[ -n $REPLY ]]; then
   N=ItemEditorModal; H=$REPLY
   d '\.item-name' '' 'margin:0' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)' 'text-overflow:ellipsis'
+  d '\.item-name\.editing' '' 'overflow:visible'
+  d '\.title-input' '' 'font-weight:600'
   # 5c D11: the path ("Vectors › Linear combinations · item 1 of 2"), not mono.
   d '\.item-ctx' '' 'font-size:12px' 'color:var\(--muted\)' 'white-space:nowrap' 'text-overflow:ellipsis'
   d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'gap:6px'
