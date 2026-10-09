@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1351
+EXPECTED_CHECKS=1377
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4368,6 +4368,7 @@ if [[ -n $REPLY ]]; then
   d '\.qexpl' '' 'margin:0 12px 10px 38px' 'padding:7px 10px' 'border-left:3px solid var\(--border-strong\)' 'background:var\(--surface-2\)' 'font-size:12\.5px' 'color:var\(--muted\)'
   none "QuestionCard chip is sans, never mono" "\.qchip\.${H}\{[^}]*font-family"
   none "QuestionCard no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
+  d '\.qexpl-add' '' 'color:var\(--primary\)' 'font-size:12\.5px'
   sweep QuestionCard $H
 fi
 
@@ -4412,6 +4413,26 @@ if [[ -n $REPLY ]]; then
   d '\.inline-err' '' 'font-size:12px' 'color:var\(--danger\)'
   none "InlineInput no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
   sweep InlineInput $H
+fi
+
+own qt-title QuestionTextModal.svelte
+uniq1 qt-title
+if [[ -n $REPLY ]]; then
+  N=QuestionTextModal; H=$REPLY
+  d '\.qt-title' '' 'margin:0' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.qt-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  d '\.qt-sub' '' 'margin-right:auto'   # pushes the modal's × to the right edge
+  sweep QuestionTextModal $H
+fi
+own ex-note ExplanationModal.svelte
+uniq1 ex-note
+if [[ -n $REPLY ]]; then
+  N=ExplanationModal; H=$REPLY
+  d '\.ex-title' '' 'margin:0' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.ex-note' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.ex-sub' '' 'margin-right:auto'   # pushes the modal's × to the right edge
+  d '\.ex-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  sweep ExplanationModal $H
 fi
 
 FILES_5D=(src/components/editor/quiz/*.svelte)

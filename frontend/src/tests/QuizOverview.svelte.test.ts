@@ -123,8 +123,8 @@ describe('Quiz overview (5d T3)', () => {
     r.click();
     await settle();
     expect(cards().length).toBe(1);
-    // Focus never drops to <body>: the fallback (no ✎ yet in T3, so ×).
-    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+    // Focus never drops to <body>: the fallback is the card's ✎ (T7).
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
   });
 
   it('a card\'s answers: "Loading answers…", then "Couldn\'t load answers" + Retry', async () => {
@@ -142,8 +142,8 @@ describe('Quiz overview (5d T3)', () => {
     await settle();
     expect(rows(cards()[0]).length).toBe(1);
     expect(cards()[0].querySelector('ul.ans-list')!.getAttribute('role')).toBe('list');
-    // Focus never drops to <body>: the fallback (no ✎ yet in T3, so ×).
-    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+    // Focus never drops to <body>: the fallback is the card's ✎ (T7).
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
   });
 
   it('a list Retry that fails again focuses the new Retry', async () => {
