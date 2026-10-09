@@ -629,13 +629,13 @@ it('a published version titles every disabled question control with the structur
   }
 });
 
-it('the add form offers the lowercase type cards', async () => {
+it('the add form offers the type cards with the 5d chip names', async () => {
   vi.spyOn(qa, 'listQuestions').mockResolvedValue([]);
   const { target } = mountEditor();
   await loaded();
   openAddForm(target);
   expect([...target.querySelectorAll('.qtype-picker label')].map((l) => l.textContent!.trim()))
-    .toEqual(['single choice', 'multiple choice', 'numeric answer', 'text answer']);
+    .toEqual(['Single choice', 'Multiple choice', 'Number', 'Text']);
 });
 
 // ---- A failed structure op keeps the list mounted (§5.4: drafts survive) ----

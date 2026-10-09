@@ -22,6 +22,7 @@
     ariaLabel = undefined,
     plain = false,
     frozen = false,
+    noAssets = false,
   }: {
     assetContext: AssetContext;
     value?: string;
@@ -43,6 +44,9 @@
     // readonly WITHOUT blurring (disabled would blur, readOnly would unmount it),
     // and drops / sidebar inserts / uploads are blocked. Tabs stay usable.
     frozen?: boolean;
+    // Slice-5d D11: the explanation editor. Edit/Preview stay; there is no
+    // sidebar and no upload path. The window file-drop guard still runs.
+    noAssets?: boolean;
   } = $props();
 
   let _mode = $state<'edit' | 'preview'>('edit');
@@ -121,7 +125,7 @@
     file: File,
     batch?: { current: number; total: number },
   ): Promise<AssetItem | null> {
-    if (frozen) return null;
+    if (frozen || noAssets) return null;
     if (uploading) { flashOverlay(); return null; }
     const controller = new AbortController();
     uploadAbortController = controller;
@@ -195,7 +199,7 @@
   async function handleTextareaDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (disabled || frozen) return;
+    if (disabled || frozen || noAssets) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     let offset = dropOffsetFromPoint(e);
@@ -215,7 +219,7 @@
   }
   async function handleWrapperDrop(e: DragEvent) {
     e.preventDefault();
-    if (disabled || frozen) return;
+    if (disabled || frozen || noAssets) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     for (let i = 0; i < files.length; i++) {
@@ -301,17 +305,19 @@
           onblur={onTextareaBlur}
           onselectionchange={onTextareaSelectionChange}
         ></textarea>
-        <AssetSidebar
-          {assetContext}
-          disabled={disabled || frozen}
-          onInsert={handleSidebarInsert}
-          onUploadFile={uploadOne}
-          {refreshKey}
-          {cursorReady}
-          bind:uploading
-          bind:uploadProgress
-          bind:uploadError
-        />
+        {#if !noAssets}
+          <AssetSidebar
+            {assetContext}
+            disabled={disabled || frozen}
+            onInsert={handleSidebarInsert}
+            onUploadFile={uploadOne}
+            {refreshKey}
+            {cursorReady}
+            bind:uploading
+            bind:uploadProgress
+            bind:uploadError
+          />
+        {/if}
       </div>
     {:else if loading}
       <div class="preview"><em>Rendering…</em></div>

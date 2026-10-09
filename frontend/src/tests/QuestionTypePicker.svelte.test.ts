@@ -18,7 +18,7 @@ it('offers four type radios and binds the selection', () => {
   expect(props.value).toBe('numeric_answer');
 });
 
-it('renders 5a-style cards: lowercase names, the selected card marked, no glyphs (Slice-5b T6)', () => {
+it('renders 5a-style cards: the 5d chip names, the selected card marked, no glyphs', () => {
   const target = document.createElement('div');
   document.body.appendChild(target);
   const props: { value: 'single_choice' | 'multiple_choice' | 'numeric_answer' | 'text_answer'; disabled?: boolean } =
@@ -26,7 +26,7 @@ it('renders 5a-style cards: lowercase names, the selected card marked, no glyphs
   const cmp = mount(QuestionTypePicker, { target, props });
   cleanup = () => unmount(cmp);
   const labels = [...target.querySelectorAll('label')];
-  expect(labels.map((l) => l.textContent!.trim())).toEqual(['single choice', 'multiple choice', 'numeric answer', 'text answer']);
+  expect(labels.map((l) => l.textContent!.trim())).toEqual(['Single choice', 'Multiple choice', 'Number', 'Text']);
   expect(labels.map((l) => l.classList.contains('selected'))).toEqual([false, false, true, false]);
   expect(target.querySelector('.glyph')).toBeNull();
   props.disabled = true;

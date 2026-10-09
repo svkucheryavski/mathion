@@ -130,7 +130,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="modal-backdrop" role="presentation" onmousedown={onBackdropMousedown} onclick={onBackdropClick}>
-  <FocusTrap {autofocusSelector} {autofocusPriorityOrder}>
+  <FocusTrap {autofocusSelector} {autofocusPriorityOrder} active={isTop}>
     <!-- HTML-ARIA allows role="dialog" on <section>; the lint is stricter than the spec. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section

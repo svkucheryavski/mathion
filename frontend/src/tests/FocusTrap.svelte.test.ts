@@ -61,4 +61,27 @@ describe('FocusTrap', () => {
     // Should not throw.
     expect(() => { unmount(component!); component = null; }).not.toThrow();
   });
+
+  it('an inactive trap leaves Tab alone (5d: only the top modal traps)', () => {
+    const snippet = (() => '') as unknown as Snippet;
+    let active = true;
+    component = mount(FocusTrap, { target, props: { children: snippet, active: () => active } });
+    flushSync();
+    const container = target.firstElementChild as HTMLElement;
+    const a = document.createElement('button');
+    const b = document.createElement('button');
+    container.append(a, b);
+    b.focus();
+    const tab = () => {
+      const e = new KeyboardEvent('keydown', { key: 'Tab', cancelable: true, bubbles: true });
+      document.dispatchEvent(e);
+      return e;
+    };
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(a);
+    b.focus();
+    active = false;
+    expect(tab().defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(b);
+  });
 });

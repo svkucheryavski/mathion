@@ -674,3 +674,22 @@ describe('MarkdownEditor — frozen (Slice-5b D10)', () => {
     expect(stubCtx.renderPreview).toHaveBeenCalledWith('abc');
   });
 });
+
+describe('MarkdownEditor — noAssets (5d D11)', () => {
+  it('noAssets: no sidebar, no upload on drop, and a window file drop never navigates', async () => {
+    const { target } = mountEditor({ value: 'x', noAssets: true });
+    await Promise.resolve(); flushSync();
+    expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
+    expect(target.querySelector('textarea')).not.toBeNull();
+    const file = new File(['a'], 'a.png', { type: 'image/png' });
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    target.querySelector('textarea')!.dispatchEvent(drop);
+    await Promise.resolve();
+    expect(stubCtx.upload).not.toHaveBeenCalled();
+    const winDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(winDrop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    window.dispatchEvent(winDrop);
+    expect(winDrop.defaultPrevented).toBe(true);
+  });
+});

@@ -4,10 +4,14 @@
   let {
     autofocusSelector = 'input, select, textarea, button',
     autofocusPriorityOrder = false,
+    active = undefined,
     children,
   }: {
     autofocusSelector?: string;
     autofocusPriorityOrder?: boolean;
+    // Slice-5d: a stacked Modal passes "am I the top modal"; without it the
+    // trap is always active, as before (the run modals and side panels).
+    active?: () => boolean;
     children: Snippet;
   } = $props();
 
@@ -26,6 +30,7 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key !== 'Tab') return;
+    if (active && !active()) return;
     const focusables = getFocusable();
     if (focusables.length === 0) return;
     const first = focusables[0]!;

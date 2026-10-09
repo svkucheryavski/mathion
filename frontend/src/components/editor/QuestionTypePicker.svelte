@@ -1,14 +1,13 @@
 <script lang="ts">
   // The add-question type picker (Slice-5b §5.5): 5a's ItemTypePicker cards,
-  // with D15's lowercase type names and no glyphs (Constraint 3).
+  // with the 5d chip names and no glyphs (Constraint 3).
   import type { QuestionType } from '../../lib/quizAuthoring';
+  import { TYPE_LABEL } from '../../lib/quizFormat';
   let { value = $bindable(), disabled = false }: { value: QuestionType; disabled?: boolean } = $props();
-  const TYPES: { value: QuestionType; label: string }[] = [
-    { value: 'single_choice', label: 'single choice' },
-    { value: 'multiple_choice', label: 'multiple choice' },
-    { value: 'numeric_answer', label: 'numeric answer' },
-    { value: 'text_answer', label: 'text answer' },
-  ];
+  // Slice-5d: the same four names as the card chips (lib/quizFormat TYPE_LABEL).
+  const TYPES: { value: QuestionType; label: string }[] =
+    (['single_choice', 'multiple_choice', 'numeric_answer', 'text_answer'] as const)
+      .map((value) => ({ value, label: TYPE_LABEL[value] }));
 </script>
 
 <fieldset class="qtype-picker" {disabled}>

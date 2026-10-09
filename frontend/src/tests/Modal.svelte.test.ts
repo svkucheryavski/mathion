@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import Harness from './support/ModalHarness.svelte';
+import NestedHarness from './support/NestedModalHarness.svelte';
 
 let target: HTMLDivElement | null = null;
 let cmp: ReturnType<typeof mount> | null = null;
@@ -217,5 +218,42 @@ describe('Modal — stacking (only the top modal is live)', () => {
     unmount(b);
     t2.remove();
     expect(document.documentElement.style.overflow).toBe('scroll');
+  });
+});
+
+describe('Modal — nested level-3 inside level-2 (5d)', () => {
+  it('Tab and Shift+Tab stay in the top modal; Esc closes only it', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOuterClose = vi.fn();
+    const onInnerClose = vi.fn();
+    // The outer modal settles first, then level 3 opens over it — as in the app.
+    // Mounting both at once would run the inner onMount first and leave the
+    // OUTER modal on top of the stack.
+    const props = $state({ inner: false, onOuterClose, onInnerClose });
+    const cmp = mount(NestedHarness, { target: host, props });
+    flushSync();
+    await Promise.resolve();
+    props.inner = true;
+    flushSync();
+    await Promise.resolve();
+    const innerPanel = document.querySelector<HTMLElement>('section[aria-labelledby="inner-t"]')!;
+    const innerClose = innerPanel.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+    const innerB = document.getElementById('inner-b') as HTMLButtonElement;
+    const key = (k: string, shift = false) => {
+      const e = new KeyboardEvent('keydown', { key: k, shiftKey: shift, cancelable: true, bubbles: true });
+      document.activeElement!.dispatchEvent(e);
+      return e;
+    };
+    innerB.focus();
+    key('Tab');
+    expect(document.activeElement).toBe(innerClose);
+    key('Tab', true);
+    expect(document.activeElement).toBe(innerB);
+    key('Escape');
+    expect(onInnerClose).toHaveBeenCalledTimes(1);
+    expect(onOuterClose).not.toHaveBeenCalled();
+    unmount(cmp);
+    host.remove();
   });
 });
