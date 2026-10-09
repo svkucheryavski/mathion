@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1315
+EXPECTED_CHECKS=1338
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4382,6 +4382,11 @@ if [[ -n $REPLY ]]; then
   none "ChoiceRow no --success leftovers (the theme has none)" "\.${H}[^{]*\{[^}]*var\(--success"
   none "ChoiceRow no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
   sweep ChoiceRow $H
+  d '\.row-acts' '' 'opacity:0' 'margin-left:auto'
+  check "ChoiceRow row actions show on hover (D8)" "\.ans-row\.${H}:hover \.row-acts:where\(\.${H}\)\{opacity:1\}"
+  check "ChoiceRow row actions show on keyboard focus (D8)" "\.ans-row\.${H}:focus-within \.row-acts:where\(\.${H}\)\{opacity:1\}"
+  check "ChoiceRow row actions always shown without hover (D8)" "@media \(hover: ?none\)\{\.row-acts\.${H}\{opacity:1\}"
+  d '\.ans-row' ':not\(\.ok\):hover' 'background:var\(--focus-row\)'
 fi
 
 own key-line KeyAnswer.svelte
@@ -4390,6 +4395,18 @@ if [[ -n $REPLY ]]; then
   N=KeyAnswer; H=$REPLY
   d '\.key-line' '' 'margin:0' 'font-size:13\.5px' 'color:var\(--text-2\)' 'overflow-wrap:anywhere'
   sweep KeyAnswer $H
+fi
+
+own inline-field InlineInput.svelte
+uniq1 inline-field
+if [[ -n $REPLY ]]; then
+  N=InlineInput; H=$REPLY
+  d '\.inline-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'font-size:var\(--control-font\)' 'caret-color:var\(--primary\)'
+  chk "\.inline-input\.${H}:focus-visible" 'outline:none' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  chk "\.inline-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
+  d '\.inline-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  none "InlineInput no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
+  sweep InlineInput $H
 fi
 
 FILES_5D=(src/components/editor/quiz/*.svelte)

@@ -90,7 +90,7 @@ describe('Quiz overview (5d T3)', () => {
     const s = new QuizServer([q({ id: 1 })], [opt(11, 1, 'Eleven', true), opt(12, 1, 'Twelve')]);
     await renderQuiz(s);
     const [r1, r2] = rows(cards()[0]);
-    expect(text(r1.querySelector('.ans-text'))).toBe('Eleven');
+    expect(text(r1.querySelector('.ans-text'))).toBe('Edit answer Eleven');   // the hidden prefix + the answer (T5)
     expect(r1.classList.contains('ok')).toBe(true);
     expect(text(r1.querySelector('.ans-ok'))).toBe('correct');
     expect(r2.querySelector('.ans-ok')).toBeNull();
