@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1415
+EXPECTED_CHECKS=1420
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4451,6 +4451,29 @@ FILES_5D=(src/components/editor/quiz/*.svelte)
 emoji_scan "all Slice-5d quiz files" $FILES_5D src/lib/quizFormat.ts src/lib/quizEdits.svelte.ts \
   src/lib/quizContext.ts src/lib/newTabLinks.ts
 colour_scan 5d-quiz $FILES_5D
+# D13: no "disabled with a reason" for version-forbidden structure — the quiz
+# components never read structureReason (the header trash in ItemEditorModal is the exception).
+if grep -l 'structureReason' $FILES_5D >/dev/null 2>&1; then
+  echo "FAIL  5d quiz components hide what the version forbids (no structureReason) (D13)"; fail=1
+else echo "PASS  5d quiz components hide what the version forbids (no structureReason) (D13)"; fi
+# The old one-Save machinery and its components are gone (spec §Removed).
+if grep -rqE 'QUIZ_SAVE_KEY|QUIZ_GUARD_KEY|QuizSaveHub|quizSave|QuestionAccordion|OptionRow|\bQuizEditor\b' src; then
+  echo "FAIL  the quiz one-Save machinery and its components are gone"; fail=1
+else echo "PASS  the quiz one-Save machinery and its components are gone"; fi
+# ... and the quiz body no longer owns a DirtyRegistry (spec §Removed): QuizEdits holds the edits.
+if grep -l 'createDirtyRegistry' $FILES_5D >/dev/null 2>&1; then
+  echo "FAIL  5d quiz components build no DirtyRegistry of their own"; fail=1
+else echo "PASS  5d quiz components build no DirtyRegistry of their own"; fi
+# Every 5d prompt and title comes from quizEdits (DISCARD_PROMPT, WAIT_TITLE,
+# FORBIDDEN_TITLE, KEY_CONFIRM), never a copy.
+if grep -lE "Discard unsaved changes and continue|Wait for the save to finish|This version can no longer be edited|This quiz is published\. Changing the answer key" $FILES_5D >/dev/null 2>&1; then
+  echo "FAIL  5d components use the quizEdits texts, not copies"; fail=1
+else echo "PASS  5d components use the quizEdits texts, not copies"; fi
+# DISCARD_PROMPT is the DirtyGuard text (spec §Unsaved work): the two literals stay equal.
+dp_q=$(grep -oE "DISCARD_PROMPT = '[^']+'" src/lib/quizEdits.svelte.ts | sed -E "s/.*= '([^']+)'/\1/")
+dp_g=$(grep -oE "window\.confirm\('[^']+'\)" src/components/editor/DirtyGuard.svelte | sed -E "s/.*\('([^']+)'\)/\1/")
+if [[ -n $dp_q && $dp_q == $dp_g ]]; then echo "PASS  DISCARD_PROMPT equals the DirtyGuard prompt ($dp_q)"
+else echo "FAIL  DISCARD_PROMPT ('$dp_q') differs from the DirtyGuard prompt ('$dp_g')"; fail=1; fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
