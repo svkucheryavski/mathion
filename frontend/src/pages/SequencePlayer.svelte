@@ -41,6 +41,9 @@
       (b) => b.sequences.some((s) => String(s.id) === sequenceId),
     ) ?? null,
   );
+  // Its place in the course, as the course page and the editor number it
+  // (`order` keeps gaps after a block delete).
+  const blockNo = $derived(currentBlock ? (currentCourse.value?.blocks.indexOf(currentBlock) ?? -1) + 1 : 0);
 
   // Initial item resolution: hash → last_visited_at → first.
   function resolveInitialItemId(seq: SequenceContent): number | null {
@@ -164,7 +167,7 @@
     {#if currentBlock}
       <span class="sep" aria-hidden="true">/</span>
       <!-- "1. Title", as the course page numbers its blocks (user, 2026-10-08). -->
-      <span class="crumb">{currentBlock.order}. {currentBlock.title}</span>
+      <span class="crumb">{blockNo}. {currentBlock.title}</span>
       <span class="sep" aria-hidden="true">/</span>
     {/if}
     <!-- Ends with the sequence TITLE, in bold (user, 2026-10-08): the course page

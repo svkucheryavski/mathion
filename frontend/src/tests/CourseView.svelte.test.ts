@@ -143,6 +143,16 @@ describe('CourseView header and course summary', () => {
     expect(target.querySelector('header')!.textContent).not.toContain('Courses');
   });
 
+  it('numbers blocks by their place in the list, as the editor does — a deleted block leaves no gap', async () => {
+    // Final review (both lanes): block.order keeps gaps after a delete (1, 3).
+    seedCourse([twoBlocks[0], { ...twoBlocks[1], order: 3 }], {});
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const btns = [...target.querySelectorAll<HTMLButtonElement>('header h2 button.acc')];
+    expect(btns.map((b) => b.querySelector('.num')!.textContent)).toEqual(['1.', '2.']);
+    expect(btns[1].getAttribute('aria-label')!.startsWith('2. B,')).toBe(true);
+  });
+
   it('summarises the WHOLE course beside the info: items over every block, quiz score over the quizzes tried', async () => {
     // 2 of 4 items → 50%; quizzes (3 + 1) / (4 + 4) = 50%.
     seedCourse(twoBlocks, { '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(false, [1, 4]) });

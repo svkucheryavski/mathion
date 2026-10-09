@@ -135,3 +135,22 @@ rule (Critical/Important are fixed in-task; Minor lands here).
   `--btn-pad-sm` from the card edge, not centred on the chevron. Cosmetic.
 - A block whose only content is a mini-project starts collapsed (as designed: mini-project status does
   not count toward "unfinished"). Revisit if students miss mini-projects.
+
+## Whole-branch review (29737f4..1ab391e, 2026-10-09) — minors, deferred
+
+- **5c header renames don't reload the tree on 403/409** (Opus): `BlockAccordion.renameBlock` and
+  `SequenceAccordion.renameSeq` pass the error to AccordionHeader without `loadAdminTree(…, { force: true })`,
+  unlike every 5d write. The ✓ stays enabled and every retry fails until a manual reload. Fix together with
+  "Read-only flip drops a dirty title silently" above: a reload would close the field through the
+  `!canEditTitle` effect and lose the typed text.
+- **Mouse Create / Save in NewItemModal and VersionSettingsModal drops focus to `<body>` on failure** (Fable):
+  the footer button is `disabled` while busy, so the pressed button loses focus; Modal's focusin containment
+  recovers it on the next Tab. The 5d modals use `loading` plus a re-entry guard instead. Same family as the
+  5b "mouse-Save focus" item; check in the Safari pass.
+- **VersionSettingsModal on a legacy empty label** (Fable): if an install skipped the label backfill, changing
+  only the attempts errors "Label is required" on a field the author did not touch. The migration fills
+  every label, so only a skipped migration reaches it.
+- **Teacher run screens still label blocks "Block {order}"** (both lanes, re-check): `MiniProjectModal.svelte`
+  and `RunMiniProjectsTab.svelte` render the stored `order`, which keeps gaps after a block delete, while the
+  editor and (since the final review) the student view number blocks by list position. Pre-existing,
+  outside this branch.

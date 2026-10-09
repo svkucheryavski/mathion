@@ -67,7 +67,7 @@ describe('BlockGroup', () => {
   it('renders sequence <li>s and NO MP <li> when mpByBlockId is empty (spec §8 case 1)', () => {
     component = mount(BlockGroup, {
       target,
-      props: {
+      props: { n: 1,
         courseSlug: 'course-a',
         block: BASE_BLOCK,
         state: BASE_STATE,
@@ -83,7 +83,7 @@ describe('BlockGroup', () => {
   it('renders MP <li> AFTER sequence <li>s when mpByBlockId has the block (spec §8 case 2, DOM order)', () => {
     component = mount(BlockGroup, {
       target,
-      props: {
+      props: { n: 1,
         courseSlug: 'course-a',
         block: BASE_BLOCK,
         state: BASE_STATE,
@@ -103,7 +103,7 @@ describe('BlockGroup', () => {
   it('renders only the MP <li> when block has no sequences (spec §8 case 3)', () => {
     component = mount(BlockGroup, {
       target,
-      props: {
+      props: { n: 1,
         courseSlug: 'course-a',
         block: { ...BASE_BLOCK, sequences: [] },
         state: BASE_STATE,
@@ -120,7 +120,7 @@ describe('BlockGroup', () => {
   it('renders no MP <li> when mpByBlockId prop is omitted entirely (spec §8 case 4)', () => {
     component = mount(BlockGroup, {
       target,
-      props: {
+      props: { n: 1,
         courseSlug: 'course-a',
         block: BASE_BLOCK,
         state: BASE_STATE,
@@ -140,7 +140,7 @@ describe('BlockGroup', () => {
     const mpByBlockId: Record<string, StudentMiniProjectListItem> = { '42': BASE_MP };
     component = mount(BlockGroup, {
       target,
-      props: {
+      props: { n: 1,
         courseSlug: 'course-a',
         block: BASE_BLOCK, // block.id = 42 (number)
         state: BASE_STATE,
@@ -161,7 +161,7 @@ describe('BlockGroup', () => {
   function mountBlock(over: Partial<BlockContent> = {}) {
     component = mount(BlockGroup, {
       target,
-      props: { courseSlug: 'course-a', block: { ...BASE_BLOCK, ...over }, state: BASE_STATE, mpByBlockId: {} },
+      props: { n: 1, courseSlug: 'course-a', block: { ...BASE_BLOCK, ...over }, state: BASE_STATE, mpByBlockId: {} },
     });
     flushSync();
     return {
@@ -221,7 +221,7 @@ describe('BlockGroup', () => {
     // now pins that it stays unrendered.
     component = mount(BlockGroup, {
       target,
-      props: {
+      props: { n: 1,
         courseSlug: 'course-a',
         block: { ...BASE_BLOCK, info_html: '<p>BLOCK-INFO-MARKER</p>' },
         state: BASE_STATE,
@@ -268,7 +268,7 @@ describe('BlockGroup', () => {
     // starts open as before.
     component = mount(BlockGroup, {
       target,
-      props: { courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE, mpByBlockId: {}, expanded: false },
+      props: { n: 1, courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE, mpByBlockId: {}, expanded: false },
     });
     flushSync();
     const btn = target.querySelector('header h2 button.acc') as HTMLButtonElement;
@@ -372,7 +372,7 @@ describe('BlockGroup', () => {
   function mountTotals() {
     component = mount(BlockGroup, {
       target,
-      props: { courseSlug: 'course-a', block: totalsBlock(), state: totalsState, mpByBlockId: {} },
+      props: { n: 1, courseSlug: 'course-a', block: totalsBlock(), state: totalsState, mpByBlockId: {} },
     });
     flushSync();
     return target.querySelector('header h2 button.acc') as HTMLButtonElement;

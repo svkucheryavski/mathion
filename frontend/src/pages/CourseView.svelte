@@ -101,8 +101,8 @@
       <div class="all-toggle">
         <Button variant="ghost" onclick={() => setAll(!anyOpen)}>{anyOpen ? 'Collapse all' : 'Expand all'}</Button>
       </div>
-      {#each currentCourse.value.blocks as b (b.id)}
-        <BlockGroup {courseSlug} block={b} state={currentCourse.value.state} mpByBlockId={currentCourse.value.miniProjectsByBlockId}
+      {#each currentCourse.value.blocks as b, i (b.id)}
+        <BlockGroup {courseSlug} block={b} n={i + 1} state={currentCourse.value.state} mpByBlockId={currentCourse.value.miniProjectsByBlockId}
           bind:expanded={() => open[b.id] ?? false, (v) => (open[b.id] = v)} />
       {/each}
     {/if}

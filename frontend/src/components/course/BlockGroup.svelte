@@ -8,6 +8,7 @@
   let {
     courseSlug,
     block,
+    n,
     state: vstate,
     mpByBlockId,
     // Bindable (user, 2026-10-08): CourseView decides which blocks start open
@@ -17,6 +18,9 @@
   }: {
     courseSlug: string;
     block: BlockContent;
+    // The block's place in the course (1-based), as the editor numbers it:
+    // `block.order` keeps gaps after a delete (final review, both lanes).
+    n: number;
     state: VersionState;
     mpByBlockId?: Record<string, StudentMiniProjectListItem>;
     expanded?: boolean;
@@ -37,7 +41,7 @@
   // It starts with the visible "1. Title", so voice control still matches it.
   // The number is in the name although `.num` is aria-hidden (Opus lane): the
   // blocks are sibling sections, not a list, so nothing else states it.
-  const label = $derived(`${block.order}. ${block.title}, ${progressPhrase(p)}`);
+  const label = $derived(`${n}. ${block.title}, ${progressPhrase(p)}`);
 </script>
 
 <section class="block">
@@ -59,7 +63,7 @@
         <!-- "1." like the admin editor (user, 2026-10-08): "B1" was the last
              structure code a student saw. A light ordinal, aria-hidden: the
              button's aria-label states "1. Title" in words. -->
-        <span class="num" aria-hidden="true">{block.order}.</span>
+        <span class="num" aria-hidden="true">{n}.</span>
         <span class="acc-title">{block.title}</span>
         <ProgressMeter {p} onStrip />
         <!-- One down-chevron, rotated when collapsed. A STATIC icon would drop the

@@ -10,6 +10,7 @@
   import VersionBadges from '../../components/editor/VersionBadges.svelte';
   import { deleteVersionReason, duplicateVersionReason } from '../../lib/editorReasons';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { DISCARD_PROMPT } from '../../lib/quizEdits.svelte';
   import type { Version } from '../../lib/types';
   import {
     loadVersionsPage,
@@ -83,10 +84,13 @@
     addLineEl?.focus();
   }
 
-  // Escape in a field cancels, as the editor's add rows do.
+  // Escape in a field cancels, as the editor's add rows do — but a stray
+  // Escape must not silently drop typed input (final review): then it asks.
+  const createDirty = () => newLabel !== '' || info_md !== '' || max_quiz_attempts !== 3;
   function escCancels(e: KeyboardEvent) {
     if (e.key !== 'Escape' || e.isComposing || busy) return;
     e.preventDefault();
+    if (createDirty() && !window.confirm(DISCARD_PROMPT)) return;
     void cancelCreate();
   }
 

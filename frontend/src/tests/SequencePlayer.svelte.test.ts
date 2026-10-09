@@ -15,7 +15,7 @@ import { __test__setSlots, loadCourse } from '../stores/currentCourse.svelte';
 import { ApiError } from '../lib/api';
 import { currentRoute } from '../lib/router.svelte';
 import SequencePlayer from '../pages/SequencePlayer.svelte';
-import type { Item } from '../lib/types';
+import type { BlockContent, Item } from '../lib/types';
 
 const SLUG = 'algebra';
 
@@ -34,13 +34,13 @@ function page(id: number, seqId: number, title: string): Item {
 
 // One block (B1 "Vectors") with two non-empty sequences + one empty sequence.
 // Course-flat item order: 1001 (s100) → 1002 (s100) → 1003 (s200).
-function seed(): void {
+function seed(mapBlocks: (b: BlockContent[]) => BlockContent[] = (b) => b): void {
   __test__setSlots({
     slug: SLUG,
     versionId: 1,
     course: { id: 1, slug: SLUG, name: 'Linear Algebra' },
     version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
-    blocks: [
+    blocks: mapBlocks([
       {
         id: 10,
         title: 'Vectors',
@@ -54,7 +54,7 @@ function seed(): void {
           { id: 300, title: 'Empty seq', slug: 'empty', order: 3, items: [] },
         ],
       },
-    ],
+    ]),
     state: { version_id: 1, items: {} },
     miniProjectsByBlockId: {},
   });
@@ -89,6 +89,13 @@ afterEach(() => {
 });
 
 describe('SequencePlayer breadcrumb (T1)', () => {
+  it('numbers the block in the crumb by its place in the list, not its stored order (gaps after a delete)', () => {
+    seed((b) => [{ ...b[0], id: 9, title: 'Intro', order: 1, sequences: [] }, { ...b[0], order: 3 }]);
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    expect(el.querySelector('nav.crumbs .crumb')!.textContent).toBe('2. Vectors');
+  });
+
   it('renders a semantic breadcrumb ending in the sequence title, and a screen-reader-only h1', () => {
     seed();
     seedRoute(100, '#item=1001');

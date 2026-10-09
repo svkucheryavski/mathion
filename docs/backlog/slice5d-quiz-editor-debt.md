@@ -84,3 +84,7 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
 - Move and delete do not bump `loadToken`, so in theory a re-fetch left in flight by a failed create could
   overwrite a later move or delete. Not reachable in practice: the New question modal stays on top until the
   author closes it (Opus nit).
+
+### Whole-branch review (29737f4..1ab391e, 2026-10-09)
+- `QuestionTextModal` compares the raw text, so a whitespace-only change (e.g. a trailing newline) sends a
+  PATCH and announces "Saved". Consistent with its dirty check; a no-op request (Opus).

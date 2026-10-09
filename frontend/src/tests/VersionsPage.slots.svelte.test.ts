@@ -259,6 +259,28 @@ describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
     expect(target.querySelector('form.create')).toBeNull();
     expect(document.activeElement).toBe(addLine());
   });
+
+  it('Escape with typed input asks first; "no" keeps the form and the text (final review)', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    addLine()!.click();
+    await settle();
+    const info = target.querySelector<HTMLTextAreaElement>('form.create textarea')!;
+    info.value = 'A long paragraph';
+    info.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(ask).toHaveBeenCalledWith('Discard unsaved changes and continue?');
+    expect(target.querySelector<HTMLTextAreaElement>('form.create textarea')?.value).toBe('A long paragraph');
+    ask.mockReturnValue(true);
+    info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('form.create')).toBeNull();
+    expect(document.activeElement).toBe(addLine());
+    ask.mockRestore();
+  });
 });
 
 describe('VersionsPage — states (9d)', () => {
