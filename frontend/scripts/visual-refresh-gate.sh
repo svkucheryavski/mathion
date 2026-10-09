@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1338
+EXPECTED_CHECKS=1351
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4394,6 +4394,11 @@ uniq1 key-line
 if [[ -n $REPLY ]]; then
   N=KeyAnswer; H=$REPLY
   d '\.key-line' '' 'margin:0' 'font-size:13\.5px' 'color:var\(--text-2\)' 'overflow-wrap:anywhere'
+  d '\.key-row' '' 'display:flex' 'align-items:center' 'gap:6px'
+  d '\.key-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
+  chk "\.key-input\.${H}:focus-visible" 'outline:none' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  d '\.key-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  none "KeyAnswer no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
   sweep KeyAnswer $H
 fi
 
