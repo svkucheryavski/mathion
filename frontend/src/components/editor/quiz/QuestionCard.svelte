@@ -16,7 +16,17 @@
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import type { AuthoringOption, AuthoringQuestion } from '../../../lib/quizAuthoring';
 
-  let { q, n }: { q: AuthoringQuestion; n: number } = $props();
+  let {
+    q, n, count, moving = false, deleting = false, autoAdd = false, onAutoAddDone = () => {}, onMove, onDelete,
+  }: {
+    q: AuthoringQuestion; n: number; count: number;
+    // This card's own move / delete is in flight: the control that started it
+    // stays enabled, re-entry is blocked in QuizBody (focus never drops).
+    moving?: boolean; deleting?: boolean;
+    // A just-created choice question opens its "+ Add answer" row once loaded.
+    autoAdd?: boolean; onAutoAddDone?: () => void;
+    onMove: (dir: -1 | 1) => void; onDelete: () => void;
+  } = $props();
   const ctx = getContext<QuizCtx>(QUIZ_CTX);
   const uid = $props.id();
   const textId = `${uid}-text`;
@@ -34,6 +44,11 @@
   let l3 = $state<'text' | 'expl' | null>(null);
   let cardEl = $state<HTMLElement>();
   const openReason = $derived(ctx.edits.locked ? WAIT_TITLE : null);
+  // Structure: the per-quiz lock, and this question's own lock (its answer writes).
+  const structWait = $derived(ctx.quizLock || ctx.busyQuestions.has(q.id) ? WAIT_TITLE : null);
+  const upReason = $derived((moving ? null : structWait) ?? (n === 1 ? 'Move up — already first' : null));
+  const downReason = $derived((moving ? null : structWait) ?? (n === count ? 'Move down — already last' : null));
+  const deleteReason = $derived(deleting ? null : structWait);
   function open(kind: 'text' | 'expl') {
     if (l3 !== null || openReason !== null) return;
     if (!ctx.edits.request()) return;
@@ -69,13 +84,21 @@
           <IconButton glyph="pencil" size="sm" borderless title={openReason ?? 'Edit question'}
                       aria-label={`Edit question ${n}`} disabled={openReason !== null} onclick={() => open('text')} />
         {/if}
+        {#if ctx.canStruct}
+          <IconButton glyph="up" size="sm" borderless title={upReason ?? 'Move up'}
+                      aria-label={`Move question ${n} up`} disabled={upReason !== null} onclick={() => onMove(-1)} />
+          <IconButton glyph="down" size="sm" borderless title={downReason ?? 'Move down'}
+                      aria-label={`Move question ${n} down`} disabled={downReason !== null} onclick={() => onMove(1)} />
+          <IconButton glyph="trash" size="sm" borderless danger title={deleteReason ?? 'Delete question'}
+                      aria-label={`Delete question ${n}`} disabled={deleteReason !== null} onclick={onDelete} />
+        {/if}
       </span>
     </span>
   </div>
 
   <div class="qanswers">
     {#if choice}
-      <ChoiceAnswers {q} {n} bind:options />
+      <ChoiceAnswers {q} {n} bind:options {autoAdd} {onAutoAddDone} />
     {:else}
       <KeyAnswer {q} {n} />
     {/if}

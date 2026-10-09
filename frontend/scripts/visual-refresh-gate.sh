@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1377
+EXPECTED_CHECKS=1415
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4351,6 +4351,7 @@ if [[ -n $REPLY ]]; then
   d '\.quiz-head' '' 'display:flex' 'align-items:center' 'gap:10px'
   d '\.quiz-label' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
   d '\.quiz-list' '' 'list-style:none' 'margin:0' 'padding:0' 'display:flex' 'flex-direction:column' 'gap:10px'
+  d '\.q-add' '' 'margin-left:auto'
   none "QuizBody no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
   sweep QuizBody $H
 fi
@@ -4433,6 +4434,17 @@ if [[ -n $REPLY ]]; then
   d '\.ex-sub' '' 'margin-right:auto'   # pushes the modal's × to the right edge
   d '\.ex-err' '' 'font-size:12px' 'color:var\(--danger\)'
   sweep ExplanationModal $H
+fi
+own nq-title NewQuestionModal.svelte
+uniq1 nq-title
+if [[ -n $REPLY ]]; then
+  N=NewQuestionModal; H=$REPLY
+  d '\.nq-title' '' 'margin:0 auto 0 0' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'   # auto: the modal's × at the right edge
+  d '\.nq-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
+  chk "\.nq-input\.${H}:focus-visible" 'outline:none' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  d '\.nq-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  none "NewQuestionModal no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
+  sweep NewQuestionModal $H
 fi
 
 FILES_5D=(src/components/editor/quiz/*.svelte)

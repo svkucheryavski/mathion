@@ -16,8 +16,10 @@
     type AuthoringOption, type AuthoringQuestion,
   } from '../../../lib/quizAuthoring';
 
-  let { q, n, options = $bindable(null) }: {
+  let { q, n, options = $bindable(null), autoAdd = false, onAutoAddDone = () => {} }: {
     q: AuthoringQuestion; n: number; options?: AuthoringOption[] | null;
+    // A just-created question: open "+ Add answer" once loaded (spec §Adding, step 5).
+    autoAdd?: boolean; onAutoAddDone?: () => void;
   } = $props();
   const ctx = getContext<QuizCtx>(QUIZ_CTX);
 
@@ -32,6 +34,7 @@
   let mounted = true;
   // Mounted AND still showing this version (spec §Stale responses).
   const alive = () => mounted && ctx.live();
+  const cardEl = () => listEl?.closest('li.qcard') ?? null;
   let token = 0;
   onDestroy(() => { mounted = false; token++; });
 
@@ -48,9 +51,19 @@
       if (my !== token) return;
       options = sortByOrder(list);
       status = 'loaded';
+      if (autoAdd) {
+        onAutoAddDone();
+        await tick();
+        // Only if the author has not moved on meanwhile: no other edit open,
+        // focus still on this card (its ✎) or dropped.
+        const a = document.activeElement;
+        const mine = a === null || a === document.body || (cardEl()?.contains(a) ?? false);
+        if (alive() && ctx.edits.active === null && mine) openAdd();
+      }
     } catch {
       if (my !== token) return;
       status = 'error';
+      if (autoAdd) { onAutoAddDone(); ctx.focusFallback(q.id); }
     }
   }
   onMount(() => { void load(); });
