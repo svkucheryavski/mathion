@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1382
+EXPECTED_CHECKS=1313
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -386,6 +386,13 @@ else:
 #      appear below, reviewed. A new one reds this check BY DESIGN — that is the
 #      prompt to check whether it can wrap a T3 subtree.
 GLOBAL_ALLOW = {
+    # Slice-5d: the authoring quiz card's rendered question text / explanation
+    # (.qtext, .qexpl-body). It lives only in the item editor modal, which never
+    # renders the student quiz components (T3 files).
+    ('src/components/editor/quiz/QuestionCard.svelte', 'p'),
+    ('src/components/editor/quiz/QuestionCard.svelte', 'p + p'),
+    ('src/components/editor/quiz/QuestionCard.svelte', 'img'),
+    ('src/components/editor/quiz/QuestionCard.svelte', ':is(h1, h2, h3, h4, h5, h6)'),
     # PageItem renders the Page item type; it never contains a quiz.
     ('src/components/items/PageItem.svelte', 'h1'),
     ('src/components/items/PageItem.svelte', 'h2'),
@@ -4171,82 +4178,26 @@ fi
 emoji_scan "VideoBody / AppBody / frames" src/components/editor/item/VideoBody.svelte src/components/editor/item/AppBody.svelte src/components/items/VideoFrame.svelte src/components/items/InteractiveFrame.svelte
 
 echo
-echo "--- (ae) Slice-5b T6 — quiz look (3f): QuizEditor, QuestionAccordion, OptionRow, QuestionTypePicker ---"
-own questions-head QuizEditor.svelte
-uniq1 questions-head
-if [[ -n $REPLY ]]; then
-  N=QuizEditor; H=$REPLY
-  d '\.quiz-editor' '' 'display:flex' 'flex-direction:column' 'gap:12px'
-  d '\.questions-head' '' 'display:flex' 'align-items:center' 'gap:10px'
-  d '\.questions-label' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
-  d '\.q-count' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.head-add' '' 'margin-left:auto'
-  d '\.questions' '' 'display:flex' 'flex-direction:column' 'gap:12px'
-  d '\.add-form' '' 'display:flex' 'flex-direction:column' 'gap:8px'
-  d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
-  chk "\.plain-input\.${H}:focus-visible" 'outline:none' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
-  none "QuizEditor input padding is the token, not the 5a literal" "\.plain-input\.${H}\{[^}]*padding:0 10px"
-  none "QuizEditor no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
-  sweep QuizEditor $H
-fi
-
-own q-toggle QuestionAccordion.svelte
-uniq1 q-toggle
-if [[ -n $REPLY ]]; then
-  N=QuestionAccordion; H=$REPLY
-  d '\.question' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
-  d '\.q-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 12px' 'background:var\(--surface\)'
-  chk "\.question\.expanded\.${H} \.q-head:where\(\.${H}\)" 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
-  d '\.q-toggle' '' 'display:flex' 'flex:1' 'min-width:0' 'border:0' 'background:transparent' 'text-align:left' 'cursor:pointer'
-  d '\.q-badge' '' 'font-size:11px' 'color:var\(--primary\)'
-  d '\.q-title' '' 'font-size:13px' 'font-weight:600' 'color:var\(--text\)'
-  d '\.q-type' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
-  d '\.body' '' 'padding:12px' 'display:flex' 'flex-direction:column' 'gap:10px'
-  d '\.stack' '' 'display:flex' 'flex-direction:column' 'gap:4px'
-  d '\.row-label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
-  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
-  d '\.opts-head' '' 'display:flex' 'align-items:center' 'gap:10px'
-  d '\.opts-label' '' 'width:132px'
-  d '\.opts-add' '' 'margin-left:auto'
-  d '\.options' '' 'display:flex' 'flex-direction:column' 'gap:6px'
-  d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
-  chk "\.plain-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
-  none "QuestionAccordion closed header carries no rule (ref 1891: only the open one)" "\.q-head\.${H}\{[^}]*border-bottom"
-  none "QuestionAccordion Question/Explanation rows are stacked, not the 132px grid (D23)" "\.stack\.${H}\{[^}]*grid-template-columns"
-  none "QuestionAccordion no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
-  sweep QuestionAccordion $H
-fi
-
-own correct-badge OptionRow.svelte
-uniq1 correct-badge
-if [[ -n $REPLY ]]; then
-  N=OptionRow; H=$REPLY
-  d '\.option' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:4px 9px' 'border:1px solid var\(--border\)' 'background:var\(--surface\)' 'border-radius:var\(--radius\)'
-  d '\.option\.correct' '' 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
-  d '\.mark' '' 'width:15px' 'height:15px' 'margin:0' 'accent-color:var\(--primary\)'
-  d '\.opt-input' '' 'flex:1' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid transparent' 'background:transparent' 'color:var\(--text\)' 'font-size:var\(--control-font\)' 'caret-color:var\(--primary\)'
-  chk "\.opt-input\.${H}:focus-visible" 'outline:none' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)'
-  d '\.correct-badge' '' 'padding:2px 7px' 'border-radius:3px' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)' 'font-size:11px' 'font-weight:500'
-  d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
-  none "OptionRow plain row is not drawn with the correct border" "\.option\.${H}\{[^}]*border:1px solid var\(--primary\)"
-  none "OptionRow no --success / --text-muted leftovers" "\.${H}[^{]*\{[^}]*var\(--(success|text-muted)"
-  none "OptionRow no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
-  sweep OptionRow $H
-fi
-
+echo "--- (ae) Slice-5b T6 — quiz look (3f): QuestionTypePicker (5d moved the rest to (ai)) ---"
 own qtype-picker QuestionTypePicker.svelte
-uniq1 qtype-picker
-if [[ -n $REPLY ]]; then
-  N=QuestionTypePicker; H=$REPLY
-  d '\.qtype-picker' '' 'border:0' 'padding:0' 'margin:0' 'min-width:0'
-  d '\.cards' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px'
-  chk "label\.${H}" 'display:flex' 'padding:6px 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
-  chk "label\.selected\.${H}" 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
-  none "QuestionTypePicker no --accent / --accent-bg fallbacks" "\.${H}[^{]*\{[^}]*var\(--accent"
-  sweep QuestionTypePicker $H
+# Slice-5d: the old QuizEditor was the picker's only user; 5d T8's New question
+# modal imports it again. Until then it is not in the bundle, so its dist rows
+# cannot run (one PASS stands in; the count rises by 19 when it returns).
+if grep -rqE "import QuestionTypePicker from" src --include='*.svelte' --exclude-dir=tests; then
+  uniq1 qtype-picker
+  if [[ -n $REPLY ]]; then
+    N=QuestionTypePicker; H=$REPLY
+    d '\.qtype-picker' '' 'border:0' 'padding:0' 'margin:0' 'min-width:0'
+    d '\.cards' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px'
+    chk "label\.${H}" 'display:flex' 'padding:6px 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
+    chk "label\.selected\.${H}" 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
+    none "QuestionTypePicker no --accent / --accent-bg fallbacks" "\.${H}[^{]*\{[^}]*var\(--accent"
+    sweep QuestionTypePicker $H
+  fi
+else
+  echo "PASS  QuestionTypePicker is unused until 5d T8 (no dist rules to check)"
 fi
-emoji_scan "quiz editor files" src/components/editor/QuizEditor.svelte src/components/editor/QuestionAccordion.svelte src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
+emoji_scan "quiz type picker" src/components/editor/QuestionTypePicker.svelte
 
 echo
 echo "--- (af) Slice-5b T7 — emoji scan over every Slice-5b source file (Constraint 3) ---"
@@ -4260,11 +4211,10 @@ FILES_5B=(
   src/components/editor/item/VideoBody.svelte src/components/editor/item/AppBody.svelte
   src/components/items/VideoFrame.svelte src/components/items/InteractiveFrame.svelte
   src/pages/editor/VersionEditPage.svelte src/components/editor/ItemRow.svelte
-  src/components/editor/QuizEditor.svelte src/components/editor/QuestionAccordion.svelte
-  src/components/editor/OptionRow.svelte src/components/editor/QuestionTypePicker.svelte
+  src/components/editor/QuestionTypePicker.svelte
   src/pages/MiniProjectDetailPage.svelte src/App.svelte
 )
-emoji_scan "all Slice-5b source files" $FILES_5B src/components/ui/FocusTrap.svelte src/lib/itemBody.ts src/lib/quizSave.ts \
+emoji_scan "all Slice-5b source files" $FILES_5B src/components/ui/FocusTrap.svelte src/lib/itemBody.ts \
   src/lib/deriveExpansion.ts src/lib/handleStaleIdFallback.ts src/routes.ts src/stores/currentEditorVersion.svelte.ts
 
 echo
@@ -4388,6 +4338,62 @@ if grep -qE '^[[:space:]]*\.(slug|code|item-slug)\b|class="[^"]*\b(slug|code|ite
      src/components/editor/AccordionHeader.svelte src/components/editor/ItemRow.svelte; then
   echo "FAIL  no slug or code badge in the constructor rows (5c D5)"; fail=1
 else echo "PASS  no slug or code badge in the constructor rows (5c D5)"; fi
+
+echo
+echo "--- (ai) Slice-5d — the quiz overview: body, cards, answers, key line ---"
+own quiz-head QuizBody.svelte
+uniq1 quiz-head
+if [[ -n $REPLY ]]; then
+  N=QuizBody; H=$REPLY
+  d '\.quiz-body' '' 'display:flex' 'flex-direction:column' 'gap:12px'
+  d '\.quiz-head' '' 'display:flex' 'align-items:center' 'gap:10px'
+  d '\.quiz-label' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.quiz-list' '' 'list-style:none' 'margin:0' 'padding:0' 'display:flex' 'flex-direction:column' 'gap:10px'
+  none "QuizBody no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
+  sweep QuizBody $H
+fi
+
+own qcard QuestionCard.svelte
+uniq1 qcard
+if [[ -n $REPLY ]]; then
+  N=QuestionCard; H=$REPLY
+  d '\.qcard' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  d '\.qhead' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px' 'padding:10px 12px 6px'
+  d '\.qnum' '' 'color:var\(--ordinal\)' 'font-weight:600' 'font-size:14\.5px'
+  d '\.qtext' '' 'font-size:14\.5px' 'color:var\(--text\)'
+  d '\.qchip' '' 'font-size:11px' 'font-weight:500' 'color:var\(--muted\)' 'background:var\(--surface-2\)' 'border-radius:3px' 'padding:2px 7px'
+  d '\.qanswers' '' 'padding:2px 12px 8px 38px'
+  d '\.qexpl' '' 'margin:0 12px 10px 38px' 'padding:7px 10px' 'border-left:3px solid var\(--border-strong\)' 'background:var\(--surface-2\)' 'font-size:12\.5px' 'color:var\(--muted\)'
+  none "QuestionCard chip is sans, never mono" "\.qchip\.${H}\{[^}]*font-family"
+  none "QuestionCard no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
+  sweep QuestionCard $H
+fi
+
+own ans-row ChoiceRow.svelte
+uniq1 ans-row
+if [[ -n $REPLY ]]; then
+  N=ChoiceRow; H=$REPLY
+  d '\.ans-row' '' 'display:flex' 'align-items:center' 'gap:8px' 'padding:4px 8px' 'border-radius:var\(--radius\)' 'font-size:13\.5px' 'color:var\(--text-2\)'
+  d '\.ans-row\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ans-mark' '' 'width:15px' 'height:15px' 'border:1\.5px solid var\(--muted\)' 'border-radius:50%'
+  d '\.ans-ok' '' 'font-size:11px' 'font-weight:500'
+  none "ChoiceRow no --success leftovers (the theme has none)" "\.${H}[^{]*\{[^}]*var\(--success"
+  none "ChoiceRow no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
+  sweep ChoiceRow $H
+fi
+
+own key-line KeyAnswer.svelte
+uniq1 key-line
+if [[ -n $REPLY ]]; then
+  N=KeyAnswer; H=$REPLY
+  d '\.key-line' '' 'margin:0' 'font-size:13\.5px' 'color:var\(--text-2\)' 'overflow-wrap:anywhere'
+  sweep KeyAnswer $H
+fi
+
+FILES_5D=(src/components/editor/quiz/*.svelte)
+emoji_scan "all Slice-5d quiz files" $FILES_5D src/lib/quizFormat.ts src/lib/quizEdits.svelte.ts \
+  src/lib/quizContext.ts src/lib/newTabLinks.ts
+colour_scan 5d-quiz $FILES_5D
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

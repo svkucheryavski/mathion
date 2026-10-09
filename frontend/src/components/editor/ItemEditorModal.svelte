@@ -11,7 +11,7 @@
   import ItemMark from '../course/ItemMark.svelte';
   import PageBody from './item/PageBody.svelte';
   import VideoBody from './item/VideoBody.svelte';
-  import QuizEditor from './QuizEditor.svelte';
+  import QuizBody from './quiz/QuizBody.svelte';
   import AppBody from './item/AppBody.svelte';
   import { makeDirtyTracker } from '../../lib/dirty.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
@@ -50,6 +50,8 @@
 
   const versionDisabled = $derived(version.is_disabled);
   const canEditText = $derived(perms.canEditTextFields);
+  // Slice-5d: a quiz saves each edit itself — no footer, no body Title row.
+  const isQuiz = $derived(item.type === 'quiz');
   // Memoised per vid (as ItemEditPage did): bodies compare it by identity.
   const assetContext = $derived(courseAssetContext(vid));
 
@@ -235,32 +237,34 @@
   closeDisabled={deleting || saving}
   bodyInert={deleting}
   header={head}
-  footer={canEditText ? foot : undefined}
+  footer={canEditText && !isQuiz ? foot : undefined}
 >
-  <div class="field-row">
-    <span class="field-label">Title</span>
-    {#if canEditText}
-      <div class="field">
-        <input
-          bind:this={titleEl}
-          class="plain-input"
-          type="text"
-          aria-label="Title"
-          maxlength="200"
-          required
-          data-autofocus
-          readonly={frozen}
-          aria-invalid={titleError ? 'true' : undefined}
-          aria-describedby={titleError ? titleErrId : undefined}
-          bind:value={titleTracker.current.title}
-          oninput={() => { if (titleError) titleError = null; }}
-        />
-        {#if titleError}<p class="field-err" id={titleErrId}>{titleError}</p>{/if}
-      </div>
-    {:else}
-      <span class="ro-value">{item.title}</span>
-    {/if}
-  </div>
+  {#if !isQuiz}
+    <div class="field-row">
+      <span class="field-label">Title</span>
+      {#if canEditText}
+        <div class="field">
+          <input
+            bind:this={titleEl}
+            class="plain-input"
+            type="text"
+            aria-label="Title"
+            maxlength="200"
+            required
+            data-autofocus
+            readonly={frozen}
+            aria-invalid={titleError ? 'true' : undefined}
+            aria-describedby={titleError ? titleErrId : undefined}
+            bind:value={titleTracker.current.title}
+            oninput={() => { if (titleError) titleError = null; }}
+          />
+          {#if titleError}<p class="field-err" id={titleErrId}>{titleError}</p>{/if}
+        </div>
+      {:else}
+        <span class="ro-value">{item.title}</span>
+      {/if}
+    </div>
+  {/if}
 
   {#if versionDisabled}
     <!-- A video's preview is an external iframe and still shows (§4), so its
@@ -298,7 +302,7 @@
       bind:guardDirty={bodyGuardDirty}
     />
   {:else if item.type === 'quiz'}
-    <QuizEditor
+    <QuizBody
       bind:this={body}
       itemId={item.id}
       {vid}
@@ -306,9 +310,7 @@
       {perms}
       {assetContext}
       {versionDisabled}
-      {frozen}
       {stillOnVid}
-      bind:saveDirty={bodySaveDirty}
       bind:guardDirty={bodyGuardDirty}
       bind:busy={bodyBusy}
     />

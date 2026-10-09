@@ -1,5 +1,5 @@
 // The item-body contract (Slice-5b §2). ItemEditorModal owns the Title and the
-// footer; each type body (PageBody, VideoBody, AppBody, QuizEditor) implements
+// footer; each type body (PageBody, VideoBody, AppBody, quiz/QuizBody) implements
 // this API, exported from the component and reached via bind:this.
 import { api, ApiError } from './api';
 import { loadAdminTree } from '../stores/currentEditorVersion.svelte';
