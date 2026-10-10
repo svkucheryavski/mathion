@@ -473,6 +473,7 @@ describe('formatShortDeadline (R12)', () => {
     expect(formatShortDeadline('2026-01-10T22:59:00Z')).toBe('10 Jan 23:59');
   });
   it('the month is English whatever the browser locale', () => {
+    // formatShortDeadline must not use Intl (fixed English months, R12); this spy pins that.
     const spy = vi.spyOn(Intl, 'DateTimeFormat');
     expect(formatShortDeadline('2026-12-01T08:05:00Z')).toBe('01 Dec 09:05');
     // No Intl month formatting: a German or Danish browser still reads "Dec".
@@ -1429,6 +1430,8 @@ Create `src/components/ui/DangerConfirm.svelte`:
     if (!armed || blocked) return;
     try {
       await onConfirm();
+    } catch {
+      // The caller reports its own failure (banner, toast); the box re-arms.
     } finally {
       armed = false;
     }
@@ -2941,7 +2944,7 @@ Expected: PASS.
 
 - [ ] **Step 11: Gate rows**
 
-In section (aj): add `src/pages/runs/RunDetailPage.svelte src/components/runs/TeachingCrumbs.svelte src/components/runs/RunRosterTab.svelte` to `FILES_6A` and `src/lib/runTabs.ts` to `LIB_6A`, set `EXPECTED_CHECKS=1485`, and append:
+In section (aj): add `src/pages/runs/RunDetailPage.svelte src/components/runs/TeachingCrumbs.svelte` to `FILES_6A` and `src/lib/runTabs.ts` to `LIB_6A`, set `EXPECTED_CHECKS=1485`, and append:
 
 ```zsh
 own run-tabs RunDetailPage.svelte
@@ -2966,7 +2969,7 @@ fi
 
 Count: RunDetailPage 1 + 1 + 2 + 2 + 2 + 2 + 2 = 12; TeachingCrumbs 1 + 1 + 1 + 2 = 5; total 17 → 1485.
 
-`RunRosterTab` joins `FILES_6A` because its import line changed; if its existing CSS or text fails `colour_scan` or `emoji_scan`, take it back out of `FILES_6A` and ledger a ruling (6c restyles Roster; 6a only touched one import).
+`RunRosterTab` stays out of `FILES_6A`: 6a changes only its import line, and its untouched markup and CSS still hold `×`, `→` and hex fallbacks that 6c removes when it restyles Roster.
 
 - [ ] **Step 12: Full verification**
 
@@ -3100,7 +3103,7 @@ In `src/tests/TeacherRunListPage.svelte.test.ts`:
 ```ts
   it('h1 "Teaching"; columns Title, Course, Status, Students, Start, End', async () => {
     vi.stubGlobal('fetch', mockFetch(200, [row({
-      run: makeRun({ id: 42, title: 'Spring', start_date: '2026-09-01', end_date: '2099-12-31' }),
+      run: makeRun({ id: 42, title: 'Spring', start_date: '2020-01-01', end_date: '2099-12-31' }),
       course_name: 'Calc 101', course_slug: 'calc', student_count: 12,
     })]));
     component = mount(TeacherRunListPage, { target });
@@ -3110,7 +3113,7 @@ In `src/tests/TeacherRunListPage.svelte.test.ts`:
     expect(Array.from(target.querySelectorAll('thead th')).map((th) => th.textContent?.trim()))
       .toEqual(['Title', 'Course', 'Status', 'Students', 'Start', 'End']);
     const cells = Array.from(target.querySelectorAll('tbody tr:first-child td')).map((td) => td.textContent?.trim());
-    expect(cells).toEqual(['Spring', 'Calc 101', 'active', '12', '01 Sep 2026', '31 Dec 2099']);
+    expect(cells).toEqual(['Spring', 'Calc 101', 'active', '12', '01 Jan 2020', '31 Dec 2099']);
   });
 
   it('the Course column links to /teaching/:slug', async () => {
@@ -3382,7 +3385,7 @@ Create `src/components/ui/FilterPills.svelte`:
 <div class="filter-pills" role="group" aria-label={label}>
   {#each options as o (o.key)}
     <button type="button" class="fp" aria-pressed={value === o.key} onclick={() => onchange(o.key)}>
-      {o.label}{#if o.count !== undefined} <span class="fp-n">({o.count})</span>{/if}
+      {o.label}{#if o.count !== undefined}{' '}<span class="fp-n">({o.count})</span>{/if}
     </button>
   {/each}
 </div>
@@ -3661,7 +3664,7 @@ Replace `src/pages/runs/RunListPage.svelte` with:
             <tr>
               <td><a href={runHref(run.id)} onclick={(e) => go(e, runHref(run.id))}>{run.title}</a></td>
               <td><RunStatusChip {status} /></td>
-              <td>{#if v?.label}{v.label} · {/if}<span class="ver-id">v. {run.version_id}</span></td>
+              <td>{#if v?.label}{v.label}{' '}·{' '}{/if}<span class="ver-id">v. {run.version_id}</span></td>
               <td class="num">{formatShortDate(run.start_date)}</td>
               <td class="num">{formatShortDate(run.end_date)}</td>
               <td class="row-actions">
@@ -3741,7 +3744,7 @@ Replace `src/pages/runs/RunListPage.svelte` with:
 Notes for the implementer:
 - `ErrorState`'s inline variant has `role="alert"`, so a failed load is announced.
 - The h1 keeps `tabindex="-1"` only as the last focus fallback; `h1:focus { outline: none }` keeps a programmatic focus from drawing a ring.
-- `{#if v?.label}{v.label} · {/if}` renders "Autumn · v. 99"; an empty label renders "v. 98" alone (R3).
+- `{#if v?.label}{v.label}{' '}·{' '}{/if}` renders "Autumn · v. 99" (Svelte trims a bare space at the edge of a block, so the spaces are expressions); an empty label renders "v. 98" alone (R3).
 
 - [ ] **Step 8: Run the tests to see them pass**
 
@@ -3769,7 +3772,7 @@ own teach-table TeacherRunListPage.svelte
 uniq1 teach-table
 if [[ -n $REPLY ]]; then
   N=TeacherRunListPage; H=$REPLY
-  chk "\.teach-table\.${H} th\.${H}" 'background:var\(--surface-2\)' 'color:var\(--text-3\)'
+  chk "\.teach-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)' 'color:var\(--text-3\)'
   sweep TeacherRunListPage $H
 fi
 
@@ -3777,7 +3780,7 @@ own runs-table RunListPage.svelte
 uniq1 runs-table
 if [[ -n $REPLY ]]; then
   N=RunListPage; H=$REPLY
-  chk "\.runs-table\.${H} th\.${H}" 'background:var\(--surface-2\)'
+  chk "\.runs-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)'
   d '\.runs-count' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
   sweep RunListPage $H
 fi
@@ -4446,6 +4449,9 @@ and rename it `'disabled group: muted name and a "disabled" chip; no opacity row
    - :248 and :595 and :624 — `includes('Block 2')` → `includes('B2')` (that MP's `block_title` is `'B2'`);
    - :676 — `includes('MP1')` → `includes('B1')`;
    - :693 — `includes('MP99')` → `includes('B99')`.
+   - :623 and :692 — the selector `'th.mp-title-header'` → `'th.mp-head'`.
+   - :196 — `'tr.mp-titles-row th.sticky-group'` → `'thead th.sticky-group'` (the thead is one row now).
+   - :109 ('renders status grid when data loads') — `expect(host.textContent).toContain('Mini project for Block 1');` → `expect(host.querySelector('th.mp-head button')?.textContent?.trim()).toBe('B1');` (the header now shows the block title). :304 stays: the detail panel still names the mini-project by its title.
 
 - [ ] **Step 2: Run them to see them fail**
 
@@ -4907,7 +4913,8 @@ function key(el: Element, k: string) {
 
   it('deleting the last group moves focus to the + toggle (Review Focus 3)', async () => {
     fetchSpy.mockImplementation(() => jres(null, 204));
-    const props = $state({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props: any = $state({
       runId: 10, groups: [group(1, 'Alpha')], groupsEnabled: true,
       onRefetchGroups: async () => { props.groups = []; },
       onRefetchGroupsAndStudents: vi.fn().mockResolvedValue(undefined),
@@ -5032,7 +5039,8 @@ In `src/tests/RunTeachersTab.svelte.test.ts`:
 
   it('after removing the only teacher focus goes to the email field', async () => {
     fetchSpy.mockImplementation(() => jres(null, 204));
-    const props = $state({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props: any = $state({
       runId: 10, teachers: [tA], course: baseCourse,
       onRefetch: async () => { props.teachers = []; },
     });
@@ -5417,7 +5425,7 @@ Replace `src/components/runs/RunTeachersTab.svelte` with:
         <li class="t-row">
           <Avatar />
           <span class="t-who">
-            <span class="t-name">{t.user_full_name || '—'}{#if t.user_full_name === null} <span class="chip-invited">invited</span>{/if}</span>
+            <span class="t-name">{t.user_full_name || '—'}{#if t.user_full_name === null}{' '}<span class="chip-invited">invited</span>{/if}</span>
             <span class="t-email">{t.user_email}</span>
           </span>
           {#if course.is_admin}
@@ -5806,6 +5814,32 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     unmount(cmp);
   });
 
+  it('deleting the only mini-project while + is disabled moves focus to the h2 (Review Focus 3)', async () => {
+    fetchSpy.mockImplementation(() => jres(null, 204));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: false, runGroupsEnabled: false,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks,
+      miniProjects: [mkMp()],
+      onRefetchMiniProjects: async () => { propsRef.miniProjects = []; },
+      onNavigateToTab: vi.fn(),
+      course: baseCourse,
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+    expect(byAction(target, 'new-mp')!.disabled).toBe(true);
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('h2'));
+    unmount(cmp);
+  });
+
   it('banners: info banners carry their class; the delete error is an alert with Dismiss', async () => {
     fetchSpy.mockImplementation(() => jres({ detail: 'Boom' }, 500));
     const { target } = mountMpTab({ runIsPublished: false, runGroupsEnabled: false, miniProjects: [mkMp()] });
@@ -6101,7 +6135,7 @@ Replace `src/components/runs/RunMiniProjectsTab.svelte` with:
       </div>
     {/if}
 
-    {#if miniProjects.length === 0}
+    {#if rows.length === 0}
       <p class="mp-empty">
         No mini-projects yet. A mini-project is a PDF assignment that each group submits and you grade.
         <strong>Click + New mini-project to assign one to a block.</strong>
@@ -6322,7 +6356,7 @@ function replaceBtn(): HTMLButtonElement | null {
 }
 ```
 
-3. Replace every `findButton(target, /↻ Replace/)` with `replaceBtn()` (19 places; `findButton` returned the first match, and so does `replaceBtn`).
+3. Replace every `findButton(target, /↻ Replace/)` with `replaceBtn()` (16 places; `findButton` returned the first match, and so does `replaceBtn`).
 
 4. In `'smoke: upload + list + replace UI render identically regardless of course.is_admin'` replace
 
@@ -6701,7 +6735,7 @@ In `src/components/runs/RunAssetsTab.svelte`, `<script>`:
   }
 ```
 
-9. `performDelete`: after `const force = isReferenced;` add `const idx = sortedAssets.findIndex((a) => a.id === assetId);`. In the `catch`, before each of the three exits add the failure focus — i.e. replace the body of the `catch` after the `AbortError` line with:
+9. `performDelete`: after `const force = isReferenced;` add `const idx = sortedAssets.findIndex((a) => a.id === assetId);`, and after `openConfirm = null;` add `void focusRow(trashEls, assetId);` (the confirm unmounts with focus in it; the row's Delete holds focus while the request runs). In the `catch`, before each of the three exits add the failure focus — i.e. replace the body of the `catch` after the `AbortError` line with:
 
 ```ts
       if (err?.status === 403) {
@@ -7119,7 +7153,7 @@ In section (aj): add `src/components/runs/RunAssetsTab.svelte` to `FILES_6A`, se
 
 ```zsh
 # Assets: the shared panel, pills and confirms replace the local ones (P9).
-if grep -qE 'force-confirm|bulk-confirm|checkboxChecked|filter-pills|inline-confirm' src/components/runs/RunAssetsTab.svelte; then
+if grep -qE 'data-role="(force|bulk)-confirm"|checkboxChecked|class="filter-pills"|class="inline-confirm' src/components/runs/RunAssetsTab.svelte; then
   echo "FAIL  RunAssetsTab still has its own confirm panel or pills"; fail=1
 else
   echo "PASS  RunAssetsTab uses DangerConfirm, InlineConfirm and FilterPills (6a)"
