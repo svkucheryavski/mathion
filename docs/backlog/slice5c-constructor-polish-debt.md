@@ -26,6 +26,8 @@ rule (Critical/Important are fixed in-task; Minor lands here).
   a CJK author's Enter-to-convert commits a half-typed title (Esc can cancel
   the rename). Fix: `if (e.isComposing || e.keyCode === 229) return;` — the
   same debt exists in `InlineField` (Modal already guards it).
+  **Low priority (user, 2026-10-10):** Japanese/Chinese input is not planned in the near future; not tested in
+  the Safari pass.
 - **Read-only flip drops a dirty title silently.** InlineField toasted
   "Editing closed — this version is no longer editable" and refocused its row;
   the header closes the field without a message (focus may fall to `<body>`).
@@ -68,7 +70,7 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **The read-only modal gives no reason (r1).** It just shows text. A one-line muted reason ("Published versions are read-only") would explain it; `metaReason` already has the wording (see above).
 - **Gate anchor `.ro` is generic (r1).** VersionSettingsModal's token pins anchor on `.ro`; rename the class to `.vs-ro` so the pin can't match another component's `.ro`.
 - **Test gaps (r1):** double Save while busy (the button path; the Enter path is pinned); Escape while saving does nothing; the "Saved (refresh failed …)" info toast; "Save failed" toast after an unmount mid-PATCH; the "Saved" toast after a version switch; the version-switch page test should also assert the `v2` chip.
-- **Safari IME commit Enter can save (r2, Opus).** Safari may fire the composition-commit Enter with `isComposing` false and `keyCode` 229, so a Japanese/Chinese label could save early. Add `|| e.keyCode === 229` to `onEnter` (Modal.svelte guards Escape this way); AccordionHeader's Enter has no IME guard at all — fix both together.
+- **Safari IME commit Enter can save (r2, Opus).** Safari may fire the composition-commit Enter with `isComposing` false and `keyCode` 229, so a Japanese/Chinese label could save early. Add `|| e.keyCode === 229` to `onEnter` (Modal.svelte guards Escape this way); AccordionHeader's Enter has no IME guard at all — fix both together. Low priority: CJK input not planned (user, 2026-10-10).
 
 ## Versions page follow-up (2026-10-08)
 
@@ -106,6 +108,8 @@ rule (Critical/Important are fixed in-task; Minor lands here).
   86px chip; 15px/600 block titles wrap to two lines, and a course with NO quizzes still reserves the
   empty 86px chip slot on every line. Candidate: `@media (max-width:560px) .quiz-chip.empty { flex-basis:0 }`
   (+ gap compensation) or a narrower chip. Decide during the Safari/phone pass.
+  **Decided 2026-10-09 (Safari pass): keep as is** — rows stay aligned; portrait-phone use is not expected
+  to be common. Revisit only if real course titles wrap badly.
 - **Heading / region names carry the progress phrase** (both lanes): the header button's aria-label is
   also the `<h2>` name and, via `aria-labelledby`, the panel region name ("1. Vectors, 2 of 3 items
   completed, quiz score 50%, region"). Alternative: `aria-describedby` to a hidden span keeps the
@@ -146,7 +150,8 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **Mouse Create / Save in NewItemModal and VersionSettingsModal drops focus to `<body>` on failure** (Fable):
   the footer button is `disabled` while busy, so the pressed button loses focus; Modal's focusin containment
   recovers it on the next Tab. The 5d modals use `loading` plus a re-entry guard instead. Same family as the
-  5b "mouse-Save focus" item; check in the Safari pass.
+  5b "mouse-Save focus" item. Safari pass 2026-10-10: on SUCCESS focus is right (Save → the settings pencil;
+  Create → inside the new item's modal). The failure path was not exercised; still open.
 - **VersionSettingsModal on a legacy empty label** (Fable): if an install skipped the label backfill, changing
   only the attempts errors "Label is required" on a field the author did not touch. The migration fills
   every label, so only a skipped migration reaches it.

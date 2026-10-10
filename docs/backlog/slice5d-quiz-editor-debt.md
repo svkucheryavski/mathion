@@ -3,12 +3,19 @@
 Collected from the per-task review lanes (T1–T8). Each line: what, where, why it was deferred.
 
 ## Carried to the browser pass (spec §Carried to the browser pass)
-- The 5d screens join the 5b/5c Safari pass with the user, together with the 5c
-  phone-width item. Check: D8's always-shown answer controls on touch screens,
-  and the stacked level-3 backdrop in Safari (the quiz modal's backdrop-filter
-  makes it the containing block of the fixed level-3 backdrop).
-- `say()` re-announces the same message by clearing and setting it in a microtask; confirm with VoiceOver in
-  Safari that a repeated "Saved" is read again (T2, Fable M3).
+- Safari pass with the user (2026-10-09/10) — done. OK: stacked level-3 modal (dimmed, centred, not clipped;
+  Esc closes only the top one), the New question modal, narrow-window wrapping of the card actions, student
+  block numbers, phone width (empty quiz-chip space kept by decision), no freeze after closing an item, the
+  Video URL label, focus after a mouse Save/Create. Not done: D8's always-shown answer controls on a real
+  touch device (no device test), and Japanese/Chinese input (not planned).
+- **VoiceOver (Safari) does not speak "Saved" after an inline save** — found in the Safari pass 2026-10-09.
+  The save itself succeeds (PATCH 200). "Answer moved to position 2 of 2" IS spoken, so the live region works;
+  "Saved" is missed even on a fresh quiz modal (not only on a repeat). Likely cause: the save closes the field
+  (the focused input is removed) and focus jumps back to the answer button in the same moment, and VoiceOver
+  reads the new focus at length and drops the polite message. Candidate fix: announce "Saved" after the
+  focus move has settled (a short delay, or `role="status"` with the update in a later task), then re-test
+  with VoiceOver. Also still unverified: whether a repeated identical message is re-read (`say()` clears and
+  sets it in a microtask, likely coalesced by WebKit) (T2, Fable M3). User: not a priority now.
 
 ## Minors
 <!-- one bullet per deferred review minor, added task by task -->
