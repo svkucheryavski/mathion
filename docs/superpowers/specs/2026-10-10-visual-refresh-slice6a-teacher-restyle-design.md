@@ -1,7 +1,9 @@
 # Visual refresh — Slice 6a: the teacher screens, restyled (runs lists, run frame, six tabs)
 
-**Status:** draft, rev 2. Written 2026-10-10 for the user's review.
-- Rev 2 folds in round 1 of the spec review (Opus code angle, Opus design angle, Fable second opinion). Notes are in `.superpowers/sdd/2026-10-10-visual-refresh-slice6-teacher/spec-r1-*.md`.
+**Status:** draft, rev 3. Written 2026-10-10 for the user's review.
+- Rev 2 folded in round 1 of the spec review (Opus code angle, Opus design angle, Fable second opinion).
+- Rev 3 folds in round 2 (fresh Opus, fresh Fable) and the user's answers on R3, R9 and R10.
+- Review notes are in `.superpowers/sdd/2026-10-10-visual-refresh-slice6-teacher/spec-r*.md`.
 
 **Branch:** `feat/visual-refresh-slice6-teacher`, cut from `feat/visual-refresh-slice5-authoring` at `65bcea2`. It stays local: no push, no merge.
 
@@ -34,16 +36,19 @@ The user's (2026-10-10):
 - **D4 — No ✎ on run rows.** The run title opens the run; title and dates are edited on Overview. 🗑 stays.
 - **D5 — Nothing that works today is dropped** (stated to the user; no objection).
   - The drawings omit many working features: banners, empty states, Refresh, filters, retry paths and others. Each is kept and restyled in the same visual language. §Keep lists them per screen.
-  - The only deliberate removals are named as rulings: R3, R6, R7, R8.
+  - The only deliberate removals are named: R3, R6, R7, R8, and the Teaching list's summary sentence (§`/teaching`).
 - **D6 — Mini-projects are shown by their block's title** wherever 6a shows a mini-project. The model has no mini-project title column. The drawn names ("Matrix explorer") are not real.
 - **D7 — Teacher avatars are the drawn silhouette only.** There is no photo field.
+- **D8 — Version numbers are the version id, written "v. N"** (the user's choice over "vN" as drawn and over today's rank; 2026-10-10). See R3.
+- **D9 — Superusers see every run on the Teaching list** (the user's choice, 2026-10-10). This reverses the 2026-05-29 teacher-monitoring decision "There is NO superuser bypass" (`docs/superpowers/specs/2026-05-29-teacher-monitoring-slice-a-design.md:291`) and its test. See R9.
+- **D10 — Leaving a tab with a half-written grade asks first** (the user's choice over switching silently, 2026-10-10). See R10.
 
 Rulings taken at the controller's discretion (technical; the user defers these). Each states what it costs if wrong:
 - **R1 — The open tab lives in the address** (`?tab=…`), so a reload keeps the tab. Switching tabs replaces the history entry; it does not push one. Back leaves the run page, and coming back restores the tab. *Cost if wrong:* the user wanted Back to step through tabs; that is a one-line change (push instead of replace).
 - **R2 — Tab order and names as drawn:** Overview, Progress, Submissions, Roster, Groups, Mini-projects, Assets, Teachers. "Submission" becomes "Submissions".
-- **R3 — Version numbers become the version id.**
+- **R3 — Version numbers become the version id** (confirmed by the user as D8).
   - Today both the runs list and the run page show the version's *rank* by creation date, plus its date: "v2 (2026-02-04)" (`RunListPage.svelte:22-30`, `RunDetailPage.svelte:186-192`).
-  - 6a shows the version **id**, as the 5c editor does (`VersionsPage.svelte:236`). One number now means the same version everywhere; a teacher's rank was computed from the pinned versions only and differed from the admin's. The date is dropped.
+  - 6a shows the version **id** as "v. N", as the 5c editor does (`VersionsPage.svelte:236`). One number now means the same version everywhere. A teacher's rank was computed from the pinned versions only and differed from the admin's, and the admin's rank was computed from one page of a paginated list (`versions.py:198-204`). The date is dropped.
   - *Cost if wrong:* a run that showed "v2" now shows "v. 17"; this is visible, not data-changing.
 - **R4 — Delete is a trash glyph everywhere.** The drawings use a red × for delete in 10i and 10j. 6a uses the same trash as 10e, 10c, 10d and the 5c editor.
 - **R5 — Disabled-with-reason vs read-only on teacher screens.**
@@ -54,16 +59,26 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 - **R6 — The runs list drops its "Open" row link** (`RunListPage.svelte:122`). The title is the link (as drawn), so the second link to the same place goes.
 - **R7 — One version-disabled banner.**
   - The frame shows it once, under the title row. Progress (`RunProgressTab.svelte:287-289`) and Mini-projects (`RunMiniProjectsTab.svelte:191-197`) no longer repeat the same sentence.
-  - Each keeps only its own extra clause as one `--muted` line at the top of the tab: Progress "Coverage reflects the last known state."; Mini-projects keeps its "See Overview" link line.
+  - Each keeps only its own extra clause as one `--muted` line at the top of the tab, shown while the version is disabled:
+    - Progress: "Coverage data reflects last-known state." (today's text);
+    - Mini-projects, for admins only: "See Overview", a link through `setTab` (today it is admin-only, `RunMiniProjectsTab.svelte:198-204`). Non-admins get no line.
 - **R8 — The Submissions column header drops "N groups".** Today: "N groups · a awaiting · b revision · c rejected" (`RunSubmissionTab.svelte:134-140`). As drawn: "B2 · a awaiting · b revision · c rejected", with zero parts omitted, as today. The rows already show the groups.
-- **R9 — Superusers see every run on the Teaching list.**
+- **R9 — Superusers see every run on the Teaching list** (confirmed by the user as D9).
   - A superuser already gets the Authoring pill and is a course admin of every course in `by-slug` (`courses.py:84-86`, `auth.py:30`). So they get the Teaching pill under D3 too.
   - Without a bypass, their Teaching list would always be empty. The teaching endpoint gains the same superuser bypass the rest of the admin surface has.
   - *Cost if wrong:* a busy install shows a superuser a long list (the status filter keeps it usable).
-- **R10 — Leaving a tab with unsaved work asks first.**
+- **R10 — Leaving a tab with unsaved work asks first** (confirmed by the user as D10).
   - A `?tab` change is a navigation, so the registered unsaved-changes guards run (`router.svelte.ts:88-112`). Today a tab click silently drops a half-written evaluation in the side panel (`DashboardSidePanel.svelte:770` mounts a `DirtyGuard`). After 6a it asks "Discard unsaved changes and continue?".
   - Cancelling keeps the tab and the address.
   - This is intended.
+- **R12 — Mini-project deadlines keep their time and zone.** 10j draws "soft 07 Aug". 6a shows "soft 07 Aug 23:59", with the zone in the column header or each part's `title` (§Mini-projects). D5 forbids dropping the time; for a hard deadline it matters. *Cost if wrong:* a wider Deadlines column.
+- **R13 — Block and sequence numbers follow list position, not the stored `order`.**
+  - "B{n}" (Progress, Submissions) and "Block {n}" (Mini-projects, Assets' "used by") use the block's 1-based position in the pinned version's `blocks` list.
+  - "S{n}" (Progress) is the sequence's 1-based position within its block, among that block's sequences in the Progress payload. Those are all the block's sequences, because the payload lists every sequence of the version.
+  - The stored `order` keeps gaps after a delete. The student view and the editor already number by position (commit `5c73890`).
+  - The dashboard payloads hold only some blocks (Progress: blocks with sequences; Submissions: blocks with mini-projects), so the number is taken from `blocks`, not from the payload. `RunDetailPage` passes `blocks` to Progress, Submissions and Assets, as it already does to Mini-projects.
+  - This closes the 5c backlog item "Teacher run screens still label blocks 'Block {order}'" (`docs/backlog/slice5c-constructor-polish-debt.md:158-161`) for these screens. `MiniProjectModal` follows in 6b.
+- **R14 — The Assets "used by" sub-panel and the danger panel render under their row**, as a full-width row inserted after it (today's placement, `RunAssetsTab.svelte:777-809`, `:833`). 10i draws both under the table, but with many files that puts them far from the row they act on. *Cost if wrong:* a position change.
 - **R11 — Inline name edits on the Groups tab register no unsaved-changes guard** (none do today). An open add or rename field is dropped without asking when the tab changes. That keeps tab switching cheap, and the text is one short name.
 
 ## Scope
@@ -108,6 +123,8 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 - **Redirects.**
   - Both old routes stay in `routes.ts` with `auth: true`, so a signed-out bookmark still goes through login with `next` (`App.svelte:53-58`).
   - They map to one small component, `pages/runs/RunsRedirect.svelte`. In an `$effect` keyed on its params, it calls `navigate(newPath + currentRoute.search + currentRoute.hash, { replace: true })`. It renders nothing, and makes no fetch.
+  - `newPath` re-encodes `courseSlug` with `encodeURIComponent` (`matchPattern` decodes it, `router.svelte.ts:196`).
+  - It calls `navigate` without `force`, so a signed-out visitor's login redirect from App still wins the race (`navGen`).
   - Removing the routes and redirecting from App would show NotFound first, so it is not done.
 - **Route matching** has no conflict: patterns match only paths with the same number of segments (`router.svelte.ts:191`).
 
@@ -122,13 +139,13 @@ Every in-app link to a run list or run page uses the new addresses:
 - `RunDetailPage.svelte:276` (`onDeleteRun`, back to the list after a delete). This one line changes in 6a.
 - Any other builder of `/courses/…/runs…` under `src/` outside `/api/` paths, found by grep in the plan.
 
-API paths (`lib/runs.ts:7,15` and others) are not page links and are untouched. Existing tests that assert old page addresses are updated (the plan lists them).
+API paths (`lib/runs.ts:7,15` and others) are not page links and are untouched. Existing tests that assert old page addresses are updated (the plan lists them), and so is `AppHeader.svelte.test.ts:89`, which asserts that an admin has no Teaching pill.
 
 ### The header pill (`AppHeader.svelte:10-38`)
 
 - "Teaching" renders when `has_run_teacher || has_course_admin`. Today it needs `has_run_teacher`. `has_course_admin` is already true for superusers (`auth.py:30`); with R9 their list is not empty.
 - "Teaching" is active on `/teaching` and everything under it (unchanged rule; the run pages now live there).
-- "Authoring" is active on `/courses…` (unchanged). Run pages no longer match it. A redirect route renders nothing, so no pill flashes.
+- "Authoring" is active on `/courses…` (unchanged). Run pages no longer match it. No pill flashes on a redirect: the pill follows `currentRoute.path`, and the redirect replaces it before the next paint.
 - `defaultLandingPath` is unchanged: admins still land on `/courses`.
 
 ### The breadcrumb
@@ -225,7 +242,8 @@ Every chip's meaning is also in its text; colour is never the only signal.
 - Sorting is today's per-status ordering (unchanged).
 - **Empty and error copy:**
   - With no runs at all: "No runs yet. Runs you teach or administer appear here." This replaces the teacher-only text at `:95-96`, which is false for admins after D3.
-  - With runs but none for the selected pill: "No {label} runs.", with the pill's lowercase label ("No finished runs."). Today it says "ended" (`:109-111`).
+  - With runs but none for the selected pill: "No {label} runs.", with the pill's lowercase label ("No finished runs.").
+  - Today that line also adds "You have N active, N upcoming, N ended, and N draft." (`:109-111`). That sentence goes: the pills now carry the counts.
   - The load error and its "Try again" button (`:92`) are kept, restyled with `ErrorState`.
 
 ### `/teaching/:courseSlug` (`RunListPage`)
@@ -284,8 +302,8 @@ Common to all six:
     - "Download CSV" as a secondary button.
 - **Table (handoff §4 Tables):**
   - Student and Group columns sticky (already sticky; restyle only).
-  - The existing block header row (`:325-336`) is restyled: "B1 · VECTORS", mono 10.5px uppercase `--muted`, spanning that block's sequences. The `B{block_order} ·` prefix is new.
-  - Sequence headers "S1 Vectors": `S{sequence_order}` plus the title, from fields already in the payload (`lib/dashboards.ts:47-55`).
+  - The existing block header row (`:325-336`) is restyled: "B1 · VECTORS", mono 10.5px uppercase `--muted`, spanning that block's sequences. The `B{n} ·` prefix (R13) is new.
+  - Sequence headers "S1 Vectors": `S{n}` (R13) plus the title, from fields already in the payload (`lib/dashboards.ts:47-55`).
   - Cell values mono 11.5px.
   - The sort controls on Student, Group and sequences stay (today's sort).
 - **Heatmap:**
@@ -293,7 +311,7 @@ Common to all six:
 
     | Ratio | Background |
     |---|---|
-    | no data ("—") | none |
+    | no data (the ratio is null; the cell shows "—", or "0/0" in Quiz mode with no questions) | none |
     | 0 | `--surface-muted` |
     | > 0 and ≤ 0.25 | `--heat-1` |
     | ≤ 0.5 | `--heat-2` |
@@ -308,7 +326,7 @@ Common to all six:
   - Today's `.disabled-row { opacity: 0.55 }` and its hex fallbacks go.
 - **Cell click** opens the existing side panel, unchanged (6c).
 - **Keep (D5):**
-  - R7's extra line;
+  - R7's extra line, with today's text "Coverage data reflects last-known state." (`:288`);
   - "No sequences in this run." (`:320`);
   - "No students enrolled in this run." and "No matches for current filters." (`:375-377`);
   - the loading and error states.
@@ -318,13 +336,13 @@ Common to all six:
 - **Toolbar:** the group filter at the left; at the right, ↻ Refresh and ⤓ CSV as icon buttons (`refresh` and `download` glyphs, titles "Refresh" and "Download CSV").
 - **Grid:** groups down, mini-projects across.
   - **Column header line 1:** the block title (D6), e.g. "Matrices and transformations".
-  - **Line 2,** mono `--muted`: "B2 · 3 awaiting · 1 revision · 1 rejected", with zero parts omitted (R8).
+  - **Line 2,** mono `--muted`: "B2 · 3 awaiting · 1 revision · 1 rejected", with zero parts omitted (R8). "B2" is the block's position (R13).
     - When every in-scope group is "not submitted", it reads "B2 · no submissions".
     - When the parts are all zero but something was submitted (everything accepted), it reads just "B2".
   - **The column sort** on each mini-project (`:254`) and on Group stays.
 - **Cells:**
   - A status badge per cell, with lowercase short labels: "accepted", "needs revision", "awaiting eval", "not submitted", "rejected".
-  - The short labels are a new `STATUS_SHORT_LABEL` map in `lib/dashboards.ts`. The existing `STATUS_LABEL` ("Awaiting evaluation", …) stays for `DashboardSidePanel`, `SubmissionThreadEntry` (6c) and the cell `aria-label`.
+  - The short labels are a new `STATUS_SHORT_LABEL` map in `lib/dashboards.ts`. `ui/StatusBadge.svelte` gains an optional `label` prop that overrides its text (default unchanged: `STATUS_LABEL`); Submissions passes the short label. The existing `STATUS_LABEL` ("Awaiting evaluation", …) stays for `DashboardSidePanel`, `SubmissionThreadEntry` (6c) and the cell `aria-label`.
   - The cell's `aria-label` names the group and the block title, not `mp.title` (`:275`).
   - "—" when the group is outside the mini-project's scope.
 - **A disabled group:** its name in `--muted` with a "disabled" chip. Today's `.disabled-row` opacity rule (`:359`) goes.
@@ -341,7 +359,7 @@ Common to all six:
   - Enter or ✓ adds.
   - Esc, ×, or the header toggle closes it and returns focus to the toggle.
   - The existing 409 text ("A group with that name already exists in this run.") and other errors show under the field.
-  - On success the field clears and stays focused, for the next name.
+  - On success the add row remounts its `InlineName` (`{#key}`), so the field is empty and focused again, for the next name.
 - **Each group row:** the name, the capacity badge, then the action slot: ✎ ("Rename") and 🗑 ("Delete").
 - **Renaming.** ✎ swaps the name for an `InlineName` (label "Group name", maxlength 80) with the current name.
   - The action slot becomes × then ✓, with ✓ where ✎ was (handoff §4 Inline field editing). The capacity badge stays.
@@ -356,7 +374,7 @@ Common to all six:
 - **Groups disabled:** the list is replaced by a card.
   - Its header strip reads "Groups disabled for this run", styled mono uppercase `--muted` on `--surface-2`.
   - Its body is today's text for the case, one of three by role and publish state (`:104-111`).
-  - In each text, "Overview" is a link that switches to the Overview tab through `setTab`.
+  - In the first two texts, "Overview" is a link that switches to the Overview tab through `setTab`. The third ("Ask a course admin…", `:111`) has no link.
 - **Keep:** the empty list text "No groups yet.".
 
 **Capacity badge:** "empty" / "n/10", with the `n/10` text in mono. Colours come from `getCapacityClass` (`lib/runGroups.ts:24-29`, thresholds unchanged):
@@ -391,10 +409,11 @@ The badge's `title` spells it out: "7 of 10 students".
   - "+" (primary, 28px) is titled "New mini-project" and opens `MiniProjectModal` (unchanged until 6b).
   - It is disabled, with today's reason as its `title`, in exactly the cases where today's New button is disabled. The plan lists them from the code.
 - **Table:**
-  - **Block:** "Block 1 — Vectors and vector spaces" (D6).
-  - **Deadlines:** mono, "soft 07 Aug 23:59 · hard 14 Aug 23:59 · resub 21 Aug 23:59". Absent deadlines are omitted.
+  - **Block:** "Block 1 — Vectors and vector spaces" (D6; the number per R13).
+  - **Deadlines** (R12): mono, "soft 07 Aug 23:59 · hard 14 Aug 23:59 · resub 21 Aug 23:59". Absent deadlines are omitted.
+    - The short form uses fixed English month abbreviations (Jan…Dec) and 24-hour local time, not the browser's locale. It is one small helper in `lib/datetime.ts`.
     - Each part's `title` is today's full `formatLocalWithTz` value, e.g. "2026-08-14 23:59 GMT+2" (`RunMiniProjectsTab.svelte:238-240`).
-    - The column header reads "Deadlines (GMT+2)", with the browser's offset from `localTzLabel`, so the zone stays visible.
+    - The column header shows the zone. Each shown deadline's offset is `localTzLabel(new Date(iso))`, because the offset changes across daylight saving. If all of them agree, the header reads "Deadlines (GMT+2)". Otherwise it reads "Deadlines (local time)" and each part's `title` carries its own offset.
   - **State chip:** draft / published / locked (§Chip tokens).
   - **Actions:** ✎ and 🗑.
 - **✎ is disabled with a reason** in today's cases: a locked row ("Has submissions — editing is off"), and a disabled version (`:252-254`, today's reason). Today the locked case is hidden (`:249-268`; R5).
@@ -403,8 +422,8 @@ The badge's `title` spells it out: "7 of 10 students".
   - A non-admin who opens the panel sees Force delete disabled with "Only a course admin can force delete." (R5). Today their 🗑 is hidden on locked rows.
 - **Keep (D5),** restyled as precondition banners (§Chip and banner tokens), at the top of the tab:
   - "Mini-projects require groups" (info). Its link "Enable on Overview" goes through `setTab`.
-  - The run-not-published banner (info), with today's "See Overview" / "Publish on Overview" links and their role conditions (`:197-212`, via `setTab`).
-  - The delete-error banner (error).
+  - The run-not-published banner (info), with today's "Publish on Overview" link for admins only (`:205-212`, via `setTab`).
+  - The delete-error banner (error), with its "Dismiss" button (`:217-224`).
   - "Cannot load — pinned version not found." (`:171-172`, error).
   - R7's version line.
   - The empty copy naming "+ New mini-project" (`:228-231`).
@@ -426,10 +445,10 @@ The badge's `title` spells it out: "7 of 10 students".
   - Uses: a `<button>` chip ("2 uses", "1 use", "0 uses"; tokens per §Chip tokens), with `aria-expanded` and `aria-controls` pointing at the "used by" sub-panel;
   - actions: ↻ Replace (`refresh` glyph) and 🗑 Delete (R4).
   - Sortable columns keep today's sort.
-- **The "used by" sub-panel** renders under the table as drawn: "rubric.pdf — used by", the list, and "Edit" links (it exists; restyle).
-  - The list names each mini-project by its block title (D6). Today it uses `mp.title` (`:840`). `RunDetailPage` passes `blocks` to the tab, as it already does to Mini-projects.
+- **The "used by" sub-panel** renders under its row (R14): "rubric.pdf — used by", the list, and "Edit" links (it exists; restyle). It keeps its `id="uses-{id}"` for the Uses button's `aria-controls`.
+  - The list names each mini-project as "Block {n} — {block title}" (D6, R13). Today it uses `mp.title` (`:840`). `RunDetailPage` passes `blocks` to the tab (R13).
   - "Edit" goes through `setTab` with `pendingEditTarget` (§The tab in the address).
-- **Deleting a referenced asset** uses the shared danger panel. The admin-only force rule and its disabled reason (`:661-662`, `:808-809`) are unchanged.
+- **Deleting a referenced asset** uses the shared danger panel, under its row (R14). The admin-only force rule and its disabled reason (`:661-662`, `:808-809`) are unchanged.
 - **Replace** keeps its inline confirm (`:760-773`) and the same-extension rule with its error, restyled.
 - **Keep (D5):**
   - the drop zone and upload progress;
@@ -485,6 +504,8 @@ All new pieces use tokens only and carry their own tests.
   - It is not the 5d quiz `InlineInput`, which is bound to the quiz edit slot (`editor/quiz/InlineInput.svelte`).
 - **`runs/RunStatusChip.svelte` (new):** the §Run status chip.
 - **`lib/dashboards.ts`:** the new `STATUS_SHORT_LABEL` map (§Submissions).
+- **`ui/StatusBadge.svelte`:** an optional `label` prop overriding the text; the default is unchanged.
+- **`lib/datetime.ts`:** the short deadline formatter (R12).
 - **Filter pills and the segmented control** are styled locally in their tabs (two uses each), not as new shared components.
 
 ## Backend change (D3, R9)
@@ -551,10 +572,12 @@ Applied:
 - **Changed:**
   - `components/ui/IconButton.svelte` (two glyphs);
   - `lib/runStatus.ts` (a label map; the key is unchanged);
-  - `lib/dashboards.ts` (`STATUS_SHORT_LABEL`).
+  - `lib/dashboards.ts` (`STATUS_SHORT_LABEL`);
+  - `components/ui/StatusBadge.svelte` (the `label` prop);
+  - `lib/datetime.ts` (the short deadline formatter).
 - **Backend:** `backend/mathion/api/teaching.py`, `backend/tests/test_teaching.py`.
 - **Gate:** `frontend/scripts/visual-refresh-gate.sh` (§Gate).
-- **Docs:** `docs/backlog/slice6a-teacher-restyle-debt.md` (deferred minors, task by task).
+- **Docs:** `docs/backlog/slice6a-teacher-restyle-debt.md` (deferred minors, task by task); the R13 note in `docs/backlog/slice5c-constructor-polish-debt.md`.
 
 ## Process
 
@@ -618,13 +641,14 @@ Component tests use `mount` / `unmount` / `flushSync` (not testing-library). At 
 - **Progress:**
   - The heat steps at 0, 0.25, 0.26, 0.5, 0.75, 0.76 and 1 give the expected token; "—" has no fill.
   - The legend's name in each mode.
-  - The "B1 · TITLE" and "S1" headers.
+  - The "B1 · TITLE" and "S1" headers number by position: a version whose blocks have stored orders 1, 3 shows B1, B2 (R13).
   - Refresh is an icon button and still refetches.
   - "(Ungrouped)" is kept.
   - Disabled rows get the chip, with no opacity rule.
   - The kept empty texts.
 - **Submissions:**
-  - Column header: the block title, plus the line-2 cases (parts, "no submissions", bare "B2").
+  - Column header: the block title, plus the line-2 cases (parts, "no submissions", bare "B2"); "B{n}" by position (R13).
+  - `StatusBadge` with and without the `label` prop.
   - Lowercase short labels.
   - The cell `aria-label` uses the block title.
   - "—" out of scope.
@@ -652,7 +676,8 @@ Component tests use `mount` / `unmount` / `flushSync` (not testing-library). At 
   - Focus after add and remove.
 - **Mini-projects:**
   - The "3 of 4 blocks" count.
-  - Deadlines with time, the `title`, and the header offset.
+  - Deadlines with time, the `title`, and the header offset; a mixed-offset set (one summer and one winter deadline) gives "(local time)"; the short format is English whatever the locale.
+  - "Block {n}" by position (R13).
   - Locked and version-disabled rows show a disabled ✎ with reasons.
   - Force delete uses the danger panel, and the request is unchanged.
   - A non-admin sees Force delete disabled with the reason.
@@ -660,7 +685,7 @@ Component tests use `mount` / `unmount` / `flushSync` (not testing-library). At 
 - **Assets:**
   - The danger panel for a referenced asset (row and bulk); the plain confirm for an unreferenced bulk delete.
   - The Uses button's `aria-expanded`.
-  - The sub-panel names block titles.
+  - The sub-panel names "Block {n} — title" (R13), under its row (R14).
   - Replace and its inline confirm.
   - The kept drop zone, progress and banner slots.
 - **DangerConfirm:**
