@@ -3,7 +3,7 @@
 **Status:** draft, rev 4. Written 2026-10-10 for the user's review.
 - Rev 2 folded in round 1 of the spec review (Opus code angle, Opus design angle, Fable second opinion).
 - Rev 3 folds in round 2 (fresh Opus, fresh Fable) and the user's answers on R3, R9 and R10.
-- Rev 4 folds in the rev 3 re-check (fresh Opus).
+- Rev 4 folds in the rev 3 re-check (fresh Opus); its own re-check (Fable) found no Critical or Important, and its three minors are folded in.
 - Review notes are in `.superpowers/sdd/2026-10-10-visual-refresh-slice6-teacher/spec-r*.md`.
 
 **Branch:** `feat/visual-refresh-slice6-teacher`, cut from `feat/visual-refresh-slice5-authoring` at `65bcea2`. It stays local: no push, no merge.
@@ -81,7 +81,7 @@ Rulings taken at the controller's discretion (technical; the user defers these).
   - If a block is not in `blocks` (e.g. `blocks` is empty because the pinned version was not found, `RunDetailPage.svelte:86-95`), the "B{n} · " / "Block {n} — " prefix is omitted and the title alone is shown.
   - This closes the 5c backlog item "Teacher run screens still label blocks 'Block {order}'" (`docs/backlog/slice5c-constructor-polish-debt.md:158-161`) for these screens. `MiniProjectModal` follows in 6b.
 - **R14 — The Assets "used by" sub-panel and the danger panel render under their row**, as a full-width row inserted after it.
-  - The sub-panel is already such a row (`RunAssetsTab.svelte:829-833`). The danger panel today sits inside the actions cell (`:775-811`); moving it to a full-width row is a change, because the panel's text and checkbox do not fit a narrow cell.
+  - The sub-panel is already such a row (`RunAssetsTab.svelte:831-835`). The danger panel today sits inside the actions cell (`:773-814`); moving it to a full-width row is a change, because the panel's text and checkbox do not fit a narrow cell.
   - The plain single-row delete confirm (an unreferenced asset) and the Replace confirm stay in the actions cell, as today.
   - A row has at most one panel under it: opening the danger panel closes that row's "used by" sub-panel, and the reverse.
   - 10i draws both under the table, but with many files that puts them far from the row they act on. *Cost if wrong:* a position change.
@@ -128,8 +128,8 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 
 - **Redirects.**
   - Both old routes stay in `routes.ts` with `auth: true`, so a signed-out bookmark still goes through login with `next` (`App.svelte:53-58`).
-  - They map to one small component, `pages/runs/RunsRedirect.svelte`. In an `$effect` that tracks only its params and `session.user`, it calls `navigate(newPath + search + hash, { replace: true })`. `search` and `hash` are read from `currentRoute` with `untrack`. It renders nothing, and makes no fetch.
-  - **It does nothing while `session.user` is null.** App owns the signed-out case: it sends the visitor to login with `next`, and after login `next` brings back the old address, where the redirect runs. Without this guard, the redirect could read the login's `?next=…` and move the page off `/login`.
+  - They map to one small component, `pages/runs/RunsRedirect.svelte`. In an `$effect` that tracks only its params and `session.user`, it calls `navigate(newPath + search + hash, { replace: true })`. It reads `search` and `hash` and calls `navigate` inside `untrack`, so the effect depends only on its params and `session.user`. It renders nothing, and makes no fetch.
+  - **It does nothing while `session.user` is null.** App owns the signed-out case: it sends the visitor to login with `next`, and after login `next` brings back the old address, where the redirect runs. While the session is still loading, App mounts no routed component (`App.svelte:66`), so the redirect cannot run early. Without this guard, the redirect could read the login's `?next=…` and move the page off `/login`.
   - `newPath` re-encodes `courseSlug` with `encodeURIComponent` (`matchPattern` decodes it, `router.svelte.ts:196`).
   - Removing the routes and redirecting from App would show NotFound first, so it is not done.
 - **Route matching** has no conflict: patterns match only paths with the same number of segments (`router.svelte.ts:191`).
