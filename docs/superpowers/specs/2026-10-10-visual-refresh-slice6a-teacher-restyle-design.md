@@ -1,8 +1,9 @@
 # Visual refresh — Slice 6a: the teacher screens, restyled (runs lists, run frame, six tabs)
 
-**Status:** draft, rev 3. Written 2026-10-10 for the user's review.
+**Status:** draft, rev 4. Written 2026-10-10 for the user's review.
 - Rev 2 folded in round 1 of the spec review (Opus code angle, Opus design angle, Fable second opinion).
 - Rev 3 folds in round 2 (fresh Opus, fresh Fable) and the user's answers on R3, R9 and R10.
+- Rev 4 folds in the rev 3 re-check (fresh Opus).
 - Review notes are in `.superpowers/sdd/2026-10-10-visual-refresh-slice6-teacher/spec-r*.md`.
 
 **Branch:** `feat/visual-refresh-slice6-teacher`, cut from `feat/visual-refresh-slice5-authoring` at `65bcea2`. It stays local: no push, no merge.
@@ -77,8 +78,13 @@ Rulings taken at the controller's discretion (technical; the user defers these).
   - "S{n}" (Progress) is the sequence's 1-based position within its block, among that block's sequences in the Progress payload. Those are all the block's sequences, because the payload lists every sequence of the version.
   - The stored `order` keeps gaps after a delete. The student view and the editor already number by position (commit `5c73890`).
   - The dashboard payloads hold only some blocks (Progress: blocks with sequences; Submissions: blocks with mini-projects), so the number is taken from `blocks`, not from the payload. `RunDetailPage` passes `blocks` to Progress, Submissions and Assets, as it already does to Mini-projects.
+  - If a block is not in `blocks` (e.g. `blocks` is empty because the pinned version was not found, `RunDetailPage.svelte:86-95`), the "B{n} · " / "Block {n} — " prefix is omitted and the title alone is shown.
   - This closes the 5c backlog item "Teacher run screens still label blocks 'Block {order}'" (`docs/backlog/slice5c-constructor-polish-debt.md:158-161`) for these screens. `MiniProjectModal` follows in 6b.
-- **R14 — The Assets "used by" sub-panel and the danger panel render under their row**, as a full-width row inserted after it (today's placement, `RunAssetsTab.svelte:777-809`, `:833`). 10i draws both under the table, but with many files that puts them far from the row they act on. *Cost if wrong:* a position change.
+- **R14 — The Assets "used by" sub-panel and the danger panel render under their row**, as a full-width row inserted after it.
+  - The sub-panel is already such a row (`RunAssetsTab.svelte:829-833`). The danger panel today sits inside the actions cell (`:775-811`); moving it to a full-width row is a change, because the panel's text and checkbox do not fit a narrow cell.
+  - The plain single-row delete confirm (an unreferenced asset) and the Replace confirm stay in the actions cell, as today.
+  - A row has at most one panel under it: opening the danger panel closes that row's "used by" sub-panel, and the reverse.
+  - 10i draws both under the table, but with many files that puts them far from the row they act on. *Cost if wrong:* a position change.
 - **R11 — Inline name edits on the Groups tab register no unsaved-changes guard** (none do today). An open add or rename field is dropped without asking when the tab changes. That keeps tab switching cheap, and the text is one short name.
 
 ## Scope
@@ -122,9 +128,9 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 
 - **Redirects.**
   - Both old routes stay in `routes.ts` with `auth: true`, so a signed-out bookmark still goes through login with `next` (`App.svelte:53-58`).
-  - They map to one small component, `pages/runs/RunsRedirect.svelte`. In an `$effect` keyed on its params, it calls `navigate(newPath + currentRoute.search + currentRoute.hash, { replace: true })`. It renders nothing, and makes no fetch.
+  - They map to one small component, `pages/runs/RunsRedirect.svelte`. In an `$effect` that tracks only its params and `session.user`, it calls `navigate(newPath + search + hash, { replace: true })`. `search` and `hash` are read from `currentRoute` with `untrack`. It renders nothing, and makes no fetch.
+  - **It does nothing while `session.user` is null.** App owns the signed-out case: it sends the visitor to login with `next`, and after login `next` brings back the old address, where the redirect runs. Without this guard, the redirect could read the login's `?next=…` and move the page off `/login`.
   - `newPath` re-encodes `courseSlug` with `encodeURIComponent` (`matchPattern` decodes it, `router.svelte.ts:196`).
-  - It calls `navigate` without `force`, so a signed-out visitor's login redirect from App still wins the race (`navGen`).
   - Removing the routes and redirecting from App would show NotFound first, so it is not done.
 - **Route matching** has no conflict: patterns match only paths with the same number of segments (`router.svelte.ts:191`).
 
@@ -413,7 +419,8 @@ The badge's `title` spells it out: "7 of 10 students".
   - **Deadlines** (R12): mono, "soft 07 Aug 23:59 · hard 14 Aug 23:59 · resub 21 Aug 23:59". Absent deadlines are omitted.
     - The short form uses fixed English month abbreviations (Jan…Dec) and 24-hour local time, not the browser's locale. It is one small helper in `lib/datetime.ts`.
     - Each part's `title` is today's full `formatLocalWithTz` value, e.g. "2026-08-14 23:59 GMT+2" (`RunMiniProjectsTab.svelte:238-240`).
-    - The column header shows the zone. Each shown deadline's offset is `localTzLabel(new Date(iso))`, because the offset changes across daylight saving. If all of them agree, the header reads "Deadlines (GMT+2)". Otherwise it reads "Deadlines (local time)" and each part's `title` carries its own offset.
+    - The column header shows the zone. Each shown deadline's offset is `localTzLabel(new Date(iso))`, because the offset changes across daylight saving. If all of them agree, the header reads "Deadlines (GMT+2)" (`localTzLabel` already returns the parentheses). Otherwise it reads "Deadlines (local time)" and each part's `title` carries its own offset. With no deadlines shown, it reads "Deadlines".
+    - The offset label keeps `localTzLabel`'s browser-locale formatting (a `shortOffset` such as "GMT+2"); only the date part is fixed English. Accepted.
   - **State chip:** draft / published / locked (§Chip tokens).
   - **Actions:** ✎ and 🗑.
 - **✎ is disabled with a reason** in today's cases: a locked row ("Has submissions — editing is off"), and a disabled version (`:252-254`, today's reason). Today the locked case is hidden (`:249-268`; R5).
@@ -603,6 +610,7 @@ Component tests use `mount` / `unmount` / `flushSync` (not testing-library). At 
   - `/courses/s/runs` → `/teaching/s` (replace).
   - `/courses/s/runs/8?tab=groups#x` → `/teaching/s/runs/8?tab=groups#x` (replace).
   - A signed-out visit to an old address goes through login and lands on the new one.
+  - While `session.user` is null, `RunsRedirect` calls no `navigate` (the login page keeps its single `?next=`).
   - The course card's Runs link points to `/teaching/s`.
   - `NewRunModal` navigates to `/teaching/s/runs/{id}` after create.
   - Deleting a run from Overview lands on `/teaching/s`.
@@ -686,6 +694,8 @@ Component tests use `mount` / `unmount` / `flushSync` (not testing-library). At 
   - The danger panel for a referenced asset (row and bulk); the plain confirm for an unreferenced bulk delete.
   - The Uses button's `aria-expanded`.
   - The sub-panel names "Block {n} — title" (R13), under its row (R14).
+  - Opening the danger panel closes that row's sub-panel, and the reverse; the plain delete and Replace confirms stay in the actions cell.
+  - A block missing from `blocks` drops the "Block {n} — " prefix.
   - Replace and its inline confirm.
   - The kept drop zone, progress and banner slots.
 - **DangerConfirm:**
