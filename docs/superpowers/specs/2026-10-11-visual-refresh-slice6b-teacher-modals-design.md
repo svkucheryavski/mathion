@@ -1,7 +1,8 @@
 # Visual refresh — Slice 6b: the four teacher modals, on the shared Modal
 
-**Status:** draft, rev 2. Written 2026-10-11 for the user's review.
+**Status:** draft, rev 3. Written 2026-10-11 for the user's review.
 - Rev 2 folds in round 1 of the spec review (fresh Opus on the code, fresh Opus on the design, Fable second opinion) and the user's answers D19–D22. Review notes: `.superpowers/sdd/2026-10-11-visual-refresh-slice6b-teacher-modals/spec-r1-*.md`.
+- Rev 3 folds in round 2 (the same three reviewers; `spec-r2-*.md`) and the user's answer D23.
 
 **Branch:** `feat/visual-refresh-slice6-teacher`, after the 6a Safari pass (`89fbcb2`). It stays local: no push, no merge.
 
@@ -33,6 +34,7 @@ The user's (2026-10-11), continuing the Slice-6 numbering:
 - **D20 — The import preview shows why a row will skip.** The drawn × tile stays, and the row's reasons show as muted text under its e-mail. Today they are visible text; the drawing would make them a tooltip.
 - **D21 — The precondition box follows what is on screen.** Fixing a deadline removes its line as you type; clearing the assignment adds one. The dirty flag alone never shows the box (R22).
 - **D22 — Skipped rows past the first 10 are named:** "Showing the first 10 of 34 rows. Rows 14, 27 will skip." Up to 5 numbers, then "+N more".
+- **D23 — The preview's "Already enrolled, will be re-bucketed" line lists only real moves:** enrolled students whose pasted group names a different group from their current one. Today it lists every enrolled student, even one whose group stays or whose group cell is empty, so it promised moves the result never shows.
 
 Rulings taken at the controller's discretion (technical; the user defers these). Each states what it costs if wrong:
 - **R16 — A shared `ui/Switch.svelte`** for "Groups enabled"; 6c's Overview reuses it.
@@ -40,7 +42,7 @@ Rulings taken at the controller's discretion (technical; the user defers these).
   - The look: the 30×17 track and 13px knob of 10k.
     - Off: a `--border-strong` track, knob at the left.
     - On: a `--primary` track, knob at the right.
-    - Focus-visible: the house focus ring.
+    - Focus-visible: the global `:focus-visible` ring (`styles/base.css:22`).
     - Disabled: a `--border-faint` track, with the reason as `title`.
     - Frozen (R19): `aria-disabled="true"`, and clicks are ignored.
   - Its `<label for>` is the visible text "Groups enabled", so a click on the text toggles it. The help line is its `aria-describedby`.
@@ -62,8 +64,11 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 - **R20 — The busy button keeps focus.**
   - The button whose request runs keeps `loading` ("Creating…", "Importing…", "Saving…", "Publishing…") but is not `disabled`; its handler ignores a second click.
   - The other footer buttons (Cancel, Discard, Publish, Done, Copy failed rows) ignore clicks while a request runs.
+  - For New run the handler is the form's submit: `submit()` returns at once while a create runs, before validation. A readonly field still submits on Enter, and the busy Create run stays enabled.
+  - After a failed request the modal un-freezes first, then `tick()`, then moves focus, so the focus call never lands on a still-frozen control.
   - So focus never falls off a button the browser has just disabled. Today New run's Cancel even closes mid-create.
-  - Buttons that are unusable for a reason (validation, no valid rows, an upload running) stay `disabled` with a `title` naming the reason.
+  - Buttons that are unusable for a reason (validation, no valid rows, an upload running) stay `disabled` with a `title` naming the reason. When reasons overlap, the first wins: Save and Create: "Wait for the upload to finish", then the validation reason, then "No changes to save". Publish: "Wait for the upload to finish", then D13's, then "Save your changes first".
+  - A button that a successful action itself makes unusable never keeps focus: §Focus says where it goes after Save and Discard.
   - *Cost if wrong:* a focus drop after a failed request.
 - **R21 — The mini-project editor numbers blocks by position** (6a R13).
   - The title "Edit — Block {n} — {title}" and the create-mode picker's "Block {n} — {title}" use `blockPositions(blocks)` (`lib/blockNumbers.ts:4`). `RunMiniProjectsTab` already receives `blocks`.
@@ -77,7 +82,7 @@ Rulings taken at the controller's discretion (technical; the user defers these).
   - *Cost if wrong:* one bullet back in the box.
 - **R23 — Zone labels read "GMT+2"**, without parentheses: `localTzLabel()` with its parentheses dropped, in mono `--muted` 10.5px after each deadline label. (10m draws "CEST" there.) *Cost if wrong:* two characters.
 - **R24 — Icons are drawn, not typed.**
-  - The import preview's status tile is 18×18, radius 4, with an 11px SVG: a check on the accepted-status tokens, or a × on the needs-revision tokens. Its `title` is "Valid" or the row's reasons.
+  - The import preview's status tile is 18×18, radius 4, with an 11px SVG: a check on the accepted-status tokens, or a × on the needs-revision tokens. It is `role="img"` with `aria-label` "Valid" or "Will skip"; its `title` is "Valid" or the row's reasons. The status column's header is a visually-hidden "Status".
   - No ✓ ✗ × glyphs remain in the four files, so the gate's emoji scan passes.
   - *Cost if wrong:* glyphs again.
 - **R25 — The import result's Detail shows the server's text.**
@@ -89,7 +94,7 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 - **R28 — Copy.**
   - ASCII apostrophes ("can't"), as the code does throughout.
   - The drawn copy is taken as drawn, including "Organise" and "Publish" without an ellipsis.
-  - Counts take their singular at 1: "1 row", "Import 1 valid row" (6a rule).
+  - Counts take their singular at 1: "1 row", "Import 1 valid row", "Row 14 will skip.", "Copied 1 row" (6a rule).
   - *Cost if wrong:* characters.
 - **R29 — The staff e-mail links (`_staff_url`, `backend/mathion/notifications/templates.py:35`) stay for 6c**, as the 6a backlog says. *Cost if wrong:* none; the 6a redirects cover them.
 
@@ -123,7 +128,7 @@ Out:
 - **R19:** `closeDisabled` is true while a request runs.
 - **Widths** as drawn: conflicts 560, New run 620, import 760, mini-project 820. `maxHeight` stays at Modal's 600 for the first two and is 720 for the other two (Modal clamps it to the window).
 - **Long values** (names, e-mails, groups, block titles) take one line with an ellipsis and the full text as `title`.
-- **Server-error lines** use the 6a error banner (`role="alert"`).
+- **Server-error lines** use the 6a error banner: `--status-rejected-bg` with a 3px `--danger` left rule (6a spec §Chip and banner tokens), `role="alert"`. The mini-project's existing `.banner-error` hook stays on it.
 - **No literal colours, no emoji glyphs, tokens only.** Each modal's CSS is rewritten.
 
 ## Publish conflicts (10l, `PublishConflictsModal`)
@@ -171,7 +176,7 @@ Out:
 - **Header, both stages:** "Import roster from CSV", then a two-step marker.
   - It is an `<ol>`, not focusable. The current step has `aria-current="step"`; the completed one carries visually-hidden "(done)".
   - Paste stage: a filled `--primary` 17px "1" circle with "Paste" (12px/500 `--text`), a 14px `--border-strong` rule, then "2" on `--border-soft` in `--muted` with "Result" (12px `--muted`).
-  - Result stage: a check circle on the accepted-status tokens for "Paste", a `--primary` rule, then a filled "2" with "Result".
+  - Result stage: a check circle on the accepted-status tokens for "Paste" (12px `--muted`, normal weight), a `--primary` rule, then a filled "2" with "Result" (12px/500 `--text`).
   - The marker sits next to the title; × stays at the right edge.
 
 **Paste stage (10f):**
@@ -187,7 +192,7 @@ Out:
 - **The counts, as drawn:** muted 12.5px, the key figures and names in `--text` (not bold).
   - "{n} rows — {v} valid, {s} will skip ({i} invalid, {d} duplicate in paste)."
   - "Will create groups: {names}."
-  - "Already enrolled, will be re-bucketed: {emails}." The list is still cut after 5 with "+N more" (`:50-53`).
+  - "Already enrolled, will be re-bucketed: {emails}." It lists only real moves (D23): a valid row whose e-mail is on the roster (`existingRoster`) and whose group cell names a group other than the student's current one (`existingGroups`), matched as the import matches them. The list is still cut after 5 with "+N more" (`:50-53`).
   - A line is left out when its list is empty, as today.
 - **Kept:** the parse error line ("Paste is empty.", "No email column found.").
 - **Footer:**
@@ -206,7 +211,7 @@ Out:
     - Otherwise Detail is empty.
 - **The summary:** "{a} added, {f} failed.", with `{a} added` in `--text`. Done's `aria-describedby` points at it, so a screen reader hears the outcome when focus lands on Done.
 - **Footer:**
-  - when something failed: the note "Failed rows can be copied as text and fixed in your sheet." and **Copy failed rows** (secondary, `data-action="copy-failed"`). A successful copy toasts "Copied N rows".
+  - when something failed: the note "Failed rows can be copied as text and fixed in your sheet." and **Copy failed rows** (secondary, `data-action="copy-failed"`). A successful copy toasts "Copied N rows" (singular at 1).
   - always: **Done** (primary, `data-action="done"`).
   - Kept: the copy fallback (`textarea.copy-fallback`, `:87-103`). It appears at the end of the body, takes focus and selects its text.
 
@@ -237,7 +242,7 @@ Out:
 **The precondition box** (D13, D21, R22):
 - **When it shows:** while editing an unpublished mini-project with at least one unmet precondition. Never when creating, and never on a published mini-project.
 - **What it reads:** the bullets are today's (`:180-245`), computed from the values on screen (D21), each opening with "·". "Save your changes before publishing." is no longer among them (R22).
-- **The look:** gold. `--status-needs-revision-bg`, a 3px `--gold` left rule, text in `--status-needs-revision-fg`, the heading "Cannot publish yet" at 600.
+- **The look:** gold, as 10m draws it. `--status-needs-revision-bg`, a 3px `--gold` left rule, radius 0 5px 5px 0, padding 8px 10px; text in `--status-needs-revision-fg` at 12.5px, line-height 1.5; the heading "Cannot publish yet" at 600; 7px from the heading to the list, 4px between bullets.
 - **The "Open Overview" link** and its admin gating, as today (`:450-466`).
 - **Hooks:**
   - It has no live role (today `role="alert"`, `:446`): it is information, not an error.
@@ -249,13 +254,21 @@ Out:
 - **Publish** (secondary, `data-action="publish"`), only while unpublished. It is disabled (D13, R22) while the box shows or the form is dirty.
 - **Discard** (ghost):
   - disabled while clean, titled "No changes to discard";
-  - otherwise it resets the fields to the saved values and clears the server error and the field errors.
+  - otherwise it resets the fields to the saved values, clears the server error and the field errors, and moves focus to the assignment field (Discard itself just became disabled).
 - **Save** (primary, `data-action="save"`):
   - disabled while clean ("No changes to save") or invalid (today's validation reason, `:125-141`, as its `title`);
   - "Saving…" with `loading` while it runs.
-  - On success (D19): a "Saved" toast; the list refreshes (`onSaved`); the saved values become the new starting point; the modal stays open and focus stays on Save.
+  - On success (D19), in this order:
+    1. the PATCH resolves;
+    2. the form's baseline becomes the values just sent. The fields were frozen, so these equal what is on screen; the baseline is not re-read from the response or the refreshed list. `initialFormSnapshot` (`:80`, a `const` today with a one-shot comment, `:42-47`) becomes `$state`;
+    3. a "Saved" toast;
+    4. `onSaved()` refreshes the list in its own `try`. If only the refresh fails, the toast reads "Saved (refresh failed — reload to see latest)" (the 5b wording, `ItemEditorModal.svelte:207-208`), and no save error shows. Today a failed refresh inside the save `try` reports the save as failed (`:330-358`).
+  - The modal stays open and clean. Focus goes to Publish when it is shown and enabled, or else to the assignment field: Save itself just became disabled ("No changes to save").
+  - After a save, the form's baseline is the truth. `initial` (an object from before the refresh) is read only for `id` and `is_published`; neither changes on a PATCH.
 
-**Footer, creating:** Cancel (ghost) · **Create** (primary, `data-action="save"`, "Creating…" with `loading`). Create's disabled reasons are Save's. On success the modal closes and the list refreshes.
+**Footer, creating:** Cancel (ghost) · **Create** (primary, `data-action="save"`, "Creating…" with `loading`). Create's disabled reasons are Save's.
+- On success the modal hands the created mini-project to the tab (a new `onCreated(mp)` prop; `createMiniProject` returns it, `lib/miniProjects.ts:12-17`, and today `handleSave` drops it, `:325`) and closes; the list refreshes.
+- A refresh that fails after a successful create toasts "Created (refresh failed — reload to see latest)"; it never reports the create as failed, because a retry would hit the one-per-block 409.
 
 **The two confirms** (both `InlineConfirm` with `takeFocus`; each replaces the footer's buttons while it shows, and "unsaved changes" stays):
 - **Publish** → "Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)." with `data-action="confirm-publish"`.
@@ -293,8 +306,12 @@ A failed request focuses the first field with an error, or else stays on its but
   - mini-project: the assignment field, via `autofocusSelector={'textarea, header.modal-head button[aria-label="Close"]'}` as the 5b editors do (`editor/quiz/QuestionTextModal.svelte:116`).
 - **Close:** focus returns to the opener (`FocusTrap`). Two cases where the opener cannot take it:
   - **A mini-project opened from Assets' "used by → Edit":** the opener is the Mini-projects tab, which `RunDetailPage` focuses before the modal opens (`:85-88`, 6a P10). Kept: focus returns to that tab.
-  - **After Create:** "+ New" can become disabled, when the last free block gets its mini-project (`RunMiniProjectsTab.svelte:124-126`). After a create, focus goes to the new row's ✎, or else the tab's `<h2>`.
-- **Requests:** R20; a failed request focuses the first errored field, or else stays on its button.
+  - **After Create:** "+ New" can become disabled, when the last free block gets its mini-project (`RunMiniProjectsTab.svelte:124-126`). So after every create, focus goes to the new row's ✎, which also shows the teacher what was made, or else to the tab's `<h2>`.
+    - The tab binds its ✎ buttons in a `pencilEls` record, as it binds `trashEls` (`:105`, `:295-297`).
+    - On close it sets `modalMode = null`, waits `tick()` so FocusTrap's restore has run (`FocusTrap.svelte:70-74`), then calls `focusFirst([pencilEls[created.id], headingEl])`.
+  - **After Save:** Publish when it is shown and enabled, or else the assignment field.
+  - **After Discard:** the assignment field.
+- **Requests:** R20; a failed request un-freezes, waits `tick()`, then focuses the first errored field, or else stays on its button.
 - **Import stage switch:** focus goes to Done.
 - **The mini-project's confirms:** as §Mini-project editor says.
 
@@ -357,6 +374,7 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 - The version strip: "will use {label} · v. {id}", and "will use v. {id}" for an empty label. `NewRunModal.svelte.test.ts:116-126` changes from "v2 (2026-02-01)" (D18), and `.version-row` stays as the hook.
 - With no published version, the strip text shows and Create run is disabled with it as `title`.
 - Esc and Cancel while creating do nothing, and success navigates once.
+- A second submit while a create runs (Enter in a field, or the busy button) sends one request and navigates once (R20).
 
 **Switch:**
 - `type="button"`; `role="switch"` and `aria-checked` follow the value.
@@ -381,6 +399,9 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 - Done, then Done again or Esc, runs one refetch; a failed refetch still closes with the toast.
 - The copy toast; the fallback textarea takes focus and selects.
 - `RosterImportModal.submit.svelte.test.ts:283-310` now asserts the modal stays open on a backdrop click (D11).
+- `RosterImportModal.submit.svelte.test.ts:90-107` (Import and Cancel `disabled` while importing) changes on purpose: they now ignore clicks (R20).
+- The re-bucketed line lists only real moves: not an enrolled student with the same group, nor one with an empty group cell (D23).
+- "Row 14 will skip." and "Copied 1 row" in the singular.
 - The hooks `p.error[role="alert"]`, `p.error`, `table.result`, `span.badge.badge-error[data-result="error"]` and `.error-detail` either stay or change on purpose in the same task; the plan names which.
 
 **Mini-project editor:**
@@ -389,7 +410,11 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 - Creating shows Cancel · Create. Editing shows Publish · Discard · Save, and "unsaved changes" only while dirty (D12).
 - The disabled titles of Save, Discard, Create and Publish, and "Wait for the upload to finish" while uploading.
 - Discard resets the fields and clears the errors.
-- Save keeps the modal open, toasts "Saved", calls `onSaved`, and leaves the form clean (D19).
+- Save keeps the modal open, toasts "Saved", calls `onSaved`, and leaves the form clean (D19). Focus then lands on Publish, or on the assignment field when Publish is hidden or disabled.
+- A refresh that fails after a successful save leaves the form clean and shows the refresh-failed toast, not a save error. The same for Create.
+- After Discard, focus is on the assignment field.
+- Tests that click Save on an untouched form now meet a disabled Save ("No changes to save"), so each makes an edit first, on purpose: `MiniProjectModal.create-edit.svelte.test.ts:372`, `:454`, `:579`, `:625` and `MiniProjectModal.publish.svelte.test.ts:525`.
+- Still holding under D19, not to be flipped: `MiniProjectModal.create-edit.svelte.test.ts:81` (Create still closes) and `:454-498` (× after the save closes a clean modal).
 - The box:
   - it shows up front, without a Publish click, and not on a new or a published mini-project (D13);
   - it follows the fields on screen (D21);
@@ -416,7 +441,7 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 
 **RunMiniProjectsTab:**
 - The "used by → Edit" path opens nothing for a locked mini-project, toasts its reason, and still consumes the pending edit.
-- After a create that disables "+", focus is on the new row's ✎.
+- After a create, focus is on the new row's ✎; including a create that disables "+".
 
 ## Gate
 
@@ -441,5 +466,6 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 - The Switch's off-state contrast (R16).
 - The import with a real paste from a sheet (tabs), and the copy-failed path, on mocked requests.
 - The mini-project editor: typing, Save staying open, Discard, the up-front box, "Open Overview" with unsaved edits (D16), Esc and × with a confirm open.
+- Esc from the assignment field opens the discard confirm and focus ends on its Cancel: in a real browser, making the body inert first blurs the field, which jsdom cannot show.
 - Safari does not focus a button on a mouse click, so a mouse-opened modal may return focus to `<body>`. This is the same in every 5b modal; note it rather than fix it in 6b.
 - The interim mixed look (6c's Overview, Roster and side panel are still old) is expected, not a finding.
