@@ -32,7 +32,7 @@
            aria-current={isAuthoringActive ? 'page' : undefined}
            onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Authoring</a>
       {/if}
-      {#if session.user?.has_run_teacher}
+      {#if session.user?.has_run_teacher || session.user?.has_course_admin}
         <a href="/teaching"
            aria-current={isTeachingActive ? 'page' : undefined}
            onclick={(e) => { e.preventDefault(); navigate('/teaching'); }}>Teaching</a>

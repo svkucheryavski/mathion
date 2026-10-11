@@ -273,7 +273,7 @@
     if (runIdInt === null || !run) return;
     try {
       await deleteRun(runIdInt);
-      navigate(`/courses/${courseSlug}/runs`);
+      navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
     } catch (e) {
       if (e instanceof ApiError) {
         const msg = typeof e.detail === 'string' ? e.detail : '';
@@ -327,7 +327,7 @@
       {#if course.is_admin}
         <a href="/courses" onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Courses</a> ›
         <a href={`/courses/${course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}`); }}>{course.name}</a> ›
-        <a href={`/courses/${course.slug}/runs`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs`); }}>Runs</a> ›
+        <a href={`/teaching/${course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/teaching/${course!.slug}`); }}>Runs</a> ›
         {run.title}
       {:else}
         <a href="/teaching" onclick={(e) => { e.preventDefault(); navigate('/teaching'); }}>Teaching</a> ›

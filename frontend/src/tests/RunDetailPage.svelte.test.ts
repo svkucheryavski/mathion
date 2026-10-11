@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
 import { session } from '../stores/session.svelte';
+import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 
 const fetchSpy = vi.fn();
 
@@ -259,6 +260,28 @@ describe('RunDetailPage shell', () => {
     expect(badge?.classList.contains('badge-draft')).toBe(true);
     unmount(cmp);
   });
+  it('deleting a run from Overview lands on /teaching/:slug (6a D3)', async () => {
+    __resetGuardsForTests();
+    history.replaceState(null, '', '/teaching/algebra/runs/10');
+    currentRoute.path = location.pathname;
+    currentRoute.search = '';
+    currentRoute.hash = '';
+    mockHappyPath();
+    const inner = fetchSpy.getMockImplementation()!;
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) =>
+      init?.method === 'DELETE' && /\/api\/runs\/10$/.test(url) ? jres(null, 204) : inner(url, init));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    (target.querySelector('button[data-action="delete-run"]') as HTMLButtonElement).click();
+    flushSync();
+    (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
+    await settle();
+    expect(location.pathname).toBe('/teaching/algebra');
+    unmount(cmp);
+  });
+
 });
 
 describe('RunDetailPage — Assets tab integration', () => {

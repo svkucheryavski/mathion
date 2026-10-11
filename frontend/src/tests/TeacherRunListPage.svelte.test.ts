@@ -196,7 +196,7 @@ describe('TeacherRunListPage', () => {
     expect(nodeByText(target, 'calc')).toBeNull();
   });
 
-  it('cell-anchor href points to /courses/:slug/runs/:rid', async () => {
+  it('cell-anchor href points to /teaching/:slug/runs/:rid', async () => {
     vi.stubGlobal('fetch', mockFetch(200, [row({
       run: makeRun({ id: 42, title: 'Spring' }),
       course_slug: 'calc',
@@ -206,7 +206,7 @@ describe('TeacherRunListPage', () => {
     await settle();
     const link = linkByText(target, 'Spring');
     expect(link).not.toBeNull();
-    expect(link!.getAttribute('href')).toBe('/courses/calc/runs/42');
+    expect(link!.getAttribute('href')).toBe('/teaching/calc/runs/42');
   });
 
   it('within-active sort: end_date ASC', async () => {
@@ -480,7 +480,7 @@ describe('TeacherRunListPage', () => {
     const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
     link!.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(true);
-    expect(navSpy).toHaveBeenCalledWith('/courses/calc/runs/42');
+    expect(navSpy).toHaveBeenCalledWith('/teaching/calc/runs/42');
   });
 
   it('mocked-fetch row uses the exact backend contract key set', () => {

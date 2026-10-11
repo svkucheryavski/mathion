@@ -120,6 +120,12 @@ describe('CourseCard §2b (rendered through CourseList)', () => {
     expect((t.querySelector('.badge-admin') as HTMLElement).textContent?.trim()).toBe('ADMIN');
     expect(t.querySelector('.footer a[href="/courses/c4/edit"]')).not.toBeNull();
   });
+  it('the Runs link points to /teaching/:slug (6a D3)', async () => {
+    const t = seed([courseStub(2, { is_admin: true })]);
+    await settle();
+    expect((t.querySelector('a[aria-label="Runs for Course 2"]') as HTMLAnchorElement).getAttribute('href')).toBe('/teaching/c2');
+  });
+
 });
 
 describe('CourseList §2b header enrolled-count', () => {

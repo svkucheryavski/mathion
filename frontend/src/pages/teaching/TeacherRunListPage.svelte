@@ -75,7 +75,7 @@
   });
 
   const displayLabel = (s: string) => s[0].toUpperCase() + s.slice(1);
-  const runUrl = (slug: string, id: number) => `/courses/${slug}/runs/${id}`;
+  const runUrl = (slug: string, id: number) => `/teaching/${slug}/runs/${id}`;
   function onCellClick(e: MouseEvent, slug: string, id: number) {
     e.preventDefault();
     navigate(runUrl(slug, id));

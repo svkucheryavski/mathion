@@ -54,7 +54,7 @@
         groups_enabled,
       });
       onClose();
-      navigate(`/courses/${course.slug}/runs/${run.id}`);
+      navigate(`/teaching/${course.slug}/runs/${run.id}`);
     } catch (e) {
       if (e instanceof ApiError) submitError = e.displayMessage;
       else submitError = 'Unable to create run.';

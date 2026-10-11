@@ -16,6 +16,7 @@
   import VersionEditPage from './pages/editor/VersionEditPage.svelte';
   import RunListPage from './pages/runs/RunListPage.svelte';
   import RunDetailPage from './pages/runs/RunDetailPage.svelte';
+  import RunsRedirect from './pages/runs/RunsRedirect.svelte';
   import TeacherRunListPage from './pages/teaching/TeacherRunListPage.svelte';
   import SuperuserShell from './pages/superuser/SuperuserShell.svelte';
 
@@ -29,6 +30,7 @@
     VersionEditPage: VersionEditPage as Component<Record<string, string>>,
     RunListPage: RunListPage as Component<Record<string, string>>,
     RunDetailPage: RunDetailPage as Component<Record<string, string>>,
+    RunsRedirect: RunsRedirect as Component<Record<string, string>>,
     TeacherRunListPage: TeacherRunListPage as Component<Record<string, string>>,
     SuperuserShell: SuperuserShell as Component<Record<string, string>>,
   };

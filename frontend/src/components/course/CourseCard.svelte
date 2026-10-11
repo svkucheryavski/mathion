@@ -6,7 +6,7 @@
   const adminOnly = $derived(course.is_admin && course.version_id === null);
   const studentHref = $derived(`/courses/${course.course.slug}`);
   const editHref = $derived(`/courses/${course.course.slug}/edit`);
-  const runsHref = $derived(`/courses/${course.course.slug}/runs`);
+  const runsHref = $derived(`/teaching/${course.course.slug}`);
   // Floor a nonzero fraction to a visible 2%: a started course (covered > 0) whose
   // exact percentage rounds to 0 (e.g. 1/220 → 0.45%) must not render an empty bar.
   const pct = $derived(

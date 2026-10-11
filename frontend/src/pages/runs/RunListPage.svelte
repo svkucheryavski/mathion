@@ -113,13 +113,13 @@
         {#each runs as run (run.id)}
           {@const status = runStatus(run)}
           <tr>
-            <td><a href={`/courses/${course.slug}/runs/${run.id}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs/${run.id}`); }}>{run.title}</a></td>
+            <td><a href={`/teaching/${course.slug}/runs/${run.id}`} onclick={(e) => { e.preventDefault(); navigate(`/teaching/${course!.slug}/runs/${run.id}`); }}>{run.title}</a></td>
             <td><span class="badge badge-{status}">{status[0].toUpperCase() + status.slice(1)}</span></td>
             <td>{versionLabelById.get(run.version_id) ?? '—'}</td>
             <td>{run.start_date}</td>
             <td>{run.end_date}</td>
             <td>
-              <a href={`/courses/${course.slug}/runs/${run.id}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs/${run.id}`); }}>Open</a>
+              <a href={`/teaching/${course.slug}/runs/${run.id}`} onclick={(e) => { e.preventDefault(); navigate(`/teaching/${course!.slug}/runs/${run.id}`); }}>Open</a>
               {#if !run.is_published}
                 {#if pendingDelete === run.id}
                   <InlineConfirm

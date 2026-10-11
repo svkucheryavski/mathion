@@ -81,12 +81,19 @@ describe('AppHeader', () => {
     expect(linkByText(target, 'Teaching')).not.toBeNull();
   });
 
-  it('renders only Authoring when only has_course_admin', () => {
+  it('an admin who teaches nothing gets Authoring and Teaching (D3)', () => {
     setSession({ has_course_admin: true, has_run_teacher: false });
     component = mount(AppHeader, { target });
     flushSync();
     expect(linkByText(target, 'Authoring')).not.toBeNull();
-    expect(linkByText(target, 'Teaching')).toBeNull();
+    expect(linkByText(target, 'Teaching')).not.toBeNull();
+  });
+
+  it('a superuser gets the Teaching pill', () => {
+    setSession({ is_superuser: true, has_course_admin: true, has_run_teacher: false });
+    component = mount(AppHeader, { target });
+    flushSync();
+    expect(linkByText(target, 'Teaching')).not.toBeNull();
   });
 
   it('renders only Teaching when only has_run_teacher', () => {
@@ -107,7 +114,7 @@ describe('AppHeader', () => {
 
   it('marks Authoring active on deep /courses routes', () => {
     setSession({ has_course_admin: true, has_run_teacher: true });
-    currentRoute.path = '/courses/foo/runs/bar';
+    currentRoute.path = '/courses/foo/edit';
     component = mount(AppHeader, { target });
     flushSync();
     const link = linkByText(target, 'Authoring');
@@ -121,6 +128,15 @@ describe('AppHeader', () => {
     flushSync();
     const link = linkByText(target, 'Teaching');
     expect(link?.getAttribute('aria-current')).toBe('page');
+  });
+
+  it('a run page is under Teaching, not Authoring', () => {
+    setSession({ has_course_admin: true, has_run_teacher: false });
+    currentRoute.path = '/teaching/s/runs/8';
+    component = mount(AppHeader, { target });
+    flushSync();
+    expect(linkByText(target, 'Teaching')?.getAttribute('aria-current')).toBe('page');
+    expect(linkByText(target, 'Authoring')?.getAttribute('aria-current')).toBeNull();
   });
 
   it('updates aria-current reactively when currentRoute.path changes', () => {

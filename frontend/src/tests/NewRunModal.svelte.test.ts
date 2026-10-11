@@ -86,7 +86,7 @@ describe('NewRunModal', () => {
     (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
     expect(onClose).toHaveBeenCalled();
-    expect(location.pathname).toBe('/courses/algebra/runs/42');
+    expect(location.pathname).toBe('/teaching/algebra/runs/42');
     unmount(cmp);
   });
 
