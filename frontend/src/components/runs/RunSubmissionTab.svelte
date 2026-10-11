@@ -8,6 +8,7 @@
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
   import ErrorState from '../ui/ErrorState.svelte';
   import IconButton from '../ui/IconButton.svelte';
+  import Button from '../ui/Button.svelte';
   import SortMark from '../ui/SortMark.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
@@ -242,7 +243,8 @@
           </select>
           <div class="sub-right">
             <IconButton glyph="refresh" title="Refresh" onclick={refresh} />
-            <IconButton glyph="download" title="Download CSV" data-action="download-csv" onclick={handleDownloadCSV} />
+            <!-- A text button, as on Progress (Safari pass: one look for one action). -->
+            <Button variant="secondary" data-action="download-csv" onclick={handleDownloadCSV}>Download CSV</Button>
           </div>
         </div>
 

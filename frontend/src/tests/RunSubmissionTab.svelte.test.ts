@@ -327,14 +327,15 @@ describe('RunSubmissionTab', () => {
     expect(btn.getAttribute('aria-label')).toBe(`G1, B1: ${STATUS_LABEL.not_submitted}`);
   });
 
-  it('toolbar: refresh and download are icon buttons; sort marks are SortMark', async () => {
+  it('toolbar: ↻ is an icon button, Download CSV a secondary text button (as Progress, Safari pass); sort marks are SortMark', async () => {
     vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
     mountTab();
     await settle();
     expect((host.querySelector('button[aria-label="Refresh"]') as HTMLElement).getAttribute('data-glyph')).toBe('refresh');
     const csv = host.querySelector('button[data-action="download-csv"]') as HTMLElement;
-    expect(csv.getAttribute('data-glyph')).toBe('download');
-    expect(csv.getAttribute('title')).toBe('Download CSV');
+    expect(csv.hasAttribute('data-glyph')).toBe(false);
+    expect(csv.getAttribute('data-variant')).toBe('secondary');
+    expect(csv.textContent?.trim()).toBe('Download CSV');
     expect(host.querySelector('thead svg.sort-mark')?.getAttribute('data-dir')).toBe('asc');
     expect(host.querySelector('thead')?.textContent).not.toMatch(/[▲▼]/);
   });
