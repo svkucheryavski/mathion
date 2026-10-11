@@ -121,6 +121,8 @@ describe('TeacherRunListPage', () => {
     component = mount(TeacherRunListPage, { target });
     flushSync();
     await settle();
+    expect(target.querySelector('.error-state.inline')).not.toBeNull();
+    expect(target.textContent).toContain('Could not load runs.');
     const tryAgain = buttonByText(target, 'Try again');
     expect(tryAgain).not.toBeNull();
     tryAgain!.click();
@@ -147,7 +149,7 @@ describe('TeacherRunListPage', () => {
     // All five pill labels with full-response-derived counts.
     expect(buttonByText(target, /^Active \(1\)$/)).not.toBeNull();
     expect(buttonByText(target, /^Upcoming \(0\)$/)).not.toBeNull();
-    expect(buttonByText(target, /^Ended \(0\)$/)).not.toBeNull();
+    expect(buttonByText(target, /^Finished \(0\)$/)).not.toBeNull();
     expect(buttonByText(target, /^Draft \(1\)$/)).not.toBeNull();
     expect(buttonByText(target, /^All \(2\)$/)).not.toBeNull();
     // Switch to Draft pill; counts must remain stable (not recomputed from
@@ -156,7 +158,7 @@ describe('TeacherRunListPage', () => {
     flushSync();
     expect(buttonByText(target, /^Active \(1\)$/)).not.toBeNull();
     expect(buttonByText(target, /^Upcoming \(0\)$/)).not.toBeNull();
-    expect(buttonByText(target, /^Ended \(0\)$/)).not.toBeNull();
+    expect(buttonByText(target, /^Finished \(0\)$/)).not.toBeNull();
     expect(buttonByText(target, /^Draft \(1\)$/)).not.toBeNull();
     expect(buttonByText(target, /^All \(2\)$/)).not.toBeNull();
   });
@@ -176,7 +178,7 @@ describe('TeacherRunListPage', () => {
     component = mount(TeacherRunListPage, { target });
     flushSync();
     await settle();
-    expect(pageTextContains(target, /You're not assigned to any runs yet/)).toBe(true);
+    expect(pageTextContains(target, 'No runs yet. Runs you teach or administer appear here.')).toBe(true);
     // No pill buttons rendered when there are no runs at all.
     expect(buttonByText(target, /^Active/)).toBeNull();
     expect(buttonByText(target, /^All/)).toBeNull();
@@ -322,7 +324,7 @@ describe('TeacherRunListPage', () => {
     component = mount(TeacherRunListPage, { target });
     flushSync();
     await settle();
-    buttonByText(target, /^Ended/)!.click();
+    buttonByText(target, /^Finished/)!.click();
     flushSync();
     const rows = Array.from(target.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
     expect(rows[0]?.textContent ?? '').toContain('Mid ended');     // id=2, end=2022-12-31
@@ -377,18 +379,17 @@ describe('TeacherRunListPage', () => {
     expect(status).toBe('active');
   });
 
-  it('Status column renders title-cased badge label', async () => {
+  it('Status column renders the run status chip (lowercase label)', async () => {
     vi.stubGlobal('fetch', mockFetch(200, [row({})]));
     component = mount(TeacherRunListPage, { target });
     flushSync();
     await settle();
-    // The badge span has class badge-active and text "Active" (title-cased).
-    const badge = target.querySelector('span.badge-active');
-    expect(badge).not.toBeNull();
-    expect((badge?.textContent ?? '').trim()).toBe('Active');
+    const chip = target.querySelector('tbody .run-chip') as HTMLElement;
+    expect(chip.getAttribute('data-status')).toBe('active');
+    expect(chip.textContent?.trim()).toBe('active');
   });
 
-  it('with 0 active + other groups non-empty, default pill stays Active and shows cross-counts', async () => {
+  it('with 0 active runs the default pill stays Active and says "No active runs."', async () => {
     // Spec §6.2 bullet 5: when the response has 0 active runs, default pill
     // remains 'active' (selected) and the inline empty-filter message renders
     // with cross-counts derived from the full response.
@@ -410,11 +411,8 @@ describe('TeacherRunListPage', () => {
     const activePill = buttonByText(target, /^Active/);
     expect(activePill).not.toBeNull();
     expect(activePill!.getAttribute('aria-pressed')).toBe('true');
-    // Cross-counts message visible.
-    expect(pageTextContains(target, /No Active runs\./)).toBe(true);
-    expect(pageTextContains(target, /0 active/)).toBe(true);
-    expect(pageTextContains(target, /1 ended/)).toBe(true);
-    expect(pageTextContains(target, /1 draft/)).toBe(true);
+    expect(pageTextContains(target, 'No active runs.')).toBe(true);
+    expect(pageTextContains(target, /You have/)).toBe(false);
     // Table is not rendered (no rows in current filter).
     expect(target.querySelector('tbody tr')).toBeNull();
   });
@@ -449,7 +447,7 @@ describe('TeacherRunListPage', () => {
     expect(pageTextContains(target, 'DRAFT_ROW')).toBe(true);
   });
 
-  it('switching to a non-default empty pill renders inline empty-filter with cross-counts', async () => {
+  it('an empty non-default pill says "No draft runs."', async () => {
     // Single active row; user clicks Draft → inline empty-filter copy + cross-counts.
     vi.stubGlobal('fetch', mockFetch(200, [row({})]));
     component = mount(TeacherRunListPage, { target });
@@ -457,11 +455,8 @@ describe('TeacherRunListPage', () => {
     await settle();
     buttonByText(target, /^Draft/)!.click();
     flushSync();
-    expect(pageTextContains(target, /No Draft runs\./)).toBe(true);
-    expect(pageTextContains(target, /1 active/)).toBe(true);
-    expect(pageTextContains(target, /0 upcoming/)).toBe(true);
-    expect(pageTextContains(target, /0 ended/)).toBe(true);
-    expect(pageTextContains(target, /0 draft/)).toBe(true);
+    expect(pageTextContains(target, 'No draft runs.')).toBe(true);
+    expect(pageTextContains(target, /You have/)).toBe(false);
     expect(target.querySelector('tbody tr')).toBeNull();
   });
 
@@ -491,5 +486,36 @@ describe('TeacherRunListPage', () => {
     expect(Object.keys(r).sort()).toEqual(
       ['course_id', 'course_name', 'course_slug', 'run', 'student_count'].sort(),
     );
+  });
+
+  it('h1 "Teaching"; columns Title, Course, Status, Students, Start, End', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, [row({
+      run: makeRun({ id: 42, title: 'Spring', start_date: '2020-01-01', end_date: '2099-12-31' }),
+      course_name: 'Calc 101', course_slug: 'calc', student_count: 12,
+    })]));
+    component = mount(TeacherRunListPage, { target });
+    flushSync();
+    await settle();
+    expect(target.querySelector('h1')?.textContent?.trim()).toBe('Teaching');
+    expect(Array.from(target.querySelectorAll('thead th')).map((th) => th.textContent?.trim()))
+      .toEqual(['Title', 'Course', 'Status', 'Students', 'Start', 'End']);
+    const cells = Array.from(target.querySelectorAll('tbody tr:first-child td')).map((td) => td.textContent?.trim());
+    expect(cells).toEqual(['Spring', 'Calc 101', 'active', '12', '01 Jan 2020', '31 Dec 2099']);
+  });
+
+  it('the Course column links to /teaching/:slug', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, [row({ course_name: 'Calc 101', course_slug: 'calc' })]));
+    component = mount(TeacherRunListPage, { target });
+    flushSync();
+    await settle();
+    expect(linkByText(target, 'Calc 101')?.getAttribute('href')).toBe('/teaching/calc');
+  });
+
+  it('one link per row cell that links (no whole-row anchors)', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, [row({})]));
+    component = mount(TeacherRunListPage, { target });
+    flushSync();
+    await settle();
+    expect(target.querySelectorAll('tbody tr:first-child a')).toHaveLength(2);
   });
 });

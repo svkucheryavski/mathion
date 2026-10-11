@@ -47,3 +47,12 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - "Open Overview" inside MiniProjectModal: FocusTrap's cleanup runs before `setTab`'s `tick()`, and its `previousFocus` (the unmounted row control) is skipped because `isConnected` is false, so the tab keeps focus. Correct, but implicit; add a comment when T10 touches the modal wiring.
 - Pre-existing: the run-change effect does not clear `pendingEditTarget` (`loadAll` does); it is non-null only between `setTab` and the modal consuming it.
 - `.run-title-row` wraps, so a long run title pushes the publish bar onto a second line (the spec says "right end of the title row"). User-approved; check at ~1000px in the browser pass.
+
+### T6 — the two runs lists
+- §Focus steps 2-3 after a delete (the next row's 🗑, then the previous row's) are implemented but not pinned; only "+ New run", Cancel and failure are tested. An off-by-one or a swapped next/prev would pass. Add: three drafts, delete the middle → the former third row's 🗑; delete the last → the previous row's 🗑 (both lanes).
+- Pre-existing: a double-click on "Confirm Delete" sends two `deleteRun` calls; the second 404s, so an error toast follows "Run deleted." and focus jumps. InlineConfirm has no in-flight guard (DangerConfirm got one in T3).
+- Pre-existing: `RunListPage` loads in `onMount`, so a change of `courseSlug` on the same mounted page would not reload. No in-app link goes course-to-course today; check before 6b adds one.
+- `.runs-head h1:focus { outline: none }`: the heading is focused only as the last fallback (`tabindex=-1`); `:focus:not(:focus-visible)` would be the conservative form. Practical effect nil.
+- The run-title link colour (`--primary`, a ledgered deviation from the plan) has no gate row; add `d '\.runs-table td a' … 'color:var\(--primary\)'` if it should be held.
+- `TeacherRunListPage` would read "No all runs." if the All pill were ever empty; unreachable today (pills show only when there are rows).
+- `trashEls` is `$state({})` though nothing in the template reads it; a plain object would do. Harmless.
