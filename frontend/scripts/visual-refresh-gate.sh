@@ -4338,8 +4338,8 @@ if [[ $ftok -eq 0 ]]; then echo "PASS  the eight --focus-* tokens are each defin
 else echo "FAIL  the eight --focus-* tokens are each defined once in the theme"; fail=1; fi
 # 6a Safari pass (user, 2026-10-11): one page width for the whole site, 1140px
 # (the teacher drawings' content: 1180 artboard minus 20px gutters). Every page
-# column reads the token; reading measures (68ch quiz, 652px item, 760px
-# mini-project page) keep their own limits.
+# column reads the token; reading measures (652px quiz and page items, 760px
+# mini-project text) keep their own limits.
 if [[ $(grep -cE '^[[:space:]]*--page-max:[[:space:]]*1140px;' src/styles/theme-default.css) -eq 1 ]]; then
   echo "PASS  --page-max is 1140px, defined once in the theme"
 else echo "FAIL  --page-max is 1140px, defined once in the theme"; fail=1; fi

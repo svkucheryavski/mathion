@@ -7,6 +7,10 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - Sticky Student/Group columns in Safari while scrolling sideways.
 - The redirects from old bookmarks.
 - The interim mixed look (spec §Why) is expected, not a finding.
+- **Safari pass with the user (2026-10-11) — done.** OK: the Teaching list and the course runs list, the run frame at a laptop width and at about 1000px, Progress (sideways scroll inside its card, sticky Student/Group columns), Submissions, the dirty-grade guard, Groups, Teachers, Mini-projects, Assets (upload, bulk strip, Replace and Delete confirms), and the old bookmarks (signed in, and signed out through login with one `?next=`). Changed on the user's word: one page width `--page-max` 1140px (`57c5864`), Submissions' CSV as a text button (`577f45f`), plain delete confirms as one-line rows under their row plus semi-bold deadline labels (`c626192`). P19 kept (no `<h2>` on Progress/Submissions). Spec rev 5 records these.
+  - Not done: VoiceOver on the confirm groups ("Delete X?, group" before Cancel) — skipped by the user; the naming is pinned by tests.
+  - Expected, not findings: the grading side panel still looks unstyled (DashboardSidePanel is 6c); Submissions sorting not checkable with one group (unchanged in 6a, covered by tests).
+  - Dev setup note: the dev backend needs `MATHION_ASSET_PATH` (run-debug.sh sets `$HOME/mathion-assets`); without it uploads fail with "Failed to write asset file". The handler hides the real error behind that message.
 
 ## Minors
 <!-- one heading per task, one bullet per deferred review minor -->

@@ -1,10 +1,11 @@
 # Visual refresh — Slice 6a: the teacher screens, restyled (runs lists, run frame, six tabs)
 
-**Status:** draft, rev 4. Written 2026-10-10 for the user's review.
+**Status:** rev 5. Written 2026-10-10 for the user's review; rev 4 approved.
 - Rev 2 folded in round 1 of the spec review (Opus code angle, Opus design angle, Fable second opinion).
 - Rev 3 folds in round 2 (fresh Opus, fresh Fable) and the user's answers on R3, R9 and R10.
 - Rev 4 folds in the rev 3 re-check (fresh Opus); its own re-check (Fable) found no Critical or Important, and its three minors are folded in.
 - Review notes are in `.superpowers/sdd/2026-10-10-visual-refresh-slice6-teacher/spec-r*.md`.
+- Rev 5 records the user's decisions in the 6a Safari pass (2026-10-11): R15 (one page width), the confirm rows in R14 and §Mini-projects, P19 kept, and one CSV button style.
 
 **Branch:** `feat/visual-refresh-slice6-teacher`, cut from `feat/visual-refresh-slice5-authoring` at `65bcea2`. It stays local: no push, no merge.
 
@@ -82,9 +83,13 @@ Rulings taken at the controller's discretion (technical; the user defers these).
   - This closes the 5c backlog item "Teacher run screens still label blocks 'Block {order}'" (`docs/backlog/slice5c-constructor-polish-debt.md:158-161`) for these screens. `MiniProjectModal` follows in 6b.
 - **R14 — The Assets "used by" sub-panel and the danger panel render under their row**, as a full-width row inserted after it.
   - The sub-panel is already such a row (`RunAssetsTab.svelte:831-835`). The danger panel today sits inside the actions cell (`:773-814`); moving it to a full-width row is a change, because the panel's text and checkbox do not fit a narrow cell.
-  - The plain single-row delete confirm (an unreferenced asset) and the Replace confirm stay in the actions cell, as today.
-  - A row has at most one panel under it: opening the danger panel closes that row's "used by" sub-panel, and the reverse.
+  - The Replace confirm (T11) and the plain single-row delete confirm for an unreferenced asset (Safari pass) are full-width rows under their row too. The plain one keeps its question and buttons on one line (`InlineConfirm`'s `row` layout).
+  - A row has at most one panel under it: any delete or Replace confirm and the "used by" sub-panel close each other.
   - 10i draws both under the table, but with many files that puts them far from the row they act on. *Cost if wrong:* a position change.
+- **R15 — One page width for the whole site (Safari pass, user 2026-10-11).** Every page column — student, authoring, teaching, NotFound — is `max-width: var(--page-max)` (1140px: the teacher drawings' content, 1180 artboard minus 20px gutters), centred. 960px came from the first frontend commit, not from a design.
+  - The header bar keeps its full-width background; its nav row sits in the same column, so the logo and Logout line up with the page edges.
+  - The mini-project page sits in the same column, its text in a 760px column at the left. The quiz and page items keep their 652px reading measure (the reference's 68ch at its 16px base, written in px on purpose; §(g) of the gate).
+  - Outside the shared column on purpose: Login (a centred 380px card) and the superuser shell (its own header, full-width `.su-main`).
 - **R11 — Inline name edits on the Groups tab register no unsaved-changes guard** (none do today). An open add or rename field is dropped without asking when the tab changes. That keeps tab switching cheap, and the text is one short name.
 
 ## Scope
@@ -288,6 +293,7 @@ The page first loads the course by slug (`/api/courses/by-slug`, as today). It a
 
 Common to all six:
 - A section header row: an `<h2>` title with a mono `--muted` count, and the section's primary action at the right (+ / + Upload). The `<h2>` has `tabindex="-1"`, so it can take focus as the last fallback (§Focus).
+  - Progress and Submissions have no header row (P19, confirmed by the user in the Safari pass): as 2d and 9a draw, their toolbar sits straight under the tabs; neither has a primary action, and the tab names the panel.
 - Tables use the handoff §4 table style:
   - header `--surface-2`, 12px/600 `--text-3`;
   - 1px `--border-soft` row separators;
@@ -339,7 +345,7 @@ Common to all six:
 
 ### Submissions (9a, `RunSubmissionTab`)
 
-- **Toolbar:** the group filter at the left; at the right, ↻ Refresh and ⤓ CSV as icon buttons (`refresh` and `download` glyphs, titles "Refresh" and "Download CSV").
+- **Toolbar:** the group filter at the left; at the right, ↻ Refresh as an icon button (`refresh` glyph, title "Refresh") and "Download CSV" as a secondary text button, the same as Progress (Safari pass; 9a draws a ⤓ icon).
 - **Grid:** groups down, mini-projects across.
   - **Column header line 1:** the block title (D6), e.g. "Matrices and transformations".
   - **Line 2,** mono `--muted`: "B2 · 3 awaiting · 1 revision · 1 rejected", with zero parts omitted (R8). "B2" is the block's position (R13).
@@ -416,7 +422,7 @@ The badge's `title` spells it out: "7 of 10 students".
   - It is disabled, with today's reason as its `title`, in exactly the cases where today's New button is disabled. The plan lists them from the code.
 - **Table:**
   - **Block:** "Block 1 — Vectors and vector spaces" (D6; the number per R13).
-  - **Deadlines** (R12): mono, "soft 07 Aug 23:59 · hard 14 Aug 23:59 · resub 21 Aug 23:59". Absent deadlines are omitted.
+  - **Deadlines** (R12): mono, "soft 07 Aug 23:59 · hard 14 Aug 23:59 · resub 21 Aug 23:59". Absent deadlines are omitted. The labels soft / hard / resub are semi-bold `--text`, so they stand apart from the dates (Safari pass).
     - The short form uses fixed English month abbreviations (Jan…Dec) and 24-hour local time, not the browser's locale. It is one small helper in `lib/datetime.ts`.
     - Each part's `title` is today's full `formatLocalWithTz` value, e.g. "2026-08-14 23:59 GMT+2" (`RunMiniProjectsTab.svelte:238-240`).
     - The column header shows the zone. Each shown deadline's offset is `localTzLabel(new Date(iso))`, because the offset changes across daylight saving. If all of them agree, the header reads "Deadlines (GMT+2)" (`localTzLabel` already returns the parentheses). Otherwise it reads "Deadlines (local time)" and each part's `title` carries its own offset. With no deadlines shown, it reads "Deadlines".
@@ -424,7 +430,7 @@ The badge's `title` spells it out: "7 of 10 students".
   - **State chip:** draft / published / locked (§Chip tokens).
   - **Actions:** ✎ and 🗑.
 - **✎ is disabled with a reason** in today's cases: a locked row ("Has submissions — editing is off"), and a disabled version (`:252-254`, today's reason). Today the locked case is hidden (`:249-268`; R5).
-- **🗑 opens the shared danger panel** (§Shared pieces) for a mini-project with submissions, and today's inline confirm for one without.
+- **🗑 opens the shared danger panel** (§Shared pieces) for a mini-project with submissions, and today's inline confirm for one without. Both open as a full-width row under their row; the inline confirm keeps its question and buttons on one line (Safari pass).
   - Today's consequence text, the "I understand" box and the admin-only force rule are unchanged.
   - A non-admin who opens the panel sees Force delete disabled with "Only a course admin can force delete." (R5). Today their 🗑 is hidden on locked rows.
 - **Keep (D5),** restyled as precondition banners (§Chip and banner tokens), at the top of the tab:
@@ -456,7 +462,7 @@ The badge's `title` spells it out: "7 of 10 students".
   - The list names each mini-project as "Block {n} — {block title}" (D6, R13). Today it uses `mp.title` (`:840`). `RunDetailPage` passes `blocks` to the tab (R13).
   - "Edit" goes through `setTab` with `pendingEditTarget` (§The tab in the address).
 - **Deleting a referenced asset** uses the shared danger panel, under its row (R14). The admin-only force rule and its disabled reason (`:661-662`, `:808-809`) are unchanged.
-- **Replace** keeps its inline confirm (`:760-773`) and the same-extension rule with its error, restyled.
+- **Replace** keeps its inline confirm (`:760-773`), now a full-width row under its row (R14), and the same-extension rule with its error, restyled.
 - **Keep (D5):**
   - the drop zone and upload progress;
   - both banner slots (`:578-583`);
@@ -467,7 +473,7 @@ The badge's `title` spells it out: "7 of 10 students".
 
 All new pieces use tokens only and carry their own tests.
 
-- **`ui/IconButton.svelte`:** add the glyphs `refresh` (circular arrow) and `download` (arrow into tray) to the `Glyph` union (`:9-11`), in the existing glyph style.
+- **`ui/IconButton.svelte`:** add the glyphs `refresh` (circular arrow) and `download` (arrow into tray) to the `Glyph` union (`:9-11`), in the existing glyph style. `download` has no consumer since the Safari pass made Download CSV a text button (backlog, Polish).
 - **`ui/Avatar.svelte` (new):**
   - a `--avatar` circle, `--avatar-bg` fill, 1px `--border-strong` ring;
   - the inline silhouette SVG exactly as documented in `base.css:55-68`, filled `--avatar-fig`;
@@ -544,7 +550,7 @@ There are no other backend changes in 6a.
 
 ## Focus
 
-Focus never drops to `<body>` after an action in these screens. The rule, for any action whose control disappears or is re-created (an inline confirm replacing its button, a row deleted, a panel closed), is tried in order:
+Focus never drops to `<body>` after an action in these screens. The rule, for any action whose control disappears or is re-created (a confirm opening or closing, a row deleted, a panel closed), is tried in order:
 1. Return focus to the control that started the action, if it still exists.
 2. Else the same action on the next row, then on the previous row.
 3. Else the section's primary action (+), if it is enabled.
@@ -690,11 +696,12 @@ Component tests use `mount` / `unmount` / `flushSync` (not testing-library). At 
   - Force delete uses the danger panel, and the request is unchanged.
   - A non-admin sees Force delete disabled with the reason.
   - All kept banners and the empty copy.
+  - The plain delete confirm is a one-line row under its row (Cancel returns focus to the 🗑); the deadline labels are separate semi-bold spans.
 - **Assets:**
   - The danger panel for a referenced asset (row and bulk); the plain confirm for an unreferenced bulk delete.
   - The Uses button's `aria-expanded`.
   - The sub-panel names "Block {n} — title" (R13), under its row (R14).
-  - Opening the danger panel closes that row's sub-panel, and the reverse; the plain delete and Replace confirms stay in the actions cell.
+  - Any delete or Replace confirm and that row's sub-panel close each other; the plain delete confirm is a one-line row under its row.
   - A block missing from `blocks` drops the "Block {n} — " prefix.
   - Replace and its inline confirm.
   - The kept drop zone, progress and banner slots.
