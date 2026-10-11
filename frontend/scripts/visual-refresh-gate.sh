@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1518
+EXPECTED_CHECKS=1557
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4493,6 +4493,7 @@ FILES_6A=(
   src/pages/runs/RunDetailPage.svelte src/components/runs/TeachingCrumbs.svelte
   src/components/ui/FilterPills.svelte src/pages/teaching/TeacherRunListPage.svelte src/pages/runs/RunListPage.svelte
   src/components/runs/RunProgressTab.svelte src/components/runs/RunSubmissionTab.svelte
+  src/components/runs/RunGroupsTab.svelte src/components/runs/RunTeachersTab.svelte
 )
 LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts src/lib/runTabs.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
@@ -4630,6 +4631,45 @@ if [[ -n $REPLY ]]; then
   chk "\.submission-grid\.${H} \.mp-head:where\(\.${H}\)" 'text-align:center'
   chk "\.submission-grid\.${H} \.status-cell:where\(\.${H}\)" 'text-align:center'
   sweep RunSubmissionTab $H
+fi
+
+# Deferred from T2/T3 (the own rows already ship there): the avatar silhouette
+# and the inline name editor, graded now that T9 consumes both.
+uniq1 avatar
+if [[ -n $REPLY ]]; then
+  N=Avatar; H=$REPLY
+  d '\.avatar' '' 'width:var\(--avatar\)' 'height:var\(--avatar\)' 'border-radius:50%' 'background:var\(--avatar-bg\)' 'border:1px solid var\(--border-strong\)'
+  d '\.fig' '' 'fill:var\(--avatar-fig\)'
+  sweep Avatar $H
+fi
+
+uniq1 inline-name
+if [[ -n $REPLY ]]; then
+  N=InlineName; H=$REPLY
+  d '\.in-input' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
+  d '\.in-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  sweep InlineName $H
+fi
+
+own group-list RunGroupsTab.svelte
+uniq1 group-list
+if [[ -n $REPLY ]]; then
+  N=RunGroupsTab; H=$REPLY
+  d '\.cap-empty' '' 'background:var\(--status-not-submitted-bg\)' 'color:var\(--status-not-submitted-fg\)'
+  d '\.cap-ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.cap-warn' '' 'background:var\(--status-needs-revision-bg\)' 'color:var\(--status-needs-revision-fg\)'
+  d '\.cap-full' '' 'background:var\(--status-rejected-bg\)' 'color:var\(--status-rejected-fg\)'
+  d '\.go-head' '' 'background:var\(--surface-2\)' 'font-family:var\(--font-mono\)' 'text-transform:uppercase'
+  sweep RunGroupsTab $H
+fi
+
+own t-list RunTeachersTab.svelte
+uniq1 t-list
+if [[ -n $REPLY ]]; then
+  N=RunTeachersTab; H=$REPLY
+  d '\.chip-invited' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  d '\.t-email' '' 'font-family:var\(--font-mono\)'
+  sweep RunTeachersTab $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { ApiError } from '../../lib/api';
   import { createGroup, deleteGroup, getCapacityClass, updateGroup } from '../../lib/runGroups';
-  import { makeDirtyTracker } from '../../lib/dirty.svelte';
-  import type { DirtyTracker } from '../../lib/dirty.svelte';
+  import { focusFirst } from '../../lib/focusFirst';
   import { pushToast } from '../../stores/toasts.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
+  import InlineName from '../ui/InlineName.svelte';
   import type { Course, GroupResponse } from '../../lib/types';
 
   let {
@@ -15,6 +17,7 @@
     onRefetchGroupsAndStudents,
     course,
     runIsPublished,
+    onGotoOverview = undefined,
   }: {
     runId: number;
     groups: GroupResponse[];
@@ -23,162 +26,212 @@
     onRefetchGroupsAndStudents: () => Promise<void>;
     course: Course;
     runIsPublished: boolean;
+    onGotoOverview?: () => void;
   } = $props();
 
-  let newName = $state('');
-  let addError: string | null = $state(null);
+  // One editor at a time (R11): the add row or one group's rename. Switching
+  // drops the open one without saving; nothing registers a dirty guard.
+  type Editor = { kind: 'add' } | { kind: 'rename'; id: number } | null;
+  let editor = $state<Editor>(null);
+  let addKey = $state(0);
   let pendingDelete: number | null = $state(null);
 
+  let headingEl = $state<HTMLElement>();
+  let toggleEl = $state<HTMLButtonElement>();
+  const pencilEls: Record<number, HTMLButtonElement | undefined> = $state({});
+  const trashEls: Record<number, HTMLButtonElement | undefined> = $state({});
+
   const sorted = $derived([...groups].sort((a, b) => a.name.localeCompare(b.name)));
+  const addOpen = $derived(editor?.kind === 'add');
 
-  // One tracker per group id; only its `.current` is a $state proxy.
-  // Map entries persist after a group is deleted server-side (small leak,
-  // bounded by ~20 groups per run — acceptable).
-  const renameTrackers = new Map<number, DirtyTracker<{ name: string }>>();
-
-  function trackerFor(group: GroupResponse): DirtyTracker<{ name: string }> {
-    let t = renameTrackers.get(group.id);
-    if (!t) {
-      t = makeDirtyTracker<{ name: string }>({ name: group.name });
-      renameTrackers.set(group.id, t);
-    }
-    return t;
+  async function closeAdd() {
+    editor = null;
+    await tick();
+    toggleEl?.focus();
   }
 
-  async function addGroup(event: SubmitEvent) {
-    event.preventDefault();
-    addError = null;
-    try {
-      await createGroup(runId, newName.trim());
-      newName = '';
-      await onRefetchGroups();
-    } catch (e) {
-      if (e instanceof ApiError) {
-        addError =
-          e.status === 409
-            ? 'A group with that name already exists in this run.'
-            : e.displayMessage;
-      }
-    }
-  }
-
-  async function commitRename(group: GroupResponse) {
-    const t = trackerFor(group);
-    const next = t.current.name.trim();
-    if (!next || next === group.name) {
-      t.current.name = group.name;
+  function toggleAdd() {
+    if (addOpen) {
+      void closeAdd();
       return;
     }
-    try {
-      await updateGroup(group.id, { name: next });
-      await onRefetchGroups();
-    } catch (e) {
-      t.current.name = group.name;
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
-    }
+    pendingDelete = null;
+    editor = { kind: 'add' };
   }
 
+  async function addGroup(name: string) {
+    try {
+      await createGroup(runId, name);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        throw new Error('A group with that name already exists in this run.');
+      }
+      throw e;
+    }
+    await onRefetchGroups();
+    addKey += 1; // a fresh, empty, focused field for the next name
+  }
+
+  function startRename(id: number) {
+    pendingDelete = null;
+    editor = { kind: 'rename', id };
+  }
+
+  async function endRename(id: number) {
+    editor = null;
+    await tick();
+    pencilEls[id]?.focus();
+  }
+
+  async function saveRename(id: number, name: string) {
+    await updateGroup(id, { name });
+    await onRefetchGroups();
+    await endRename(id);
+  }
+
+  function askDelete(id: number) {
+    editor = null;
+    pendingDelete = id;
+  }
+
+  async function cancelDelete(id: number) {
+    pendingDelete = null;
+    await tick();
+    trashEls[id]?.focus();
+  }
+
+  // §Focus: on success the next row's trash, the previous row's, the + toggle,
+  // the h2; on failure this row's trash, else its ✎.
   async function confirmDelete(groupId: number) {
+    const idx = sorted.findIndex((g) => g.id === groupId);
     try {
       await deleteGroup(groupId);
       pendingDelete = null;
       await onRefetchGroups();
+      await tick();
+      const next = sorted[idx];
+      const prev = idx > 0 ? sorted[idx - 1] : undefined;
+      focusFirst([next && trashEls[next.id], prev && trashEls[prev.id], toggleEl, headingEl]);
     } catch (e) {
       pendingDelete = null;
       if (e instanceof ApiError) {
         const msg = typeof e.detail === 'string' ? e.detail : '';
-        if (e.status === 409 && /students/i.test(msg)) {
-          pushToast(e.displayMessage, 'error');
-          await onRefetchGroupsAndStudents();
-        } else if (e.status === 409 && /submission/i.test(msg)) {
-          pushToast(e.displayMessage, 'error');
-          await onRefetchGroups();
-        } else {
-          pushToast(e.displayMessage, 'error');
-        }
+        pushToast(e.displayMessage, 'error');
+        if (e.status === 409 && /students/i.test(msg)) await onRefetchGroupsAndStudents();
+        else if (e.status === 409 && /submission/i.test(msg)) await onRefetchGroups();
       }
+      await tick();
+      // A "has students" refetch disables this row's trash: fall back to its ✎.
+      focusFirst([trashEls[groupId], pencilEls[groupId], toggleEl, headingEl]);
     }
   }
 </script>
 
+{#snippet overviewLink()}
+  {#if onGotoOverview}<button type="button" class="linklike" data-action="goto-overview" onclick={() => onGotoOverview?.()}>Overview</button>{:else}Overview{/if}
+{/snippet}
+
+{#snippet cap(g: GroupResponse)}
+  {@const n = g.student_count}
+  <span class="cap cap-{getCapacityClass(n)}" class:cap-n={n > 0} title="{n} of 10 students">{n === 0 ? 'empty' : `${n}/10`}</span>
+{/snippet}
+
 {#if !groupsEnabled}
-  <section class="groups-disabled-placeholder">
-    {#if !runIsPublished}
-      Groups are disabled for this run. Enable in Overview → Settings to manage groups.
-    {:else if course.is_admin}
-      Groups are disabled for this run. Unpublish in Overview before enabling groups.
-    {:else}
-      Groups are disabled for this run. Ask a course admin to unpublish the run and enable groups.
-    {/if}
+  <section class="groups-off">
+    <p class="go-head">Groups disabled for this run</p>
+    <p class="go-body">
+      {#if !runIsPublished}
+        Groups are disabled for this run. Enable in {@render overviewLink()} › Settings to manage groups.
+      {:else if course.is_admin}
+        Groups are disabled for this run. Unpublish in {@render overviewLink()} before enabling groups.
+      {:else}
+        Groups are disabled for this run. Ask a course admin to unpublish the run and enable groups.
+      {/if}
+    </p>
   </section>
 {:else}
   <section class="groups-tab">
-    <form onsubmit={addGroup}>
-      <input name="name" maxlength="80" bind:value={newName} placeholder="Group name" />
-      <button type="submit" disabled={!newName.trim()}>Add group</button>
-    </form>
-    {#if addError}<p class="error">{addError}</p>{/if}
+    <div class="sec-head">
+      <h2 tabindex="-1" bind:this={headingEl}>Groups <span class="sec-count">{groups.length}</span></h2>
+      <IconButton glyph={addOpen ? 'close' : 'plus'} primary={!addOpen} size="md"
+                  title={addOpen ? 'Close' : 'Add group'} aria-expanded={addOpen}
+                  data-action="toggle-add-group" bind:element={toggleEl} onclick={toggleAdd} />
+    </div>
 
-    {#if sorted.length === 0}
-      <p class="empty">No groups yet.</p>
-    {:else}
-      <ul>
+    {#if addOpen || sorted.length > 0}
+      <ul class="group-list">
+        {#if addOpen}
+          <li class="g-row g-add">
+            {#key addKey}
+              <InlineName label="New group name" maxlength={80} saveTitle="Add" onSave={addGroup} onCancel={closeAdd} />
+            {/key}
+          </li>
+        {/if}
         {#each sorted as g (g.id)}
-          {@const t = trackerFor(g)}
-          <li>
-            <input
-              name="rename-{g.id}"
-              bind:value={t.current.name}
-              onblur={() => commitRename(g)}
-              onkeydown={(e) => {
-                if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
-                if (e.key === 'Escape') {
-                  t.current.name = g.name;
-                  (e.currentTarget as HTMLInputElement).blur();
-                }
-              }}
-            />
-            <span class="badge badge-{getCapacityClass(g.student_count)}">
-              {g.student_count === 0 ? 'empty' : `${g.student_count}/10`}
-            </span>
-            {#if pendingDelete === g.id}
-              <InlineConfirm
-                confirmLabel="Confirm Delete"
-                confirmDataAction="confirm-delete-group"
-                onConfirm={() => confirmDelete(g.id)}
-                onCancel={() => (pendingDelete = null)}
-              />
+          <li class="g-row">
+            {#if editor?.kind === 'rename' && editor.id === g.id}
+              <InlineName label="Group name" value={g.name} maxlength={80}
+                          onSave={(name) => saveRename(g.id, name)} onCancel={() => endRename(g.id)}>
+                {#snippet aside()}{@render cap(g)}{/snippet}
+              </InlineName>
             {:else}
-              <button
-                data-action="delete-group"
-                disabled={g.student_count > 0}
-                title={g.student_count > 0 ? 'Move students out before deleting.' : ''}
-                onclick={() => (pendingDelete = g.id)}
-              >Delete</button>
+              <span class="g-name">{g.name}</span>
+              {@render cap(g)}
+              <span class="g-actions">
+                {#if pendingDelete === g.id}
+                  <InlineConfirm takeFocus confirmLabel="Confirm Delete" confirmDataAction="confirm-delete-group"
+                                 onConfirm={() => confirmDelete(g.id)} onCancel={() => cancelDelete(g.id)} />
+                {:else}
+                  <IconButton glyph="pencil" size="sm" title="Rename" aria-label="Rename {g.name}"
+                              data-action="rename-group" bind:element={pencilEls[g.id]}
+                              onclick={() => startRename(g.id)} />
+                  <IconButton glyph="trash" size="sm" danger aria-label="Delete group {g.name}"
+                              title={g.student_count > 0 ? 'Move students out before deleting.' : 'Delete'}
+                              disabled={g.student_count > 0} data-action="delete-group"
+                              bind:element={trashEls[g.id]} onclick={() => askDelete(g.id)} />
+                {/if}
+              </span>
             {/if}
           </li>
         {/each}
       </ul>
     {/if}
+    {#if sorted.length === 0}<p class="empty">No groups yet.</p>{/if}
   </section>
 {/if}
 
 <style>
-  .groups-disabled-placeholder {
-    padding: 16px;
-    background: var(--surface-muted, #f5f5f5);
-    color: var(--muted, #666);
-    border-radius: 4px;
+  .groups-tab { display: flex; flex-direction: column; gap: 10px; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sec-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+  .sec-head h2:focus { outline: none; }
+  .sec-count { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+
+  .group-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .g-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 12px; border-top: 1px solid var(--border-soft); }
+  .g-row:first-child { border-top: 0; }
+  .g-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text); }
+  .g-actions { display: flex; align-items: center; gap: 4px; }
+
+  .cap { padding: 1px 8px; border-radius: var(--radius-pill); font-size: 11.5px; white-space: nowrap; }
+  .cap-n { font-family: var(--font-mono); }
+  .cap-empty { background: var(--status-not-submitted-bg); color: var(--status-not-submitted-fg); }
+  .cap-ok { background: var(--status-accepted-bg); color: var(--status-accepted-fg); }
+  .cap-warn { background: var(--status-needs-revision-bg); color: var(--status-needs-revision-fg); }
+  .cap-full { background: var(--status-rejected-bg); color: var(--status-rejected-fg); }
+
+  .groups-off { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  .go-head {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
   }
-  .groups-tab { display: flex; flex-direction: column; gap: 12px; }
-  form { display: flex; gap: 8px; align-items: center; }
-  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-  li { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
-  .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.85em; }
-  .badge-empty { background: #eee; color: #666; }
-  .badge-ok { background: #e7f5ee; color: #0a6c3e; }
-  .badge-warn { background: #fff4d6; color: #8a6500; }
-  .badge-full { background: #fdecea; color: #a8071a; }
-  .error { color: var(--danger, #c00); }
-  .empty { color: var(--muted, #666); }
+  .go-body { margin: 0; padding: 12px; font-size: 13px; color: var(--text-2); }
+  .linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
+  .empty { margin: 0; color: var(--muted); font-size: 13px; }
 </style>

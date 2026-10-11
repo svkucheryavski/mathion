@@ -459,6 +459,7 @@
           onRefetchGroupsAndStudents={refetchGroupsAndStudents}
           course={course!}
           runIsPublished={run.is_published}
+          onGotoOverview={() => void setTab('overview', { focusTab: true })}
         />
       {:else if activeTab === 'mini-projects'}
         <RunMiniProjectsTab

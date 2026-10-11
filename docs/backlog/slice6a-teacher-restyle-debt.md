@@ -72,3 +72,13 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - `.mp-head { min-width: 11rem }` on a table cell is undefined in CSS 2.1 (old Gecko ignored it); under `width: max-content` with nowrap headers it rarely matters.
 - Gate: the T8 block has `uniq1 submission-grid` but no `own submission-grid`; section (q) proves dist-uniqueness indirectly.
 - Pre-existing: the out-of-scope cell is `<span aria-label="No data">—</span>` with no role, which screen readers may not announce; visually-hidden text would be robust.
+
+### T9 — Groups and Teachers
+- The "invited" chip sits inline after "—" (the plan's markup); drawing 10d puts it at the row's right, before 🗑. The user approved the screenshots as they are.
+- `.g-name` has no `overflow-wrap`: one long unbreakable group name (up to 80 characters) runs into the capacity badge. `overflow-wrap: anywhere` (as T7's `.name-box`) fixes it.
+- `addGroup`: if `createGroup` succeeds but `onRefetchGroups()` throws, the refetch error shows under the field, which still holds the created name; Save again reports "already exists".
+- `confirmDelete` (Groups): the refetch awaited inside `catch` is unguarded, so a failing refetch rejects `confirmDelete`, and InlineConfirm does not await `onConfirm`, which leaves an unhandled rejection. Pre-existing shape.
+- A non-ApiError (network) failure on group delete or teacher remove is silent (no toast). Pre-existing in both components.
+- Teachers `submit` always moves focus back to the email field when the request settles; during a slow add, a user who moved on (e.g. opened a remove confirm) gets focus pulled back. Guard on `activeElement` being `<body>` or inside the tab if it shows up.
+- The disabled-groups text now reads "Overview › Settings" (brief P7) where it used to read "→".
+- Test strength: only the "last row → + toggle / email field", Cancel and failure focus paths are pinned; "next row's 🗑" and "previous row's 🗑" after a delete are not (a three-row middle-delete test would pin them). Same as the T6 minor.
