@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1424
+EXPECTED_CHECKS=1426
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -386,6 +386,10 @@ else:
 #      appear below, reviewed. A new one reds this check BY DESIGN — that is the
 #      prompt to check whether it can wrap a T3 subtree.
 GLOBAL_ALLOW = {
+    # Slice-6a: DangerConfirm styles the <code> in its caller's message snippet
+    # (a filename). Ancestor-scoped under its own .dc-msg, which wraps only that
+    # text, never a quiz.
+    ('src/components/ui/DangerConfirm.svelte', 'code'),
     # Slice-5d: the authoring quiz card's rendered question text / explanation
     # (.qtext, .qexpl-body). It lives only in the item editor modal, which never
     # renders the student quiz components (T3 files).
@@ -4483,6 +4487,8 @@ FILES_6A=(
   src/components/runs/RunStatusChip.svelte src/components/ui/IconButton.svelte
   src/components/ui/Button.svelte src/components/ui/StatusBadge.svelte
   src/components/ui/ErrorState.svelte
+  src/components/ui/DangerConfirm.svelte src/components/ui/InlineName.svelte
+  src/components/ui/InlineConfirm.svelte
 )
 LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
@@ -4492,6 +4498,8 @@ colour_scan 6a-teacher $FILES_6A
 # rows (uniq1, declarations, sweep) land with the task that first imports it.
 own avatar Avatar.svelte
 own run-chip RunStatusChip.svelte
+own danger-confirm DangerConfirm.svelte
+own inline-name InlineName.svelte
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

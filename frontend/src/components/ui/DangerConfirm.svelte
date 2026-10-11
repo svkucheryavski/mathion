@@ -1,0 +1,139 @@
+<script lang="ts">
+  // The danger panel (handoff §4 Confirm-then-act): the consequence, an
+  // "I understand" box, Force delete and Cancel. Unarmed, Force delete keeps
+  // its slot in the muted red family and does nothing; ticking arms it. A
+  // missing right (disabledReason) disables it natively, with the reason.
+  // The box un-ticks when onConfirm settles, so a failure has to be re-armed.
+  import { onMount, type Snippet } from 'svelte';
+
+  let {
+    message,
+    confirmLabel = 'Force delete',
+    busy = false,
+    disabledReason = undefined,
+    onConfirm,
+    onCancel,
+  }: {
+    message: Snippet;
+    confirmLabel?: string;
+    busy?: boolean;
+    disabledReason?: string;
+    onConfirm: () => void | Promise<void>;
+    onCancel: () => void;
+  } = $props();
+
+  const uid = $props.id();
+  const msgId = `${uid}-msg`;
+  let armed = $state(false);
+  // A second click while onConfirm runs must not send the action twice.
+  let pending = false;
+  let boxEl = $state<HTMLInputElement>();
+  onMount(() => boxEl?.focus());
+
+  const blocked = $derived(busy || disabledReason !== undefined);
+  const forceTitle = $derived(disabledReason ?? (armed ? undefined : 'Tick “I understand” first'));
+
+  async function confirm() {
+    if (!armed || blocked || pending) return;
+    pending = true;
+    try {
+      await onConfirm();
+    } catch {
+      // The caller reports its own failure (banner, toast); the box re-arms.
+    } finally {
+      armed = false;
+      pending = false;
+    }
+  }
+
+  // Esc anywhere in the panel = Cancel. stopPropagation so an enclosing modal
+  // or panel does not close as well.
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  }
+</script>
+
+<div class="danger-confirm" role="group" aria-label={confirmLabel} aria-describedby={msgId}>
+  <p class="dc-msg" id={msgId}>{@render message()}</p>
+  <label class="dc-ack">
+    <input type="checkbox" data-role="danger-ack" bind:this={boxEl} bind:checked={armed} disabled={busy} onkeydown={onKeydown} />
+    I understand
+  </label>
+  <div class="dc-actions">
+    <button
+      type="button"
+      class="dc-force"
+      class:armed={armed && disabledReason === undefined}
+      data-action="force-delete"
+      disabled={blocked}
+      aria-disabled={!armed && !blocked ? 'true' : undefined}
+      aria-busy={busy ? 'true' : undefined}
+      title={forceTitle}
+      onclick={confirm}
+      onkeydown={onKeydown}
+    >{#if busy}<span class="dc-spin" aria-hidden="true"></span>{/if}{confirmLabel}</button>
+    <button type="button" class="dc-cancel" disabled={busy} onclick={onCancel} onkeydown={onKeydown}>Cancel</button>
+  </div>
+</div>
+
+<style>
+  .danger-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--status-rejected-bg);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius);
+  }
+  .dc-msg { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--status-rejected-fg); }
+  .dc-msg :global(code) { font-family: var(--font-mono); background: var(--surface); padding: 0 4px; border-radius: var(--radius-pill); }
+  .dc-ack { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+  .dc-actions { display: flex; gap: 6px; }
+  .dc-force, .dc-cancel {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: var(--btn-pad);
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  /* Unarmed (and natively disabled): the muted red family, never grey. */
+  .dc-force {
+    background: var(--danger-off-bg);
+    color: var(--danger-off-text);
+    border: 1px solid var(--danger-off-border);
+    cursor: not-allowed;
+  }
+  .dc-force.armed {
+    background: var(--danger);
+    color: var(--primary-text);
+    border-color: var(--danger);
+    cursor: pointer;
+  }
+  .dc-cancel {
+    background: var(--surface);
+    color: var(--text-3);
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+  }
+  .dc-cancel:disabled {
+    background: var(--bg);
+    color: var(--faint);
+    border-color: var(--border-faint);
+    cursor: not-allowed;
+  }
+  .dc-spin {
+    width: 10px;
+    height: 10px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: dc-spin 0.6s linear infinite;
+  }
+  @keyframes dc-spin { to { transform: rotate(360deg); } }
+</style>

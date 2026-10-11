@@ -23,3 +23,11 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - The Intl spy in the `formatShortDeadline` locale test only catches `new Intl.DateTimeFormat`; a regression to `toLocaleString` under an en-US test locale would still pass.
 - No test for `Button`'s `bind:element` or for `data-action` being absent on `Button`; T9/T11 callers exercise them.
 - The StatusBadge label test's title says "the colours stay" but asserts only `data-status`.
+
+### T3 — DangerConfirm, InlineName, InlineConfirm takeFocus
+- While `busy`, DangerConfirm natively disables the focused box or button, so Chrome and Safari drop focus to `<body>`; the caller restores focus after the action (§Focus, T10/T11). Check in the browser pass.
+- InlineName shows "Please correct the highlighted fields." for a 422 with a list detail, though nothing else is highlighted; an empty-string detail shows no error. Callers pass `maxlength={80}`, so a 422 is unlikely.
+- InlineName's last test cannot tell the ApiError branch from the Error branch (`ApiError(500, 'Server exploded')` has message === displayMessage); a list-detail 422 would pin it.
+- DangerConfirm's Esc handler sits on its three controls, not the root; a focusable element inside a caller's message snippet would not cancel on Esc. Today's messages hold only text and `<code>`.
+- No test for the Force delete title while busy, or for InlineName's ✓ title ("Save" / `saveTitle`); T9 exercises the Groups rename title.
+- Round 2: the DangerConfirm group and its button are announced with the same words ("Force delete, group" … "Force delete, button"); a name like "Confirm force delete" would read better. Cosmetic.

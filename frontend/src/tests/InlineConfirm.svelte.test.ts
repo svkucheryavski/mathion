@@ -62,4 +62,30 @@ describe('InlineConfirm', () => {
     const confirmBtn = target.querySelectorAll('button')[0]!;
     expect(confirmBtn.getAttribute('data-action')).toBe('confirm-delete-item');
   });
+
+  it('takeFocus: Cancel takes focus on mount (6a P3)', () => {
+    component = mount(InlineConfirm, { target, props: { onConfirm: () => {}, onCancel: () => {}, takeFocus: true } });
+    flushSync();
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+  });
+
+  it('takeFocus: Esc on either button cancels', () => {
+    const onCancel = vi.fn();
+    component = mount(InlineConfirm, { target, props: { onConfirm: () => {}, onCancel, takeFocus: true } });
+    flushSync();
+    const [confirm, cancel] = Array.from(target.querySelectorAll('button'));
+    cancel!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    confirm!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(onCancel).toHaveBeenCalledTimes(2);
+  });
+
+  it('without takeFocus: focus is untouched and Esc is ignored', () => {
+    const onCancel = vi.fn();
+    const before = document.activeElement;
+    component = mount(InlineConfirm, { target, props: { onConfirm: () => {}, onCancel } });
+    flushSync();
+    expect(document.activeElement).toBe(before);
+    target.querySelectorAll('button')[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(onCancel).not.toHaveBeenCalled();
+  });
 });
