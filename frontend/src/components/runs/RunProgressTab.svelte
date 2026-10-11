@@ -1,18 +1,26 @@
 <script lang="ts">
-  import { getProgressDashboard,
+  import { getProgressDashboard, heatToken,
            type DashboardProgressResponse } from '../../lib/dashboards';
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
+  import { blockPositions } from '../../lib/blockNumbers';
+  import type { BlockResponse } from '../../lib/types';
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
+  import ErrorState from '../ui/ErrorState.svelte';
+  import IconButton from '../ui/IconButton.svelte';
+  import Button from '../ui/Button.svelte';
+  import SortMark from '../ui/SortMark.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
 
   let {
     runId,
     isAdmin = false,
     isTeacher = false,
+    blocks = [],
   }: {
     runId: number;
     isAdmin?: boolean;
     isTeacher?: boolean;
+    blocks?: BlockResponse[];
   } = $props();
 
   let data = $state<DashboardProgressResponse | null>(null);
@@ -185,19 +193,36 @@
     return Array.from(blocks.values());
   });
 
+  // R13: B{n} is the block's position in the pinned version's `blocks`; S{n}
+  // the sequence's position within its block in this payload.
+  const blockPos = $derived(blockPositions(blocks));
+  const seqPos = $derived.by(() => {
+    const m = new Map<number, number>();
+    for (const bg of blockGroupedSequences) bg.sequences.forEach((s, i) => m.set(s.sequence_id, i + 1));
+    return m;
+  });
+  function blockLabel(blockId: number, title: string): string {
+    const n = blockPos.get(blockId);
+    return n === undefined ? title : `B${n} · ${title}`;
+  }
+  const legendName = $derived(`${mode === 'coverage' ? 'Coverage' : 'Score'} scale, 0 to 100 percent`);
+
   // --- Cell helpers ---
 
+  // Five steps (heatToken); no data gives no style, so the cell has no fill.
   function cellInlineStyle(
     s: DashboardProgressResponse['students'][number],
     i: number,
     m: Mode,
-  ): string {
+  ): string | undefined {
     const cell = m === 'coverage' ? s.coverage[i] : s.quizzes[i];
-    if (!cell) return '';
-    const ratio = computeRatio(cell, m);
-    if (ratio === null) return '';
-    const hue = 120 * ratio;
-    return `--cell-bg: hsl(${hue} 70% 80%);`;
+    if (!cell) return undefined;
+    const token = heatToken(computeRatio(cell, m));
+    return token === null ? undefined : `--cell-bg: var(${token})`;
+  }
+
+  function sortAria(key: SortKey): 'ascending' | 'descending' | 'none' {
+    return sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   }
 
   function cellText(
@@ -278,29 +303,21 @@
 <div class="tab-container">
   {#if loading}<LoadingPlaceholder />{/if}
   {#if error}
-    <div class="banner banner-error" role="alert">
-      {error} <button onclick={refresh}>Retry</button>
-    </div>
+    <ErrorState title="Could not load progress." message={error} onretry={refresh} />
   {/if}
 
   {#if data}
     {#if data.run.version_is_disabled}
-      <div class="banner banner-warning" role="status">
-        This run's course version is disabled. Coverage data reflects last-known state.
-      </div>
+      <p class="pg-note">Coverage data reflects last-known state.</p>
     {/if}
 
-    <div class="controls">
-      <fieldset class="mode-switch" aria-label="Heatmap mode">
-        <button type="button"
-                aria-pressed={mode === 'coverage'}
-                onclick={() => mode = 'coverage'}>Coverage</button>
-        <button type="button"
-                aria-pressed={mode === 'quiz'}
-                onclick={() => mode = 'quiz'}>Quiz</button>
-      </fieldset>
+    <div class="pg-toolbar">
+      <div class="seg" role="group" aria-label="Heatmap mode">
+        <button type="button" class="seg-btn" aria-pressed={mode === 'coverage'} onclick={() => (mode = 'coverage')}>Coverage</button>
+        <button type="button" class="seg-btn" aria-pressed={mode === 'quiz'} onclick={() => (mode = 'quiz')}>Quiz</button>
+      </div>
 
-      <select bind:value={groupFilter} aria-label="Filter by group">
+      <select class="pg-control" bind:value={groupFilter} aria-label="Filter by group">
         <option value="all">All groups</option>
         {#if hasUngroupedStudents}
           <option value="ungrouped">(Ungrouped)</option>
@@ -310,10 +327,19 @@
         {/each}
       </select>
 
-      <input type="search" bind:value={nameQuery} placeholder="Search student" aria-label="Search student" />
+      <input class="pg-control pg-search" type="search" bind:value={nameQuery} placeholder="Search student" aria-label="Search student" />
 
-      <button class="refresh-button" onclick={refresh} aria-label="Refresh">Refresh</button>
-      <button class="csv-button" onclick={handleDownloadCSV} data-action="download-csv">Download CSV</button>
+      <div class="pg-right">
+        <span class="heat-legend" role="img" aria-label={legendName}>
+          <span class="hl-end">0%</span>
+          <span class="hl-bar">
+            <span class="hl-sw s0"></span><span class="hl-sw s1"></span><span class="hl-sw s2"></span><span class="hl-sw s3"></span><span class="hl-sw s4"></span>
+          </span>
+          <span class="hl-end">100%</span>
+        </span>
+        <IconButton glyph="refresh" title="Refresh" onclick={refresh} />
+        <Button variant="secondary" data-action="download-csv" onclick={handleDownloadCSV}>Download CSV</Button>
+      </div>
     </div>
 
     {#if data.sequences.length === 0}
@@ -323,26 +349,21 @@
       <table class="progress-grid">
         <thead>
           <tr class="block-row">
-            <th class="sticky-name" scope="col" rowspan="2"
-                aria-sort={sortKey === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-              <button onclick={() => toggleSort('name')}>Student {#if sortKey === 'name'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
+            <th class="sticky-name" scope="col" rowspan="2" aria-sort={sortAria('name')}>
+              <button type="button" onclick={() => toggleSort('name')}>Student{#if sortKey === 'name'}<SortMark dir={sortDir} />{/if}</button>
             </th>
-            <th class="sticky-group" scope="col" rowspan="2"
-                aria-sort={sortKey === 'group' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-              <button onclick={() => toggleSort('group')}>Group {#if sortKey === 'group'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
+            <th class="sticky-group" scope="col" rowspan="2" aria-sort={sortAria('group')}>
+              <button type="button" onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
             </th>
             {#each blockGroupedSequences as bg (bg.block_id)}
-              <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{bg.block_title}</th>
+              <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{blockLabel(bg.block_id, bg.block_title)}</th>
             {/each}
           </tr>
           <tr class="seq-row">
             {#each data.sequences as seq (seq.sequence_id)}
-              <th class="seq-header"
-                  scope="col"
-                  aria-sort={sortKey === `seq:${seq.sequence_id}` ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                <button onclick={() => toggleSort(`seq:${seq.sequence_id}`)}>
-                  {seq.sequence_title}
-                  {#if sortKey === `seq:${seq.sequence_id}`}{sortDir === 'asc' ? '▲' : '▼'}{/if}
+              <th class="seq-header" scope="col" aria-sort={sortAria(`seq:${seq.sequence_id}`)}>
+                <button type="button" onclick={() => toggleSort(`seq:${seq.sequence_id}`)}>
+                  <span class="seq-n">S{seqPos.get(seq.sequence_id)}</span> {seq.sequence_title}{#if sortKey === `seq:${seq.sequence_id}`}<SortMark dir={sortDir} />{/if}
                 </button>
               </th>
             {/each}
@@ -350,14 +371,17 @@
         </thead>
         <tbody>
           {#each visibleStudents as s (s.user_id)}
-            <tr class:disabled-row={s.user_is_disabled || s.group_is_disabled}>
+            {@const off = s.user_is_disabled || s.group_is_disabled}
+            <tr>
               <th scope="row" class="sticky-name">
-                {s.full_name ?? s.email}
-                {#if s.user_is_disabled}<span class="badge-muted">disabled</span>{/if}
+                <div class="name-box">
+                  <span class="pg-name" class:off>{s.full_name ?? s.email}</span>
+                  {#if s.user_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                </div>
               </th>
               <td class="sticky-group">
                 {s.group_name ?? '—'}
-                {#if s.group_is_disabled}<span class="badge-muted">disabled</span>{/if}
+                {#if s.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
               </td>
               {#each data.sequences as seq, i (seq.sequence_id)}
                 <td class="cell" style={cellInlineStyle(s, i, mode)}>
@@ -395,42 +419,103 @@
 </div>
 
 <style>
-  .progress-grid { border-collapse: separate; border-spacing: 0; }
+  .pg-note { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+  .pg-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .pg-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+  .seg-btn {
+    height: var(--control-h-sm);
+    padding: 0 12px;
+    background: var(--surface);
+    color: var(--text-2);
+    border: 0;
+    font: inherit;
+    font-size: var(--control-font);
+    cursor: pointer;
+  }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border-strong); }
+  .seg-btn[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+
+  .pg-control {
+    box-sizing: border-box;
+    height: var(--control-h-sm);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--control-font);
+  }
+  .pg-search { width: 220px; }
+
+  .heat-legend { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .hl-bar { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .hl-sw { width: 18px; height: 12px; }
+  .hl-sw.s0 { background: var(--surface-muted); }
+  .hl-sw.s1 { background: var(--heat-1); }
+  .hl-sw.s2 { background: var(--heat-2); }
+  .hl-sw.s3 { background: var(--heat-3); }
+  .hl-sw.s4 { background: var(--heat-4); }
+
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .progress-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+  .progress-grid th, .progress-grid td { padding: 0; border-bottom: 1px solid var(--border-soft); text-align: left; }
+  .progress-grid thead th { background: var(--surface-2); color: var(--text-3); font-size: 12px; font-weight: 600; }
+  .progress-grid th button { padding: 8px 12px; }
   .sticky-name {
     position: sticky;
     left: 0;
     width: 14rem;
-    background: var(--bg, #fff);
+    background: var(--surface);
+    border-right: 1px solid var(--border-soft);
     z-index: 2;
   }
   .sticky-group {
     position: sticky;
     left: 14rem;
-    width: 10rem;
-    background: var(--bg, #fff);
+    width: 6rem;
+    background: var(--surface);
+    border-right: 1px solid var(--border-soft);
     z-index: 2;
   }
-  .block-header, .seq-header {
-    position: sticky;
-    top: 0;
-    background: var(--bg, #fff);
-    z-index: 1;
-  }
+  tbody .sticky-name, tbody .sticky-group { padding: 6px 12px; font-size: 13px; font-weight: 400; color: var(--text); }
+  .block-header, .seq-header { position: sticky; top: 0; z-index: 1; }
   .block-row .sticky-name, .block-row .sticky-group { top: 0; z-index: 3; }
-
-  .disabled-row { opacity: 0.55; font-style: italic; }
-
-  .badge-muted {
-    display: inline-block;
-    margin-left: 0.4em;
-    padding: 0.05em 0.4em;
-    font-size: 0.75em;
-    font-style: normal;
+  /* Qualified by .progress-grid so these outrank `.progress-grid thead th`
+     and `.progress-grid th` (padding 0) above. */
+  .progress-grid .block-header {
+    padding: 6px 12px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     font-weight: 500;
-    line-height: 1.3;
-    color: var(--muted, #6b7280);
-    background: var(--surface-muted, #f3f4f6);
-    border-radius: 0.25em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  /* One line per header (2d): a wide run scrolls sideways inside .table-scroll
+     with Student and Group pinned, instead of squeezing every title. */
+  .progress-grid .seq-header { font-weight: 500; white-space: nowrap; }
+  .seq-n { font-family: var(--font-mono); }
+
+  /* Holds the Student column at exactly 14rem (the sticky Group's left offset)
+     under the table's max-content width: a long name or email wraps here
+     instead of widening the column under the Group cell. 25px = the cell's
+     12px side paddings + its 1px right border. */
+  .name-box { width: calc(14rem - 25px); white-space: normal; overflow-wrap: anywhere; }
+  .pg-name.off { font-style: italic; color: var(--muted); }
+  .chip-disabled {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    background: var(--state-disabled-bg);
+    color: var(--state-disabled-fg);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-style: normal;
     vertical-align: middle;
   }
 
@@ -439,15 +524,12 @@
     border: none;
     font: inherit;
     color: inherit;
-    padding: 0;
     cursor: pointer;
     text-align: inherit;
     width: 100%;
     height: 100%;
   }
-
-  .cell { background-color: var(--cell-bg, var(--surface-muted, #f3f4f6)); color: var(--text, #1f2937); }
-  .empty { color: var(--muted, #6b7280); padding: 1rem; text-align: center; }
-  .banner-error { background: var(--status-rejected-bg); color: var(--status-rejected-fg); padding: 0.5rem 1rem; border-radius: 4px; }
-  .banner-warning { background: var(--status-needs-revision-bg); color: var(--status-needs-revision-fg); padding: 0.5rem 1rem; border-radius: 4px; }
+  .cell-btn { padding: 6px 12px; font-family: var(--font-mono); font-size: 11.5px; }
+  .cell { background: var(--cell-bg, none); color: var(--heat-fg); }
+  .empty { color: var(--muted); padding: 1rem; text-align: center; }
 </style>

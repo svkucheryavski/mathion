@@ -423,7 +423,7 @@
           course={course!}
         />
       {:else if activeTab === 'progress'}
-        <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
+        <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} blocks={blocks ?? []} />
       {:else if activeTab === 'submissions'}
         <RunSubmissionTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
       {:else if activeTab === 'roster'}

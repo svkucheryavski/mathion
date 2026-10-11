@@ -56,3 +56,12 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - The run-title link colour (`--primary`, a ledgered deviation from the plan) has no gate row; add `d '\.runs-table td a' … 'color:var\(--primary\)'` if it should be held.
 - `TeacherRunListPage` would read "No all runs." if the All pill were ever empty; unreachable today (pills show only when there are rows).
 - `trashEls` is `$state({})` though nothing in the template reads it; a plain object would do. Harmless.
+
+### T7 — Progress
+- `tbody .sticky-name, tbody .sticky-group { padding: 6px 12px }` beats `.progress-grid th, .progress-grid td { padding: 0 }` only by source order (both (0,2,1)); `.progress-grid tbody .sticky-name` would win on specificity (both lanes). Same class of fragility the T7 header ruling fixed.
+- `blockGroupedSequences` declares a local `const blocks = new Map(...)` that shadows the new `blocks` prop; harmless, but rename to `byBlock` next to `blockPositions(blocks)`.
+- The "a block missing from `blocks`" test relies on the mock's block title being literally `'B1'`, which reads like a prefix; use a distinct title (e.g. 'Vectors') and assert exactly that.
+- No quiz-mode heat assertion (e.g. 1/2 → `--heat-2` after clicking Quiz) and no `aria-sort` assertion on the new headers; heatToken's own T2 test covers the thresholds.
+- `.block-header, .seq-header { position: sticky; top: 0 }` is inert (`.table-scroll` has no height limit, so headers never stick on a page scroll). Pre-existing; look at it in the browser pass.
+- The 14rem / 6rem sticky widths and `.name-box { width: calc(14rem - 25px) }` assume border-box cells; `reset.css` sets `*, *::before, *::after { box-sizing: border-box }`, so this holds in every engine. Check in Safari anyway. `.name-box`'s `white-space: normal` is redundant (the th inherits normal).
+- Pre-existing: three CSV-download tests print jsdom "Not implemented: navigation" on stderr (the anchor `click()`); not a vitest Errors line.

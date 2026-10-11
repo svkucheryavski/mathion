@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1483
+EXPECTED_CHECKS=1506
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4492,6 +4492,7 @@ FILES_6A=(
   src/components/chrome/AppHeader.svelte src/pages/runs/RunsRedirect.svelte
   src/pages/runs/RunDetailPage.svelte src/components/runs/TeachingCrumbs.svelte
   src/components/ui/FilterPills.svelte src/pages/teaching/TeacherRunListPage.svelte src/pages/runs/RunListPage.svelte
+  src/components/runs/RunProgressTab.svelte
 )
 LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts src/lib/runTabs.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
@@ -4575,6 +4576,41 @@ if [[ -n $REPLY ]]; then
   d '\.runs-count' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
   d '\.runs-page' '' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
   sweep RunListPage $H
+fi
+
+# Progress: five heat steps replace the hsl() sweep; no opacity on disabled rows.
+if grep -q 'hsl(' src/components/runs/RunProgressTab.svelte; then
+  echo "FAIL  RunProgressTab still contains hsl("; fail=1
+else
+  echo "PASS  RunProgressTab has no hsl( (6a heatmap)"
+fi
+if grep -q 'disabled-row' src/components/runs/RunProgressTab.svelte; then
+  echo "FAIL  RunProgressTab still has a .disabled-row rule"; fail=1
+else
+  echo "PASS  RunProgressTab has no .disabled-row (6a)"
+fi
+own heat-legend RunProgressTab.svelte
+uniq1 heat-legend
+if [[ -n $REPLY ]]; then
+  N=RunProgressTab; H=$REPLY
+  d '\.hl-sw\.s0' '' 'background:var\(--surface-muted\)'
+  d '\.hl-sw\.s1' '' 'background:var\(--heat-1\)'
+  d '\.hl-sw\.s2' '' 'background:var\(--heat-2\)'
+  d '\.hl-sw\.s3' '' 'background:var\(--heat-3\)'
+  d '\.hl-sw\.s4' '' 'background:var\(--heat-4\)'
+  d '\.cell' '' 'background:var\(--cell-bg, ?none\)' 'color:var\(--heat-fg\)'
+  # The table keeps its natural width (Student 14rem, Group 6rem) so the sticky
+  # offsets line up; the header rules are qualified by .progress-grid so they
+  # outrank `.progress-grid thead th` / `.progress-grid th` (padding 0).
+  d '\.progress-grid' '' 'width:max-content'
+  chk "\.progress-grid\.${H} \.block-header:where\(\.${H}\)" 'padding:6px 12px' 'font-family:var\(--font-mono\)' 'text-transform:uppercase' 'white-space:nowrap'
+  chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'white-space:nowrap'
+  # The Student column is exactly 14rem (the sticky Group's offset): the name box
+  # is 14rem less the cell's 12px side paddings and 1px right border, and a long
+  # email wraps inside it.
+  d '\.name-box' '' 'width:calc\(14rem - 25px\)' 'overflow-wrap:anywhere'
+  d '\.chip-disabled' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  sweep RunProgressTab $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

@@ -112,9 +112,9 @@ describe('RunProgressTab', () => {
     expect(cells.length).toBeGreaterThan(0);
     expect(host.textContent).toContain('2/4');
     expect(host.textContent).toContain('4/4');
-    // Per spec §13 line 1636: inline --cell-bg style set per ratio
-    const cellWithStyle = host.querySelector('td.cell') as HTMLElement;
-    expect(cellWithStyle.getAttribute('style')).toMatch(/--cell-bg:\s*hsl\(/);
+    const cellsByText = (t: string) => Array.from(host.querySelectorAll('td.cell')).find((td) => td.textContent?.trim() === t) as HTMLElement;
+    expect(cellsByText('2/4').getAttribute('style')).toMatch(/--cell-bg:\s*var\(--heat-2\)/);
+    expect(cellsByText('4/4').getAttribute('style')).toMatch(/--cell-bg:\s*var\(--heat-4\)/);
   });
 
   // T6 – Quiz mode cells
@@ -374,10 +374,10 @@ describe('RunProgressTab', () => {
   });
 
   // T16 – Disabled user
-  it('disabled user: row has "disabled" badge; row has disabled-row class', async () => {
+  it('the Student cell holds its name and chip in a fixed-width box (sticky Group never covers a long name)', async () => {
     const body = progressMock({
       students: [
-        { user_id: 100, full_name: 'Alice', email: 'a@x', user_is_disabled: true,
+        { user_id: 100, full_name: null, email: 's123456@student.university.example', user_is_disabled: true,
           group_id: 1, group_name: 'G1', group_is_disabled: false,
           coverage: [{ sequence_id: 10, covered: 2, total: 4 }],
           quizzes: [{ sequence_id: 10, correct: 1, total: 2 }] },
@@ -386,20 +386,53 @@ describe('RunProgressTab', () => {
     vi.stubGlobal('fetch', mockFetch(200, body));
     mountTab();
     await settle();
-    const row = host.querySelector('tr.disabled-row');
-    expect(row).toBeTruthy();
-    expect(host.querySelector('.badge-muted')).toBeTruthy();
-    expect(host.querySelector('.badge-muted')!.textContent?.trim()).toBe('disabled');
+    const th = host.querySelector('tbody th.sticky-name') as HTMLElement;
+    const box = th.querySelector(':scope > .name-box') as HTMLElement;
+    expect(th.children).toHaveLength(1);
+    expect(box.querySelector('.pg-name')?.textContent).toBe('s123456@student.university.example');
+    expect(box.querySelector('.chip-disabled')?.textContent?.trim()).toBe('disabled');
+  });
+
+  it('disabled user: italic muted name + "disabled" chip after the name; no opacity row class', async () => {
+    const body = progressMock({
+      students: [
+        { user_id: 100, full_name: 'Alice', email: 'a@x', user_is_disabled: true,
+          group_id: 1, group_name: 'G1', group_is_disabled: false,
+          coverage: [{ sequence_id: 10, covered: 2, total: 4 }],
+          quizzes: [{ sequence_id: 10, correct: 1, total: 2 }] },
+        { user_id: 101, full_name: 'Bob', email: 'b@x', user_is_disabled: false,
+          group_id: 2, group_name: 'G2', group_is_disabled: true,
+          coverage: [{ sequence_id: 10, covered: 2, total: 4 }],
+          quizzes: [{ sequence_id: 10, correct: 1, total: 2 }] },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetch(200, body));
+    mountTab();
+    await settle();
+    expect(host.querySelector('tr.disabled-row')).toBeNull();
+    const [alice, bob] = Array.from(host.querySelectorAll('tbody tr'));
+    expect(alice!.querySelector('th .pg-name')?.classList.contains('off')).toBe(true);
+    expect(alice!.querySelector('th .chip-disabled')?.textContent?.trim()).toBe('disabled');
+    expect(alice!.querySelector('td.sticky-group .chip-disabled')).toBeNull();
+    expect(bob!.querySelector('th .pg-name')?.classList.contains('off')).toBe(true);
+    expect(bob!.querySelector('th .chip-disabled')).toBeNull();
+    expect(bob!.querySelector('td.sticky-group .chip-disabled')?.textContent?.trim()).toBe('disabled');
   });
 
   // T17 – Disabled version
-  it('disabled version: warning banner renders at top', async () => {
+  it('disabled version: one muted line with only the tab\'s own clause (R7)', async () => {
     vi.stubGlobal('fetch', mockFetch(200, progressMock({ run: { id: 1, title: 'R', groups_enabled: true, version_is_disabled: true } })));
     mountTab();
     await settle();
-    const banner = host.querySelector('.banner-warning, [role="status"]');
-    expect(banner).toBeTruthy();
-    expect(banner!.textContent).toContain('disabled');
+    expect(host.querySelector('p.pg-note')?.textContent?.trim()).toBe('Coverage data reflects last-known state.');
+    expect(host.textContent).not.toContain('course version is disabled');
+  });
+
+  it('enabled version: no note', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    mountTab();
+    await settle();
+    expect(host.querySelector('p.pg-note')).toBeNull();
   });
 
   // T18 – Sticky CSS classes
@@ -654,5 +687,97 @@ describe('RunProgressTab', () => {
     const select = host.querySelector('select[aria-label="Filter by group"]') as HTMLSelectElement;
     const opts = Array.from(select.options).map((o) => o.value);
     expect(opts).toContain('ungrouped');
+  });
+
+  it('heat steps: 0 → --surface-muted, no data → no fill; text keeps its value', async () => {
+    const body = progressMock({
+      students: [
+        { user_id: 100, full_name: 'Alice', email: 'a@x', user_is_disabled: false,
+          group_id: 1, group_name: 'G1', group_is_disabled: false,
+          coverage: [{ sequence_id: 10, covered: 0, total: 4 }],
+          quizzes: [{ sequence_id: 10, correct: null, total: null }] },
+        { user_id: 101, full_name: 'Bob', email: 'b@x', user_is_disabled: false,
+          group_id: 1, group_name: 'G1', group_is_disabled: false,
+          coverage: [{ sequence_id: 10, covered: 0, total: 0 }],
+          quizzes: [{ sequence_id: 10, correct: 0, total: 0 }] },
+      ],
+    });
+    vi.stubGlobal('fetch', mockFetch(200, body));
+    mountTab();
+    await settle();
+    const [a, b] = Array.from(host.querySelectorAll('td.cell')) as HTMLElement[];
+    expect(a!.getAttribute('style')).toMatch(/--cell-bg:\s*var\(--surface-muted\)/);
+    expect(a!.textContent?.trim()).toBe('0/4');
+    expect(b!.getAttribute('style') ?? '').not.toContain('--cell-bg');
+    expect(b!.textContent?.trim()).toBe('—');
+  });
+
+  it('the legend: 0%, five swatches in order, 100%; its name follows the mode', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    mountTab();
+    await settle();
+    const legend = host.querySelector('.heat-legend') as HTMLElement;
+    expect(legend.getAttribute('role')).toBe('img');
+    expect(legend.getAttribute('aria-label')).toBe('Coverage scale, 0 to 100 percent');
+    expect(Array.from(legend.querySelectorAll('.hl-sw')).map((s) => s.className.match(/\bs\d\b/)?.[0]))
+      .toEqual(['s0', 's1', 's2', 's3', 's4']);
+    expect(legend.textContent?.replace(/\s+/g, ' ').trim()).toBe('0% 100%');
+    (Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Quiz') as HTMLButtonElement).click();
+    flushSync();
+    expect(legend.getAttribute('aria-label')).toBe('Score scale, 0 to 100 percent');
+  });
+
+  it('headers number blocks by position in `blocks` and sequences within their block (R13)', async () => {
+    const body = progressMock({
+      sequences: [
+        { sequence_id: 10, sequence_title: 'Vectors', sequence_order: 1, block_id: 5, block_order: 1, block_title: 'Vectors',
+          total_items: 4, has_quiz_items: true },
+        { sequence_id: 11, sequence_title: 'Spaces', sequence_order: 4, block_id: 5, block_order: 1, block_title: 'Vectors',
+          total_items: 4, has_quiz_items: true },
+        { sequence_id: 12, sequence_title: 'As a map', sequence_order: 2, block_id: 7, block_order: 3, block_title: 'Matrices',
+          total_items: 4, has_quiz_items: true },
+      ],
+      students: [],
+    });
+    vi.stubGlobal('fetch', mockFetch(200, body));
+    mountTab(1, { blocks: [
+      { id: 5, version_id: 1, title: 'Vectors', slug: 'v', order: 1, info: '', info_html: '' },
+      { id: 7, version_id: 1, title: 'Matrices', slug: 'm', order: 3, info: '', info_html: '' },
+    ] });
+    await settle();
+    expect(Array.from(host.querySelectorAll('th.block-header')).map((th) => th.textContent?.trim()))
+      .toEqual(['B1 · Vectors', 'B2 · Matrices']);
+    expect(Array.from(host.querySelectorAll('th.seq-header')).map((th) => th.textContent?.replace(/\s+/g, ' ').trim()))
+      .toEqual(['S1 Vectors', 'S2 Spaces', 'S1 As a map']);
+  });
+
+  it('a block missing from `blocks` shows its title without "B{n} · "', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    mountTab();
+    await settle();
+    expect(host.querySelector('th.block-header')?.textContent?.trim()).toBe('B1');
+  });
+
+  it('the active sort column shows a SortMark, not a glyph character', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    mountTab();
+    await settle();
+    const student = host.querySelector('th.sticky-name') as HTMLElement;
+    expect(student.querySelector('svg.sort-mark')?.getAttribute('data-dir')).toBe('asc');
+    expect(host.querySelector('thead')?.textContent).not.toMatch(/[▲▼]/);
+  });
+
+  it('toolbar: Coverage / Quiz segmented, refresh icon button, Download CSV secondary', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    mountTab();
+    await settle();
+    const seg = host.querySelector('.seg') as HTMLElement;
+    expect(Array.from(seg.querySelectorAll('button')).map((b) => [b.textContent?.trim(), b.getAttribute('aria-pressed')]))
+      .toEqual([['Coverage', 'true'], ['Quiz', 'false']]);
+    const refresh = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
+    expect(refresh.getAttribute('data-glyph')).toBe('refresh');
+    const csv = host.querySelector('button[data-action="download-csv"]') as HTMLButtonElement;
+    expect(csv.getAttribute('data-variant')).toBe('secondary');
+    expect(csv.textContent?.trim()).toBe('Download CSV');
   });
 });
