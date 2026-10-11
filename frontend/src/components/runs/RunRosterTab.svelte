@@ -11,7 +11,7 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { GroupResponse, RunStudentResponse, BulkRosterErrorCode } from '../../lib/types';
-  import type { ActiveTab } from '../../pages/runs/RunDetailPage.svelte';
+  import type { ActiveTab } from '../../lib/runTabs';
 
   type BulkOpKind = 'move' | 'delete';
   type BulkRowErrorMeta = { error_code?: BulkRosterErrorCode | null; detail?: string | null };

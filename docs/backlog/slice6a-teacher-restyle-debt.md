@@ -38,3 +38,12 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - No test pins the route table itself (`/teaching/s/runs/8` → RunDetailPage, the old address → RunsRedirect); the App-level test covers it indirectly.
 - `RunDetailPage.svelte:276` encodes `courseSlug` (a decoded route param) while the other links interpolate `course.slug` raw (API slugs are `[a-z0-9-]`). Harmless; noted so nobody "fixes" one side.
 - RunsRedirect's "renders nothing" test spies on `router.navigate` through Vitest's ESM rewriting; the null-user test confirms the spy intercepts.
+
+### T5 — run frame, tab in the address
+- The Assets "Edit" test (`RunDetailPage.tabs.svelte.test.ts`) promises "the tab has focus underneath" but asserts only the dialog; P10 (the modal returning focus to the Mini-projects tab) is checked by code reading only. Close the modal and assert `document.activeElement === tab('mini-projects')` (both lanes).
+- No test asserts that `#hash` survives a tab click (`setTab` carries `currentRoute.hash`); only the unknown-tab rewrite test covers the hash.
+- The tabpanel has no `tabindex="0"`; the ARIA tabs pattern suggests one when a panel may open on non-focusable content (Progress or Submissions while loading). Optional.
+- `isRunPath` rejects a trailing slash (`/teaching/s/runs/8/`), which the router accepts; an unknown `?tab` there is not rewritten, though the page shows Overview. Cosmetic.
+- "Open Overview" inside MiniProjectModal: FocusTrap's cleanup runs before `setTab`'s `tick()`, and its `previousFocus` (the unmounted row control) is skipped because `isConnected` is false, so the tab keeps focus. Correct, but implicit; add a comment when T10 touches the modal wiring.
+- Pre-existing: the run-change effect does not clear `pendingEditTarget` (`loadAll` does); it is non-null only between `setTab` and the modal consuming it.
+- `.run-title-row` wraps, so a long run title pushes the publish bar onto a second line (the spec says "right end of the title row"). User-approved; check at ~1000px in the browser pass.

@@ -10,7 +10,11 @@ beforeEach(() => {
   fetchSpy.mockReset();
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
   document.body.innerHTML = '';
-  location.hash = '#/courses/algebra/runs/10';
+  __resetGuardsForTests();
+  history.replaceState(null, '', '/teaching/algebra/runs/10');
+  currentRoute.path = '/teaching/algebra/runs/10';
+  currentRoute.search = '';
+  currentRoute.hash = '';
 });
 
 function jres(body: unknown, status = 200) {
@@ -125,6 +129,7 @@ describe('RunDetailPage shell', () => {
     const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
     await settle();
     expect(target.textContent).toContain('course version is disabled');
+    expect(target.querySelectorAll('.run-banner-warn')).toHaveLength(1);
     unmount(cmp);
   });
 
@@ -141,25 +146,7 @@ describe('RunDetailPage shell', () => {
     unmount(cmp);
   });
 
-  it('resets activeTab to overview and rosterPrefilter to null on runId change', async () => {
-    mockHappyPath();
-    const target = document.createElement('div');
-    document.body.appendChild(target);
-    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
-    await settle();
-    const rosterBtn = Array.from(target.querySelectorAll('button[role="tab"]')).find((b) => b.textContent?.includes('Roster')) as HTMLButtonElement;
-    rosterBtn.click();
-    flushSync();
-    expect(rosterBtn.getAttribute('aria-selected')).toBe('true');
-    unmount(cmp);
-    const cmp2 = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '11' } });
-    await settle();
-    const overviewBtn = Array.from(target.querySelectorAll('button[role="tab"]')).find((b) => b.textContent?.includes('Overview')) as HTMLButtonElement;
-    expect(overviewBtn.getAttribute('aria-selected')).toBe('true');
-    unmount(cmp2);
-  });
-
-  it('renders version label "vN (YYYY-MM-DD)" in the header (spec §7 step 4)', async () => {
+  it('the meta line names the pinned version by id, not rank (R3)', async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ version_id: 102 }));
@@ -168,7 +155,6 @@ describe('RunDetailPage shell', () => {
       if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
       if (url.includes('/versions')) return jres([
         versionFixture({ id: 100, created_at: '2026-01-01' }),
-        versionFixture({ id: 101, created_at: '2026-02-01' }),
         versionFixture({ id: 102, created_at: '2026-03-15' }),
       ]);
       if (url.includes('/teachers')) return jres([]);
@@ -180,8 +166,30 @@ describe('RunDetailPage shell', () => {
     document.body.appendChild(target);
     const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
     await settle();
-    const label = target.querySelector('[data-testid="version-label"]');
-    expect(label?.textContent).toBe('v3 (2026-03-15)');
+    expect(target.querySelector('p.run-meta')?.textContent?.trim()).toBe('0 students · v. 102');
+    // Spec §The run frame / 10a–10j: the meta line sits on the title row.
+    expect(target.querySelector('.run-title-row p.run-meta')).not.toBeNull();
+    unmount(cmp);
+  });
+
+  it('the meta line: singulars, and "· N groups" only with groups on', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres(courseFixture);
+      if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ groups_enabled: true }));
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.includes('/versions')) return jres([versionFixture()]);
+      if (url.includes('/teachers')) return jres([]);
+      if (url.includes('/groups')) return jres([{ id: 3, run_id: 10, name: 'A', is_disabled: false, student_count: 1 }]);
+      if (url.includes('/students')) return jres([{ id: 1, run_id: 10, user_id: 7, user_email: 's@x', user_full_name: 'S', group_id: 3, created_at: '2026-01-01' }]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    expect(target.querySelector('p.run-meta')?.textContent?.trim()).toBe('1 student · 1 group · v. 99');
     unmount(cmp);
   });
 
@@ -238,7 +246,7 @@ describe('RunDetailPage shell', () => {
     unmount(cmp);
   });
 
-  it('renders status badge in the header (spec §3.5 + §7 step 20)', async () => {
+  it('the title row: h1 run title and the run status chip', async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes('/courses/by-slug/')) return jres(courseFixture);
       if (url.match(/\/api\/runs\/10$/)) return jres(runFixture({ is_published: false }));
@@ -255,17 +263,13 @@ describe('RunDetailPage shell', () => {
     document.body.appendChild(target);
     const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
     await settle();
-    const badge = target.querySelector('[data-testid="status-badge"]');
-    expect(badge?.textContent).toBe('Draft');
-    expect(badge?.classList.contains('badge-draft')).toBe(true);
+    const chip = target.querySelector('.run-title-row .run-chip') as HTMLElement;
+    expect(chip.textContent?.trim()).toBe('draft');
+    expect(chip.getAttribute('data-status')).toBe('draft');
+    expect(target.querySelector('h1')?.textContent?.trim()).toBe('Spring');
     unmount(cmp);
   });
   it('deleting a run from Overview lands on /teaching/:slug (6a D3)', async () => {
-    __resetGuardsForTests();
-    history.replaceState(null, '', '/teaching/algebra/runs/10');
-    currentRoute.path = location.pathname;
-    currentRoute.search = '';
-    currentRoute.hash = '';
     mockHappyPath();
     const inner = fetchSpy.getMockImplementation()!;
     fetchSpy.mockImplementation((url: string, init?: RequestInit) =>
@@ -282,6 +286,29 @@ describe('RunDetailPage shell', () => {
     unmount(cmp);
   });
 
+  it('errors use the page ErrorState with a link back to Teaching', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return jres({ detail: 'Course not found' }, 404);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    const card = target.querySelector('.error-state.page') as HTMLElement;
+    expect(card.querySelector('h1')?.textContent).toBe('Course not found');
+    expect(card.querySelector('a')?.getAttribute('href')).toBe('/teaching');
+    unmount(cmp);
+  });
+
+  it('"Invalid run." uses the page ErrorState too', async () => {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: 'abc' } });
+    await settle();
+    expect(target.querySelector('.error-state.page h1')?.textContent).toBe('Invalid run.');
+    unmount(cmp);
+  });
 });
 
 describe('RunDetailPage — Assets tab integration', () => {
@@ -295,7 +322,7 @@ describe('RunDetailPage — Assets tab integration', () => {
       .find((b) => b.textContent?.trim() === 'Assets') as HTMLButtonElement;
     expect(assetsBtn).toBeTruthy();
     assetsBtn.click();
-    flushSync();
+    await settle();
     expect(assetsBtn.getAttribute('aria-selected')).toBe('true');
     expect(target.textContent).toMatch(/No assets yet/i);
     unmount(cmp);
@@ -399,7 +426,7 @@ describe('RunDetailPage — isThisRunTeacher derivation', () => {
     const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
     await settle();
     const submTab = Array.from(target.querySelectorAll('button[role="tab"]'))
-      .find((b) => b.textContent?.trim() === 'Submission') as HTMLButtonElement;
+      .find((b) => b.textContent?.trim() === 'Submissions') as HTMLButtonElement;
     submTab.click();
     flushSync();
     await settle();
@@ -434,7 +461,7 @@ describe('RunDetailPage — isThisRunTeacher derivation', () => {
     const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
     await settle();
     const submTab = Array.from(target.querySelectorAll('button[role="tab"]'))
-      .find((b) => b.textContent?.trim() === 'Submission') as HTMLButtonElement;
+      .find((b) => b.textContent?.trim() === 'Submissions') as HTMLButtonElement;
     submTab.click();
     flushSync();
     await settle();

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1427
+EXPECTED_CHECKS=1459
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4490,8 +4490,9 @@ FILES_6A=(
   src/components/ui/DangerConfirm.svelte src/components/ui/InlineName.svelte
   src/components/ui/InlineConfirm.svelte
   src/components/chrome/AppHeader.svelte src/pages/runs/RunsRedirect.svelte
+  src/pages/runs/RunDetailPage.svelte src/components/runs/TeachingCrumbs.svelte
 )
-LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts)
+LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts src/lib/runTabs.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
 colour_scan 6a-teacher $FILES_6A
 
@@ -4510,6 +4511,38 @@ if [[ -z $old_links ]]; then
   echo "PASS  no page link to an old /courses/…/runs address (6a D3)"
 else
   echo "FAIL  page links to old run addresses remain:"; echo "$old_links"; fail=1
+fi
+
+own run-tabs RunDetailPage.svelte
+uniq1 run-tabs
+if [[ -n $REPLY ]]; then
+  N=RunDetailPage; H=$REPLY
+  d '\.run-tab' '' 'border-bottom:2px solid transparent' 'color:var\(--muted\)'
+  chk "\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'color:var\(--text\)' 'border-bottom-color:var\(--primary\)'
+  d '\.run-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)'
+  d '\.run-meta' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
+  d '\.run-page' '' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
+  sweep RunDetailPage $H
+fi
+
+own teach-crumbs TeachingCrumbs.svelte
+uniq1 teach-crumbs
+if [[ -n $REPLY ]]; then
+  N=TeachingCrumbs; H=$REPLY
+  d '\.tc-sep' '' 'color:var\(--faint\)'
+  sweep TeachingCrumbs $H
+fi
+
+# RunStatusChip dist rows (deferred from T2: RunDetailPage is its first importer).
+uniq1 run-chip
+if [[ -n $REPLY ]]; then
+  N=RunStatusChip; H=$REPLY
+  d '\.run-chip' '' 'border-radius:var\(--radius-pill\)' 'font-size:11px' 'font-weight:500'
+  d '\.run-chip-active' '' 'background:var\(--status-awaiting-eval-bg\)' 'color:var\(--status-awaiting-eval-fg\)'
+  d '\.run-chip-upcoming' '' 'background:var\(--primary-soft\)' 'color:var\(--primary\)'
+  d '\.run-chip-ended' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
+  d '\.run-chip-draft' '' 'background:var\(--state-created-bg\)' 'color:var\(--state-created-fg\)'
+  sweep RunStatusChip $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

@@ -185,24 +185,24 @@ describe('Publish bar', () => {
 });
 
 describe('publish-bar split for course.is_admin', () => {
-  it('teacher (is_admin=false) sees status badge and version label but NOT publish/unpublish buttons', async () => {
+  it('teacher (is_admin=false) sees the chip and the meta line but NOT publish/unpublish buttons', async () => {
     const { target, cmp } = setup({
       course: { is_admin: false },
       teachers: [{ user_id: 1, user_email: 't@x.com' }],
     });
     await settle();
-    expect(target.querySelector('[data-testid="status-badge"]')).not.toBeNull();
-    expect(target.querySelector('[data-testid="version-label"]')).not.toBeNull();
+    expect(target.querySelector('.run-chip')).not.toBeNull();
+    expect(target.querySelector('p.run-meta')).not.toBeNull();
     expect(buttonByText(target, /^Publish$/)).toBeNull();
     expect(buttonByText(target, /^Unpublish$/)).toBeNull();
     unmount(cmp);
   });
 
-  it('admin (is_admin=true) sees publish or unpublish button + badge + label', async () => {
+  it('admin (is_admin=true) sees publish or unpublish button + the chip and the meta line', async () => {
     const { target, cmp } = setup({ teachers: [{ user_id: 1, user_email: 't@x.com' }] });
     await settle();
-    expect(target.querySelector('[data-testid="status-badge"]')).not.toBeNull();
-    expect(target.querySelector('[data-testid="version-label"]')).not.toBeNull();
+    expect(target.querySelector('.run-chip')).not.toBeNull();
+    expect(target.querySelector('p.run-meta')).not.toBeNull();
     const pub = buttonByText(target, /^Publish$/);
     const unpub = buttonByText(target, /^Unpublish$/);
     expect(pub !== null || unpub !== null).toBe(true);
@@ -279,25 +279,18 @@ describe('readiness sizes check — API-parity (oversized-only gate)', () => {
   });
 });
 
-describe('breadcrumb fix for teachers', () => {
-  it('teacher sees Teaching root, no /courses link', async () => {
-    const { target, cmp } = setup({ course: { is_admin: false } });
-    await settle();
-    const teachingLink = linkByText(target, 'Teaching');
-    expect(teachingLink).not.toBeNull();
-    expect(teachingLink!.getAttribute('href')).toBe('/teaching');
-    expect(linkByText(target, 'Courses')).toBeNull();
-    unmount(cmp);
-  });
-
-  it('admin sees the original Courses › ... › Runs breadcrumb', async () => {
-    const { target, cmp } = setup({});
-    await settle();
-    const coursesLink = linkByText(target, 'Courses');
-    expect(coursesLink).not.toBeNull();
-    expect(coursesLink!.getAttribute('href')).toBe('/courses');
-    unmount(cmp);
-  });
+describe('breadcrumb: Teaching / Course / Run for everyone (spec §The breadcrumb)', () => {
+  for (const isAdmin of [false, true]) {
+    it(`${isAdmin ? 'admin' : 'teacher'}: Teaching / Algebra / Spring, no /courses link`, async () => {
+      const { target, cmp } = setup({ course: { is_admin: isAdmin } });
+      await settle();
+      const nav = target.querySelector('nav[aria-label="Breadcrumb"]') as HTMLElement;
+      expect(Array.from(nav.querySelectorAll('a')).map((a) => a.getAttribute('href'))).toEqual(['/teaching', '/teaching/algebra']);
+      expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('Spring');
+      expect(linkByText(target, 'Courses')).toBeNull();
+      unmount(cmp);
+    });
+  }
 });
 
 // Helpers shared by the PublishConflictsModal-wiring tests (E3).
