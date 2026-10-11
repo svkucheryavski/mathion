@@ -12,7 +12,7 @@ vi.mock('../lib/csvWrite', async (importOriginal) => {
 });
 
 import { downloadCSV } from '../lib/csvWrite';
-import { STATUS_LABEL } from '../lib/dashboards';
+import { STATUS_LABEL, STATUS_SHORT_LABEL } from '../lib/dashboards';
 import RunSubmissionTab from '../components/runs/RunSubmissionTab.svelte';
 
 let host: HTMLDivElement;
@@ -41,13 +41,17 @@ function routedTabFetch(dashboards: unknown[], threads: unknown[]) {
   });
 }
 
-function mountTab(runId = 1) {
+function mountTab(runId = 1, extraProps: Record<string, unknown> = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
-  component = mount(RunSubmissionTab, { target: host, props: { runId } });
+  component = mount(RunSubmissionTab, { target: host, props: { runId, ...extraProps } });
   flushSync();
   return host;
 }
+const BLOCKS = [
+  { id: 5, version_id: 1, title: 'Vectors', slug: 'v', order: 1, info: '', info_html: '' },
+  { id: 6, version_id: 1, title: 'Matrices', slug: 'm', order: 4, info: '', info_html: '' },
+];
 
 beforeEach(() => { vi.restoreAllMocks(); });
 
@@ -106,7 +110,7 @@ describe('RunSubmissionTab', () => {
     expect(grid).toBeTruthy();
     expect(host.textContent).toContain('G1');
     expect(host.textContent).toContain('G2');
-    expect(host.textContent).toContain('Mini project for Block 1');
+    expect(host.querySelector('th.mp-head button')?.textContent?.trim()).toBe('B1');
   });
 
   // T3 – Error state
@@ -171,8 +175,10 @@ describe('RunSubmissionTab', () => {
     // Each badge must show the label text (the decorative status glyph was dropped, §5 #8)
     for (const status of ['not_submitted', 'awaiting_eval', 'needs_revision', 'accepted', 'rejected'] as const) {
       const badge = Array.from(badges).find((b) => b.getAttribute('data-status') === status)!;
-      expect(badge.textContent).toContain(STATUS_LABEL[status]);
+      expect(badge.textContent).toContain(STATUS_SHORT_LABEL[status]);
     }
+    expect(Array.from(badges).map((b) => b.textContent?.trim()).sort())
+      .toEqual(['accepted', 'awaiting eval', 'needs revision', 'not submitted', 'rejected']);
   });
 
   // T7 – Sort by group: click toggles direction, aria-sort updates
@@ -193,7 +199,7 @@ describe('RunSubmissionTab', () => {
     vi.stubGlobal('fetch', mockFetch(200, body));
     mountTab();
     await settle();
-    const groupTh = host.querySelector('tr.mp-titles-row th.sticky-group') as HTMLElement;
+    const groupTh = host.querySelector('thead th.sticky-group') as HTMLElement;
     expect(groupTh).toBeTruthy();
     // Default: sortKey='group', sortDir='asc' → aria-sort=ascending
     expect(groupTh.getAttribute('aria-sort')).toBe('ascending');
@@ -245,7 +251,7 @@ describe('RunSubmissionTab', () => {
     await settle();
     // Click "Mini project for Block 2" column header to sort asc
     const headerBtn = Array.from(host.querySelectorAll('th button'))
-      .find((b) => b.textContent?.includes('Block 2')) as HTMLButtonElement;
+      .find((b) => b.textContent?.includes('B2')) as HTMLButtonElement;
     headerBtn.click();
     flushSync();
     const rowsAsc = Array.from(host.querySelectorAll('tbody tr'));
@@ -276,15 +282,61 @@ describe('RunSubmissionTab', () => {
   });
 
   // T10 – Per-MP counts row
-  it('per-MP counts row renders formatCountsLine output (skip-zero rule)', async () => {
+  it('column header: the block title, then "B{n} · parts" with zero parts and "N groups" omitted (R8, R13)', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    mountTab(1, { blocks: BLOCKS });
+    await settle();
+    const heads = Array.from(host.querySelectorAll('th.mp-head'));
+    expect(heads.map((th) => th.querySelector('button')?.textContent?.trim())).toEqual(['B1', 'B2']);
+    // MP1: 1 not submitted + 1 accepted → nothing to count → bare "B1"
+    // MP2: 1 awaiting + 1 revision
+    expect(heads.map((th) => th.querySelector('.mp-line2')?.textContent?.trim()))
+      .toEqual(['B1', 'B2 · 1 awaiting · 1 revision']);
+    expect(host.textContent).not.toMatch(/\d groups/);
+  });
+
+  it('every in-scope group not submitted reads "B{n} · no submissions"', async () => {
+    const body = submissionMock();
+    (body.mini_projects as Array<Record<string, unknown>>)[1] = {
+      ...(body.mini_projects as Array<Record<string, unknown>>)[1],
+      groups: [
+        { group_id: 1, group_name: 'G1', group_is_disabled: false, status: 'not_submitted', latest_submission: null, latest_evaluation: null },
+        { group_id: 2, group_name: 'G2', group_is_disabled: false, status: 'not_submitted', latest_submission: null, latest_evaluation: null },
+      ],
+      counts: { total_groups: 2, not_submitted: 2, awaiting_eval: 0, needs_revision: 0, accepted: 0, rejected: 0 },
+    };
+    vi.stubGlobal('fetch', mockFetch(200, body));
+    mountTab(1, { blocks: BLOCKS });
+    await settle();
+    expect(host.querySelectorAll('.mp-line2')[1]!.textContent?.trim()).toBe('B2 · no submissions');
+  });
+
+  it('a block missing from `blocks` drops the "B{n}" prefix', async () => {
     vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
     mountTab();
     await settle();
-    // MP2 counts: { total_groups: 2, awaiting_eval: 1, needs_revision: 1, rejected: 0 }
-    // Expected: "2 groups · 1 awaiting · 1 revision" (rejected skipped as 0)
-    expect(host.textContent).toMatch(/2 groups.*1 awaiting.*1 revision/);
-    // rejected=0 should not appear in that line (no "0 rejected")
-    expect(host.textContent).not.toContain('0 rejected');
+    expect(Array.from(host.querySelectorAll('.mp-line2')).map((l) => l.textContent?.trim()))
+      .toEqual(['', '1 awaiting · 1 revision']);
+  });
+
+  it('the cell aria-label names the group and the block title, with the full status label', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    mountTab(1, { blocks: BLOCKS });
+    await settle();
+    const btn = host.querySelector('.status-cell-btn') as HTMLButtonElement;
+    expect(btn.getAttribute('aria-label')).toBe(`G1, B1: ${STATUS_LABEL.not_submitted}`);
+  });
+
+  it('toolbar: refresh and download are icon buttons; sort marks are SortMark', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    mountTab();
+    await settle();
+    expect((host.querySelector('button[aria-label="Refresh"]') as HTMLElement).getAttribute('data-glyph')).toBe('refresh');
+    const csv = host.querySelector('button[data-action="download-csv"]') as HTMLElement;
+    expect(csv.getAttribute('data-glyph')).toBe('download');
+    expect(csv.getAttribute('title')).toBe('Download CSV');
+    expect(host.querySelector('thead svg.sort-mark')?.getAttribute('data-dir')).toBe('asc');
+    expect(host.querySelector('thead')?.textContent).not.toMatch(/[▲▼]/);
   });
 
   // T11 – Cell click: opens DashboardSidePanel (submission variant)
@@ -306,7 +358,7 @@ describe('RunSubmissionTab', () => {
   });
 
   // T12 – Disabled group rendering
-  it('disabled group: row has disabled-row class and badge-muted "disabled" label', async () => {
+  it('disabled group: muted name and a "disabled" chip; no opacity row class', async () => {
     const body = submissionMock({
       mini_projects: [
         {
@@ -322,10 +374,10 @@ describe('RunSubmissionTab', () => {
     vi.stubGlobal('fetch', mockFetch(200, body));
     mountTab();
     await settle();
-    const row = host.querySelector('tr.disabled-row');
-    expect(row).toBeTruthy();
-    expect(host.querySelector('.badge-muted')).toBeTruthy();
-    expect(host.querySelector('.badge-muted')!.textContent?.trim()).toBe('disabled');
+    expect(host.querySelector('tr.disabled-row')).toBeNull();
+    const th = host.querySelector('tbody th') as HTMLElement;
+    expect(th.querySelector('.g-name')?.classList.contains('off')).toBe(true);
+    expect(th.querySelector('.chip-disabled')?.textContent?.trim()).toBe('disabled');
   });
 
   // T13 – Refresh button triggers refetch
@@ -592,7 +644,7 @@ describe('RunSubmissionTab', () => {
     await settle();
     // Click the MP id=2 column header to set sortKey='mp:2', sortDir='asc'
     const mpBtn = Array.from(host.querySelectorAll('th button'))
-      .find((b) => b.textContent?.includes('Block 2')) as HTMLButtonElement;
+      .find((b) => b.textContent?.includes('B2')) as HTMLButtonElement;
     mpBtn.click();
     flushSync();
     // BEFORE runId change: verify aria-sort='ascending' on the MP2 header (spec line 1082)
@@ -620,8 +672,8 @@ describe('RunSubmissionTab', () => {
     expect(host.textContent).toContain('G1');
     expect(host.textContent).toContain('G2');
     // sortKey/sortDir NOT reset: MP2 header still has aria-sort='ascending' (spec line 1082)
-    const mpTh2 = Array.from(host.querySelectorAll('th.mp-title-header'))
-      .find((th) => th.querySelector('button')?.textContent?.includes('Block 2')) as HTMLElement;
+    const mpTh2 = Array.from(host.querySelectorAll('th.mp-head'))
+      .find((th) => th.querySelector('button')?.textContent?.includes('B2')) as HTMLElement;
     expect(mpTh2.getAttribute('aria-sort')).toBe('ascending');
   });
 
@@ -673,7 +725,7 @@ describe('RunSubmissionTab', () => {
     await settle();
     // Click MP id=1 header to sort by it (asc)
     const mpBtn = Array.from(host.querySelectorAll('th button'))
-      .find((b) => b.textContent?.includes('MP1')) as HTMLButtonElement;
+      .find((b) => b.textContent?.includes('B1')) as HTMLButtonElement;
     mpBtn.click();
     flushSync();
     // Swap to run 2 (MP id=1 no longer exists — stale sortKey)
@@ -689,8 +741,8 @@ describe('RunSubmissionTab', () => {
     expect(rows[1].textContent).toContain('C');
     expect(rows[2].textContent).toContain('B');
     // The MP99 header must NOT have aria-sort set to the old stale state
-    const mp99Th = Array.from(host.querySelectorAll('th.mp-title-header'))
-      .find((th) => th.querySelector('button')?.textContent?.includes('MP99')) as HTMLElement;
+    const mp99Th = Array.from(host.querySelectorAll('th.mp-head'))
+      .find((th) => th.querySelector('button')?.textContent?.includes('B99')) as HTMLElement;
     expect(mp99Th.getAttribute('aria-sort')).toBe('none');
   });
 

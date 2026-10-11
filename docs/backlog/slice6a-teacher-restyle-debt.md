@@ -65,3 +65,10 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - `.block-header, .seq-header { position: sticky; top: 0 }` is inert (`.table-scroll` has no height limit, so headers never stick on a page scroll). Pre-existing; look at it in the browser pass.
 - The 14rem / 6rem sticky widths and `.name-box { width: calc(14rem - 25px) }` assume border-box cells; `reset.css` sets `*, *::before, *::after { box-sizing: border-box }`, so this holds in every engine. Check in Safari anyway. `.name-box`'s `white-space: normal` is redundant (the th inherits normal).
 - Pre-existing: three CSV-download tests print jsdom "Not implemented: navigation" on stderr (the anchor `click()`); not a vitest Errors line.
+
+### T8 — Submissions
+- Test strength: the mock's block titles are literally 'B1' / 'B2' / 'B99' and `BLOCKS` puts blocks 5 and 6 at positions 1 and 2, so the R13 header and aria-label tests cannot tell `block_title` from `B{position}` (an implementation printing the title in line 2, or `B${n}` in line 1, would pass). Put a third block first in `BLOCKS` and use distinct titles, then expect 'B2' / 'B3 · 1 awaiting · 1 revision' (both lanes). Same pattern as the T7 minor.
+- An empty `<span class="mp-line2">` renders when the block is missing from `blocks` and nothing is left to count; harmless (0 height); `{#if line2(mp)}` would skip it.
+- `.mp-head { min-width: 11rem }` on a table cell is undefined in CSS 2.1 (old Gecko ignored it); under `width: max-content` with nowrap headers it rarely matters.
+- Gate: the T8 block has `uniq1 submission-grid` but no `own submission-grid`; section (q) proves dist-uniqueness indirectly.
+- Pre-existing: the out-of-scope cell is `<span aria-label="No data">—</span>` with no role, which screen readers may not announce; visually-hidden text would be robust.

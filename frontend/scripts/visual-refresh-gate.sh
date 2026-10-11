@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1506
+EXPECTED_CHECKS=1518
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4492,7 +4492,7 @@ FILES_6A=(
   src/components/chrome/AppHeader.svelte src/pages/runs/RunsRedirect.svelte
   src/pages/runs/RunDetailPage.svelte src/components/runs/TeachingCrumbs.svelte
   src/components/ui/FilterPills.svelte src/pages/teaching/TeacherRunListPage.svelte src/pages/runs/RunListPage.svelte
-  src/components/runs/RunProgressTab.svelte
+  src/components/runs/RunProgressTab.svelte src/components/runs/RunSubmissionTab.svelte
 )
 LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts src/lib/runTabs.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
@@ -4611,6 +4611,25 @@ if [[ -n $REPLY ]]; then
   d '\.name-box' '' 'width:calc\(14rem - 25px\)' 'overflow-wrap:anywhere'
   d '\.chip-disabled' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
   sweep RunProgressTab $H
+fi
+
+if grep -q 'disabled-row' src/components/runs/RunSubmissionTab.svelte; then
+  echo "FAIL  RunSubmissionTab still has a .disabled-row rule"; fail=1
+else
+  echo "PASS  RunSubmissionTab has no .disabled-row (6a)"
+fi
+uniq1 submission-grid
+if [[ -n $REPLY ]]; then
+  N=RunSubmissionTab; H=$REPLY
+  d '\.mp-line2' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)' 'white-space:nowrap'
+  # Natural width (Group 12rem, one-line headers): the grid scrolls inside its card.
+  d '\.submission-grid' '' 'width:max-content'
+  d '\.chip-disabled' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  # 9a centres the mini-project headers and badges; qualified so they outrank
+  # `.submission-grid th, .submission-grid td { text-align: left }`.
+  chk "\.submission-grid\.${H} \.mp-head:where\(\.${H}\)" 'text-align:center'
+  chk "\.submission-grid\.${H} \.status-cell:where\(\.${H}\)" 'text-align:center'
+  sweep RunSubmissionTab $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

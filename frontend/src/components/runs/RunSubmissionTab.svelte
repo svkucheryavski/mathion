@@ -1,9 +1,14 @@
 <script lang="ts">
-  import { getMiniProjectsDashboard, STATUS_LABEL, STATUS_PRIORITY,
+  import { getMiniProjectsDashboard, STATUS_LABEL, STATUS_SHORT_LABEL, STATUS_PRIORITY,
            type DashboardMiniProjectsResponse, type DashboardMpRow, type DashboardMpGroupEntry }
     from '../../lib/dashboards';
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
+  import { blockPositions } from '../../lib/blockNumbers';
+  import type { BlockResponse } from '../../lib/types';
   import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
+  import ErrorState from '../ui/ErrorState.svelte';
+  import IconButton from '../ui/IconButton.svelte';
+  import SortMark from '../ui/SortMark.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
 
@@ -11,10 +16,12 @@
     runId,
     isAdmin = false,
     isTeacher = false,
+    blocks = [],
   }: {
     runId: number;
     isAdmin?: boolean;
     isTeacher?: boolean;
+    blocks?: BlockResponse[];
   } = $props();
 
   const canWrite = $derived(isAdmin || isTeacher);
@@ -131,12 +138,25 @@
     selectedIds = null;
   }
 
-  function formatCountsLine(counts: DashboardMpRow['counts']): string {
-    const parts: string[] = [`${counts.total_groups} groups`];
-    if (counts.awaiting_eval) parts.push(`${counts.awaiting_eval} awaiting`);
-    if (counts.needs_revision) parts.push(`${counts.needs_revision} revision`);
-    if (counts.rejected) parts.push(`${counts.rejected} rejected`);
+  // R8 + R13: "B2 · 3 awaiting · 1 revision · 1 rejected", zero parts omitted;
+  // "B2 · no submissions" when every in-scope group is not submitted; bare
+  // "B2" when nothing is left to count. No B{n} when the block is not in `blocks`.
+  const blockPos = $derived(blockPositions(blocks));
+  function line2(mp: DashboardMpRow): string {
+    const n = blockPos.get(mp.block_id);
+    const parts: string[] = n === undefined ? [] : [`B${n}`];
+    const c = mp.counts;
+    if (c.total_groups > 0 && c.not_submitted === c.total_groups) {
+      parts.push('no submissions');
+    } else {
+      if (c.awaiting_eval) parts.push(`${c.awaiting_eval} awaiting`);
+      if (c.needs_revision) parts.push(`${c.needs_revision} revision`);
+      if (c.rejected) parts.push(`${c.rejected} rejected`);
+    }
     return parts.join(' · ');
+  }
+  function sortAria(key: SortKey): 'ascending' | 'descending' | 'none' {
+    return sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   }
 
   function handleDownloadCSV(): void {
@@ -200,11 +220,7 @@
 </script>
 
 <div class="tab-container" data-test="run-submission-tab" data-can-write={canWrite ? 'true' : 'false'}>
-  {#if error}
-    <div class="banner banner-error" role="alert">
-      {error} <button onclick={refresh}>Retry</button>
-    </div>
-  {/if}
+  {#if error}<ErrorState title="Could not load submissions." message={error} onretry={refresh} />{/if}
 
   {#if loading}
     <LoadingPlaceholder />
@@ -217,54 +233,40 @@
       {#if data.mini_projects.length === 0}
         <div class="empty">No mini-projects in this run.</div>
       {:else}
-        <div class="controls">
-          <label>
-            Group:
-            <select bind:value={groupFilter}>
-              <option value="all">All groups</option>
-              {#each uniqueGroups as g (g.group_id)}
-                <option value={g.group_id}>{g.group_name}{g.group_is_disabled ? ' (disabled)' : ''}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="refresh-button" onclick={refresh} aria-label="Refresh">Refresh</button>
-          <button class="csv-button" onclick={handleDownloadCSV} data-action="download-csv">Download CSV</button>
+        <div class="sub-toolbar">
+          <select class="sub-control" bind:value={groupFilter} aria-label="Filter by group">
+            <option value="all">All groups</option>
+            {#each uniqueGroups as g (g.group_id)}
+              <option value={g.group_id}>{g.group_name}{g.group_is_disabled ? ' (disabled)' : ''}</option>
+            {/each}
+          </select>
+          <div class="sub-right">
+            <IconButton glyph="refresh" title="Refresh" onclick={refresh} />
+            <IconButton glyph="download" title="Download CSV" data-action="download-csv" onclick={handleDownloadCSV} />
+          </div>
         </div>
 
         <div class="table-scroll">
           <table class="submission-grid">
             <thead>
-              <tr class="mp-counts-row">
-                <th class="sticky-group" scope="col"></th>
-                {#each data.mini_projects as mp (mp.id)}
-                  <th class="mp-counts" scope="col">
-                    <small>{formatCountsLine(mp.counts)}</small>
-                  </th>
-                {/each}
-              </tr>
-              <tr class="mp-titles-row">
-                <th class="sticky-group" scope="col"
-                    aria-sort={sortKey === 'group' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button onclick={() => toggleSort('group')}>Group {#if sortKey === 'group'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
+              <tr>
+                <th class="sticky-group" scope="col" aria-sort={sortAria('group')}>
+                  <button type="button" onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
                 </th>
                 {#each data.mini_projects as mp (mp.id)}
-                  <th class="mp-title-header"
-                      scope="col"
-                      aria-sort={sortKey === `mp:${mp.id}` ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    <button onclick={() => toggleSort(`mp:${mp.id}`)}>
-                      {mp.title}{#if sortKey === `mp:${mp.id}`} {sortDir === 'asc' ? '▲' : '▼'}{/if}
-                    </button>
-                    <small class="block-subtitle">{mp.block_title}</small>
+                  <th class="mp-head" scope="col" aria-sort={sortAria(`mp:${mp.id}`)}>
+                    <button type="button" onclick={() => toggleSort(`mp:${mp.id}`)}>{mp.block_title}{#if sortKey === `mp:${mp.id}`}<SortMark dir={sortDir} />{/if}</button>
+                    <span class="mp-line2">{line2(mp)}</span>
                   </th>
                 {/each}
               </tr>
             </thead>
             <tbody>
               {#each visibleGroups as g (g.group_id)}
-                <tr class:disabled-row={g.group_is_disabled}>
+                <tr>
                   <th scope="row" class="sticky-group">
-                    {g.group_name}
-                    {#if g.group_is_disabled}<span class="badge-muted">disabled</span>{/if}
+                    <span class="g-name" class:off={g.group_is_disabled}>{g.group_name}</span>
+                    {#if g.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
                   </th>
                   {#each data.mini_projects as mp (mp.id)}
                     {@const cell = mp.groups.find((x) => x.group_id === g.group_id)}
@@ -272,8 +274,8 @@
                       {#if cell}
                         <button class="status-cell-btn"
                                 onclick={() => openPanel(mp, cell)}
-                                aria-label={`${g.group_name}, ${mp.title}: ${STATUS_LABEL[cell.status]}`}>
-                          <StatusBadge status={cell.status} />
+                                aria-label={`${g.group_name}, ${mp.block_title}: ${STATUS_LABEL[cell.status]}`}>
+                          <StatusBadge status={cell.status} label={STATUS_SHORT_LABEL[cell.status]} />
                         </button>
                       {:else}
                         <span aria-label="No data" class="empty-cell">—</span>
@@ -301,89 +303,67 @@
 </div>
 
 <style>
-  .submission-grid { border-collapse: separate; border-spacing: 0; }
-
-  .sticky-group {
-    position: sticky;
-    left: 0;
-    width: 14rem;
-    background: var(--bg, #fff);
-    z-index: 2;
+  .sub-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .sub-right { margin-left: auto; display: flex; gap: 6px; }
+  .sub-control {
+    box-sizing: border-box;
+    height: var(--control-h-sm);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--control-font);
   }
 
-  .mp-counts-row .mp-counts {
-    font-size: 0.8em;
-    color: var(--muted, #6b7280);
-    padding: 0.2rem 0.5rem;
-    text-align: center;
-  }
-
-  .mp-titles-row .mp-title-header {
-    position: sticky;
-    top: 0;
-    background: var(--bg, #fff);
-    z-index: 1;
-    padding: 0.3rem 0.5rem;
-    text-align: center;
-  }
-
-  .block-subtitle {
-    display: block;
-    font-size: 0.75em;
-    font-weight: normal;
-    color: var(--muted, #6b7280);
-  }
-
-  .status-cell {
-    padding: 0;
-    text-align: center;
-    vertical-align: middle;
-  }
-
-  .status-cell-btn {
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* Natural width (Group 12rem, one-line headers): a run with many mini-projects
+     scrolls sideways inside .table-scroll instead of squeezing the columns. */
+  .submission-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+  .submission-grid th, .submission-grid td { border-bottom: 1px solid var(--border-soft); text-align: left; }
+  .submission-grid thead th { background: var(--surface-2); color: var(--text-3); font-size: 12px; font-weight: 600; padding: 8px 12px; vertical-align: top; }
+  .submission-grid th button {
     background: none;
     border: none;
     font: inherit;
     color: inherit;
-    padding: 0.25rem 0.5rem;
+    padding: 0;
     cursor: pointer;
-    text-align: center;
-    width: 100%;
-    height: 100%;
+    text-align: left;
   }
-
-  .empty-cell {
-    color: var(--muted, #6b7280);
+  .sticky-group {
+    position: sticky;
+    left: 0;
+    width: 12rem;
+    background: var(--surface);
+    border-right: 1px solid var(--border-soft);
+    z-index: 2;
   }
+  tbody .sticky-group { padding: 8px 12px; font-size: 13px; font-weight: 400; color: var(--text); }
+  .mp-head { position: sticky; top: 0; z-index: 1; min-width: 11rem; }
+  .mp-line2 { display: block; margin-top: 2px; font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--muted); white-space: nowrap; }
 
-  .disabled-row { opacity: 0.55; font-style: italic; }
-
-  .badge-muted {
+  .g-name.off { color: var(--muted); }
+  .chip-disabled {
     display: inline-block;
-    margin-left: 0.4em;
-    padding: 0.05em 0.4em;
-    font-size: 0.75em;
-    font-style: normal;
-    font-weight: 500;
-    line-height: 1.3;
-    color: var(--muted, #6b7280);
-    background: var(--surface-muted, #f3f4f6);
-    border-radius: 0.25em;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    background: var(--state-disabled-bg);
+    color: var(--state-disabled-fg);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     vertical-align: middle;
   }
 
-  .banner-error { background: var(--status-rejected-bg); color: var(--status-rejected-fg); padding: 0.5rem 1rem; border-radius: 4px; }
-
-  .empty {
-    color: var(--muted, #6b7280);
-    padding: 1rem;
-    text-align: center;
-  }
-
-  .empty-state {
-    color: var(--muted, #6b7280);
-    padding: 1rem;
-  }
-
-
+  .status-cell { padding: 6px 12px; vertical-align: middle; }
+  .status-cell-btn { background: none; border: none; padding: 0; cursor: pointer; }
+  /* 9a centres the mini-project columns (the Group column stays left);
+     qualified to outrank `.submission-grid th, .submission-grid td` above. */
+  .submission-grid .mp-head { text-align: center; }
+  .submission-grid .status-cell { text-align: center; }
+  .empty-cell { color: var(--muted); }
+  .empty { color: var(--muted); padding: 1rem; text-align: center; }
+  .empty-state { color: var(--muted); padding: 1rem; }
 </style>

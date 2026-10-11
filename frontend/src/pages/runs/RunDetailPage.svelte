@@ -425,7 +425,7 @@
       {:else if activeTab === 'progress'}
         <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} blocks={blocks ?? []} />
       {:else if activeTab === 'submissions'}
-        <RunSubmissionTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
+        <RunSubmissionTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} blocks={blocks ?? []} />
       {:else if activeTab === 'roster'}
         <RunRosterTab
           runId={runIdInt!}
