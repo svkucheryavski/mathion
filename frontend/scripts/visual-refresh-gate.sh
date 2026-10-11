@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1599
+EXPECTED_CHECKS=1617
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -529,9 +529,12 @@ else:
 # level). Each time the new token was the ONLY change. Then once more on the
 # 5c follow-up (255b1037 -> aaed0f95): +--ordinal (the block numbers "1."),
 # again the ONLY change (dropping it reproduces 255b1037).
+# Then once more in the 6a Safari pass (aaed0f95 -> 2448f67f, user 2026-10-11):
+# +--page-max (one page width for the whole site), the ONLY change (dropping it
+# reproduces aaed0f95).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
-    ('', ':focus-visible', '1684b043'), ('', ':root', 'aaed0f95'),
+    ('', ':focus-visible', '1684b043'), ('', ':root', '2448f67f'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
@@ -2673,7 +2676,7 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 # because it is a POSITIONAL counter, not a ratio.
 W = '.%s' % h
 WANT = [
-    ('.page' + W, 'max-width:960px;margin:0 auto;padding:var(--space-3)'),
+    ('.page' + W, 'max-width:var(--page-max);margin:0 auto;padding:var(--space-3)'),
     # Student-view follow-up (user, 2026-10-08): the crumb trail ends with the
     # sequence title in bold 14px and the visible h1 is gone -- `baseline` keeps
     # the 12.5px crumbs from sitting low beside it; 14px is the gap the h1 left.
@@ -3517,7 +3520,10 @@ if [[ ${#mp[@]} -ne 1 ]]; then
 else
   echo "PASS  MP page resolves to one hash ($mp[1])"
   N=MP; H=$mp[1]
-  d '\.page' '' 'max-width:800px' 'padding:18px 20px 24px'
+  # 6a Safari pass (user, 2026-10-11): the page sits in the shared column, under the
+  # logo; the 760px reading measure (ref 1265-1266) is its inner .mp-col, left-aligned.
+  d '\.page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:18px var\(--space-3\) 24px'
+  d '\.mp-col' '' 'max-width:760px'
   d '\.breadcrumb' '' 'gap:8px' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin-bottom:10px' 'flex-wrap:wrap'
   chk "\.breadcrumb\.${H} a:where\(\.${H}\)"        'color:var\(--muted\)' 'min-width:0' 'overflow-wrap:anywhere'
   chk "\.breadcrumb\.${H} \.sep:where\(\.${H}\)"     'color:var\(--faint\)'
@@ -4330,6 +4336,34 @@ for t in 0 1 2 page row line line-strong shadow; do
 done
 if [[ $ftok -eq 0 ]]; then echo "PASS  the eight --focus-* tokens are each defined once in the theme"
 else echo "FAIL  the eight --focus-* tokens are each defined once in the theme"; fail=1; fi
+# 6a Safari pass (user, 2026-10-11): one page width for the whole site, 1140px
+# (the teacher drawings' content: 1180 artboard minus 20px gutters). Every page
+# column reads the token; reading measures (68ch quiz, 652px item, 760px
+# mini-project page) keep their own limits.
+if [[ $(grep -cE '^[[:space:]]*--page-max:[[:space:]]*1140px;' src/styles/theme-default.css) -eq 1 ]]; then
+  echo "PASS  --page-max is 1140px, defined once in the theme"
+else echo "FAIL  --page-max is 1140px, defined once in the theme"; fail=1; fi
+pmax=0
+for f in src/pages/CourseList.svelte src/pages/CourseView.svelte src/pages/SequencePlayer.svelte \
+         src/pages/editor/VersionsPage.svelte src/pages/editor/VersionEditPage.svelte \
+         src/pages/teaching/TeacherRunListPage.svelte src/pages/runs/RunListPage.svelte \
+         src/pages/runs/RunDetailPage.svelte src/pages/NotFound.svelte; do
+  [[ $(grep -cE '^[[:space:]]*\.(page|teach-page|runs-page|run-page) \{ max-width: var\(--page-max\); margin: 0 auto;' $f) -eq 1 ]] || { pmax=1; echo "      no --page-max column in $f"; }
+done
+if [[ $pmax -eq 0 ]]; then echo "PASS  all nine page columns read --page-max"
+else echo "FAIL  all nine page columns read --page-max"; fail=1; fi
+if grep -rqE 'max-width:[[:space:]]*960px' src --include='*.svelte' --include='*.css'; then
+  echo "FAIL  no hard-coded 960px page width left"; fail=1
+else echo "PASS  no hard-coded 960px page width left"; fi
+# The header bar stays full width (background + border); its row sits in the same
+# centred column, so the logo and Logout line up with the page edges (user, 2026-10-11).
+own app-header AppHeader.svelte
+uniq1 app-header
+if [[ -n $REPLY ]]; then
+  N=AppHeader; H=$REPLY
+  d '\.app-header' '' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
+  d 'nav' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
+fi
 # R3 / T1 ruling: the canvas shades <body> through a scoped :has() and the tokens only.
 if [[ $(grep -cE ':global\(body\):has\(\.canvas\.d[012]\)[[:space:]]*\{[[:space:]]*background:[[:space:]]*var\(--focus-(page|1|2)\);?[[:space:]]*\}' src/pages/editor/VersionEditPage.svelte) -eq 3 ]]; then
   echo "PASS  the canvas shades the body only through the focus tokens (d0/d1/d2)"
@@ -4525,7 +4559,8 @@ if [[ -n $REPLY ]]; then
   chk "\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'color:var\(--text\)' 'border-bottom-color:var\(--primary\)'
   d '\.run-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)'
   d '\.run-meta' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
-  d '\.run-page' '' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
+  # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
+  d '\.run-page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
   sweep RunDetailPage $H
 fi
 
@@ -4566,7 +4601,8 @@ uniq1 teach-table
 if [[ -n $REPLY ]]; then
   N=TeacherRunListPage; H=$REPLY
   chk "\.teach-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)' 'color:var\(--text-3\)'
-  d '\.teach-page' '' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
+  # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
+  d '\.teach-page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
   sweep TeacherRunListPage $H
 fi
 
@@ -4576,7 +4612,8 @@ if [[ -n $REPLY ]]; then
   N=RunListPage; H=$REPLY
   chk "\.runs-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)'
   d '\.runs-count' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
-  d '\.runs-page' '' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
+  # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
+  d '\.runs-page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
   sweep RunListPage $H
 fi
 

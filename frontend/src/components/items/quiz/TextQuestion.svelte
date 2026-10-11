@@ -56,7 +56,7 @@
   /* overflow-wrap: the prompt renders UNBOUNDED teacher markdown through
      {@html} — a long URL is likelier here than in the bounded answer below,
      and `.row` is a stretch column whose overflow escapes the quiz article
-     (max-width:652px) and .page (max-width:960px), neither of which clips,
+     (max-width:652px) and .page (max-width:var(--page-max)), neither of which clips,
      giving page-level horizontal scroll (WCAG 1.4.10). Measured in Chromium
      at 320px: it takes NO break opportunity after `/` or `.`, only at `-`, so
      a slash- or dot-joined run, a hyphen-free URL, a hash and a base64 blob

@@ -110,7 +110,7 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
   header { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-3); }
   /* The admin versions page's title size (VersionsPage .heading h1). */
   h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; }

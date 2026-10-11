@@ -506,7 +506,7 @@
 
 <style>
   /* Lines up with the header's own side padding (AppHeader: 0 var(--space-3)). */
-  .run-page { padding: var(--space-3) var(--space-3) var(--space-4); }
+  .run-page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3) var(--space-3) var(--space-4); }
   .run-head { display: flex; flex-direction: column; gap: 8px; }
   .run-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .run-title-row h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text); }

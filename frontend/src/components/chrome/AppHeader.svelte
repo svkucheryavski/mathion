@@ -54,10 +54,14 @@
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
+  /* The bar spans the window; its row sits in the page column (--page-max), so
+     the logo and Logout line up with the page edges. */
   nav {
     display: flex;
     align-items: center;
     gap: var(--space-3);
+    max-width: var(--page-max);
+    margin: 0 auto;
     padding: 0 var(--space-3);
     height: 100%;
   }

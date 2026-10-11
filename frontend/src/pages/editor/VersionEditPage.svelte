@@ -628,7 +628,7 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
   .editor-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; /* ref 1525 */ }
   .editor-heading h1 { font-size: 18px; /* 5c T5 (user): a step under ref 1526's 20px */ min-width: 0; overflow-wrap: anywhere; }
   .editor-heading a { color: var(--primary); text-decoration: none; /* ref 1526 */ }

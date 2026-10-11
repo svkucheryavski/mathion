@@ -135,7 +135,7 @@
 </div>
 
 <style>
-  .teach-page { padding: var(--space-3) var(--space-3) var(--space-4); }
+  .teach-page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3) var(--space-3) var(--space-4); }
   h1 { margin: 0 0 14px; font-size: 22px; font-weight: 600; color: var(--text); }
   .empty { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
   .teach-table { width: 100%; border-collapse: collapse; margin-top: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }

@@ -289,7 +289,7 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
   /* 5c follow-up (user): the editor's page shade, so the course page and the
      version page read alike. `.page` stays scoped: the rule ends with the page. */
   :global(body):has(.page) { background: var(--focus-page); }

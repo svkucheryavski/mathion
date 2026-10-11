@@ -89,6 +89,10 @@
   --space-4: 1.5rem;
   --space-6: 3rem;
 
+  /* --- page column: one width for the student, authoring and teaching pages
+     (the teacher drawings' content, 1180 artboard minus 20px gutters) --- */
+  --page-max: 1140px;
+
   /* --- progress heatmap: single-hue ramp, replaces the hsl() sweep --- */
   --surface-muted: #F5F6F9;   /* no data */
   --heat-1: #E1E8EE;          /* >0–25%  */

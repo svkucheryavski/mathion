@@ -451,188 +451,194 @@
 </script>
 
 <div class="page">
-  <!--
-    C16 — sr-only aria-live status announcer. MUST live OUTSIDE the
-    {#if isLoading}/{#if data} branching so its DOM node identity stays
-    stable across state transitions (the AT shouldn't re-read the whole
-    region just because data flipped from loading→loaded). The text reads
-    from `statusLiveLabel`, which is a pure derived view of data.latest_status.
-  -->
-  <div class="sr-only" aria-live="polite" data-testid="sr-live">Status: {statusLiveLabel}</div>
+  <div class="mp-col">
+    <!--
+      C16 — sr-only aria-live status announcer. MUST live OUTSIDE the
+      {#if isLoading}/{#if data} branching so its DOM node identity stays
+      stable across state transitions (the AT shouldn't re-read the whole
+      region just because data flipped from loading→loaded). The text reads
+      from `statusLiveLabel`, which is a pure derived view of data.latest_status.
+    -->
+    <div class="sr-only" aria-live="polite" data-testid="sr-live">Status: {statusLiveLabel}</div>
 
-  {#if isLoading}
-    <Skeleton rows={4} />
-  {:else if fetchErrorMessage !== null}
-    <div data-testid="fetch-error-banner">
-      <ErrorState variant="page" title="Mini-project unavailable" message={fetchErrorMessage}>
-        {#snippet action()}
-          <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
-        {/snippet}
-      </ErrorState>
-    </div>
-  {:else if data}
-    <header>
-      <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a href="/courses">Courses</a>
-        <span class="sep" aria-hidden="true">/</span>
-        <a href="/courses/{courseSlug}">{currentCourse.value?.course.name ?? '<Course Name>'}</a>
-        <span class="sep" aria-hidden="true">/</span>
-        <span class="current" aria-current="page">{titleForHeading}</span>
-      </nav>
-      <div class="title-row">
-        <h1>Mini-project — {titleForHeading}</h1>
-        <StatusPill status={data.latest_status} />
+    {#if isLoading}
+      <Skeleton rows={4} />
+    {:else if fetchErrorMessage !== null}
+      <div data-testid="fetch-error-banner">
+        <ErrorState variant="page" title="Mini-project unavailable" message={fetchErrorMessage}>
+          {#snippet action()}
+            <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
+          {/snippet}
+        </ErrorState>
       </div>
-      {#if showResub || data.hard_deadline !== null || data.soft_deadline !== null}
-        <div class="deadlines">
-          <!-- `&& data.resubmission_deadline !== null` narrows for TS; showResub already implies it. -->
-          {#if showResub && data.resubmission_deadline !== null}
-            <p class="deadline deadline-resub"><strong>Resubmission deadline</strong> · {formatRelativeDeadline(data.resubmission_deadline)}</p>
-          {:else if data.hard_deadline !== null}
-            <p class="deadline deadline-hard"><strong>Hard deadline</strong> · {formatRelativeDeadline(data.hard_deadline)}</p>
-          {/if}
-          {#if data.soft_deadline !== null}
-            <p class="deadline-soft mono">soft deadline · {formatLocalWithTz(data.soft_deadline)}</p>
-          {/if}
+    {:else if data}
+      <header>
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+          <a href="/courses">Courses</a>
+          <span class="sep" aria-hidden="true">/</span>
+          <a href="/courses/{courseSlug}">{currentCourse.value?.course.name ?? '<Course Name>'}</a>
+          <span class="sep" aria-hidden="true">/</span>
+          <span class="current" aria-current="page">{titleForHeading}</span>
+        </nav>
+        <div class="title-row">
+          <h1>Mini-project — {titleForHeading}</h1>
+          <StatusPill status={data.latest_status} />
         </div>
-      {/if}
-    </header>
-
-    <section class="assignment">
-      <h2>Assignment</h2>
-      <!-- L1 + M1: bind:this and {@html} on the SAME div; data-testid is the test seam. -->
-      <div class="assignment-html" data-testid="assignment-html" bind:this={assignmentEl}>
-        {@html data.assignment_html}
-      </div>
-    </section>
-
-    <div class="grid2">
-      <section class="group-block">
-        <h2>Your group</h2>
-        {#if data.group === null}
-          <!-- D4 friendly banner. -->
-          <p class="members">You're not yet assigned to a group. Once your teacher assigns you, you'll be able to submit.</p>
-        {:else if data.group.members.length === 1}
-          {@const me = data.group.members[0]}
-          <p class="members">Group {data.group.name} — <strong>{me.full_name} (you)</strong> — you're the only member so far.</p>
-        {:else}
-          <p class="members">
-            Group {data.group.name} —
-            {#each orderedMembers as m, i (m.user_id)}{#if i > 0}{', '}{/if}{#if m.is_me}<strong>{m.full_name} (you)</strong>{:else}{m.full_name}{/if}{/each}
-          </p>
+        {#if showResub || data.hard_deadline !== null || data.soft_deadline !== null}
+          <div class="deadlines">
+            <!-- `&& data.resubmission_deadline !== null` narrows for TS; showResub already implies it. -->
+            {#if showResub && data.resubmission_deadline !== null}
+              <p class="deadline deadline-resub"><strong>Resubmission deadline</strong> · {formatRelativeDeadline(data.resubmission_deadline)}</p>
+            {:else if data.hard_deadline !== null}
+              <p class="deadline deadline-hard"><strong>Hard deadline</strong> · {formatRelativeDeadline(data.hard_deadline)}</p>
+            {/if}
+            {#if data.soft_deadline !== null}
+              <p class="deadline-soft mono">soft deadline · {formatLocalWithTz(data.soft_deadline)}</p>
+            {/if}
+          </div>
         {/if}
-        {#if data.group?.is_disabled}
-          <!-- The disabled meaning is carried by this line alone (Constraint 2: no opacity dim). -->
-          <p class="group-notice">This group is disabled — contact your teacher.</p>
-        {/if}
+      </header>
+
+      <section class="assignment">
+        <h2>Assignment</h2>
+        <!-- L1 + M1: bind:this and {@html} on the SAME div; data-testid is the test seam. -->
+        <div class="assignment-html" data-testid="assignment-html" bind:this={assignmentEl}>
+          {@html data.assignment_html}
+        </div>
       </section>
 
-      <!-- D6 — submit / resubmit section. Renders ONLY when the group is
-           assigned AND can_submit has been resolved (true OR false with a
-           reason). When can_submit=false, render the reason banner only —
-           no file picker, no submit button. -->
-      {#if data.group !== null && data.can_submit !== null}
-        <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
-          {#if data.can_submit === true}
-            <h2>{submitHeading}</h2>
-            <div class="submit-row">
-              <label
-                class="drop"
-                class:dragover={isDragOver}
-                class:has-file={selectedFile !== null}
-                ondragover={handleDragOver}
-                ondragleave={handleDragLeave}
-                ondrop={handleDrop}
-              >
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  data-testid="mp-file-input"
-                  disabled={submitState === 'submitting'}
-                  onchange={handleFileChange}
-                  bind:this={fileInputEl}
-                />
-                <span class="drop-label">{selectedFile !== null ? selectedFile.name : 'Drop a PDF or click to pick'}</span>
-              </label>
-              <Button
-                variant="primary"
-                disabled={!canSubmitClick}
-                loading={submitState === 'submitting'}
-                onclick={handleSubmit}
-                title={selectedFile === null && submitState !== 'submitting' ? 'Pick a PDF first' : undefined}
-              >
-                {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
-              </Button>
-            </div>
-            {#if submitState === 'error' && submitErrorMessage !== null}
-              <div class="submit-error" data-testid="mp-submit-error">
-                <ErrorState title="Couldn't submit" message={submitErrorMessage} onretry={submitErrorIsNetwork ? handleSubmit : undefined} />
-              </div>
-            {/if}
-          {:else if data.can_submit_reason_if_not !== null}
-            <div class="precondition" data-testid="mp-cannot-submit">{REASON_LABELS[data.can_submit_reason_if_not]}</div>
+      <div class="grid2">
+        <section class="group-block">
+          <h2>Your group</h2>
+          {#if data.group === null}
+            <!-- D4 friendly banner. -->
+            <p class="members">You're not yet assigned to a group. Once your teacher assigns you, you'll be able to submit.</p>
+          {:else if data.group.members.length === 1}
+            {@const me = data.group.members[0]}
+            <p class="members">Group {data.group.name} — <strong>{me.full_name} (you)</strong> — you're the only member so far.</p>
+          {:else}
+            <p class="members">
+              Group {data.group.name} —
+              {#each orderedMembers as m, i (m.user_id)}{#if i > 0}{', '}{/if}{#if m.is_me}<strong>{m.full_name} (you)</strong>{:else}{m.full_name}{/if}{/each}
+            </p>
+          {/if}
+          {#if data.group?.is_disabled}
+            <!-- The disabled meaning is carried by this line alone (Constraint 2: no opacity dim). -->
+            <p class="group-notice">This group is disabled — contact your teacher.</p>
           {/if}
         </section>
-      {/if}
-    </div>
 
-    {#if data.submission_history.length > 0}
-      <section class="history">
-        <h2>Submission history</h2>
-        {#each data.submission_history as entry (entry.submission_id)}
-          <section class="history-entry">
-            <!-- D15 (restated in Slice-4 enumerated 19): the Late pill is never inside <h3>;
-                 its parent is .pills, the h3's sibling. -->
-            <div class="history-entry-header">
-              <h3>Submission <span class="mono">{entry.submission_number}</span></h3>
-              <span class="entry-meta mono">{formatLocalWithTz(entry.submitted_at)} · {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}</span>
-              <span class="pills">
-                {#if entry.is_late}
-                  <span
-                    class="pill pill-late"
-                    title={data.soft_deadline
-                      ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
-                      : 'Submitted past the soft deadline'}
-                  >Late</span>
-                {/if}
-                {#if entry.evaluation}
-                  <StatusPill status={entry.evaluation.result} />
-                {/if}
-              </span>
-            </div>
-            <div class="history-entry-body">
-              <div class="file">
-                <span class="file-kind mono" aria-hidden="true">PDF</span>
-                <span class="file-name">
-                  <span class="name">{entry.filename}</span>
-                  <span class="size mono">{formatFileSize(entry.file_size)}</span>
-                </span>
-                <a class="dl" href="/api/submissions/{entry.submission_id}/file" download title="Download" aria-label="Download {entry.filename}">
-                  <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="3" x2="8" y2="10.6"/><polyline points="4.8,7.6 8,10.8 11.2,7.6"/><line x1="3.4" y1="13" x2="12.6" y2="13"/></svg>
-                </a>
+        <!-- D6 — submit / resubmit section. Renders ONLY when the group is
+             assigned AND can_submit has been resolved (true OR false with a
+             reason). When can_submit=false, render the reason banner only —
+             no file picker, no submit button. -->
+        {#if data.group !== null && data.can_submit !== null}
+          <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
+            {#if data.can_submit === true}
+              <h2>{submitHeading}</h2>
+              <div class="submit-row">
+                <label
+                  class="drop"
+                  class:dragover={isDragOver}
+                  class:has-file={selectedFile !== null}
+                  ondragover={handleDragOver}
+                  ondragleave={handleDragLeave}
+                  ondrop={handleDrop}
+                >
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    data-testid="mp-file-input"
+                    disabled={submitState === 'submitting'}
+                    onchange={handleFileChange}
+                    bind:this={fileInputEl}
+                  />
+                  <span class="drop-label">{selectedFile !== null ? selectedFile.name : 'Drop a PDF or click to pick'}</span>
+                </label>
+                <Button
+                  variant="primary"
+                  disabled={!canSubmitClick}
+                  loading={submitState === 'submitting'}
+                  onclick={handleSubmit}
+                  title={selectedFile === null && submitState !== 'submitting' ? 'Pick a PDF first' : undefined}
+                >
+                  {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
+                </Button>
               </div>
-              {#if entry.evaluation}
-                {@const ev = entry.evaluation}
-                <div class="feedback {ev.result === 'rejected' ? 'rejected' : ev.result === 'accepted' ? 'accepted' : 'needs-revision'}">
-                  <!-- Separators as string expressions: Svelte trims whitespace at block edges, and a
-                       bare " · score " as the first node of the {#if} would lose its leading space. -->
-                  <p class="feedback-meta">{evaluationResultLabel(ev.result)}{#if ev.score !== null}{' · score '}<span class="mono">{ev.score}/100</span>{/if}{' · '}{ev.evaluated_by_full_name}, <span class="mono">{formatLocalWithTz(ev.evaluated_at)}</span></p>
-                  <p class="feedback-text">{ev.feedback_text || 'No written feedback'}</p>
-                  {#if ev.has_feedback_file}
-                    <a class="feedback-file" href="/api/evaluations/{ev.eval_id}/feedback-file" download>Download feedback</a>
-                  {/if}
+              {#if submitState === 'error' && submitErrorMessage !== null}
+                <div class="submit-error" data-testid="mp-submit-error">
+                  <ErrorState title="Couldn't submit" message={submitErrorMessage} onretry={submitErrorIsNetwork ? handleSubmit : undefined} />
                 </div>
               {/if}
-            </div>
+            {:else if data.can_submit_reason_if_not !== null}
+              <div class="precondition" data-testid="mp-cannot-submit">{REASON_LABELS[data.can_submit_reason_if_not]}</div>
+            {/if}
           </section>
-        {/each}
-      </section>
+        {/if}
+      </div>
+
+      {#if data.submission_history.length > 0}
+        <section class="history">
+          <h2>Submission history</h2>
+          {#each data.submission_history as entry (entry.submission_id)}
+            <section class="history-entry">
+              <!-- D15 (restated in Slice-4 enumerated 19): the Late pill is never inside <h3>;
+                   its parent is .pills, the h3's sibling. -->
+              <div class="history-entry-header">
+                <h3>Submission <span class="mono">{entry.submission_number}</span></h3>
+                <span class="entry-meta mono">{formatLocalWithTz(entry.submitted_at)} · {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}</span>
+                <span class="pills">
+                  {#if entry.is_late}
+                    <span
+                      class="pill pill-late"
+                      title={data.soft_deadline
+                        ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
+                        : 'Submitted past the soft deadline'}
+                    >Late</span>
+                  {/if}
+                  {#if entry.evaluation}
+                    <StatusPill status={entry.evaluation.result} />
+                  {/if}
+                </span>
+              </div>
+              <div class="history-entry-body">
+                <div class="file">
+                  <span class="file-kind mono" aria-hidden="true">PDF</span>
+                  <span class="file-name">
+                    <span class="name">{entry.filename}</span>
+                    <span class="size mono">{formatFileSize(entry.file_size)}</span>
+                  </span>
+                  <a class="dl" href="/api/submissions/{entry.submission_id}/file" download title="Download" aria-label="Download {entry.filename}">
+                    <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="3" x2="8" y2="10.6"/><polyline points="4.8,7.6 8,10.8 11.2,7.6"/><line x1="3.4" y1="13" x2="12.6" y2="13"/></svg>
+                  </a>
+                </div>
+                {#if entry.evaluation}
+                  {@const ev = entry.evaluation}
+                  <div class="feedback {ev.result === 'rejected' ? 'rejected' : ev.result === 'accepted' ? 'accepted' : 'needs-revision'}">
+                    <!-- Separators as string expressions: Svelte trims whitespace at block edges, and a
+                         bare " · score " as the first node of the {#if} would lose its leading space. -->
+                    <p class="feedback-meta">{evaluationResultLabel(ev.result)}{#if ev.score !== null}{' · score '}<span class="mono">{ev.score}/100</span>{/if}{' · '}{ev.evaluated_by_full_name}, <span class="mono">{formatLocalWithTz(ev.evaluated_at)}</span></p>
+                    <p class="feedback-text">{ev.feedback_text || 'No written feedback'}</p>
+                    {#if ev.has_feedback_file}
+                      <a class="feedback-file" href="/api/evaluations/{ev.eval_id}/feedback-file" download>Download feedback</a>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            </section>
+          {/each}
+        </section>
+      {/if}
     {/if}
-  {/if}
+  </div>
 </div>
 
 <style>
-  .page { max-width: 800px; /* ref 1265-1266: 760px content column + 20px padding each side; reset.css:1 is border-box, so the outer max is 800 for the inner to be 760 */ margin: 0 auto; padding: 18px 20px 24px; /* ref 1265 */ }
+  /* The shared page column (--page-max), so the content starts under the logo
+     (6a Safari pass); the 760px reading measure of ref 1265-1266 is .mp-col,
+     left-aligned in it. Vertical padding is ref 1265's. */
+  .page { max-width: var(--page-max); margin: 0 auto; padding: 18px var(--space-3) 24px; }
+  .mp-col { max-width: 760px; }
   header { display: flex; flex-direction: column; }
   /* Breadcrumb — ref 1267. base.css paints links --primary; the crumbs read as chrome. */
   .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; /* ref 1267 */ flex-wrap: wrap; }

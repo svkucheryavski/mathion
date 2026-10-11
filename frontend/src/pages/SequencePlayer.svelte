@@ -237,7 +237,7 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
   /* Breadcrumb — scoped to .crumbs so it never reaches the sibling
      <nav class="strip"> Items row. flex-wrap is a mechanism addition
      (Constraint 5b) so a long block title wraps the row, not its own column. */

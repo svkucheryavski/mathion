@@ -74,7 +74,7 @@
      viewport, one long unbreakable URL in a paragraph gave documentElement
      scrollWidth 753 vs clientWidth 320 — 433px of PAGE-level horizontal
      scroll, because the overflow escapes .page-item (max-width:652px) and
-     .page (max-width:960px) and neither clips (WCAG 1.4.10 reflow). Inherited
+     .page (max-width:var(--page-max)) and neither clips (WCAG 1.4.10 reflow). Inherited
      by the descendant rules below, and inert on <pre>, which keeps its own
      overflow-x:auto. */
   .content { overflow-wrap: anywhere; color: var(--text-2); }

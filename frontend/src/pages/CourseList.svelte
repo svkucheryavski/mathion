@@ -55,7 +55,7 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
   .page-head { display: flex; align-items: center; gap: 12px; /* ref 2038 */ margin-bottom: var(--space-3); /* 16px, ref 2038 */ }
   .page-head h1 { margin: 0; flex: 1; }
   .enrolled { font-family: var(--font-mono); font-size: 12px; /* ref 2040 */ color: var(--muted); }

@@ -210,7 +210,7 @@
 </div>
 
 <style>
-  .runs-page { padding: var(--space-3) var(--space-3) var(--space-4); }
+  .runs-page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3) var(--space-3) var(--space-4); }
   .runs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 14px; }
   .runs-head h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text); }
   .runs-head h1:focus { outline: none; }
