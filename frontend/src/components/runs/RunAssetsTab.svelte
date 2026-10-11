@@ -429,7 +429,8 @@
   function handleDeleteClick(assetId: number, isReferenced: boolean): void {
     if (versionIsDisabled) return;
     banner = null;
-    if (isReferenced && openSubPanelAssetId === assetId) openSubPanelAssetId = null;
+    // One panel under a row (R14): either delete confirm closes "used by".
+    if (openSubPanelAssetId === assetId) openSubPanelAssetId = null;
     openConfirm = { kind: 'delete', assetId, isReferenced };
   }
 
@@ -592,8 +593,9 @@
     const opening = openSubPanelAssetId !== assetId;
     openSubPanelAssetId = opening ? assetId : null;
     const c = confirmFor(assetId);
-    if (opening && c?.kind === 'delete' && c.isReferenced) openConfirm = null;
-    // One panel under a row (R14): "used by" closes the replace confirm too.
+    // One panel under a row (R14): "used by" closes either delete confirm and
+    // the replace confirm.
+    if (opening && c?.kind === 'delete') openConfirm = null;
     if (opening && c?.kind === 'replace') { openConfirm = null; pendingReplaceAssetId = null; }
   }
 
@@ -792,9 +794,6 @@
               {/if}
             </td>
             <td class="actions-cell">
-              {#if rc?.kind === 'delete' && !rc.isReferenced}
-                <InlineConfirm takeFocus warning="Delete this asset?" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
-              {/if}
               <span class="row-icons">
                 <IconButton glyph="refresh" size="sm" aria-label="Replace {a.filename}"
                             title={versionIsDisabled ? VERSION_OFF : 'Replace'} disabled={versionIsDisabled}
@@ -807,6 +806,15 @@
               </span>
             </td>
           </tr>
+          {#if rc?.kind === 'delete' && !rc.isReferenced}
+            <!-- A one-line full-width row under its row, like the replace confirm
+                 and the danger panel (Safari pass). -->
+            <tr class="delete-row">
+              <td colspan="7">
+                <InlineConfirm row takeFocus warning="Delete this asset?" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
+              </td>
+            </tr>
+          {/if}
           {#if rc?.kind === 'replace'}
             <tr class="replace-row">
               <td colspan="7">
@@ -952,7 +960,7 @@
   .rc-confirm { background: var(--primary); color: var(--primary-text); border: 1px solid var(--primary); }
   .rc-cancel { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); }
 
-  .danger-row td, .sub-panel-row td, .replace-row td { padding: 0 10px 10px; border-top: 0; }
+  .danger-row td, .sub-panel-row td, .replace-row td, .delete-row td { padding: 0 10px 10px; border-top: 0; }
   .sub-panel { padding: 8px 12px; background: var(--surface-2); border-radius: var(--radius); }
   .sp-head { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
   .sub-panel ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }

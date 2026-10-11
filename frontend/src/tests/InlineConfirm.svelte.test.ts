@@ -111,4 +111,16 @@ describe('InlineConfirm', () => {
     flushSync();
     expect(target.querySelector('.inline-confirm')?.hasAttribute('role')).toBe(false);
   });
+
+  it('`row` lays the question and the two buttons out on one line (Safari pass)', () => {
+    component = mount(InlineConfirm, { target, props: { warning: 'Delete this asset?', row: true, onConfirm: () => {} } });
+    flushSync();
+    expect(target.querySelector('.inline-confirm')?.classList.contains('row')).toBe(true);
+  });
+
+  it('without `row` it stays stacked', () => {
+    component = mount(InlineConfirm, { target, props: { warning: 'Delete this asset?', onConfirm: () => {} } });
+    flushSync();
+    expect(target.querySelector('.inline-confirm')?.classList.contains('row')).toBe(false);
+  });
 });

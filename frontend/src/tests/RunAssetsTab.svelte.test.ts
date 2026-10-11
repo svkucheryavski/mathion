@@ -2417,17 +2417,40 @@ describe('RunAssetsTab — 6a restyle', () => {
     expect(document.activeElement).toBe(del);
   });
 
-  it('the plain delete confirm is in the actions cell and takes focus; Cancel returns focus to Delete', async () => {
+  it('the plain delete confirm is a one-line full-width row under its row (Safari pass) and takes focus; Cancel returns focus to Delete', async () => {
     component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
     flushSync();
     const del = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
     del.click();
     flushSync();
-    expect(findButton(target, /^Confirm$/)!.closest('td')?.classList.contains('actions-cell')).toBe(true);
+    const row = findButton(target, /^Confirm$/)!.closest('tr') as HTMLTableRowElement;
+    expect(row.classList.contains('delete-row')).toBe(true);
+    expect(row.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
+    expect(row.querySelector('td')?.getAttribute('colspan')).toBe('7');
+    expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete this asset\?/);
+    expect(target.querySelector('tr[data-asset-id="1"] .actions-cell .inline-confirm')).toBeNull();
     expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
     (document.activeElement as HTMLButtonElement).click();
     await settle();
     expect(document.activeElement).toBe(del);
+  });
+
+  it('the plain delete row and the "used by" panel never show together, either way round (R14)', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    const chip = findButton(target, /0 uses$/)!;
+    chip.click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+    (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(target.querySelector('tr.delete-row')).not.toBeNull();
+    expect(target.querySelector('#uses-1')).toBeNull();
+    expect(chip.getAttribute('aria-expanded')).toBe('false');
+    chip.click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+    expect(target.querySelector('tr.delete-row')).toBeNull();
   });
 
   it('the replace confirm gives Cancel the focus; Cancel and Esc return it to Replace', async () => {

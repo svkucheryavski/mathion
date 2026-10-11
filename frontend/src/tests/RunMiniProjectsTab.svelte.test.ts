@@ -823,12 +823,19 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     expect(document.activeElement).toBe(byAction(target, 'delete'));
   });
 
-  it('the plain confirm sits in the actions cell, takes focus, and Cancel returns focus to the 🗑', async () => {
+  it('the plain confirm is a one-line full-width row under its row (Safari pass), takes focus, and Cancel returns focus to the 🗑', async () => {
     const { target } = mountMpTab({ miniProjects: [mkMp()] });
     await settle();
     byAction(target, 'delete')!.click();
     await settle();
-    expect(byAction(target, 'confirm-delete')!.closest('td')?.classList.contains('mp-actions')).toBe(true);
+    const row = byAction(target, 'confirm-delete')!.closest('tr') as HTMLTableRowElement;
+    expect(row.classList.contains('mp-panel-row')).toBe(true);
+    expect(row.previousElementSibling?.getAttribute('data-role')).toBe('mp-row');
+    expect(row.querySelector('td')?.getAttribute('colspan')).toBe('4');
+    expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete this mini-project\?/);
+    const cell = target.querySelector('tr[data-role="mp-row"] .mp-actions') as HTMLElement;
+    expect(cell.querySelector('.inline-confirm')).toBeNull();
+    expect(cell.querySelector('[data-action="delete"]')).not.toBeNull();
     expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
     (document.activeElement as HTMLButtonElement).click();
     await settle();
@@ -904,5 +911,14 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     byAction(target, 'dismiss-delete-error')!.click();
     flushSync();
     expect(target.querySelector('[data-role="delete-error-banner"]')).toBeNull();
+  });
+
+  it('each deadline label ("soft", "hard", "resub") is its own semi-bold span, apart from the date (Safari pass)', async () => {
+    const { target } = mountMpTab({ miniProjects: [mkMp({
+      soft_deadline: '2026-09-14T11:47:00Z', hard_deadline: '2026-09-21T11:47:00Z', resubmission_deadline: '2026-09-28T11:47:00Z',
+    })] });
+    await settle();
+    const kinds = Array.from(target.querySelectorAll('td.mp-dl .dl .dl-kind')).map((e) => e.textContent);
+    expect(kinds).toEqual(['soft', 'hard', 'resub']);
   });
 });

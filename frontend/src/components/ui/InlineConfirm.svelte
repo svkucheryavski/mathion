@@ -14,6 +14,7 @@
     onCancel,
     takeFocus = false,
     label,
+    row = false,
   }: {
     confirmLabel?: string;
     confirmDataAction?: string;
@@ -22,6 +23,9 @@
     onCancel?: () => void;
     takeFocus?: boolean;
     label?: string;
+    // The question and the two buttons on one line, for a confirm that opens
+    // as a full-width row under its table row (Safari pass).
+    row?: boolean;
   } = $props();
 
   const uid = $props.id();
@@ -39,7 +43,7 @@
   }
 </script>
 
-<div class="inline-confirm" role={named ? 'group' : undefined} aria-label={label}
+<div class="inline-confirm" class:row role={named ? 'group' : undefined} aria-label={label}
      aria-labelledby={!label && warning ? warnId : undefined}>
   {#if warning}<div class="warning" id={warnId}>{warning}</div>{/if}
   <div class="actions">
@@ -52,6 +56,7 @@
   .inline-confirm { display: inline-flex; flex-direction: column; gap: 4px; }
   .warning { color: var(--muted); font-size: 0.85em; }
   .actions { display: inline-flex; gap: 6px; }
+  .inline-confirm.row { flex-direction: row; align-items: center; gap: 12px; }
   /* Destructive confirm uses the danger-TEXT convention (never a red fill). */
   .confirm { color: var(--danger); }
 </style>

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1617
+EXPECTED_CHECKS=1624
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4352,6 +4352,14 @@ for f in src/pages/CourseList.svelte src/pages/CourseView.svelte src/pages/Seque
 done
 if [[ $pmax -eq 0 ]]; then echo "PASS  all nine page columns read --page-max"
 else echo "FAIL  all nine page columns read --page-max"; fail=1; fi
+# Safari pass (user, 2026-10-11): a plain delete confirm opens as a one-line row
+# under its row (Mini-projects, Assets) — InlineConfirm's `row` layout.
+own inline-confirm InlineConfirm.svelte
+uniq1 inline-confirm
+if [[ -n $REPLY ]]; then
+  N=InlineConfirm; H=$REPLY
+  d '\.inline-confirm\.row' '' 'flex-direction:row' 'align-items:center' 'gap:12px'
+fi
 if grep -rqE 'max-width:[[:space:]]*960px' src --include='*.svelte' --include='*.css'; then
   echo "FAIL  no hard-coded 960px page width left"; fail=1
 else echo "PASS  no hard-coded 960px page width left"; fi
@@ -4735,6 +4743,8 @@ if [[ -n $REPLY ]]; then
   d '\.chip-published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
   d '\.chip-locked' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
   d '\.mp-dl' '' 'font-family:var\(--font-mono\)'
+  # Safari pass (user, 2026-10-11): the deadline labels stand apart from the dates.
+  d '\.dl-kind' '' 'font-weight:600' 'color:var\(--text\)'
   d '\.mp-banner' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
   d '\.mp-banner-err' '' 'background:var\(--status-rejected-bg\)' 'border-left-color:var\(--danger\)'
   sweep RunMiniProjectsTab $H

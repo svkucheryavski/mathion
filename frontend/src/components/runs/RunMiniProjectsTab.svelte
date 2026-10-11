@@ -286,16 +286,11 @@
               <td class="mp-dl">
                 {#each deadlineParts(r.mp) as p, i (p.kind)}
                   {#if i > 0}<span class="mp-sep" aria-hidden="true">·</span>{/if}
-                  <span class="dl" title={formatLocalWithTz(p.iso)}>{p.kind} {formatShortDeadline(p.iso)}</span>
+                  <span class="dl" title={formatLocalWithTz(p.iso)}><span class="dl-kind">{p.kind}</span> {formatShortDeadline(p.iso)}</span>
                 {/each}
               </td>
               <td><span class="mp-chip chip-{status}">{status}</span></td>
               <td class="mp-actions">
-                {#if deleteConfirmId === r.mp.id && status !== 'locked'}
-                  <InlineConfirm takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
-                                 confirmDataAction="confirm-delete"
-                                 onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
-                {/if}
                 <span class="row-icons">
                   <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? 'Edit'}
                               disabled={reason !== undefined} data-action="edit"
@@ -306,12 +301,20 @@
                 </span>
               </td>
             </tr>
-            {#if deleteConfirmId === r.mp.id && status === 'locked'}
+            {#if deleteConfirmId === r.mp.id}
+              <!-- Both confirms open as a full-width row under their row (Safari
+                   pass): the plain one on one line, the danger panel for a locked row. -->
               <tr class="mp-panel-row">
                 <td colspan="4">
-                  <DangerConfirm message={forceMessage} busy={forceBusy}
-                                 disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
-                                 onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
+                  {#if status === 'locked'}
+                    <DangerConfirm message={forceMessage} busy={forceBusy}
+                                   disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
+                                   onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
+                  {:else}
+                    <InlineConfirm row takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
+                                   confirmDataAction="confirm-delete"
+                                   onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
+                  {/if}
                 </td>
               </tr>
             {/if}
@@ -391,6 +394,8 @@
   .chip-draft { background: var(--state-created-bg); color: var(--state-created-fg); }
   .chip-published { background: var(--state-published-bg); color: var(--state-published-fg); }
   .chip-locked { background: var(--state-archived-bg); color: var(--state-archived-fg); }
+  /* The label stands apart from its date (Safari pass). */
+  .dl-kind { font-weight: 600; color: var(--text); }
 
   .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>
