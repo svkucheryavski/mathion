@@ -37,6 +37,16 @@ const blocks: BlockResponse[] = [
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
+const mpBase: MiniProjectResponse = {
+  id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+  assignment_md: 'x', assignment_html: '<p>x</p>',
+  soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+  is_published: false, first_submitted_at: null,
+  created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+};
+const mkMp = (o: Partial<MiniProjectResponse> = {}): MiniProjectResponse => ({ ...mpBase, ...o });
+const byAction = (t: HTMLElement, a: string) => t.querySelector(`button[data-action="${a}"]`) as HTMLButtonElement | null;
+
 // Centralised mount helper: builds defaults for all required props (including
 // `course`, threaded as required by RunMiniProjectsTab at T12) and merges
 // caller overrides. Course may be passed partial; it merges onto baseCourse so
@@ -85,11 +95,13 @@ describe('RunMiniProjectsTab', () => {
     expect(onNav).toHaveBeenCalledWith('overview');
   });
 
-  it('actionable banner when versionIsDisabled; [+ New] disabled with tooltip (spec lines 548, 595)', async () => {
+  it('versionIsDisabled (admin): only the "See Overview" line; [+ New] disabled with tooltip (R7)', async () => {
     const onNav = vi.fn();
     const { target } = mountMpTab({ versionIsDisabled: true, onNavigateToTab: onNav });
     await settle();
-    expect(target.textContent).toContain("This run's course version is disabled");
+    // R7: the frame shows the version banner once; the tab keeps only the admin's link.
+    expect(target.textContent).not.toContain("This run's course version is disabled");
+    expect(target.querySelector('.mp-note button[data-action="nav-overview-version"]')?.textContent).toBe('See Overview');
     const link = target.querySelector('button[data-action="nav-overview-version"]') as HTMLElement;
     link.click();
     expect(onNav).toHaveBeenCalledWith('overview');
@@ -148,23 +160,24 @@ describe('RunMiniProjectsTab', () => {
     expect(btn.title).toContain('already have a mini-project');
   });
 
-  it('MP rows sorted by block.order asc; status pill mapping', async () => {
-    const mps: MiniProjectResponse[] = [
-      { id: 2, run_id: 10, block_id: 2, title: 'Mini project for Block 1', assignment_md: 'x', assignment_html: '<p>x</p>', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: true, first_submitted_at: null, created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
-      { id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0', assignment_md: 'x', assignment_html: '<p>x</p>', soft_deadline: null, hard_deadline: null, resubmission_deadline: null, is_published: false, first_submitted_at: '2026-05-22T00:00:00Z', created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z' },
+  it('rows sorted by block position, "Block {n} — title" (R13); lowercase state chips; locked ✎ disabled with its reason', async () => {
+    const mps = [
+      mkMp({ id: 2, block_id: 2, is_published: true }),
+      mkMp({ id: 1, block_id: 1, first_submitted_at: '2026-05-22T00:00:00Z' }),
     ];
     const { target } = mountMpTab({ miniProjects: mps });
     await settle();
-    const rows = Array.from(target.querySelectorAll('[data-role="mp-row"]'));
+    const rows = Array.from(target.querySelectorAll('tr[data-role="mp-row"]'));
     expect(rows.length).toBe(2);
-    expect(rows[0].textContent).toContain('Block 0');
-    expect(rows[0].textContent).toContain('Locked');
-    expect(rows[1].textContent).toContain('Block 1');
-    expect(rows[1].textContent).toContain('Published');
-    expect(rows[0].querySelector('button[data-action="edit"]')).toBeNull();
-    // Modal-only-publish contract (spec line 553): NO row-level Publish button on
-    // ANY MP state, including Published and Locked rows. Locks the contract for
-    // the states this test renders.
+    expect(rows[0].querySelector('.mp-block')?.textContent).toBe('Block 1 — Intro');
+    expect(rows[0].querySelector('.mp-chip')?.textContent).toBe('locked');
+    expect(rows[1].querySelector('.mp-block')?.textContent).toBe('Block 2 — Theory');
+    expect(rows[1].querySelector('.mp-chip')?.textContent).toBe('published');
+    const lockedEdit = rows[0].querySelector('button[data-action="edit"]') as HTMLButtonElement;
+    expect(lockedEdit.disabled).toBe(true);
+    expect(lockedEdit.getAttribute('title')).toBe('Has submissions — editing is off');
+    expect(lockedEdit.getAttribute('aria-label')).toBe('Edit mini-project for Block 1');
+    // Modal-only publish (spec line 553): no row-level Publish button on any state.
     expect(rows[0].querySelector('button[data-action="publish"]')).toBeNull();
     expect(rows[1].querySelector('button[data-action="publish"]')).toBeNull();
   });
@@ -242,7 +255,7 @@ describe('RunMiniProjectsTab', () => {
     expect(propsRef.onRefetchMiniProjects).toHaveBeenCalledTimes(1);
     expect(target.textContent).toContain('Force delete will permanently remove');
     expect(target.querySelector('input[type="checkbox"]')).toBeTruthy();
-    expect(target.querySelector('button.danger')).toBeTruthy();
+    expect(target.querySelector('button[data-action="force-delete"]')).toBeTruthy();
 
     unmount(cmp);
   });
@@ -272,7 +285,7 @@ describe('RunMiniProjectsTab', () => {
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
-    (target.querySelector('button.danger') as HTMLButtonElement).click();
+    (target.querySelector('button[data-action="force-delete"]') as HTMLButtonElement).click();
     await settle();
     expect(target.textContent).toMatch(/Internal server error/);
     expect(target.querySelector('[data-role="delete-error-banner"]')).toBeTruthy();
@@ -448,16 +461,18 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     first_submitted_at: null,
   };
 
-  it('teacher + locked MP: no Delete × button rendered for that row, no force-confirm UI', async () => {
+  it('teacher + locked MP: 🗑 opens the danger panel with Force delete disabled and its reason (R5)', async () => {
     const { target } = mountMpTab({
       course: { is_admin: false },
       miniProjects: [lockedMp],
     });
     await settle();
-    const row = target.querySelector('[data-role="mp-row"]') as HTMLElement;
-    expect(row).toBeTruthy();
-    expect(row.querySelector('button[data-action="delete"]')).toBeNull();
-    expect(target.textContent).not.toContain('Force delete will permanently remove');
+    byAction(target, 'delete')!.click();
+    await settle();
+    expect(target.textContent).toContain('Force delete will permanently remove');
+    const force = byAction(target, 'force-delete')!;
+    expect(force.disabled).toBe(true);
+    expect(force.getAttribute('title')).toBe('Only a course admin can force delete.');
   });
 
   it('admin + locked MP: Delete × button present; clicking opens force-confirm with "I understand"', async () => {
@@ -536,13 +551,13 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     expect(target.querySelector('button[data-action="nav-overview-groups"]')).toBeTruthy();
   });
 
-  it('teacher + versionIsDisabled: "See Overview" link NOT rendered, banner text IS', async () => {
+  it('teacher + versionIsDisabled: no version line at all (R7)', async () => {
     const { target } = mountMpTab({
       course: { is_admin: false },
       versionIsDisabled: true,
     });
     await settle();
-    expect(target.textContent).toContain("This run's course version is disabled");
+    expect(target.textContent).not.toContain("This run's course version is disabled");
     expect(target.querySelector('button[data-action="nav-overview-version"]')).toBeNull();
   });
 
@@ -641,7 +656,7 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     // Defense-in-depth: force-confirm panel must NOT appear for teachers
     // even though the (now-locked) MP would trigger the locked branch for
     // an admin.
-    expect(target.querySelector('.force-confirm')).toBeNull();
+    expect(target.querySelector('.danger-confirm')).toBeNull();
     expect(target.textContent).not.toContain('Force delete will permanently remove');
     expect(target.textContent).not.toContain('I understand');
 
@@ -657,27 +672,12 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     unmount(cmp);
   });
 
-  it('teacher: external rowStatus flip to locked while deleteConfirmId is set — force-confirm panel does NOT render (line-269 gate isolation)', async () => {
-    // This test pins the line-269 `course.is_admin` clause specifically:
-    // it bypasses handleDeleteConfirm (which would clear deleteConfirmId
-    // for teachers in the 409 path) by mutating miniProjects directly
-    // through the $state proxy. Without the line-269 gate, the force-confirm
-    // panel would render after the row flips to locked.
+  it('teacher: a row that turns locked while its confirm is open swaps to the danger panel with Force delete disabled', async () => {
     const localBlocks: BlockResponse[] = [
       { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
     ];
-    const unlocked: MiniProjectResponse = {
-      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
-      assignment_md: 'x', assignment_html: '<p>x</p>',
-      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
-      is_published: true, first_submitted_at: null,
-      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
-    };
-    const locked: MiniProjectResponse = {
-      ...unlocked,
-      first_submitted_at: '2026-04-15T10:00:00Z',
-    };
-
+    const unlocked = mkMp({ is_published: true });
+    const locked = mkMp({ is_published: true, first_submitted_at: '2026-04-15T10:00:00Z' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const propsRef: any = $state({
       runId: 10, runIsPublished: true, runGroupsEnabled: true,
@@ -688,30 +688,17 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
       onNavigateToTab: vi.fn(),
       course: { ...baseCourse, is_admin: false },
     });
-
     const target = document.createElement('div');
     document.body.appendChild(target);
     const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
     await settle();
-
-    // Open InlineConfirm on the unlocked row → deleteConfirmId = mp.id.
-    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    byAction(target, 'delete')!.click();
     await settle();
-    expect(target.querySelector('button[data-action="confirm-delete"]')).not.toBeNull();
-
-    // Flip the row to locked WITHOUT going through handleDeleteConfirm —
-    // simulates an external state change (parent prop refetch, webhook,
-    // etc.). deleteConfirmId remains set from the prior click.
+    expect(byAction(target, 'confirm-delete')).not.toBeNull();
     propsRef.miniProjects = [locked];
     await settle();
-
-    // For the teacher, the force-confirm panel must NOT render even though
-    // deleteConfirmId is set AND rowStatus is now 'locked'. The line-269
-    // `&& course.is_admin` gate is the only thing preventing it.
-    expect(target.querySelector('.force-confirm')).toBeNull();
-    expect(target.textContent).not.toContain('I understand');
-    expect(target.textContent).not.toContain('Force delete will permanently');
-
+    expect(byAction(target, 'confirm-delete')).toBeNull();
+    expect(byAction(target, 'force-delete')!.disabled).toBe(true);
     unmount(cmp);
   });
 
@@ -737,5 +724,185 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
     const dialog = target.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog!.querySelector('button[data-action="publish"]')).toBeTruthy();
+  });
+});
+
+describe('RunMiniProjectsTab — 6a restyle', () => {
+  it('header: h2 with the mono "N of M blocks" count; + is an icon button named "New mini-project"', async () => {
+    const { target } = mountMpTab({ miniProjects: [mkMp()] });
+    await settle();
+    const h2 = target.querySelector('h2') as HTMLElement;
+    expect(h2.textContent?.replace(/\s+/g, ' ').trim()).toBe('Mini-projects 1 of 2 blocks');
+    expect(h2.getAttribute('tabindex')).toBe('-1');
+    const plus = byAction(target, 'new-mp')!;
+    expect(plus.getAttribute('data-glyph')).toBe('plus');
+    expect(plus.getAttribute('aria-label')).toBe('New mini-project');
+    expect(plus.getAttribute('title')).toBe('New mini-project');
+  });
+
+  it('the count takes its singular at one block', async () => {
+    const { target } = mountMpTab({ blocks: [blocks[0]!], miniProjects: [mkMp()] });
+    await settle();
+    expect(target.querySelector('.sec-count')?.textContent).toBe('1 of 1 block');
+  });
+
+  it('"Block {n}" follows list position, not the stored order (R13)', async () => {
+    const gapBlocks: BlockResponse[] = [
+      { id: 5, version_id: 7, title: 'Vectors', slug: 'v', order: 1, info: '', info_html: '' },
+      { id: 9, version_id: 7, title: 'Matrices', slug: 'm', order: 3, info: '', info_html: '' },
+    ];
+    const { target } = mountMpTab({ blocks: gapBlocks, miniProjects: [mkMp({ id: 1, block_id: 9 }), mkMp({ id: 2, block_id: 5 })] });
+    await settle();
+    expect(Array.from(target.querySelectorAll('.mp-block')).map((c) => c.textContent))
+      .toEqual(['Block 1 — Vectors', 'Block 2 — Matrices']);
+  });
+
+  it('deadlines: short English form with time; full value in title; zone in the header (R12)', async () => {
+    const { target } = mountMpTab({
+      miniProjects: [mkMp({ soft_deadline: '2026-08-07T21:59:00Z', hard_deadline: '2026-08-14T21:59:00Z' })],
+    });
+    await settle();
+    const parts = Array.from(target.querySelectorAll('.mp-dl .dl')) as HTMLElement[];
+    expect(parts.map((p) => p.textContent)).toEqual(['soft 07 Aug 23:59', 'hard 14 Aug 23:59']);
+    expect(parts[0]!.getAttribute('title')).toBe('2026-08-07 23:59 GMT+2');
+    expect(target.querySelectorAll('thead th')[1]!.textContent).toBe('Deadlines (GMT+2)');
+  });
+
+  it('mixed offsets give "Deadlines (local time)"; each part keeps its own offset (Review Focus 5)', async () => {
+    const { target } = mountMpTab({
+      miniProjects: [
+        mkMp({ id: 1, block_id: 1, soft_deadline: '2026-08-07T21:59:00Z' }),
+        mkMp({ id: 2, block_id: 2, resubmission_deadline: '2026-01-10T22:59:00Z' }),
+      ],
+    });
+    await settle();
+    expect(target.querySelectorAll('thead th')[1]!.textContent).toBe('Deadlines (local time)');
+    const parts = Array.from(target.querySelectorAll('.mp-dl .dl')) as HTMLElement[];
+    expect(parts.map((p) => p.textContent)).toEqual(['soft 07 Aug 23:59', 'resub 10 Jan 23:59']);
+    expect(parts[0]!.getAttribute('title')).toBe('2026-08-07 23:59 GMT+2');
+    expect(parts[1]!.getAttribute('title')).toBe('2026-01-10 23:59 GMT+1');
+  });
+
+  it('no deadlines: the header reads "Deadlines"', async () => {
+    const { target } = mountMpTab({ miniProjects: [mkMp()] });
+    await settle();
+    expect(target.querySelectorAll('thead th')[1]!.textContent).toBe('Deadlines');
+    expect(target.querySelectorAll('.mp-dl .dl')).toHaveLength(0);
+  });
+
+  it('a disabled version: ✎ on a draft row is disabled with the version reason', async () => {
+    const { target } = mountMpTab({ versionIsDisabled: true, miniProjects: [mkMp()] });
+    await settle();
+    const edit = byAction(target, 'edit')!;
+    expect(edit.disabled).toBe(true);
+    expect(edit.getAttribute('title')).toBe("This run's course version is disabled.");
+  });
+
+  it('every row shows its 🗑, named by the block', async () => {
+    const { target } = mountMpTab({
+      course: { is_admin: false },
+      miniProjects: [mkMp({ id: 1, block_id: 1, first_submitted_at: '2026-05-22T00:00:00Z' }), mkMp({ id: 2, block_id: 2 })],
+    });
+    await settle();
+    const trash = Array.from(target.querySelectorAll('button[data-action="delete"]'));
+    expect(trash.map((b) => b.getAttribute('aria-label'))).toEqual(['Delete mini-project for Block 1', 'Delete mini-project for Block 2']);
+  });
+
+  it('the danger panel is a full-width row under its row (P12); Cancel returns focus to the 🗑', async () => {
+    const { target } = mountMpTab({ miniProjects: [mkMp({ first_submitted_at: '2026-05-22T00:00:00Z' })] });
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    const panelRow = target.querySelector('tr.mp-panel-row') as HTMLTableRowElement;
+    expect(panelRow.previousElementSibling?.getAttribute('data-role')).toBe('mp-row');
+    expect(panelRow.querySelector('td')?.getAttribute('colspan')).toBe('4');
+    expect(document.activeElement?.getAttribute('data-role')).toBe('danger-ack');
+    (Array.from(panelRow.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('tr.mp-panel-row')).toBeNull();
+    expect(document.activeElement).toBe(byAction(target, 'delete'));
+  });
+
+  it('the plain confirm sits in the actions cell, takes focus, and Cancel returns focus to the 🗑', async () => {
+    const { target } = mountMpTab({ miniProjects: [mkMp()] });
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    expect(byAction(target, 'confirm-delete')!.closest('td')?.classList.contains('mp-actions')).toBe(true);
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+    (document.activeElement as HTMLButtonElement).click();
+    await settle();
+    expect(document.activeElement).toBe(byAction(target, 'delete'));
+  });
+
+  it('deleting the only mini-project moves focus to +', async () => {
+    fetchSpy.mockImplementation(() => jres(null, 204));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks,
+      miniProjects: [mkMp()],
+      onRefetchMiniProjects: async () => { propsRef.miniProjects = []; },
+      onNavigateToTab: vi.fn(),
+      course: baseCourse,
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    await settle();
+    expect(target.textContent).toContain('No mini-projects yet');
+    expect(document.activeElement).toBe(byAction(target, 'new-mp'));
+    unmount(cmp);
+  });
+
+  it('deleting the only mini-project while + is disabled moves focus to the h2 (Review Focus 3)', async () => {
+    fetchSpy.mockImplementation(() => jres(null, 204));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: false, runGroupsEnabled: false,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks,
+      miniProjects: [mkMp()],
+      onRefetchMiniProjects: async () => { propsRef.miniProjects = []; },
+      onNavigateToTab: vi.fn(),
+      course: baseCourse,
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+    expect(byAction(target, 'new-mp')!.disabled).toBe(true);
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('h2'));
+    unmount(cmp);
+  });
+
+  it('banners: info banners carry their class; the delete error is an alert with Dismiss', async () => {
+    fetchSpy.mockImplementation(() => jres({ detail: 'Boom' }, 500));
+    const { target } = mountMpTab({ runIsPublished: false, runGroupsEnabled: false, miniProjects: [mkMp()] });
+    await settle();
+    expect(target.querySelectorAll('.mp-banner:not(.mp-banner-err)')).toHaveLength(2);
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    const err = target.querySelector('[data-role="delete-error-banner"]') as HTMLElement;
+    expect(err.classList.contains('mp-banner-err')).toBe(true);
+    expect(err.getAttribute('role')).toBe('alert');
+    expect(err.textContent).toContain('Boom');
+    expect(document.activeElement).toBe(byAction(target, 'delete'));
+    byAction(target, 'dismiss-delete-error')!.click();
+    flushSync();
+    expect(target.querySelector('[data-role="delete-error-banner"]')).toBeNull();
   });
 });

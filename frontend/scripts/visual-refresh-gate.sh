@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1557
+EXPECTED_CHECKS=1583
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4494,6 +4494,7 @@ FILES_6A=(
   src/components/ui/FilterPills.svelte src/pages/teaching/TeacherRunListPage.svelte src/pages/runs/RunListPage.svelte
   src/components/runs/RunProgressTab.svelte src/components/runs/RunSubmissionTab.svelte
   src/components/runs/RunGroupsTab.svelte src/components/runs/RunTeachersTab.svelte
+  src/components/runs/RunMiniProjectsTab.svelte
 )
 LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts src/lib/runTabs.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
@@ -4670,6 +4671,36 @@ if [[ -n $REPLY ]]; then
   d '\.chip-invited' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
   d '\.t-email' '' 'font-family:var\(--font-mono\)'
   sweep RunTeachersTab $H
+fi
+
+# Deferred from T3 (its own row already ships there): the shared danger panel,
+# graded now that T10 consumes it.
+uniq1 danger-confirm
+if [[ -n $REPLY ]]; then
+  N=DangerConfirm; H=$REPLY
+  d '\.danger-confirm' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  d '\.dc-force' '' 'background:var\(--danger-off-bg\)' 'color:var\(--danger-off-text\)' 'border:1px solid var\(--danger-off-border\)'
+  d '\.dc-force\.armed' '' 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  sweep DangerConfirm $H
+fi
+
+# Mini-projects: the danger panel is the shared one (P9), no local checkbox.
+if grep -qE 'forceCheckbox|force-confirm' src/components/runs/RunMiniProjectsTab.svelte; then
+  echo "FAIL  RunMiniProjectsTab still has its own force-confirm panel"; fail=1
+else
+  echo "PASS  RunMiniProjectsTab uses DangerConfirm (6a)"
+fi
+own mp-table RunMiniProjectsTab.svelte
+uniq1 mp-table
+if [[ -n $REPLY ]]; then
+  N=RunMiniProjectsTab; H=$REPLY
+  d '\.chip-draft' '' 'background:var\(--state-created-bg\)' 'color:var\(--state-created-fg\)'
+  d '\.chip-published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
+  d '\.chip-locked' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
+  d '\.mp-dl' '' 'font-family:var\(--font-mono\)'
+  d '\.mp-banner' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
+  d '\.mp-banner-err' '' 'background:var\(--status-rejected-bg\)' 'border-left-color:var\(--danger\)'
+  sweep RunMiniProjectsTab $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

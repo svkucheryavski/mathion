@@ -82,3 +82,11 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - Teachers `submit` always moves focus back to the email field when the request settles; during a slow add, a user who moved on (e.g. opened a remove confirm) gets focus pulled back. Guard on `activeElement` being `<body>` or inside the tab if it shows up.
 - The disabled-groups text now reads "Overview › Settings" (brief P7) where it used to read "→".
 - Test strength: only the "last row → + toggle / email field", Cancel and failure focus paths are pinned; "next row's 🗑" and "previous row's 🗑" after a delete are not (a three-row middle-delete test would pin them). Same as the T6 minor.
+
+### T10 — Mini-projects
+- P20 (user-approved): the plain "Delete this mini-project?" confirm sits beside ✎ 🗑 in the actions cell, which widens it, so the columns shift while it is open.
+- `.mp-table` uses `border-collapse: collapse`, which ignores `border-radius`, so the card corners are square (10j draws them rounded). `border-collapse: separate; border-spacing: 0` (as the Progress/Submissions grids) or a wrapper with `overflow: hidden` fixes it. T6's `.runs-table` has the same pattern.
+- After a failed force delete, focus goes to the row's 🗑 (the panel rule), and the panel stays open unarmed below it; focusing the panel's checkbox would keep a retrying user in place.
+- An admin's 409 whose refetched row is still not locked leaves the inline confirm open with no feedback (pre-existing).
+- The empty text keys off `rows.length` (mini-projects whose block is in `blocks`), so a mini-project whose block is missing from the pinned version shows "No mini-projects yet…" and "0 of N". The data model should not allow that.
+- Tests: the admin-409 test does not assert focus on `input[data-role="danger-ack"]`, and the force-delete success focus path (`focusAfterRemoval`) is untested.
