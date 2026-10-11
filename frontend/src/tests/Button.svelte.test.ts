@@ -79,4 +79,20 @@ describe('Button', () => {
     const btn = render({ 'data-action': 'download-csv' });
     expect(btn.getAttribute('data-action')).toBe('download-csv');
   });
+  // Slice-6b R17 / P1: pass-throughs for the run modals.
+  it('forwards form, so a footer button can submit a form it sits outside of', () => {
+    expect(render({ type: 'submit', form: 'f1' }).getAttribute('form')).toBe('f1');
+  });
+  it('omits form by default', () => {
+    expect(render({}).hasAttribute('form')).toBe(false);
+  });
+  it('marks data-autofocus when asked, so ui/Modal focuses it on open', () => {
+    expect(render({ 'data-autofocus': true }).hasAttribute('data-autofocus')).toBe(true);
+  });
+  it('omits data-autofocus by default', () => {
+    expect(render({}).hasAttribute('data-autofocus')).toBe(false);
+  });
+  it('forwards aria-describedby', () => {
+    expect(render({ 'aria-describedby': 'sum' }).getAttribute('aria-describedby')).toBe('sum');
+  });
 });

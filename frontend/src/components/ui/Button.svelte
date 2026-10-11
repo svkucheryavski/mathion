@@ -12,6 +12,12 @@
     'aria-label': ariaLabel = undefined as string | undefined,
     // Slice-6a: a test and gate hook, and a ref for callers that return focus.
     'data-action': dataAction = undefined as string | undefined,
+    // Slice-6b R17: a footer button submits the form it sits outside of through
+    // `form`; `data-autofocus` lets ui/Modal pick it on open. P1: the import's
+    // Done is described by its summary.
+    form = undefined as string | undefined,
+    'data-autofocus': dataAutofocus = false,
+    'aria-describedby': ariaDescribedby = undefined as string | undefined,
     element = $bindable(undefined as HTMLButtonElement | undefined),
     onclick = undefined as (() => void) | undefined,
     full = false,
@@ -26,6 +32,9 @@
   class:full={full}
   data-variant={variant}
   data-action={dataAction}
+  data-autofocus={dataAutofocus ? '' : undefined}
+  {form}
+  aria-describedby={ariaDescribedby}
   {disabled}
   {title}
   aria-label={ariaLabel}

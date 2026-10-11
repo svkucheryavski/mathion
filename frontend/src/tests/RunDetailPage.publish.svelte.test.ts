@@ -326,8 +326,12 @@ function setupWithPublishStub(publishBody: unknown, publishStatus: number, runId
   return { target, cmp };
 }
 
+// R26: the dialog is named by its <h2>, not by an aria-label.
 function dialogEl(): Element | null {
-  return document.querySelector('[role="dialog"][aria-label="Cannot publish run"]');
+  return Array.from(document.querySelectorAll('[role="dialog"]')).find((d) => {
+    const id = d.getAttribute('aria-labelledby');
+    return !!id && /can't be added$/.test(document.getElementById(id)?.textContent?.trim() ?? '');
+  }) ?? null;
 }
 
 describe('PublishConflictsModal wiring (E3)', () => {
@@ -546,6 +550,25 @@ describe('PublishConflictsModal wiring (E3)', () => {
     flushSync();
     await settle();
     expect(dialogEl()).toBeNull();
+    unmount(cmp);
+  });
+  it('closing the conflicts modal returns focus to Publish (spec §Publish conflicts › Focus)', async () => {
+    const { target, cmp } = setupWithPublishStub({
+      detail: 'Cannot publish: 1 student already active',
+      error_code: 'student_already_active_in_course',
+      conflicts: [{ user_id: 1, email: 'a@example.com', run_id: 7, run_title: 'Old Run A' }],
+    }, 409);
+    await settle();
+    const btn = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    btn.focus();
+    btn.click();
+    await settle();
+    const close = dialogEl()!.querySelector<HTMLButtonElement>('button[data-action="close"]')!;
+    expect(document.activeElement).toBe(close);
+    close.click();
+    await settle();
+    expect(dialogEl()).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('button[data-action="publish"]'));
     unmount(cmp);
   });
 });

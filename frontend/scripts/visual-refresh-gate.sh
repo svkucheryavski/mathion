@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1624
+EXPECTED_CHECKS=1654
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4771,5 +4771,40 @@ if [[ -n $REPLY ]]; then
   sweep RunAssetsTab $H
 fi
 
+echo
+echo "--- (ak) Slice-6b — the four teacher modals on ui/Modal ---"
+# Every file Slice 6b migrates or creates; each task appends its files (spec §Gate).
+FILES_6B=(
+  src/components/runs/PublishConflictsModal.svelte
+)
+emoji_scan "all Slice-6b files" $FILES_6B
+colour_scan 6b-modals $FILES_6B
+# D11: no 6b modal closes on a backdrop click or draws a backdrop of its own.
+if grep -lE 'closeOnBackdrop|class="(modal-)?backdrop"' $FILES_6B >/dev/null 2>&1; then
+  echo "FAIL  no 6b modal closes on a backdrop click or draws its own backdrop (D11)"; fail=1
+else echo "PASS  no 6b modal closes on a backdrop click or draws its own backdrop (D11)"; fi
+# srcw RELPATH WIDTH — the modal renders ui/Modal at its drawn width (spec §Common frame).
+srcw() {
+  local f=src/components/$1
+  if grep -q "import Modal from '../ui/Modal.svelte'" $f && grep -qE "^[[:space:]]*width=\{$2\}" $f; then
+    echo "PASS  ${1:t} renders ui/Modal at width $2"
+  else
+    echo "FAIL  ${1:t} renders ui/Modal at width $2"; fail=1
+  fi
+}
+srcw runs/PublishConflictsModal.svelte 560
+own pc-emails PublishConflictsModal.svelte
+uniq1 pc-emails
+if [[ -n $REPLY ]]; then
+  N=PublishConflictsModal; H=$REPLY
+  d '\.pc-heading' '' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.pc-lead' '' 'font-size:13px' 'color:var\(--text-2\)'
+  d '\.pc-run' '' 'display:flex' 'flex-direction:column' 'gap:5px'
+  d '\.pc-title' '' 'font-size:13px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.pc-emails' '' 'padding:0 0 0 12px' 'border-left:2px solid var\(--border\)' 'font-family:var\(--font-mono\)' 'font-size:12px' 'color:var\(--text-3\)'
+  d '\.pc-note' '' 'font-size:12\.5px' 'line-height:1\.5' 'color:var\(--muted\)'
+  d '\.pc-foot-note' '' 'flex:1' 'font-size:12\.5px' 'color:var\(--muted\)'
+  sweep PublishConflictsModal $H
+fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
