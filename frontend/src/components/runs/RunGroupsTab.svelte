@@ -170,7 +170,7 @@
         {#each sorted as g (g.id)}
           <li class="g-row">
             {#if editor?.kind === 'rename' && editor.id === g.id}
-              <InlineName label="Group name" value={g.name} maxlength={80}
+              <InlineName label="Group name" value={g.name} maxlength={80} subject={g.name}
                           onSave={(name) => saveRename(g.id, name)} onCancel={() => endRename(g.id)}>
                 {#snippet aside()}{@render cap(g)}{/snippet}
               </InlineName>
@@ -179,7 +179,7 @@
               {@render cap(g)}
               <span class="g-actions">
                 {#if pendingDelete === g.id}
-                  <InlineConfirm takeFocus confirmLabel="Confirm Delete" confirmDataAction="confirm-delete-group"
+                  <InlineConfirm takeFocus label="Delete {g.name}?" confirmLabel="Confirm Delete" confirmDataAction="confirm-delete-group"
                                  onConfirm={() => confirmDelete(g.id)} onCancel={() => cancelDelete(g.id)} />
                 {:else}
                   <IconButton glyph="pencil" size="sm" title="Rename" aria-label="Rename {g.name}"

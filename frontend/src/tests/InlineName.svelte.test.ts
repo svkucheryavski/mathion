@@ -147,4 +147,12 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
     await settle();
     expect(host.querySelector('p.in-err')?.textContent).toBe(new ApiError(500, 'Server exploded').displayMessage);
   });
+
+  it('a subject names × and ✓ after their row; the tooltips stay short (final review)', () => {
+    const { close, check } = render({ subject: 'Group A' });
+    expect(close.getAttribute('aria-label')).toBe('Cancel renaming Group A');
+    expect(check.getAttribute('aria-label')).toBe('Save Group A');
+    expect(close.getAttribute('title')).toBe('Cancel');
+    expect(check.getAttribute('title')).toBe('Save');
+  });
 });

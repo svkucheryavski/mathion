@@ -16,6 +16,7 @@
     onCancel,
     saveTitle = 'Save',
     aside = undefined,
+    subject = undefined,
   }: {
     label: string;
     value?: string;
@@ -24,6 +25,8 @@
     onCancel: () => void;
     saveTitle?: string;
     aside?: Snippet;
+    // What the field renames ("Group A"): × and ✓ name it for a screen reader.
+    subject?: string;
   } = $props();
 
   const uid = $props.id();
@@ -86,8 +89,10 @@
       onkeydown={onKeydown}
     />
     {@render aside?.()}
-    <IconButton glyph="close" size="sm" title="Cancel" disabled={saving} onclick={cancel} />
+    <IconButton glyph="close" size="sm" title="Cancel" disabled={saving} onclick={cancel}
+                aria-label={subject ? `Cancel renaming ${subject}` : undefined} />
     <IconButton glyph="check" size="sm" primary title={saving ? 'Saving…' : saveTitle}
+                aria-label={subject ? `${saving ? 'Saving' : saveTitle} ${subject}` : undefined}
                 disabled={!trimmed || saving} onclick={() => void save()} />
   </div>
   {#if error}<p class="in-err" id={errId} role="alert">{error}</p>{/if}

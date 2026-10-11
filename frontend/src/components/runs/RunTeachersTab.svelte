@@ -117,7 +117,7 @@
           {#if course.is_admin}
             <span class="t-actions">
               {#if pendingRemove === t.user_id}
-                <InlineConfirm takeFocus confirmLabel="Confirm Remove" confirmDataAction="confirm-remove"
+                <InlineConfirm takeFocus label="Remove {t.user_email}?" confirmLabel="Confirm Remove" confirmDataAction="confirm-remove"
                                onConfirm={() => confirmRemove(t.user_id)} onCancel={() => cancelRemove(t.user_id)} />
               {:else}
                 <IconButton glyph="trash" size="sm" danger title="Remove" aria-label="Remove {t.user_email}"

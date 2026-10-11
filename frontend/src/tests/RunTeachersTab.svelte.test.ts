@@ -191,6 +191,7 @@ describe('RunTeachersTab', () => {
     await settle();
     (target.querySelector('button[data-action="remove"]') as HTMLButtonElement).click();
     await settle();
+    expect(target.querySelector('.inline-confirm[role="group"]')?.getAttribute('aria-label')).toBe('Remove t@x.com?');
     (target.querySelector('button[data-action="confirm-remove"]') as HTMLButtonElement).click();
     await settle();
     expect(refetch).toHaveBeenCalled();

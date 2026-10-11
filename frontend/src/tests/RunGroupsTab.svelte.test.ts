@@ -160,6 +160,7 @@ describe('RunGroupsTab', () => {
     await settle();
     (target.querySelector('button[data-action="delete-group"]') as HTMLButtonElement).click();
     await settle();
+    expect(target.querySelector('.inline-confirm[role="group"]')?.getAttribute('aria-label')).toBe('Delete Alpha?');
     (
       target.querySelector('button[data-action="confirm-delete-group"]') as HTMLButtonElement
     ).click();
@@ -182,6 +183,7 @@ describe('RunGroupsTab', () => {
     const input = target.querySelector('input[aria-label="Group name"]') as HTMLInputElement;
     expect(input.value).toBe('Alpha');
     expect(document.activeElement).toBe(input);
+    expect(input.parentElement!.querySelector('button[data-glyph="check"]')?.getAttribute('aria-label')).toBe('Save Alpha');
     // the capacity badge keeps its place between the field and ×
     expect(input.parentElement!.querySelector('.cap')).not.toBeNull();
     expect(byAction(target, 'delete-group')).toHaveLength(0);

@@ -88,4 +88,27 @@ describe('InlineConfirm', () => {
     target.querySelectorAll('button')[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(onCancel).not.toHaveBeenCalled();
   });
+
+  it('is a group named by its warning, so a screen reader says what Cancel cancels (final review)', () => {
+    component = mount(InlineConfirm, { target, props: { warning: 'Delete this asset?', takeFocus: true, onConfirm: () => {} } });
+    flushSync();
+    const g = target.querySelector('.inline-confirm') as HTMLElement;
+    expect(g.getAttribute('role')).toBe('group');
+    const id = g.getAttribute('aria-labelledby')!;
+    expect(document.getElementById(id)?.textContent).toBe('Delete this asset?');
+  });
+
+  it('a label names the group when there is no warning (final review)', () => {
+    component = mount(InlineConfirm, { target, props: { label: 'Delete Alpha?', onConfirm: () => {} } });
+    flushSync();
+    const g = target.querySelector('.inline-confirm') as HTMLElement;
+    expect(g.getAttribute('role')).toBe('group');
+    expect(g.getAttribute('aria-label')).toBe('Delete Alpha?');
+  });
+
+  it('with neither, it is no group', () => {
+    component = mount(InlineConfirm, { target, props: { onConfirm: () => {} } });
+    flushSync();
+    expect(target.querySelector('.inline-confirm')?.hasAttribute('role')).toBe(false);
+  });
 });

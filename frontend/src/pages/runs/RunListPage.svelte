@@ -158,7 +158,7 @@
                 <td class="num">{formatShortDate(run.end_date)}</td>
                 <td class="row-actions">
                   {#if pendingDelete === run.id}
-                    <InlineConfirm takeFocus confirmLabel="Confirm Delete"
+                    <InlineConfirm takeFocus label="Delete run {run.title}?" confirmLabel="Confirm Delete"
                                    onConfirm={() => confirmDelete(run.id)}
                                    onCancel={() => cancelDelete(run.id)} />
                   {:else}

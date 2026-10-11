@@ -95,3 +95,19 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - At 1000px, an extreme filename together with a very long uploader email (and the plain delete confirm open in the actions cell) squeezes the Filename column; the replace confirm already sits in its own full-width row (browser pass).
 - `.assets-table` uses `border-collapse: collapse`, so the card corners are square (same as T6 `.runs-table` and T10 `.mp-table`).
 - Tests: after a delete, the "next row's 🗑" and "previous row's 🗑" focus steps are not pinned (only the last-row → + Upload step is), and the 403 force-delete path has no focus assertion.
+
+### Final whole-branch review (fresh Opus + Fable: no Critical; two minors re-graded Important and fixed; the rest deferred)
+Fixed in the review pass: inline confirms are now groups named by their question (screen readers hear "Delete run X?" before "Cancel"); the group rename ✓/× name the group.
+- `RunDetailPage` binds tab buttons into a plain object: Svelte logs `binding_property_non_reactive` eight times per mount in dev and in tests. Fix: `const tabEls = $state<…>({})`.
+- Assets "used by → Edit" opens the mini-project modal even when that mini-project is locked (its ✎ is disabled on Mini-projects); saving then fails with 409. Take with 6b's modal work.
+- Assets 403 on force delete reloads the whole run page, so the "no longer have permission" banner disappears and focus lands on `<body>` (pre-existing, rare). Toast it, or refetch only the course.
+- Teachers add: a network (non-API) failure shows nothing.
+- Spec R14 still says the Replace confirm stays in the actions cell; T11 moved it to a full-width row (browser pass). Update the spec line.
+- `withTab`/`withoutTab` re-serialise other search parameters (`%20` → `+`); none exist on run addresses today.
+- `RunListPage` actions header uses `<th aria-label>` where the tabs use a visually-hidden span.
+- P19: Progress and Submissions have no h2 header row, while the spec says the header row is common to all six tabs — confirm with the user at the Safari pass.
+- Carried to 6c: the publish bar's Unpublish confirm and the Publish ↔ Unpublish swap drop focus to `<body>`.
+- "Delete N selected" stays enabled while a bulk delete runs; a second deliberate confirm starts a duplicate loop and a misleading "deleted by another user" banner (pre-existing).
+- The Teaching list's status pill is not kept in the address, so Back from a run resets it to Active (pre-existing).
+- The Mini-projects and Assets single-row delete confirms are named "Delete this mini-project?" / "Delete this asset?", not after their row (the three new labels are); pass `label="Delete {name}?"` if wanted.
+- Every InlineConfirm with a warning is now a group named by it, including the confirms outside 6a (Unpublish, MiniProjectModal publish, discard prompts); the MiniProjectModal publish group's name is its whole two-sentence warning. Keep in mind for 6b/6c.
