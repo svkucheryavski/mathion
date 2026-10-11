@@ -1,8 +1,9 @@
 # Visual refresh — Slice 6b: the four teacher modals, on the shared Modal
 
-**Status:** draft, rev 3. Written 2026-10-11 for the user's review.
+**Status:** draft, rev 4. Written 2026-10-11 for the user's review.
 - Rev 2 folds in round 1 of the spec review (fresh Opus on the code, fresh Opus on the design, Fable second opinion) and the user's answers D19–D22. Review notes: `.superpowers/sdd/2026-10-11-visual-refresh-slice6b-teacher-modals/spec-r1-*.md`.
 - Rev 3 folds in round 2 (the same three reviewers; `spec-r2-*.md`) and the user's answer D23.
+- Rev 4 folds in the rev 3 re-check (Opus on the code, Fable; `spec-r3-*.md`): the create order, focus timing after a request settles, the Preview-mode focus fallback, and where D23 is computed.
 
 **Branch:** `feat/visual-refresh-slice6-teacher`, after the 6a Safari pass (`89fbcb2`). It stays local: no push, no merge.
 
@@ -65,7 +66,8 @@ Rulings taken at the controller's discretion (technical; the user defers these).
   - The button whose request runs keeps `loading` ("Creating…", "Importing…", "Saving…", "Publishing…") but is not `disabled`; its handler ignores a second click.
   - The other footer buttons (Cancel, Discard, Publish, Done, Copy failed rows) ignore clicks while a request runs.
   - For New run the handler is the form's submit: `submit()` returns at once while a create runs, before validation. A readonly field still submits on Enter, and the busy Create run stays enabled.
-  - After a failed request the modal un-freezes first, then `tick()`, then moves focus, so the focus call never lands on a still-frozen control.
+  - When a request settles, whether it failed or succeeded, the modal un-freezes first, then `tick()`, then moves focus, so the focus call never lands on a still-frozen control. The modal stays frozen (and `closeDisabled`) through the list refresh that follows a save or a create, as today.
+  - A button's disabled reasons never apply while it is `loading`: Save does not turn "No changes to save"-disabled the moment the baseline is re-based mid-request.
   - So focus never falls off a button the browser has just disabled. Today New run's Cancel even closes mid-create.
   - Buttons that are unusable for a reason (validation, no valid rows, an upload running) stay `disabled` with a `title` naming the reason. When reasons overlap, the first wins: Save and Create: "Wait for the upload to finish", then the validation reason, then "No changes to save". Publish: "Wait for the upload to finish", then D13's, then "Save your changes first".
   - A button that a successful action itself makes unusable never keeps focus: §Focus says where it goes after Save and Discard.
@@ -192,7 +194,8 @@ Out:
 - **The counts, as drawn:** muted 12.5px, the key figures and names in `--text` (not bold).
   - "{n} rows — {v} valid, {s} will skip ({i} invalid, {d} duplicate in paste)."
   - "Will create groups: {names}."
-  - "Already enrolled, will be re-bucketed: {emails}." It lists only real moves (D23): a valid row whose e-mail is on the roster (`existingRoster`) and whose group cell names a group other than the student's current one (`existingGroups`), matched as the import matches them. The list is still cut after 5 with "+N more" (`:50-53`).
+  - "Already enrolled, will be re-bucketed: {emails}." It lists only real moves (D23): a valid row whose e-mail is on the roster (`existingRoster`) and whose group cell names a group other than the student's current one (`existingGroups`), matched as the import matches them: e-mails lower-cased, group names exactly after a trim (`lib/csv.ts`, `backend/mathion/api/run_roster.py:229-231`, `Group.name == row.group`). The list is still cut after 5 with "+N more" (`:50-53`).
+    - It is derived in the modal from `parsed.rows`, `existingRoster` and `existingGroups`. `lib/csv.ts` is not changed: `row.alreadyEnrolled` and `alreadyEnrolledEmails` keep today's meaning, because `buildBatchRow` (`lib/buildBatchRow.ts:25-33`) reads `alreadyEnrolled` to resend an enrolled student's current group for an empty group cell. Narrowing them would make the server unassign those students (`roster_ops.py:50-51`).
   - A line is left out when its list is empty, as today.
 - **Kept:** the parse error line ("Paste is empty.", "No email column found.").
 - **Footer:**
@@ -254,7 +257,7 @@ Out:
 - **Publish** (secondary, `data-action="publish"`), only while unpublished. It is disabled (D13, R22) while the box shows or the form is dirty.
 - **Discard** (ghost):
   - disabled while clean, titled "No changes to discard";
-  - otherwise it resets the fields to the saved values, clears the server error and the field errors, and moves focus to the assignment field (Discard itself just became disabled).
+  - otherwise it resets the fields to the saved values, clears the server error and the field errors, and moves focus (§Focus › After Discard; Discard itself just became disabled).
 - **Save** (primary, `data-action="save"`):
   - disabled while clean ("No changes to save") or invalid (today's validation reason, `:125-141`, as its `title`);
   - "Saving…" with `loading` while it runs.
@@ -263,12 +266,16 @@ Out:
     2. the form's baseline becomes the values just sent. The fields were frozen, so these equal what is on screen; the baseline is not re-read from the response or the refreshed list. `initialFormSnapshot` (`:80`, a `const` today with a one-shot comment, `:42-47`) becomes `$state`;
     3. a "Saved" toast;
     4. `onSaved()` refreshes the list in its own `try`. If only the refresh fails, the toast reads "Saved (refresh failed — reload to see latest)" (the 5b wording, `ItemEditorModal.svelte:207-208`), and no save error shows. Today a failed refresh inside the save `try` reports the save as failed (`:330-358`).
-  - The modal stays open and clean. Focus goes to Publish when it is shown and enabled, or else to the assignment field: Save itself just became disabled ("No changes to save").
+  - The modal stays open and clean. Focus moves as §Focus › After Save says: Save itself just became disabled ("No changes to save").
   - After a save, the form's baseline is the truth. `initial` (an object from before the refresh) is read only for `id` and `is_published`; neither changes on a PATCH.
 
 **Footer, creating:** Cancel (ghost) · **Create** (primary, `data-action="save"`, "Creating…" with `loading`). Create's disabled reasons are Save's.
-- On success the modal hands the created mini-project to the tab (a new `onCreated(mp)` prop; `createMiniProject` returns it, `lib/miniProjects.ts:12-17`, and today `handleSave` drops it, `:325`) and closes; the list refreshes.
-- A refresh that fails after a successful create toasts "Created (refresh failed — reload to see latest)"; it never reports the create as failed, because a retry would hit the one-per-block 409.
+- On success, in this order (today `handleSave` already awaits `onSaved()` before `onClose()`, `:331-333`):
+  1. the POST resolves with the created mini-project (`createMiniProject` returns it, `lib/miniProjects.ts:12-17`; today `handleSave` drops it, `:325`);
+  2. `onCreated(mp)` hands it to the tab. The prop is optional (`onCreated?: (mp: MiniProjectResponse) => void`), so the existing suites' prop objects stay valid;
+  3. `await onSaved()` refreshes the list in its own `try`, so the new row and its ✎ exist. If only the refresh fails, the toast reads "Created (refresh failed — reload to see latest)", and the create is never reported as failed: a retry would hit the one-per-block 409;
+  4. `onClose()`, with the `mounted` guards as today;
+  5. the tab focuses the new row's ✎ (§Focus › After Create).
 
 **The two confirms** (both `InlineConfirm` with `takeFocus`; each replaces the footer's buttons while it shows, and "unsaved changes" stays):
 - **Publish** → "Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)." with `data-action="confirm-publish"`.
@@ -309,8 +316,8 @@ A failed request focuses the first field with an error, or else stays on its but
   - **After Create:** "+ New" can become disabled, when the last free block gets its mini-project (`RunMiniProjectsTab.svelte:124-126`). So after every create, focus goes to the new row's ✎, which also shows the teacher what was made, or else to the tab's `<h2>`.
     - The tab binds its ✎ buttons in a `pencilEls` record, as it binds `trashEls` (`:105`, `:295-297`).
     - On close it sets `modalMode = null`, waits `tick()` so FocusTrap's restore has run (`FocusTrap.svelte:70-74`), then calls `focusFirst([pencilEls[created.id], headingEl])`.
-  - **After Save:** Publish when it is shown and enabled, or else the assignment field.
-  - **After Discard:** the assignment field.
+  - **After Save:** `focusFirst([Publish, the assignment field, the editor's Edit tab, ×])`, after the un-freeze and `tick()` (R20). The assignment textarea exists only in Edit mode (`MarkdownEditor.svelte:285-296`), and Save is reachable from Preview, so the Edit tab (`button[data-action="edit"]`) is the next fallback.
+  - **After Discard:** `focusFirst([the assignment field, the editor's Edit tab, ×])`.
 - **Requests:** R20; a failed request un-freezes, waits `tick()`, then focuses the first errored field, or else stays on its button.
 - **Import stage switch:** focus goes to Done.
 - **The mini-project's confirms:** as §Mini-project editor says.
@@ -386,7 +393,8 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 **Import roster:**
 - The step marker in both stages (`aria-current`, the hidden "(done)").
 - The paste box's name and description.
-- The drawn help and counts. `RosterImportModal.scaffold.svelte.test.ts:46` ("Will auto-create groups: G1") changes on purpose.
+- The drawn help and counts. `RosterImportModal.scaffold.svelte.test.ts:46` ("Will auto-create groups: G1") changes on purpose, and so does `:87-99` ("truncates already-enrolled list with +N more"): its paste gains a group column so its seven enrolled rows are real moves (D23).
+- An enrolled student with an empty group cell still sends their current group in the import request (`buildBatchRow`; D23 must not change it).
 - A skipping row shows its reasons as text (D20) and in its tile's `title`.
 - "Showing the first 10 of N rows." only above 10 rows (D17), plus "Rows … will skip." with the cut after 5 (D22).
 - Singular counts.
@@ -410,9 +418,9 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 - Creating shows Cancel · Create. Editing shows Publish · Discard · Save, and "unsaved changes" only while dirty (D12).
 - The disabled titles of Save, Discard, Create and Publish, and "Wait for the upload to finish" while uploading.
 - Discard resets the fields and clears the errors.
-- Save keeps the modal open, toasts "Saved", calls `onSaved`, and leaves the form clean (D19). Focus then lands on Publish, or on the assignment field when Publish is hidden or disabled.
+- Save keeps the modal open, toasts "Saved", calls `onSaved`, and leaves the form clean (D19). Focus then lands on Publish, or on the assignment field when Publish is hidden or disabled, or on the editor's Edit tab when the editor is in Preview. Save never turns disabled while it is loading.
 - A refresh that fails after a successful save leaves the form clean and shows the refresh-failed toast, not a save error. The same for Create.
-- After Discard, focus is on the assignment field.
+- After Discard, focus is on the assignment field, or on the Edit tab in Preview.
 - Tests that click Save on an untouched form now meet a disabled Save ("No changes to save"), so each makes an edit first, on purpose: `MiniProjectModal.create-edit.svelte.test.ts:372`, `:454`, `:579`, `:625` and `MiniProjectModal.publish.svelte.test.ts:525`.
 - Still holding under D19, not to be flipped: `MiniProjectModal.create-edit.svelte.test.ts:81` (Create still closes) and `:454-498` (× after the save closes a clean modal).
 - The box:
@@ -441,7 +449,7 @@ Existing tests keep their hooks unless a line here changes them on purpose.
 
 **RunMiniProjectsTab:**
 - The "used by → Edit" path opens nothing for a locked mini-project, toasts its reason, and still consumes the pending edit.
-- After a create, focus is on the new row's ✎; including a create that disables "+".
+- After a create, focus is on the new row's ✎; including a create that disables "+". The modal calls `onCreated`, then awaits `onSaved`, then closes, in that order.
 
 ## Gate
 
