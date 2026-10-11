@@ -6,10 +6,13 @@
     disabled = false,
     loading = false,
     title = undefined as string | undefined,
-    // Forward aria-label so icon-only buttons (reorder ↑/↓) can announce
+    // Forward aria-label so icon-only buttons (reorder up/down) can announce
     // their purpose to screen readers. Visible glyph stays for sighted
     // users; the title attribute also supplies a tooltip.
     'aria-label': ariaLabel = undefined as string | undefined,
+    // Slice-6a: a test and gate hook, and a ref for callers that return focus.
+    'data-action': dataAction = undefined as string | undefined,
+    element = $bindable(undefined as HTMLButtonElement | undefined),
     onclick = undefined as (() => void) | undefined,
     full = false,
     children,
@@ -17,10 +20,12 @@
 </script>
 
 <button
+  bind:this={element}
   {type}
   class="btn {variant}"
   class:full={full}
   data-variant={variant}
+  data-action={dataAction}
   {disabled}
   {title}
   aria-label={ariaLabel}

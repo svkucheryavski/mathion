@@ -19,7 +19,7 @@ afterEach(() => {
   component = null;
 });
 
-const GLYPHS = ['pencil','duplicate','disable','enable','trash','plus','up','down','chevron','close','back','check','chevron-right'] as const;
+const GLYPHS = ['pencil','duplicate','disable','enable','trash','plus','up','down','chevron','close','back','check','chevron-right','refresh','download'] as const;
 
 describe('IconButton', () => {
   it('requires and renders a title (tooltip + a11y)', () => {
@@ -122,6 +122,15 @@ describe('IconButton', () => {
     expect(btn.getAttribute('aria-controls')).toBe('panel-1');
     btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(onmousedown).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards data-action (6a P2)', () => {
+    const btn = render({ glyph: 'trash', title: 'Delete', 'data-action': 'delete-run' });
+    expect(btn.getAttribute('data-action')).toBe('delete-run');
+  });
+  it('omits data-action when not given', () => {
+    const btn = render({ glyph: 'trash', title: 'Delete' });
+    expect(btn.hasAttribute('data-action')).toBe(false);
   });
 });
 

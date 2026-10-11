@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { localInputToISO, isoToLocalInput, formatLocalWithTz, localTzLabel } from '../lib/datetime';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { localInputToISO, isoToLocalInput, formatLocalWithTz, localTzLabel, formatShortDeadline, formatShortDate, deadlinesHeader } from '../lib/datetime';
 
 // TZ pinned to Europe/Copenhagen via package.json scripts (TZ=Europe/Copenhagen
 // prepended to vitest). Node caches the host TZ at process start, so a
@@ -79,5 +79,43 @@ describe('localTzLabel', () => {
   it('accepts a Date arg and uses ITS offset (so winter dates label as GMT+1)', () => {
     expect(localTzLabel(new Date('2026-01-15T11:00:00Z'))).toMatch(/\(GMT\+1\)/);
     expect(localTzLabel(new Date('2026-06-07T21:59:00Z'))).toMatch(/\(GMT\+2\)/);
+  });
+});
+
+describe('formatShortDeadline (R12)', () => {
+  it('summer: local day, English month, 24-hour time', () => {
+    // 21:59Z on 7 Aug = 23:59 CEST.
+    expect(formatShortDeadline('2026-08-07T21:59:00Z')).toBe('07 Aug 23:59');
+  });
+  it('winter: the winter offset applies to that date', () => {
+    // 22:59Z on 10 Jan = 23:59 CET.
+    expect(formatShortDeadline('2026-01-10T22:59:00Z')).toBe('10 Jan 23:59');
+  });
+  it('the month is English whatever the browser locale', () => {
+    // formatShortDeadline must not use Intl (fixed English months, R12); this spy pins that.
+    const spy = vi.spyOn(Intl, 'DateTimeFormat');
+    expect(formatShortDeadline('2026-12-01T08:05:00Z')).toBe('01 Dec 09:05');
+    // No Intl month formatting: a German or Danish browser still reads "Dec".
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe('formatShortDate (P15)', () => {
+  it('a calendar date, no time zone', () => {
+    expect(formatShortDate('2026-09-01')).toBe('01 Sep 2026');
+    expect(formatShortDate('2027-01-31')).toBe('31 Jan 2027');
+  });
+});
+
+describe('deadlinesHeader (R12)', () => {
+  it('no deadlines → plain "Deadlines"', () => {
+    expect(deadlinesHeader([])).toBe('Deadlines');
+  });
+  it('one shared offset → "Deadlines (GMT+2)"', () => {
+    expect(deadlinesHeader(['2026-08-07T21:59:00Z', '2026-08-14T21:59:00Z'])).toBe('Deadlines (GMT+2)');
+  });
+  it('a summer and a winter deadline → "Deadlines (local time)"', () => {
+    expect(deadlinesHeader(['2026-08-07T21:59:00Z', '2026-01-10T22:59:00Z'])).toBe('Deadlines (local time)');
   });
 });

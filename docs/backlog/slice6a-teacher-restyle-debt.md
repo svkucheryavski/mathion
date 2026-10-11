@@ -16,3 +16,10 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - The docstring says "the role test is a WHERE ... IN, not a join": a how-comment that goes stale if the query is rewritten. The test `test_course_admin_who_also_teaches_sees_the_run_once_with_its_student_count` now pins the behaviour, so it is harmless.
 - Round 2: the hardened test's comment says "(2x2x2)" while it asserts 2; "a role join would give 8, not 2" reads clearer. Cosmetic.
 - Round 2: the docstring parenthetical could simply be dropped instead of tracked. Harmless either way.
+
+### T2 — shared pieces
+- `heatToken(NaN)` returns `--heat-4` (every `<=` is false for NaN). Today's caller `computeRatio` returns null for a 0 or null total, so NaN cannot arrive; T7 must keep it that way.
+- `deadlinesHeader` throws `RangeError` on an unparseable ISO, as `formatLocalWithTz` already does; callers pass only real deadlines.
+- The Intl spy in the `formatShortDeadline` locale test only catches `new Intl.DateTimeFormat`; a regression to `toLocaleString` under an en-US test locale would still pass.
+- No test for `Button`'s `bind:element` or for `data-action` being absent on `Button`; T9/T11 callers exercise them.
+- The StatusBadge label test's title says "the colours stay" but asserts only `data-status`.

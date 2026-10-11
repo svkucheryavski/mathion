@@ -20,6 +20,16 @@ export const STATUS_LABEL: Record<MpGroupStatus, string> = {
   rejected: 'Rejected',
 };
 
+// Lowercase short labels for the Submissions grid cells (spec §Submissions).
+// STATUS_LABEL stays for the side panel, the thread entries and cell names.
+export const STATUS_SHORT_LABEL: Record<MpGroupStatus, string> = {
+  not_submitted: 'not submitted',
+  awaiting_eval: 'awaiting eval',
+  needs_revision: 'needs revision',
+  accepted: 'accepted',
+  rejected: 'rejected',
+};
+
 // Teacher-action-priority sort order (asc puts most-attention-needed first).
 export const STATUS_PRIORITY: Record<MpGroupStatus, number> = {
   needs_revision: 0,
@@ -41,6 +51,17 @@ export function resultToStatus(result: string | null): MpGroupStatus {
   if (result === 'accepted') return 'accepted';
   if (result === 'rejected') return 'rejected';
   return 'awaiting_eval';
+}
+
+// The Progress heatmap's five steps (spec §Heatmap): the token that fills a
+// cell, or null for a cell with no data (no fill).
+export function heatToken(ratio: number | null): string | null {
+  if (ratio === null) return null;
+  if (ratio <= 0) return '--surface-muted';
+  if (ratio <= 0.25) return '--heat-1';
+  if (ratio <= 0.5) return '--heat-2';
+  if (ratio <= 0.75) return '--heat-3';
+  return '--heat-4';
 }
 
 // ---- Progress dashboard ----

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1420
+EXPECTED_CHECKS=1424
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4474,6 +4474,24 @@ dp_q=$(grep -oE "DISCARD_PROMPT = '[^']+'" src/lib/quizEdits.svelte.ts | sed -E 
 dp_g=$(grep -oE "window\.confirm\('[^']+'\)" src/components/editor/DirtyGuard.svelte | sed -E "s/.*\('([^']+)'\)/\1/")
 if [[ -n $dp_q && $dp_q == $dp_g ]]; then echo "PASS  DISCARD_PROMPT equals the DirtyGuard prompt ($dp_q)"
 else echo "FAIL  DISCARD_PROMPT ('$dp_q') differs from the DirtyGuard prompt ('$dp_g')"; fail=1; fi
+
+echo
+echo "--- (aj) Slice-6a — the teacher screens: shared pieces, run frame, tabs ---"
+# Every component Slice 6a restyles or creates; each later task appends its files.
+FILES_6A=(
+  src/components/ui/Avatar.svelte src/components/ui/SortMark.svelte
+  src/components/runs/RunStatusChip.svelte src/components/ui/IconButton.svelte
+  src/components/ui/Button.svelte src/components/ui/StatusBadge.svelte
+  src/components/ui/ErrorState.svelte
+)
+LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts)
+emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
+colour_scan 6a-teacher $FILES_6A
+
+# The built CSS holds only components something imports: each new piece's dist
+# rows (uniq1, declarations, sweep) land with the task that first imports it.
+own avatar Avatar.svelte
+own run-chip RunStatusChip.svelte
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

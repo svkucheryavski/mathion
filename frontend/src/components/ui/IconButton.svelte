@@ -4,11 +4,11 @@
   // are transcribed verbatim from the titled action controls in
   // docs/design/visual-refresh/reference-screens.dc.html. Glyph set:
   // pencil | duplicate | disable | enable | trash | plus | up | down | chevron |
-  // chevron-right | close | back | check.
+  // chevron-right | close | back | check | refresh | download.
   type Size = 'sm' | 'md';
   type Glyph =
     | 'pencil' | 'duplicate' | 'disable' | 'enable' | 'trash' | 'plus' | 'up' | 'down'
-    | 'chevron' | 'chevron-right' | 'close' | 'back' | 'check';
+    | 'chevron' | 'chevron-right' | 'close' | 'back' | 'check' | 'refresh' | 'download';
   type Props = {
     glyph: Glyph;
     // Required: the tooltip AND the default screen-reader label. A disabled
@@ -34,6 +34,7 @@
     'aria-expanded'?: boolean;
     'aria-controls'?: string;
     id?: string;
+    'data-action'?: string;
     tabindex?: number;
     // Bindable ref to the <button>, for callers that return focus to it.
     element?: HTMLButtonElement;
@@ -55,6 +56,7 @@
     'aria-expanded': ariaExpanded = undefined,
     'aria-controls': ariaControls = undefined,
     id = undefined,
+    'data-action': dataAction = undefined,
     tabindex = undefined,
     element = $bindable(),
   }: Props = $props();
@@ -72,6 +74,7 @@
   {disabled}
   {title}
   {id}
+  data-action={dataAction}
   {tabindex}
   aria-label={ariaLabel ?? title}
   aria-hidden={ariaHidden}
@@ -116,6 +119,10 @@
     {:else if glyph === 'check'}
       <!-- per-element 1.9: the check is the one heavier mark (visual-spec §4) -->
       <polyline points="3.4,8.4 6.6,11.6 12.6,4.8" stroke-width="1.9" />
+    {:else if glyph === 'refresh'}
+      <path d="M12.4 8a4.4 4.4 0 1 1-1.3-3.1" /><polyline points="11.4,2.4 11.4,5.1 8.7,5.1" />
+    {:else if glyph === 'download'}
+      <line x1="8" y1="2.8" x2="8" y2="9.6" /><polyline points="5,6.8 8,9.8 11,6.8" /><path d="M3 10.8v2h10v-2" />
     {/if}
   </svg>
 </button>

@@ -12,12 +12,14 @@
     title,
     message = undefined,
     onretry = undefined,
+    retryLabel = 'Retry',
     action = undefined,
   }: {
     variant?: 'inline' | 'page';
     title: string;
     message?: string;
     onretry?: () => void;
+    retryLabel?: string;
     action?: Snippet;
   } = $props();
 </script>
@@ -27,7 +29,7 @@
     {#if variant === 'page'}<h1 class="title">{title}</h1>{:else}<p class="title">{title}</p>{/if}
     {#if message}<p class="message">{message}</p>{/if}
   </div>
-  {#if variant === 'inline' && onretry}<Button variant="secondary" onclick={onretry}>Retry</Button>{/if}
+  {#if variant === 'inline' && onretry}<Button variant="secondary" onclick={onretry}>{retryLabel}</Button>{/if}
   {#if variant === 'page' && action}<div class="action">{@render action()}</div>{/if}
 </div>
 

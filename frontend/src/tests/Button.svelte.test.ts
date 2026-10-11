@@ -74,4 +74,9 @@ describe('Button', () => {
   it('omits the full class by default', () => {
     expect(render({}).classList.contains('full')).toBe(false);
   });
+
+  it('forwards data-action (6a P2)', () => {
+    const btn = render({ 'data-action': 'download-csv' });
+    expect(btn.getAttribute('data-action')).toBe('download-csv');
+  });
 });

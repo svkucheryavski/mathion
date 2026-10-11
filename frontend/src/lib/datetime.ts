@@ -36,3 +36,29 @@ export function localTzLabel(date?: Date): string {
   const tz = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'UTC';
   return `(${tz})`;
 }
+
+// Fixed English month abbreviations: the short forms never follow the
+// browser's locale (spec R12).
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+// A UTC ISO deadline in browser-local time: "07 Aug 23:59".
+export function formatShortDeadline(iso: string): string {
+  const d = new Date(iso);
+  return `${pad2(d.getDate())} ${MONTHS[d.getMonth()]} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+// A calendar date "YYYY-MM-DD" (no time, no zone): "01 Sep 2026".
+export function formatShortDate(yyyyMmDd: string): string {
+  const [y, m, d] = yyyyMmDd.split('-').map(Number);
+  return `${pad2(d)} ${MONTHS[m - 1]} ${y}`;
+}
+
+// The Deadlines column header: the zone when every shown deadline shares one
+// offset, "(local time)" when daylight saving splits them, bare otherwise.
+export function deadlinesHeader(isos: string[]): string {
+  const zones = new Set(isos.map((iso) => localTzLabel(new Date(iso))));
+  if (zones.size === 0) return 'Deadlines';
+  if (zones.size === 1) return `Deadlines ${[...zones][0]}`;
+  return 'Deadlines (local time)';
+}

@@ -84,4 +84,10 @@ describe('ErrorState (Slice-4 §1.3)', () => {
     expect(inline.querySelector('.action')).toBeNull();
     expect(inline.querySelector('.probe')).toBeNull();
   });
+
+  it('retryLabel renames the inline Retry button (6a P8)', () => {
+    const h = render({ title: 'Could not load runs.', onretry: () => {}, retryLabel: 'Try again' });
+    const btns = Array.from(h.querySelectorAll('button')).map((b) => b.textContent?.trim());
+    expect(btns).toEqual(['Try again']);
+  });
 });

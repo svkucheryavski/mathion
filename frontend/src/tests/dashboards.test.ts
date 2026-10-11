@@ -8,6 +8,8 @@ import {
   resultToStatus,
   STATUS_LABEL,
   STATUS_PRIORITY,
+  STATUS_SHORT_LABEL,
+  heatToken,
 } from '../lib/dashboards';
 
 function mockFetch(status: number, body: unknown) {
@@ -170,5 +172,35 @@ describe('getSubmissionThread wire', () => {
     expect(url).toBe('/api/runs/5/dashboard/mini-projects/12/groups/99/submissions');
     expect(init.method).toBe('GET');
     expect(init.signal).toBe(ctrl.signal);
+  });
+});
+
+describe('STATUS_SHORT_LABEL (6a Submissions cells)', () => {
+  it('holds the lowercase short labels', () => {
+    expect(STATUS_SHORT_LABEL).toEqual({
+      accepted: 'accepted',
+      needs_revision: 'needs revision',
+      awaiting_eval: 'awaiting eval',
+      not_submitted: 'not submitted',
+      rejected: 'rejected',
+    });
+  });
+});
+
+describe('heatToken (6a Progress heatmap, five steps)', () => {
+  it('no data → null (no fill)', () => {
+    expect(heatToken(null)).toBeNull();
+  });
+  it('0 → --surface-muted', () => {
+    expect(heatToken(0)).toBe('--surface-muted');
+  });
+  it('the step edges', () => {
+    expect(heatToken(0.01)).toBe('--heat-1');
+    expect(heatToken(0.25)).toBe('--heat-1');
+    expect(heatToken(0.26)).toBe('--heat-2');
+    expect(heatToken(0.5)).toBe('--heat-2');
+    expect(heatToken(0.75)).toBe('--heat-3');
+    expect(heatToken(0.76)).toBe('--heat-4');
+    expect(heatToken(1)).toBe('--heat-4');
   });
 });
