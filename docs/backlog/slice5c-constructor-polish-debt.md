@@ -159,3 +159,4 @@ rule (Critical/Important are fixed in-task; Minor lands here).
   and `RunMiniProjectsTab.svelte` render the stored `order`, which keeps gaps after a block delete, while the
   editor and (since the final review) the student view number blocks by list position. Pre-existing,
   outside this branch.
+  Slice 6a numbers blocks by position on the teacher screens (Progress, Submissions, Mini-projects, the Assets "used by" list); `MiniProjectModal` follows in 6b.

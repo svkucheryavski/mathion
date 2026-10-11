@@ -90,3 +90,8 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - An admin's 409 whose refetched row is still not locked leaves the inline confirm open with no feedback (pre-existing).
 - The empty text keys off `rows.length` (mini-projects whose block is in `blocks`), so a mini-project whose block is missing from the pinned version shows "No mini-projects yet…" and "0 of N". The data model should not allow that.
 - Tests: the admin-409 test does not assert focus on `input[data-role="danger-ack"]`, and the force-delete success focus path (`focusAfterRemoval`) is untested.
+
+### T11 — Assets
+- At 1000px, an extreme filename together with a very long uploader email (and the plain delete confirm open in the actions cell) squeezes the Filename column; the replace confirm already sits in its own full-width row (browser pass).
+- `.assets-table` uses `border-collapse: collapse`, so the card corners are square (same as T6 `.runs-table` and T10 `.mp-table`).
+- Tests: after a delete, the "next row's 🗑" and "previous row's 🗑" focus steps are not pinned (only the last-row → + Upload step is), and the 403 force-delete path has no focus assertion.

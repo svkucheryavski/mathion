@@ -13,7 +13,7 @@ vi.mock('../lib/runAssets', async () => {
 
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
 import { uploadRunAsset, replaceRunAsset, deleteRunAsset } from '../lib/runAssets';
-import type { Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
+import type { BlockResponse, Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
 
 // jsdom doesn't ship DataTransfer/DragEvent constructors with a writable
 // `files` property, so build a minimal shape via Object.defineProperty —
@@ -50,6 +50,7 @@ function baseProps(overrides: Partial<{
   course: Course;
   versionIsDisabled: boolean;
   onEditMiniProject: (mp: MiniProjectResponse) => void;
+  blocks: BlockResponse[];
 }> = {}) {
   return {
     runId: 1,
@@ -94,6 +95,10 @@ function findAllButtons(root: HTMLElement, label: RegExp): HTMLButtonElement[] {
   return Array.from(root.querySelectorAll('button')).filter((b) =>
     label.test(b.textContent?.trim() ?? ''),
   ) as HTMLButtonElement[];
+}
+
+function replaceBtn(): HTMLButtonElement | null {
+  return target.querySelector('button[data-action="replace"]');
 }
 
 let target: HTMLDivElement;
@@ -929,7 +934,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'whatever.pdf', { type: 'application/pdf' }));
     await settle();
@@ -955,7 +960,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.png', { type: 'image/png' }));
     await settle();
@@ -973,7 +978,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'NEW.PDF', { type: 'application/pdf' }));
     await settle();
@@ -989,7 +994,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     const big = new File(['x'], 'big.pdf', { type: 'application/pdf' });
     Object.defineProperty(big, 'size', { value: 20 * 1024 * 1024 + 1 });
@@ -1008,7 +1013,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1032,7 +1037,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1054,7 +1059,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1075,7 +1080,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1092,7 +1097,7 @@ describe('RunAssetsTab — replace flow', () => {
       props: baseProps({ assets, versionIsDisabled: true }),
     });
     flushSync();
-    const btn = findButton(target, /↻ Replace/)!;
+    const btn = replaceBtn()!;
     expect(btn.disabled).toBe(true);
   });
 
@@ -1113,7 +1118,7 @@ describe('RunAssetsTab — replace flow', () => {
     });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1142,7 +1147,7 @@ describe('RunAssetsTab — replace flow', () => {
     component = mount(RunAssetsTab, { target, props: box });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1162,7 +1167,7 @@ describe('RunAssetsTab — replace flow', () => {
     component = mount(RunAssetsTab, { target, props: box });
     flushSync();
 
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1209,7 +1214,7 @@ describe('RunAssetsTab — replace flow', () => {
     expect(target.textContent).toMatch(/extension not allowed/i);
 
     // Now trigger a replace-side ext-mismatch error.
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['x'], 'wrong.png', { type: 'image/png' }));
     await settle();
@@ -1308,15 +1313,16 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     flushSync();
     expect(target.textContent).toMatch(/referenced by 1 mini-project/i);
     const danger = findButton(target, /Force delete/i)!;
-    expect(danger.disabled).toBe(true);
+    expect(danger.getAttribute('aria-disabled')).toBe('true');
 
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     expect(checkbox).not.toBeNull();
     expect(document.activeElement).toBe(checkbox);
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
     expect(danger.disabled).toBe(false);
+    expect(danger.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('Force delete fires DELETE with force=true + both refetches', async () => {
@@ -1336,7 +1342,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('ref.pdf').click();
     flushSync();
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
@@ -1364,7 +1370,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('ref.pdf').click();
     flushSync();
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
@@ -1391,7 +1397,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('ref.pdf').click();
     flushSync();
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
@@ -1421,7 +1427,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
       findDeleteBtn('ref.pdf').click();
       flushSync();
-      const checkbox = target.querySelector('input[type="checkbox"][data-role="force-confirm"]') as HTMLInputElement;
+      const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
       checkbox.checked = true;
       checkbox.dispatchEvent(new Event('change', { bubbles: true }));
       flushSync();
@@ -1443,7 +1449,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     }
   });
 
-  it('warning aria-describedby points at the warning paragraph id', async () => {
+  it('the danger panel is described by its warning', async () => {
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({ assets: refAssets, miniProjects: refMps }),
@@ -1452,12 +1458,9 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('ref.pdf').click();
     flushSync();
-    const danger = findButton(target, /Force delete/i)!;
-    const describedBy = danger.getAttribute('aria-describedby');
-    expect(describedBy).toBe('warn-1');
-    const warningPara = target.querySelector('#warn-1');
-    expect(warningPara).not.toBeNull();
-    expect(warningPara!.textContent).toMatch(/referenced by/i);
+    const panel = target.querySelector('.danger-confirm') as HTMLElement;
+    const id = panel.getAttribute('aria-describedby')!;
+    expect(document.getElementById(id)?.textContent).toMatch(/referenced by 1 mini-project/i);
   });
 
   it('orphan success does NOT call onRefetchMiniProjects', async () => {
@@ -1576,7 +1579,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     flushSync();
 
     // Open replace confirm
-    findButton(target, /↻ Replace/)!.click();
+    replaceBtn()!.click();
     flushSync();
     pickReplaceFile(new File(['x'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
@@ -1722,7 +1725,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     findButton(target, /Delete 3 selected/i)!.click();
     flushSync();
     // Referenced count > 0 → checkbox + Force delete
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
@@ -1765,7 +1768,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     findButton(target, /Delete 2 selected/i)!.click();
     flushSync();
     // No checkbox needed in this branch
-    expect(target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]')).toBeNull();
+    expect(target.querySelector('input[type="checkbox"][data-role="danger-ack"]')).toBeNull();
     expect(findButton(target, /Force delete/i)).toBeNull();
     findButton(target, /^Confirm$/)!.click();
     await settle();
@@ -1788,8 +1791,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     flushSync();
 
     // Single-row delete triggers banner via the 500 fallback.
-    const deleteBtn = target.querySelector('button.row-action-delete') as HTMLButtonElement
-      ?? findButton(target, /^×$/);
+    const deleteBtn = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
     deleteBtn!.click();
     flushSync();
     findButton(target, /^Confirm$/)!.click();
@@ -1816,8 +1818,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
       });
       flushSync();
 
-      const deleteBtn = target.querySelector('button.row-action-delete') as HTMLButtonElement
-        ?? findButton(target, /^×$/);
+      const deleteBtn = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
       deleteBtn!.click();
       flushSync();
       findButton(target, /^Confirm$/)!.click();
@@ -1883,7 +1884,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     flushSync();
     findButton(target, /Delete 1 selected/i)!.click();
     flushSync();
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
@@ -1956,7 +1957,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     flushSync();
     findButton(target, /Delete 3 selected/i)!.click();
     flushSync();
-    const checkbox = target.querySelector('input[type="checkbox"][data-role="bulk-confirm"]') as HTMLInputElement;
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
@@ -2133,7 +2134,7 @@ describe('RunAssetsTab — versionIsDisabled tooltips', () => {
     expect(upload.disabled).toBe(true);
     expect(upload.title).toBe(DISABLED_TOOLTIP);
 
-    const replace = findButton(target, /↻ Replace/)!;
+    const replace = replaceBtn()!;
     expect(replace).not.toBeNull();
     expect(replace.disabled).toBe(true);
     expect(replace.title).toBe(DISABLED_TOOLTIP);
@@ -2207,7 +2208,7 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
     );
     // Acknowledging does NOT enable the button for teachers.
     const checkbox = target.querySelector(
-      'input[type="checkbox"][data-role="force-confirm"]',
+      'input[type="checkbox"][data-role="danger-ack"]',
     ) as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2229,9 +2230,9 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
     flushSync();
     const danger = findButton(target, /Force delete/i)!;
     expect(danger).toBeTruthy();
-    expect(danger.disabled).toBe(true);  // gated by checkbox initially
+    expect(danger.getAttribute('aria-disabled')).toBe('true');  // gated by checkbox initially
     const checkbox = target.querySelector(
-      'input[type="checkbox"][data-role="force-confirm"]',
+      'input[type="checkbox"][data-role="danger-ack"]',
     ) as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2274,7 +2275,7 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
     });
     flushSync();
     expect(findButton(target, /\+ Upload/)).not.toBeNull();
-    expect(findButton(target, /↻ Replace/)).not.toBeNull();
+    expect(replaceBtn()).not.toBeNull();
     const adminLink = target.querySelector('a')!.textContent?.trim();
     expect(adminLink).toBe('doc.pdf');
     unmount(component);
@@ -2292,16 +2293,355 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
       const uploadBtn = Array.from(target2.querySelectorAll('button')).find((b) =>
         /\+ Upload/.test(b.textContent ?? ''),
       );
-      const replaceBtn = Array.from(target2.querySelectorAll('button')).find((b) =>
-        /↻ Replace/.test(b.textContent ?? ''),
-      );
+      const replace2 = target2.querySelector('button[data-action="replace"]');
       expect(uploadBtn).toBeDefined();
-      expect(replaceBtn).toBeDefined();
+      expect(replace2).not.toBeNull();
       const teacherLink = target2.querySelector('a')!.textContent?.trim();
       expect(teacherLink).toBe('doc.pdf');
       unmount(cmp2);
     } finally {
       document.body.removeChild(target2);
     }
+  });
+});
+
+describe('RunAssetsTab — 6a restyle', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+  });
+
+  // Stored orders 2 and 5: block 1 is second in the list (R13).
+  const blocks: BlockResponse[] = [
+    { id: 4, version_id: 7, title: 'Vectors', slug: 'v', order: 2, info: '', info_html: '' },
+    { id: 1, version_id: 7, title: 'Intro', slug: 'i', order: 5, info: '', info_html: '' },
+  ];
+  const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
+  const refMp = mkMp(10, 'MP A', '![](ref.pdf)');
+
+  it('header row: h2 "Assets" with the mono count and a primary + Upload; the filter pills under it', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    const h2 = target.querySelector('.sec-head h2') as HTMLElement;
+    expect(h2.textContent?.replace(/\s+/g, ' ').trim()).toBe('Assets 1');
+    expect(h2.getAttribute('tabindex')).toBe('-1');
+    expect(target.querySelector('.sec-head')?.contains(findButton(target, /\+ Upload/))).toBe(true);
+    const pills = target.querySelector('.filter-pills[role="group"]') as HTMLElement;
+    expect(pills.getAttribute('aria-label')).toBe('Filter assets');
+    expect(Array.from(pills.querySelectorAll('button')).map((b) => b.getAttribute('aria-pressed')))
+      .toEqual(['true', 'false', 'false']);
+    expect(findButton(target, /\+ Upload/)!.getAttribute('data-variant')).toBe('primary');
+  });
+
+  it('row actions are icon buttons named by the file (R4)', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    const rep = replaceBtn()!;
+    expect(rep.getAttribute('data-glyph')).toBe('refresh');
+    expect(rep.getAttribute('aria-label')).toBe('Replace a.pdf');
+    expect(rep.getAttribute('title')).toBe('Replace');
+    const del = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
+    expect(del.getAttribute('data-glyph')).toBe('trash');
+    expect(del.getAttribute('title')).toBe('Delete');
+  });
+
+  it('Uses chip colour follows the count; size, date and email are mono', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }),
+    });
+    flushSync();
+    const chips = Array.from(target.querySelectorAll('button.uses-chip'));
+    expect(chips.map((c) => c.textContent)).toEqual(['1 use', '0 uses']);
+    expect(chips[0]!.classList.contains('uses-on')).toBe(true);
+    expect(chips[1]!.classList.contains('uses-off')).toBe(true);
+    expect(target.querySelector('tr[data-asset-id="1"]')!.querySelectorAll('td.num')).toHaveLength(3);
+  });
+
+  it('only the sorted column carries a sort mark', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    expect(target.querySelectorAll('thead .sort-mark')).toHaveLength(1);
+    const th = Array.from(target.querySelectorAll('th')).find((t) => t.textContent?.includes('Filename'))!;
+    expect(th.querySelector('.sort-mark')?.getAttribute('data-dir')).toBe('asc');
+  });
+
+  it('the "used by" sub-panel sits under its row and names "Block {n} — title" by position (R13, R14)', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'foo.pdf')], miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')], blocks }) });
+    flushSync();
+    findButton(target, /1 use$/)!.click();
+    flushSync();
+    const sub = target.querySelector('#uses-1') as HTMLElement;
+    expect(sub.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
+    expect(sub.querySelector('.sp-head')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('foo.pdf — used by');
+    expect(sub.querySelector('.sp-mp')?.textContent).toBe('Block 2 — Intro');
+  });
+
+  it('a block missing from blocks drops the "Block {n} — " prefix', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'foo.pdf')], miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')] }) });
+    flushSync();
+    findButton(target, /1 use$/)!.click();
+    flushSync();
+    expect(target.querySelector('.sp-mp')?.textContent).toBe('MP A');
+  });
+
+  it('the danger panel is a full-width row under its row; it and the sub-panel never show together (R14)', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [refAsset], miniProjects: [refMp] }) });
+    flushSync();
+    const chip = findButton(target, /1 use$/)!;
+    chip.click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+    (target.querySelector('button[aria-label="Delete ref.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).toBeNull();
+    expect(chip.getAttribute('aria-expanded')).toBe('false');
+    const row = target.querySelector('tr.danger-row') as HTMLElement;
+    expect(row.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
+    expect(row.querySelector('td')?.getAttribute('colspan')).toBe('7');
+    chip.click();
+    flushSync();
+    expect(target.querySelector('tr.danger-row')).toBeNull();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+  });
+
+  it('Cancel on the danger panel returns focus to the row\'s Delete (Review Focus 3)', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [refAsset], miniProjects: [refMp] }) });
+    flushSync();
+    const del = target.querySelector('button[aria-label="Delete ref.pdf"]') as HTMLButtonElement;
+    del.click();
+    flushSync();
+    expect(document.activeElement?.getAttribute('data-role')).toBe('danger-ack');
+    findButton(target, /^Cancel$/)!.click();
+    await settle();
+    expect(target.querySelector('tr.danger-row')).toBeNull();
+    expect(document.activeElement).toBe(del);
+  });
+
+  it('the plain delete confirm is in the actions cell and takes focus; Cancel returns focus to Delete', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    const del = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
+    del.click();
+    flushSync();
+    expect(findButton(target, /^Confirm$/)!.closest('td')?.classList.contains('actions-cell')).toBe(true);
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+    (document.activeElement as HTMLButtonElement).click();
+    await settle();
+    expect(document.activeElement).toBe(del);
+  });
+
+  it('the replace confirm gives Cancel the focus; Cancel and Esc return it to Replace', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'doc.pdf')] }) });
+    flushSync();
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['N'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+    (document.activeElement as HTMLButtonElement).click();
+    await settle();
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(document.activeElement).toBe(replaceBtn());
+
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['N'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(document.activeElement).toBe(replaceBtn());
+  });
+
+  it('the replace confirm is a full-width row under its row; Replace and Delete stay in the row (browser pass)', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'doc.pdf'), mkAsset(2, 'e.pdf')] }) });
+    flushSync();
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['N'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    const row = target.querySelector('tr.replace-row') as HTMLTableRowElement;
+    expect(row.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
+    expect(row.querySelector('td')?.getAttribute('colspan')).toBe('7');
+    expect(row.querySelector('.row-confirm code')?.textContent).toBe('doc.pdf');
+    const cells = target.querySelector('tr[data-asset-id="1"] .actions-cell') as HTMLElement;
+    expect(cells.querySelector('.row-confirm')).toBeNull();
+    expect(cells.querySelector('button[data-action="replace"]')).not.toBeNull();
+    expect(cells.querySelector('button[data-action="delete-asset"]')).not.toBeNull();
+  });
+
+  it('deleting the only asset moves focus to + Upload', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const box: any = $state({
+      ...baseProps({ assets: [mkAsset(1, 'a.pdf')] }),
+      onRefetchAssets: async () => { box.assets = []; },
+    });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+    await settle();
+    expect(target.textContent).toMatch(/No assets yet/);
+    expect(document.activeElement).toBe(findButton(target, /\+ Upload/));
+  });
+
+  it('bulk: a referenced selection puts the danger panel in the strip; Cancel returns focus to "Delete N selected"', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [refAsset], miniProjects: [refMp] }) });
+    flushSync();
+    (target.querySelector('input[aria-label="Select all"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    expect(target.querySelector('.bulk-strip .danger-confirm')).not.toBeNull();
+    findButton(target, /^Cancel$/)!.click();
+    await settle();
+    expect(document.activeElement).toBe(findButton(target, /Delete 1 selected/i));
+  });
+
+  it('the error banner is an alert; the summary banner is a status', async () => {
+    (deleteRunAsset as any).mockResolvedValue(undefined);
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    const uploadInput = target.querySelector('input[type="file"]:not([data-role])') as HTMLInputElement;
+    Object.defineProperty(uploadInput, 'files', { value: [new File(['x'], 'evil.exe')], configurable: true });
+    uploadInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.querySelector('.banner-error')?.getAttribute('role')).toBe('alert');
+    (target.querySelector('input[aria-label="Select all"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+    expect(target.querySelector('.banner-info')?.getAttribute('role')).toBe('status');
+  });
+});
+
+describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
+  beforeEach(() => {
+    (deleteRunAsset as any).mockReset();
+    (replaceRunAsset as any).mockReset();
+  });
+
+  it('a delete 404 whose refetch removes the row moves focus to + Upload at the storm flush', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (deleteRunAsset as any).mockRejectedValue(Object.assign(new Error('not found'), { status: 404 }));
+      const box: any = $state({ ...baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+      box.onRefetchAssets = vi.fn(async () => { box.assets = []; });
+      component = mount(RunAssetsTab, { target, props: box });
+      flushSync();
+      (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
+      flushSync();
+      findButton(target, /^Confirm$/)!.click();
+      await settle();
+      await vi.advanceTimersByTimeAsync(500);
+      await settle();
+      expect(box.onRefetchAssets).toHaveBeenCalledTimes(1);
+      expect(target.textContent).toMatch(/deleted by another user/i);
+      expect(document.activeElement).toBe(findButton(target, /\+ Upload/));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a replace 404 whose refetch removes the row moves focus to + Upload', async () => {
+    (replaceRunAsset as any).mockRejectedValue(Object.assign(new Error('not found'), { status: 404 }));
+    const box: any = $state({ ...baseProps({ assets: [mkAsset(1, 'doc.pdf')] }) });
+    box.onRefetchAssets = vi.fn(async () => { box.assets = []; });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+    await settle();
+    expect(target.textContent).toMatch(/deleted by another user/i);
+    expect(document.activeElement).toBe(findButton(target, /\+ Upload/));
+  });
+
+  it('while a bulk delete runs, focus waits on "Delete N selected"', async () => {
+    let release!: () => void;
+    (deleteRunAsset as any).mockImplementation(() => new Promise<void>((r) => { release = r; }));
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    (target.querySelector('input[aria-label="Select all"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+    expect(deleteRunAsset).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(findButton(target, /Delete 1 selected/i));
+    release();
+    await settle();
+  });
+
+  it('opening the replace confirm closes that row\'s "used by" panel: one panel under a row (R14)', async () => {
+    const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: [refAsset], miniProjects: [mkMp(10, 'MP A', '![](ref.pdf)')] }),
+    });
+    flushSync();
+    (target.querySelector('button.uses-chip') as HTMLButtonElement).click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'ref.pdf', { type: 'application/pdf' }));
+    await settle();
+    expect(target.querySelector('tr.replace-row')).not.toBeNull();
+    expect(target.querySelector('#uses-1')).toBeNull();
+  });
+
+  it('opening "used by" closes that row\'s replace confirm: R14 the other way round', async () => {
+    const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: [refAsset], miniProjects: [mkMp(10, 'MP A', '![](ref.pdf)')] }),
+    });
+    flushSync();
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['NEW'], 'ref.pdf', { type: 'application/pdf' }));
+    await settle();
+    expect(target.querySelector('tr.replace-row')).not.toBeNull();
+    (target.querySelector('button.uses-chip') as HTMLButtonElement).click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+    expect(target.querySelector('tr.replace-row')).toBeNull();
+  });
+
+  it('a replace that moves its row under Size sort keeps focus on that row\'s ↻', async () => {
+    (replaceRunAsset as any).mockResolvedValue(undefined);
+    const sized = (id: number, name: string, size: number) => ({ ...mkAsset(id, name), file_size: size });
+    const box: any = $state({
+      ...baseProps({ assets: [sized(1, 'a.pdf', 100), sized(2, 'b.pdf', 200), sized(3, 'c.pdf', 300)] }),
+    });
+    box.onRefetchAssets = vi.fn(async () => {
+      box.assets = [sized(1, 'a.pdf', 999), sized(2, 'b.pdf', 200), sized(3, 'c.pdf', 300)];
+    });
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    findButton(target, /^Size$/)!.click();
+    flushSync();
+    const rb = () => target.querySelector('button[data-action="replace"][aria-label="Replace a.pdf"]') as HTMLButtonElement;
+    rb().click();
+    flushSync();
+    pickReplaceFile(new File(['NEWER'], 'a.pdf', { type: 'application/pdf' }));
+    await settle();
+    findButton(target, /^Confirm$/)!.click();
+    await settle();
+    await settle();
+    expect(box.onRefetchAssets).toHaveBeenCalledTimes(1);
+    expect(Array.from(target.querySelectorAll('tbody tr a')).map((a) => a.textContent?.trim()))
+      .toEqual(['b.pdf', 'c.pdf', 'a.pdf']);
+    expect(document.activeElement).toBe(rb());
   });
 });

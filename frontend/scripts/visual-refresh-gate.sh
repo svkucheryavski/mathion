@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1583
+EXPECTED_CHECKS=1599
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4494,7 +4494,7 @@ FILES_6A=(
   src/components/ui/FilterPills.svelte src/pages/teaching/TeacherRunListPage.svelte src/pages/runs/RunListPage.svelte
   src/components/runs/RunProgressTab.svelte src/components/runs/RunSubmissionTab.svelte
   src/components/runs/RunGroupsTab.svelte src/components/runs/RunTeachersTab.svelte
-  src/components/runs/RunMiniProjectsTab.svelte
+  src/components/runs/RunMiniProjectsTab.svelte src/components/runs/RunAssetsTab.svelte
 )
 LIB_6A=(src/lib/runStatus.ts src/lib/dashboards.ts src/lib/datetime.ts src/lib/blockNumbers.ts src/lib/focusFirst.ts src/lib/runTabs.ts)
 emoji_scan "all Slice-6a files" $FILES_6A $LIB_6A
@@ -4701,6 +4701,27 @@ if [[ -n $REPLY ]]; then
   d '\.mp-banner' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
   d '\.mp-banner-err' '' 'background:var\(--status-rejected-bg\)' 'border-left-color:var\(--danger\)'
   sweep RunMiniProjectsTab $H
+fi
+
+# Assets: the shared panel, pills and confirms replace the local ones (P9).
+if grep -qE 'data-role="(force|bulk)-confirm"|checkboxChecked|class="filter-pills"|class="inline-confirm' src/components/runs/RunAssetsTab.svelte; then
+  echo "FAIL  RunAssetsTab still has its own confirm panel or pills"; fail=1
+else
+  echo "PASS  RunAssetsTab uses DangerConfirm, InlineConfirm and FilterPills (6a)"
+fi
+own assets-table RunAssetsTab.svelte
+uniq1 assets-table
+if [[ -n $REPLY ]]; then
+  N=RunAssetsTab; H=$REPLY
+  d '\.bulk-strip' '' 'background:var\(--surface-2\)'
+  # The Uses chip stays on one line when the table narrows (browser-found, 6a T11).
+  d '\.uses-chip' '' 'white-space:nowrap'
+  d '\.uses-on' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.uses-off' '' 'background:var\(--status-not-submitted-bg\)' 'color:var\(--status-not-submitted-fg\)'
+  d '\.banner-error' '' 'background:var\(--status-rejected-bg\)' 'border-left-color:var\(--danger\)'
+  d '\.banner-info' '' 'background:var\(--surface-2\)' 'border-left-color:var\(--primary\)'
+  d '\.num' '' 'font-family:var\(--font-mono\)'
+  sweep RunAssetsTab $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

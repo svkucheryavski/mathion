@@ -489,6 +489,7 @@
           onRefetchMiniProjects={refetchMiniProjects}
           onEditMiniProject={(mp) => void setTab('mini-projects', { editTarget: mp, focusTab: true })}
           onReloadRun={reloadRun}
+          blocks={blocks ?? []}
         />
       {:else if activeTab === 'teachers'}
         <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} course={course!} />
