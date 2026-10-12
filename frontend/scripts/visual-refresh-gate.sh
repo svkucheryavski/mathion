@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1697
+EXPECTED_CHECKS=1733
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4071,7 +4071,8 @@ emoji_scan "MarkdownEditor / AssetSidebar" src/components/editor/MarkdownEditor.
 
 echo
 echo "--- (aa) Slice-5b T1/T3a — ui/Modal ---"
-# Anchored on .modal-panel: three run modals also author .modal-backdrop (R8).
+# Anchored on .modal-panel (5b). Section (ak) asserts `own modal-backdrop`
+# since 6b moved the last run modal that authored .modal-backdrop onto Modal.
 own modal-panel Modal.svelte
 uniq1 modal-panel
 if [[ -n $REPLY ]]; then
@@ -4777,6 +4778,7 @@ echo "--- (ak) Slice-6b — the four teacher modals on ui/Modal ---"
 FILES_6B=(
   src/components/runs/PublishConflictsModal.svelte
   src/components/runs/NewRunModal.svelte src/components/ui/Switch.svelte
+  src/components/runs/RosterImportModal.svelte
 )
 emoji_scan "all Slice-6b files" $FILES_6B
 colour_scan 6b-modals $FILES_6B
@@ -4835,6 +4837,31 @@ if [[ -n $REPLY ]]; then
   d '\.nr-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
   d '\.nr-foot-note' '' 'flex:1' 'color:var\(--muted\)'
   sweep NewRunModal $H
+fi
+srcw runs/RosterImportModal.svelte 760
+# (aa) anchored on .modal-panel while three run modals authored .modal-backdrop;
+# with the last of them on ui/Modal, the backdrop is Modal's alone again.
+own modal-backdrop Modal.svelte
+own ri-steps RosterImportModal.svelte
+uniq1 ri-steps
+if [[ -n $REPLY ]]; then
+  N=RosterImportModal; H=$REPLY
+  d '\.ri-rule' '' 'width:14px' 'height:1\.5px' 'background:var\(--border-strong\)'
+  d '\.ri-rule-done' '' 'background:var\(--primary\)'
+  d '\.ri-dot' '' 'width:17px' 'height:17px' 'border-radius:50%' 'background:var\(--border-soft\)'
+  d '\.ri-dot-on' '' 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.ri-dot-done' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ri-tile' '' 'width:18px' 'height:18px' 'border-radius:4px'
+  d '\.ri-tile-col' '' 'width:32px'
+  d '\.ri-ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ri-skip' '' 'background:var\(--status-needs-revision-bg\)' 'color:var\(--status-needs-revision-fg\)'
+  d '\.ri-why' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.ri-added' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ri-failed' '' 'background:var\(--status-rejected-bg\)' 'color:var\(--status-rejected-fg\)'
+  d '\.ri-chip' '' 'border-radius:3px'
+  d '\.ri-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  d '\.ri-paste' '' 'font-family:var\(--font-mono\)'
+  sweep RosterImportModal $H
 fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

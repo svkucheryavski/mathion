@@ -29,8 +29,10 @@ function normalize(text: string): string[] {
   t = t.replace(/\r\n?/g, '\n');
   return t
     .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+    // Trim the end only: a leading tab is an empty first cell (a sheet row with
+    // no name). The cells are trimmed one by one after the split.
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter((l) => l.trim().length > 0);
 }
 
 function detectDelimiter(line: string): ',' | '\t' {
@@ -62,8 +64,14 @@ export function parseCsv(
   const lines = normalize(text);
   if (lines.length === 0) return { ok: false, error: 'Paste is empty.' };
 
-  const delimiter = detectDelimiter(lines[0]);
-  const split = lines.map((l) => l.split(delimiter).map((c) => c.trim()));
+  // A leading tab is an empty cell, not a delimiter vote.
+  const delimiter = detectDelimiter(lines[0].trim());
+  let split = lines.map((l) => l.split(delimiter).map((c) => c.trim()));
+  // A copied range that starts with a column empty on every row: drop it, so
+  // the columns line up as if the range started one column later.
+  while (split.every((cells) => cells.length > 1 && cells[0] === '')) {
+    split = split.map((cells) => cells.slice(1));
+  }
   const header = detectHeader(split[0]);
   const hasHeader = header !== null;
   const dataRows = hasHeader ? split.slice(1) : split;

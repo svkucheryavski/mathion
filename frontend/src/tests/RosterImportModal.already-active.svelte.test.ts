@@ -107,13 +107,12 @@ describe('RosterImportModal — student_already_active_in_course rendering', () 
     unmount(cmp);
   });
 
-  it('Test 2: other error_code preserves tooltip and does NOT render inline detail', async () => {
+  it('Test 2: other error_code shows its detail inline too, and keeps it as the chip title', async () => {
     fetchSpy.mockImplementation(() => jres({ results: [
       {
         email: 'a@x.com',
         status: 'error',
-        // Valid BulkRosterErrorCode union member (types.ts:334-338). Using an
-        // unknown string like 'some_other_code' would fail svelte-check.
+        // Valid BulkRosterErrorCode union member (types.ts:347-351).
         error_code: 'capacity_reached',
         detail: 'something else',
       },
@@ -122,13 +121,10 @@ describe('RosterImportModal — student_already_active_in_course rendering', () 
     await settle();
     await pasteAndImport(target, 'a@x.com');
 
-    // Badge present with the detail surfaced via title (tooltip-only path).
     const badge = target.querySelector('span.badge.badge-error[data-result="error"]');
     if (!badge) throw new Error('badge.badge-error not found');
     expect(badge.getAttribute('title')).toBe('something else');
-
-    // Inline-visible detail span must NOT be rendered for non-matching codes.
-    expect(target.querySelector('.error-detail')).toBeNull();
+    expect(target.querySelector('.error-detail')?.textContent?.trim()).toBe('something else');
 
     unmount(cmp);
   });

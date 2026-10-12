@@ -29,3 +29,15 @@ Review round 1 (Opus + Fable), both CLEAN; minors:
 - **Reduced motion.** `.knob` `transition: transform .12s` has no `prefers-reduced-motion` guard; nothing in the app handles it yet. Polish slice.
 - **Test isolation.** `NewRunModal.svelte.test.ts` unmounts at the end of each test without `try/finally`; one failing `expect` leaves a panel on Modal's stack and cascades. Fix: an `afterEach` unmount, as in the Task 1 file.
 - **Note for 6c:** a disabled Switch names its reason only through `title`, which keyboard users and Safari never show. The Overview's "Locked once the run is published" should also be visible text or `aria-describedby`.
+
+## Task 3 — Import roster
+
+Found while taking the shots, fixed in the task: the status tile column was too narrow (border-box cells; now 32px, gate-pinned); `lib/csv.ts` dropped an empty first cell (a sheet row with no name) because it trimmed whole lines (now trims the end only; a leading column empty on every row is dropped; the delimiter is chosen from the trimmed first line).
+
+Review round 1 (Opus + Fable), both CLEAN; the two csv regressions they found were fixed in the task. Minors:
+- **Copied failed rows disagree with the screen.** `failedRowsAsText()` uses the raw `r.detail` (empty, or the literal "internal error"), while Detail shows "Not added" / "Server error — try again" (R25). Fix: build the copy text from `detailFor(r)`.
+- **Re-bucketed e-mails are not mono.** The counts line "Already enrolled, will be re-bucketed: …" shows e-mails as muted proportional text. Fix: `<span class="ri-key mono">` per e-mail, keeping the "+N more" cut.
+- **Step marker list semantics in Safari.** `<ol class="ri-steps">` with `list-style: none` loses "list, 2 items" in VoiceOver. Fix: `role="list"` (same family as Task 1's `.pc-emails`).
+- **Test gap: Copy during Done's refetch.** Nothing asserts that Copy failed rows is inert while Done's refetch runs; dropping the `closing` guard in `onCopyFailed` passes the suite. Fix: one click-while-pending assertion in "Done runs once".
+- **Observation (by design):** the D23 line uses the mount-time roster while the request and Detail use the refetch; a colleague's change in between can make preview and result disagree for that student. The result column is the truth.
+- **Paste-parser quirks, pre-existing (round 2 probes, not 6b regressions).** In `lib/csv.ts`: an e-mail-first paste whose first row has a blank e-mail (`\tG1` / `b@x.com\tG2`) picks name-first and misreads every row; a line that is just `,` becomes a "Missing email" row instead of being skipped; an e-mail-first row with an empty middle cell (`a@x.com\t\tG1`) loses its group (positional e-mail-first reads only `cells[1]`). Fix together if the parser is revisited.
