@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { ApiError } from '../../lib/api';
   import { deadlinesHeader, formatLocalWithTz, formatShortDeadline } from '../../lib/datetime';
   import { deleteMiniProject } from '../../lib/miniProjects';
   import { blockPositions } from '../../lib/blockNumbers';
   import { focusFirst } from '../../lib/focusFirst';
+  import { pushToast } from '../../stores/toasts.svelte';
   import MiniProjectModal from './MiniProjectModal.svelte';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
@@ -103,22 +104,46 @@
   let headingEl = $state<HTMLElement>();
   let newEl = $state<HTMLButtonElement>();
   const trashEls: Record<number, HTMLButtonElement | undefined> = $state({});
+  const pencilEls: Record<number, HTMLButtonElement | undefined> = $state({});
+  let createdId: number | null = null;
+
+  // §Focus › After Create: "+" may now be disabled, so focus the new row's
+  // pencil, or else the h2. Wait a tick so FocusTrap's restore has run.
+  async function closeModal() {
+    modalMode = null;
+    editTarget = null;
+    const id = createdId;
+    createdId = null;
+    if (id === null) return;
+    await tick();
+    focusFirst([pencilEls[id], headingEl]);
+  }
 
   // Parent (RunDetailPage) hands us a MP to open in edit mode when the
-  // Assets tab's [Edit] action navigates here. Stale-cascade safe: if the
-  // MP is no longer in our local list (refetch dropped it), we skip
-  // opening the modal but still fire onPendingEditConsumed so the parent
-  // clears the dangling reference. The early-return on null prevents
-  // re-entry once the parent clears pendingEditTarget.
+  // Assets tab's [Edit] action navigates here. P17: open the tab's own row
+  // (fresh from miniProjects), not the parent's copy. A locked row or a
+  // disabled version opens nothing and toasts the reason its pencil shows.
+  // A row that is gone (refetch dropped it) opens nothing. In every case
+  // onPendingEditConsumed fires so the parent clears the reference; the
+  // early-return on null prevents re-entry once it has. Only the target is
+  // tracked: pushToast writes the toast list (a read-then-write of its length),
+  // so running the body tracked would re-run the effect without end.
   $effect(() => {
-    if (!pendingEditTarget) return;
     const target = pendingEditTarget;
-    const stillExists = miniProjects.some((mp) => mp.id === target.id);
-    if (stillExists) {
-      editTarget = target;
-      modalMode = 'edit';
-    }
-    onPendingEditConsumed?.();
+    if (!target) return;
+    untrack(() => {
+      const row = miniProjects.find((mp) => mp.id === target.id);
+      if (row) {
+        const reason = editReason(row);
+        if (reason) {
+          pushToast(reason, 'info');
+        } else {
+          editTarget = row;
+          modalMode = 'edit';
+        }
+      }
+      onPendingEditConsumed?.();
+    });
   });
 
   const newDisabled = $derived(
@@ -293,7 +318,7 @@
               <td class="mp-actions">
                 <span class="row-icons">
                   <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? 'Edit'}
-                              disabled={reason !== undefined} data-action="edit"
+                              disabled={reason !== undefined} data-action="edit" bind:element={pencilEls[r.mp.id]}
                               onclick={() => { editTarget = r.mp; modalMode = 'edit'; }} />
                   <IconButton glyph="trash" size="sm" danger aria-label="Delete {r.aria}" title="Delete"
                               data-action="delete" bind:element={trashEls[r.mp.id]}
@@ -335,10 +360,9 @@
       {versionIsDisabled}
       {runEndDate}
       {course}
-      onClose={() => {
-        modalMode = null;
-        editTarget = null;
-      }}
+      {blocks}
+      onClose={() => void closeModal()}
+      onCreated={(mp) => (createdId = mp.id)}
       onSaved={refetchAll}
       {onNavigateToTab}
     />

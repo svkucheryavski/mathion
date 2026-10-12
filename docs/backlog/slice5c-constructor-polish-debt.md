@@ -160,3 +160,4 @@ rule (Critical/Important are fixed in-task; Minor lands here).
   editor and (since the final review) the student view number blocks by list position. Pre-existing,
   outside this branch.
   Slice 6a numbers blocks by position on the teacher screens (Progress, Submissions, Mini-projects, the Assets "used by" list); `MiniProjectModal` follows in 6b.
+  6b (Task 4): MiniProjectModal numbers blocks by position too (R21). Closed.

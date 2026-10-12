@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount as svelteUnmount, flushSync } from 'svelte';
 import RunMiniProjectsTab from '../components/runs/RunMiniProjectsTab.svelte';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -13,6 +14,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  while (mountedTabs.length) svelteUnmount(mountedTabs.pop()!);
+  clearToasts();
   (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
 });
 
@@ -51,6 +54,14 @@ const byAction = (t: HTMLElement, a: string) => t.querySelector(`button[data-act
 // `course`, threaded as required by RunMiniProjectsTab at T12) and merges
 // caller overrides. Course may be passed partial; it merges onto baseCourse so
 // tests can write `course: { is_admin: false }`.
+const mountedTabs: ReturnType<typeof mount>[] = [];
+// A test that unmounts its own tab drops it from the list, so afterEach does
+// not unmount it twice (Svelte warns lifecycle_double_unmount; it never throws).
+function unmount(cmp: ReturnType<typeof mount>) {
+  const i = mountedTabs.indexOf(cmp);
+  if (i >= 0) mountedTabs.splice(i, 1);
+  svelteUnmount(cmp);
+}
 function mountMpTab(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.appendChild(target);
@@ -74,6 +85,7 @@ function mountMpTab(extra: Record<string, unknown> = {}) {
     target,
     props: { ...defaults, ...rest, course },
   });
+  mountedTabs.push(cmp);
   return { target, cmp };
 }
 
@@ -920,5 +932,88 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     await settle();
     const kinds = Array.from(target.querySelectorAll('td.mp-dl .dl .dl-kind')).map((e) => e.textContent);
     expect(kinds).toEqual(['soft', 'hard', 'resub']);
+  });
+});
+
+describe('RunMiniProjectsTab — 6b editor hand-off', () => {
+  const draft = mkMp({ id: 10, block_id: 1, assignment_md: 'doc body' });
+
+  it('"used by → Edit" on a locked mini-project opens nothing, toasts its reason, and is consumed', async () => {
+    clearToasts();
+    const onPendingEditConsumed = vi.fn();
+    const { target, cmp } = mountMpTab({
+      miniProjects: [{ ...draft, first_submitted_at: '2026-06-01T00:00:00Z' }],
+      pendingEditTarget: draft,
+      onPendingEditConsumed,
+    });
+    await settle();
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    // The target stays set (the spy never clears it): still one toast, one call.
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Has submissions — editing is off', 'info']]);
+    expect(onPendingEditConsumed).toHaveBeenCalledTimes(1);
+    unmount(cmp);
+  });
+
+  it('"used by → Edit" with a disabled version opens nothing and toasts the version reason', async () => {
+    clearToasts();
+    const onPendingEditConsumed = vi.fn();
+    const { target, cmp } = mountMpTab({
+      miniProjects: [draft],
+      versionIsDisabled: true,
+      pendingEditTarget: draft,
+      onPendingEditConsumed,
+    });
+    await settle();
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(toasts.list.map((t) => t.message)).toContain("This run's course version is disabled.");
+    expect(onPendingEditConsumed).toHaveBeenCalledTimes(1);
+    unmount(cmp);
+  });
+
+  it('"used by → Edit" opens the tab\'s own row, numbered by position (P17, R21)', async () => {
+    fetchSpy.mockImplementation(() => jres([]));
+    const { cmp } = mountMpTab({
+      miniProjects: [draft],
+      pendingEditTarget: { ...draft, assignment_md: 'stale copy' },
+      onPendingEditConsumed: vi.fn(),
+    });
+    await settle();
+    expect((document.querySelector('section.modal-panel textarea') as HTMLTextAreaElement).value).toBe('doc body');
+    expect(document.getElementById('mp-modal-title')?.textContent).toBe('Edit — Block 1 — Intro');
+    unmount(cmp);
+  });
+
+  it('after a create that takes the last free block, focus lands on the new row\'s pencil (§Focus › After Create)', async () => {
+    const created = mkMp({ id: 2, block_id: 2 });
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) =>
+      String(url).includes('/api/runs/10/mini-projects') && init?.method === 'POST' ? jres(created) : jres([]));
+    const props = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true, runEndDate: '2026-06-30',
+      versionIsDisabled: false, pinnedAvailable: true, blocks,
+      miniProjects: [mkMp({ id: 1, block_id: 1 })] as MiniProjectResponse[],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(),
+      course: baseCourse,
+    });
+    props.onRefetchMiniProjects = vi.fn(async () => {
+      props.miniProjects = [...props.miniProjects, created];
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props });
+    await settle();
+    byAction(target, 'new-mp')!.click();
+    await settle();
+    const ta = document.querySelector('section.modal-panel textarea') as HTMLTextAreaElement;
+    ta.value = 'New task';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    (document.querySelector('section.modal-panel button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(byAction(target, 'new-mp')!.disabled).toBe(true);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit mini-project for Block 2');
+    unmount(cmp);
   });
 });

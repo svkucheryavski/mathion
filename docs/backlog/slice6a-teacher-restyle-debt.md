@@ -104,6 +104,7 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 Fixed in the review pass: inline confirms are now groups named by their question (screen readers hear "Delete run X?" before "Cancel"); the group rename ✓/× name the group.
 - `RunDetailPage` binds tab buttons into a plain object: Svelte logs `binding_property_non_reactive` eight times per mount in dev and in tests. Fix: `const tabEls = $state<…>({})`.
 - Assets "used by → Edit" opens the mini-project modal even when that mini-project is locked (its ✎ is disabled on Mini-projects); saving then fails with 409. Take with 6b's modal work.
+  6b (Task 4): fixed — the "used by → Edit" path toasts the row's edit reason and opens nothing (P17).
 - Assets 403 on force delete reloads the whole run page, so the "no longer have permission" banner disappears and focus lands on `<body>` (pre-existing, rare). Toast it, or refetch only the course.
 - Teachers add: a network (non-API) failure shows nothing.
 - Spec R14 still says the Replace confirm stays in the actions cell; T11 moved it to a full-width row (browser pass). Update the spec line.

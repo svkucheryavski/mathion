@@ -256,6 +256,7 @@ badges) never had entries here.
 
   None of these occurs in today's 17 files. Widen the scanner only if a later slice adds one of these shapes.
 - **Constraint 11's scope sentence lists "untouched files" as examples, not an enumeration.** The exemptions now live in two places: the spec line under Constraint 11 and the comment above `FILES_5B`. Slice 6 adds MiniProjectModal and the run modals back to (ag) when it restyles them (D21). Keep the two places in step.
+  6b (Task 4): MiniProjectModal and the run modals are scanned in section (ak), FILES_6B, not (ag).
 
 ## Final whole-branch review — deferred minors
 

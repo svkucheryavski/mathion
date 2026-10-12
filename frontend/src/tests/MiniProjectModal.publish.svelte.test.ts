@@ -226,11 +226,7 @@ describe('MiniProjectModal publish — preconditions', () => {
     expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
   });
 
-  it('unsaved changes: bullet "Save your changes before publishing." + POST not called (T9 smoke catch)', async () => {
-    // T9 smoke catch: publishCheckResult reads formData (unsaved inputs), but
-    // the backend reads the persisted MP. If user fills deadlines and clicks
-    // Publish without Save, form-side checks pass; backend rejects with
-    // "hard_deadline required at publish". Gate Publish on `!dirty`.
+  it('unsaved changes: Publish is disabled with "Save your changes first"; no "save first" bullet (R22)', async () => {
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -239,14 +235,17 @@ describe('MiniProjectModal publish — preconditions', () => {
       props: defaultProps({ initial: draftMp() }) as ModalProps,
     });
     await settle();
-    // Mutate the assignment textarea so the form becomes dirty.
     const textarea = target.querySelector('textarea') as HTMLTextAreaElement;
     textarea.value = 'orig text + edits';
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
+    const publish = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(true);
+    expect(publish.title).toBe('Save your changes first');
+    publish.click();
     await settle();
-    expect(target.textContent).toContain('Save your changes before publishing.');
+    expect(target.textContent).not.toContain('Save your changes before publishing.');
+    expect(target.querySelector('button[data-action="confirm-publish"]')).toBeNull();
     expect(fetchSpy.mock.calls.find((c) => String(c[0]).includes('/publish'))).toBeFalsy();
   });
 
@@ -536,6 +535,10 @@ describe('MiniProjectModal publish — error mapping', () => {
     document.body.appendChild(target);
     trackedMount(MiniProjectModal, { target, props: defaultProps() as ModalProps });
     await settle();
+    const edited = target.querySelector('textarea') as HTMLTextAreaElement;
+    edited.value = 'changed';
+    edited.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
     const span = target.querySelector('#err-assignment_md');
@@ -586,7 +589,7 @@ describe('MiniProjectModal publish — error mapping', () => {
 });
 
 describe('MiniProjectModal publish — submitting + mounted-flag', () => {
-  it('Save and Publish share submitting: clicking Publish disables Save AND label flips to "Publishing…"', async () => {
+  it('a click on Save while publishing sends nothing; the busy Publish keeps focus as "Publishing…" (R20, P11)', async () => {
     let resolvePublish!: (v: unknown) => void;
     fetchSpy.mockImplementation((url, init) => {
       if (String(url).includes('/publish') && (init as RequestInit | undefined)?.method === 'POST') {
@@ -604,13 +607,13 @@ describe('MiniProjectModal publish — submitting + mounted-flag', () => {
     await settle();
     (target.querySelector('button[data-action="confirm-publish"]') as HTMLButtonElement).click();
     await settle();
-    // Save button is gone (footer is now in submitting-progress state) OR disabled.
-    // The InlineConfirm has cleared (pendingPublishConfirm=false). The normal
-    // footer shows Save disabled + Publishing… label.
-    const saveBtn = target.querySelector('button[data-action="save"]') as HTMLButtonElement | null;
-    expect(saveBtn?.disabled).toBe(true);
-    expect(target.textContent).toContain('Publishing…');
-    // Cleanup
+    const publish = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(publish.disabled).toBe(false);
+    expect(publish.textContent?.trim()).toBe('Publishing…');
+    expect(document.activeElement).toBe(publish);
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    expect(fetchSpy.mock.calls.some((c) => (c[1] as RequestInit | undefined)?.method === 'PATCH')).toBe(false);
     resolvePublish({ ok: true, status: 200, json: () => Promise.resolve(draftMp({ is_published: true })) } as Response);
     await settle();
   });

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1733
+EXPECTED_CHECKS=1769
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4215,8 +4215,8 @@ emoji_scan "quiz type picker" src/components/editor/QuestionTypePicker.svelte
 echo
 echo "--- (af) Slice-5b T7 — emoji scan over every Slice-5b source file (Constraint 3) ---"
 # Every 5b-touched component with CSS, in one list (reused by (ag)).
-# MiniProjectModal.svelte is deliberately left out: 5b gave it only T2's one-line
-# Escape guard, and Slice 6 restyles it (D21; spec Constraint 11).
+# MiniProjectModal.svelte is left out here: Slice 6b restyled it, and section
+# (ak) scans it with the other teacher modals (FILES_6B).
 FILES_5B=(
   src/components/ui/Modal.svelte
   src/components/editor/MarkdownEditor.svelte src/components/editor/AssetSidebar.svelte
@@ -4779,6 +4779,7 @@ FILES_6B=(
   src/components/runs/PublishConflictsModal.svelte
   src/components/runs/NewRunModal.svelte src/components/ui/Switch.svelte
   src/components/runs/RosterImportModal.svelte
+  src/components/runs/MiniProjectModal.svelte
 )
 emoji_scan "all Slice-6b files" $FILES_6B
 colour_scan 6b-modals $FILES_6B
@@ -4862,6 +4863,25 @@ if [[ -n $REPLY ]]; then
   d '\.ri-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
   d '\.ri-paste' '' 'font-family:var\(--font-mono\)'
   sweep RosterImportModal $H
+fi
+srcw runs/MiniProjectModal.svelte 820
+own mpm-block MiniProjectModal.svelte
+uniq1 mpm-block
+if [[ -n $REPLY ]]; then
+  N=MiniProjectModal; H=$REPLY
+  d '\.mpm-heading' '' 'font-size:15px' 'font-weight:600' 'white-space:nowrap' 'text-overflow:ellipsis'
+  d '\.mpm-block' '' 'display:grid' 'grid-template-columns:150px 1fr' 'gap:12px'
+  d '\.mpm-key' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.mpm-label' '' 'font-size:12\.5px' 'font-weight:500' 'color:var\(--text-3\)'
+  d '\.mpm-deadlines' '' 'display:grid' 'grid-template-columns:repeat\(3,1fr\)' 'gap:12px'
+  d '\.mpm-zone' '' 'font-size:10\.5px' 'color:var\(--muted\)'
+  d '\.mpm-input' '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)'
+  d '\.mpm-invalid' '' 'border-color:var\(--danger\)'
+  d '\.mpm-dirty' '' 'flex:1' 'font-size:11\.5px' 'color:var\(--status-needs-revision-fg\)'
+  d '\.mpm-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  d '\.mpm-box' '' 'padding:8px 10px' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)' 'border-radius:0 5px 5px 0' 'color:var\(--status-needs-revision-fg\)'
+  d '\.mpm-box-head' '' 'font-weight:600'
+  sweep MiniProjectModal $H
 fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
