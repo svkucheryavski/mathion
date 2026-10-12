@@ -52,3 +52,12 @@ Review round 1 (Opus + Fable), both CLEAN. Minors:
 - **The zone slice trusts the label's shape.** `localTzLabel().slice(1, -1)` and the frame test build the expectation the same way, so a change to the label's parentheses would cut two real characters with the test green. Fix: `.replace(/^\(|\)$/g, '')` and a literal-shape assertion.
 - **Test gaps.** No test for the After-Create fallback to the tab's h2 when the new row is missing (a failed refresh); no test for a double click on `confirm-publish` (guarded only by the sync `submitting` flag).
 - **Observation:** Esc while a native `datetime-local` picker is open belongs to the browser; glance at it in the Safari pass.
+
+## Task 5 — The precondition box
+
+Review round 1 (Opus + Fable), both CLEAN. Minors:
+- **The drawn "·" is read aloud from the moment the editor opens** (raises Task 4's minor). With the box up front, every field with an unmet precondition is described as "middle dot Hard deadline must be set". Same fix: `content: '· ' / ''` and `role="list"`. Check FIRST in the 6b browser pass.
+- **Old suites click a now-disabled Publish** (both lanes). `MiniProjectModal.publish.svelte.test.ts` (~10 precondition tests, from `:200`) and `MiniProjectModal.teacher-gating.svelte.test.ts` (`:122`, `:151`, `:178`, `:203`) click Publish before reading the box; the click is a no-op, so "POST not called" holds vacuously and a reader may think the box is click-gated. Their bullet, date, gating and `aria-describedby` assertions stay real. Fix (Polish): drop the clicks, or assert `publish.disabled` + the D13 title instead.
+- **Test gap: upload ahead of the box on Publish.** Nothing pins "Wait for the upload to finish" over "Resolve the listed preconditions first" (the Task 4 upload test uses a complete draft). Fix: one assertion with an unmet precondition and an upload in flight.
+- **The two new gate rows are coarse source greps.** `publishAttempted` catches only that name (a comment naming it would also fail the row); the role row reads only the line with `data-testid`, so a `role` on the next line passes, and a legitimate non-live `role="group"` would fail. The box tests cover both regressions. Fix if the box's a11y changes: read the whole opening tag.
+- **Observation:** with no live region, nothing announces the box appearing or going while typing (the spec's choice); each field's description and Publish's title carry the reasons. If VoiceOver finds the disabled Publish too silent, add `aria-describedby` from Publish to the box heading.

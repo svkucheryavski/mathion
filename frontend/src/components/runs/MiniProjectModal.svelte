@@ -163,14 +163,12 @@
   // bullet has optional `field` — when set, the bullet's <li> gets a stable ID
   // and the corresponding input adds it to aria-describedby (spec line 512).
   // Bullets containing "Open Overview" render that substring as a link to
-  // onNavigateToTab('overview'). publishAttempted flips on the first Publish
-  // click so the box only appears after the user tries. `adminOnly` flags a bullet whose "Open Overview" affordance only a
+  // onNavigateToTab('overview'). D13: the box shows up front whenever a
+  // precondition is unmet. `adminOnly` flags a bullet whose "Open Overview" affordance only a
   // course admin can act on; for a teacher it renders as plain text.
   // Spec §6.2 RunMiniProjectsTab + MiniProjectModal teacher-gating.
   type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
   type PreconditionBullet = { text: string; field?: FieldKey; adminOnly?: boolean };
-
-  let publishAttempted = $state(false);
 
   const publishCheckResult = $derived.by((): PreconditionBullet[] | null => {
     if (mode !== 'edit' || initial?.is_published) return null;
@@ -232,15 +230,27 @@
     return unmet;
   });
 
+  // D13 / D21: the box shows while editing an unpublished mini-project with an
+  // unmet precondition, computed from the values on screen.
+  const boxShows = $derived(!!publishCheckResult && publishCheckResult.length > 0);
+
   // R20: when reasons overlap the first wins; a loading button ignores them.
   const saveReason = $derived(uploading ? UPLOAD_WAIT : (saveError ?? (dirty ? null : 'No changes to save')));
   const discardReason = $derived(dirty ? null : 'No changes to discard');
-  const publishReason = $derived(uploading ? UPLOAD_WAIT : dirty ? 'Save your changes first' : null);
+  const publishReason = $derived(
+    uploading
+      ? UPLOAD_WAIT
+      : boxShows
+        ? 'Resolve the listed preconditions first'
+        : dirty
+          ? 'Save your changes first'
+          : null,
+  );
 
   // Stable bullet IDs grouped by field, used for aria-describedby on inputs.
   const preconditionIdsByField = $derived.by((): Record<string, string> => {
     const result: Record<string, string[]> = {};
-    if (!publishAttempted || !publishCheckResult) return {};
+    if (!boxShows || !publishCheckResult) return {};
     publishCheckResult.forEach((b, idx) => {
       if (b.field) {
         const id = `precondition-${idx}`;
@@ -328,8 +338,6 @@
 
   function handlePublishClick() {
     if (submitting || publishReason) return;
-    publishAttempted = true;
-    if (publishCheckResult && publishCheckResult.length > 0) return;
     pendingPublishConfirm = true;
   }
 
@@ -344,8 +352,7 @@
     pendingPublishConfirm = false;
     // Re-check: the parent may have flipped versionIsDisabled (or
     // runIsPublished) since the click, and R22 refuses while dirty.
-    if ((publishCheckResult && publishCheckResult.length > 0) || dirty) {
-      publishAttempted = true;
+    if (boxShows || dirty) {
       await tick();
       focusFirst([publishEl, closeX()]);
       return;
@@ -605,8 +612,8 @@
   {#if serverError}
     <div class="banner banner-error mpm-banner" role="alert">{serverError}</div>
   {/if}
-  {#if publishAttempted && publishCheckResult && publishCheckResult.length > 0}
-    <div class="mpm-box precondition-banner" data-testid="publish-preconditions" role="alert">
+  {#if boxShows && publishCheckResult}
+    <div class="mpm-box precondition-banner" data-testid="publish-preconditions">
       <p class="mpm-box-head">Cannot publish yet</p>
       <ul class="mpm-box-list">
         {#each publishCheckResult as bullet, idx (bullet.text)}

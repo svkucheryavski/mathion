@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1769
+EXPECTED_CHECKS=1773
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4881,7 +4881,17 @@ if [[ -n $REPLY ]]; then
   d '\.mpm-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
   d '\.mpm-box' '' 'padding:8px 10px' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)' 'border-radius:0 5px 5px 0' 'color:var\(--status-needs-revision-fg\)'
   d '\.mpm-box-head' '' 'font-weight:600'
+  d '\.mpm-box-list' '' 'gap:4px' 'line-height:1\.5'
   sweep MiniProjectModal $H
 fi
+# D13: the precondition box shows up front, and it is information, not an alert.
+MPM=src/components/runs/MiniProjectModal.svelte
+if grep -q 'publishAttempted' $MPM; then
+  echo "FAIL  MiniProjectModal's precondition box waits for a Publish click (D13)"; fail=1
+else echo "PASS  MiniProjectModal's precondition box waits for no Publish click (D13)"; fi
+box_line=$(grep 'data-testid="publish-preconditions"' $MPM)
+if [[ $(grep -c 'data-testid="publish-preconditions"' $MPM) -eq 1 && $box_line != *role=* ]]; then
+  echo "PASS  MiniProjectModal's precondition box has no live role"
+else echo "FAIL  MiniProjectModal's precondition box has no live role"; fail=1; fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
