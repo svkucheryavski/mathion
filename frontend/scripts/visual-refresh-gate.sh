@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1654
+EXPECTED_CHECKS=1697
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4776,6 +4776,7 @@ echo "--- (ak) Slice-6b — the four teacher modals on ui/Modal ---"
 # Every file Slice 6b migrates or creates; each task appends its files (spec §Gate).
 FILES_6B=(
   src/components/runs/PublishConflictsModal.svelte
+  src/components/runs/NewRunModal.svelte src/components/ui/Switch.svelte
 )
 emoji_scan "all Slice-6b files" $FILES_6B
 colour_scan 6b-modals $FILES_6B
@@ -4805,6 +4806,35 @@ if [[ -n $REPLY ]]; then
   d '\.pc-note' '' 'font-size:12\.5px' 'line-height:1\.5' 'color:var\(--muted\)'
   d '\.pc-foot-note' '' 'flex:1' 'font-size:12\.5px' 'color:var\(--muted\)'
   sweep PublishConflictsModal $H
+fi
+srcw runs/NewRunModal.svelte 620
+own switch Switch.svelte
+uniq1 switch
+if [[ -n $REPLY ]]; then
+  N=Switch; H=$REPLY
+  d '\.switch' '' 'width:30px' 'height:17px' 'padding:2px' 'border-radius:9px' 'background:var\(--border-strong\)'
+  d '\.switch\.on' '' 'background:var\(--primary\)'
+  d '\.switch' ':disabled' 'background:var\(--border-faint\)'
+  d '\.knob' '' 'width:13px' 'height:13px' 'border-radius:50%' 'background:var\(--surface\)'
+  # esbuild minifies translateX(x) to translate(x) (translateY stays as written).
+  chk "\.switch\.on\.${H} \.knob:where\(\.${H}\)" 'transform:translate\(13px\)'
+  sweep Switch $H
+fi
+own nr-strip NewRunModal.svelte
+uniq1 nr-strip
+if [[ -n $REPLY ]]; then
+  N=NewRunModal; H=$REPLY
+  d '\.nr-label' '' 'font-size:12\.5px' 'font-weight:500' 'color:var\(--text-3\)'
+  d '\.nr-input' '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)'
+  d '\.nr-invalid' '' 'border-color:var\(--danger\)'
+  d '\.nr-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  d '\.nr-dates' '' 'display:grid' 'grid-template-columns:1fr 1fr' 'gap:14px'
+  d '\.nr-help' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.nr-strip' '' 'padding:9px 11px' 'background:var\(--surface-2\)' 'border-radius:var\(--radius\)'
+  d '\.nr-ver' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.nr-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  d '\.nr-foot-note' '' 'flex:1' 'color:var\(--muted\)'
+  sweep NewRunModal $H
 fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
