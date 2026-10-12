@@ -73,3 +73,23 @@ describe('RunRosterTab draft-gate', () => {
     if (moveBtn) expect(moveBtn.disabled).toBe(false);
   });
 });
+
+// 6b whole-branch review: the empty-roster link unmounts once the import's
+// refetch fills the roster, so FocusTrap could not return focus to it after
+// Done. The link hands focus to the toolbar's Import roster first, so the
+// modal's opener is a button that stays on the page.
+describe('RunRosterTab — the empty-roster import link', () => {
+  it('focuses the toolbar Import roster before opening the import', () => {
+    let opened = 0;
+    let focusAtOpen: Element | null = null;
+    mountTab({ runIsPublished: true, onOpenImport: () => { opened++; focusAtOpen = document.activeElement; } });
+    const link = target!.querySelector<HTMLButtonElement>('button[data-action="open-import-link"]')!;
+    link.focus();
+    link.click();
+    flushSync();
+    const toolbar = target!.querySelector<HTMLButtonElement>('button[data-action="open-import"]')!;
+    expect(opened).toBe(1);
+    expect(focusAtOpen).toBe(toolbar);
+    expect(document.activeElement).toBe(toolbar);
+  });
+});

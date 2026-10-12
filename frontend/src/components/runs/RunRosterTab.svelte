@@ -57,6 +57,15 @@
     onOpenImport: () => void;
   } = $props();
 
+  // The empty-roster link unmounts once an import fills the roster, so the
+  // modal could not return focus to it. Hand focus to the toolbar's Import
+  // roster first: that is the opener the modal returns to after Done.
+  let importBtnEl = $state<HTMLButtonElement>();
+  function openImportFromLink() {
+    importBtnEl?.focus();
+    onOpenImport();
+  }
+
   let search = $state('');
   let newEmail = $state('');
   let newGroupId = $state<number | '__unassigned'>('__unassigned');
@@ -406,13 +415,13 @@
         <button data-action="clear-prefilter" aria-label="Clear filter" onclick={onPrefilterClear}>×</button>
       </span>
     {/if}
-    <button data-action="open-import" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={onOpenImport}>Import roster</button>
+    <button data-action="open-import" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} bind:this={importBtnEl} onclick={onOpenImport}>Import roster</button>
   </header>
 
   {#if students.length === 0}
     <p class="empty">
       No students yet. Add one below or
-      <button data-action="open-import-link" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={onOpenImport}>Import roster from CSV</button>.
+      <button data-action="open-import-link" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={openImportFromLink}>Import roster from CSV</button>.
     </p>
   {/if}
 

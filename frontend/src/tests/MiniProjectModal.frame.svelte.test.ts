@@ -469,6 +469,23 @@ describe('MiniProjectModal — the two confirms', () => {
     expect(document.activeElement).toBe(btn('publish'));
   });
 
+  it('a refresh that fails after a successful publish: it still closes, with the Published toast, no publish error (Review Focus 5)', async () => {
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) =>
+      init?.method === 'POST' && String(url).includes('/publish') ? jres(mp({ is_published: true })) : jres([]));
+    const onClose = vi.fn();
+    open({ onClose, onSaved: vi.fn().mockRejectedValue(new Error('network')) });
+    await settle();
+    btn('publish')!.click();
+    await settle();
+    btn('confirm-publish')!.click();
+    await settle();
+    expect(fetchSpy.mock.calls.filter((c) => String(c[0]).includes('/publish'))).toHaveLength(1);
+    expect(toastTexts()).toEqual(['Published (refresh failed — reload to see latest)']);
+    expect(toasts.list[0].kind).toBe('info');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(panel().querySelector('.banner-error')).toBeNull();
+  });
+
   it('the publish confirm refuses while dirty; focus goes to × because Publish is now disabled (R22)', async () => {
     open();
     await settle();

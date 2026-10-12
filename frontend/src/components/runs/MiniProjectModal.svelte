@@ -365,10 +365,6 @@
     publishEl?.focus();
     try {
       await publishMiniProject(initial!.id);
-      if (!mounted) return;
-      await onSaved();
-      if (!mounted) return;
-      onClose();
     } catch (e: unknown) {
       if (!mounted) return;
       if (e instanceof ApiError) {
@@ -377,12 +373,25 @@
         const eo = e as { message?: unknown } | null | undefined;
         serverError = typeof eo?.message === 'string' ? eo.message : 'Publish failed';
       }
-    } finally {
-      if (mounted) {
-        submitting = false;
-        publishing = false;
-      }
+      submitting = false;
+      publishing = false;
+      return;
     }
+    if (!mounted) return;
+    // D19, as for Save and Create: the publish succeeded and cannot be undone,
+    // so a failed list refresh is only a toast and the modal still closes (a
+    // retry would hit the already-published 409).
+    let refreshFailed = false;
+    try {
+      await onSaved();
+    } catch {
+      refreshFailed = true;
+    }
+    if (!mounted) return;
+    if (refreshFailed) pushToast('Published (refresh failed — reload to see latest)', 'info');
+    submitting = false;
+    publishing = false;
+    onClose();
   }
 
   async function handleSave() {
