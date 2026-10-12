@@ -72,3 +72,23 @@ Fresh Opus + Fable, both "with fixes". Fixed: a failed refresh after a successfu
 - **After Cancel/Esc from an empty roster, focus returns to the toolbar's Import roster, not the link the teacher used.** Both open the same import; mention in the browser pass.
 - **Test gap: a failed publish keeps Publish enabled and focused.** The 5xx test checks only the banner and that the modal stays open. Fix: assert `publish.disabled === false` and `document.activeElement === publish`.
 - Routed to 6c (outside 6b's files): the run-level Publish on the run page has no in-flight guard (a double click sends two POSTs); the import modal lives inside the roster tab's `{#if}`, so a tab change mid-import unmounts it and it reopens on return.
+
+## Browser pass (Safari, 2026-10-12)
+
+Run on run 8 with a console mock (every write answered in the page; no dev data changed). Steps 1-8 in the user's Safari window (width not recorded), step 9 at about 1000px; all OK. Step 10 (VoiceOver) moved to the beta pass (below).
+- Mini-project editor: the box shows up front with Publish's D13 title; the box follows the fields (filling the missing hard deadline removes it); Save stays open with a toast and focus on Publish; Discard restores the saved values; Esc in the assignment field opens the discard confirm with focus on Cancel (Esc keeps it, Cancel → ×); × with edits opens the confirm, and Discard closes; "Open Overview" with edits asks through the browser dialog (Cancel stays, OK → Overview).
+- Publish conflicts (10l): the long e-mail fits; after a keyboard open, Esc returns the ring to Publish. After a mouse open, focus is not visible (Safari does not focus a clicked button; known, spec note).
+- New run (10k): matches the drawing; the switch's off state is visible; Return in Title submits (the date errors first, then a mocked create).
+- Import roster (10f/10g): a real paste from a sheet; the empty-name row keeps its e-mail; a skipping row shows its reason; a capitalised existing e-mail is re-bucketed; the result chips and Details; Copy failed rows, and the selected fallback box when the clipboard fails; Done closes once.
+- About 1000px: the mini-project editor and the import fit, and the editor's assets panel stays beside the text. Below 880px it stacks and the body scrolls inside the dialog (expected). New run and Publish conflicts were not checked at 1000px in Safari (the Task 1-2 screenshots, in Chrome, cover 1000px).
+- Not exercised in Safari, stay as they are: × while a confirm already shows (jsdom-tested: it keeps the confirm and moves focus to its Cancel); Esc while a native `datetime-local` picker is open (Task 4 note); the server-error banner's position after a failed Save at 1000px (no failed Save was mocked); focus after Cancel/Esc from an empty roster (run 8's roster is not empty).
+- The interim mixed look (6c's Overview, Roster and side panel still old beside the new modals) is expected, not a finding.
+- Asked by the user during the pass: the run page title (`.run-title-row h1`) 22px → 18px, the size of authoring's page titles (Versions page, version editor); gate row added (1774).
+
+**VoiceOver pass (beta).** The user moved every VoiceOver check to one pass at the very end, when the beta is ready. From 6b:
+- the drawn "·" in the precondition box (Task 4/5 minors; ready fix: `content: '· ' / ''` + `role="list"`);
+- `role="list"` on the step marker and on `.pc-emails`;
+- the Switch's name from `<label for>` ("Groups enabled, switch, off"; else add a `labelledby` prop);
+- whether the disabled Publish is too silent without a description;
+- Done's description from the summary ("Done, button, 1 added, 1 failed") and the import tiles' "Valid" / "Will skip" names;
+- how "Import roster, button" sounds as the import opens from the empty-roster link.

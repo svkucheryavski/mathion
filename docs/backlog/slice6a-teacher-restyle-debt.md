@@ -51,6 +51,7 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - "Open Overview" inside MiniProjectModal: FocusTrap's cleanup runs before `setTab`'s `tick()`, and its `previousFocus` (the unmounted row control) is skipped because `isConnected` is false, so the tab keeps focus. Correct, but implicit; add a comment when T10 touches the modal wiring.
 - Pre-existing: the run-change effect does not clear `pendingEditTarget` (`loadAll` does); it is non-null only between `setTab` and the modal consuming it.
 - `.run-title-row` wraps, so a long run title pushes the publish bar onto a second line (the spec says "right end of the title row"). User-approved; check at ~1000px in the browser pass.
+  6b browser pass (user, 2026-10-12): the run title is 18px now (authoring's page-title size), not the 6a plan's 22px; the run list pages' h1 stay 22px.
 
 ### T6 — the two runs lists
 - §Focus steps 2-3 after a delete (the next row's 🗑, then the previous row's) are implemented but not pinned; only "+ New run", Cancel and failure are tested. An off-by-one or a swapped next/prev would pass. Add: three drafts, delete the middle → the former third row's 🗑; delete the last → the previous row's 🗑 (both lanes).

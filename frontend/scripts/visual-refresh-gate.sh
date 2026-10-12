@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1773
+EXPECTED_CHECKS=1774
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4568,6 +4568,8 @@ if [[ -n $REPLY ]]; then
   chk "\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'color:var\(--text\)' 'border-bottom-color:var\(--primary\)'
   d '\.run-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)'
   d '\.run-meta' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
+  # 6b browser pass (user, 2026-10-12): the run title matches authoring's page titles (18px).
+  chk "\.run-title-row\.${H} h1:where\(\.${H}\)" 'font-size:18px'
   # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
   d '\.run-page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
   sweep RunDetailPage $H
