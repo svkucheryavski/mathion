@@ -283,16 +283,38 @@
     );
   });
 
-  // The discard confirm in Modal's footer. R36: Discard after the form's
-  // Cancel ends the edit; after × or Esc it closes the panel. Cancel returns
-  // focus to where it was when the confirm opened.
+  // The form is on screen exactly when the template renders `evaluationForm`.
+  // Edits left in state after the form went away (a 409 race, a stale cell)
+  // are not on screen, so closing must not ask about them: the confirm lives
+  // in the form and would never show (rev 8).
+  const formShown = $derived(
+    target.kind === 'submission' &&
+      newest != null &&
+      !newest.is_resubmission &&
+      canWrite &&
+      (effectiveEvaluation ? editing : !raceTransition),
+  );
+  const dirtyOnScreen = $derived(formShown && isDirty);
+
+  // The discard confirm replaces the form's button row (user, 6c Safari pass:
+  // the drawer's footer sat at the screen's bottom edge, far from the form).
+  // R36: Discard after the form's Cancel ends the edit; after × or Esc it
+  // closes the panel. Cancel returns focus to where it was when the confirm
+  // opened. While it asks, the rest of the drawer body is inert (`freeze`).
   let confirmDiscard = $state(false);
+  // The confirm lives in the form: when the form goes (a thread load brings an
+  // evaluation), the question goes with it and the body thaws.
+  $effect(() => {
+    if (!formShown && confirmDiscard) confirmDiscard = false;
+  });
   let discardSource: 'cancel' | 'close' = 'close';
   let discardReturnEl: HTMLElement | null = null;
 
   function askDiscard(source: 'cancel' | 'close') {
     discardSource = source;
-    discardReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Safari leaves focus on <body> after a mouse click on ×: no return target then.
+    const active = document.activeElement;
+    discardReturnEl = active instanceof HTMLElement && active !== document.body ? active : null;
     confirmDiscard = true;
   }
 
@@ -416,6 +438,8 @@
       if (e instanceof ApiError && e.status === 409) {
         raceTransition = true;
         editing = false;
+        // The lost edits go too: a later resubmission's create form starts empty.
+        resetForm();
         raceFocusPending = true;
         onRefetch();
         if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
@@ -472,7 +496,7 @@
       discardEl?.querySelector<HTMLButtonElement>('button.cancel')?.focus();
       return;
     }
-    if (isDirty) {
+    if (dirtyOnScreen) {
       askDiscard('close');
       return;
     }
@@ -493,8 +517,11 @@
   async function cancelDiscard() {
     confirmDiscard = false;
     await tick();
-    focusFirst([discardReturnEl, checkedRadio(), closeX()]);
+    focusFirst([discardReturnEl, find<HTMLButtonElement>('button[data-test="cancel-button"]'), checkedRadio(), closeX()]);
   }
+
+  // The attribute, not the property: jsdom lacks `inert`.
+  const freeze = (el: HTMLElement) => { el.toggleAttribute('inert', confirmDiscard); };
 
   async function handleFileChange(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -620,7 +647,7 @@
   {/if}
 {/snippet}
 
-{#snippet discardFooter()}
+{#snippet discardRow()}
   <div class="sp-discard" bind:this={discardEl}>
     <InlineConfirm
       row
@@ -660,6 +687,7 @@
         aria-required="true"
         aria-describedby={resultDescribedby}
         disabled={submitting}
+        {@attach freeze}
       >
         <legend class="sp-legend">Result <span class="sp-hint">(required)</span></legend>
         <div class="sp-seg">
@@ -683,7 +711,7 @@
         {#if resultLocked}<p class="sp-lock" id="evaluation-result-lock">{LOCK_TEXT}</p>{/if}
       </fieldset>
 
-      <div class="sp-fields">
+      <div class="sp-fields" {@attach freeze}>
         <div class="sp-field">
           <label class="sp-label" for="evaluation-feedback">Feedback <span class="sp-hint">{requiredHint}</span></label>
           <textarea
@@ -727,7 +755,7 @@
 
       {#if serverError}<p class="sp-error form-error" role="alert">{serverError}</p>{/if}
 
-      <div class="sp-bottom">
+      <div class="sp-bottom" {@attach freeze}>
         <!-- The file control is inert while a save runs (the attribute, not the
              property: jsdom lacks `inert`). -->
         <div class="sp-file-ctl" {@attach (el) => { el.toggleAttribute('inert', submitting); }}>
@@ -773,6 +801,7 @@
             <p class="sp-muted">The feedback file cannot be replaced.</p>
           {/if}
         </div>
+        {#if !confirmDiscard}
         <div class="sp-actions">
           {#if editing || submitting}
             <Button variant="secondary" data-test="cancel-button" onclick={handleCancel}>{submitting ? 'Cancel upload' : 'Cancel'}</Button>
@@ -786,7 +815,9 @@
             title={submitting ? SAVE_WAIT : saveTitle}
           >{submitting ? 'Saving…' : 'Save'}</Button>
         </div>
+        {/if}
       </div>
+      {#if confirmDiscard}{@render discardRow()}{/if}
     </form>
   </section>
 {/snippet}
@@ -797,11 +828,9 @@
   labelledby={titleId}
   closeDisabled={submitting}
   closeTitle={SAVE_WAIT}
-  bodyInert={confirmDiscard}
   autofocusSelector={AUTOFOCUS}
   onRequestClose={tryClose}
   header={head}
-  footer={confirmDiscard ? discardFooter : undefined}
 >
   {#if target.kind === 'progress'}
     {#if loading}
@@ -819,7 +848,7 @@
     <p class="sp-muted">Not submitted yet.</p>
   {:else}
     {@const sub = newest}
-    <section class="sp-card" aria-labelledby="{uid}-latest">
+    <section class="sp-card" aria-labelledby="{uid}-latest" {@attach freeze}>
       <div class="sp-card-head">
         <h3 class="sp-h" id="{uid}-latest">Latest submission</h3>
         {@render submissionChips(sub)}
@@ -849,12 +878,12 @@
     {#if threadLoading}
       <p class="sp-muted" data-test="thread-loading">Loading earlier submissions…</p>
     {:else if threadError}
-      <p class="sp-error" role="alert" data-test="thread-error">
+      <p class="sp-error" role="alert" data-test="thread-error" {@attach freeze}>
         Couldn't load submission history.
         <button type="button" class="sp-link" data-test="thread-retry" onclick={retryThread}>Retry</button>
       </p>
     {:else if threadState && threadState.length > 1}
-      <section class="sp-card" aria-labelledby="{uid}-earlier">
+      <section class="sp-card" aria-labelledby="{uid}-earlier" {@attach freeze}>
         <div class="sp-card-head">
           <h3 class="sp-h" id="{uid}-earlier">Earlier submissions</h3>
           <span class="sp-count-n">{threadState.length - 1}</span>
@@ -871,7 +900,7 @@
       </section>
     {/if}
   {/if}
-  <DirtyGuard isDirty={() => isDirty && !submitting} />
+  <DirtyGuard isDirty={() => dirtyOnScreen && !submitting} />
 </Modal>
 
 <style>
@@ -919,7 +948,7 @@
     text-decoration: underline;
     cursor: pointer;
   }
-  .sp-discard { flex: 1 1 auto; font-size: 13px; color: var(--text-2); }
+  .sp-discard { padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
 
   /* Cards (9b): a --surface-2 head strip holding an <h3>. */
   .sp-card {

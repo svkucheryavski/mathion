@@ -87,8 +87,16 @@ function panelTitle(): HTMLElement | null {
   const dialog = host.querySelector('section.modal-panel') as HTMLElement;
   return document.getElementById(dialog.getAttribute('aria-labelledby') ?? '');
 }
-const discardCancel = () => host.querySelector<HTMLButtonElement>('footer.modal-foot .inline-confirm button.cancel');
-const discardConfirm = () => host.querySelector<HTMLButtonElement>('footer.modal-foot button.confirm[data-action="confirm-discard"]');
+// The discard confirm sits in the form's button row (user, 6c Safari pass, rev 8).
+const discardCancel = () => host.querySelector<HTMLButtonElement>('form[aria-label="Write evaluation"] .sp-discard .inline-confirm button.cancel');
+const discardConfirm = () => host.querySelector<HTMLButtonElement>('form[aria-label="Write evaluation"] .sp-discard button.confirm[data-action="confirm-discard"]');
+// While the confirm asks, everything else in the drawer body is inert.
+const frozen = () => [
+  host.querySelector('.modal-body > section.sp-card'),
+  host.querySelector('#evaluation-result'),
+  host.querySelector('.sp-fields'),
+  host.querySelector('.sp-bottom'),
+].map((el) => el!.hasAttribute('inert'));
 
 // The Result radios (R37); a click picks one (a disabled one stays unpicked).
 const resultRadio = (value: string) =>
@@ -910,6 +918,97 @@ describe('DashboardSidePanel', () => {
     expect(onRefetch).toHaveBeenCalledTimes(1);
   });
 
+  // Rev 8: the discard confirm lives in the form, so with the form gone (here a
+  // 409 race, the edits still in state) × must close, not ask an unseen question.
+  it('after a 409 race replaces the form, × closes the panel; nothing is left inert', async () => {
+    const start = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const winning = { submissions: [{ ...start.entry.latest_submission!, evaluation: {
+      id: 77, evaluated_at: '2026-06-05T12:00:00Z', evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'Winner', has_feedback_file: false } }] };
+    vi.stubGlobal('fetch', sequencedThreadFetch(
+      [echoThread(start), winning],
+      { status: 409, body: { detail: 'Already evaluated' } },
+    ));
+    const { onClose } = mountPanel({ target: start, isAdmin: true });
+    await settle();
+    pickResult('accepted');
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    closeX().click();
+    await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[inert]')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  // Rev 8: a stale cell — the confirm is open when the first thread load lands
+  // with an evaluation and takes the form (and the confirm) away; the drawer must
+  // not stay frozen on a question nobody can see (round 2 review).
+  it('the confirm goes with the form when the thread brings an evaluation; × then closes', async () => {
+    const start = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    let release: (body: unknown) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      release = (body) => resolve(new Response(JSON.stringify(body), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
+    })));
+    const { onClose } = mountPanel({ target: start, isAdmin: true });
+    flushSync();
+    pickResult('accepted');
+    closeX().click();
+    flushSync();
+    expect(discardCancel()).not.toBeNull();
+    release({ submissions: [{ ...start.entry.latest_submission!, evaluation: {
+      id: 77, evaluated_at: '2026-06-05T12:00:00Z', evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'Winner', has_feedback_file: false } }] });
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(host.querySelector('[inert]')).toBeNull();
+    closeX().click();
+    await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  // A 409 race leaves the lost edits behind; a later resubmission's create form
+  // must start empty, not with the old submission's feedback (round 2 review).
+  it('after a 409 race, a later resubmission opens an empty create form', async () => {
+    const start = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const winning = { submissions: [{ ...start.entry.latest_submission!, evaluation: {
+      id: 77, evaluated_at: '2026-06-05T12:00:00Z', evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'Winner', has_feedback_file: false } }] };
+    const next = submissionTarget({ status: 'awaiting_eval', submissionId: 101 });
+    const resubmitted = { submissions: [
+      { ...next.entry.latest_submission!, evaluation: null },
+      winning.submissions[0],
+    ] };
+    vi.stubGlobal('fetch', sequencedThreadFetch(
+      [echoThread(start), winning, resubmitted],
+      { status: 409, body: { detail: 'Already evaluated' } },
+    ));
+    const box = $state({ target: start as PanelTarget, onClose: vi.fn(), isAdmin: true, isTeacher: false, onRefetch: vi.fn() });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(DashboardSidePanel, { target: host, props: box });
+    await settle();
+    pickResult('accepted');
+    await typeFeedback('Written for the old submission');
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    box.target = next;
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).not.toBeNull();
+    expect(checkedResult()).toBe('');
+    expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('');
+    vi.unstubAllGlobals();
+  });
+
   // T29: timeout → banner + Save re-enabled + values preserved
   it('T29: timeout → "Upload timed out. Try again." banner; Save re-enabled', async () => {
     vi.useFakeTimers();
@@ -1211,8 +1310,8 @@ describe('DashboardSidePanel', () => {
     expect(document.activeElement).toBe(resultRadio('major_revision'));
   });
 
-  // T28b: dirty create + Escape → the footer confirm, focus on its Cancel, the body inert
-  it('T28b: dirty create + Escape → the footer confirm; focus on its Cancel; the body inert', async () => {
+  // T28b: dirty create + Escape → the confirm in the form's button row, focus on its Cancel, the rest inert
+  it("T28b: dirty create + Escape → the confirm replaces the form's buttons; focus on its Cancel; the rest inert", async () => {
     const { onClose } = mountPanel({
       target: submissionTarget({ status: 'awaiting_eval' }),
       isAdmin: true,
@@ -1221,10 +1320,14 @@ describe('DashboardSidePanel', () => {
     await typeFeedback('unsaved');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
-    expect(host.querySelector('footer.modal-foot')!.textContent).toContain('Discard unsaved changes?');
+    expect(host.querySelector('footer.modal-foot')).toBeNull();
+    expect(host.querySelector('form[aria-label="Write evaluation"] .sp-discard')!.textContent).toContain('Discard unsaved changes?');
     expect(discardConfirm()).toBeTruthy();
+    expect(host.querySelector('form[aria-label="Write evaluation"] button[type="submit"]')).toBeNull();
     expect(document.activeElement).toBe(discardCancel());
-    expect(host.querySelector('.modal-body')!.hasAttribute('inert')).toBe(true);
+    expect(host.querySelector('.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(frozen()).toEqual([true, true, true, true]);
+    expect(discardCancel()!.closest('[inert]')).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -1754,7 +1857,8 @@ describe('DashboardSidePanel — drawer frame (6c T5)', () => {
     cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     await settle();
     expect(discardCancel()).toBeNull();
-    expect(host.querySelector('.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(frozen()).toEqual([false, false, false, false]);
+    expect(host.querySelector('form[aria-label="Write evaluation"] button[type="submit"]')).not.toBeNull();
     expect(document.activeElement).toBe(textarea);
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -1777,6 +1881,39 @@ describe('DashboardSidePanel — drawer frame (6c T5)', () => {
     expect(discardCancel()).toBeNull();
     expect(document.activeElement).toBe(host.querySelector('button[data-test="edit-evaluation"]'));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("Safari: × clicked with focus on <body> → the confirm's Cancel focuses the checked Result radio", async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    pickResult('major_revision');
+    await typeFeedback('unsaved');
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    closeX().click();
+    await settle();
+    discardCancel()!.click();
+    await settle();
+    expect(document.activeElement).toBe(resultRadio('major_revision'));
+  });
+
+  it("a dirty edit → the form's Cancel → the confirm's Cancel: focus back on the form's Cancel", async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'needs_revision', latest_evaluation: NEEDS_REVISION_EVAL }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    await typeFeedback('Changed');
+    const formCancel = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    formCancel.focus();
+    formCancel.click();
+    await settle();
+    expect(host.querySelector('button[data-test="cancel-button"]')).toBeNull();
+    discardCancel()!.click();
+    await settle();
+    expect(document.activeElement).toBe(host.querySelector('button[data-test="cancel-button"]'));
   });
 
   it('R36: a dirty edit → × → Discard closes the panel', async () => {

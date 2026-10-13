@@ -57,7 +57,7 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 
 ## Task 5 — Side panel frame and Progress view
 
-- **Discard Cancel can leave focus on `<body>`** (both lanes). `askDiscard` saves `document.activeElement`, which can be `<body>`: in Safari a mouse click on × doesn't focus it. `focusFirst` then "succeeds" on `<body>`, and the fallback to the Result select and × never runs. Fix: save the element only when it is not `<body>`, or only when it is inside the panel. Check this in the Safari pass.
+- Fixed in the Safari pass (spec rev 8): ~~**Discard Cancel can leave focus on `<body>`**~~. `askDiscard` no longer saves `<body>`; Cancel falls back to the form's Cancel, then the checked Result radio, then ×.
 - **× while the confirm asks always moves focus to its Cancel,** even when the confirm came from the form's Cancel (source `cancel`). This is what the spec says, but to close, a teacher must press Cancel, then ×, then Discard. A cheaper path: re-arm the confirm with source `close`. This is a design note.
 
 ## Task 6 — Submission cards and evaluation form
@@ -67,7 +67,8 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **T25's closing `evalCalls(...).toHaveLength(0)` is vacuous now:** nothing dispatches a submit, so it can't fail. `checkedResult() === 'accepted'` carries the intent. Fix: drop that assertion and the stale "Save guarded" comment.
 - **T19b's `toContain('accepted')` is always true,** because the auto-accept banner contains "Auto-accepted". Fix: assert the card's badge text "Accepted".
 - **The prefill effect re-runs when `effectiveEvaluation` changes identity mid-edit** (this predates 6c). A thread that lands after an early Edit, or a grid refresh that refetches the thread, re-fills the form over in-progress edits. Focus also jumps back to the checked radio.
-- **A 409 doesn't reset the form** (this predates 6c). `isDirty` stays true, so × then asks to discard edits that are no longer shown.
+- Fixed in the Safari pass (spec rev 8): ~~**A 409 doesn't reset the form**~~. The 409 branch now resets it, and × asks about unsaved edits only while the form is on screen.
+- **Focus drops to `<body>` when the first thread load replaces a focused create form** (Safari-pass review, both lanes). For example, the confirm is open from a stale cell and the thread brings an evaluation: the form and the confirm go, and focus is left on `<body>` inside the drawer. Tab re-enters the drawer, so this is no trap; a focused field already did this before 6c. Fix: after the form goes, focus the Evaluation heading, else ×.
 - **"Result is required." is effectively unreachable,** because Save is natively disabled whenever the form is invalid (this predates 6c).
 - **After a PATCH, the "Evaluated" line names the previous evaluator** until the refetch lands (this predates 6c).
 - **The `awaiting-evaluation-placeholder` hook repeats inside opened earlier submissions,** so `querySelector` returns whichever comes first. The tests scope it today.
@@ -86,3 +87,7 @@ Deferred minors:
 - **A busy Publish has no reason `title`** (R44 asks for one); the visible "Publishing…" covers sighted users.
 - **The Version row's disabled ✎ has no `aria-label`,** so its name is the reason sentence. Fix: `aria-label="Edit the version"`, or check it in the VoiceOver pass at beta.
 - **Nits:** a stale "else Save evaluation" comment in `DashboardSidePanel.svelte` (~441); `NOUN` duplicates `FIELDS[].noun` in `RunOverviewTab.svelte`.
+
+## For the Polish slice (user, 6c Safari pass)
+
+- **FIRST ITEM: confirms as real small buttons, and a crimson danger red.** Every confirm that asks (`InlineConfirm`: "Discard unsaved changes?", Unpublish, the roster row and bulk confirms; and `DangerConfirm`) shows its action and Cancel as real buttons with a lower height and smaller padding: red for the action, grey for Cancel. Every danger button and error uses a stronger red, like crimson (the `--danger` token and its uses). Check this on every screen that uses them (6a, 6b and 6c), with screenshots and a review.
