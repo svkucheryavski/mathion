@@ -47,6 +47,7 @@ function mountTab(extra: Record<string, unknown> = {}) {
     props: {
       runId: 10,
       runIsPublished: true,
+      isAdmin: true,
       courseSlug: 'test',
       onNavigateToTab: vi.fn(),
       students: studentN(3),

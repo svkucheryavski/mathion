@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1851
+EXPECTED_CHECKS=1886
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4948,5 +4948,35 @@ if [[ -n $REPLY ]]; then
 fi
 # Publish run lives in the Overview: the run page's title row has no publish bar.
 none "RunDetailPage has no .publish-bar rule" "\.publish-bar\."
+# R41: the IconButton link variant keeps the boxed look, without an underline.
+uniq1 icon-btn
+if [[ -n $REPLY ]]; then
+  N=IconButton; H=$REPLY
+  d '\.icon-link' '' 'text-decoration:none'
+fi
+# RunRosterTab (10b): the toolbar, the add row, the draft banner (Task 3);
+# the strip, the result banner and the table (Task 4).
+own ro-toolbar RunRosterTab.svelte
+uniq1 ro-toolbar
+if [[ -n $REPLY ]]; then
+  N=RunRosterTab; H=$REPLY
+  d '\.ro-toolbar' '' 'display:flex' 'align-items:center' 'gap:9px' 'flex-wrap:wrap'
+  d '\.ro-tools-right' '' 'margin-left:auto' 'gap:8px'
+  d '\.ro-search' '' 'width:230px'
+  d '\.ro-input' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'font-size:var\(--control-font\)'
+  d '\.ro-chip' '' 'height:26px' 'border-radius:13px' 'background:var\(--surface-2\)' 'font-size:12px' 'color:var\(--text-3\)'
+  d '\.ro-chip-x' '' 'width:18px' 'height:18px' 'border-radius:50%'
+  # The draft banner is the 6a info precondition banner.
+  d '\.ro-info' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
+  d '\.ro-add' '' 'display:flex' 'background:var\(--surface-2\)' 'border:1px solid var\(--border\)'
+  d '\.ro-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  d '\.ro-link' '' 'color:var\(--primary\)' 'text-decoration:underline'
+  none "RunRosterTab has no add-row form under the table (D25)" "\.add-row\.${H}"
+fi
+if grep -q 'class="add-row"' src/components/runs/RunRosterTab.svelte; then
+  echo "FAIL  RunRosterTab still has the add form under the table (D25)"; fail=1
+else
+  echo "PASS  RunRosterTab has no add form under the table (D25)"
+fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

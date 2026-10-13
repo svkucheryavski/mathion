@@ -179,3 +179,54 @@ describe('IconButton — type (Slice-5c T3)', () => {
     expect(onsubmit).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('IconButton — the link variant and describedby (6c R41)', () => {
+  function renderHost(props: Record<string, unknown>) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(IconButton, { target: host, props: props as ComponentProps<typeof IconButton> });
+    flushSync();
+    return host;
+  }
+  function reset() {
+    if (component) unmount(component);
+    component = null;
+    host.remove();
+  }
+
+  it('href renders an <a> with the same classes, glyph, title and name', () => {
+    const a = renderHost({ glyph: 'download', title: 'Download submission', href: '/api/files/3', download: true, size: 'sm' })
+      .querySelector('a')!;
+    expect(host.querySelector('button')).toBeNull();
+    expect(a.getAttribute('href')).toBe('/api/files/3');
+    expect(a.getAttribute('download')).toBe('');
+    expect([...a.classList]).toEqual(expect.arrayContaining(['icon-btn', 'icon-link', 'sm']));
+    expect(a.getAttribute('data-glyph')).toBe('download');
+    expect(a.getAttribute('title')).toBe('Download submission');
+    expect(a.getAttribute('aria-label')).toBe('Download submission');
+    expect(a.querySelector('svg')).not.toBeNull();
+  });
+
+  it('a string download is forwarded; without download the attribute is absent', () => {
+    let a = renderHost({ glyph: 'download', title: 'Get', href: '/f', download: 'answer.pdf' }).querySelector('a')!;
+    expect(a.getAttribute('download')).toBe('answer.pdf');
+    reset();
+    a = renderHost({ glyph: 'download', title: 'Get', href: '/f' }).querySelector('a')!;
+    expect(a.hasAttribute('download')).toBe(false);
+  });
+
+  it('a disabled control with href stays a disabled <button>', () => {
+    const h = renderHost({ glyph: 'download', title: 'No file yet', href: '/f', disabled: true });
+    expect(h.querySelector('a')).toBeNull();
+    expect((h.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('describedby sets aria-describedby on the button and on the link; absent by default', () => {
+    expect(render({ glyph: 'plus', title: 'Add', describedby: 'hint-1' }).getAttribute('aria-describedby')).toBe('hint-1');
+    reset();
+    const a = renderHost({ glyph: 'download', title: 'Get', href: '/f', describedby: 'hint-2' }).querySelector('a')!;
+    expect(a.getAttribute('aria-describedby')).toBe('hint-2');
+    reset();
+    expect(render({ glyph: 'plus', title: 'Add' }).hasAttribute('aria-describedby')).toBe(false);
+  });
+});

@@ -35,6 +35,7 @@ type TabProps = ComponentProps<typeof RunRosterTab>;
 const BASE_PROPS: TabProps = {
   runId: 10,
   runIsPublished: true,
+  isAdmin: true,
   courseSlug: 'calc-101',
   students: [],
   groups: [],
@@ -61,6 +62,12 @@ function getTarget(): HTMLDivElement {
 
 async function clickAdd(email: string) {
   const root = getTarget();
+  // D25: the add row opens behind the toolbar's +.
+  const toggle = root.querySelector('button[data-action="toggle-add-student"]') as HTMLButtonElement;
+  if (toggle.getAttribute('aria-expanded') !== 'true') {
+    toggle.click();
+    await settle();
+  }
   const input = root.querySelector('input[name="new-email"]') as HTMLInputElement;
   input.value = email;
   input.dispatchEvent(new Event('input', { bubbles: true }));

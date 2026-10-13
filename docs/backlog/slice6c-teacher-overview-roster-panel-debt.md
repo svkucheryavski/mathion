@@ -23,3 +23,18 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **🗑 still closes the open panel while it is `aria-disabled`** during a field save or the switch request. `toggleDelete`'s close branch runs before the `runWrite` guard. This is harmless, since no delete request is running, but R44 says the handler returns at once. Fix: guard the close branch with `runWrite` too.
 - **Focus can drop to `<body>` after a failed publish whose refetch reveals a new violation** (e.g. the last teacher was removed elsewhere). Publish run becomes natively disabled and loses focus. The case is rare. Fix: on `'failed'`, `await tick(); if (publishBlocked) focusFirst([readyHead]);`.
 - **Backend: the published check reads the row loaded before the advisory locks** (`api/runs.py`, delete). The window against a concurrent publish is accepted per D28 and documented in the comment. A `db.refresh(run)` after the lock loop would narrow it at no cost.
+
+## Task 3 — Roster toolbar and add row
+
+- **Close requests are ignored silently while an add runs.** During the POST and its refetch, the toggle ×, Cancel and Esc in the row do nothing, and nothing says why (`closeAdd` returns while `adding`). They are not `aria-disabled`. Fix as R44 does elsewhere: `aria-disabled={adding}` and the title "Wait for the current change to finish" on Cancel and the toggle.
+- **Esc in the group select may close the whole add row.** The form's keydown also catches an Esc that comes from the `<select>`. A native popup usually swallows the key, so check this in the browser pass. Fix: ignore the event when its target is the select.
+- **The add error stays while the teacher edits the address.** There is no `oninput` clear, so the error line and the red edge stay until the next submit. This predates 6c. Fix: clear `addError` on input.
+- **Pre-existing error-path gaps in `submitAdd`:**
+  - an add that succeeds but whose refetch fails shows the refetch error under the row, as if the add had failed, after the field was already emptied;
+  - a network `TypeError` says nothing.
+  
+  Fix: refetch outside the add's error branch, and add an `else` with a generic message.
+- **The open add row unmounts under focus if the run turns draft** (a refetch after another session unpublished it). Focus falls to `<body>`, since the toggle is disabled by then. Only reachable across sessions.
+- **No success announcement after an add.** The row just clears, with focus back in the e-mail field. Collect for the VoiceOver pass at beta.
+- **Untested:** `open-add-link` while the row is already open (it only refocuses the e-mail field).
+- **The `IconButton` link variant** never binds `element`, which is typed `HTMLButtonElement`. It does not pass `tabindex` or `aria-hidden` either. Task 6's download link needs none of these. Document or widen this if a later caller needs them.

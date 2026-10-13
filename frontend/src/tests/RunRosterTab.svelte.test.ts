@@ -43,6 +43,7 @@ function mountTab(props: Record<string, unknown>) {
     props: {
       runId: 10,
       runIsPublished: true,
+      isAdmin: true,
       courseSlug: 'test',
       onNavigateToTab: vi.fn(),
       students: [],
@@ -71,6 +72,8 @@ describe('RunRosterTab core', () => {
     const { target, cmp } = mountTab({
       students: [fakeStudent({ user_id: 1, user_email: 'a@x.com' })],
     });
+    await settle();
+    (target.querySelector('button[data-action="toggle-add-student"]') as HTMLButtonElement).click();
     await settle();
     const emailInput = target.querySelector('input[name="new-email"]') as HTMLInputElement;
     emailInput.value = 'A@X.COM';
@@ -160,7 +163,7 @@ describe('RunRosterTab core', () => {
     unmount(cmp);
   });
 
-  it('persistent add-student row stays in DOM across filter changes', async () => {
+  it('an open add row stays in the DOM across filter changes', async () => {
     const { target, cmp } = mountTab({
       students: [
         fakeStudent({ user_id: 1, user_email: 'a@x.com', user_full_name: 'Alice', group_id: null }),
@@ -169,7 +172,9 @@ describe('RunRosterTab core', () => {
       rosterPrefilter: 'unassigned',
     });
     await settle();
-    // Prefilter active: only Alice visible. Add row must still exist.
+    (target.querySelector('button[data-action="toggle-add-student"]') as HTMLButtonElement).click();
+    await settle();
+    // Prefilter active: only Alice visible. The open add row must still exist.
     expect(target.querySelector('input[name="new-email"]')).not.toBeNull();
     // Type a search that filters out everyone.
     const search = target.querySelector('input[name="roster-search"]') as HTMLInputElement;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Shared icon-only button. A <button> shell carrying data-glyph, a required
+  // Shared icon-only button. A <button> shell (an <a> with `href`) carrying data-glyph, a required
   // title (tooltip + a11y label default) and an inline glyph SVG. Glyph paths
   // are transcribed verbatim from the titled action controls in
   // docs/design/visual-refresh/reference-screens.dc.html. Glyph set:
@@ -38,6 +38,12 @@
     id?: string;
     'data-action'?: string;
     tabindex?: number;
+    // Slice-6c R41: with `href` (and not `disabled`) the control is an <a> with
+    // the same look, e.g. a download; `download: true` sets the bare attribute.
+    href?: string;
+    download?: boolean | string;
+    // Slice-6c R41: the id of the text that explains the control (a disabled reason).
+    describedby?: string;
     // Bindable ref to the <button>, for callers that return focus to it.
     element?: HTMLButtonElement;
   };
@@ -61,33 +67,14 @@
     id = undefined,
     'data-action': dataAction = undefined,
     tabindex = undefined,
+    href = undefined,
+    download = undefined,
+    describedby = undefined,
     element = $bindable(),
   }: Props = $props();
 </script>
 
-<button
-  bind:this={element}
-  {type}
-  class="icon-btn {size}"
-  class:danger
-  class:borderless
-  class:round
-  class:primary
-  class:blocked={ariaDisabled}
-  data-glyph={glyph}
-  {disabled}
-  {title}
-  {id}
-  data-action={dataAction}
-  {tabindex}
-  aria-label={ariaLabel ?? title}
-  aria-hidden={ariaHidden}
-  aria-expanded={ariaExpanded}
-  aria-controls={ariaControls}
-  aria-disabled={ariaDisabled ? 'true' : undefined}
-  {onclick}
-  {onmousedown}
->
+{#snippet mark()}
   <svg
     viewBox="0 0 16 16"
     fill="none"
@@ -130,7 +117,58 @@
       <line x1="8" y1="2.8" x2="8" y2="9.6" /><polyline points="5,6.8 8,9.8 11,6.8" /><path d="M3 10.8v2h10v-2" />
     {/if}
   </svg>
-</button>
+{/snippet}
+
+{#if href && !disabled}
+  <a
+    {href}
+    download={download === true ? '' : download || undefined}
+    class="icon-btn icon-link {size}"
+    class:danger
+    class:borderless
+    class:round
+    class:primary
+    data-glyph={glyph}
+    {title}
+    {id}
+    data-action={dataAction}
+    {tabindex}
+    aria-label={ariaLabel ?? title}
+    aria-hidden={ariaHidden}
+    aria-describedby={describedby}
+    {onclick}
+    {onmousedown}
+  >
+    {@render mark()}
+  </a>
+{:else}
+  <button
+    bind:this={element}
+    {type}
+    class="icon-btn {size}"
+    class:danger
+    class:borderless
+    class:round
+    class:primary
+    class:blocked={ariaDisabled}
+    data-glyph={glyph}
+    {disabled}
+    {title}
+    {id}
+    data-action={dataAction}
+    {tabindex}
+    aria-label={ariaLabel ?? title}
+    aria-hidden={ariaHidden}
+    aria-expanded={ariaExpanded}
+    aria-controls={ariaControls}
+    aria-disabled={ariaDisabled ? 'true' : undefined}
+    aria-describedby={describedby}
+    {onclick}
+    {onmousedown}
+  >
+    {@render mark()}
+  </button>
+{/if}
 
 <style>
   /* Boxed default: fixed square so a row of icon buttons stays aligned even
@@ -148,6 +186,7 @@
     color: var(--muted);
     cursor: pointer;
   }
+  .icon-link { text-decoration: none; }
   .sm { width: var(--glyph-btn); height: var(--glyph-btn); }
   .md { width: 28px; height: 28px; }
   .sm svg { width: 12px; height: 12px; }

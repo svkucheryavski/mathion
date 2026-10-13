@@ -146,7 +146,8 @@ describe('RunDetailPage — the tab in the address', () => {
     await settle();
     expect(selected()).toBe('run-tab-roster');
     expect(location.search).toBe('?tab=roster');
-    expect(target.textContent).toContain('Showing: Unassigned');
+    expect(target.querySelector('button[data-action="clear-prefilter"]')).not.toBeNull();
+    expect(target.textContent).toContain('Unassigned (1)');
     expect(document.activeElement).toBe(tab('roster'));
   });
 
@@ -184,7 +185,7 @@ describe('RunDetailPage — the tab in the address', () => {
     tab('roster').click();
     await settle();
     expect(selected()).toBe('run-tab-roster');
-    expect(target.textContent).not.toContain('Showing: Unassigned');
+    expect(target.querySelector('button[data-action="clear-prefilter"]')).toBeNull();
 
     // A cancelled Assets → Edit leaves no pending edit behind.
     tab('assets').click();
@@ -222,12 +223,50 @@ describe('RunDetailPage — the tab in the address', () => {
     await settle();
     (target.querySelector('button[data-action="goto-unassigned"]') as HTMLButtonElement).click();
     await settle();
-    expect(target.textContent).toContain('Showing: Unassigned');
+    expect(target.querySelector('button[data-action="clear-prefilter"]')).not.toBeNull();
+    expect(target.textContent).toContain('Unassigned (1)');
     at('/teaching/algebra/runs/11?tab=roster');
     props.runId = '11';
     await settle();
     await settle();
     expect(selected()).toBe('run-tab-roster');
-    expect(target.textContent).not.toContain('Showing: Unassigned');
+    expect(target.querySelector('button[data-action="clear-prefilter"]')).toBeNull();
+  });
+});
+
+describe('RunDetailPage — the import modal (R39)', () => {
+  it('stays open across a tab change; closed then, it focuses the active tab', async () => {
+    at('/teaching/algebra/runs/10?tab=roster');
+    open();
+    await settle();
+    const importBtn = target.querySelector('button[data-action="open-import"]') as HTMLButtonElement;
+    importBtn.focus();
+    importBtn.click();
+    await settle();
+    expect(document.querySelector('textarea[aria-label="Rows to import"]')).not.toBeNull();
+
+    at('/teaching/algebra/runs/10?tab=overview');
+    await settle();
+    expect(selected()).toBe('run-tab-overview');
+    expect(importBtn.isConnected).toBe(false);
+    expect(document.querySelector('textarea[aria-label="Rows to import"]')).not.toBeNull();
+
+    (document.querySelector('[role="dialog"] button[data-action="cancel"]') as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('textarea[aria-label="Rows to import"]')).toBeNull();
+    expect(document.activeElement).toBe(tab('overview'));
+  });
+
+  it('closed on the tab that opened it, focus returns to Import roster', async () => {
+    at('/teaching/algebra/runs/10?tab=roster');
+    open();
+    await settle();
+    const importBtn = target.querySelector('button[data-action="open-import"]') as HTMLButtonElement;
+    importBtn.focus();
+    importBtn.click();
+    await settle();
+    (document.querySelector('[role="dialog"] button[data-action="cancel"]') as HTMLButtonElement).click();
+    await settle();
+    expect(document.activeElement).toBe(importBtn);
   });
 });

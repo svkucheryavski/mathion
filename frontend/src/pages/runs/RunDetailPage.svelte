@@ -195,6 +195,15 @@
     students = ss;
   }
 
+  // R39: the import modal outlives a tab change. Closed while another tab is
+  // open, its opener is gone and focus would fall to <body>: take the tab.
+  async function closeImport(): Promise<void> {
+    showImportModal = false;
+    await tick();
+    const active = document.activeElement;
+    if (!active || active === document.body) tabEls[activeTab]?.focus();
+  }
+
   $effect(() => {
     void courseSlug;
     if (runIdInt === null) return;
@@ -447,6 +456,7 @@
         <RunRosterTab
           runId={runIdInt!}
           runIsPublished={run.is_published}
+          {isAdmin}
           {courseSlug}
           onNavigateToTab={(t) => void setTab(t, { focusTab: true })}
           {students}
@@ -458,15 +468,6 @@
           onRefetchGroupsOnly={refetchGroups}
           onOpenImport={() => (showImportModal = true)}
         />
-        {#if showImportModal}
-          <RosterImportModal
-            runId={runIdInt!}
-            existingRoster={students}
-            existingGroups={groups}
-            onRefetchBeforeSubmit={refetchRosterData}
-            onClose={() => (showImportModal = false)}
-          />
-        {/if}
       {:else if activeTab === 'groups'}
         <RunGroupsTab
           runId={runIdInt!}
@@ -512,6 +513,15 @@
         <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} course={course!} />
       {/if}
     </div>
+    {#if showImportModal}
+      <RosterImportModal
+        runId={runIdInt!}
+        existingRoster={students}
+        existingGroups={groups}
+        onRefetchBeforeSubmit={refetchRosterData}
+        onClose={closeImport}
+      />
+    {/if}
   {/if}
 </div>
 

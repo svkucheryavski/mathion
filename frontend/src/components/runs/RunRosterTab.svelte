@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import {
@@ -9,6 +10,9 @@
     bulkDeleteRunStudents,
   } from '../../lib/runRoster';
   import { pushToast } from '../../stores/toasts.svelte';
+  import Button from '../ui/Button.svelte';
+  import EmptyState from '../ui/EmptyState.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { GroupResponse, RunStudentResponse, BulkRosterErrorCode } from '../../lib/types';
   import type { ActiveTab } from '../../lib/runTabs';
@@ -32,6 +36,7 @@
   let {
     runId,
     runIsPublished,
+    isAdmin,
     courseSlug: _courseSlug,
     onNavigateToTab,
     students,
@@ -45,6 +50,7 @@
   }: {
     runId: number;
     runIsPublished: boolean;
+    isAdmin: boolean;
     courseSlug: string;
     onNavigateToTab: (tab: ActiveTab) => void;
     students: RunStudentResponse[];
@@ -57,12 +63,32 @@
     onOpenImport: () => void;
   } = $props();
 
+  const uid = $props.id();
+  // The draft banner's id: a test hook, and the description of every add
+  // control a draft disables.
+  const DRAFT_HINT_ID = 'roster-draft-publish-hint';
+  const draftTitle = $derived(
+    isAdmin ? 'Publish this run before adding students' : 'A course admin must publish this run first',
+  );
+  const enabledGroups = $derived(groups.filter((g) => !g.is_disabled));
+  const unassignedCount = $derived(students.filter((s) => s.group_id === null).length);
+
+  // R38: every roster group select reads "Group A · 7/10" (a native option
+  // cannot set the count in mono).
+  function groupLabel(g: GroupResponse): string {
+    return `${g.name} · ${g.student_count}/10`;
+  }
+
+  let searchEl = $state<HTMLInputElement>();
+  let toggleEl = $state<HTMLButtonElement>();
+  let emailEl = $state<HTMLInputElement>();
+
   // The empty-roster link unmounts once an import fills the roster, so the
   // modal could not return focus to it. Hand focus to the toolbar's Import
   // roster first: that is the opener the modal returns to after Done.
   let importBtnEl = $state<HTMLButtonElement>();
   function openImportFromLink() {
-    importBtnEl?.focus();
+    importBtnEl?.focus({ preventScroll: true });
     onOpenImport();
   }
 
@@ -71,6 +97,12 @@
   let newGroupId = $state<number | '__unassigned'>('__unassigned');
   let addError: string | null = $state(null);
   let pendingDelete = $state<number | null>(null);
+
+  // D25: + opens the add row under the toolbar. `adding` spans the POST and
+  // its refetch: Add stays focusable but inert, the field read-only (6b R20).
+  let addOpen = $state(false);
+  let adding = $state(false);
+  const addShown = $derived(addOpen && runIsPublished);
 
   const pendingGroupId = new SvelteMap<number, number | null>();
   const selected = new SvelteSet<number>();
@@ -298,9 +330,49 @@
     if (search && rosterPrefilter !== null) onPrefilterClear();
   }
 
+  // §Focus: chip ×, Clear filter and Clear search → the search field.
+  async function clearPrefilter() {
+    onPrefilterClear();
+    await tick();
+    searchEl?.focus();
+  }
+
+  async function clearSearch() {
+    search = '';
+    await tick();
+    searchEl?.focus();
+  }
+
+  async function openAdd() {
+    if (!runIsPublished) return;
+    addOpen = true;
+    await tick();
+    emailEl?.focus();
+  }
+
+  // Closing keeps the typed e-mail; it is ignored while an add runs.
+  async function closeAdd() {
+    if (adding) return;
+    addOpen = false;
+    addError = null;
+    await tick();
+    toggleEl?.focus();
+  }
+
+  function toggleAdd() {
+    if (addShown) void closeAdd();
+    else void openAdd();
+  }
+
+  function onAddKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    void closeAdd();
+  }
+
   async function submitAdd(event: SubmitEvent) {
     event.preventDefault();
-    if (!runIsPublished) return;
+    if (adding || !runIsPublished) return;
     addError = null;
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
@@ -309,6 +381,7 @@
       addError = `${newEmail} is already enrolled. Edit their group in the table.`;
       return;
     }
+    adding = true;
     try {
       const groupId: number | null = newGroupId === '__unassigned' ? null : newGroupId;
       await addRunStudent(runId, newEmail.trim(), groupId);
@@ -325,7 +398,12 @@
       if (e instanceof ApiError) {
         addError = e.displayMessage;
       }
+    } finally {
+      adding = false;
     }
+    // Success: ready for the next student. Failure: the field the error is about.
+    await tick();
+    emailEl?.focus();
   }
 
   async function confirmDelete(userId: number) {
@@ -383,46 +461,116 @@
   });
 </script>
 
-<section class="roster-tab">
+<section class="ro-tab">
   {#if !runIsPublished}
-    <div
-      id="roster-draft-publish-hint"
-      class="banner"
-      role="status"
-      data-action="draft-publish-hint"
-    >
-      Publish this run before adding students. You can still move or remove students already on the roster.
-      <button
-        type="button"
-        class="linklike"
-        data-action="nav-overview-publish-roster"
-        onclick={() => onNavigateToTab('overview')}
-      >Publish on Overview</button>
+    <div id={DRAFT_HINT_ID} class="ro-info" role="status" data-action="draft-publish-hint">
+      {#if isAdmin}
+        Publish this run before adding students. You can still move or remove students already on the roster.
+        <button
+          type="button"
+          class="ro-link"
+          data-action="nav-overview-publish-roster"
+          onclick={() => onNavigateToTab('overview')}
+        >Publish on Overview</button>
+      {:else}
+        This run is not published yet. A course admin publishes it; then students can be added. You can still move or remove students already on the roster.
+      {/if}
     </div>
   {/if}
 
-  <header class="roster-toolbar">
+  <div class="ro-toolbar">
+    <label class="vh" for="{uid}-search">Search students</label>
     <input
+      id="{uid}-search"
+      class="ro-input ro-search"
       name="roster-search"
-      placeholder="Search by name or email…"
+      placeholder="Search name or email…"
+      autocomplete="off"
       value={search}
       oninput={onSearchInput}
+      bind:this={searchEl}
     />
     {#if rosterPrefilter === 'unassigned'}
-      {@const n = students.filter((s) => s.group_id === null).length}
-      <span class="prefilter-pill">
-        Showing: Unassigned ({n})
-        <button data-action="clear-prefilter" aria-label="Clear filter" onclick={onPrefilterClear}>×</button>
+      <span class="ro-chip">
+        Unassigned ({unassignedCount})
+        <button
+          type="button"
+          class="ro-chip-x"
+          data-action="clear-prefilter"
+          aria-label="Clear filter"
+          title="Clear filter"
+          onclick={clearPrefilter}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4.4" y1="4.4" x2="11.6" y2="11.6" /><line x1="11.6" y1="4.4" x2="4.4" y2="11.6" /></svg>
+        </button>
       </span>
     {/if}
-    <button data-action="open-import" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} bind:this={importBtnEl} onclick={onOpenImport}>Import roster</button>
-  </header>
+    <div class="ro-tools-right">
+      <Button
+        variant="secondary"
+        data-action="open-import"
+        disabled={!runIsPublished}
+        title={runIsPublished ? undefined : draftTitle}
+        aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+        bind:element={importBtnEl}
+        onclick={onOpenImport}
+      >Import roster</Button>
+      <IconButton
+        glyph={addShown ? 'close' : 'plus'}
+        primary={!addShown}
+        size="sm"
+        title={!runIsPublished ? draftTitle : addShown ? 'Close add row' : 'Add student'}
+        aria-label={addShown ? 'Close add row' : 'Add student'}
+        disabled={!runIsPublished}
+        describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+        aria-expanded={addShown}
+        aria-controls={addShown ? `${uid}-add` : undefined}
+        data-action="toggle-add-student"
+        bind:element={toggleEl}
+        onclick={toggleAdd}
+      />
+    </div>
+  </div>
 
-  {#if students.length === 0}
-    <p class="empty">
-      No students yet. Add one below or
-      <button data-action="open-import-link" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={openImportFromLink}>Import roster from CSV</button>.
-    </p>
+  {#if addShown}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <form id="{uid}-add" class="ro-add" onsubmit={submitAdd} onkeydown={onAddKeydown}>
+      <label class="vh" for="{uid}-email">Student email</label>
+      <input
+        id="{uid}-email"
+        class="ro-input ro-email"
+        name="new-email"
+        type="email"
+        maxlength="254"
+        placeholder="student@example.com"
+        autocomplete="off"
+        readonly={adding}
+        aria-invalid={addError ? 'true' : undefined}
+        aria-describedby={addError ? `${uid}-add-err` : undefined}
+        bind:value={newEmail}
+        bind:this={emailEl}
+      />
+      {#if groupsEnabled}
+        <label class="vh" for="{uid}-group">Group</label>
+        <select id="{uid}-group" class="ro-select" bind:value={newGroupId}>
+          <option value="__unassigned">Unassigned</option>
+          {#each enabledGroups as g (g.id)}
+            <option value={g.id}>{groupLabel(g)}</option>
+          {/each}
+        </select>
+      {/if}
+      <Button
+        type="submit"
+        variant="primary"
+        data-action="add-student"
+        loading={adding}
+        aria-disabled={adding}
+        disabled={!adding && !newEmail.trim()}
+        title={adding ? 'Wait for the current change to finish' : newEmail.trim() ? undefined : 'Enter an email address'}
+      >Add</Button>
+      <Button variant="secondary" data-action="cancel-add-student" onclick={closeAdd}>Cancel</Button>
+    </form>
+    {#if addError}<p id="{uid}-add-err" class="ro-err error" role="alert">{addError}</p>{/if}
   {/if}
 
   {#if bulkOpResult.kind !== 'idle' && !(bulkOpResult.kind === 'success' && bannerDismissed)}
@@ -519,134 +667,215 @@
     </div>
   {/if}
 
-  <table>
-    <thead>
-      <tr>
-        <th>
-          <input
-            type="checkbox"
-            data-header-checkbox
-            checked={headerChecked}
-            onclick={onHeaderClick}
-            bind:indeterminate={() => headerIndeterminate, () => {}}
-          />
-        </th>
-        <th>Email</th>
-        <th>Full name</th>
-        <th>Group</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each visible as s (s.user_id)}
-        <tr
-          data-row="student"
-          data-user-id={s.user_id}
-          class:row-error={rowErrorBorders.has(s.user_id)}
-          title={bulkErrorTooltip(rowErrorMeta.get(s.user_id))}
-        >
-          <td>
+  {#if visible.length > 0}
+    <table>
+      <thead>
+        <tr>
+          <th>
             <input
               type="checkbox"
-              data-row-checkbox
-              checked={selected.has(s.user_id)}
-              onchange={(e) => {
-                if ((e.currentTarget as HTMLInputElement).checked) selected.add(s.user_id);
-                else selected.delete(s.user_id);
-              }}
+              data-header-checkbox
+              checked={headerChecked}
+              onclick={onHeaderClick}
+              bind:indeterminate={() => headerIndeterminate, () => {}}
             />
-          </td>
-          <td>{s.user_email}</td>
-          <td>{s.user_full_name || '—'}</td>
-          <td>
-            {#if groupsEnabled}
-              <select
-                value={selectValueFor(s)}
-                disabled={pendingGroupId.has(s.user_id)}
-                onchange={(e) => onGroupChange(s, (e.currentTarget as HTMLSelectElement).value)}
-              >
-                <option value="__unassigned">Unassigned</option>
-                {#each groups as g (g.id)}
-                  <option value={g.id}>{g.name} ({g.student_count}/10){g.is_disabled ? ' (disabled)' : ''}</option>
-                {/each}
-              </select>
-            {:else}
-              —
-            {/if}
-          </td>
-          <td>
-            {#if pendingDelete === s.user_id}
-              <InlineConfirm
-                confirmLabel="Confirm Delete"
-                confirmDataAction="confirm-delete-student"
-                onConfirm={() => confirmDelete(s.user_id)}
-                onCancel={() => (pendingDelete = null)}
-              />
-            {:else}
-              <button data-action="delete-student" onclick={() => (pendingDelete = s.user_id)}>Delete</button>
-            {/if}
-          </td>
+          </th>
+          <th>Email</th>
+          <th>Full name</th>
+          <th>Group</th>
+          <th>Actions</th>
         </tr>
-      {/each}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {#each visible as s (s.user_id)}
+          <tr
+            data-row="student"
+            data-user-id={s.user_id}
+            class:row-error={rowErrorBorders.has(s.user_id)}
+            title={bulkErrorTooltip(rowErrorMeta.get(s.user_id))}
+          >
+            <td>
+              <input
+                type="checkbox"
+                data-row-checkbox
+                checked={selected.has(s.user_id)}
+                onchange={(e) => {
+                  if ((e.currentTarget as HTMLInputElement).checked) selected.add(s.user_id);
+                  else selected.delete(s.user_id);
+                }}
+              />
+            </td>
+            <td>{s.user_email}</td>
+            <td>{s.user_full_name || '—'}</td>
+            <td>
+              {#if groupsEnabled}
+                <select
+                  value={selectValueFor(s)}
+                  disabled={pendingGroupId.has(s.user_id)}
+                  onchange={(e) => onGroupChange(s, (e.currentTarget as HTMLSelectElement).value)}
+                >
+                  <option value="__unassigned">Unassigned</option>
+                  {#each groups as g (g.id)}
+                    <option value={g.id}>{g.name} ({g.student_count}/10){g.is_disabled ? ' (disabled)' : ''}</option>
+                  {/each}
+                </select>
+              {:else}
+                —
+              {/if}
+            </td>
+            <td>
+              {#if pendingDelete === s.user_id}
+                <InlineConfirm
+                  confirmLabel="Confirm Delete"
+                  confirmDataAction="confirm-delete-student"
+                  onConfirm={() => confirmDelete(s.user_id)}
+                  onCancel={() => (pendingDelete = null)}
+                />
+              {:else}
+                <button data-action="delete-student" onclick={() => (pendingDelete = s.user_id)}>Delete</button>
+              {/if}
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
 
-  {#if visible.length === 0 && students.length > 0}
-    <p class="empty">
+  {#if students.length === 0}
+    <EmptyState title="No students yet.">
+      {#snippet action()}
+        <span class="ro-empty-links">
+          <button
+            type="button"
+            class="ro-link"
+            data-action="open-import-link"
+            disabled={!runIsPublished}
+            title={runIsPublished ? undefined : draftTitle}
+            aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+            onclick={openImportFromLink}
+          >Import roster</button>
+          <button
+            type="button"
+            class="ro-link"
+            data-action="open-add-link"
+            disabled={!runIsPublished}
+            title={runIsPublished ? undefined : draftTitle}
+            aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+            onclick={openAdd}
+          >Add student</button>
+        </span>
+      {/snippet}
+    </EmptyState>
+  {:else if visible.length === 0}
+    <p class="ro-nomatch">
       {#if rosterPrefilter === 'unassigned'}
         No students are unassigned.
-        <button data-action="clear-prefilter-link" onclick={onPrefilterClear}>Clear filter</button>.
+        <button type="button" class="ro-link" data-action="clear-prefilter-link" onclick={clearPrefilter}>Clear filter</button>.
       {:else}
         No students match '{search}'.
-        <button data-action="clear-search-link" onclick={() => (search = '')}>Clear search</button>.
+        <button type="button" class="ro-link" data-action="clear-search-link" onclick={clearSearch}>Clear search</button>.
       {/if}
     </p>
   {/if}
-
-  <form class="add-row" onsubmit={submitAdd}>
-    <input name="new-email" type="email" maxlength="254" bind:value={newEmail} placeholder="student@example.com" />
-    {#if groupsEnabled}
-      <select bind:value={newGroupId}>
-        <option value="__unassigned">Unassigned</option>
-        {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
-          <option value={g.id}>{g.name} ({g.student_count}/10)</option>
-        {/each}
-      </select>
-    {:else}
-      —
-    {/if}
-    <button data-action="add-student" type="submit" disabled={!runIsPublished || !newEmail.trim()} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined}>Add</button>
-  </form>
-  {#if addError}<p class="error" role="alert">{addError}</p>{/if}
 </section>
 
 <style>
-  .banner {
-    margin: 0.5rem 0;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-muted, #f4f4f4);
-    border-left: 3px solid var(--accent, #888);
-    border-radius: 2px;
-  }
+  .ro-tab { display: flex; flex-direction: column; gap: 10px; }
 
-  .roster-tab { display: flex; flex-direction: column; gap: 12px; }
-  .roster-toolbar { display: flex; gap: 8px; align-items: center; }
-  .prefilter-pill {
+  /* The 6a info precondition banner. */
+  .ro-info {
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .ro-link {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--primary);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .ro-link:disabled { color: var(--faint); text-decoration: none; cursor: not-allowed; }
+
+  .ro-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .ro-tools-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  /* R40: native fields in the 6a field style (RunTeachersTab's .t-input). */
+  .ro-input {
+    box-sizing: border-box;
+    height: var(--control-h-sm);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--control-font);
+  }
+  .ro-input[aria-invalid='true'] { border-color: var(--danger); }
+  .ro-search { width: 230px; max-width: 100%; }
+  .ro-email { flex: 1 1 240px; min-width: 0; max-width: 360px; }
+  .ro-select {
+    box-sizing: border-box;
+    height: 26px;
+    max-width: 100%;
+    padding: 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .ro-chip {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    background: var(--surface-muted, #f5f5f5);
-    border-radius: 999px;
-    font-size: 0.85em;
+    gap: 6px;
+    height: 26px;
+    padding: 0 4px 0 10px;
+    border-radius: 13px;
+    background: var(--surface-2);
+    font-size: 12px;
+    color: var(--text-3);
   }
-  .prefilter-pill button { background: transparent; border: 0; cursor: pointer; padding: 0 4px; font-size: 1em; }
+  .ro-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .ro-chip-x:hover { background: var(--border); color: var(--text); }
+
+  /* D25: the 6a add-row look. */
+  .ro-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .ro-err { margin: 0; font-size: 12px; color: var(--danger); }
+  .ro-nomatch { margin: 0; font-size: 13px; color: var(--muted); }
+  .ro-empty-links { display: inline-flex; gap: 16px; }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--border, #eee); text-align: left; }
   thead th { position: sticky; top: 0; background: var(--surface, #fff); }
-  .add-row { display: flex; gap: 8px; align-items: center; }
-  .empty { color: var(--muted, #666); }
-  .error { color: var(--danger, #c00); }
   .bulk-strip {
     display: flex;
     gap: 8px;
@@ -668,19 +897,5 @@
   .bulk-banner-cancelled { background: var(--danger-soft, #fdecea); }
   .row-error {
     box-shadow: inset 4px 0 0 0 var(--danger, #c00);
-  }
-
-  .linklike {
-    background: none;
-    border: 0;
-    padding: 0;
-    margin-left: 0.5rem;
-    color: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-    font: inherit;
-  }
-  .linklike:hover {
-    text-decoration: none;
   }
 </style>
