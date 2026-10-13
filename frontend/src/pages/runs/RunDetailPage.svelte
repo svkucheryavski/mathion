@@ -438,7 +438,7 @@
       {#if activeTab === 'overview'}
         <RunOverviewTab
           {run}
-          setRun={(r) => (run = r)}
+          setRun={(r) => { if (r.id === runIdInt) run = r; }}
           {pinned}
           {isAdmin}
           {readiness}

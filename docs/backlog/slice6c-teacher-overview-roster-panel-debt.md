@@ -72,3 +72,17 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **After a PATCH, the "Evaluated" line names the previous evaluator** until the refetch lands (this predates 6c).
 - **The `awaiting-evaluation-placeholder` hook repeats inside opened earlier submissions,** so `querySelector` returns whichever comes first. The tests scope it today.
 - **Seen in the screenshot pass:** the "Evaluation saved; group notified" toast covers the panel's status badge and × for a few seconds. The toast position is outside this slice.
+
+## Whole-branch review (9aec18e..5aaba37)
+
+Fixed: **a late Overview save no longer overwrites another run** (Fable, Important). `setRun` now ignores a response whose `id` is not the current run, so a field or groups PATCH that lands after Back/Forward to another run can't put the old run's data on the new run's page.
+
+Deferred minors:
+- **A long e-mail doesn't wrap in two places:** the row-confirm warning "Remove {email} from this run?" (`InlineConfirm`'s `.warning`) and the add-row error `.ro-err`. With an e-mail that has no break points, the table grows past its column and Remove/Cancel move right inside the scroll wrapper. Fix: `overflow-wrap: anywhere` on `.ro-err` and on a wrapper around the confirm warning.
+- **A failed forced delete is lost when the admin has left the Overview.** The `'failed'` outcome only shows in the Overview's card, which is gone after the remount. `localWrite` resets, so a second DELETE can start. Fix: a toast in `onDeleteRun`'s failure branch, or a page-level `deleting` flag.
+- **`onDeleteRun` navigates without a load-token check.** If the admin moves to another run while the DELETE runs, success still sends them to the course page. Fix: `if (myToken === loadToken)` before the navigation.
+- **A delete that returns 404** (the run was deleted elsewhere) re-arms the panel with "Run not found". Kinder: take the "Run deleted." path.
+- **A network failure under an Overview field shows the browser's raw text** ("Failed to fetch" / "Load failed") from `InlineName`'s `e.message` branch. Fix: show `ApiError.displayMessage`, else "Could not save.", and keep the raw text only for the R32 wait constant.
+- **A busy Publish has no reason `title`** (R44 asks for one); the visible "Publishing…" covers sighted users.
+- **The Version row's disabled ✎ has no `aria-label`,** so its name is the reason sentence. Fix: `aria-label="Edit the version"`, or check it in the VoiceOver pass at beta.
+- **Nits:** a stale "else Save evaluation" comment in `DashboardSidePanel.svelte` (~441); `NOUN` duplicates `FIELDS[].noun` in `RunOverviewTab.svelte`.

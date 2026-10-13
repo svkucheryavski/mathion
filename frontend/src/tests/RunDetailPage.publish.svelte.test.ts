@@ -560,6 +560,100 @@ describe('PublishConflictsModal wiring (E3)', () => {
     expect(dialogEl()).toBeNull();
     unmount(cmp);
   });
+  it("a field save that lands after a runId change does not overwrite the new run (final review)", async () => {
+    let releaseSave!: (r: Response) => void;
+    const heldSave = new Promise<Response>((r) => { releaseSave = r; });
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/courses/by-slug/')) return jres({
+        id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true,
+      });
+      const runMatch = url.match(/\/api\/runs\/(\d+)$/);
+      if (runMatch && init?.method === 'PATCH') return heldSave;
+      if (runMatch) {
+        const rid = Number(runMatch[1]);
+        return jres({
+          id: rid, course_id: 1, version_id: 99, title: `Run ${rid}`, start_date: '2026-06-01', end_date: '2026-06-30',
+          is_published: false, groups_enabled: false,
+        });
+      }
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.includes('/versions')) return jres([{
+        id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false,
+      }]);
+      if (url.includes('/teachers')) return jres([{ user_id: 1, user_email: 't@x.com' }]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+
+    const props = $state({ courseSlug: 'algebra', runId: '10' });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props });
+    await settle();
+    (target.querySelector('button[data-action="edit-title"]') as HTMLButtonElement).click();
+    flushSync();
+    const input = target.querySelector('input.in-input') as HTMLInputElement;
+    input.value = 'Late title';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    flushSync();
+    await settle();
+
+    props.runId = '11';
+    flushSync();
+    await settle();
+    expect(target.querySelector('h1')?.textContent).toBe('Run 11');
+
+    releaseSave(await jres({
+      id: 10, course_id: 1, version_id: 99, title: 'Late title', start_date: '2026-06-01', end_date: '2026-06-30',
+      is_published: false, groups_enabled: false,
+    }));
+    await settle();
+    expect(target.querySelector('h1')?.textContent).toBe('Run 11');
+    unmount(cmp);
+  });
+  it("a field save on the same run still updates the page header (final review)", async () => {
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/courses/by-slug/')) return jres({
+        id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true,
+      });
+      if (url.match(/\/api\/runs\/10$/)) return jres({
+        id: 10, course_id: 1, version_id: 99, start_date: '2026-06-01', end_date: '2026-06-30',
+        is_published: false, groups_enabled: false,
+        title: init?.method === 'PATCH' ? 'Summer' : 'Spring',
+      });
+      if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+      if (url.includes('/mini-projects')) return jres([]);
+      if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+      if (url.includes('/versions')) return jres([{
+        id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false,
+      }]);
+      if (url.includes('/teachers')) return jres([{ user_id: 1, user_email: 't@x.com' }]);
+      if (url.includes('/groups')) return jres([]);
+      if (url.includes('/students')) return jres([]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    await settle();
+    expect(target.querySelector('h1')?.textContent).toBe('Spring');
+    (target.querySelector('button[data-action="edit-title"]') as HTMLButtonElement).click();
+    flushSync();
+    const input = target.querySelector('input.in-input') as HTMLInputElement;
+    input.value = 'Summer';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    flushSync();
+    await settle();
+    expect(target.querySelector('h1')?.textContent).toBe('Summer');
+    unmount(cmp);
+  });
   it('closing the conflicts modal returns focus to Publish (spec §Publish conflicts › Focus)', async () => {
     const { target, cmp } = setupWithPublishStub({
       detail: 'Cannot publish: 1 student already active',
