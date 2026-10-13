@@ -1,14 +1,15 @@
 <!-- frontend/src/components/runs/DashboardSidePanel.svelte -->
 <!--
-  Slide-in side drawer (NOT centered modal). Width: min(640px, 90vw).
-  Pattern: peek-and-back-to-list, not focused-edit. Deliberate divergence
-  from the existing modal pattern; see spec §6.5 line 1304.
+  The grading / progress side panel (9b): a 520px drawer on ui/Modal at the
+  right edge (6c D27, R30). × and Esc close it; a click on the dimmed page
+  does not (D29).
 -->
 <script lang="ts">
   import {
     getSequenceItemState,
     getSubmissionThread,
     resultToStatus,
+    STATUS_SHORT_LABEL,
     type MpGroupStatus,
     type SequenceItemStateResponse,
     type DashboardMpRow,
@@ -16,12 +17,14 @@
     type ThreadSubmission,
   } from '../../lib/dashboards';
   import SubmissionThreadEntry from './SubmissionThreadEntry.svelte';
-  import FocusTrap from '../ui/FocusTrap.svelte';
+  import ProgressBreakdown from './ProgressBreakdown.svelte';
+  import Modal from '../ui/Modal.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import DirtyGuard from '../editor/DirtyGuard.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatLocalWithTz } from '../../lib/datetime';
   import { formatFileSize } from '../../lib/format';
+  import { focusFirst } from '../../lib/focusFirst';
   import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
   import { ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -56,6 +59,14 @@
   } = $props();
 
   const canWrite = $derived(isAdmin || isTeacher);
+
+  const uid = $props.id();
+  const titleId = `${uid}-title`;
+  let titleEl = $state<HTMLElement>();
+  let discardEl = $state<HTMLElement>();
+  // Modal owns the panel and ×; the panel finds them from its title.
+  const panelEl = () => titleEl?.closest<HTMLElement>('.modal-panel') ?? null;
+  const closeX = () => panelEl()?.querySelector<HTMLButtonElement>('.modal-head button[aria-label="Close"]') ?? null;
   let editing = $state(false);
 
   let formResult = $state<EvaluationResult | ''>('');
@@ -232,16 +243,18 @@
     );
   });
 
+  // The discard confirm in Modal's footer. R36: Discard after the form's
+  // Cancel ends the edit; after × or Esc it closes the panel. Cancel returns
+  // focus to where it was when the confirm opened.
   let confirmDiscard = $state(false);
+  let discardSource: 'cancel' | 'close' = 'close';
+  let discardReturnEl: HTMLElement | null = null;
 
-  $effect(() => {
-    if (confirmDiscard) {
-      tick().then(() => {
-        const btn = document.querySelector('.inline-confirm button') as HTMLButtonElement | null;
-        btn?.focus();
-      });
-    }
-  });
+  function askDiscard(source: 'cancel' | 'close') {
+    discardSource = source;
+    discardReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    confirmDiscard = true;
+  }
 
   const feedbackCharCount = $derived(formFeedbackText.length);
   const counterApproaching = $derived(feedbackCharCount >= 900);
@@ -361,7 +374,7 @@
       return;
     }
     if (isDirty) {
-      confirmDiscard = true;
+      askDiscard('cancel');
       return;
     }
     editing = false;
@@ -373,27 +386,45 @@
 
   function tryClose() {
     if (submitting) return;
+    // × (or Esc on ×) while the confirm asks: go to its Cancel, don't ask twice.
+    if (confirmDiscard) {
+      discardEl?.querySelector<HTMLButtonElement>('button.cancel')?.focus();
+      return;
+    }
     if (isDirty) {
-      confirmDiscard = true;
+      askDiscard('close');
       return;
     }
     onClose();
   }
 
-  function discardAndClose() {
+  function discard() {
     confirmDiscard = false;
-    if (editing) {
-      editing = false;
-      formResult = '';
-      formScore = null;
-      formFeedbackText = '';
-      formFeedbackFile = null;
-      fileError = null;
-      prefillSnapshot = null;
-      formSubmitAttempted = false;
-    } else {
+    if (discardSource === 'close') {
       onClose();
+      return;
     }
+    editing = false;
+    formResult = '';
+    formScore = null;
+    formFeedbackText = '';
+    formFeedbackFile = null;
+    fileError = null;
+    prefillSnapshot = null;
+    formSubmitAttempted = false;
+    tick().then(() => {
+      focusFirst([panelEl()?.querySelector<HTMLElement>('button[data-test="edit-evaluation"]')]);
+    });
+  }
+
+  async function cancelDiscard() {
+    confirmDiscard = false;
+    await tick();
+    focusFirst([
+      discardReturnEl,
+      panelEl()?.querySelector<HTMLElement>('select[name="evaluation-result"]'),
+      closeX(),
+    ]);
   }
 
   function handleFileChange(e: Event) {
@@ -439,9 +470,8 @@
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        // Spec §6.5 line 1322: "Fetch error (incl. 404)" → uniform message
-        // for ALL fetch errors (404 not split from other errors).
-        error = 'Item details unavailable. The dashboard may be out of date — Refresh.';
+        // One message for every fetch error, 404 included.
+        error = 'Item details unavailable. The dashboard may be out of date — close this panel and refresh the table.';
         loading = false;
       });
     return () => ctl.abort();
@@ -480,70 +510,74 @@
   // Unmount-only cleanup for any in-flight panel fetch (mirrors the tab pattern).
   $effect(() => () => abortCtl?.abort());
 
-  // Escape handled via svelte:window per spec §6.5 line 1300 (matches the
-  // RosterImportModal.svelte:111-116 pattern). FocusTrap handles Tab/Shift+Tab
-  // cycling + previousFocus restore on unmount.
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      tryClose();
-    }
-  }
+  // The header: the block title (6a D6) and the group for a submission; the
+  // student and "{Block} — {Sequence}" for progress, "Item details" until
+  // they load, so the dialog is always named.
+  const title = $derived(
+    target.kind === 'submission'
+      ? target.mp.block_title
+      : data
+        ? (data.student.full_name ?? data.student.email)
+        : 'Item details',
+  );
+  const subtitle = $derived(
+    target.kind === 'submission'
+      ? target.entry.group_name
+      : data
+        ? `${data.sequence.block_title} — ${data.sequence.sequence_title}`
+        : '',
+  );
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+{#snippet head()}
+  <div class="sp-titles">
+    <h2 class="sp-title" id={titleId} tabindex="-1" bind:this={titleEl}>{title}</h2>
+    {#if subtitle}<p class="sp-sub">{subtitle}</p>{/if}
+  </div>
+  {#if target.kind === 'submission'}
+    <StatusBadge status={panelStatus} label={STATUS_SHORT_LABEL[panelStatus]} />
+  {/if}
+{/snippet}
 
-<div class="panel-backdrop" onclick={tryClose} role="presentation"></div>
-<FocusTrap autofocusSelector='select[name="evaluation-result"], [data-side-panel-close]' autofocusPriorityOrder>
-  <div
-    class="dashboard-side-panel"
-    role="dialog"
-    aria-modal="true"
-    aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
-    data-can-write={target.kind === 'submission' && canWrite ? 'true' : undefined}
-  >
-    <button class="panel-close" onclick={tryClose} aria-label="Close panel" data-side-panel-close>
-      <span aria-hidden="true">✕</span>
-      Close
-    </button>
+{#snippet discardFooter()}
+  <div class="sp-discard" bind:this={discardEl}>
+    <InlineConfirm
+      row
+      takeFocus
+      warning="Discard unsaved changes?"
+      confirmLabel="Discard"
+      confirmDataAction="confirm-discard"
+      onConfirm={discard}
+      onCancel={cancelDiscard}
+    />
+  </div>
+{/snippet}
 
+<Modal
+  placement="right"
+  width={520}
+  labelledby={titleId}
+  closeDisabled={submitting}
+  closeTitle="Wait for the save to finish"
+  bodyInert={confirmDiscard}
+  autofocusSelector={'select[name="evaluation-result"], .modal-head button[aria-label="Close"]'}
+  onRequestClose={tryClose}
+  header={head}
+  footer={confirmDiscard ? discardFooter : undefined}
+>
     {#if target.kind === 'progress'}
       {#if loading}
-        <p>Loading…</p>
+        <p class="sp-muted">Loading…</p>
       {:else if error}
-        <p class="banner-error" role="alert">{error}</p>
+        <p class="sp-error" role="alert">{error}</p>
       {:else if data}
-        <header>
-          <p class="student-line">{data.student.full_name ?? data.student.email}</p>
-          <h3>{data.sequence.block_title} — {data.sequence.sequence_title}</h3>
-        </header>
         {#if data.items.length === 0}
-          <p>No items in this sequence.</p>
+          <p class="sp-muted">No items in this sequence.</p>
         {:else}
-          <ol class="item-list">
-            {#each data.items as it (it.item_id)}
-              <li>
-                <span class="item-covered">{it.is_covered ? '✓' : '○'}</span>
-                <span class="item-title">{it.item_title}</span>
-                <span class="item-type">{it.item_type}</span>
-                {#if it.last_score}
-                  <span class="item-score">{it.last_score.correct}/{it.last_score.total}</span>
-                {/if}
-              </li>
-            {/each}
-          </ol>
+          <ProgressBreakdown items={data.items} />
         {/if}
       {/if}
     {:else}
-      <!-- submission variant: no fetch, render from passed-in target.entry -->
-      <header>
-        <h3>{target.mp.title}</h3>
-        <p class="block-subtitle">{target.mp.block_title}</p>
-        <p class="group-line">{target.entry.group_name}</p>
-      </header>
-
-      <StatusBadge status={panelStatus} />
-
       {#if newest == null}
         <p>Not submitted yet.</p>
       {:else}
@@ -757,32 +791,37 @@
         {/if}
       {/if}
     {/if}
-    {#if confirmDiscard}
-      <div class="discard-confirm">
-        <InlineConfirm
-          confirmLabel="Discard"
-          warning="Discard unsaved changes?"
-          onConfirm={discardAndClose}
-          onCancel={() => (confirmDiscard = false)}
-        />
-      </div>
-    {/if}
     <DirtyGuard isDirty={() => isDirty && !submitting} />
-  </div>
-</FocusTrap>
+</Modal>
 
 <style>
-  .panel-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100;
+  .sp-titles { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+  .sp-title {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: anywhere;
   }
-  .dashboard-side-panel {
-    position: fixed; top: 0; right: 0; bottom: 0;
-    width: min(640px, 90vw);
-    background: var(--bg, #fff); padding: 1.5rem;
-    overflow-y: auto; z-index: 101;
-    box-shadow: -2px 0 8px rgba(0,0,0,0.15);
+  .sp-sub {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
   }
-  .panel-close { float: right; font-size: 1.5em; background: none; border: none; cursor: pointer; }
+  .sp-muted { margin: 0; font-size: 13px; color: var(--muted); }
+  /* The 6a error banner. */
+  .sp-error {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--status-rejected-bg);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--status-rejected-fg);
+  }
+  .sp-discard { flex: 1 1 auto; font-size: 13px; color: var(--text-2); }
   .banner-info {
     padding: 0.75rem 1rem;
     border-radius: 4px;

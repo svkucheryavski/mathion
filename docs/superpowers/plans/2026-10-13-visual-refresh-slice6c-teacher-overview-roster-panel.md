@@ -98,7 +98,7 @@ Each states what it costs if wrong. P-numbers continue from 6b's P18.
 - **P48 — `Button` gains a `data-test` pass-through**, so Edit and Cancel keep `edit-evaluation` and `cancel-button` on the shared Button. New test hooks: `data-test="evaluation-card"` (the read-only card), `"submission-content"` and `"evaluation-content"` (the snippets' rows), `data-action="attach-feedback-file"` and `"remove-feedback-file"`. *Cost:* one prop.
 - **P49 — The panel finds Modal's `.modal-panel` and × from its own title** (`titleEl.closest('.modal-panel')`); Modal exposes no refs. *Cost:* a DOM query.
 - **P50 — The form card is headed "Evaluate" in create and in edit mode** (the spec: Edit "turns the card into the Evaluate form"). *Cost:* wording.
-- **P51 — Save evaluation's `title` while a save runs is "Wait for the save to finish"**, the same as ×'s `closeTitle` (R44 asks for a reason title). *Cost:* wording.
+- **P51 — Save's `title` while a save runs is "Wait for the save to finish"**, the same as ×'s `closeTitle` (R44 asks for a reason title). *Cost:* wording.
 - **P52 — A 409 race focuses × at once** (the form is gone and the winning card has not loaded yet). When the Evaluation card renders, its `<h3>` takes focus only if focus is still on × or `<body>`. *Cost:* none.
 - **P53 — Feedback and Score align to the top (`align-items: start`), not the drawn `end`.** An error or the counter under Feedback then leaves Score in place; the drawn state looks the same. *Cost:* none.
 - **P54 — Undrawn details use tokens.**
@@ -8672,7 +8672,7 @@ once("""    const select = """ + SEL + """;
 """, """    expect(document.activeElement).toBe(resultRadio('major_revision'));
 """)
 
-# F. T21 / T29: R44 on Save evaluation.
+# F. T21 / T29: R44 on Save.
 once("""    expect(saveBtn.getAttribute('aria-busy')).toBe('true');
     expect(saveBtn.disabled).toBe(true);
 """, """    expect(saveBtn.getAttribute('aria-busy')).toBe('true');
@@ -8889,7 +8889,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     expect(document.activeElement).toBe(host.querySelector('button[data-action="attach-feedback-file"]'));
   });
 
-  it("Save evaluation's disabled reason, first match wins", async () => {
+  it("Save's disabled reason, first match wins", async () => {
     await mountCreate();
     expect(save().disabled).toBe(true);
     expect(save().title).toBe('Choose a result');
@@ -8908,7 +8908,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     pickResult('accepted');
     expect(save().disabled).toBe(false);
     expect(save().hasAttribute('title')).toBe(false);
-    expect(save().textContent!.trim()).toBe('Save evaluation');
+    expect(save().textContent!.trim()).toBe('Save');
   });
 
   it('while saving: Save keeps focus, busy and not disabled; the fields freeze; a second submit sends nothing', async () => {
@@ -8943,7 +8943,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     expect(evalCalls(fetchMock)).toHaveLength(1);
   });
 
-  it('a failed save → after the un-freeze, focus on Save evaluation (no field has an error)', async () => {
+  it('a failed save → after the un-freeze, focus on Save (no field has an error)', async () => {
     vi.stubGlobal('fetch', routedFetch({ evalResponse: { status: 400, body: { detail: 'Bad request' } } }));
     await mountCreate();
     pickResult('accepted');
@@ -8955,7 +8955,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     expect(document.activeElement).toBe(save());
   });
 
-  it('Cancel upload → the form stays, focus on Save evaluation', async () => {
+  it('Cancel upload → the form stays, focus on Save', async () => {
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
       if ((init?.method ?? 'GET').toUpperCase() === 'GET') {
         return Promise.resolve(new Response(JSON.stringify({ submissions: [] }), {
@@ -9750,7 +9750,7 @@ Replace the whole of `frontend/src/components/runs/DashboardSidePanel.svelte` wi
   // for UX) — the native `disabled` covers it pre-attempt.
   const valid = $derived(formResult !== '' && !errors.score && !errors.feedbackText && !errors.feedbackFile);
 
-  // Save evaluation's reason while it is disabled; the first match wins.
+  // Save's reason while it is disabled; the first match wins.
   const saveTitle = $derived(
     formResult === ''
       ? 'Choose a result'
@@ -10203,7 +10203,7 @@ Replace the whole of `frontend/src/components/runs/DashboardSidePanel.svelte` wi
             aria-disabled={submitting}
             disabled={!valid && !submitting}
             title={submitting ? SAVE_WAIT : saveTitle}
-          >{submitting ? 'Saving…' : 'Save evaluation'}</Button>
+          >{submitting ? 'Saving…' : 'Save'}</Button>
         </div>
       </div>
     </form>
@@ -10471,7 +10471,7 @@ Replace the whole of `frontend/src/components/runs/DashboardSidePanel.svelte` wi
     border: 0;
   }
 
-  /* The bottom row: the feedback-file control left, Save evaluation right. */
+  /* The bottom row: the feedback-file control left, Save right. */
   .sp-bottom { display: flex; align-items: center; gap: 9px; }
   .sp-file-ctl {
     display: flex;
@@ -10493,7 +10493,7 @@ Replace the whole of `frontend/src/components/runs/DashboardSidePanel.svelte` wi
 
 Notes for the reviewer:
 - **R37:** the Result is a `fieldset role="radiogroup"` of four native radios with `bind:group`. The legend is the visible "Result (required)". `aria-describedby` lists the error and the lock line only while they show. `disabled` while saving freezes the whole group.
-- **R44:** Save evaluation passes `aria-disabled={submitting}` and `loading={submitting}`. Task 2's Button then sets `aria-disabled="true"` and `aria-busy="true"` without native `disabled`, so focus stays. `handleSave` returns at once while `submitting`.
+- **R44:** Save passes `aria-disabled={submitting}` and `loading={submitting}`. Task 2's Button then sets `aria-disabled="true"` and `aria-busy="true"` without native `disabled`, so focus stays. `handleSave` returns at once while `submitting`.
 - **Edit mode:** the PATCH carries no file, but while it runs the Cancel button still reads "Cancel upload" and aborts it, as today.
 - **`{@attach}` for `inert`:** jsdom has no `inert` property, so the attachment toggles the attribute (Modal's `bodyInert` does the same).
 
@@ -10625,9 +10625,9 @@ Before any click, route both evaluation writes:
 - `"**/api/evaluations/*"` → status 200 with the same body.
 
 Keep both routes until the last shot. No real write reaches the dev database, and no file is chosen in the browser. Shots at 1280 and 1000 (`?tab=submissions` on run 8):
-1. An "awaiting eval" cell: the header "{Group} · B{n}", the Latest submission card with its file card, the Evaluate card with no result picked (hover Save evaluation for "Choose a result").
+1. An "awaiting eval" cell: the header "{Group} · B{n}", the Latest submission card with its file card, the Evaluate card with no result picked (hover Save for "Choose a result").
 2. The same after picking Major revision and typing feedback: "(required)" labels, "attach PDF", the counter.
-3. Picking Accepted, then Save evaluation (mocked 201): the read-only Evaluation card "You · Just now" with Edit focused.
+3. Picking Accepted, then Save (mocked 201): the read-only Evaluation card "You · Just now" with Edit focused.
 4. A "needs revision" cell: the Evaluation card with "Minor revision" / "Major revision", then Edit: the form pre-filled (and, if a no-file evaluation exists in dev data, the lock line).
 5. A group with two or more submissions: the "Earlier submissions" card, one row opened.
 6. `?tab=progress`: the drawer again (Task 5's Items card) to confirm nothing moved.

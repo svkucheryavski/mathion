@@ -54,3 +54,8 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **The row group select is natively `disabled` while its request runs,** so a keyboard user's focus drops to `<body>`. This predates 6c and the spec says "disabled while that row's request runs". Check it in the VoiceOver pass at beta.
 - **The strip can count a student whose row a refresh removed** ("1 selected" with no row). Found in plan review; this predates 6c.
 - **The roster's strip-gone focus fallback is unreachable today,** because failed rows stay selected, so the strip stays up. The comment says so; there is no test.
+
+## Task 5 — Side panel frame and Progress view
+
+- **Discard Cancel can leave focus on `<body>`** (both lanes). `askDiscard` saves `document.activeElement`, which can be `<body>`: in Safari a mouse click on × doesn't focus it. `focusFirst` then "succeeds" on `<body>`, and the fallback to the Result select and × never runs. Fix: save the element only when it is not `<body>`, or only when it is inside the panel. Check this in the Safari pass.
+- **× while the confirm asks always moves focus to its Cancel,** even when the confirm came from the form's Cancel (source `cancel`). This is what the spec says, but to close, a teacher must press Cancel, then ×, then Discard. A cheaper path: re-arm the confirm with source `close`. This is a design note.

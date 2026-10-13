@@ -352,9 +352,10 @@ describe('RunSubmissionTab', () => {
     // Real panel mounted for submission variant (no fetch needed — data in props)
     const panel = host.querySelector('[role="dialog"]');
     expect(panel).toBeTruthy();
-    expect(panel!.getAttribute('aria-label')).toBe('Submission details');
-    // mp.title and group_name from submissionMock should appear in the panel
-    expect(panel!.textContent).toContain('Mini project for Block 1');
+    // The dialog is named by its <h2>, the block title (6c D27, 6a D6).
+    const title = document.getElementById(panel!.getAttribute('aria-labelledby')!);
+    expect(title?.tagName).toBe('H2');
+    expect(title?.textContent).toBe('B1');
     expect(panel!.textContent).toContain('G1');
   });
 

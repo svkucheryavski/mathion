@@ -10,6 +10,8 @@ import {
   STATUS_PRIORITY,
   STATUS_SHORT_LABEL,
   heatToken,
+  ITEM_TYPE_NAME,
+  drillItemType,
 } from '../lib/dashboards';
 
 function mockFetch(status: number, body: unknown) {
@@ -202,5 +204,19 @@ describe('heatToken (6a Progress heatmap, five steps)', () => {
     expect(heatToken(0.75)).toBe('--heat-3');
     expect(heatToken(0.76)).toBe('--heat-4');
     expect(heatToken(1)).toBe('--heat-4');
+  });
+});
+
+describe('ITEM_TYPE_NAME / drillItemType (6c §Progress variant)', () => {
+  it('names the four drill-down item types', () => {
+    expect(ITEM_TYPE_NAME).toEqual({
+      static_page: 'Page', video: 'Video', quiz: 'Quiz', interactive_app: 'Interactive app',
+    });
+  });
+  it('narrows a known type and refuses anything else (P55)', () => {
+    expect(drillItemType('quiz')).toBe('quiz');
+    expect(drillItemType('static_page')).toBe('static_page');
+    expect(drillItemType('mini_project')).toBeNull();
+    expect(drillItemType('toString')).toBeNull();
   });
 });

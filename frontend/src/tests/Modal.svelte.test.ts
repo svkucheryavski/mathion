@@ -257,3 +257,29 @@ describe('Modal — nested level-3 inside level-2 (5d)', () => {
     host.remove();
   });
 });
+
+describe('Modal — right placement (6c R30)', () => {
+  it('centre is the default: no right modifier', () => {
+    render();
+    expect(backdrop().classList.contains('right')).toBe(false);
+    expect(panel().classList.contains('right')).toBe(false);
+  });
+
+  it('placement="right" marks the backdrop and the panel; a backdrop click still does nothing', () => {
+    const p = render({ placement: 'right' });
+    expect(backdrop().classList.contains('right')).toBe(true);
+    expect(panel().classList.contains('right')).toBe(true);
+    backdrop().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(p.onRequestClose).not.toHaveBeenCalled();
+  });
+
+  it('closeTitle is the × title only while closeDisabled; its name stays "Close"', () => {
+    const p = render({ closeTitle: 'Wait for the save to finish' });
+    expect(closeBtn().getAttribute('title')).toBe('Close');
+    p.closeDisabled = true;
+    flushSync();
+    expect(closeBtn().getAttribute('title')).toBe('Wait for the save to finish');
+    expect(closeBtn().getAttribute('aria-label')).toBe('Close');
+    expect(closeBtn().disabled).toBe(true);
+  });
+});

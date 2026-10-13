@@ -25,6 +25,11 @@
     autofocusPriorityOrder?: boolean;
     closeDisabled?: boolean;
     bodyInert?: boolean;
+    // Slice-6c R30: `right` docks the panel to the right edge as a full-height
+    // drawer (the side panel, 9b); `maxHeight` is ignored there. `closeTitle`
+    // is ×'s title while `closeDisabled`, saying what the panel waits for.
+    placement?: 'center' | 'right';
+    closeTitle?: string;
     header: Snippet;
     children: Snippet;
     footer?: Snippet;
@@ -46,6 +51,8 @@
     autofocusPriorityOrder = true,
     closeDisabled = false,
     bodyInert = false,
+    placement = 'center',
+    closeTitle = undefined,
     header,
     children,
     footer = undefined,
@@ -129,13 +136,20 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="modal-backdrop" role="presentation" onmousedown={onBackdropMousedown} onclick={onBackdropClick}>
+<div
+  class="modal-backdrop"
+  class:right={placement === 'right'}
+  role="presentation"
+  onmousedown={onBackdropMousedown}
+  onclick={onBackdropClick}
+>
   <FocusTrap {autofocusSelector} {autofocusPriorityOrder} active={isTop}>
     <!-- HTML-ARIA allows role="dialog" on <section>; the lint is stricter than the spec. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section
       bind:this={panelEl}
       class="modal-panel"
+      class:right={placement === 'right'}
       role="dialog"
       aria-modal="true"
       aria-label={label}
@@ -146,7 +160,15 @@
     >
       <header class="modal-head">
         {@render header()}
-        <IconButton id={closeId} glyph="close" size="md" title="Close" aria-label="Close" disabled={closeDisabled} onclick={onRequestClose} />
+        <IconButton
+          id={closeId}
+          glyph="close"
+          size="md"
+          title={closeDisabled && closeTitle ? closeTitle : 'Close'}
+          aria-label="Close"
+          disabled={closeDisabled}
+          onclick={onRequestClose}
+        />
       </header>
       <!-- The attribute, not the property: Svelte compiles `inert={…}` to
            `el.inert = …`, which jsdom lacks, and candidates() reads [inert]. -->
@@ -185,6 +207,22 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     box-shadow: 0 16px 44px rgba(20,24,35,.22); /* ref 1684 */
+  }
+  /* R30: the drawer (9b) — full height at the right edge, square, its left
+     edge drawn. The centre rules above stay as they are (gate (aa)). */
+  .modal-backdrop.right {
+    justify-content: flex-end;
+    align-items: stretch;
+    padding: 0;
+  }
+  .modal-panel.right {
+    width: min(var(--modal-w), 100vw);
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
+    border-left: 1px solid var(--border-strong);
+    box-shadow: -14px 0 40px rgba(20,24,35,.22); /* 9b's edge, the shadow colour above */
   }
   .modal-head {
     display: flex;

@@ -370,7 +370,8 @@ describe('RunProgressTab', () => {
     // Real panel is mounted — check for dialog role
     const panel = host.querySelector('[role="dialog"]');
     expect(panel).toBeTruthy();
-    expect(panel!.getAttribute('aria-label')).toBe('Item-level breakdown');
+    // Named by its <h2>: the student once the drill-down has loaded (6c §Progress variant).
+    expect(document.getElementById(panel!.getAttribute('aria-labelledby')!)?.textContent).toBe('Alice');
   });
 
   // T16 – Disabled user

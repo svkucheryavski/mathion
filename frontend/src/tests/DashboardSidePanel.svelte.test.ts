@@ -80,6 +80,38 @@ function evalCalls(fetchMock: ReturnType<typeof vi.fn>) {
   }) as [string, RequestInit][];
 }
 
+// The drawer's frame (6c D27): Modal's ×, the dialog's title, the footer confirm.
+const closeX = () => host.querySelector('.modal-head button[aria-label="Close"]') as HTMLButtonElement;
+function panelTitle(): HTMLElement | null {
+  const dialog = host.querySelector('section.modal-panel') as HTMLElement;
+  return document.getElementById(dialog.getAttribute('aria-labelledby') ?? '');
+}
+const discardCancel = () => host.querySelector<HTMLButtonElement>('footer.modal-foot .inline-confirm button.cancel');
+const discardConfirm = () => host.querySelector<HTMLButtonElement>('footer.modal-foot button.confirm[data-action="confirm-discard"]');
+
+// Picks the Result.
+function pickResult(value: string) {
+  const select = host.querySelector('select[name="evaluation-result"]') as HTMLSelectElement;
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+}
+
+// Types into Feedback with focus in it (makes the form dirty).
+async function typeFeedback(text: string) {
+  const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
+  textarea.focus();
+  textarea.value = text;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  return textarea;
+}
+
+const NEEDS_REVISION_EVAL = {
+  id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' },
+  result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true,
+};
+
 interface MountPanelOpts {
   target: PanelTarget;
   onClose?: () => void;
@@ -274,7 +306,7 @@ describe('DashboardSidePanel', () => {
     vi.stubGlobal('fetch', mockFetch(404, { detail: 'Not found' }));
     mountPanel({ target: makeProgressTarget() });
     await settle();
-    expect(host.textContent).toContain('Item details unavailable. The dashboard may be out of date — Refresh.');
+    expect(host.textContent).toContain('Item details unavailable. The dashboard may be out of date — close this panel and refresh the table.');
   });
 
   // 5. Progress variant: non-404 error → same uniform message
@@ -282,15 +314,15 @@ describe('DashboardSidePanel', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('network down'))));
     mountPanel({ target: makeProgressTarget() });
     await settle();
-    expect(host.textContent).toContain('Item details unavailable. The dashboard may be out of date — Refresh.');
+    expect(host.textContent).toContain('Item details unavailable. The dashboard may be out of date — close this panel and refresh the table.');
   });
 
   // 6. Submission variant: renders submission + evaluation
-  it('submission variant: renders mp title, group, submission, and evaluation details', async () => {
+  it('submission variant: renders the block title, group, submission, and evaluation details', async () => {
     const mp = makeMp();
     const entry = makeEntry();
     mountPanel({ target: { kind: 'submission', runId: 1, mp, entry } });
-    expect(host.textContent).toContain('MP Alpha');
+    expect(panelTitle()!.textContent).toBe('Block X');
     expect(host.textContent).toContain('Block X');
     expect(host.textContent).toContain('G7');
     expect(host.textContent).toContain('Submission');
@@ -348,22 +380,22 @@ describe('DashboardSidePanel', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  // 11. Backdrop click closes panel
-  it('backdrop click calls onClose', () => {
+  // 11. D29: a click on the dimmed page does not close the panel
+  it('backdrop click does nothing (D29)', () => {
     vi.stubGlobal('fetch', mockFetch(200, makeItemsResponse()));
     const { onClose } = mountPanel({ target: makeProgressTarget() });
-    const backdrop = host.querySelector('.panel-backdrop') as HTMLElement;
+    const backdrop = host.querySelector('div.modal-backdrop') as HTMLElement;
     expect(backdrop).toBeTruthy();
     backdrop.click();
     flushSync();
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // 12. Close button closes panel
   it('close button calls onClose', () => {
     vi.stubGlobal('fetch', mockFetch(200, makeItemsResponse()));
     const { onClose } = mountPanel({ target: makeProgressTarget() });
-    const closeBtn = host.querySelector('[aria-label="Close panel"]') as HTMLButtonElement;
+    const closeBtn = closeX();
     expect(closeBtn).toBeTruthy();
     closeBtn.click();
     flushSync();
@@ -1216,61 +1248,49 @@ describe('DashboardSidePanel', () => {
     expect(document.activeElement).toBe(select);
   });
 
-  // T28b: dirty create + Escape → InlineConfirm + focus on confirm button
-  it('T28b: dirty create + Escape → InlineConfirm; focus on confirm button', async () => {
+  // T28b: dirty create + Escape → the footer confirm, focus on its Cancel, the body inert
+  it('T28b: dirty create + Escape → the footer confirm; focus on its Cancel; the body inert', async () => {
     const { onClose } = mountPanel({
       target: submissionTarget({ status: 'awaiting_eval' }),
       isAdmin: true,
     });
     await settle();
-    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
-    textarea.value = 'unsaved';
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    await typeFeedback('unsaved');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
-    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
-    expect(confirmBtn).toBeTruthy();
-    expect(document.activeElement).toBe(confirmBtn);
+    expect(host.querySelector('footer.modal-foot')!.textContent).toContain('Discard unsaved changes?');
+    expect(discardConfirm()).toBeTruthy();
+    expect(document.activeElement).toBe(discardCancel());
+    expect(host.querySelector('.modal-body')!.hasAttribute('inert')).toBe(true);
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  // T28c: dirty + backdrop click → InlineConfirm + focus on confirm button
-  it('T28c: dirty + backdrop click → InlineConfirm; focus on confirm button', async () => {
-    mountPanel({
+  // T28c (D29): a click on the dimmed page does nothing, even with edits
+  it('T28c: dirty + backdrop click → nothing (D29)', async () => {
+    const { onClose } = mountPanel({
       target: submissionTarget({ status: 'awaiting_eval' }),
       isAdmin: true,
     });
     await settle();
-    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
-    textarea.value = 'unsaved';
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    const backdrop = host.querySelector('.panel-backdrop') as HTMLElement;
-    backdrop.click();
+    await typeFeedback('unsaved');
+    (host.querySelector('div.modal-backdrop') as HTMLElement).click();
     await settle();
-    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
-    expect(confirmBtn).toBeTruthy();
-    expect(document.activeElement).toBe(confirmBtn);
+    expect(discardCancel()).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
-  // T28d: dirty + × Close button → InlineConfirm + focus on confirm button
-  it('T28d: dirty + × Close → InlineConfirm; focus on confirm button', async () => {
+  // T28d: dirty + × → the footer confirm, focus on its Cancel
+  it('T28d: dirty + × → the footer confirm; focus on its Cancel', async () => {
     mountPanel({
       target: submissionTarget({ status: 'awaiting_eval' }),
       isAdmin: true,
     });
     await settle();
-    const textarea = host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement;
-    textarea.value = 'unsaved';
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    const closeBtn = host.querySelector('[data-side-panel-close]') as HTMLButtonElement;
-    closeBtn.click();
+    await typeFeedback('unsaved');
+    closeX().click();
     await settle();
-    const confirmBtn = host.querySelector('.inline-confirm button') as HTMLButtonElement;
-    expect(confirmBtn).toBeTruthy();
-    expect(document.activeElement).toBe(confirmBtn);
+    expect(discardConfirm()).toBeTruthy();
+    expect(document.activeElement).toBe(discardCancel());
   });
 
   // T28e: during submit, Escape is a no-op
@@ -1347,7 +1367,7 @@ describe('DashboardSidePanel', () => {
     const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    const closeBtn = host.querySelector('[data-side-panel-close]') as HTMLButtonElement;
+    const closeBtn = closeX();
     closeBtn.click();
     await settle();
     expect(host.querySelector('.inline-confirm')).toBeNull();
@@ -1659,4 +1679,183 @@ describe('DashboardSidePanel', () => {
     expect(badge.getAttribute('data-status')).toBe('awaiting_eval');
   });
 
+});
+
+// --- 6c Task 5: the drawer frame, the header, the discard footer, Progress ---
+
+describe('DashboardSidePanel — drawer frame (6c T5)', () => {
+  it('renders inside a 520px .modal-panel.right, named by its <h2> title (D27, R30)', async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }) });
+    await settle();
+    const panel = host.querySelector('section.modal-panel') as HTMLElement;
+    expect(panel.classList.contains('right')).toBe(true);
+    expect(host.querySelector('div.modal-backdrop')!.classList.contains('right')).toBe(true);
+    expect(panel.style.getPropertyValue('--modal-w')).toBe('520px');
+    expect(panel.getAttribute('aria-label')).toBeNull();
+    const title = panelTitle()!;
+    expect(title.tagName).toBe('H2');
+    expect(title.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('submission header: the block title, the group, and the short status badge', async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }) });
+    await settle();
+    expect(panelTitle()!.textContent).toBe('Block X');
+    expect(host.querySelector('.modal-head .sp-sub')!.textContent).toBe('G7');
+    const badge = host.querySelector('.modal-head .status-badge') as HTMLElement;
+    expect(badge.textContent).toBe('awaiting eval');
+    expect(badge.getAttribute('data-status')).toBe('awaiting_eval');
+  });
+
+  it('progress header: "Item details" while loading, no subtitle, no badge', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => { /* never resolves */ })));
+    mountPanel({ target: makeProgressTarget() });
+    expect(panelTitle()!.textContent).toBe('Item details');
+    expect(host.querySelector('.modal-head .sp-sub')).toBeNull();
+    expect(host.querySelector('.modal-head .status-badge')).toBeNull();
+    expect(host.textContent).toContain('Loading…');
+  });
+
+  it('progress header after the load: the student and "Block — Sequence"', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, makeItemsResponse()));
+    mountPanel({ target: makeProgressTarget() });
+    await settle();
+    expect(panelTitle()!.textContent).toBe('Alice');
+    expect(host.querySelector('.modal-head .sp-sub')!.textContent).toBe('B1 — S1');
+  });
+
+  it('progress header: the e-mail when the student has no name', async () => {
+    const body = makeItemsResponse();
+    vi.stubGlobal('fetch', mockFetch(200, { ...body, student: { ...body.student, full_name: null } }));
+    mountPanel({ target: makeProgressTarget() });
+    await settle();
+    expect(panelTitle()!.textContent).toBe('alice@test.com');
+  });
+
+  it('progress header after an error stays "Item details"', async () => {
+    vi.stubGlobal('fetch', mockFetch(500, { detail: 'boom' }));
+    mountPanel({ target: makeProgressTarget() });
+    await settle();
+    expect(panelTitle()!.textContent).toBe('Item details');
+    expect(host.querySelector('[role="alert"]')!.textContent).toContain('close this panel and refresh the table.');
+  });
+
+  it('the Items card: ItemMark rows with the readable type name and the score', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, makeItemsResponse([
+      { item_id: 1, item_order: 1, item_title: 'Item One', item_type: 'static_page', is_covered: true, last_score: null, last_visited_at: null },
+      { item_id: 2, item_order: 2, item_title: 'Check', item_type: 'quiz', is_covered: false, last_score: { correct: 3, total: 4 }, last_visited_at: null },
+    ])));
+    mountPanel({ target: makeProgressTarget() });
+    await settle();
+    const rows = host.querySelectorAll('li.pb-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.querySelector('.item-mark')!.classList.contains('covered')).toBe(true);
+    expect(rows[0]!.textContent).toContain('Page');
+    expect(rows[1]!.querySelector('.item-mark')!.classList.contains('not-yet')).toBe(true);
+    expect(rows[1]!.textContent).toContain('Quiz');
+    expect(rows[1]!.textContent).toContain('3/4');
+  });
+
+  it('nothing closes while a save runs; × is disabled with "Wait for the save to finish"', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET').toUpperCase() === 'GET') {
+        return Promise.resolve(new Response(JSON.stringify({ submissions: [] }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      return new Promise<Response>(() => { /* the save never answers */ });
+    }));
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    pickResult('accepted');
+    (host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await tick();
+    flushSync();
+    expect(closeX().disabled).toBe(true);
+    expect(closeX().getAttribute('title')).toBe('Wait for the save to finish');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    closeX().click();
+    flushSync();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(discardCancel()).toBeNull();
+  });
+
+  it('× while the confirm shows focuses its Cancel and keeps the confirm', async () => {
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    await typeFeedback('unsaved');
+    closeX().click();
+    await settle();
+    expect(document.activeElement).toBe(discardCancel());
+    closeX().focus();
+    closeX().click();
+    await settle();
+    expect(discardConfirm()).toBeTruthy();
+    expect(document.activeElement).toBe(discardCancel());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Esc on the confirm\'s Cancel closes it; focus returns to the field focused when it opened', async () => {
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    const textarea = await typeFeedback('unsaved');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    const cancel = discardCancel()!;
+    expect(document.activeElement).toBe(cancel);
+    cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(discardCancel()).toBeNull();
+    expect(host.querySelector('.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('R36: a dirty edit → Cancel → Discard ends the edit; the panel stays; focus on Edit', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'needs_revision', latest_evaluation: NEEDS_REVISION_EVAL }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    await typeFeedback('Changed');
+    (host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement).click();
+    await settle();
+    expect(document.activeElement).toBe(discardCancel());
+    discardConfirm()!.click();
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(discardCancel()).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector('button[data-test="edit-evaluation"]'));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('R36: a dirty edit → × → Discard closes the panel', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'needs_revision', latest_evaluation: NEEDS_REVISION_EVAL }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    await typeFeedback('Changed');
+    closeX().click();
+    await settle();
+    discardConfirm()!.click();
+    flushSync();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('R36: a dirty create → Esc → Discard closes the panel', async () => {
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    await typeFeedback('unsaved');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    discardConfirm()!.click();
+    flushSync();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

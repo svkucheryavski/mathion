@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1921
+EXPECTED_CHECKS=1968
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4083,12 +4083,13 @@ if [[ -n $REPLY ]]; then
   d '\.modal-body' '' 'flex:1 1 auto' 'min-height:0' 'overflow:auto' 'padding:14px 16px' 'display:flex' 'flex-direction:column' 'gap:12px'
   check "Modal .modal-body > * { flex:0 0 auto }" "\.modal-body\.${H}>\*\{flex:0 0 auto\}"
   d '\.modal-foot' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:12px 16px' 'border-top:1px solid var\(--border\)' 'background:var\(--surface-3\)'
-  # Constraint 11: the ref-1684 shadow is the ONE hex allowed in Modal's rules.
+  # Constraint 11 + 6c R30: the centre (ref 1684) and drawer (9b) shadows are
+  # the only hex in Modal's rules.
   modal_rules=$(grep -oE "[^{}]*\.${H}[^{]*\{[^}]*\}" $CSS)
-  if print -r -- "$modal_rules" | sed 's/box-shadow:0 16px 44px #14182338//g' | grep -qE '#[0-9a-fA-F]{3}'; then
-    echo "FAIL  Modal no hex beyond the ref-1684 shadow"; fail=1
+  if print -r -- "$modal_rules" | sed -e 's/box-shadow:0 16px 44px #14182338//g' -e 's/box-shadow:-14px 0 40px #14182338//g' | grep -qE '#[0-9a-fA-F]{3}'; then
+    echo "FAIL  Modal no hex beyond its two shadows (ref 1684, 9b)"; fail=1
   else
-    echo "PASS  Modal no hex beyond the ref-1684 shadow"
+    echo "PASS  Modal no hex beyond its two shadows (ref 1684, 9b)"
   fi
   none "Modal no opacity dim"      "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*opacity:0?\.[0-9]"
   none "Modal no rem font sizes"   "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
@@ -4258,9 +4259,13 @@ rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silve
 slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white
 whitesmoke yellow yellowgreen'''.split())
 LIT = re.compile(r'#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z_-])|(?<![\w-])(?:rgba?|hsla?)\(')
-# The one Modal literal the spec allows (Constraint 11), compared whitespace-free.
-# The backdrop is color-mix(…var(--text)…transparent) — no literal, so no entry.
-ALLOWED = {'Modal.svelte': {'box-shadow:0 16px 44px rgba(20,24,35,.22)'.replace(' ', '')}}
+# The two Modal literals the specs allow (5b Constraint 11, 6c R30), compared
+# whitespace-free. The backdrop is color-mix(…var(--text)…transparent) — no
+# literal, so no entry.
+ALLOWED = {'Modal.svelte': {s.replace(' ', '') for s in (
+    'box-shadow:0 16px 44px rgba(20,24,35,.22)',   # the centre panel (ref 1684)
+    'box-shadow:-14px 0 40px rgba(20,24,35,.22)',  # the right drawer (9b)
+)}}
 
 def strip_comments(s):
     s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)
@@ -4901,6 +4906,7 @@ echo "--- (al) Slice-6c — Overview, Roster and the side panel ---"
 FILES_6C=(
   src/components/runs/RunOverviewTab.svelte
   src/components/runs/RunRosterTab.svelte
+  src/components/runs/ProgressBreakdown.svelte
 )
 emoji_scan "all Slice-6c files" $FILES_6C
 colour_scan 6c-teacher $FILES_6C
@@ -4995,6 +5001,45 @@ if grep -q 'class="add-row"' src/components/runs/RunRosterTab.svelte; then
   echo "FAIL  RunRosterTab still has the add form under the table (D25)"; fail=1
 else
   echo "PASS  RunRosterTab has no add form under the table (D25)"
+fi
+
+# 6c T5 — the drawer (R30, D27, D29) and the Progress view.
+uniq1 modal-panel
+if [[ -n $REPLY ]]; then
+  N=Modal; H=$REPLY
+  d '\.modal-backdrop\.right' '' 'justify-content:flex-end' 'align-items:stretch' 'padding:0'
+  d '\.modal-panel\.right' '' 'width:min\(var\(--modal-w\),100vw\)' 'height:100dvh' 'max-height:none' 'border-radius:0' 'border:0' 'border-left:1px solid var\(--border-strong\)' 'box-shadow:-14px 0 40px #14182338'
+fi
+none "DashboardSidePanel's own backdrop, dialog box and close button are gone (D27)" '\.(panel-backdrop|dashboard-side-panel|panel-close)\.svelte-'
+SP=src/components/runs/DashboardSidePanel.svelte
+if grep -qE '<svelte:window|FocusTrap|closeOnBackdrop' $SP; then
+  echo "FAIL  DashboardSidePanel rides on Modal alone: no window keydown, no FocusTrap, no backdrop close (D27, D29)"; fail=1
+else
+  echo "PASS  DashboardSidePanel rides on Modal alone: no window keydown, no FocusTrap, no backdrop close (D27, D29)"
+fi
+if grep -q 'placement="right"' $SP; then
+  echo "PASS  DashboardSidePanel opens Modal at the right edge (R30)"
+else
+  echo "FAIL  DashboardSidePanel opens Modal at the right edge (R30)"; fail=1
+fi
+own sp-title DashboardSidePanel.svelte
+uniq1 sp-title
+if [[ -n $REPLY ]]; then
+  N=DashboardSidePanel; H=$REPLY
+  d '\.sp-title' '' 'margin:0' 'font-size:14\.5px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.sp-sub' '' 'font-family:var\(--font-mono\)' 'font-size:11\.5px' 'color:var\(--muted\)'
+fi
+own pb-card ProgressBreakdown.svelte
+uniq1 pb-card
+if [[ -n $REPLY ]]; then
+  N=ProgressBreakdown; H=$REPLY
+  d '\.pb-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden' 'background:var\(--surface\)'
+  d '\.pb-head' '' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
+  d '\.pb-title' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.pb-row' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:9px 12px' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.pb-nomark' '' 'width:22px' 'height:22px' 'border:1px solid var\(--border-strong\)'
+  d '\.pb-score' '' 'margin-left:auto' 'font-family:var\(--font-mono\)'
+  sweep ProgressBreakdown $H
 fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

@@ -12,6 +12,8 @@
     headDisabled = false,
     saveDisabled = false,
     withHiddenFile = false,
+    placement = 'center',
+    closeTitle = undefined,
   }: {
     onRequestClose: () => void;
     closeOnBackdrop?: boolean;
@@ -24,6 +26,8 @@
     // AssetSidebar's `hidden` file input (review T1-I1).
     saveDisabled?: boolean;
     withHiddenFile?: boolean;
+    placement?: 'center' | 'right';
+    closeTitle?: string;
   } = $props();
 </script>
 
@@ -42,6 +46,8 @@
   {closeOnBackdrop}
   {closeDisabled}
   {bodyInert}
+  {placement}
+  {closeTitle}
   header={head}
   footer={withFooter ? foot : undefined}
 >

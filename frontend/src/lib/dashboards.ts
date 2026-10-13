@@ -182,6 +182,23 @@ export interface SequenceItemStateResponse {
   items: SequenceItemState[];
 }
 
+// The drill-down's item types and their readable names (6c §Progress variant);
+// `static_page` reads "Page", its authoring name.
+export type DrillItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
+
+export const ITEM_TYPE_NAME: Record<DrillItemType, string> = {
+  static_page: 'Page',
+  video: 'Video',
+  quiz: 'Quiz',
+  interactive_app: 'Interactive app',
+};
+
+// Narrows the wire's `item_type` before it reaches ItemMark; anything else is
+// null (an own key only, so "toString" is not a type).
+export function drillItemType(t: string): DrillItemType | null {
+  return Object.prototype.hasOwnProperty.call(ITEM_TYPE_NAME, t) ? (t as DrillItemType) : null;
+}
+
 // ---- Wire functions ----
 
 export async function getProgressDashboard(
