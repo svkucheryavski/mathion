@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1886
+EXPECTED_CHECKS=1921
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4900,6 +4900,7 @@ echo "--- (al) Slice-6c — Overview, Roster and the side panel ---"
 # Every component Slice 6c restyles or creates; each task appends its files (spec §Gate).
 FILES_6C=(
   src/components/runs/RunOverviewTab.svelte
+  src/components/runs/RunRosterTab.svelte
 )
 emoji_scan "all Slice-6c files" $FILES_6C
 colour_scan 6c-teacher $FILES_6C
@@ -4972,6 +4973,23 @@ if [[ -n $REPLY ]]; then
   d '\.ro-err' '' 'font-size:12px' 'color:var\(--danger\)'
   d '\.ro-link' '' 'color:var\(--primary\)' 'text-decoration:underline'
   none "RunRosterTab has no add-row form under the table (D25)" "\.add-row\.${H}"
+  d '\.ro-strip' '' 'display:flex' 'padding:8px 12px' 'background:var\(--primary-soft\)' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)'
+  d '\.ro-count' '' 'font-size:12\.5px' 'font-weight:600'
+  d '\.ro-banner' '' 'display:flex' 'padding:8px 12px' 'border-left:3px solid var\(--primary\)'
+  d '\.ro-banner-info' '' 'background:var\(--surface-2\)' 'color:var\(--text-2\)'
+  d '\.ro-banner-ok' '' 'background:var\(--status-accepted-bg\)' 'border-left-color:var\(--success\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ro-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left-color:var\(--gold\)' 'color:var\(--status-needs-revision-fg\)'
+  d '\.ro-retry' '' 'text-decoration:underline' 'color:inherit'
+  d '\.ro-table-wrap' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  chk "\.ro-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)' 'font-size:12px' 'font-weight:600'
+  chk "\.ro-table\.${H} td:where\(\.${H}\)" 'border-top:1px solid var\(--border-soft\)'
+  d '\.ro-selected' '' 'background:var\(--primary-soft\)'
+  d '\.ro-mark' '' 'box-shadow:inset 3px 0 0 0 var\(--danger\)'
+  # Review Focus 3: a 254-character e-mail wraps inside its cell.
+  d '\.ro-email-cell' '' 'overflow-wrap:anywhere'
+  d '\.ro-none' '' 'color:var\(--muted\)'
+  none "RunRosterTab pre-6c roster rules are gone" "\.(banner|bulk-banner(-[a-z]+)?|bulk-strip|prefilter-pill|row-error|roster-tab|roster-toolbar|linklike|empty|error)\.${H}"
+  sweep RunRosterTab $H
 fi
 if grep -q 'class="add-row"' src/components/runs/RunRosterTab.svelte; then
   echo "FAIL  RunRosterTab still has the add form under the table (D25)"; fail=1

@@ -38,3 +38,19 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **No success announcement after an add.** The row just clears, with focus back in the e-mail field. Collect for the VoiceOver pass at beta.
 - **Untested:** `open-add-link` while the row is already open (it only refocuses the e-mail field).
 - **The `IconButton` link variant** never binds `element`, which is typed `HTMLButtonElement`. It does not pass `tabindex` or `aria-hidden` either. Task 6's download link needs none of these. Document or widen this if a later caller needs them.
+
+## Task 4 — Roster strip, result banner, table and confirms
+
+- **A bulk op can stick on "Moving N…"** (`dispatchBulkOp`). The page's `refetchRosterData` throws on a network error, and the refetch after the ops is not guarded. If the ops succeed but the refetch fails:
+  - the promise rejects unhandled;
+  - the banner stays "Moving N…" with no Dismiss;
+  - every bulk and retry control stays locked until a reload.
+  
+  This predates 6c. Fix: wrap the refetch in `try/catch` so the result still settles.
+- **A stale `pendingDelete` reopens the row confirm and steals focus** when that student comes back. Sequence: the row confirm is open, the student is bulk-removed, then they are re-added later; the confirm row renders again and `takeFocus` moves focus to its Cancel. Fix: clear `pendingDelete` in the `students` effect when its id is no longer on the roster.
+- **Cancel during a slow row Remove is overridden.** The confirm shows no busy state while the DELETE runs. Clicking Cancel puts focus on the row's 🗑, but the success chain then moves it to the next row's 🗑. A second Remove is ignored silently.
+- **Other rows' 🗑 are ignored silently while a remove runs** (`askRemove` returns). They have no `aria-disabled` or reason. R44 names only the strip 🗑.
+- **Row actions and the add row are not blocked during a bulk op.** This applies to the row 🗑, the row group select and Add. It matches today's behaviour, and the spec doesn't ask for more. The server stays consistent and the last refetch wins.
+- **The row group select is natively `disabled` while its request runs,** so a keyboard user's focus drops to `<body>`. This predates 6c and the spec says "disabled while that row's request runs". Check it in the VoiceOver pass at beta.
+- **The strip can count a student whose row a refresh removed** ("1 selected" with no row). Found in plan review; this predates 6c.
+- **The roster's strip-gone focus fallback is unreachable today,** because failed rows stay selected, so the strip stays up. The comment says so; there is no test.
