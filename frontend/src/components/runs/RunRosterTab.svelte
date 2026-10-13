@@ -141,6 +141,25 @@
   let rowErrorBorders = $state(new SvelteSet<number>());
   let rowErrorMeta = $state(new SvelteMap<number, BulkRowErrorMeta>());
   let bulkDeleteConfirm = $state(false);
+  // Rows the teacher fixed by hand since the last bulk op (their own group
+  // change or removal succeeded): they lose their mark and the retries leave
+  // them out (user, 6c Safari pass).
+  let fixedByHand = $state(new SvelteSet<number>());
+  const retryFailedIds = $derived(bulkOpResult.chunkErrorRowIds.filter((id) => !fixedByHand.has(id)));
+  const retryCancelledIds = $derived(bulkOpResult.cancelledIds.filter((id) => !fixedByHand.has(id)));
+
+  function markFixed(userId: number) {
+    // A bulk op that is still running has the newer word on this row.
+    if (bulkInFlight) return;
+    fixedByHand.add(userId);
+    rowErrorBorders.delete(userId);
+    rowErrorMeta.delete(userId);
+    // Nothing left to retry: the banner has done its job.
+    const open = bulkOpResult.kind === 'partial' || bulkOpResult.kind === 'cancelled';
+    if (open && retryFailedIds.length === 0 && retryCancelledIds.length === 0) {
+      bulkOpResult = { ...bulkOpResult, kind: 'idle' };
+    }
+  }
 
   // An emptied selection unmounts the strip; its confirm must not come back
   // open with the next selection.
@@ -173,7 +192,7 @@
     if (r.kind === 'in-flight') return `${r.lastOp === 'move' ? 'Moving' : 'Removing'} ${r.total}…`;
     const total = r.succeededIds.length + r.chunkErrorRowIds.length + r.cancelledIds.length;
     const verb = r.lastOp === 'move' ? 'Moved' : 'Removed';
-    const hint = r.chunkErrorRowIds.length > 0 ? ' Hover a marked row for the reason.' : '';
+    const hint = retryFailedIds.length > 0 ? ' Hover a marked row for the reason.' : '';
     if (r.kind === 'success') return `${verb} ${r.succeededIds.length} of ${total} — 0 failed.`;
     if (r.kind === 'partial') return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed.${hint}`;
     if (r.kind === 'cancelled') {
@@ -197,24 +216,24 @@
   function retryMove(event: Event) {
     const groupId = takeChoice(event);
     if (groupId === undefined) return;
-    void dispatchBulkOp('move', bulkOpResult.chunkErrorRowIds, groupId);
+    void dispatchBulkOp('move', retryFailedIds, groupId);
   }
 
   function retryDelete() {
     if (bulkInFlight) return;
-    void dispatchBulkOp('delete', bulkOpResult.chunkErrorRowIds);
+    void dispatchBulkOp('delete', retryFailedIds);
   }
 
   // The "not processed" retries send the cancelled and the failed students.
   function retryCancelledMove(event: Event) {
     const groupId = takeChoice(event);
     if (groupId === undefined) return;
-    void dispatchBulkOp('move', [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds], groupId);
+    void dispatchBulkOp('move', [...retryCancelledIds, ...retryFailedIds], groupId);
   }
 
   function retryCancelledDelete() {
     if (bulkInFlight) return;
-    void dispatchBulkOp('delete', [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds]);
+    void dispatchBulkOp('delete', [...retryCancelledIds, ...retryFailedIds]);
   }
 
   function bulkErrorTooltip(meta: BulkRowErrorMeta | undefined): string {
@@ -242,6 +261,7 @@
     // Step 1: clear borders/meta for this op (new instances → guaranteed reactivity).
     rowErrorBorders = new SvelteSet<number>();
     rowErrorMeta = new SvelteMap<number, BulkRowErrorMeta>();
+    fixedByHand = new SvelteSet<number>();
     bulkOpResult = {
       kind: 'in-flight',
       total: userIds.length,
@@ -358,6 +378,8 @@
 
   async function dismissBanner() {
     bulkOpResult = { ...bulkOpResult, kind: 'idle' };
+    rowErrorBorders = new SvelteSet<number>();
+    rowErrorMeta = new SvelteMap<number, BulkRowErrorMeta>();
     await tick();
     searchEl?.focus();
   }
@@ -491,6 +513,8 @@
     const idx = visible.findIndex((s) => s.user_id === userId);
     try {
       await removeRunStudent(runId, userId);
+      selected.delete(userId);
+      markFixed(userId);
       pendingDelete = null;
       await onRefetchRosterData();
       await tick();
@@ -517,6 +541,7 @@
       // keeps the row's group_id in sync until the next full roster refetch.
       s.group_id = updated.group_id;
       pendingGroupId.delete(s.user_id);
+      markFixed(s.user_id);
       await onRefetchGroupsOnly();
     } catch (e) {
       // Delete from pendingGroupId on EVERY error path (incl. network failures),
@@ -714,7 +739,7 @@
     >
       <span class="ro-banner-text">{summaryText()}</span>
       {#if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'move'}
-        {@const n = bulkOpResult.chunkErrorRowIds.length}
+        {@const n = retryFailedIds.length}
         <label class="vh" for="{uid}-retry-move">Move the {n} failed {n === 1 ? 'student' : 'students'} to a group</label>
         <select id="{uid}-retry-move" class="ro-retry" data-action="retry-move-select" bind:this={retryMoveEl} onchange={retryMove}>
           <option value="" disabled selected>Retry {n} &rarr; group…</option>
@@ -724,9 +749,9 @@
           {/each}
         </select>
       {:else if bulkOpResult.kind === 'partial'}
-        <button type="button" class="ro-retry" data-action="retry-delete" bind:this={retryDeleteEl} onclick={retryDelete}>Retry removing {bulkOpResult.chunkErrorRowIds.length}</button>
+        <button type="button" class="ro-retry" data-action="retry-delete" bind:this={retryDeleteEl} onclick={retryDelete}>Retry removing {retryFailedIds.length}</button>
       {:else if bulkOpResult.kind === 'cancelled'}
-        {@const m = bulkOpResult.cancelledIds.length + bulkOpResult.chunkErrorRowIds.length}
+        {@const m = retryCancelledIds.length + retryFailedIds.length}
         {#if bulkOpResult.lastOp === 'move'}
           <label class="vh" for="{uid}-retry-cancelled">Move the {m} not processed {m === 1 ? 'student' : 'students'} to a group</label>
           <select id="{uid}-retry-cancelled" class="ro-retry" data-action="retry-cancelled" bind:this={retryCancelledSelectEl} onchange={retryCancelledMove}>

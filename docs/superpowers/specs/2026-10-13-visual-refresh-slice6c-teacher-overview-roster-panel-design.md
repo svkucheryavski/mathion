@@ -1,6 +1,6 @@
 # Visual refresh — Slice 6c: Overview, Roster and the side panel
 
-**Status:** approved; rev 6 (2026-10-13: Settings moved to the left column at the user's Task 2 review; rev 6: the evaluation form's button stays "Save", at the user's Task 5 review).
+**Status:** approved; rev 7 (2026-10-13: Settings moved to the left column at the user's Task 2 review; rev 6: the evaluation form's button stays "Save", at the user's Task 5 review; rev 7: a marked row fixed by hand loses its mark, at the user's Safari pass).
 - Rev 4 folds in the rev 3 re-check (Opus on the code, Fable; `spec-r3-*.md`): the zero-groups row no longer blocks a publish, focus after a failed save or a cancelled upload, the run-write lock across a remount and an open danger panel, and test flips.
 - Rev 3 folds in round 2 (the same three reviewers; `spec-r2-*.md`): D28's backend test blast radius, the busy-control mechanics (R44), the run-write lock (R32), focus fixes, and copy.
 - Rev 2 folds in round 1 of the spec review (fresh Opus on the code, fresh Opus on the design, Fable second opinion; notes in `.superpowers/sdd/2026-10-13-visual-refresh-slice6c-teacher-overview-roster-panel/spec-r1-*.md`) and the user's answers D28–D29.
@@ -201,7 +201,7 @@ Top to bottom: the draft banner, the toolbar, the add row, the bulk strip, the r
 
 **Table** (6a table look: `--surface`, header `--surface-2`, 1px `--border-soft` row lines; inside a wrapper that scrolls sideways below ~700px):
 - columns: the checkbox (header box "Select all visible students", indeterminate as today, `data-header-checkbox`; row box "Select {email}", `data-row-checkbox`), Email, Full name ("—" when empty), Group (groups on; select "Group for {email}", R38; disabled while that row's request runs; a failure toasts, as today), and the actions cell (header visually hidden "Actions");
-- a marked row (failed its last bulk op) gets a 3px `--danger` left rule (an inset box-shadow on its first cell), keeps its reason as the row `title`, and a visually hidden "Failed: {reason}" in the Email cell; it stays selected, as today;
+- a marked row (failed its last bulk op) gets a 3px `--danger` left rule (an inset box-shadow on its first cell), keeps its reason as the row `title`, and a visually hidden "Failed: {reason}" in the Email cell; it stays selected, as today. The mark (rule, `title`, hidden text) goes when that row's own group change or removal succeeds, and the retries and their counts leave that row out; when nothing is left to retry the banner closes. Dismiss clears every mark; the selection stays (user, Safari pass, rev 7);
 - the row 🗑 "Remove {email}" (title "Remove from run", `data-action="delete-student"`) opens a one-line confirm row under its row (6a's plain delete confirm): "Remove {email} from this run?" Cancel / **Remove** (`confirmDataAction="confirm-delete-student"`). Success refetches; failure toasts, as today. Long e-mails wrap.
 - Rows keep `data-row="student"` and `data-user-id`.
 

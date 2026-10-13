@@ -463,6 +463,115 @@ describe('RunRosterTab — the result banner', () => {
   });
 });
 
+describe('RunRosterTab — a marked row fixed by hand (Safari pass, user 2026-10-13)', () => {
+  const rowSelect = (id: number) => row(id)!.querySelector('select') as HTMLSelectElement;
+  const marked = (id: number) => row(id)!.classList.contains('row-error');
+  // Students 2 and 3 fail the first bulk move; later moves and every row PATCH succeed.
+  function twoFail() {
+    let phase = 1;
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith('/bulk-move')) {
+        return jres(phase++ === 1 ? result([1], [[2, 'internal_error', null], [3, 'internal_error', null]]) : result([3]));
+      }
+      if (init?.method === 'PATCH') {
+        const id = Number(url.split('/').pop());
+        return jres(student(id, JSON.parse(init.body as string)));
+      }
+      if (init?.method === 'DELETE') return Promise.resolve(resp(null, 204));
+      return jres([]);
+    });
+  }
+
+  it("the row's own group change clears its mark, reason and hidden text; it stays selected", async () => {
+    twoFail();
+    open();
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settleAll();
+    expect(marked(2)).toBe(true);
+    pick(rowSelect(2), '99');
+    await settleAll();
+    expect(marked(2)).toBe(false);
+    expect(row(2)!.querySelector('td')!.classList.contains('ro-mark')).toBe(false);
+    expect(row(2)!.hasAttribute('title')).toBe(false);
+    expect(row(2)!.querySelector('.ro-email-cell .vh')).toBeNull();
+    expect((row(2)!.querySelector('input[data-row-checkbox]') as HTMLInputElement).checked).toBe(true);
+    expect(marked(3)).toBe(true);
+  });
+
+  it('the retry leaves out a row fixed by hand: "Retry 1 → group…" sends only the other id', async () => {
+    twoFail();
+    open();
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settleAll();
+    expect(options(act<HTMLSelectElement>('retry-move-select')!)[0]).toBe('Retry 2 → group…');
+    pick(rowSelect(2), '99');
+    await settleAll();
+    const retry = act<HTMLSelectElement>('retry-move-select')!;
+    expect(options(retry)[0]).toBe('Retry 1 → group…');
+    expect(labelFor(retry)).toBe('Move the 1 failed student to a group');
+    pick(retry, '99');
+    await settleAll();
+    expect(JSON.parse((bulkCalls('bulk-move')[1][1] as RequestInit).body as string)).toEqual({ user_ids: [3], group_id: 99 });
+  });
+
+  it('with every failed row fixed by hand the banner closes', async () => {
+    twoFail();
+    open();
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settleAll();
+    pick(rowSelect(2), '99');
+    await settleAll();
+    expect(banner()).not.toBeNull();
+    trash(3).click();
+    await settle();
+    (target.querySelector('button.confirm') as HTMLButtonElement).click();
+    server = [student(1, { group_id: 99 }), student(2, { group_id: 99 })];
+    await settleAll();
+    expect(banner()).toBeNull();
+    // The removed student leaves the selection: no ghost id for the next bulk op.
+    expect(text(target.querySelector('.ro-count'))).toBe('1 selected');
+  });
+
+  it('a row fixed by hand while a bulk op runs keeps the op\'s verdict: marked and counted in the retry', async () => {
+    const pending = deferred<Response>();
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith('/bulk-move')) return pending.promise;
+      if (init?.method === 'PATCH') {
+        const id = Number(url.split('/').pop());
+        return jres(student(id, JSON.parse(init.body as string)));
+      }
+      return jres([]);
+    });
+    open();
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settle();
+    pick(rowSelect(2), '99');
+    await settleAll();
+    pending.resolve(resp(result([1, 3], [[2, 'internal_error', null]])));
+    await settleAll();
+    expect(marked(2)).toBe(true);
+    expect(options(act<HTMLSelectElement>('retry-move-select')!)[0]).toBe('Retry 1 → group…');
+  });
+
+  it('Dismiss clears every mark; the selection stays', async () => {
+    twoFail();
+    open();
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settleAll();
+    act('dismiss-banner')!.click();
+    await settle();
+    expect(marked(2)).toBe(false);
+    expect(marked(3)).toBe(false);
+    expect(row(3)!.hasAttribute('title')).toBe(false);
+    expect(text(target.querySelector('.ro-count'))).toBe('2 selected');
+  });
+});
+
 describe('RunRosterTab — the table', () => {
   it('columns, header box and accessible names', () => {
     open();
