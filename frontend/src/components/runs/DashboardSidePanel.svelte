@@ -312,9 +312,11 @@
 
   function askDiscard(source: 'cancel' | 'close') {
     discardSource = source;
-    // Safari leaves focus on <body> after a mouse click on ×: no return target then.
+    // Safari does not focus a clicked button or radio: focus stays on <body> or
+    // moves to the drawer's own panel (tabindex -1). Neither is a return target.
     const active = document.activeElement;
-    discardReturnEl = active instanceof HTMLElement && active !== document.body ? active : null;
+    const container = active === document.body || active?.matches('section.modal-panel');
+    discardReturnEl = active instanceof HTMLElement && !container ? active : null;
     confirmDiscard = true;
   }
 

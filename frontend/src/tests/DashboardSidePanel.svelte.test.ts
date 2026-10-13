@@ -1897,6 +1897,23 @@ describe('DashboardSidePanel — drawer frame (6c T5)', () => {
     expect(document.activeElement).toBe(resultRadio('major_revision'));
   });
 
+  // Safari moves a mouse click's focus to the nearest focusable ancestor, the
+  // drawer's own panel (tabindex -1): that is no return target either (Safari pass).
+  it("Safari: × clicked with focus on the drawer panel → the confirm's Cancel focuses the checked Result radio", async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    pickResult('major_revision');
+    await typeFeedback('unsaved');
+    const panel = host.querySelector('section.modal-panel') as HTMLElement;
+    panel.focus();
+    expect(document.activeElement).toBe(panel);
+    closeX().click();
+    await settle();
+    discardCancel()!.click();
+    await settle();
+    expect(document.activeElement).toBe(resultRadio('major_revision'));
+  });
+
   it("a dirty edit → the form's Cancel → the confirm's Cancel: focus back on the form's Cancel", async () => {
     mountPanel({
       target: submissionTarget({ status: 'needs_revision', latest_evaluation: NEEDS_REVISION_EVAL }),
