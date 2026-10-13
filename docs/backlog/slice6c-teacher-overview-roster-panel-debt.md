@@ -59,3 +59,16 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 
 - **Discard Cancel can leave focus on `<body>`** (both lanes). `askDiscard` saves `document.activeElement`, which can be `<body>`: in Safari a mouse click on × doesn't focus it. `focusFirst` then "succeeds" on `<body>`, and the fallback to the Result select and × never runs. Fix: save the element only when it is not `<body>`, or only when it is inside the panel. Check this in the Safari pass.
 - **× while the confirm asks always moves focus to its Cancel,** even when the confirm came from the form's Cancel (source `cancel`). This is what the spec says, but to close, a teacher must press Cancel, then ×, then Discard. A cheaper path: re-arm the confirm with source `close`. This is a design note.
+
+## Task 6 — Submission cards and evaluation form
+
+- **Save's title says "Attach the feedback PDF" in a locked edit,** but the edit form has no attach control. Sequence: edit an evaluation with no feedback file and a non-accepted result; Save stays disabled (today's behaviour, as the spec says) until Accepted is picked. Fix: in edit mode, use the lock text (or "Choose Accepted") as the title.
+- **The feedback-file error is not in the attach button's `aria-describedby`.** "Only PDF files accepted." is announced once (role=alert). When focus returns to "attach PDF", the error isn't read again. Fix: give the `<p>` an id and add it to the describedby while the error shows, as the Score and Feedback fields do. Check in the VoiceOver pass at beta.
+- **T25's closing `evalCalls(...).toHaveLength(0)` is vacuous now:** nothing dispatches a submit, so it can't fail. `checkedResult() === 'accepted'` carries the intent. Fix: drop that assertion and the stale "Save guarded" comment.
+- **T19b's `toContain('accepted')` is always true,** because the auto-accept banner contains "Auto-accepted". Fix: assert the card's badge text "Accepted".
+- **The prefill effect re-runs when `effectiveEvaluation` changes identity mid-edit** (this predates 6c). A thread that lands after an early Edit, or a grid refresh that refetches the thread, re-fills the form over in-progress edits. Focus also jumps back to the checked radio.
+- **A 409 doesn't reset the form** (this predates 6c). `isDirty` stays true, so × then asks to discard edits that are no longer shown.
+- **"Result is required." is effectively unreachable,** because Save is natively disabled whenever the form is invalid (this predates 6c).
+- **After a PATCH, the "Evaluated" line names the previous evaluator** until the refetch lands (this predates 6c).
+- **The `awaiting-evaluation-placeholder` hook repeats inside opened earlier submissions,** so `querySelector` returns whichever comes first. The tests scope it today.
+- **Seen in the screenshot pass:** the "Evaluation saved; group notified" toast covers the panel's status badge and × for a few seconds. The toast position is outside this slice.

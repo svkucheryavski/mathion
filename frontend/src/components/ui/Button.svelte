@@ -21,6 +21,8 @@
     // Slice-6c R44: a control that must not act right now but keeps focus (a
     // busy Publish run). onclick still fires, so the caller returns at once.
     'aria-disabled': ariaDisabled = false,
+    // Slice-6c P48: a test hook (the side panel's Edit and Cancel).
+    'data-test': dataTest = undefined as string | undefined,
     element = $bindable(undefined as HTMLButtonElement | undefined),
     onclick = undefined as (() => void) | undefined,
     full = false,
@@ -36,6 +38,7 @@
   class:blocked={ariaDisabled && !loading}
   data-variant={variant}
   data-action={dataAction}
+  data-test={dataTest}
   data-autofocus={dataAutofocus ? '' : undefined}
   {form}
   aria-describedby={ariaDescribedby}

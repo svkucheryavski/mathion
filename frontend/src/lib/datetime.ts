@@ -54,6 +54,13 @@ export function formatShortDate(yyyyMmDd: string): string {
   return `${pad2(d)} ${MONTHS[m - 1]} ${y}`;
 }
 
+
+// A UTC ISO instant as the viewer's local calendar date: "02 Aug 2026".
+export function formatLocalShortDate(iso: string): string {
+  const d = new Date(iso);
+  return `${pad2(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 // The Deadlines column header: the zone when every shown deadline shares one
 // offset, "(local time)" when daylight saving splits them, bare otherwise.
 export function deadlinesHeader(isos: string[]): string {

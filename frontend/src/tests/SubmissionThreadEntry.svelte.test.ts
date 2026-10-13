@@ -33,49 +33,59 @@ function mountEntry(submission: ThreadSubmission, expanded: boolean, onToggle = 
   return host;
 }
 
-describe('SubmissionThreadEntry', () => {
-  it('collapsed: shows summary + badge, hides submission/evaluation detail', () => {
+describe('SubmissionThreadEntry (6c 9b rows)', () => {
+  const toggle = () => host.querySelector('[data-test="thread-entry-toggle"]') as HTMLButtonElement;
+
+  it('collapsed: a disclosure row with the name, the local date and the short badge; no content', () => {
     mountEntry(makeSubmission(), false);
-    const toggle = host.querySelector('[data-test="thread-entry-toggle"]') as HTMLButtonElement;
-    expect(toggle).toBeTruthy();
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(host.textContent).toContain('Submission 3');
-    expect(host.textContent).toContain('Accepted'); // StatusBadge label for accepted
-    expect(host.querySelector('a.download-link')).toBeNull();
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().querySelector('.te-name')!.textContent).toBe('Submission 3');
+    expect(toggle().querySelector('.te-date')!.textContent).toBe('01 Jun 2026');
+    const badge = toggle().querySelector('.status-badge') as HTMLElement;
+    expect(badge.textContent).toBe('accepted');
+    expect(badge.getAttribute('data-status')).toBe('accepted');
+    expect(host.querySelector('[data-test="submission-content"]')).toBeNull();
+    expect(host.querySelector('a[download]')).toBeNull();
   });
 
-  it('expanded: shows submission block, evaluation, both download links', () => {
+  it('a submission at 23:30 UTC shows the viewer\'s next day (Review Focus 5)', () => {
+    mountEntry(makeSubmission({ submitted_at: '2026-08-01T23:30:00Z' }), false);
+    expect(toggle().querySelector('.te-date')!.textContent).toBe('02 Aug 2026');
+  });
+
+  it('expanded: the submission and evaluation content, both downloads', () => {
     mountEntry(makeSubmission(), true);
-    const toggle = host.querySelector('[data-test="thread-entry-toggle"]') as HTMLButtonElement;
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(host.textContent).toContain('File size:');
-    expect(host.textContent).toContain('Result: accepted');
-    const links = Array.from(host.querySelectorAll('a.download-link')).map((a) => a.getAttribute('href'));
-    expect(links).toContain('/api/submissions/42/file');
-    expect(links).toContain('/api/evaluations/11/feedback-file');
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelector('[data-test="submission-content"]')).toBeTruthy();
+    expect(host.querySelector('.sc-file-meta')!.textContent).toBe('PDF · 2.0 kB');
+    expect(host.querySelector('h4')!.textContent).toBe('Evaluation');
+    const ev = host.querySelector('[data-test="evaluation-content"]') as HTMLElement;
+    expect(ev.querySelector('.status-badge')!.textContent).toBe('Accepted');
+    const links = Array.from(host.querySelectorAll('a[download]')).map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/api/submissions/42/file', '/api/evaluations/11/feedback-file']);
   });
 
-  it('expanded + null evaluation: shows "Awaiting evaluation" and awaiting badge', () => {
+  it('expanded + null evaluation: the placeholder, no evaluation content, the awaiting badge', () => {
     mountEntry(makeSubmission({ evaluation: null }), true);
-    // Positive guard: the placeholder <p> renders (unique selector, so this is
-    // NOT satisfied by the summary StatusBadge's own 'Awaiting evaluation' label).
     const placeholder = host.querySelector('[data-test="awaiting-evaluation-placeholder"]');
-    expect(placeholder?.textContent).toContain('Awaiting evaluation');
-    // Negative guard: the null-eval path must render NO evaluation section.
-    expect(host.querySelector('section.evaluation-block')).toBeNull();
+    expect(placeholder?.textContent).toBe('Awaiting evaluation');
+    expect(host.querySelector('[data-test="evaluation-content"]')).toBeNull();
     const badge = host.querySelector('.status-badge') as HTMLElement;
     expect(badge.getAttribute('data-status')).toBe('awaiting_eval');
+    expect(badge.textContent).toBe('awaiting eval');
   });
 
-  it('expanded + is_resubmission: shows auto-accept banner', () => {
+  it('expanded + is_resubmission: the chip and the auto-accept line', () => {
     mountEntry(makeSubmission({ is_resubmission: true }), true);
-    expect(host.textContent).toContain('Auto-accepted on resubmission');
+    expect(host.querySelector('.te-chips')!.textContent).toContain('resubmission');
+    expect(host.querySelector('p.te-info[role="status"]')!.textContent)
+      .toBe('Auto-accepted on resubmission. No manual evaluation needed.');
   });
 
-  it('clicking the summary calls onToggle', () => {
+  it('clicking the row calls onToggle', () => {
     let toggled = 0;
     mountEntry(makeSubmission(), false, () => { toggled += 1; });
-    (host.querySelector('[data-test="thread-entry-toggle"]') as HTMLButtonElement).click();
+    toggle().click();
     flushSync();
     expect(toggled).toBe(1);
   });

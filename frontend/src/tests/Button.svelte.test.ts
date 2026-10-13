@@ -117,4 +117,12 @@ describe('Button', () => {
     expect(btn.hasAttribute('aria-disabled')).toBe(false);
     expect(btn.hasAttribute('aria-busy')).toBe(false);
   });
+
+  it('forwards data-test (6c P48)', () => {
+    expect(render({ 'data-test': 'edit-evaluation' }).getAttribute('data-test')).toBe('edit-evaluation');
+  });
+
+  it('omits data-test by default', () => {
+    expect(render({}).hasAttribute('data-test')).toBe(false);
+  });
 });

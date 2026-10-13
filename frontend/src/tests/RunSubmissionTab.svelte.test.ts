@@ -359,6 +359,16 @@ describe('RunSubmissionTab', () => {
     expect(panel!.textContent).toContain('G1');
   });
 
+  // R35: the panel's subtitle carries the block's B-label from `blocks`.
+  it('the side panel subtitle reads "{Group} · B{n}" (R35)', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    mountTab(1, { blocks: BLOCKS });
+    await settle();
+    (host.querySelector('.status-cell-btn') as HTMLButtonElement).click();
+    flushSync();
+    expect(host.querySelector('.modal-head .sp-sub')!.textContent).toBe('G1 · B1');
+  });
+
   // T12 – Disabled group rendering
   it('disabled group: muted name and a "disabled" chip; no opacity row class', async () => {
     const body = submissionMock({

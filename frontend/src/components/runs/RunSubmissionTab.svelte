@@ -156,6 +156,12 @@
     }
     return parts.join(' · ');
   }
+
+  // R35: the side panel's "B2", from the same positions as line 2.
+  function blockLabelOf(mp: DashboardMpRow): string | undefined {
+    const n = blockPos.get(mp.block_id);
+    return n === undefined ? undefined : `B${n}`;
+  }
   function sortAria(key: SortKey): 'ascending' | 'descending' | 'none' {
     return sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   }
@@ -297,6 +303,7 @@
             {isAdmin}
             {isTeacher}
             onRefetch={refresh}
+            blockLabel={blockLabelOf(panelTarget.mp)}
           />
         {/if}
       {/if}

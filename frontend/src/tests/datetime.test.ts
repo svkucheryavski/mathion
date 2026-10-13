@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { localInputToISO, isoToLocalInput, formatLocalWithTz, localTzLabel, formatShortDeadline, formatShortDate, deadlinesHeader } from '../lib/datetime';
+import { localInputToISO, isoToLocalInput, formatLocalWithTz, localTzLabel, formatShortDeadline, formatShortDate, formatLocalShortDate, deadlinesHeader } from '../lib/datetime';
 
 // TZ pinned to Europe/Copenhagen via package.json scripts (TZ=Europe/Copenhagen
 // prepended to vitest). Node caches the host TZ at process start, so a
@@ -117,5 +117,17 @@ describe('deadlinesHeader (R12)', () => {
   });
   it('a summer and a winter deadline → "Deadlines (local time)"', () => {
     expect(deadlinesHeader(['2026-08-07T21:59:00Z', '2026-01-10T22:59:00Z'])).toBe('Deadlines (local time)');
+  });
+});
+
+describe('formatLocalShortDate (6c §Dates)', () => {
+  it('a UTC instant as the local calendar date, mono-ready "DD Mon YYYY"', () => {
+    expect(formatLocalShortDate('2026-08-02T10:00:00Z')).toBe('02 Aug 2026');
+  });
+  it('23:30 UTC is the next day in Copenhagen (CEST, Review Focus 5)', () => {
+    expect(formatLocalShortDate('2026-08-01T23:30:00Z')).toBe('02 Aug 2026');
+  });
+  it('and across the year in winter (CET)', () => {
+    expect(formatLocalShortDate('2026-12-31T23:30:00Z')).toBe('01 Jan 2027');
   });
 });

@@ -12,6 +12,8 @@ import {
   heatToken,
   ITEM_TYPE_NAME,
   drillItemType,
+  RESULT_LABEL,
+  resultLabel,
 } from '../lib/dashboards';
 
 function mockFetch(status: number, body: unknown) {
@@ -218,5 +220,21 @@ describe('ITEM_TYPE_NAME / drillItemType (6c §Progress variant)', () => {
     expect(drillItemType('static_page')).toBe('static_page');
     expect(drillItemType('mini_project')).toBeNull();
     expect(drillItemType('toString')).toBeNull();
+  });
+});
+
+describe('RESULT_LABEL / resultLabel (6c §Already evaluated)', () => {
+  it('names each result in its own words', () => {
+    expect(RESULT_LABEL).toEqual({
+      accepted: 'Accepted',
+      minor_revision: 'Minor revision',
+      major_revision: 'Major revision',
+      rejected: 'Rejected',
+    });
+  });
+  it('maps a known result and shows anything else raw (P55)', () => {
+    expect(resultLabel('minor_revision')).toBe('Minor revision');
+    expect(resultLabel('surprise')).toBe('surprise');
+    expect(resultLabel('toString')).toBe('toString');
   });
 });

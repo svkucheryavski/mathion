@@ -2,6 +2,7 @@
 // Spec: docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md §6.1, §6.2
 
 import { api } from './api';  // existing project-wide fetch helper
+import type { EvaluationResult } from './evaluations';
 
 // --- Status enum ---
 
@@ -20,8 +21,9 @@ export const STATUS_LABEL: Record<MpGroupStatus, string> = {
   rejected: 'Rejected',
 };
 
-// Lowercase short labels for the Submissions grid cells (spec §Submissions).
-// STATUS_LABEL stays for the side panel, the thread entries and cell names.
+// Lowercase short labels for the Submissions grid cells, the side panel's
+// badge and its earlier-submission rows. STATUS_LABEL stays for the cells'
+// accessible names.
 export const STATUS_SHORT_LABEL: Record<MpGroupStatus, string> = {
   not_submitted: 'not submitted',
   awaiting_eval: 'awaiting eval',
@@ -51,6 +53,23 @@ export function resultToStatus(result: string | null): MpGroupStatus {
   if (result === 'accepted') return 'accepted';
   if (result === 'rejected') return 'rejected';
   return 'awaiting_eval';
+}
+
+
+// Each result in its own words, for the read-only Evaluation rows and the
+// Result radios (6c R37); the badge colour still comes from resultToStatus.
+export const RESULT_LABEL: Record<EvaluationResult, string> = {
+  accepted: 'Accepted',
+  minor_revision: 'Minor revision',
+  major_revision: 'Major revision',
+  rejected: 'Rejected',
+};
+
+// The thread's `result` is a plain string; an unknown one shows raw.
+export function resultLabel(result: string): string {
+  return Object.prototype.hasOwnProperty.call(RESULT_LABEL, result)
+    ? RESULT_LABEL[result as EvaluationResult]
+    : result;
 }
 
 // The Progress heatmap's five steps (spec §Heatmap): the token that fills a

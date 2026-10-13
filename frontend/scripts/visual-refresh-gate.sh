@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1968
+EXPECTED_CHECKS=2062
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4907,6 +4907,8 @@ FILES_6C=(
   src/components/runs/RunOverviewTab.svelte
   src/components/runs/RunRosterTab.svelte
   src/components/runs/ProgressBreakdown.svelte
+  src/components/runs/DashboardSidePanel.svelte
+  src/components/runs/SubmissionCards.svelte src/components/runs/SubmissionThreadEntry.svelte
 )
 emoji_scan "all Slice-6c files" $FILES_6C
 colour_scan 6c-teacher $FILES_6C
@@ -5040,6 +5042,66 @@ if [[ -n $REPLY ]]; then
   d '\.pb-nomark' '' 'width:22px' 'height:22px' 'border:1px solid var\(--border-strong\)'
   d '\.pb-score' '' 'margin-left:auto' 'font-family:var\(--font-mono\)'
   sweep ProgressBreakdown $H
+fi
+
+# 6c T6 — the side panel's cards and Evaluate form (9b, R37, R43).
+own sp-card DashboardSidePanel.svelte
+uniq1 sp-card
+if [[ -n $REPLY ]]; then
+  N=DashboardSidePanel; H=$REPLY
+  d '\.sp-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden' 'background:var\(--surface\)'
+  d '\.sp-card-head' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
+  d '\.sp-h' '' 'margin:0' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.sp-evaluate' '' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)'
+  d '\.sp-evaluate-head' '' 'background:var\(--primary-soft\)'
+  d '\.sp-seg' '' 'display:flex' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
+  d '\.sp-seg-opt' '' 'flex:1' 'padding:3px 0' 'font-size:12\.5px' 'color:var\(--muted\)' 'background:var\(--surface\)' 'border-left:1px solid var\(--border\)'
+  d '\.sp-seg-opt\.checked' '' 'color:var\(--text\)' 'font-weight:500' 'background:var\(--primary-soft\)'
+  d '\.sp-fields' '' 'display:grid' 'grid-template-columns:1fr 96px' 'gap:12px'
+  check "DashboardSidePanel Feedback and Score stack below 480px" "@media \(max-width: ?480px\)\{\.sp-fields\.${H}\{grid-template-columns:1fr\}"
+  d '\.sp-info' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
+  none "DashboardSidePanel's old banner, form-error and helper rules are gone" "\.(banner-info|banner-error|form-error|helper-text)\.${H}[{ ,:.]"
+  sweep DashboardSidePanel $H
+fi
+SP=src/components/runs/DashboardSidePanel.svelte
+if grep -q '<select' $SP; then
+  echo "FAIL  DashboardSidePanel's Result is radios, not a select (R37)"; fail=1
+else
+  echo "PASS  DashboardSidePanel's Result is radios, not a select (R37)"
+fi
+if [[ $(grep -c 'aria-label="Write evaluation"' $SP) -eq 1 ]]; then
+  echo "PASS  DashboardSidePanel renders one evaluationForm for create and edit (R43)"
+else
+  echo "FAIL  DashboardSidePanel renders one evaluationForm for create and edit (R43)"; fail=1
+fi
+if grep -q 'blockLabel=' src/components/runs/RunSubmissionTab.svelte; then
+  echo "PASS  RunSubmissionTab passes the panel its block label (R35)"
+else
+  echo "FAIL  RunSubmissionTab passes the panel its block label (R35)"; fail=1
+fi
+own sc-rows SubmissionCards.svelte
+uniq1 sc-rows
+if [[ -n $REPLY ]]; then
+  N=SubmissionCards; H=$REPLY
+  d '\.sc-rows' '' 'display:grid' 'grid-template-columns:104px 1fr' 'gap:6px 12px' 'font-size:12\.5px'
+  d '\.sc-k' '' 'color:var\(--muted\)'
+  d '\.sc-chip' '' 'padding:3px 8px' 'border-radius:var\(--radius-pill\)' 'background:var\(--surface-2\)' 'color:var\(--text-3\)' 'font-size:11px' 'font-weight:500'
+  d '\.sc-late' '' 'background:var\(--status-needs-revision-bg\)' 'color:var\(--status-needs-revision-fg\)'
+  d '\.sc-file' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:8px 10px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface-3\)'
+  d '\.sc-tile' '' 'width:32px' 'height:28px' 'border-radius:4px' 'background:var\(--surface-2\)' 'font-family:var\(--font-mono\)' 'font-size:9\.5px' 'font-weight:600' 'color:var\(--muted\)'
+  d '\.sc-file-meta' '' 'font-family:var\(--font-mono\)' 'font-size:11\.5px' 'color:var\(--muted\)'
+  sweep SubmissionCards $H
+fi
+own te-toggle SubmissionThreadEntry.svelte
+uniq1 te-toggle
+if [[ -n $REPLY ]]; then
+  N=SubmissionThreadEntry; H=$REPLY
+  d '\.te-toggle' '' 'display:flex' 'align-items:center' 'gap:9px' 'width:100%' 'padding:9px 12px'
+  d '\.te-entry' '' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.te-date' '' 'font-family:var\(--font-mono\)' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.te-badge' '' 'margin-left:auto'
+  none "SubmissionThreadEntry's old banner rule is gone" "\.banner-info\.${H}[{ ,:.]"
+  sweep SubmissionThreadEntry $H
 fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
