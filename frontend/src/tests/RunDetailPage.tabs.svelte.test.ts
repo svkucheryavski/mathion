@@ -46,7 +46,8 @@ function mockRun() {
     if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([asset]);
     if (url.includes('/versions')) return jres([version]);
     if (url.includes('/teachers')) return jres([teacher]);
-    if (url.includes('/groups')) return jres([]);
+    // R34: with zero groups the unassigned row offers Groups; one group keeps the Roster jump.
+    if (url.includes('/groups')) return jres([{ id: 1, run_id: 10, name: 'Group A', is_disabled: false, student_count: 0 }]);
     if (url.includes('/students')) return jres([unassigned]);
     return jres([]);
   });

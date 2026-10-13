@@ -126,3 +126,69 @@ describe('DangerConfirm (handoff §4 Confirm-then-act)', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 });
+
+describe('DangerConfirm after a request (R45)', () => {
+  // A caller like the run's delete: busy while its request runs.
+  function renderBusy() {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    let release!: () => void;
+    const props = $state({
+      message,
+      busy: false,
+      onCancel: vi.fn(),
+      onConfirm: async () => {
+        props.busy = true;
+        await new Promise<void>((r) => { release = r; });
+        props.busy = false;
+        throw new Error('failed');
+      },
+    });
+    component = mount(DangerConfirm, { target: host, props: props as ComponentProps<typeof DangerConfirm> });
+    flushSync();
+    const box = host.querySelector('input[data-role="danger-ack"]') as HTMLInputElement;
+    const force = host.querySelector('button[data-action="force-delete"]') as HTMLButtonElement;
+    return { box, force, release: () => release() };
+  }
+
+  it('busy disabled the box and Force delete; once the request settles, focus is back on the box', async () => {
+    const { box, force, release } = renderBusy();
+    tick(box);
+    force.focus();
+    force.click();
+    await settle();
+    expect(force.disabled).toBe(true);
+    expect(box.disabled).toBe(true);
+    release();
+    await settle();
+    await settle();
+    expect(box.checked).toBe(false);
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('focus the caller moved elsewhere during the request stays there', async () => {
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    const { box, force, release } = renderBusy();
+    tick(box);
+    force.focus();
+    force.click();
+    await settle();
+    other.focus();
+    release();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
+  it('a caller that never sets busy (Assets) keeps focus where it was', async () => {
+    const { box, force } = render({ onConfirm: vi.fn().mockRejectedValue(new Error('x')) });
+    tick(box);
+    force.focus();
+    force.click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(force);
+  });
+});

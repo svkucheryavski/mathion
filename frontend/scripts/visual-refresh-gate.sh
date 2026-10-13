@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1810
+EXPECTED_CHECKS=1851
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4899,6 +4899,7 @@ echo
 echo "--- (al) Slice-6c — Overview, Roster and the side panel ---"
 # Every component Slice 6c restyles or creates; each task appends its files (spec §Gate).
 FILES_6C=(
+  src/components/runs/RunOverviewTab.svelte
 )
 emoji_scan "all Slice-6c files" $FILES_6C
 colour_scan 6c-teacher $FILES_6C
@@ -4918,7 +4919,34 @@ if [[ -n $REPLY ]]; then
   d '\.ov-ver' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
   d '\.ov-edit' '' 'grid-column:2 ?/ ?4'
   d '\.ov-help' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.ov-check' '' 'display:flex' 'gap:9px' 'padding:7px 0' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.ov-box' '' 'width:18px' 'height:18px' 'border-radius:4px'
+  chk "\.ov-box\.${H} svg:where\(\.${H}\)" 'width:11px' 'height:11px'
+  d '\.ov-box-ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ov-box-violated' '' 'background:var\(--status-needs-revision-bg\)' 'color:var\(--status-needs-revision-fg\)'
+  d '\.ov-box-na' '' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
+  d '\.ov-hint-link' '' 'color:var\(--primary\)'
+  d '\.ov-foot' '' 'margin-top:12px' 'padding-top:12px' 'border-top:1px solid var\(--border\)'
+  d '\.ov-foot-note' '' 'flex:1' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.ov-del-card' '' 'padding:14px 18px'
+  d '\.ov-del-title' '' 'font-size:13px' 'font-weight:600'
+  d '\.ov-err' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--status-rejected-fg\)'
+  none "RunOverviewTab's pre-6c rules are gone (.readiness, .danger-zone, .run-summary, .run-settings)" "\.(readiness|danger-zone|run-summary|run-settings)\.${H}"
   sweep RunOverviewTab $H
 fi
+# R44 / P23: an aria-disabled Button or IconButton looks disabled; a busy Button keeps its look.
+own btn Button.svelte
+uniq1 btn
+if [[ -n $REPLY ]]; then
+  N=Button; H=$REPLY
+  d '\.btn\.blocked' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+fi
+uniq1 icon-btn
+if [[ -n $REPLY ]]; then
+  N=IconButton; H=$REPLY
+  d '\.icon-btn\.blocked' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+fi
+# Publish run lives in the Overview: the run page's title row has no publish bar.
+none "RunDetailPage has no .publish-bar rule" "\.publish-bar\."
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

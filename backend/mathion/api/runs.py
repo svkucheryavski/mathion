@@ -136,9 +136,13 @@ def delete_run(
     for locked_mp_id in mp_ids_to_lock:
         advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, locked_mp_id)
 
+    # D28 (Slice 6c): a published run is never deleted, forced or not, so a stale
+    # page cannot wipe a live run. publish_run takes a different lock, so this is
+    # not atomic against a concurrent publish; that window is accepted.
+    if run.is_published:
+        raise HTTPException(status_code=409, detail="Unpublish run before deleting")
+
     if not force:
-        if run.is_published:
-            raise HTTPException(status_code=409, detail="Unpublish run before deleting")
         student_count = db.scalar(select(func.count(RunStudent.id)).where(RunStudent.run_id == run_id))
         if student_count and student_count > 0:
             raise HTTPException(status_code=409, detail="Run has students; clear roster or use ?force=true")
@@ -149,7 +153,7 @@ def delete_run(
         db.commit()
         return
 
-    # ?force=true: course-admin only AND override all blocks
+    # ?force=true on an unpublished run (course admins): override the student and submission blocks
     # Cascade order: evaluations -> submissions -> run_asset_refs -> mini_projects -> groups -> teachers/students -> run_assets -> run
     sub_ids = db.execute(
         select(Submission.id).join(MiniProject, MiniProject.id == Submission.mini_project_id)

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import RunOverviewTab from '../components/runs/RunOverviewTab.svelte';
+import RunOverviewTab, {
+  type DeleteOutcome, type PublishOutcome, type Readiness, type UnpublishOutcome,
+} from '../components/runs/RunOverviewTab.svelte';
 import type { RunResponse, Version } from '../lib/types';
 
 vi.mock('../stores/toasts.svelte', async (importOriginal) => {
@@ -51,7 +53,13 @@ async function settle() {
   flushSync();
 }
 
-type Extra = { run?: Partial<RunResponse>; pinned?: Version | undefined; isAdmin?: boolean };
+type Extra = {
+  run?: Partial<RunResponse>;
+  pinned?: Version | undefined;
+  isAdmin?: boolean;
+  readiness?: Readiness;
+  publishing?: boolean;
+};
 
 function mountOverview(extra: Extra = {}) {
   const target = document.createElement('div');
@@ -62,9 +70,12 @@ function mountOverview(extra: Extra = {}) {
     setRun: setRunSpy as (r: RunResponse) => void,
     pinned: 'pinned' in extra ? extra.pinned : makeVersion(),
     isAdmin: extra.isAdmin ?? true,
-    readiness: { checks: [], firstViolation: null },
+    readiness: extra.readiness ?? { checks: [] },
+    publishing: extra.publishing ?? false,
     onNavigateTab: vi.fn(),
-    onDeleteRun: vi.fn(),
+    onPublish: vi.fn(async (): Promise<PublishOutcome> => 'failed'),
+    onUnpublish: vi.fn(async (): Promise<UnpublishOutcome> => 'failed'),
+    onDeleteRun: vi.fn(async (): Promise<DeleteOutcome> => ({ kind: 'failed', message: 'x' })),
   });
   setRunSpy.mockImplementation((r: RunResponse) => { props.run = r; });
   const cmp = mount(RunOverviewTab, { target, props });
@@ -299,6 +310,18 @@ describe('Run details (10a, R31, R32)', () => {
   });
 });
 
+describe('layout (10a, user 2026-10-13)', () => {
+  it('left column: Run details then Settings; right column: Publish readiness then Delete this run', () => {
+    const { target, cmp } = mountOverview();
+    const cols = [...target.querySelectorAll('.ov-grid > .ov-col')];
+    expect(cols).toHaveLength(2);
+    const titles = (col: Element) => [...col.querySelectorAll('h2')].map((h) => h.textContent?.trim());
+    expect(titles(cols[0])).toEqual(['Run details', 'Settings']);
+    expect(titles(cols[1])).toEqual(['Publish readiness', 'Delete this run']);
+    unmount(cmp);
+  });
+});
+
 describe('Settings (R42)', () => {
   it('one PATCH {groups_enabled: true} per toggle; setRun gets the answer', async () => {
     fetchSpy.mockImplementation(() => jres(makeRun({ groups_enabled: true })));
@@ -369,6 +392,81 @@ describe('role gating', () => {
   it('shows Delete-run to admins on a draft', () => {
     const { target, cmp } = mountOverview({ isAdmin: true });
     expect(target.querySelector('button[data-action="delete-run"]')).not.toBeNull();
+    unmount(cmp);
+  });
+});
+
+describe('R32 across the run writes', () => {
+  const WAIT = 'Wait for the current change to save';
+
+  async function startTitleSave(target: HTMLElement) {
+    const save = held();
+    fetchSpy.mockImplementationOnce(() => save.p);
+    edit(target, 'title').click();
+    flushSync();
+    type(field(target)!, 'Summer');
+    key(field(target)!, 'Enter');
+    await settle();
+    return save;
+  }
+
+  it('during a field save, Publish run and the trash are aria-disabled with the reason and do nothing', async () => {
+    const { target, cmp, props } = mountOverview();
+    const save = await startTitleSave(target);
+    const pub = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(pub.disabled).toBe(false);
+    expect(pub.getAttribute('aria-disabled')).toBe('true');
+    expect(pub.title).toBe(WAIT);
+    pub.click();
+    flushSync();
+    expect(props.onPublish).not.toHaveBeenCalled();
+    const trash = target.querySelector('button[data-action="delete-run"]') as HTMLButtonElement;
+    expect(trash.getAttribute('aria-disabled')).toBe('true');
+    expect(trash.title).toBe(WAIT);
+    trash.click();
+    flushSync();
+    expect(target.querySelector('.danger-confirm')).toBeNull();
+    save.release(okRes(makeRun({ title: 'Summer' })));
+    await settle();
+    expect(pub.getAttribute('aria-disabled')).toBeNull();
+    unmount(cmp);
+  });
+
+  it('during a field save on a published run, Unpublish does nothing', async () => {
+    const { target, cmp } = mountOverview({ run: { is_published: true } });
+    const save = await startTitleSave(target);
+    const unpub = target.querySelector('button[data-action="unpublish"]') as HTMLButtonElement;
+    expect(unpub.getAttribute('aria-disabled')).toBe('true');
+    unpub.click();
+    flushSync();
+    expect(target.querySelector('button[data-action="confirm-unpublish"]')).toBeNull();
+    save.release(okRes(makeRun({ title: 'Summer', is_published: true })));
+    await settle();
+    unmount(cmp);
+  });
+
+  it('while the page publishes (also after a remount), the pencils and the switch do nothing; Publish run is busy', () => {
+    const { target, cmp } = mountOverview({ publishing: true });
+    expect(edit(target, 'title').disabled).toBe(true);
+    expect(edit(target, 'title').title).toBe(WAIT);
+    expect(sw(target).getAttribute('aria-disabled')).toBe('true');
+    const pub = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
+    expect(pub.getAttribute('aria-busy')).toBe('true');
+    expect(pub.textContent?.trim()).toBe('Publishing…');
+    unmount(cmp);
+  });
+
+  it("an open danger panel's Force delete is disabled while a field saves", async () => {
+    const { target, cmp } = mountOverview();
+    (target.querySelector('button[data-action="delete-run"]') as HTMLButtonElement).click();
+    flushSync();
+    const save = await startTitleSave(target);
+    const force = target.querySelector('button[data-action="force-delete"]') as HTMLButtonElement;
+    expect(force.disabled).toBe(true);
+    expect(force.title).toBe(WAIT);
+    save.release(okRes(makeRun({ title: 'Summer' })));
+    await settle();
+    expect(force.disabled).toBe(false);
     unmount(cmp);
   });
 });

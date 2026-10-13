@@ -269,19 +269,26 @@ describe('RunDetailPage shell', () => {
     expect(target.querySelector('h1')?.textContent?.trim()).toBe('Spring');
     unmount(cmp);
   });
-  it('deleting a run from Overview lands on /teaching/:slug (6a D3)', async () => {
+  it('deleting a run from Overview force-deletes it and lands on /teaching/:slug (6a D3, D24)', async () => {
     mockHappyPath();
     const inner = fetchSpy.getMockImplementation()!;
-    fetchSpy.mockImplementation((url: string, init?: RequestInit) =>
-      init?.method === 'DELETE' && /\/api\/runs\/10$/.test(url) ? jres(null, 204) : inner(url, init));
+    const deletes: string[] = [];
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') { deletes.push(url); return jres(null, 204); }
+      return inner(url, init);
+    });
     const target = document.createElement('div');
     document.body.appendChild(target);
     const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
     await settle();
     (target.querySelector('button[data-action="delete-run"]') as HTMLButtonElement).click();
     flushSync();
-    (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
+    (target.querySelector('input[data-role="danger-ack"]') as HTMLInputElement).click();
+    flushSync();
+    (target.querySelector('button[data-action="force-delete"]') as HTMLButtonElement).click();
     await settle();
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toContain('/api/runs/10?force=true');
     expect(location.pathname).toBe('/teaching/algebra');
     unmount(cmp);
   });

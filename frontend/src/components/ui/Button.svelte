@@ -18,6 +18,9 @@
     form = undefined as string | undefined,
     'data-autofocus': dataAutofocus = false,
     'aria-describedby': ariaDescribedby = undefined as string | undefined,
+    // Slice-6c R44: a control that must not act right now but keeps focus (a
+    // busy Publish run). onclick still fires, so the caller returns at once.
+    'aria-disabled': ariaDisabled = false,
     element = $bindable(undefined as HTMLButtonElement | undefined),
     onclick = undefined as (() => void) | undefined,
     full = false,
@@ -30,11 +33,14 @@
   {type}
   class="btn {variant}"
   class:full={full}
+  class:blocked={ariaDisabled && !loading}
   data-variant={variant}
   data-action={dataAction}
   data-autofocus={dataAutofocus ? '' : undefined}
   {form}
   aria-describedby={ariaDescribedby}
+  aria-disabled={ariaDisabled ? 'true' : undefined}
+  aria-busy={loading ? 'true' : undefined}
   {disabled}
   {title}
   aria-label={ariaLabel}
@@ -58,6 +64,14 @@
   /* Disabled: recede via tokens, never opacity (opacity would composite the
      whole button — glyphs included — against the page). Keep the tooltip. */
   .btn:disabled {
+    background: var(--bg);
+    color: var(--faint);
+    border-color: var(--border-faint);
+    cursor: not-allowed;
+  }
+  /* P23: blocked (aria-disabled, not busy) looks disabled but keeps focus. A
+     busy button keeps its variant look and its spinner. */
+  .btn.blocked {
     background: var(--bg);
     color: var(--faint);
     border-color: var(--border-faint);

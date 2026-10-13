@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
+import { currentRoute } from '../lib/router.svelte';
 
 vi.mock('../stores/toasts.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../stores/toasts.svelte')>();
@@ -16,6 +17,10 @@ beforeEach(() => {
   vi.mocked(pushToast).mockClear();
   document.body.innerHTML = '';
   location.hash = '#/courses/algebra/runs/10';
+  history.replaceState(null, '', '/teaching/algebra/runs/10');
+  currentRoute.path = location.pathname;
+  currentRoute.search = '';
+  currentRoute.hash = '';
 });
 
 function jres(body: unknown, status = 200) {
@@ -115,8 +120,8 @@ describe('Publish bar', () => {
     expect(btn).toBeTruthy();
     btn.click();
     flushSync();
-    expect(target.textContent).toContain('Confirm Unpublish');
-    expect(target.textContent).toContain('lose access');
+    expect(target.querySelector('button[data-action="confirm-unpublish"]')?.textContent).toBe('Unpublish');
+    expect(target.textContent).toContain('Students lose access immediately; their progress is kept.');
     unmount(cmp);
   });
 
@@ -156,6 +161,8 @@ describe('Publish bar', () => {
     const pubBtn = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
     expect(pubBtn).not.toBeNull();
     expect(runGetCount).toBe(2);
+    // 'draft-now' (R33): focus lands on Publish run, never on <body>.
+    expect(document.activeElement).toBe(pubBtn);
     unmount(cmp);
   });
 
@@ -193,8 +200,9 @@ describe('publish-bar split for course.is_admin', () => {
     await settle();
     expect(target.querySelector('.run-chip')).not.toBeNull();
     expect(target.querySelector('p.run-meta')).not.toBeNull();
-    expect(buttonByText(target, /^Publish$/)).toBeNull();
+    expect(buttonByText(target, /^Publish run$/)).toBeNull();
     expect(buttonByText(target, /^Unpublish$/)).toBeNull();
+    expect(target.querySelector('.ov-foot-note')?.textContent?.trim()).toBe('A course admin publishes this run.');
     unmount(cmp);
   });
 
@@ -203,7 +211,7 @@ describe('publish-bar split for course.is_admin', () => {
     await settle();
     expect(target.querySelector('.run-chip')).not.toBeNull();
     expect(target.querySelector('p.run-meta')).not.toBeNull();
-    const pub = buttonByText(target, /^Publish$/);
+    const pub = buttonByText(target, /^Publish run$/);
     const unpub = buttonByText(target, /^Unpublish$/);
     expect(pub !== null || unpub !== null).toBe(true);
     unmount(cmp);
@@ -569,6 +577,317 @@ describe('PublishConflictsModal wiring (E3)', () => {
     await settle();
     expect(dialogEl()).toBeNull();
     expect(document.activeElement).toBe(target.querySelector('button[data-action="publish"]'));
+    unmount(cmp);
+  });
+});
+
+// A response the test releases by hand.
+function held() {
+  let release!: (r: Response) => void;
+  const p = new Promise<Response>((r) => { release = r; });
+  return { p, release };
+}
+function resp(body: unknown, status = 200): Response {
+  return {
+    ok: status < 400, status,
+    json: () => Promise.resolve(body),
+    headers: new Headers({ 'content-type': 'application/json' }),
+  } as unknown as Response;
+}
+const runBase = {
+  id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30',
+  is_published: false, groups_enabled: false,
+};
+type Route = (url: string, init?: RequestInit) => Promise<Response> | null;
+
+// The page's loads (one teacher by default, so Publish run is enabled), with
+// `extra` asked first: a write the test answers or holds.
+function mountWith(extra: Route, opts: {
+  run?: Record<string, unknown>;
+  course?: Record<string, unknown>;
+  version?: Record<string, unknown>;
+  teachers?: unknown[];
+  groups?: unknown[];
+  students?: unknown[];
+} = {}) {
+  fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+    const hit = extra(url, init);
+    if (hit) return hit;
+    if (url.includes('/courses/by-slug/')) return jres({
+      id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true, ...(opts.course ?? {}),
+    });
+    const m = url.match(/\/api\/runs\/(\d+)$/);
+    if (m && init?.method === 'GET') return jres({ ...runBase, ...(opts.run ?? {}), id: Number(m[1]) });
+    if (url.includes('/versions') && url.includes('/blocks')) return jres([]);
+    if (url.includes('/mini-projects')) return jres([]);
+    if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
+    if (url.includes('/versions')) return jres([{
+      id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false, label: 'Spring 2026',
+      ...(opts.version ?? {}),
+    }]);
+    if (url.includes('/teachers')) return jres(opts.teachers ?? [{ user_id: 1, user_email: 't@x.com' }]);
+    if (url.includes('/groups')) return jres(opts.groups ?? []);
+    if (url.includes('/students')) return jres(opts.students ?? []);
+    return Promise.reject(new Error('unexpected ' + url));
+  });
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  const props = $state({ courseSlug: 'algebra', runId: '10' });
+  const cmp = mount(RunDetailPage, { target, props });
+  return { target, cmp, props };
+}
+
+const q = (t: HTMLElement, action: string) => t.querySelector(`button[data-action="${action}"]`) as HTMLButtonElement | null;
+const isPost = (url: string, init: RequestInit | undefined, tail: string) => url.endsWith(tail) && init?.method === 'POST';
+
+describe('Publish and Unpublish live in the Overview (R33, R44)', () => {
+  it('the title row has no publish bar', async () => {
+    const { target, cmp } = mountWith(() => null);
+    await settle();
+    expect(target.querySelector('.run-title-row button')).toBeNull();
+    expect(target.querySelector('.publish-bar')).toBeNull();
+    expect(q(target, 'publish')?.textContent?.trim()).toBe('Publish run');
+    unmount(cmp);
+  });
+
+  it('two clicks while the request runs send one POST; the busy button is aria-disabled, keeps focus, then Unpublish has it', async () => {
+    const hold = held();
+    let posts = 0;
+    const { target, cmp } = mountWith((url, init) => {
+      if (isPost(url, init, '/publish')) { posts++; return hold.p; }
+      return null;
+    });
+    await settle();
+    const btn = q(target, 'publish')!;
+    btn.focus();
+    btn.click();
+    btn.click();
+    await settle();
+    expect(posts).toBe(1);
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.textContent?.trim()).toBe('Publishing…');
+    expect(document.activeElement).toBe(btn);
+    hold.release(resp({ ...runBase, is_published: true }));
+    await settle();
+    expect(document.activeElement).toBe(q(target, 'unpublish'));
+    unmount(cmp);
+  });
+
+  it('a 409 that is not a conflicts response refetches; a run found published counts as published', async () => {
+    let published = false;
+    const { target, cmp } = mountWith((url, init) => {
+      if (isPost(url, init, '/publish')) { published = true; return jres({ detail: 'Run already published' }, 409); }
+      if (/\/api\/runs\/10$/.test(url) && init?.method === 'GET' && published) return jres({ ...runBase, is_published: true });
+      return null;
+    });
+    await settle();
+    q(target, 'publish')!.focus();
+    q(target, 'publish')!.click();
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Run already published', 'error');
+    expect(document.activeElement).toBe(q(target, 'unpublish'));
+    unmount(cmp);
+  });
+
+  it("a second click on the confirm's Unpublish sends one POST; then Publish run has focus", async () => {
+    const hold = held();
+    let posts = 0;
+    const { target, cmp } = mountWith((url, init) => {
+      if (isPost(url, init, '/unpublish')) { posts++; return hold.p; }
+      return null;
+    }, { run: { is_published: true } });
+    await settle();
+    q(target, 'unpublish')!.click();
+    flushSync();
+    const confirm = q(target, 'confirm-unpublish')!;
+    confirm.click();
+    confirm.click();
+    await settle();
+    expect(posts).toBe(1);
+    hold.release(resp({ ...runBase, is_published: false }));
+    await settle();
+    expect(document.activeElement).toBe(q(target, 'publish'));
+    unmount(cmp);
+  });
+
+  it('a run change (loadAll) frees a stuck publish: Publish run sends again on the new run', async () => {
+    const hold = held();
+    const posts: string[] = [];
+    const { target, cmp, props } = mountWith((url, init) => {
+      if (isPost(url, init, '/publish')) {
+        posts.push(url);
+        return posts.length === 1 ? hold.p : jres({ ...runBase, id: 11, is_published: true });
+      }
+      return null;
+    });
+    await settle();
+    q(target, 'publish')!.click();
+    await settle();
+    props.runId = '11';
+    flushSync();
+    await settle();
+    const again = q(target, 'publish')!;
+    expect(again.getAttribute('aria-disabled')).toBeNull();
+    again.click();
+    await settle();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toContain('/api/runs/11/publish');
+    unmount(cmp);
+  });
+
+  it('a remount of the Overview while publishing keeps the pencils and the switch locked (R32)', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((url, init) => (isPost(url, init, '/publish') ? hold.p : null));
+    await settle();
+    q(target, 'publish')!.click();
+    await settle();
+    (target.querySelector('#run-tab-teachers') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('#run-tab-overview') as HTMLButtonElement).click();
+    await settle();
+    expect(q(target, 'edit-title')!.disabled).toBe(true);
+    expect(target.querySelector('button[role="switch"]')!.getAttribute('aria-disabled')).toBe('true');
+    hold.release(resp({ ...runBase, is_published: true }));
+    await settle();
+    expect(q(target, 'edit-title')!.disabled).toBe(false);
+    unmount(cmp);
+  });
+});
+
+describe('Publish readiness rows from the page (R34)', () => {
+  const rows = (t: HTMLElement) => Array.from(t.querySelectorAll('li.ov-check')).map((li) => [
+    li.getAttribute('data-check'), li.getAttribute('data-state'),
+    li.querySelector('.ov-hint, .ov-hint-link')?.textContent?.trim() ?? '',
+  ]);
+
+  it('groups off: four rows, the two group rows not applicable', async () => {
+    const { target, cmp } = mountWith(() => null);
+    await settle();
+    expect(rows(target)).toEqual([
+      ['teacher', 'ok', ''], ['version', 'ok', ''],
+      ['assigned', 'na', 'not applicable'], ['sizes', 'na', 'not applicable'],
+    ]);
+    unmount(cmp);
+  });
+
+  it('no teacher: "Add a teacher — open Teachers" opens Teachers with focus on its tab', async () => {
+    const { target, cmp } = mountWith(() => null, { teachers: [] });
+    await settle();
+    expect(rows(target)[0]).toEqual(['teacher', 'violated', 'Add a teacher — open Teachers']);
+    expect(q(target, 'publish')!.title).toBe('No teacher is assigned yet');
+    q(target, 'goto-teachers')!.click();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('#run-tab-teachers'));
+    unmount(cmp);
+  });
+
+  it('a disabled version: row 2 violated with the role hint; Publish run disabled with "The course version is disabled"', async () => {
+    const admin = mountWith(() => null, { version: { is_disabled: true } });
+    await settle();
+    expect(rows(admin.target)[1]).toEqual(['version', 'violated', 'Re-enable it in the course editor']);
+    expect(q(admin.target, 'publish')!.disabled).toBe(true);
+    expect(q(admin.target, 'publish')!.title).toBe('The course version is disabled');
+    unmount(admin.cmp);
+    const teacher = mountWith(() => null, { version: { is_disabled: true }, course: { is_admin: false } });
+    await settle();
+    expect(rows(teacher.target)[1]).toEqual(['version', 'violated', 'Ask a course admin to re-enable it']);
+    unmount(teacher.cmp);
+  });
+
+  it('groups on, no students: row 3 ok and Publish run enabled', async () => {
+    const { target, cmp } = mountWith(() => null, { run: { groups_enabled: true } });
+    await settle();
+    expect(rows(target)[2]).toEqual(['assigned', 'ok', '']);
+    expect(q(target, 'publish')!.disabled).toBe(false);
+    unmount(cmp);
+  });
+
+  it('groups on, no groups and an unassigned student: "No groups yet — open Groups"', async () => {
+    const { target, cmp } = mountWith(() => null, {
+      run: { groups_enabled: true },
+      students: [{ user_id: 2, email: 'a@x.com', full_name: null, group_id: null }],
+    });
+    await settle();
+    expect(rows(target)[2]).toEqual(['assigned', 'violated', 'No groups yet — open Groups']);
+    expect(q(target, 'publish')!.title).toBe('1 student is still unassigned to a group');
+    unmount(cmp);
+  });
+
+  it('groups on, 3 unassigned and an oversized group: two violations and the Roster jump', async () => {
+    const { target, cmp } = mountWith(() => null, {
+      run: { groups_enabled: true },
+      groups: [{ id: 1, run_id: 10, name: 'Group A', student_count: 12 }],
+      students: [1, 2, 3].map((n) => ({ user_id: n, email: `s${n}@x.com`, full_name: null, group_id: null })),
+    });
+    await settle();
+    expect(rows(target).slice(2)).toEqual([
+      ['assigned', 'violated', '3 unassigned — open Roster'],
+      ['sizes', 'violated', 'Group A (12)'],
+    ]);
+    expect(target.querySelector('.ov-foot-note')?.textContent?.trim()).toBe('Fix the 2 outstanding checks to publish.');
+    expect(q(target, 'publish')!.title).toBe('3 students are still unassigned to a group');
+    unmount(cmp);
+  });
+});
+
+describe('Delete this run from the page (D24, D28, P24)', () => {
+  async function arm(target: HTMLElement) {
+    q(target, 'delete-run')!.click();
+    flushSync();
+    (target.querySelector('input[data-role="danger-ack"]') as HTMLInputElement).click();
+    flushSync();
+    return q(target, 'force-delete')!;
+  }
+
+  it('Force delete sends DELETE ?force=true and toasts "Run deleted."', async () => {
+    const deletes: string[] = [];
+    const { target, cmp } = mountWith((url, init) => {
+      if (init?.method === 'DELETE') { deletes.push(url); return jres(null, 204); }
+      return null;
+    });
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toContain('/api/runs/10?force=true');
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Run deleted.', 'success');
+    unmount(cmp);
+  });
+
+  it('a 409 refetches the run, closes the panel, toasts, and focuses the card heading', async () => {
+    let published = false;
+    const { target, cmp } = mountWith((url, init) => {
+      if (init?.method === 'DELETE') { published = true; return jres({ detail: 'Unpublish run before deleting' }, 409); }
+      if (/\/api\/runs\/10$/.test(url) && init?.method === 'GET' && published) return jres({ ...runBase, is_published: true });
+      return null;
+    });
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    await settle();
+    expect(target.querySelector('.danger-confirm')).toBeNull();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('This run was published in the meantime. Unpublish it before deleting.', 'error');
+    expect(q(target, 'delete-run')!.disabled).toBe(true);
+    expect(q(target, 'delete-run')!.title).toBe('Unpublish the run before deleting it');
+    expect((document.activeElement as HTMLElement).textContent).toBe('Delete this run');
+    unmount(cmp);
+  });
+
+  it('another failure shows the error line, keeps the panel and refocuses its box (R45)', async () => {
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? jres({ detail: 'Database is busy' }, 503) : null));
+    await settle();
+    const force = await arm(target);
+    force.focus();
+    force.click();
+    await settle();
+    await settle();
+    expect(target.querySelector('.ov-err')?.textContent).toBe('Database is busy');
+    const box = target.querySelector('input[data-role="danger-ack"]') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(document.activeElement).toBe(box);
     unmount(cmp);
   });
 });

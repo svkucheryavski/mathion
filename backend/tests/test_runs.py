@@ -1,8 +1,8 @@
 import io
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from mathion.models import Block, Run
+from mathion.models import Block, Evaluation, Group, MiniProject, Run, RunStudent, Submission
 
 from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO
 
@@ -207,6 +207,7 @@ def test_delete_run_with_students_409(admin_client, seed_run_with_groups):
 
 
 def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
+    """D28: a published run is never deleted, not even with ?force=true."""
     run, ga, _ = seed_run_with_groups()
     run_obj = db.get(Run, run["id"])
     block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
@@ -218,9 +219,50 @@ def test_force_delete_published_run(admin_client, db, seed_run_with_groups):
     ).json()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     response = admin_client.delete(f"/api/runs/{run['id']}?force=true")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Unpublish run before deleting"
+    db.expire_all()
+    assert db.get(Run, run["id"]) is not None
+
+
+def test_force_delete_draft_with_students_and_submissions(admin_client, student_client_for, db, seed_run_with_groups):
+    """D24: a forced delete of an unpublished run removes it with its roster, groups,
+    mini-projects, submissions and evaluations, and its file tree."""
+    from mathion.api.submission_files import submission_storage_dir
+    import os
+
+    run, ga, _ = seed_run_with_groups()
+    run_obj = db.get(Run, run["id"])
+    block = db.execute(select(Block).where(Block.version_id == run_obj.version_id)).scalars().first()
+    mp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": "x",
+              "hard_deadline": NEAR_DEADLINE_ISO,
+              "resubmission_deadline": FAR_DEADLINE_ISO},
+    ).json()
+    admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
+    alice = student_client_for("alice@example.com")
+    sub = alice.post(
+        f"/api/mini-projects/{mp['id']}/submissions",
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
+    )
+    assert sub.status_code == 201
+    ev = admin_client.post(f"/api/submissions/{sub.json()['id']}/evaluation", data={"result": "accepted"})
+    assert ev.status_code == 201
+    assert os.path.isdir(submission_storage_dir(run["id"], ga["id"]))
+    assert admin_client.post(f"/api/runs/{run['id']}/unpublish").status_code == 200
+
+    response = admin_client.delete(f"/api/runs/{run['id']}?force=true")
     assert response.status_code == 204
     db.expire_all()
     assert db.get(Run, run["id"]) is None
+    count = lambda model, cond: db.scalar(select(func.count()).select_from(model).where(cond))
+    assert count(RunStudent, RunStudent.run_id == run["id"]) == 0
+    assert count(Group, Group.run_id == run["id"]) == 0
+    assert count(MiniProject, MiniProject.run_id == run["id"]) == 0
+    assert count(Submission, Submission.id == sub.json()["id"]) == 0
+    assert count(Evaluation, Evaluation.submission_id == sub.json()["id"]) == 0
+    assert not os.path.isdir(submission_storage_dir(run["id"], ga["id"]))
 
 
 def test_lower_end_date_blocked_by_submissions(admin_client, student_client_for, db, seed_run_with_groups):

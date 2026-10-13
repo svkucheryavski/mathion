@@ -132,6 +132,23 @@ describe('IconButton', () => {
     const btn = render({ glyph: 'trash', title: 'Delete' });
     expect(btn.hasAttribute('data-action')).toBe(false);
   });
+
+  it('aria-disabled keeps the button focusable and marks it blocked (R44)', () => {
+    const onclick = vi.fn();
+    const btn = render({ glyph: 'trash', title: 'Wait for the current change to save', 'aria-disabled': true, onclick });
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.classList.contains('blocked')).toBe(true);
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    btn.click();
+    expect(onclick).toHaveBeenCalledTimes(1);
+  });
+  it('omits aria-disabled by default', () => {
+    const btn = render({ glyph: 'trash', title: 'Delete' });
+    expect(btn.hasAttribute('aria-disabled')).toBe(false);
+    expect(btn.classList.contains('blocked')).toBe(false);
+  });
 });
 
 // Slice-5c T3: the inline "+ Add …" rows submit through their ✓ IconButton.

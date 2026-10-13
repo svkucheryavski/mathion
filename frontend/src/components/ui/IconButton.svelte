@@ -33,6 +33,8 @@
     'aria-hidden'?: boolean | 'true' | 'false';
     'aria-expanded'?: boolean;
     'aria-controls'?: string;
+    // Slice-6c R44: blocked but focusable; the caller's onclick returns at once.
+    'aria-disabled'?: boolean;
     id?: string;
     'data-action'?: string;
     tabindex?: number;
@@ -55,6 +57,7 @@
     'aria-hidden': ariaHidden = undefined,
     'aria-expanded': ariaExpanded = undefined,
     'aria-controls': ariaControls = undefined,
+    'aria-disabled': ariaDisabled = false,
     id = undefined,
     'data-action': dataAction = undefined,
     tabindex = undefined,
@@ -70,6 +73,7 @@
   class:borderless
   class:round
   class:primary
+  class:blocked={ariaDisabled}
   data-glyph={glyph}
   {disabled}
   {title}
@@ -80,6 +84,7 @@
   aria-hidden={ariaHidden}
   aria-expanded={ariaExpanded}
   aria-controls={ariaControls}
+  aria-disabled={ariaDisabled ? 'true' : undefined}
   {onclick}
   {onmousedown}
 >
@@ -166,6 +171,13 @@
      `.icon-btn:disabled` (0,3,0 with the scope hash) beats `.danger` and
      `.primary` (0,2,0), so a disabled trash or a disabled filled `+` greys out too. */
   .icon-btn:disabled {
+    background: var(--bg);
+    color: var(--faint);
+    border-color: var(--border-faint);
+    cursor: not-allowed;
+  }
+  /* P23: aria-disabled looks like :disabled; (0,3,0) also beats .primary/.danger. */
+  .icon-btn.blocked {
     background: var(--bg);
     color: var(--faint);
     border-color: var(--border-faint);

@@ -4,7 +4,7 @@
   // its slot in the muted red family and does nothing; ticking arms it. A
   // missing right (disabledReason) disables it natively, with the reason.
   // The box un-ticks when onConfirm settles, so a failure has to be re-armed.
-  import { onMount, type Snippet } from 'svelte';
+  import { onMount, tick, type Snippet } from 'svelte';
 
   let {
     message,
@@ -28,14 +28,23 @@
   // A second click while onConfirm runs must not send the action twice.
   let pending = false;
   let boxEl = $state<HTMLInputElement>();
+  let forceEl = $state<HTMLButtonElement>();
   onMount(() => boxEl?.focus());
 
   const blocked = $derived(busy || disabledReason !== undefined);
   const forceTitle = $derived(disabledReason ?? (armed ? undefined : 'Tick “I understand” first'));
 
+  // R45: `busy` disabled the box and Force delete, which leaves focus on
+  // <body> or on the disabled button; after the request it goes back to the box.
+  let busySeen = false;
+  $effect(() => {
+    if (busy) busySeen = true;
+  });
+
   async function confirm() {
     if (!armed || blocked || pending) return;
     pending = true;
+    busySeen = busy;
     try {
       await onConfirm();
     } catch {
@@ -43,6 +52,11 @@
     } finally {
       armed = false;
       pending = false;
+    }
+    await tick();
+    const active = document.activeElement;
+    if (busySeen && boxEl?.isConnected && (active === null || active === document.body || active === forceEl)) {
+      boxEl.focus();
     }
   }
 
@@ -66,6 +80,7 @@
     <button
       type="button"
       class="dc-force"
+      bind:this={forceEl}
       class:armed={armed && disabledReason === undefined}
       data-action="force-delete"
       disabled={blocked}

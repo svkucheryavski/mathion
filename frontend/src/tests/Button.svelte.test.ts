@@ -95,4 +95,26 @@ describe('Button', () => {
   it('forwards aria-describedby', () => {
     expect(render({ 'aria-describedby': 'sum' }).getAttribute('aria-describedby')).toBe('sum');
   });
+
+  it('aria-disabled: not natively disabled, marked blocked, onclick still fires (R44)', () => {
+    const onclick = vi.fn();
+    const btn = render({ 'aria-disabled': true, title: 'Wait for the current change to save', onclick });
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.classList.contains('blocked')).toBe(true);
+    btn.click();
+    expect(onclick).toHaveBeenCalledTimes(1);
+  });
+  it('loading sets aria-busy and keeps the variant look (P23)', () => {
+    const btn = render({ loading: true, 'aria-disabled': true });
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.classList.contains('blocked')).toBe(false);
+    expect(btn.querySelector('.spinner')).not.toBeNull();
+  });
+  it('omits aria-disabled and aria-busy by default', () => {
+    const btn = render({});
+    expect(btn.hasAttribute('aria-disabled')).toBe(false);
+    expect(btn.hasAttribute('aria-busy')).toBe(false);
+  });
 });

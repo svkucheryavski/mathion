@@ -10,8 +10,9 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import { session } from '../../stores/session.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
-  import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
-  import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
+  import RunOverviewTab, {
+    type DeleteOutcome, type PublishOutcome, type Readiness, type ReadinessRow, type UnpublishOutcome,
+  } from '../../components/runs/RunOverviewTab.svelte';
   import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
   import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
   import RunRosterTab from '../../components/runs/RunRosterTab.svelte';
@@ -25,7 +26,6 @@
   import { listMiniProjects } from '../../lib/miniProjects';
   import { listRunAssets } from '../../lib/runAssets';
   import { RUN_TABS, isRunPath, isTabKey, parseTab, rawTab, withTab, withoutTab, type ActiveTab } from '../../lib/runTabs';
-  import Button from '../../components/ui/Button.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
   import RunStatusChip from '../../components/runs/RunStatusChip.svelte';
   import TeachingCrumbs from '../../components/runs/TeachingCrumbs.svelte';
@@ -102,6 +102,8 @@
 
   async function loadAll(slug: string, rid: number) {
     const myToken = ++loadToken;
+    // R33: a run change, a course change or reloadRun() frees a stuck publish.
+    publishing = false; unpublishing = false;
     course = null; run = null; versions = null; teachers = null;
     groups = null; students = null; blocks = null; miniProjects = null;
     assets = null; pendingEditTarget = null;
@@ -223,126 +225,156 @@
     return parts.join(' · ');
   });
 
-  type ChecklistState = 'ok' | 'violated' | 'na';
-  type ChecklistRow = { id: string; label: string; state: ChecklistState; hint?: string };
-
-  const readiness = $derived.by((): { checks: ChecklistRow[]; firstViolation: string | null } => {
-    const checks: ChecklistRow[] = [];
-    if (!run || teachers === null || groups === null || students === null) {
-      return { checks: [], firstViolation: null };
-    }
-    // Teacher
-    const teacherOk = teachers.length >= 1;
-    checks.push({
-      id: 'teacher',
-      label: 'At least one teacher',
-      state: teacherOk ? 'ok' : 'violated',
-      hint: teacherOk ? undefined : 'Add at least one teacher.',
-    });
-    // Students assigned
-    if (!run.groups_enabled) {
-      checks.push({ id: 'assigned', label: 'All students assigned to a group', state: 'na' });
-    } else {
-      const unassigned = students.filter((s: RunStudentResponse) => s.group_id === null).length;
+  // R34: the rows in the order of the server's publish checks (api/runs.py
+  // publish_run): a teacher, an enabled version, no unassigned student, no
+  // oversized group. No students and no groups are fine.
+  const readiness = $derived.by((): Readiness => {
+    if (!run || teachers === null || groups === null || students === null) return { checks: [] };
+    const checks: ReadinessRow[] = [];
+    const teacherLabel = 'At least one teacher assigned';
+    checks.push(teachers.length > 0
+      ? { id: 'teacher', label: teacherLabel, state: 'ok' }
+      : { id: 'teacher', label: teacherLabel, state: 'violated', hint: 'Add a teacher — open Teachers', hintTab: 'teachers', reason: 'No teacher is assigned yet' });
+    const versionLabel = 'Course version enabled';
+    if (!pinned) checks.push({ id: 'version', label: versionLabel, state: 'na' });
+    else if (pinned.is_disabled) {
       checks.push({
-        id: 'assigned',
-        label: 'All students assigned to a group',
-        state: unassigned === 0 ? 'ok' : 'violated',
-        hint: unassigned === 0 ? undefined : `${unassigned} students unassigned.`,
+        id: 'version', label: versionLabel, state: 'violated',
+        hint: isAdmin ? 'Re-enable it in the course editor' : 'Ask a course admin to re-enable it',
+        reason: 'The course version is disabled',
+      });
+    } else checks.push({ id: 'version', label: versionLabel, state: 'ok' });
+    const assignedLabel = 'Every student assigned to a group';
+    const sizesLabel = 'No group over 10 students';
+    if (!run.groups_enabled) {
+      checks.push({ id: 'assigned', label: assignedLabel, state: 'na' }, { id: 'sizes', label: sizesLabel, state: 'na' });
+      return { checks };
+    }
+    const unassigned = students.filter((s: RunStudentResponse) => s.group_id === null).length;
+    if (unassigned === 0) checks.push({ id: 'assigned', label: assignedLabel, state: 'ok' });
+    else {
+      checks.push({
+        id: 'assigned', label: assignedLabel, state: 'violated',
+        hint: groups.length === 0 ? 'No groups yet — open Groups' : `${unassigned} unassigned — open Roster`,
+        hintTab: groups.length === 0 ? 'groups' : 'roster',
+        reason: unassigned === 1 ? '1 student is still unassigned to a group' : `${unassigned} students are still unassigned to a group`,
       });
     }
-    // Group sizes — matches api/runs.py publish-gate (oversized-only).
-    // Zero groups and empty groups are OK; teachers may add groups + students post-publish.
-    if (!run.groups_enabled) {
-      checks.push({ id: 'sizes', label: 'No oversized groups (≤10 students each)', state: 'na' });
-    } else {
-      const oversized = groups.filter((g: GroupResponse) => g.student_count > 10);
-      checks.push({
-        id: 'sizes',
-        label: 'No oversized groups (≤10 students each)',
-        state: oversized.length === 0 ? 'ok' : 'violated',
-        hint: oversized.length === 0 ? undefined : oversized.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', '),
-      });
+    const oversized = groups.filter((g: GroupResponse) => g.student_count > 10);
+    if (oversized.length === 0) checks.push({ id: 'sizes', label: sizesLabel, state: 'ok' });
+    else {
+      const list = oversized.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', ');
+      checks.push({ id: 'sizes', label: sizesLabel, state: 'violated', hint: list, reason: `Groups over 10 students: ${list}` });
     }
-    const violated = checks.find((c) => c.state === 'violated');
-    return { checks, firstViolation: violated?.hint ?? null };
+    return { checks };
   });
 
-  const publishBlocked = $derived(readiness.firstViolation !== null || showDisabledBanner);
-  const publishTooltip = $derived(showDisabledBanner
-    ? "This run's course version is disabled. Re-enable it under Course Editor before publishing."
-    : (readiness.firstViolation ?? ''));
-
-  let unpublishConfirmOpen = $state(false);
   let publishConflicts: PublishConflict[] = $state([]);
   let publishModalOpen = $state(false);
+  // R33: one publish / unpublish request at a time. Each flag clears only on
+  // its own load token; loadAll resets both.
+  let publishing = $state(false);
+  let unpublishing = $state(false);
 
-  async function doPublish() {
-    if (runIdInt === null) return;
-    const myToken = loadToken;
+  // After a publish 409 the page may be stale: read back what the rows use.
+  async function refetchReadiness(rid: number, myToken: number): Promise<void> {
+    if (!course) return;
     try {
-      const r = await publishRun(runIdInt);
+      const [r, vs, ts, gs, ss] = await Promise.all([
+        getRun(rid), listVersions(course.id), listRunTeachers(rid), listGroups(rid), listRunStudents(rid),
+      ]);
       if (myToken !== loadToken) return;
+      run = r; versions = vs; teachers = ts; groups = gs; students = ss;
+    } catch { /* the toast already said why; the page keeps what it had */ }
+  }
+
+  async function doPublish(): Promise<PublishOutcome> {
+    if (runIdInt === null || publishing || unpublishing) return 'failed';
+    const myToken = loadToken;
+    const rid = runIdInt;
+    publishing = true;
+    try {
+      const r = await publishRun(rid);
+      if (myToken !== loadToken) return 'failed';
       run = r;
+      return 'published';
     } catch (e) {
-      if (myToken !== loadToken) return;
+      if (myToken !== loadToken) return 'failed';
       if (e instanceof ApiError && e.errorCode === 'student_already_active_in_course') {
         const raw = (e.body as { conflicts?: unknown } | undefined)?.conflicts;
         const conflicts: PublishConflict[] = Array.isArray(raw) ? (raw as PublishConflict[]) : [];
         if (conflicts.length === 0) {
           pushToast(e.displayMessage, 'error');
-          return;
+          return 'failed';
         }
         publishConflicts = conflicts;
         publishModalOpen = true;
-      } else if (e instanceof ApiError) {
-        pushToast(e.displayMessage, 'error');
+        return 'conflicts';
       }
-    }
-  }
-
-  async function onDeleteRun() {
-    if (runIdInt === null || !run) return;
-    try {
-      await deleteRun(runIdInt);
-      navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
-    } catch (e) {
       if (e instanceof ApiError) {
-        const msg = typeof e.detail === 'string' ? e.detail : '';
-        if (e.status === 409 && /students/i.test(msg)) {
-          pushToast('Clear roster before deleting.', 'error');
-        } else {
-          pushToast(e.displayMessage, 'error');
+        pushToast(e.displayMessage, 'error');
+        // Published elsewhere, or a check this page missed: read the run back.
+        if (e.status === 409) {
+          await refetchReadiness(rid, myToken);
+          if (myToken === loadToken && run?.is_published) return 'published';
         }
       }
+      return 'failed';
+    } finally {
+      if (myToken === loadToken) publishing = false;
     }
   }
 
-  async function doUnpublish() {
-    if (runIdInt === null) return;
+  async function doUnpublish(): Promise<UnpublishOutcome> {
+    if (runIdInt === null || publishing || unpublishing) return 'failed';
     const myToken = loadToken;
     const rid = runIdInt;
+    unpublishing = true;
     try {
       const r = await unpublishRun(rid);
-      if (myToken !== loadToken) return;
+      if (myToken !== loadToken) return 'failed';
       run = r;
-      unpublishConfirmOpen = false;
+      return 'unpublished';
     } catch (e) {
-      if (myToken !== loadToken) return;
+      if (myToken !== loadToken) return 'failed';
       if (e instanceof ApiError) {
         pushToast(e.displayMessage, 'error');
-        // Spec §6: 409 "Run is not published" — another tab unpublished first.
-        // Refetch run so the UI flips back to Publish.
+        // 409 "Run is not published": another tab unpublished first.
         if (e.status === 409) {
           try {
             const r = await getRun(rid);
-            if (myToken !== loadToken) return;
+            if (myToken !== loadToken) return 'failed';
             run = r;
+            if (!r.is_published) return 'draft-now';
           } catch { /* refetch failed; toast already shown */ }
         }
       }
-      if (myToken !== loadToken) return;
-      unpublishConfirmOpen = false;
+      return 'failed';
+    } finally {
+      if (myToken === loadToken) unpublishing = false;
+    }
+  }
+
+  // D24 / D28 / P24: a forced delete; a 409 means the run was published meanwhile.
+  async function onDeleteRun(): Promise<DeleteOutcome> {
+    if (runIdInt === null) return { kind: 'failed', message: 'Invalid run.' };
+    const myToken = loadToken;
+    const rid = runIdInt;
+    try {
+      await deleteRun(rid, { force: true });
+      pushToast('Run deleted.', 'success');
+      void navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
+      return { kind: 'deleted' };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        try {
+          const r = await getRun(rid);
+          if (myToken === loadToken) run = r;
+        } catch { /* keep the page as it is; the toast explains */ }
+        pushToast('This run was published in the meantime. Unpublish it before deleting.', 'error');
+        return { kind: 'published-now' };
+      }
+      return { kind: 'failed', message: e instanceof ApiError ? e.displayMessage : 'Could not delete the run.' };
     }
   }
 </script>
@@ -365,22 +397,6 @@
         <h1>{run.title}</h1>
         <RunStatusChip status={runStatus(run)} />
         <p class="run-meta">{metaLine}</p>
-        {#if course.is_admin}
-          <div class="publish-bar">
-            {#if !run.is_published}
-              <Button variant="primary" data-action="publish" disabled={publishBlocked} title={publishTooltip} onclick={doPublish}>Publish</Button>
-            {:else if unpublishConfirmOpen}
-              <InlineConfirm
-                confirmLabel="Confirm Unpublish"
-                warning="Students will lose access immediately. Their progress data is preserved."
-                onConfirm={doUnpublish}
-                onCancel={() => (unpublishConfirmOpen = false)}
-              />
-            {:else}
-              <Button variant="secondary" data-action="unpublish" onclick={() => (unpublishConfirmOpen = true)}>Unpublish</Button>
-            {/if}
-          </div>
-        {/if}
       </div>
     </header>
 
@@ -417,7 +433,10 @@
           {pinned}
           {isAdmin}
           {readiness}
+          publishing={publishing || unpublishing}
           onNavigateTab={gotoTab}
+          onPublish={doPublish}
+          onUnpublish={doUnpublish}
           {onDeleteRun}
         />
       {:else if activeTab === 'progress'}
@@ -508,7 +527,6 @@
   .run-head { display: flex; flex-direction: column; gap: 8px; }
   .run-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .run-title-row h1 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
-  .publish-bar { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .run-meta { margin: 0; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
   .run-banner-warn {
     margin: 12px 0 0;

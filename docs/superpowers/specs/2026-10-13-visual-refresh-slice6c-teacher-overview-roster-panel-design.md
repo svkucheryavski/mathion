@@ -1,6 +1,6 @@
 # Visual refresh — Slice 6c: Overview, Roster and the side panel
 
-**Status:** draft, rev 4. Written 2026-10-13 for the user's review.
+**Status:** approved; rev 5 (2026-10-13: Settings moved to the left column at the user's Task 2 review).
 - Rev 4 folds in the rev 3 re-check (Opus on the code, Fable; `spec-r3-*.md`): the zero-groups row no longer blocks a publish, focus after a failed save or a cancelled upload, the run-write lock across a remount and an open danger panel, and test flips.
 - Rev 3 folds in round 2 (the same three reviewers; `spec-r2-*.md`): D28's backend test blast radius, the busy-control mechanics (R44), the run-write lock (R32), focus fixes, and copy.
 - Rev 2 folds in round 1 of the spec review (fresh Opus on the code, fresh Opus on the design, Fable second opinion; notes in `.superpowers/sdd/2026-10-13-visual-refresh-slice6c-teacher-overview-roster-panel/spec-r1-*.md`) and the user's answers D28–D29.
@@ -102,9 +102,10 @@ A confirm written "Question? Cancel / **Action**" in this spec names its two but
 ## Overview (10a, `RunOverviewTab`)
 
 **Layout.** Two columns (`1fr 1fr`, gap 14px, `align-items: start`) under the tab strip:
-- left: **Run details**;
-- right, stacked (gap 14px): **Settings**, **Publish readiness**, **Delete this run** (course admins).
-- Below 880px the columns stack (left card first).
+- left, stacked (gap 14px): **Run details**, **Settings**;
+- right, stacked (gap 14px): **Publish readiness**, **Delete this run** (course admins).
+- The drawing puts Settings on the right; the user moved it left during Task 2 (2026-10-13) to balance the columns: what the run is on the left, publishing and deleting it on the right.
+- Below 880px the columns stack (left cards first).
 - Each card: `--surface`, 1px `--border`, the 6a card radius, padding 16px 18px; an `<h2>` title at 14px / 600 (as drawn).
 
 ### Run details
