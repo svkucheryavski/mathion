@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=1774
+EXPECTED_CHECKS=1810
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4895,5 +4895,30 @@ box_line=$(grep 'data-testid="publish-preconditions"' $MPM)
 if [[ $(grep -c 'data-testid="publish-preconditions"' $MPM) -eq 1 && $box_line != *role=* ]]; then
   echo "PASS  MiniProjectModal's precondition box has no live role"
 else echo "FAIL  MiniProjectModal's precondition box has no live role"; fail=1; fi
+echo
+echo "--- (al) Slice-6c — Overview, Roster and the side panel ---"
+# Every component Slice 6c restyles or creates; each task appends its files (spec §Gate).
+FILES_6C=(
+)
+emoji_scan "all Slice-6c files" $FILES_6C
+colour_scan 6c-teacher $FILES_6C
+own ov-grid RunOverviewTab.svelte
+uniq1 ov-grid
+if [[ -n $REPLY ]]; then
+  N=RunOverviewTab; H=$REPLY
+  d '\.ov-grid' '' 'display:grid' 'grid-template-columns:1fr 1fr' 'gap:14px' 'align-items:start'
+  check "RunOverviewTab stacks its columns below 880px" "@media \(max-width: 880px\)\{\.ov-grid\.${H}\{grid-template-columns:1fr\}"
+  d '\.ov-col' '' 'display:flex' 'flex-direction:column' 'gap:14px'
+  d '\.ov-card' '' 'padding:16px 18px' 'background:var\(--surface\)' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)'
+  d '\.ov-title' '' 'font-size:14px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.ov-row' '' 'display:grid' 'grid-template-columns:132px 1fr 54px' 'gap:12px' 'padding:9px 0' 'border-bottom:1px solid var\(--border-soft\)'
+  d '\.ov-label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  # Review Focus 3: a 200-character title wraps inside its cell.
+  d '\.ov-value' '' 'font-size:13px' 'color:var\(--text\)' 'overflow-wrap:anywhere'
+  d '\.ov-ver' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
+  d '\.ov-edit' '' 'grid-column:2 ?/ ?4'
+  d '\.ov-help' '' 'font-size:12px' 'color:var\(--muted\)'
+  sweep RunOverviewTab $H
+fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

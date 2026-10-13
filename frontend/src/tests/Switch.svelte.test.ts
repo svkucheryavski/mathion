@@ -77,4 +77,30 @@ describe('Switch (R16)', () => {
     expect(sw.getAttribute('aria-disabled')).toBe('true');
     expect(document.activeElement).toBe(sw);
   });
+
+  it('onchange gets the new value after the flip, once per click (R42)', () => {
+    const calls: boolean[] = [];
+    const sw = render({ onchange: (v: boolean) => calls.push(v) });
+    sw.click();
+    flushSync();
+    expect(calls).toEqual([true]);
+    expect(value()).toBe('true');
+    sw.click();
+    flushSync();
+    expect(calls).toEqual([true, false]);
+  });
+
+  it('a disabled or frozen switch calls no onchange', () => {
+    const calls: boolean[] = [];
+    const off = render({ disabled: true, onchange: (v: boolean) => calls.push(v) });
+    off.click();
+    flushSync();
+    unmount(cmp!);
+    cmp = undefined;
+    host.remove();
+    const frozen = render({ frozen: true, onchange: (v: boolean) => calls.push(v) });
+    frozen.click();
+    flushSync();
+    expect(calls).toEqual([]);
+  });
 });

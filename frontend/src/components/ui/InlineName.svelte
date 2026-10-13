@@ -17,6 +17,8 @@
     saveTitle = 'Save',
     aside = undefined,
     subject = undefined,
+    type = 'text',
+    emptyTitle = undefined,
   }: {
     label: string;
     value?: string;
@@ -27,6 +29,10 @@
     aside?: Snippet;
     // What the field renames ("Group A"): × and ✓ name it for a screen reader.
     subject?: string;
+    // Slice-6c R31: the run's Start / End are date fields.
+    type?: 'text' | 'date';
+    // ✓'s title while the field is empty ("Choose a date"); else saveTitle.
+    emptyTitle?: string;
   } = $props();
 
   const uid = $props.id();
@@ -77,7 +83,7 @@
   <div class="in-row">
     <input
       class="in-input"
-      type="text"
+      {type}
       aria-label={label}
       {maxlength}
       readonly={saving}
@@ -91,7 +97,7 @@
     {@render aside?.()}
     <IconButton glyph="close" size="sm" title="Cancel" disabled={saving} onclick={cancel}
                 aria-label={subject ? `Cancel renaming ${subject}` : undefined} />
-    <IconButton glyph="check" size="sm" primary title={saving ? 'Saving…' : saveTitle}
+    <IconButton glyph="check" size="sm" primary title={saving ? 'Saving…' : !trimmed ? (emptyTitle ?? saveTitle) : saveTitle}
                 aria-label={subject ? `${saving ? 'Saving' : saveTitle} ${subject}` : undefined}
                 disabled={!trimmed || saving} onclick={() => void save()} />
   </div>

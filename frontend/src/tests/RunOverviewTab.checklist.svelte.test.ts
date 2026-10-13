@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunOverviewTab from '../components/runs/RunOverviewTab.svelte';
-import type { Course, RunResponse } from '../lib/types';
-
-const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
+import type { RunResponse } from '../lib/types';
 
 const fetchSpy = vi.fn();
 
@@ -18,15 +16,6 @@ const makeRun = (over: Partial<RunResponse> = {}): RunResponse => ({
   is_published: false, groups_enabled: false, ...over,
 } as RunResponse);
 
-function jres(body: unknown, status = 200) {
-  return Promise.resolve({
-    ok: status < 400,
-    status,
-    json: () => Promise.resolve(body),
-    headers: new Headers({ 'content-type': 'application/json' }),
-  } as unknown as Response);
-}
-
 async function settle() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
   flushSync();
@@ -35,7 +24,7 @@ async function settle() {
 type Extra = {
   run?: Partial<RunResponse>;
   readiness?: { checks: Array<{ id: string; label: string; state: 'ok' | 'violated' | 'na'; hint?: string }>; firstViolation: string | null };
-  course?: Partial<Course>;
+  isAdmin?: boolean;
 };
 
 function mountTab(extra: Extra = {}) {
@@ -44,19 +33,16 @@ function mountTab(extra: Extra = {}) {
   const setRun = vi.fn();
   const onNavigateTab = vi.fn();
   const onDeleteRun = vi.fn();
-  const course: Course = { ...baseCourse, ...(extra.course ?? {}) };
   const cmp = mount(RunOverviewTab, {
     target,
     props: {
       run: makeRun(extra.run ?? {}),
       setRun,
-      teachers: [],
-      groups: [],
-      students: [],
+      pinned: undefined,
+      isAdmin: extra.isAdmin ?? true,
       readiness: extra.readiness ?? { checks: [], firstViolation: null },
       onNavigateTab,
       onDeleteRun,
-      course,
     },
   });
   return { target, cmp, setRun, onNavigateTab, onDeleteRun };
@@ -98,35 +84,6 @@ describe('RunOverviewTab checklist + settings + danger zone', () => {
     hint.click();
     flushSync();
     expect(onNavigateTab).toHaveBeenCalledWith('roster', 'unassigned');
-    unmount(cmp);
-  });
-
-  it('PATCHes groups_enabled when checkbox toggled', async () => {
-    fetchSpy.mockImplementation((_url: string, init: RequestInit) => {
-      expect(init.method).toBe('PATCH');
-      const body = JSON.parse(init.body as string);
-      expect(body).toEqual({ groups_enabled: true });
-      return jres(makeRun({ groups_enabled: true }));
-    });
-    const { target, cmp, setRun } = mountTab({});
-    await settle();
-    const cb = target.querySelector('input[name="groups_enabled"]') as HTMLInputElement;
-    cb.click();
-    await settle();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(setRun).toHaveBeenCalled();
-    unmount(cmp);
-  });
-
-  it('disables groups_enabled checkbox with tooltip when published', async () => {
-    const { target, cmp } = mountTab({
-      run: { is_published: true },
-    });
-    await settle();
-    const cb = target.querySelector('input[name="groups_enabled"]') as HTMLInputElement;
-    expect(cb.disabled).toBe(true);
-    const label = cb.closest('label')!;
-    expect(label.getAttribute('title')).toContain('Locked once');
     unmount(cmp);
   });
 

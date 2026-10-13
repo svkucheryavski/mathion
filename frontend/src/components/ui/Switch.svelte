@@ -10,6 +10,7 @@
     frozen = false,
     title = undefined,
     describedby = undefined,
+    onchange = undefined,
   }: {
     checked?: boolean;
     id: string;
@@ -19,11 +20,14 @@
     frozen?: boolean;
     title?: string;
     describedby?: string;
+    // Slice-6c R42: the new value, after the flip (the Overview saves it).
+    onchange?: (next: boolean) => void;
   } = $props();
 
   function toggle() {
     if (disabled || frozen) return;
     checked = !checked;
+    onchange?.(checked);
   }
 </script>
 

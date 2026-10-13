@@ -155,4 +155,28 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
     expect(close.getAttribute('title')).toBe('Cancel');
     expect(check.getAttribute('title')).toBe('Save');
   });
+
+  it('type="date" renders a date field; an empty date keeps ✓ disabled with emptyTitle (R31)', async () => {
+    const { input, check, onSave } = render({
+      label: 'Start date', value: '2026-06-01', type: 'date',
+      saveTitle: 'Save start date', emptyTitle: 'Choose a date',
+    });
+    expect(input.type).toBe('date');
+    expect(input.value).toBe('2026-06-01');
+    expect(check.getAttribute('title')).toBe('Save start date');
+    type(input, '');
+    expect(check.disabled).toBe(true);
+    expect(check.getAttribute('title')).toBe('Choose a date');
+    type(input, '2026-06-02');
+    expect(check.getAttribute('title')).toBe('Save start date');
+    key(input, 'Enter');
+    await settle();
+    expect(onSave).toHaveBeenCalledWith('2026-06-02');
+  });
+
+  it('emptyTitle defaults to saveTitle (P21)', () => {
+    const { input, check } = render({ saveTitle: 'Save name' });
+    type(input, '');
+    expect(check.getAttribute('title')).toBe('Save name');
+  });
 });

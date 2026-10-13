@@ -414,13 +414,11 @@
         <RunOverviewTab
           {run}
           setRun={(r) => (run = r)}
-          {teachers}
-          {groups}
-          {students}
+          {pinned}
+          {isAdmin}
           {readiness}
           onNavigateTab={gotoTab}
           {onDeleteRun}
-          course={course!}
         />
       {:else if activeTab === 'progress'}
         <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} blocks={blocks ?? []} />
