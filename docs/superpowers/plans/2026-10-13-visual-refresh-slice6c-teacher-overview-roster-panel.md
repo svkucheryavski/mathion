@@ -43,7 +43,7 @@
 - **Class prefixes:** `ov-` RunOverviewTab, `ro-` RunRosterTab, `sp-` DashboardSidePanel, `sc-` SubmissionCards, `te-` SubmissionThreadEntry, `pb-` ProgressBreakdown. The gate's `own` needs a class authored by one file only.
 - **Pinned CSS rules are single-selector blocks.** The gate's `d` helper matches `.cls.svelte-HASH{…}`, so a pinned rule never shares a selector list. Test-hook classes (`confirm`, `cancel`, `hint-button`, `form-error`, `banner-error`) stay unstyled or are styled only through a prefixed class beside them.
 - **Commands** (`$SDD` below stands for `/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-10-13-visual-refresh-slice6c-teacher-overview-roster-panel`; write it out in full when you run them):
-  - Frontend tests: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europe/Copenhagen npx vitest run > $SDD/tmp/vitest.log 2>&1; echo "exit $?"; tail -5 $SDD/tmp/vitest.log; grep -cE "Errors|Unhandled" $SDD/tmp/vitest.log`. Green means `exit 0` AND the last count is `0`. One file: `TZ=Europe/Copenhagen npx vitest run src/tests/<File>.test.ts` from the same directory.
+  - Frontend tests: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europe/Copenhagen npx vitest run > $SDD/tmp/vitest.log 2>&1; echo "exit $?"; tail -5 $SDD/tmp/vitest.log; grep -cE "^ *Errors +[0-9]|Unhandled (Rejection|Error)" $SDD/tmp/vitest.log`. Green means `exit 0` AND the last count is `0`. One file: `TZ=Europe/Copenhagen npx vitest run src/tests/<File>.test.ts` from the same directory.
   - Typecheck: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npx svelte-check --threshold error > $SDD/tmp/svelte-check.log 2>&1; tail -3 $SDD/tmp/svelte-check.log`. It must report 0 errors. 13 warnings is the baseline; a task may not add one.
   - Gate: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TMPDIR=$SDD/tmp zsh scripts/visual-refresh-gate.sh > $SDD/tmp/gate.log 2>&1; echo "exit $?"; grep -E "^FAIL" $SDD/tmp/gate.log; tail -1 $SDD/tmp/gate.log`. It must end `VISUAL-REFRESH GATE: ALL PASS (N checks)` with the N the task names. Never run it in two lanes at once.
   - Backend (Task 2): `cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytest -q > $SDD/tmp/pytest.log 2>&1; echo "exit $?"; tail -3 $SDD/tmp/pytest.log`. One file: `.venv/bin/pytest tests/test_runs.py -q`.
@@ -169,7 +169,7 @@ The five inputs or conditions most likely to bite a teacher that no spec line te
 - Modify: `frontend/src/components/ui/InlineName.svelte:11-30` (props), `:78-96` (the input and ✓)
 - Modify: `frontend/src/components/ui/Switch.svelte:6-27` (props, `toggle`)
 - Modify: `frontend/src/components/runs/RunOverviewTab.svelte` (whole file: new script, markup and style; the old readiness and delete markup moves into the right column unchanged, P29)
-- Modify: `frontend/src/pages/runs/RunDetailPage.svelte:416-426` (the `RunOverviewTab` call)
+- Modify: `frontend/src/pages/runs/RunDetailPage.svelte:414-424` (the `RunOverviewTab` call)
 - Modify: `frontend/scripts/visual-refresh-gate.sh` (new section (al) before `# The summary line is the parent process's (see the re-exec at the top).`; `EXPECTED_CHECKS` at `:90`)
 - Create: `docs/backlog/slice6c-teacher-overview-roster-panel-debt.md`
 - Test: `frontend/src/tests/InlineName.svelte.test.ts`, `frontend/src/tests/Switch.svelte.test.ts`, `frontend/src/tests/support/SwitchHarness.svelte`, `frontend/src/tests/RunOverviewTab.svelte.test.ts` (rewritten), `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` (helper; two switch tests move out)
@@ -806,10 +806,10 @@ function mountTab(extra: Extra = {}) {
 }
 ```
 
-- Delete the tests `'PATCHes groups_enabled when checkbox toggled'` (`:104-119`) and `'disables groups_enabled checkbox with tooltip when published'` (`:121-131`); the Settings describe above replaces them (spec §Code changes: the lock text moves from a `<label title>` to a visible line).
+- Delete the tests `'PATCHes groups_enabled when checkbox toggled'` (`:104-119`) and `'disables groups_enabled checkbox with tooltip when published'` (`:121-131`); the Settings describe above replaces them (spec §Code changes: the lock text moves from a `<label title>` to a visible line). Delete the `jres` helper too (`:21-28`): the first of those tests was its only user, and `noUnusedLocals` makes it a svelte-check error.
 
 Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europe/Copenhagen npx vitest run src/tests/RunOverviewTab.svelte.test.ts src/tests/RunOverviewTab.checklist.svelte.test.ts`
-Expected: FAIL — no `.ov-row`, no `button[data-action="edit-title"]`, no `button[role="switch"]` (today's Overview has plain inputs and a checkbox). The checklist file's three remaining tests still pass (the old readiness and delete markup stays this task).
+Expected: FAIL — no `.ov-row`, no `button[data-action="edit-title"]`, no `button[role="switch"]` (today's Overview has plain inputs and a checkbox). Both files fail as a whole: the old component reads `course.is_admin`, and the new helpers pass no `course` (a `TypeError`).
 
 - [ ] **Step 8: Rewrite `RunOverviewTab.svelte`**
 
@@ -1104,7 +1104,7 @@ Replace the whole file with:
 
 - [ ] **Step 9: Pass the new props from the page**
 
-In `frontend/src/pages/runs/RunDetailPage.svelte`, replace the Overview call (`:416-426`)
+In `frontend/src/pages/runs/RunDetailPage.svelte`, replace the Overview call (`:414-424`)
 
 ```svelte
         <RunOverviewTab
@@ -1225,7 +1225,7 @@ Then the ledger line, memory, and wait for "go".
 - Modify: `backend/mathion/api/runs.py:139-152` (the published check moves out of `if not force:`; the force comment)
 - Modify: `backend/mathion/api/submission_files.py:15` (comment)
 - Modify: `backend/tests/test_runs.py:209-223` (flips to 409) and a new test after it
-- Modify: `backend/tests/test_concurrency_mini_project.py:391-398` (a new `_unpublish` helper after `_unpublish_and_clear_roster`), `:609-610` (Force RED), `:686-687` (Force GREEN)
+- Modify: `backend/tests/test_concurrency_mini_project.py:391-398` (a new `_unpublish` helper after `_unpublish_and_clear_roster`), `:623-624` (Force RED), `:695-696` (Force GREEN)
 - Modify: `frontend/src/lib/runs.ts:26-28` (`deleteRun` options)
 - Modify: `frontend/src/components/ui/Button.svelte` (`aria-disabled`, `aria-busy`, `.blocked`; R44, P23)
 - Modify: `frontend/src/components/ui/IconButton.svelte` (`aria-disabled`, `.blocked`; R44, P23)
@@ -1233,7 +1233,7 @@ Then the ledger line, memory, and wait for "go".
 - Modify: `frontend/src/components/runs/RunOverviewTab.svelte` (module types; readiness card; footer; delete card; `runWrite` widened)
 - Modify: `frontend/src/pages/runs/RunDetailPage.svelte`: imports (`:27`, `:132-133`); `loadAll` (`:101-104`); `:226-347` (readiness rows, publish flags, outcomes); the publish bar (`:368-383`); the Overview call (from Task 1); `.publish-bar` (`:513`)
 - Modify: `frontend/scripts/visual-refresh-gate.sh` (section (al); `EXPECTED_CHECKS`)
-- Test: `frontend/src/tests/Button.svelte.test.ts`, `frontend/src/tests/IconButton.svelte.test.ts`, `frontend/src/tests/DangerConfirm.svelte.test.ts`, `frontend/src/tests/RunOverviewTab.svelte.test.ts`, `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` (rewritten), `frontend/src/tests/RunDetailPage.publish.svelte.test.ts`, `frontend/src/tests/RunDetailPage.svelte.test.ts:272-287`
+- Test: `frontend/src/tests/Button.svelte.test.ts`, `frontend/src/tests/IconButton.svelte.test.ts`, `frontend/src/tests/DangerConfirm.svelte.test.ts`, `frontend/src/tests/RunOverviewTab.svelte.test.ts`, `frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts` (rewritten), `frontend/src/tests/RunDetailPage.publish.svelte.test.ts`, `frontend/src/tests/RunDetailPage.svelte.test.ts:272-287`, `frontend/src/tests/RunDetailPage.tabs.svelte.test.ts:49` (one group in `mockRun`)
 
 **Interfaces:**
 - Consumes (Task 1): `RunOverviewTab`'s `FIELDS`, `localWrite`, `editing`, `WAIT`, the Run details and Settings cards; gate section (al) with `FILES_6C=( )` and the `RunOverviewTab` block; `lib/focusFirst.focusFirst(candidates): boolean`.
@@ -1558,7 +1558,7 @@ describe('DangerConfirm after a request (R45)', () => {
 ```
 
 Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europe/Copenhagen npx vitest run src/tests/Button.svelte.test.ts src/tests/IconButton.svelte.test.ts src/tests/DangerConfirm.svelte.test.ts`
-Expected: FAIL — no `aria-disabled` / `aria-busy` / `blocked` on either button; the first R45 test ends with focus on Force delete. The "omits … by default" tests and the Assets test pass already (they pin behaviour that stays).
+Expected: FAIL — no `aria-disabled` / `aria-busy` / `blocked` on either button; the first R45 test ends with focus on Force delete. The "omits … by default" tests, the R45 "focus the caller moved elsewhere" test and the Assets test pass already (they pin behaviour that stays).
 
 - [ ] **Step 5: Implement R44 on `Button` and `IconButton`, R45 on `DangerConfirm`**
 
@@ -2907,6 +2907,21 @@ In `frontend/src/tests/RunDetailPage.svelte.test.ts`, replace the test `'deletin
   });
 ```
 
+In `frontend/src/tests/RunDetailPage.tabs.svelte.test.ts`, `mockRun` (`:49`), replace
+
+```ts
+    if (url.includes('/groups')) return jres([]);
+```
+
+with
+
+```ts
+    // R34: with zero groups the unassigned row offers Groups; one group keeps the Roster jump.
+    if (url.includes('/groups')) return jres([{ id: 1, run_id: 10, name: 'Group A', is_disabled: false, student_count: 0 }]);
+```
+
+so its three `goto-unassigned` tests (`:140-149`, `:167ff`, `:217ff`) still find the Roster jump.
+
 Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europe/Copenhagen npx vitest run src/tests/RunDetailPage.publish.svelte.test.ts src/tests/RunDetailPage.svelte.test.ts`
 Expected: FAIL — the page still passes the old props (`onPublish` is undefined, so Publish run in the Overview throws or does nothing), the publish bar still sits in the title row, and the readiness rows carry the old labels and no `version` row.
 
@@ -3224,7 +3239,7 @@ git add backend/mathion/api/runs.py backend/mathion/api/submission_files.py \
   frontend/src/tests/Button.svelte.test.ts frontend/src/tests/IconButton.svelte.test.ts \
   frontend/src/tests/DangerConfirm.svelte.test.ts frontend/src/tests/RunOverviewTab.svelte.test.ts \
   frontend/src/tests/RunOverviewTab.checklist.svelte.test.ts frontend/src/tests/RunDetailPage.publish.svelte.test.ts \
-  frontend/src/tests/RunDetailPage.svelte.test.ts
+  frontend/src/tests/RunDetailPage.svelte.test.ts frontend/src/tests/RunDetailPage.tabs.svelte.test.ts
 git commit -m "$(cat <<'EOF'
 feat(6c): Overview readiness, publish and force delete (10a); server refuses deleting a published run
 
@@ -6118,7 +6133,9 @@ Replace the whole of `frontend/src/components/runs/RunRosterTab.svelte` with the
     };
 
     // §Focus: the strip's 🗑 if the strip is still there, else the banner's
-    // first retry control, else Dismiss.
+    // first retry control, else Dismiss. Failed and cancelled rows stay
+    // selected, so while a retry control exists the strip does too: the retry
+    // entries are defensive, kept to match the spec's chain.
     await tick();
     if (focusIsOurs()) {
       focusFirst([bulkTrashEl, retryMoveEl, retryDeleteEl, retryCancelledSelectEl, retryCancelledBtnEl, dismissEl]);
@@ -6959,7 +6976,7 @@ Build the overlay (the 10b reference image beside each shot; same script shape a
 
 - [ ] **Step 8: Review lanes**
 
-Run the Opus (high) and Fable lanes on the uncommitted diff (`git diff`, plus the new test file). Give them the spec (§Roster, §Focus › Roster, §Testing › Roster, R38, R44, Review Focus 3–4), this task's text and the Global Constraints. Fix every Critical and Important finding; re-run both lanes after every fix until both are clean. Minors go to `docs/backlog/slice6c-teacher-overview-roster-panel-debt.md` under "## Task 4 — Roster strip, banner and table".
+Run the Opus (high) and Fable lanes on the uncommitted diff (`git diff`, plus the new test file). Give them the spec (§Roster, §Focus › Roster, §Testing › Roster, R38, R44, Review Focus 3–4), this task's text and the Global Constraints. Fix every Critical and Important finding; re-run both lanes after every fix until both are clean. Minors go to `docs/backlog/slice6c-teacher-overview-roster-panel-debt.md` under "## Task 4 — Roster strip, banner and table". Log there too, found in the plan review: a failed row that the refetch no longer lists stays selected, so the strip counts a student no table row shows ("1 selected"); pre-existing, as today. And spec §Focus › Roster's "else the banner's first retry control" never fires (the strip is up whenever a retry control is): trim its wording in the Polish slice.
 
 - [ ] **Step 9: Commit**
 
@@ -8374,7 +8391,8 @@ const rows = (el: Element) =>
 describe('SubmissionCards — submissionChips', () => {
   it('no chips for a first, on-time submission', () => {
     render({ sub: sub() });
-    expect(part('chips').textContent).toBe('');
+    expect(part('chips').querySelector('.sc-chip')).toBeNull();
+    expect(part('chips').textContent!.trim()).toBe('');
   });
   it('"resubmission" and "late" chips when they apply', () => {
     render({ sub: sub({ is_resubmission: true, is_late: true }) });
@@ -8982,7 +9000,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     expect(document.activeElement).toBe(card.querySelector('h3'));
   });
 
-  it('Edit with no feedback file: Accepted is checked and focused, the lock line shows', async () => {
+  it('Edit with no feedback file: Accepted is focused, the other results lock, the lock line shows', async () => {
     mountPanel({
       target: submissionTarget({
         status: 'needs_revision',
