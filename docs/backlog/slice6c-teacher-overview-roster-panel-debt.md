@@ -27,7 +27,7 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 ## Task 3 — Roster toolbar and add row
 
 - **Close requests are ignored silently while an add runs.** During the POST and its refetch, the toggle ×, Cancel and Esc in the row do nothing, and nothing says why (`closeAdd` returns while `adding`). They are not `aria-disabled`. Fix as R44 does elsewhere: `aria-disabled={adding}` and the title "Wait for the current change to finish" on Cancel and the toggle.
-- **Esc in the group select may close the whole add row.** The form's keydown also catches an Esc that comes from the `<select>`. A native popup usually swallows the key, so check this in the browser pass. Fix: ignore the event when its target is the select.
+- **Esc in the group select may close the whole add row.** The form's keydown also catches an Esc that comes from the `<select>`. A native popup usually swallows the key, so check this in the browser pass. Fix: ignore the event when its target is the select. Safari pass: Safari's popup swallows Esc and the row stays open; other browsers are still unchecked.
 - **The add error stays while the teacher edits the address.** There is no `oninput` clear, so the error line and the red edge stay until the next submit. This predates 6c. Fix: clear `addError` on input.
 - **Pre-existing error-path gaps in `submitAdd`:**
   - an add that succeeds but whose refetch fails shows the refetch error under the row, as if the add had failed, after the field was already emptied;
@@ -87,6 +87,15 @@ Deferred minors:
 - **A busy Publish has no reason `title`** (R44 asks for one); the visible "Publishing…" covers sighted users.
 - **The Version row's disabled ✎ has no `aria-label`,** so its name is the reason sentence. Fix: `aria-label="Edit the version"`, or check it in the VoiceOver pass at beta.
 - **Nits:** a stale "else Save evaluation" comment in `DashboardSidePanel.svelte` (~441); `NOUN` duplicates `FIELDS[].noun` in `RunOverviewTab.svelte`.
+
+## Safari pass (2026-10-13/14)
+
+Every step was run on a console mock that answers every write, so no dev data changed. Steps 1-17 passed: the Overview fields, Unpublish, force delete (fail and 409), roster add and bulk move, Publish double-click, the Progress drawer, the discard confirm, Edit, earlier submissions, attach PDF and Save. The fixes it led to:
+- `e3186cd` (spec rev 7): a marked roster row fixed by hand loses its mark, and Dismiss clears every mark (user decision).
+- `04016d5` (spec rev 8): the drawer's discard confirm sits in the form's button row, because the teacher missed it at the drawer's edge (user decision). Closing asks only while the form is on screen, and a 409 clears the lost edits.
+- `80dd43a`: a Safari click on blank drawer space focuses the panel itself, so the panel is no return target for the confirm's Cancel.
+
+Known and as specified: Safari shows no focus ring after a mouse click, Tab skips buttons by default, and focus after the drawer closes by a mouse click is `<body>`.
 
 ## For the Polish slice (user, 6c Safari pass)
 
