@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** draft rev 6 (2026-10-14), for review.
+**Status:** draft rev 7 (2026-10-14), for review.
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -37,6 +37,10 @@
   - #3 and #5 settle before their forced navigate;
   - AssetSidebar closes the question when it turns disabled;
   - the Discard rescue checks `alive`.
+- Rev 7 folds in round 6 (`spec-r6-*.md`):
+  - the `finally` order settles before the flush, so a trigger the question replaced is back when it is focused;
+  - AssetSidebar dismisses only an idle question;
+  - line citations and test mounts are corrected.
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -138,9 +142,9 @@ These were made from the reviews. Each one says what it costs if it is wrong.
 
   Then the question goes and focus moves to the table's target (R57). Actions with no request (closes, navigation Discard) settle at once. This is AssetSidebar's pattern today. It keeps focus off `<body>` while the triggers underneath stay natively `disabled={busy}`; no trigger changes.
 
-  **Every settle in `finally` follows one order:** `busy = false` → `tick()` → `settle()` → focus. The trigger and the table's targets are natively `disabled={busy}` until then (for example #20's new bar).
+  **Every settle in `finally` follows one order:** read R57's condition (is focus inside the question?) → `busy = false` → `settle()` → `tick()` → focus. The trigger and the table's targets are natively `disabled={busy}` until `busy` clears (for example #20's new bar). Where the question stands in place of its trigger (#8, #9, #20, #21), the trigger only renders again on the flush after `settle()`.
 
-  **Actions whose row goes with the reload** (#4, #5, #17, #18) settle on **success** before the reload instead. Focus then moves to an interim target that `busy` does not disable, with `{ preventScroll: true }`. The final targets after the reload are resolved by id before it (the table), and the final move uses no `preventScroll`. On **failure** the row survives, so the question stays busy through `catch`, including any reload there (`SequenceAccordion.svelte:158-159`, `BlockAccordion.svelte:130-133`), and settles in `finally` in the order above. Focus then goes to the trigger, enabled again, or the post-action chain if the row is gone (a 404 race).
+  **Actions whose row goes with the reload** (#4, #5, #17, #18) settle on **success** before the reload instead. Focus then moves to an interim target that `busy` does not disable, with `{ preventScroll: true }`. The final targets after the reload are resolved by id before it (the table), and the final move uses no `preventScroll`. On **failure** the row survives, so the question stays busy through `catch`, including any reload there (`SequenceAccordion.svelte:116-118` for #3, `:159-161` for #4, `BlockAccordion.svelte:128-131` for #5), and settles in `finally` in the order above. Focus then goes to the trigger, enabled again. If the row is gone (a 404 race), R49's subject-gone dismissal is not blocked by `busy`. It fires during the reload in `catch` and takes the dismissal chain, and the `finally` settle is then a no-op.
 
   **#3 and #5 navigate on success** (`SequenceAccordion.svelte:113`, `BlockAccordion.svelte:125`, a forced navigate). They settle and move focus before that navigate, so R49's dismissal finds the question closed. The move still obeys R57.
 
@@ -254,7 +258,7 @@ Disabled, blocked and busy looks win in every state.
 | RunAssetsTab:713 bulk delete | Confirm → Delete | danger |
 | RunAssetsTab:814 delete asset | Confirm → Delete | danger |
 | RunAssetsTab replace (`.row-confirm`, :823-835) | Confirm → Replace. Becomes InlineConfirm with `message` and `label="Replace {filename}?"`. Cancel keeps its first focus; Esc works as today. | danger |
-| AssetSidebar `.confirm-pair` (:311-329) | Confirm → Delete. Becomes InlineConfirm with `label="Delete {filename}?"` and `busy={deletingIds.has(a.id)}`, inside a wrapper element that stops click propagation. When the sidebar's `disabled` prop turns true while the question is open, the question is dismissed (nothing is deleted). Its trash, row and drop zone are natively disabled then (`AssetSidebar.svelte:289, :338, :369`), and so may be the modal's × (`ItemEditorModal.svelte:338`, the level-3 `closeDisabled={saving}`). Focus therefore takes the dismissal chain: the first connected, enabled, not-inert target, ending at `section.modal-panel` (as `Modal.svelte:75-81` does). Esc keeps `preventDefault` (Modal checks `defaultPrevented`, :93-95). After Cancel, focus goes to the trash (`trashEls`); after Delete, `refocusAfterDelete` as today. Behaviour change: Cancel waits during the request too (R54). | danger |
+| AssetSidebar `.confirm-pair` (:311-329) | Confirm → Delete. Becomes InlineConfirm with `label="Delete {filename}?"` and `busy={deletingIds.has(a.id)}`, inside a wrapper element that stops click propagation. When the sidebar's `disabled` prop turns true while the question is open and idle, the question is dismissed (nothing is deleted). A busy question (its DELETE in flight) stays until it settles, and `refocusAfterDelete` runs as today. Its trash, row and drop zone are natively disabled then (`AssetSidebar.svelte:289, :338, :369`), and so may be the modal's × (`ItemEditorModal.svelte:338`, the level-3 `closeDisabled={saving}`). Focus therefore takes the dismissal chain: the first connected, enabled, not-inert target, ending at `asideEl.closest('section.modal-panel')` (as `Modal.svelte:75-81` does). In a standalone mount there is no panel, and focus is left alone. Esc keeps `preventDefault` (Modal checks `defaultPrevented`, :93-95). After Cancel, focus goes to the trash (`trashEls`); after Delete, `refocusAfterDelete` as today. Behaviour change: Cancel waits during the request too (R54). | danger |
 | RunOverviewTab:348 Unpublish | Unpublish | primary |
 | MiniProjectModal:495 Publish | Publish | primary |
 | RunMiniProjectsTab:339, RunRosterTab:695 / :852, DashboardSidePanel:654, MiniProjectModal:485 | unchanged (Delete, Remove, Discard) | danger |
@@ -403,7 +407,7 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
 | 15 | QuestionTextModal close, dirty | in place of the footer buttons | Discard / danger | the close control that asked | as today |
 | 16 | VersionsPage Esc in the create form | in place of the form's Cancel/Create (`div.submit`) | Discard / danger | the field where Esc was pressed | as today ("+ Add version") |
 | 17 | VersionsPage enable/disable | a confirm row (`li.ask-row`) under the version row, above an open `li.dup-row` (frozen while asking) | Enable or Disable / primary | the trigger | after success, while the reload runs (`load()` shows a Skeleton for the whole list, `VersionsPage.svelte:215-216`): the page's `<h1>` (R54). Once `busy` clears: the swapped button in the same slot, found by version id. After a failure (no reload): the trigger, once `busy` clears |
-| 18 | VersionsPage delete draft | a confirm row under the version row | Delete / danger | the trash | after success, while the reload runs: the page's `<h1>` (`VersionsPage.svelte:210`; it gets `tabindex="-1"`) (R54). After a failure: the trash, once `busy` clears. Once `busy` clears: the next row's first control, else the previous, else "+ Add version", resolved by version id before the reload |
+| 18 | VersionsPage delete draft | a confirm row under the version row | Delete / danger | the trash | after success, while the reload runs: the page's `<h1>` (`VersionsPage.svelte:210`; it gets `tabindex="-1"`) (R54). After a failure: the trash, once `busy` clears. After success, once `busy` clears: the next row's first control, else the previous, else "+ Add version", resolved by version id before the reload |
 | 19 | delete item (item modal trash) | ItemEditorModal's body-top row. ItemEditorModal asks (it has `item.title`), re-checks `trashDisabled` after the await, then calls `onDeleteItem`; `VersionEditPage.deleteOpenItem` (`:261`) drops its `confirm` | Delete / danger | the trash | as today (`seq-<sid>-header`) |
 | 20 | VersionEditPage publish / archive / revert / disable / enable | in place of the whole bottom bar (`div.state-actions`). `vid` is captured before asking (R49). The question is dismissed on a version switch by an `$effect` like `settingsOpen`'s (`VersionEditPage.svelte:339-342`); a dismissal while busy closes it | the verb / primary | the trigger | the first button of the new bar, else the `<h1>` course link |
 | 21 | VersionEditPage delete version | in place of the whole bottom bar | Delete / danger | the trigger | as today (navigates away) |
@@ -500,7 +504,8 @@ Then a whole-branch review (fresh Opus + Fable) and a Safari pass, one step at a
   - the page row: Enter on a block header with a dirty rename elsewhere → Cancel → focus on that header; a mouse-style trigger (nothing focused) → Cancel → `scrollTo` with the saved position and focus on the `<h1>` course link; Discard at the version root → focus not on `<body>`; the tree is inert and the settings button `aria-disabled` while asking;
   - #19 with the DELETE held: focus on the busy confirm; on failure the trash;
   - #4, #5, #17, #18 with the reload held: focus is never `<body>`, and it reaches the final target once `busy` clears. With the request held and failing: focus stays on the busy confirm, then goes to the trigger;
-  - AssetSidebar turning `disabled` while asking: the question closes and focus is not `<body>`;
+  - AssetSidebar turning `disabled` while asking (idle): the question closes and focus goes to the panel. The test wraps the sidebar in `<section class="modal-panel" tabindex="-1">`. While busy, the question stays;
+  - #20 success and #8 failure: focus is on the re-rendered trigger, not `<body>`;
   - the tree with block 1, sequence 1 and item 1: one question shows, under the right node, and D39 moves it between them;
   - a tree question is dismissed when its node leaves `open-focus`.
 - **Inert pins to update:** `ItemEditorModal.svelte.test.ts:303-308` (`bodyInert` → the wrapper) and `VersionEditPage.svelte.test.ts:843`, `:873`, `:891`.
