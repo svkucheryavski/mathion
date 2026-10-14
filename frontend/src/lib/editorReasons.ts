@@ -38,7 +38,12 @@ export function duplicateVersionReason(v: V): string | null {
   return v.is_disabled ? 'Duplicate — enable the version first' : null;
 }
 
-/** D3: appended to the confirm() of an action that can close or unmount a draft. */
+/** R51: every navigation question, and the D10 quiz-edit question. */
+export const DISCARD_CONTINUE = 'Discard unsaved changes and continue?';
+/** R51: every close or Esc question: closing is the action itself. */
+export const DISCARD = 'Discard unsaved changes?';
+
+/** D3: appended to the question of an action that can close or unmount a draft. */
 export function unsavedSuffix(anyDirty: boolean): string {
   return anyDirty ? ' Unsaved edits may be lost.' : '';
 }

@@ -185,7 +185,7 @@ const originalFetch = globalThis.fetch;
 
 export async function renderQuiz(
   server: QuizServer,
-  over: { version?: Partial<AdminTreeVersion>; item?: Partial<AdminTreeItem> } = {},
+  over: { version?: Partial<AdminTreeVersion>; item?: Partial<AdminTreeItem>; page?: boolean } = {},
 ) {
   globalThis.fetch = vi.fn((url: string, init?: RequestInit) => server.handle(String(url), init)) as unknown as typeof fetch;
   const target = document.createElement('div');
@@ -201,6 +201,7 @@ export async function renderQuiz(
       stillOnVid: () => true, onRequestClose, onDeleteItem, deleting: false,
     },
     onRegistry: (r: DirtyRegistry) => { registry = r; },
+    withPage: over.page ?? false,
   });
   const cmp = mount(Harness, { target, props });
   mounted = { cmp, target };

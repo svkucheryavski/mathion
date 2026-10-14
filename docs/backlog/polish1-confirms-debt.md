@@ -16,3 +16,11 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 - **Focus ring clearance in `tr.delete-row` / `.ro-confirm-row`:** `td` has 0 top padding, so the ring (2px offset + 2px) overlaps the row above's border. Cosmetic; check in the Safari pass. (Fable)
 - **D42 with a wrapped warning:** with `align="end"` and a long email or filename, the `.warning` lines stay left-ragged while the block sits at the right edge. Check at 1000px in the Safari pass. (Fable)
 - **AssetSidebar's disable effect finds the row by its `data-testid`** (`AssetSidebar.svelte`, `asset-row-${id}`): a testid rename would silently break the dismissal focus path. Fix: a `data-asset-id` on the `li`, or a `rowEls` record like `trashEls`. (Fable, round 2)
+
+## Task 2
+
+- **Shared question objects** (`askInPlace.svelte.ts` `DISCARD_ASK` / `DISCARD_NAV_ASK`, `AskSlot` keyed on `ask.current`): a dismiss and a re-ask in the same flush keep the key, so no fresh InlineConfirm (no `takeFocus`, stale R50 timer). Practically unreachable today; fix by asking with `{ ...DISCARD_ASK }`. (Opus lane)
+- **Nav-Discard relies on the navigation unmounting the owner** (`DashboardSidePanel`, `MiniProjectModal` `answerNav(true)`): a future same-page `?param` navigation would leave the drawer reset / the modal open and empty with focus wherever the route puts it. Today's routes unmount both. (both lanes)
+- **ItemEditorModal trash while the page question is drawn there** returns silently (`if (trashDisabled || asking) return;`) instead of R53's "refuse the same way" (focus to that question's Cancel); the trash is aria-disabled with "Answer the question first". (Fable lane)
+- **DirtyGuard one-tick join window** after an answer: a second navigation in the same microtask turn joins the already-answered promise and, after Cancel, is refused without asking. Negligible. (Fable lane)
+- **ItemEditorModal #19 `back` chain has no panel fallback** (`[trashEl, modalClose(labelId)]`): if both were unusable focus would stay put. Unreachable today (× is disabled only while saving/deleting, neither can start while the body-top question asks; `deleting` is false by `finally`). Appending `modalPanel(labelId)` would make it symmetric with PageAsk's fallback. (Opus lane, round 2)

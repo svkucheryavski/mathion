@@ -9,6 +9,8 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import MarkdownEditor from '../editor/MarkdownEditor.svelte';
   import DirtyGuard from '../editor/DirtyGuard.svelte';
+  import { DISCARD, DISCARD_CONTINUE } from '../../lib/editorReasons';
+  import { refused, type GuardAsk } from '../../lib/askInPlace.svelte';
   import Button from '../ui/Button.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import Modal from '../ui/Modal.svelte';
@@ -106,6 +108,14 @@
   });
 
   let pendingClose = $state(false);
+  // Polish 1 (D37): the × question also asks for a navigation ('nav'), which waits on it.
+  let closeSource = $state<'close' | 'nav'>('close');
+  let navAnswer: ((ok: boolean) => void) | null = null;
+  function answerNav(ok: boolean) {
+    const r = navAnswer;
+    navAnswer = null;
+    r?.(ok);
+  }
   let pendingPublishConfirm = $state(false);
   let publishing = $state(false);
 
@@ -298,15 +308,22 @@
     );
   }
 
+  function focusConfirmCancel() {
+    const c = panel()?.querySelector<HTMLElement>('.modal-foot .inline-confirm button.cancel');
+    c?.closest('.inline-confirm')?.scrollIntoView?.({ block: 'nearest' });
+    c?.focus();
+  }
+
   // ×, Esc and create-mode Cancel. While a confirm shows they never close:
   // focus goes back to the confirm's Cancel.
   function requestClose() {
     if (submitting) return;
     if (confirmOpen) {
-      panel()?.querySelector<HTMLElement>('.modal-foot .inline-confirm button.cancel')?.focus();
+      focusConfirmCancel();
       return;
     }
     if (dirty) {
+      closeSource = 'close';
       pendingClose = true;
       return;
     }
@@ -314,8 +331,30 @@
     onClose();
   }
 
+  // DirtyGuard's `ask`. While the publish or × question is open, a navigation
+  // is refused and focus goes back to that question (R53).
+  function askNav(): GuardAsk {
+    if (confirmOpen) {
+      focusConfirmCancel();
+      return refused();
+    }
+    closeSource = 'nav';
+    pendingClose = true;
+    const promise = new Promise<boolean>((r) => { navAnswer = r; });
+    return {
+      promise,
+      dismiss: () => {
+        if (!navAnswer) return;
+        pendingClose = false;
+        answerNav(false);
+      },
+      focusCancel: focusConfirmCancel,
+    };
+  }
+
   async function cancelClose() {
     pendingClose = false;
+    answerNav(false);
     await tick();
     closeX()?.focus();
   }
@@ -323,6 +362,11 @@
   function confirmDiscard() {
     pendingClose = false;
     uploadAbortController?.abort();
+    // A navigation goes ahead and unmounts the modal; × closes it.
+    if (closeSource === 'nav') {
+      answerNav(true);
+      return;
+    }
     onClose();
   }
 
@@ -473,7 +517,7 @@
   }
 </script>
 
-<DirtyGuard isDirty={() => dirty && !submitting} />
+<DirtyGuard isDirty={() => dirty && !submitting} ask={askNav} />
 
 {#snippet head()}
   <h2 id="mp-modal-title" class="mpm-heading" title={heading} bind:this={titleEl}>{heading}</h2>
@@ -485,7 +529,7 @@
     <InlineConfirm
       row
       takeFocus
-      warning="Discard unsaved changes?"
+      warning={closeSource === 'nav' ? DISCARD_CONTINUE : DISCARD}
       confirmLabel="Discard"
       confirmDataAction="confirm-discard"
       onCancel={() => void cancelClose()}

@@ -12,8 +12,8 @@ import { SvelteSet } from 'svelte/reactivity';
 // Erased shape — the registry stores trackers across all form shapes.
 // The concrete tracker types still flow through their owning form; only
 // the registry needs to forget the parameter. `discard` (Slice-5a D3) drops
-// the tracker's draft when the user confirms the "Discard unsaved changes?"
-// prompt, so a confirmed discard never re-prompts on the next navigation.
+// the tracker's draft when the user answers Discard to the page's question,
+// so a discard never asks again on the next navigation.
 export type RegisteredTracker = { readonly isDirty: boolean; discard?: () => void };
 
 export const DIRTY_REGISTRY_KEY = Symbol('dirtyRegistry');

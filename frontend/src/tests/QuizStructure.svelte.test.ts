@@ -5,6 +5,7 @@ import {
 } from './support/quizHarness.svelte';
 import { DISCARD_PROMPT, FORBIDDEN_TITLE, WAIT_TITLE } from '../lib/quizEdits.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
+import { DISCARD } from '../lib/editorReasons';
 
 afterEach(cleanup);
 
@@ -42,25 +43,22 @@ describe('Adding a question (5d T8)', () => {
     await settle();
     expect(r.anyDirty()).toBe('false');
     expect(topPanel().querySelector('input[aria-label="Decimals"]')).not.toBeNull();
-    const ask = vi.spyOn(window, 'confirm');
     footBtn('Cancel').click();
     await settle();
-    expect(ask).not.toHaveBeenCalled();
     expect(isL3Open()).toBe(false);
     expect(posts(s)).toEqual([]);
     expect(document.activeElement).toBe(addQ());
   });
 
-  it('typed text is unsaved work; Cancel asks first', async () => {
+  it('typed text is unsaved work; Cancel asks in the footer first (#13)', async () => {
     const r = await renderQuiz(new QuizServer([]));
     addQ().click();
     await settle();
     typeInto(area(), 'Draft');
     expect(r.anyDirty()).toBe('true');
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     footBtn('Cancel').click();
     await settle();
-    expect(ask).toHaveBeenCalledWith(DISCARD_PROMPT);
+    expect(text(topPanel().querySelector('footer.modal-foot .inline-confirm .warning'))).toBe(DISCARD);
     expect(isL3Open()).toBe(true);
   });
 
@@ -138,10 +136,8 @@ describe('Adding a question (5d T8)', () => {
     radio('Single choice').click();
     await settle();
     expect(r.anyDirty()).toBe('false');
-    const ask = vi.spyOn(window, 'confirm');
     footBtn('Cancel').click();
     await settle();
-    expect(ask).not.toHaveBeenCalled();
     expect(isL3Open()).toBe(false);
   });
 

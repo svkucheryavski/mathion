@@ -8,6 +8,8 @@
   import Modal from '../ui/Modal.svelte';
   import IconButton from '../ui/IconButton.svelte';
   import Button from '../ui/Button.svelte';
+  import AskSlot from '../ui/AskSlot.svelte';
+  import { focusAfter, modalClose, usable, useModalAsk } from '../../lib/askInPlace.svelte';
   import ItemMark from '../course/ItemMark.svelte';
   import PageBody from './item/PageBody.svelte';
   import VideoBody from './item/VideoBody.svelte';
@@ -38,7 +40,8 @@
     itemCount: number;
     stillOnVid: (savedVid: number) => boolean;
     onRequestClose: () => void;
-    onDeleteItem: () => void;
+    // #19: called after the body-top question's Delete; resolves when the page's DELETE settles.
+    onDeleteItem: () => Promise<void>;
     // D9: the page's DELETE for THIS item is in flight.
     deleting?: boolean;
   };
@@ -56,6 +59,12 @@
   const canEditText = $derived(perms.canEditTextFields);
   // Slice-5d: a quiz saves each edit itself — no footer, no body Title row.
   const isQuiz = $derived(item.type === 'quiz');
+  // ---- Polish 1: the body-top row (#19) and the page question while this is
+  //      the top modal (R46). Without a footer (a quiz, a read-only item) the
+  //      page question asks in the body-top row too; R53 keeps the two apart.
+  const { own: bodyAsk, page, here: pageHere } = useModalAsk(labelId);
+  const hasFoot = $derived(canEditText && !isQuiz);
+  const asking = $derived(bodyAsk.open || pageHere());
   // Memoised per vid (as ItemEditPage did): bodies compare it by identity.
   const assetContext = $derived(courseAssetContext(vid));
 
@@ -97,7 +106,7 @@
   });
 
   function openTitle() {
-    if (!quizEdits || titleEdit || deleting || quizEdits.locked) return;
+    if (!quizEdits || titleEdit || deleting || asking || quizEdits.locked) return;
     if (!quizEdits.request()) return;
     const savedVid = vid;
     titleEdit = new InlineEdit<string>({
@@ -227,7 +236,7 @@
     if (!(e.target instanceof Element)) return;
     if (e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
     e.preventDefault();
-    if (!isQuiz) void save();
+    if (!isQuiz && !asking) void save();   // R48: nothing saves while a question asks
   }
 
   // ---- D9: the header trash. The page owns the delete flow. ----
@@ -244,6 +253,44 @@
   );
   const trashDisabled = $derived(!!structReason || guardDirty || bodyBusy || frozen);
   let trashEl = $state<HTMLButtonElement>();
+  // #19: the delete asks in the body-top row; the page owns the DELETE (D9).
+  async function askDelete() {
+    if (trashDisabled || asking) return;
+    const a = await bodyAsk.ask({
+      warning: `Delete item "${item.title}"? This cannot be undone.`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-item',
+    });
+    if (a === 'cancel') { void focusAfter(() => trashEl); return; }
+    if (a !== 'confirm') return;
+    // After the question goes: the trash, else × (the trash disables when the
+    // right to delete goes), never <body>.
+    const back = () => [trashEl, modalClose(labelId)].find(usable);
+    // R49: a save or an edit may have started while it asked.
+    if (!alive || trashDisabled) {
+      const free = bodyAsk.focusFree;
+      bodyAsk.dismiss();
+      if (alive && free) void focusAfter(back);
+      return;
+    }
+    try {
+      await onDeleteItem();
+    } finally {
+      // Success unmounts this modal; a failure brings focus back to the trash
+      // if it was still in the question (R54, R57).
+      if (alive) {
+        const free = bodyAsk.focusFree;
+        bodyAsk.settle();
+        if (free) void focusAfter(back);
+      }
+    }
+  }
+
+  // × and Esc: while the body-top row asks, back to its Cancel (R48). The page
+  // handles its own question (VersionEditPage.requestCloseItem).
+  function requestClose() {
+    if (bodyAsk.open) { bodyAsk.focusCancel(); return; }
+    onRequestClose();
+  }
   // A failed DELETE un-freezes the modal: focus goes back to the trash, or to ×
   // if the trash is still disabled (the disabled trash had dropped it to body).
   let wasDeleting = untrack(() => deleting);
@@ -296,7 +343,8 @@
                 onclick={() => titleEdit?.cancel()} />
   {:else if isQuiz && canEditText}
     <IconButton glyph="pencil" size="sm" borderless id={titleEditId} bind:element={titleEditBtn}
-                title={quizEdits?.locked ? WAIT_TITLE : 'Edit title'} aria-label="Edit title"
+                title={asking ? 'Answer the question first' : quizEdits?.locked ? WAIT_TITLE : 'Edit title'}
+                aria-label="Edit title" aria-disabled={asking}
                 disabled={!!quizEdits?.locked || deleting} onclick={openTitle} />
   {/if}
   <span class="item-ctx">{blockTitle} › {seqTitle} · item {itemIndex} of {itemCount}</span>
@@ -305,131 +353,145 @@
       glyph="trash"
       size="sm"
       danger
-      title={trashTitle}
+      title={asking ? 'Answer the question first' : trashTitle}
       aria-label="Delete item"
+      aria-disabled={asking}
       disabled={trashDisabled}
       bind:element={trashEl}
-      onclick={onDeleteItem}
+      onclick={() => void askDelete()}
     />
   </span>
 {/snippet}
 
 {#snippet foot()}
   <span class="dirty mono">{saveDirty ? 'unsaved changes' : ''}</span>
-  <Button
-    variant="ghost"
-    disabled={!saveDirty || frozen || bodyBusy}
-    title={saveDirty ? undefined : 'No changes to discard'}
-    onclick={discard}
-  >Discard</Button>
-  <Button
-    variant="primary"
-    disabled={saveBlocked}
-    title={saveDirty ? undefined : 'No changes to save'}
-    loading={saving}
-    onclick={() => void save()}
-  >Save</Button>
+  {#if pageHere()}
+    <AskSlot ask={page!.ask} />
+  {:else}
+    <Button
+      variant="ghost"
+      disabled={!saveDirty || frozen || bodyBusy}
+      title={saveDirty ? undefined : 'No changes to discard'}
+      onclick={discard}
+    >Discard</Button>
+    <Button
+      variant="primary"
+      disabled={saveBlocked}
+      title={saveDirty ? undefined : 'No changes to save'}
+      loading={saving}
+      onclick={() => void save()}
+    >Save</Button>
+  {/if}
 {/snippet}
 
 <Modal
   labelledby={labelId}
   autofocusSelector={`#${titleEditId}, [data-autofocus], header.modal-head button[aria-label="Close"]`}
-  {onRequestClose}
+  onRequestClose={requestClose}
   closeDisabled={deleting || saving}
-  bodyInert={deleting}
   header={head}
-  footer={canEditText && !isQuiz ? foot : undefined}
+  footer={hasFoot ? foot : undefined}
 >
-  {#if titleEdit?.error}<p class="field-err" id={titleErrId} role="alert">{titleEdit.error}</p>{/if}
-  {#if !isQuiz}
-    <div class="field-row">
-      <span class="field-label">Title</span>
-      {#if canEditText}
-        <div class="field">
-          <input
-            bind:this={titleEl}
-            class="plain-input"
-            type="text"
-            aria-label="Title"
-            maxlength="200"
-            required
-            data-autofocus
-            readonly={frozen}
-            aria-invalid={titleError ? 'true' : undefined}
-            aria-describedby={titleError ? titleErrId : undefined}
-            bind:value={titleTracker.current.title}
-            oninput={() => { if (titleError) titleError = null; }}
-          />
-          {#if titleError}<p class="field-err" id={titleErrId}>{titleError}</p>{/if}
-        </div>
-      {:else}
-        <span class="ro-value">{item.title}</span>
-      {/if}
-    </div>
+  {#if bodyAsk.open}
+    <AskSlot ask={bodyAsk} />
+  {:else if pageHere() && !hasFoot}
+    <AskSlot ask={page!.ask} />
   {/if}
+  <!-- R48: the rest of the body freezes while a question asks or the item
+       deletes; the question itself stays live (so no bodyInert). The
+       attribute, not the property: jsdom lacks `inert`. -->
+  <div class="body-rest" {@attach (el) => { el.toggleAttribute('inert', deleting || asking); }}>
+    {#if titleEdit?.error}<p class="field-err" id={titleErrId} role="alert">{titleEdit.error}</p>{/if}
+    {#if !isQuiz}
+      <div class="field-row">
+        <span class="field-label">Title</span>
+        {#if canEditText}
+          <div class="field">
+            <input
+              bind:this={titleEl}
+              class="plain-input"
+              type="text"
+              aria-label="Title"
+              maxlength="200"
+              required
+              data-autofocus
+              readonly={frozen}
+              aria-invalid={titleError ? 'true' : undefined}
+              aria-describedby={titleError ? titleErrId : undefined}
+              bind:value={titleTracker.current.title}
+              oninput={() => { if (titleError) titleError = null; }}
+            />
+            {#if titleError}<p class="field-err" id={titleErrId}>{titleError}</p>{/if}
+          </div>
+        {:else}
+          <span class="ro-value">{item.title}</span>
+        {/if}
+      </div>
+    {/if}
 
-  {#if versionDisabled}
-    <!-- A video's preview is an external iframe and still shows (§4), so its
-         note names only editing (user, T3c review). -->
-    <p class="ro-note">
-      {item.type === 'video'
-        ? 'Editing is unavailable while this version is disabled — enable it to edit.'
-        : 'Preview is unavailable while this version is disabled — enable it to preview or edit.'}
-    </p>
-  {/if}
+    {#if versionDisabled}
+      <!-- A video's preview is an external iframe and still shows (§4), so its
+           note names only editing (user, T3c review). -->
+      <p class="ro-note">
+        {item.type === 'video'
+          ? 'Editing is unavailable while this version is disabled — enable it to edit.'
+          : 'Preview is unavailable while this version is disabled — enable it to preview or edit.'}
+      </p>
+    {/if}
 
-  {#if item.type === 'static_page'}
-    <PageBody
-      bind:this={body}
-      {item}
-      {vid}
-      {assetContext}
-      editable={canEditText}
-      {versionDisabled}
-      {frozen}
-      {stillOnVid}
-      bind:saveDirty={bodySaveDirty}
-      bind:guardDirty={bodyGuardDirty}
-      bind:busy={bodyBusy}
-    />
-  {:else if item.type === 'video'}
-    <VideoBody
-      bind:this={body}
-      {item}
-      {vid}
-      editable={canEditText}
-      {frozen}
-      {stillOnVid}
-      bind:saveDirty={bodySaveDirty}
-      bind:guardDirty={bodyGuardDirty}
-    />
-  {:else if item.type === 'quiz'}
-    <QuizBody
-      bind:this={body}
-      itemId={item.id}
-      {vid}
-      {version}
-      {perms}
-      {assetContext}
-      {versionDisabled}
-      {stillOnVid}
-      bind:guardDirty={bodyGuardDirty}
-      bind:busy={bodyBusy}
-    />
-  {:else if item.type === 'interactive_app'}
-    <AppBody
-      bind:this={body}
-      {item}
-      {vid}
-      editable={canEditText}
-      {versionDisabled}
-      {frozen}
-      {stillOnVid}
-      bind:busy={bodyBusy}
-    />
-  {:else}
-    <p class="muted">This item type can't be edited here.</p>
-  {/if}
+    {#if item.type === 'static_page'}
+      <PageBody
+        bind:this={body}
+        {item}
+        {vid}
+        {assetContext}
+        editable={canEditText}
+        {versionDisabled}
+        {frozen}
+        {stillOnVid}
+        bind:saveDirty={bodySaveDirty}
+        bind:guardDirty={bodyGuardDirty}
+        bind:busy={bodyBusy}
+      />
+    {:else if item.type === 'video'}
+      <VideoBody
+        bind:this={body}
+        {item}
+        {vid}
+        editable={canEditText}
+        {frozen}
+        {stillOnVid}
+        bind:saveDirty={bodySaveDirty}
+        bind:guardDirty={bodyGuardDirty}
+      />
+    {:else if item.type === 'quiz'}
+      <QuizBody
+        bind:this={body}
+        itemId={item.id}
+        {vid}
+        {version}
+        {perms}
+        {assetContext}
+        {versionDisabled}
+        {stillOnVid}
+        bind:guardDirty={bodyGuardDirty}
+        bind:busy={bodyBusy}
+      />
+    {:else if item.type === 'interactive_app'}
+      <AppBody
+        bind:this={body}
+        {item}
+        {vid}
+        editable={canEditText}
+        {versionDisabled}
+        {frozen}
+        {stillOnVid}
+        bind:busy={bodyBusy}
+      />
+    {:else}
+      <p class="muted">This item type can't be edited here.</p>
+    {/if}
+  </div>
 </Modal>
 
 <style>
@@ -490,4 +552,7 @@
   }
   .muted { margin: 0; font-size: 13px; color: var(--muted); }
   .dirty { flex: 1; font-size: 11.5px; color: var(--status-needs-revision-fg); /* ref 1751 */ }
+  /* Layout-free: the body's children stay the modal body's flex items, at full size. */
+  .body-rest { display: contents; }
+  .body-rest > :global(*) { flex: 0 0 auto; }
 </style>

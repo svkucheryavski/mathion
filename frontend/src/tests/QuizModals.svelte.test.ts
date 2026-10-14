@@ -2,7 +2,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   QuizServer, q, mkVersion, renderQuiz, cleanup, settle, panel, topPanel, cards, byName, typeInto, press, live, toastTexts, text,
 } from './support/quizHarness.svelte';
-import { DISCARD_PROMPT, FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
+import { DISCARD, DISCARD_CONTINUE } from '../lib/editorReasons';
+import { FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
+import { navigate } from '../lib/router.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 
 afterEach(cleanup);
@@ -12,6 +14,10 @@ const footBtn = (label: string) =>
   [...topPanel().querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => text(b) === label)!;
 const qWrites = (s: QuizServer) => s.writes().filter((c) => /^\/api\/questions\/\d+$/.test(c.path));
 const isL3Open = () => document.querySelectorAll('section.modal-panel').length === 2;
+// A question in place of the top modal's footer buttons (Polish 1).
+const footAsk = () => topPanel().querySelector<HTMLElement>('footer.modal-foot .inline-confirm');
+const footAskBtn = (k: 'confirm' | 'cancel') => footAsk()?.querySelector<HTMLButtonElement>(`button.${k}`) ?? null;
+const xOf = (p: HTMLElement) => p.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
 
 async function openText(i = 0) { byName(cards()[i], `Edit question ${i + 1}`)!.click(); await settle(); }
 
@@ -41,28 +47,49 @@ describe('Question text modal (5d T7)', () => {
     expect(live()).toBe('Saved');
   });
 
-  it('closing without changes just closes; with changes it asks; Esc closes only the top modal', async () => {
+  it('closing without changes just closes; with changes it asks in the footer (#15); Esc closes only the top modal', async () => {
     const r = await renderQuiz(new QuizServer([q({ id: 1 })]));
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await openText();
     footBtn('Cancel').click();
     await settle();
-    expect(ask).not.toHaveBeenCalled();
     expect(isL3Open()).toBe(false);
     await openText();
     typeInto(area(), 'changed');
     expect(r.anyDirty()).toBe('true');
     press(area(), 'Escape');
     await settle();
-    expect(ask).toHaveBeenCalledWith(DISCARD_PROMPT);
+    expect(text(footAsk()!.querySelector('.warning'))).toBe(DISCARD);
+    expect(text(footAskBtn('confirm'))).toBe('Discard');
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    expect(topPanel().querySelector('div.modal-body')!.hasAttribute('inert')).toBe(true);
     expect(isL3Open()).toBe(true);
-    expect(r.onRequestClose).not.toHaveBeenCalled();
-    ask.mockReturnValue(true);
+    footAskBtn('cancel')!.click();
+    await settle();
+    expect(footAsk()).toBeNull();
+    expect(document.activeElement).toBe(xOf(topPanel()));      // Esc counts as ×
     press(area(), 'Escape');
+    await settle();
+    footAskBtn('confirm')!.click();
     await settle();
     expect(isL3Open()).toBe(false);
     expect(r.onRequestClose).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+  });
+
+  it('the footer Cancel asks; Cancel on the question returns to it; ⌘S saves nothing while it asks (R48)', async () => {
+    const s = new QuizServer([q({ id: 1 })]);
+    await renderQuiz(s);
+    await openText();
+    typeInto(area(), 'changed');
+    footBtn('Cancel').click();
+    await settle();
+    const e = press(footAskBtn('cancel')!, 's', { metaKey: true });
+    await settle();
+    expect(e.defaultPrevented).toBe(true);
+    expect(qWrites(s)).toEqual([]);
+    footAskBtn('cancel')!.click();
+    await settle();
+    expect(document.activeElement).toBe(footBtn('Cancel'));
   });
 
   it('empty text shows an error inside the modal and sends nothing', async () => {
@@ -183,18 +210,24 @@ describe('Explanation modal (5d T7)', () => {
     expect(document.activeElement).toBe(byName(cards()[0], 'Edit explanation for question 1'));
   });
 
-  it('Remove confirms, sends null, and focus goes to "+ Add explanation"', async () => {
+  it('Remove asks in the footer (#8), sends null on Remove, and focus goes to "+ Add explanation"', async () => {
     const s = new QuizServer([q({ id: 1, explanation_md: 'Old', explanation_html: '<p>Old</p>' })]);
     await renderQuiz(s);
     byName(cards()[0], 'Edit explanation for question 1')!.click();
     await settle();
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     byName(topPanel(), 'Remove explanation')!.click();
     await settle();
-    expect(ask).toHaveBeenCalledWith('Remove the explanation for question 1?');
+    expect(text(footAsk()!.querySelector('.warning'))).toBe('Remove the explanation for question 1?');
+    expect(text(footAskBtn('confirm'))).toBe('Remove');
+    expect(footAskBtn('confirm')!.classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    footAskBtn('cancel')!.click();
+    await settle();
     expect(qWrites(s)).toEqual([]);
-    ask.mockReturnValue(true);
+    expect(document.activeElement).toBe(byName(topPanel(), 'Remove explanation'));
     byName(topPanel(), 'Remove explanation')!.click();
+    await settle();
+    footAskBtn('confirm')!.click();
     await settle();
     expect(qWrites(s).map((c) => c.body)).toEqual([{ explanation_md: null }]);
     expect(cards()[0].querySelector('.qexpl')).toBeNull();
@@ -250,23 +283,24 @@ describe('Level 3 — review fixes (5d T7)', () => {
     expect(pd).toHaveBeenCalledTimes(1);
   });
 
-  it('Remove keeps focus while its request runs, and after a failure', async () => {
+  it('Remove: the busy confirm holds focus while the request runs; after a failure focus is on "Remove explanation" (R54)', async () => {
     const s = new QuizServer([q({ id: 1, explanation_md: 'Old', explanation_html: '<p>Old</p>' })]);
     const hold = s.hold('PATCH', /\/api\/questions\/1$/);
     await renderQuiz(s);
     byName(cards()[0], 'Edit explanation for question 1')!.click();
     await settle();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const rm = byName(topPanel(), 'Remove explanation')!;
-    rm.focus();
-    rm.click();
+    byName(topPanel(), 'Remove explanation')!.click();
     await settle();
-    expect(rm.disabled).toBe(false);
-    expect(document.activeElement).toBe(rm);
-    rm.click();                                   // re-entry is blocked in the handler
+    const confirm = footAskBtn('confirm')!;
+    confirm.click();
+    await settle();
+    expect(document.activeElement).toBe(confirm);
+    expect(confirm.getAttribute('aria-busy')).toBe('true');
+    confirm.click();                              // busy: nothing answers twice
     hold.fail(500, 'Boom');
     await settle();
     expect(qWrites(s).length).toBe(1);
+    expect(footAsk()).toBeNull();
     expect(text(topPanel().querySelector('.ex-err'))).toBe('Boom');
     expect(document.activeElement).toBe(byName(topPanel(), 'Remove explanation'));
   });
@@ -289,11 +323,29 @@ describe('Level 3 — review fixes (5d T7)', () => {
     expect(footBtn('Save').disabled).toBe(true);
     expect(footBtn('Save').title).toBe(FORBIDDEN_TITLE);
     expect(document.activeElement).toBe(area());     // never left on the disabled Save
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     footBtn('Cancel').click();
+    await settle();
+    footAskBtn('confirm')!.click();
     await settle();
     expect(isL3Open()).toBe(false);
     expect(panel().contains(document.activeElement)).toBe(true);
+  });
+
+  it('#8 R49: the right to edit goes while Remove asks; Remove sends nothing and focus goes to the text (never <body>)', async () => {
+    const s = new QuizServer([q({ id: 1, explanation_md: 'Old', explanation_html: '<p>Old</p>' })]);
+    const r = await renderQuiz(s);
+    byName(cards()[0], 'Edit explanation for question 1')!.click();
+    await settle();
+    byName(topPanel(), 'Remove explanation')!.click();
+    await settle();
+    archive(r);
+    await settle();
+    footAskBtn('confirm')!.click();
+    await settle();
+    expect(qWrites(s)).toEqual([]);
+    expect(footAsk()).toBeNull();
+    expect(isL3Open()).toBe(true);
+    expect(document.activeElement).toBe(area());
   });
 
   it('R10 in Preview (no textarea): a 409 on a focused Save moves focus to Cancel', async () => {
@@ -320,10 +372,9 @@ describe('Level 3 — review fixes (5d T7)', () => {
     const r = await renderQuiz(s);
     byName(cards()[0], 'Edit explanation for question 1')!.click();
     await settle();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const rm = byName(topPanel(), 'Remove explanation')!;
-    rm.focus();
-    rm.click();
+    byName(topPanel(), 'Remove explanation')!.click();
+    await settle();
+    footAskBtn('confirm')!.click();
     await settle();
     archive(r);
     await settle();
@@ -358,5 +409,56 @@ describe('Level 3 — review fixes (5d T7)', () => {
     await settle();
     expect(qWrites(s)).toEqual([]);
     expect(isL3Open()).toBe(false);
+  });
+});
+
+describe('Level 3 — the page question (Polish 1 R46, R53)', () => {
+  it('a dirty level-3 modal + a navigation asks in its footer; Cancel keeps the text and focuses its ×', async () => {
+    await renderQuiz(new QuizServer([q({ id: 1 })]), { page: true });
+    await openText();
+    typeInto(area(), 'changed');
+    const before = location.pathname;
+    const nav = navigate('/l3-elsewhere');
+    await settle();
+    expect(text(footAsk()!.querySelector('.warning'))).toBe(DISCARD_CONTINUE);
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    expect(panel().querySelector('.inline-confirm')).toBe(footAsk());    // one question, at the top modal
+    expect(topPanel().querySelector('div.modal-body')!.hasAttribute('inert')).toBe(true);
+    footAskBtn('cancel')!.click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe(before);
+    expect(area().value).toBe('changed');
+    expect(document.activeElement).toBe(xOf(topPanel()));
+  });
+
+  it('with its own close question open, a navigation is refused: the address stays, focus on that question\'s Cancel', async () => {
+    await renderQuiz(new QuizServer([q({ id: 1 })]), { page: true });
+    byName(cards()[0], 'Add explanation to question 1')!.click();
+    await settle();
+    typeInto(area(), 'typed');
+    press(area(), 'Escape');
+    await settle();
+    const before = location.pathname;
+    xOf(topPanel()).focus();
+    await navigate('/l3-refused');
+    await settle();
+    expect(location.pathname).toBe(before);
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    expect(text(footAsk()!.querySelector('.warning'))).toBe(DISCARD);
+  });
+
+  it('Discard on the page question drops the edit and lets the navigation through', async () => {
+    const r = await renderQuiz(new QuizServer([q({ id: 1 })]), { page: true });
+    await openText();
+    typeInto(area(), 'changed');
+    const nav = navigate('/l3-discarded');
+    await settle();
+    footAskBtn('confirm')!.click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe('/l3-discarded');
+    expect(isL3Open()).toBe(false);
+    expect(r.anyDirty()).toBe('false');
   });
 });

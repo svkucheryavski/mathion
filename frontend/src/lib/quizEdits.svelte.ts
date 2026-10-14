@@ -4,8 +4,10 @@
 // one instance and exposes it as ItemBodyApi.edits.
 import { ApiError } from './api';
 import { pushToast } from '../stores/toasts.svelte';
+import { DISCARD_CONTINUE } from './editorReasons';
 
-export const DISCARD_PROMPT = 'Discard unsaved changes and continue?';
+// R51: the D10 question asks with the navigation text.
+export const DISCARD_PROMPT = DISCARD_CONTINUE;
 export const WAIT_TITLE = 'Wait for the save to finish';
 // An edit that stayed open through a 403/409 permission flip: it can only be cancelled (R10).
 export const FORBIDDEN_TITLE = 'This version can no longer be edited';

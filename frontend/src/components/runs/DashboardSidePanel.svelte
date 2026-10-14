@@ -32,6 +32,8 @@
   import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import DirtyGuard from '../editor/DirtyGuard.svelte';
+  import { DISCARD, DISCARD_CONTINUE } from '../../lib/editorReasons';
+  import { refused, type GuardAsk } from '../../lib/askInPlace.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatFileSize } from '../../lib/format';
   import { focusFirst } from '../../lib/focusFirst';
@@ -302,15 +304,52 @@
   // closes the panel. Cancel returns focus to where it was when the confirm
   // opened. While it asks, the rest of the drawer body is inert (`freeze`).
   let confirmDiscard = $state(false);
+  // Polish 1 (D37): a navigation asks here too ('nav') and waits on the answer.
+  let navAnswer: ((ok: boolean) => void) | null = null;
+  function answerNav(ok: boolean) {
+    const r = navAnswer;
+    navAnswer = null;
+    r?.(ok);
+  }
   // The confirm lives in the form: when the form goes (a thread load brings an
-  // evaluation), the question goes with it and the body thaws.
+  // evaluation), the question goes with it and the body thaws. A waiting
+  // navigation is cancelled (R55).
   $effect(() => {
-    if (!formShown && confirmDiscard) confirmDiscard = false;
+    if (!formShown && confirmDiscard) {
+      confirmDiscard = false;
+      answerNav(false);
+    }
   });
-  let discardSource: 'cancel' | 'close' = 'close';
+  let discardSource = $state<'cancel' | 'close' | 'nav'>('close');
   let discardReturnEl: HTMLElement | null = null;
 
-  function askDiscard(source: 'cancel' | 'close') {
+  function focusDiscardCancel() {
+    const c = discardEl?.querySelector<HTMLButtonElement>('button.cancel');
+    c?.closest('.inline-confirm')?.scrollIntoView?.({ block: 'nearest' });
+    c?.focus();
+  }
+
+  // DirtyGuard's `ask`. While the form's Cancel or × question is open, a
+  // navigation is refused and focus goes back to that question (R53).
+  function askNav(): GuardAsk {
+    if (confirmDiscard) {
+      focusDiscardCancel();
+      return refused();
+    }
+    askDiscard('nav');
+    const promise = new Promise<boolean>((r) => { navAnswer = r; });
+    return {
+      promise,
+      dismiss: () => {
+        if (!navAnswer) return;
+        confirmDiscard = false;
+        answerNav(false);
+      },
+      focusCancel: focusDiscardCancel,
+    };
+  }
+
+  function askDiscard(source: 'cancel' | 'close' | 'nav') {
     discardSource = source;
     // Safari does not focus a clicked button or radio: focus stays on <body> or
     // moves to the drawer's own panel (tabindex -1). Neither is a return target.
@@ -495,7 +534,7 @@
     if (submitting) return;
     // × (or Esc on ×) while the confirm asks: go to its Cancel, don't ask twice.
     if (confirmDiscard) {
-      discardEl?.querySelector<HTMLButtonElement>('button.cancel')?.focus();
+      focusDiscardCancel();
       return;
     }
     if (dirtyOnScreen) {
@@ -513,11 +552,17 @@
     }
     editing = false;
     resetForm();
+    // A navigation goes ahead; its target takes focus.
+    if (discardSource === 'nav') {
+      answerNav(true);
+      return;
+    }
     void focusAfterEdit();
   }
 
   async function cancelDiscard() {
     confirmDiscard = false;
+    answerNav(false);
     await tick();
     focusFirst([discardReturnEl, find<HTMLButtonElement>('button[data-test="cancel-button"]'), checkedRadio(), closeX()]);
   }
@@ -654,7 +699,7 @@
     <InlineConfirm
       row
       takeFocus
-      warning="Discard unsaved changes?"
+      warning={discardSource === 'nav' ? DISCARD_CONTINUE : DISCARD}
       confirmLabel="Discard"
       confirmDataAction="confirm-discard"
       onConfirm={discard}
@@ -902,7 +947,7 @@
       </section>
     {/if}
   {/if}
-  <DirtyGuard isDirty={() => dirtyOnScreen && !submitting} />
+  <DirtyGuard isDirty={() => dirtyOnScreen && !submitting} ask={askNav} />
 </Modal>
 
 <style>

@@ -150,22 +150,40 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     expect(input('Label').value).toBe('Draft');
     expect(footBtn('Save')!.disabled).toBe(true);
   });
-  it('close with changes prompts; discardAll (Back) closes', () => {
+  it('close with changes asks in place of the footer buttons (#10); Cancel → ×; discardAll (Back) closes', async () => {
     const p = render();
+    await settle();   // the mount's autofocus lands first, as it does on screen
     type(input('Label'), 'L2');
     expect(registry.isAnyDirty()).toBe(true);
-    const c = vi.spyOn(window, 'confirm').mockReturnValue(false);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    expect(c).toHaveBeenCalledWith('Discard unsaved changes and continue?');
+    flushSync();
+    const row = panel().querySelector('footer.modal-foot .inline-confirm')!;
+    expect(row.querySelector('.warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
+    expect(row.querySelector('button.confirm')!.textContent!.trim()).toBe('Discard');
+    expect(footBtn('Save')).toBeUndefined();
+    expect(panel().querySelector('div.modal-body')!.hasAttribute('inert')).toBe(true);
+    expect(document.activeElement).toBe(row.querySelector('button.cancel'));
+    (row.querySelector('button.cancel') as HTMLButtonElement).click();
+    await settle();
     expect(p.onClose).not.toHaveBeenCalled();
+    expect(input('Label').value).toBe('L2');
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
     registry.discardAll();
+    expect(p.onClose).toHaveBeenCalledTimes(1);
+  });
+  it('Discard on the close question closes', async () => {
+    const p = render();
+    type(input('Label'), 'L2');
+    panel().querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!.click();
+    flushSync();
+    panel().querySelector<HTMLButtonElement>('footer.modal-foot .inline-confirm button.confirm')!.click();
+    await settle();
     expect(p.onClose).toHaveBeenCalledTimes(1);
   });
   it('close with nothing changed closes at once', () => {
     const p = render();
-    const c = vi.spyOn(window, 'confirm');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    expect(c).not.toHaveBeenCalled();
+    expect(panel().querySelector('.inline-confirm')).toBeNull();
     expect(p.onClose).toHaveBeenCalledTimes(1);
   });
   it('read-only (published / archived / disabled): values as text, no footer, no inputs', () => {

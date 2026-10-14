@@ -322,6 +322,101 @@ describe('navigation guards', () => {
     history.pushState = realPush;
     dispose();
   });
+
+  // Polish 1 R47: DirtyGuard's `pending` — every call joins the open question.
+  function joiningGuard() {
+    let resolve: ((ok: boolean) => void) | null = null;
+    let pending: Promise<boolean> | null = null;
+    let asked = 0;
+    const dispose = registerNavigationGuard(() => {
+      if (pending) return pending;
+      asked++;
+      pending = new Promise<boolean>((r) => { resolve = r; }).then((ok) => { pending = null; return ok; });
+      return pending;
+    });
+    return { dispose, answer: (ok: boolean) => resolve!(ok), asked: () => asked };
+  }
+  // jsdom fires popstate for history.back() on the second macrotask.
+  const popTwice = async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('R47: a navigate to the current address while asking leaves the pending navigation intact', async () => {
+    const g = joiningGuard();
+    const pending = navigate('/x');
+    await navigate('/');            // the same address: returns at once and must not outdate '/x'
+    g.answer(true);
+    await pending;
+    expect(currentRoute.path).toBe('/x');
+    g.dispose();
+  });
+
+  it('R47: a double navigate to a guarded target + Discard pushes once', async () => {
+    const g = joiningGuard();
+    const push = vi.spyOn(history, 'pushState');
+    const a = navigate('/x');
+    const b = navigate('/x');
+    g.answer(true);
+    await a;
+    await b;
+    expect(g.asked()).toBe(1);
+    expect(push.mock.calls.filter(([, , u]) => u === '/x')).toHaveLength(1);
+    expect(currentRoute.path).toBe('/x');
+    push.mockRestore();
+    g.dispose();
+  });
+
+  it('R47: Back twice while asking + Discard lands on the second target', async () => {
+    await navigate('/a');
+    await navigate('/b');
+    await navigate('/c');
+    const g = joiningGuard();
+    history.back();
+    await popTwice();
+    history.back();
+    await popTwice();
+    expect(location.pathname).toBe('/a');
+    g.answer(true);
+    await popTwice();
+    expect(g.asked()).toBe(1);
+    expect(currentRoute.path).toBe('/a');
+    g.dispose();
+  });
+
+  it('R47: Back twice while asking + Cancel restores the address once', async () => {
+    await navigate('/a');
+    await navigate('/b');
+    await navigate('/c');
+    const g = joiningGuard();
+    history.back();
+    await popTwice();
+    history.back();
+    await popTwice();
+    const push = vi.spyOn(history, 'pushState');
+    g.answer(false);
+    await popTwice();
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(location.pathname).toBe('/c');
+    expect(currentRoute.path).toBe('/c');
+    push.mockRestore();
+    g.dispose();
+  });
+
+  it('R47: a link, then Back while asking, + Discard lands on the link', async () => {
+    await navigate('/a');
+    await navigate('/b');
+    const g = joiningGuard();
+    const link = navigate('/l');
+    history.back();
+    await popTwice();
+    g.answer(true);
+    await link;
+    await popTwice();
+    expect(currentRoute.path).toBe('/l');
+    expect(location.pathname).toBe('/l');
+    g.dispose();
+  });
 });
 
 describe('defaultLandingPath', () => {

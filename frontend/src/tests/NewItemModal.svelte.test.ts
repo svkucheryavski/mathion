@@ -114,13 +114,31 @@ describe('NewItemModal (Slice-5c T4, D10)', () => {
     expect(alert?.textContent).toContain('Content too large');
     expect(alert?.textContent).toContain('Bad type');
   });
-  it('close with typed input prompts; Cancel at the prompt keeps it open', () => {
+  it('close with typed input asks in place of the footer buttons (#11); Cancel goes back to the control that asked', async () => {
     const p = render();
+    await settle();   // the mount's autofocus lands first, as it does on screen
     type(titleIn(), 'half');
-    const c = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const row = () => panel().querySelector('footer.modal-foot .inline-confirm');
+    const footCancel = () => [...panel().querySelectorAll<HTMLButtonElement>('footer.modal-foot button')]
+      .find((b) => b.textContent!.trim() === 'Cancel' && !b.closest('.inline-confirm'));
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    expect(c).toHaveBeenCalledWith('Discard unsaved changes and continue?');
+    flushSync();
+    expect(row()!.querySelector('.warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
+    expect(document.activeElement).toBe(row()!.querySelector('button.cancel'));
+    (row()!.querySelector('button.cancel') as HTMLButtonElement).click();
+    await settle();
     expect(p.onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));   // Esc counts as ×
+    footCancel()!.click();
+    flushSync();
+    (row()!.querySelector('button.cancel') as HTMLButtonElement).click();
+    await settle();
+    expect(document.activeElement).toBe(footCancel());
+    footCancel()!.click();
+    flushSync();
+    (row()!.querySelector('button.confirm') as HTMLButtonElement).click();
+    await settle();
+    expect(p.onClose).toHaveBeenCalledTimes(1);
   });
   it('close with nothing typed closes at once', () => {
     const p = render();

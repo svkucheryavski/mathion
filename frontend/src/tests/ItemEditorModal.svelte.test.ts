@@ -116,6 +116,9 @@ const footBtn = (label: string) =>
 const dirtyText = () => panel().querySelector('footer.modal-foot .dirty')!.textContent;
 const anyDirty = () => target.querySelector('[data-testid="any-dirty"]')!.textContent;
 const toastTexts = () => toasts.list.map((t) => t.message);
+// The body-top question (Polish 1): #19, and the page question when there is no footer.
+const bodyAsk = () => panel().querySelector<HTMLElement>('.modal-body > .ask-slot .inline-confirm');
+const bodyAskBtn = (k: 'confirm' | 'cancel') => bodyAsk()?.querySelector<HTMLButtonElement>(`button.${k}`) ?? null;
 function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -143,10 +146,83 @@ describe('ItemEditorModal — header and Title (T3a)', () => {
     expect(document.activeElement).toBe(titleInput());
   });
 
-  it('the trash calls onDeleteItem', async () => {
+  it('#19: the trash asks at the top of the body; Cancel sends nothing and focuses the trash; Delete calls onDeleteItem once', async () => {
     await render();
     trash().click();
+    flushSync();
+    expect(bodyAsk()!.querySelector('.warning')!.textContent!.trim()).toBe('Delete item "Eigenvalues"? This cannot be undone.');
+    expect(bodyAskBtn('confirm')!.textContent!.trim()).toBe('Delete');
+    expect(bodyAskBtn('confirm')!.classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    expect(panel().querySelector('div.body-rest')!.hasAttribute('inert')).toBe(true);
+    expect(bodyAsk()!.closest('[inert]')).toBeNull();
+    expect(trash().getAttribute('aria-disabled')).toBe('true');
+    expect(trash().title).toBe('Answer the question first');
+    bodyAskBtn('cancel')!.click();
+    await settle();
+    expect(bodyAsk()).toBeNull();
+    expect(props.modal.onDeleteItem).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trash());
+    trash().click();
+    flushSync();
+    bodyAskBtn('confirm')!.click();
+    await settle();
     expect(props.modal.onDeleteItem).toHaveBeenCalledTimes(1);
+    expect(bodyAsk()).toBeNull();
+  });
+
+  it('#19: while it asks, × and Esc go to its Cancel and never close', async () => {
+    await render();
+    trash().click();
+    flushSync();
+    closeBtn().focus();
+    closeBtn().click();
+    flushSync();
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    closeBtn().focus();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    flushSync();
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    expect(props.modal.onRequestClose).not.toHaveBeenCalled();
+  });
+
+  it('#19 R49: the right to delete goes while it asks; Delete sends nothing and focus goes to × (never <body>)', async () => {
+    await render();
+    trash().click();
+    flushSync();
+    const published = mkVersion({ state: 'published' });
+    props.modal.version = published;
+    props.modal.perms = versionPermissions(published);
+    flushSync();
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    expect(props.modal.onDeleteItem).not.toHaveBeenCalled();
+    expect(bodyAsk()).toBeNull();
+    expect(trash().disabled).toBe(true);
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
+  it('#19: the busy confirm holds focus while the delete runs; when it fails, focus goes to the trash (R54)', async () => {
+    let finish!: () => void;
+    const onDeleteItem = vi.fn(() => {
+      props.modal.deleting = true;
+      return new Promise<void>((r) => { finish = () => { props.modal.deleting = false; r(); }; });
+    });
+    await render({ modal: { onDeleteItem } });
+    trash().click();
+    flushSync();
+    const confirm = bodyAskBtn('confirm')!;
+    confirm.click();
+    await settle();
+    expect(onDeleteItem).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(confirm);
+    expect(confirm.getAttribute('aria-busy')).toBe('true');
+    expect(closeBtn().disabled).toBe(true);
+    finish();
+    await settle();
+    await settle();
+    expect(bodyAsk()).toBeNull();
+    expect(document.activeElement).toBe(trash());
   });
 
   it('trash reasons: the structure reason when published; "save or discard first" when dirty', async () => {
@@ -305,7 +381,7 @@ describe('ItemEditorModal — deleting freeze (T3a, D9)', () => {
     type(titleInput(), 'Eigen');
     props.modal.deleting = true;
     flushSync();
-    expect(panel().querySelector('div.modal-body')!.hasAttribute('inert')).toBe(true);
+    expect(panel().querySelector('div.body-rest')!.hasAttribute('inert')).toBe(true);
     expect(closeBtn().disabled).toBe(true);
     expect(footBtn('Save').disabled).toBe(true);
     expect(trash().disabled).toBe(true);

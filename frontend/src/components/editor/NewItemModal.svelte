@@ -5,11 +5,13 @@
   // content is written in the item editor right after. `onCreate` owns the
   // request, the reload and the navigation into the new item's editor (R1: a
   // push), and THROWS on failure so the
-  // errors land on these fields. Not a route: closing asks before dropping
-  // typed input; browser Back goes through the page guard (tracker.discard).
+  // errors land on these fields. Not a route: closing asks in the footer before
+  // dropping typed input; browser Back goes through the page guard (tracker.discard).
   import { getContext, onDestroy } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
+  import AskSlot from '../ui/AskSlot.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, useModalAsk } from '../../lib/askInPlace.svelte';
   import ItemTypePicker from './ItemTypePicker.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -58,10 +60,24 @@
     return () => registry.unregister(tracker);
   });
 
-  function requestClose() {
+  // Polish 1: the close question in place of the footer buttons (#11), and the
+  // page question while this is the top modal (R46).
+  const { own: footAsk, page, here } = useModalAsk(labelId);
+  let cancelEl = $state<HTMLButtonElement>();
+
+  async function requestClose(from: 'x' | 'cancel') {
     if (busy) return;
-    if (dirty && !window.confirm('Discard unsaved changes and continue?')) return;
-    onClose();
+    if (footAsk.open) { footAsk.focusCancel(); return; }
+    if (here()) { page!.ask.focusCancel(); return; }
+    if (!dirty) { onClose(); return; }
+    const a = await footAsk.ask(DISCARD_ASK);
+    if (a === 'confirm') {
+      footAsk.settle();
+      if (alive) onClose();
+      return;
+    }
+    // Back to the control that asked; Esc counts as ×.
+    if (a === 'cancel') void focusAfter(() => (from === 'cancel' ? cancelEl : modalClose(labelId)));
   }
 
   async function submit() {
@@ -99,11 +115,18 @@
 {#snippet foot()}
   <!-- Pushes the buttons right, as the item editor's footer (its .dirty slot). -->
   <span class="spacer" aria-hidden="true"></span>
-  <Button variant="ghost" disabled={busy} onclick={requestClose}>Cancel</Button>
-  <Button variant="primary" disabled={!ready || busy} loading={busy} onclick={() => void submit()}>Create</Button>
+  {#if footAsk.open}
+    <AskSlot ask={footAsk} />
+  {:else if here()}
+    <AskSlot ask={page!.ask} />
+  {:else}
+    <Button variant="ghost" disabled={busy} bind:element={cancelEl} onclick={() => void requestClose('cancel')}>Cancel</Button>
+    <Button variant="primary" disabled={!ready || busy} loading={busy} onclick={() => void submit()}>Create</Button>
+  {/if}
 {/snippet}
 
-<Modal labelledby={labelId} width={640} maxHeight={600} onRequestClose={requestClose} closeDisabled={busy} header={head} footer={foot}>
+<Modal labelledby={labelId} width={640} maxHeight={600} onRequestClose={() => void requestClose('x')} closeDisabled={busy}
+  bodyInert={footAsk.open || here()} header={head} footer={foot}>
   <form class="form" onsubmit={(e) => { e.preventDefault(); void submit(); }}>
     <ItemTypePicker bind:value={type} />
     <div class="field-row">

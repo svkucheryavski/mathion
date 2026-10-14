@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2148
+EXPECTED_CHECKS=2163
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -395,6 +395,14 @@ GLOBAL_ALLOW = {
     # wraps only the caller's question text, never a quiz.
     ('src/components/ui/InlineConfirm.svelte', 'code'),
     ('src/components/ui/InlineConfirm.svelte', 'strong'),
+    # Polish 1 T2: the ask slot and the item modal's body wrapper are layout-free
+    # (display: contents); `> :global(*)` keeps their direct children full-size
+    # flex items, child-combinator scoped under the hashed class. The page row's
+    # `:global(.inline-confirm)` sets only scroll-margin, scoped under the hashed
+    # .page-ask. None renders inside SequencePlayer.
+    ('src/components/ui/AskSlot.svelte', '*'),
+    ('src/components/editor/ItemEditorModal.svelte', '*'),
+    ('src/pages/editor/VersionEditPage.svelte', '.inline-confirm'),
     # Slice-5d: the authoring quiz card's rendered question text / explanation
     # (.qtext, .qexpl-body). It lives only in the item editor modal, which never
     # renders the student quiz components (T3 files).
@@ -4526,16 +4534,15 @@ else echo "PASS  the quiz one-Save machinery and its components are gone"; fi
 if grep -l 'createDirtyRegistry' $FILES_5D >/dev/null 2>&1; then
   echo "FAIL  5d quiz components build no DirtyRegistry of their own"; fail=1
 else echo "PASS  5d quiz components build no DirtyRegistry of their own"; fi
-# Every 5d prompt and title comes from quizEdits (DISCARD_PROMPT, WAIT_TITLE,
-# FORBIDDEN_TITLE, KEY_CONFIRM), never a copy.
-if grep -lE "Discard unsaved changes and continue|Wait for the save to finish|This version can no longer be edited|This quiz is published\. Changing the answer key" $FILES_5D >/dev/null 2>&1; then
+# Every 5d prompt and title comes from quizEdits / editorReasons (DISCARD_PROMPT,
+# DISCARD, WAIT_TITLE, FORBIDDEN_TITLE, KEY_CONFIRM), never a copy.
+if grep -lE "Discard unsaved changes|Wait for the save to finish|This version can no longer be edited|This quiz is published\. Changing the answer key" $FILES_5D >/dev/null 2>&1; then
   echo "FAIL  5d components use the quizEdits texts, not copies"; fail=1
 else echo "PASS  5d components use the quizEdits texts, not copies"; fi
-# DISCARD_PROMPT is the DirtyGuard text (spec §Unsaved work): the two literals stay equal.
-dp_q=$(grep -oE "DISCARD_PROMPT = '[^']+'" src/lib/quizEdits.svelte.ts | sed -E "s/.*= '([^']+)'/\1/")
-dp_g=$(grep -oE "window\.confirm\('[^']+'\)" src/components/editor/DirtyGuard.svelte | sed -E "s/.*\('([^']+)'\)/\1/")
-if [[ -n $dp_q && $dp_q == $dp_g ]]; then echo "PASS  DISCARD_PROMPT equals the DirtyGuard prompt ($dp_q)"
-else echo "FAIL  DISCARD_PROMPT ('$dp_q') differs from the DirtyGuard prompt ('$dp_g')"; fail=1; fi
+# Polish 1 R51: the two discard texts are written once, in editorReasons.ts.
+dlit=(${(f)"$(grep -rlF 'Discard unsaved changes' src --include='*.svelte' --include='*.ts' --exclude-dir=tests --exclude='*.test.ts' | grep -v '^src/lib/editorReasons\.ts$')"})
+if [[ ${#dlit[@]} -eq 0 ]]; then echo "PASS  the discard texts appear only in editorReasons.ts (R51)"
+else echo "FAIL  the discard texts appear outside editorReasons.ts: $dlit"; fail=1; fi
 
 echo
 echo "--- (aj) Slice-6a — the teacher screens: shared pieces, run frame, tabs ---"
@@ -5204,5 +5211,39 @@ if [[ -n $REPLY ]]; then
   none "Button .danger fills only an enabled, idle button" "\.danger\.${H}:((hover|active)\{|focus-visible\{[^}]*background)"
   hover_only Button $H
 fi
+# Task 2 — ask in place.
+if grep -qF "DISCARD_CONTINUE = 'Discard unsaved changes and continue?'" src/lib/editorReasons.ts \
+   && grep -qF "DISCARD = 'Discard unsaved changes?'" src/lib/editorReasons.ts; then
+  echo "PASS  editorReasons.ts defines DISCARD_CONTINUE and DISCARD (R51)"
+else echo "FAIL  editorReasons.ts defines DISCARD_CONTINUE and DISCARD (R51)"; fail=1; fi
+emoji_scan "the Polish-1 ask files" src/lib/askInPlace.svelte.ts src/lib/editorReasons.ts \
+  src/components/editor/DirtyGuard.svelte src/components/ui/AskSlot.svelte
+colour_scan polish1-ask src/lib/askInPlace.svelte.ts src/lib/editorReasons.ts \
+  src/components/editor/DirtyGuard.svelte src/components/ui/AskSlot.svelte
+# The slot anchors a question without a box of its own.
+own ask-slot AskSlot.svelte
+uniq1 ask-slot
+if [[ -n $REPLY ]]; then
+  N=AskSlot; H=$REPLY
+  d '\.ask-slot' '' 'display:contents'
+  chk "\.ask-slot\.${H}>\*" 'flex:0 0 auto'
+fi
+# D38: the row under the title, clear of the fixed Toaster when it scrolls into view.
+own page-ask VersionEditPage.svelte
+uniq1 page-ask
+if [[ -n $REPLY ]]; then
+  N=VersionEditPage; H=$REPLY
+  d '\.page-ask' '' 'margin:0 0 18px'
+  chk "\.page-ask\.${H} \.inline-confirm" 'scroll-margin-top:4\.5rem'
+fi
+# R48: ItemEditorModal's body freezes below its body-top row in a layout-free wrapper.
+own body-rest ItemEditorModal.svelte
+uniq1 body-rest
+if [[ -n $REPLY ]]; then
+  N=ItemEditorModal; H=$REPLY
+  d '\.body-rest' '' 'display:contents'
+  chk "\.body-rest\.${H}>\*" 'flex:0 0 auto'
+fi
+
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

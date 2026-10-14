@@ -101,12 +101,14 @@ export async function navigate(
   path: string,
   opts: { replace?: boolean; force?: boolean } = {}
 ): Promise<void> {
-  // F3: Capture the generation token before any async work.
-  const myGen = ++navGen;
-
   const target = path;
   const current = currentRoute.path + currentRoute.search + currentRoute.hash;
   if (target === current) return;
+
+  // F3: Capture the generation token before any async work. After the
+  // same-target return: a navigate to where we are must not outdate one that
+  // waits on a guard's question (Polish 1 R47).
+  const myGen = ++navGen;
 
   // F5: hash-only changes bypass guards; F6: force:true also bypasses guards.
   if (!opts.force && !isHashOnlyChange(target) && !(await runGuards())) return;

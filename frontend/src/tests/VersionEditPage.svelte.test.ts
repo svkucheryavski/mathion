@@ -29,6 +29,8 @@ function jres(body: unknown, status = 200) {
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 // jsdom has no scrollIntoView; the page's focus $effect calls it on route expansion.
 Element.prototype.scrollIntoView = () => {};
+// …nor scrollTo; the page row's Cancel calls it (D38).
+window.scrollTo = (() => {}) as typeof window.scrollTo;
 
 function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
   return {
@@ -270,6 +272,20 @@ async function makeDirty() {
 const btnByText = (text: string) =>
   [...target.querySelectorAll<HTMLButtonElement>('.state-actions button')].find((b) => b.textContent?.trim() === text);
 const posts = () => fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST').map(([u]) => String(u));
+// Polish 1 (D38): the page question under the title, and in a modal's footer or body top.
+const pageRow = () => target.querySelector<HTMLElement>('.page-ask');
+const pageBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.page-ask .inline-confirm button.${k}`);
+const footAskBtn = (k: 'confirm' | 'cancel') =>
+  document.querySelector<HTMLButtonElement>(`section.modal-panel footer.modal-foot .inline-confirm button.${k}`);
+const bodyAskBtn = (k: 'confirm' | 'cancel') =>
+  document.querySelector<HTMLButtonElement>(`section.modal-panel .modal-body > .ask-slot .inline-confirm button.${k}`);
+// A draft the page's Discard really drops (makeDirty's tracker has no discard()).
+async function makeDraft() {
+  const t = { dirty: true, get isDirty() { return t.dirty; }, discard() { t.dirty = false; } };
+  hoisted.registry!.register(t);
+  await settle();
+  return t;
+}
 
 describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
   const addLine = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add block'));
@@ -375,18 +391,21 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     expect(addLine()!.disabled).toBe(false);
   });
 
-  it('a typed title is guard-dirty; a confirmed navigation discards it', async () => {
+  it('a typed title is guard-dirty; Discard on the page question drops it', async () => {
     await render();
     addLine()!.click();
     await settle();
     typeTitle('New block');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    await navigate('/courses/c/edit/v/1/blocks/10');
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(pageRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Discard unsaved changes and continue?');
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
     expect(addInput()).toBeNull();
     await navigate('/courses/c/edit/v/1');
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await settle();
+    expect(pageRow()).toBeNull();
   });
 
   it('a create failure after a confirmed discard toasts and leaves no stale error for the next open', async () => {
@@ -401,8 +420,10 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     typeTitle('Intro');
     addInput()!.form!.requestSubmit();
     await settle();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    await navigate('/courses/c/edit/v/1/blocks/10');
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    pageBtn('confirm')!.click();
+    await nav;
     await settle();
     expect(addInput()).toBeNull();
     release();
@@ -586,8 +607,7 @@ async function renderRouted() {
 }
 
 describe('VersionEditPage — a create-sequence draft and a confirmed collapse (D3)', () => {
-  it('collapse with a confirmed prompt drops the draft; re-expanding, + opens an empty form without a prompt', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('collapse with Discard on the page question drops the draft; re-expanding, + opens an empty form without a question', async () => {
     await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
     await renderRouted();
     const plus = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add sequence'))!;
@@ -597,16 +617,19 @@ describe('VersionEditPage — a create-sequence draft and a confirmed collapse (
     title()!.value = 'Draft';
     title()!.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    await navigate('/courses/c/edit/v/1'); // collapse the block: DirtyGuard prompts
+    const nav = navigate('/courses/c/edit/v/1'); // collapse the block: the page question asks under the title
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(pageRow()).not.toBeNull();
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
     // 5c: a collapsed block carries no "+ Add sequence" — expand it, then open the row.
     target.querySelector<HTMLButtonElement>('#block-10-header')!.click();
     await settle();
     plus().click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(pageRow()).toBeNull();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
     expect(title()!.value).toBe('');
   });
@@ -752,18 +775,25 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(modal()).toBeNull();
   });
 
-  it('a prompt cancelled on × re-arms it; the next confirmed × closes', async () => {
+  it('× with a draft asks in the item modal\'s footer (R46); Cancel re-arms × and focuses it; Discard closes', async () => {
     await openFromPage();
     typeInto(titleField(), 'Draft');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const back = vi.spyOn(history, 'back');
     xBtn().click();
     await waitPop();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(modal()!.querySelector('footer.modal-foot .inline-confirm .warning')!.textContent!.trim())
+      .toBe('Discard unsaved changes and continue?');
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(true);
+    expect(pageRow()).toBeNull();
+    footAskBtn('cancel')!.click();
+    await waitPop();
     expect(currentRoute.path).toBe(ITEM(30));
     expect(titleField().value).toBe('Draft');
-    confirmSpy.mockReturnValue(true);
+    expect(document.activeElement).toBe(xBtn());
     xBtn().click();
+    await waitPop();
+    footAskBtn('confirm')!.click();
     await waitPop();
     expect(back).toHaveBeenCalledTimes(2);
     expect(currentRoute.path).toBe(SEQ);
@@ -783,34 +813,38 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(modal()).toBeNull();
   });
 
-  it('deep link with a draft: × prompts, cancel keeps the draft and re-arms; Escape prompts again', async () => {
+  it('deep link with a draft: × asks, Cancel keeps the draft and re-arms; Escape asks again', async () => {
     await navigate(ITEM(30), { force: true });
     await renderRouted();
     typeInto(titleField(), 'Draft');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     xBtn().click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(footAskBtn('cancel')).not.toBeNull();
+    footAskBtn('cancel')!.click();
+    await settle();
     expect(currentRoute.path).toBe(ITEM(30));
     expect(titleField().value).toBe('Draft');
     esc();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(footAskBtn('cancel')).not.toBeNull();
     expect(titleField().value).toBe('Draft');
   });
 
-  it('browser Back and the course link prompt while the modal has a draft; cancel keeps it', async () => {
+  it('browser Back and the course link ask while the modal has a draft; Cancel keeps it', async () => {
     await openFromPage();
     typeInto(titleField(), 'Draft');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     history.back();
     await waitPop();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(footAskBtn('cancel')).not.toBeNull();
+    footAskBtn('cancel')!.click();
+    await waitPop();
     expect(modal()).not.toBeNull();
     target.querySelector<HTMLAnchorElement>('h1 a')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(footAskBtn('cancel')).not.toBeNull();
+    footAskBtn('cancel')!.click();
+    await settle();
     expect(currentRoute.path).toBe(ITEM(30));
     expect(titleField().value).toBe('Draft');
   });
@@ -824,7 +858,7 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(modal()).toBeNull();
   });
 
-  it('delete: one confirm, frozen in flight, one replace+force close after which the reload lands, then toast and header focus', async () => {
+  it('delete: one question, frozen in flight, one replace+force close after which the reload lands, then toast and header focus', async () => {
     const release = holdDelete(30);
     let modalAtReload: boolean | null = null;
     const inner = fetchSpy.getMockImplementation()!;
@@ -832,15 +866,17 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
       if (String(url).endsWith('/admin-tree') && modalAtReload === false) modalAtReload = modal() !== null;
       return inner(url, init);
     });
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await openFromPage();
     const back = vi.spyOn(history, 'back');
     const replace = vi.spyOn(history, 'replaceState');
     trashBtn().click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith('Delete item "Item 30"? This cannot be undone.');
-    expect(modal()!.querySelector('div.modal-body')!.hasAttribute('inert')).toBe(true);
+    expect(modal()!.querySelector('.modal-body > .ask-slot .warning')!.textContent!.trim())
+      .toBe('Delete item "Item 30"? This cannot be undone.');
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    expect(document.activeElement).toBe(bodyAskBtn('confirm'));      // R54: the busy confirm holds focus
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(true);
     xBtn().click();
     esc();
     await settle();
@@ -863,23 +899,26 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
 
   it('a failed DELETE keeps the modal open and unfrozen, with focus on the trash', async () => {
     serve((url, init) => (url === '/api/items/30' && init?.method === 'DELETE' ? jres({ detail: 'Nope' }, 409) : undefined));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     await openFromPage();
     trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
     await settle();
     await settle();
     expect(msgs()).toContain('Nope');
     expect(currentRoute.path).toBe(ITEM(30));
-    expect(modal()!.querySelector('div.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(false);
     expect(xBtn().disabled).toBe(false);
+    expect(bodyAskBtn('confirm')).toBeNull();
     expect(document.activeElement).toBe(trashBtn());
   });
 
   it('browser Back during the DELETE, then another item: not frozen, × works, and the late success never navigates', async () => {
     const release = holdDelete(30);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     await openFromPage(30);
     trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
     await settle();
     history.back();
     await waitPop();
@@ -888,7 +927,7 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     pencil(31)!.click();
     await settle();
     expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Item 31');
-    expect(modal()!.querySelector('div.modal-body')!.hasAttribute('inert')).toBe(false);
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(false);
     expect(xBtn().disabled).toBe(false);
     const back = vi.spyOn(history, 'back');
     release();
@@ -1003,6 +1042,41 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(currentRoute.path).toBe(SEQ);
     expect(modal()).toBeNull();
   });
+
+  it('× while the page question is open in the item modal focuses its Cancel and never navigates twice; × works again after Cancel', async () => {
+    await openFromPage();
+    typeInto(titleField(), 'Draft');
+    const back = vi.spyOn(history, 'back');
+    xBtn().click();
+    await waitPop();
+    xBtn().focus();
+    xBtn().click();
+    esc();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    footAskBtn('cancel')!.click();
+    await waitPop();
+    expect(document.activeElement).toBe(xBtn());
+    xBtn().click();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(footAskBtn('cancel')).not.toBeNull();
+  });
+
+  it('R53: with the delete question open, Back with a draft elsewhere is refused; focus goes to its Cancel', async () => {
+    await openFromPage();
+    await makeDirty();               // a draft elsewhere on the page; the item itself is clean, so its trash is live
+    trashBtn().click();
+    await settle();
+    xBtn().focus();
+    history.back();
+    await waitPop();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(location.pathname).toBe(ITEM(30));
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    expect(modal()!.querySelectorAll('.inline-confirm')).toHaveLength(1);
+  });
 });
 
 // ---- Slice-5c T1: focus by depth ----
@@ -1094,5 +1168,97 @@ describe('VersionEditPage — focus by depth (Slice-5c T1)', () => {
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
     expect(depthOf()).toEqual(['d0']);
+  });
+});
+
+describe('VersionEditPage — the page question (Polish 1 D38, R46–R48)', () => {
+  beforeEach(() => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+  });
+  const courseLink = () => target.querySelector<HTMLAnchorElement>('h1 a')!;
+  const gearBtn = () => target.querySelector<HTMLButtonElement>('.editor-heading button[aria-label="Version settings"]')!;
+
+  it('Enter on a block header with a draft elsewhere asks under the title; the page below freezes; Cancel returns to that header', async () => {
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDirty();
+    const header = target.querySelector<HTMLButtonElement>('#block-10-header')!;
+    header.focus();
+    header.click();                                    // keyboard activation: detail 0
+    await settle();
+    expect(pageRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Discard unsaved changes and continue?');
+    expect(pageBtn('confirm')!.textContent!.trim()).toBe('Discard');
+    expect(document.activeElement).toBe(pageBtn('cancel'));
+    expect(target.querySelector('section.blocks')!.hasAttribute('inert')).toBe(true);
+    expect(target.querySelector('.state-actions')!.hasAttribute('inert')).toBe(true);
+    expect(courseLink().closest('[inert]')).toBeNull();
+    expect(gearBtn().getAttribute('aria-disabled')).toBe('true');
+    expect(gearBtn().title).toBe('Answer the question first');
+    gearBtn().click();
+    await settle();
+    expect(document.querySelector('section.modal-panel')).toBeNull();
+    pageBtn('cancel')!.click();
+    await settle();
+    expect(pageRow()).toBeNull();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(target.querySelector('section.blocks')!.hasAttribute('inert')).toBe(false);
+    expect(gearBtn().getAttribute('aria-disabled')).toBeNull();
+    expect(document.activeElement).toBe(header);
+  });
+
+  it('a mouse-style trigger (nothing focused): Cancel scrolls back to where it was and focuses the course link', async () => {
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDirty();
+    (document.activeElement as HTMLElement | null)?.blur();
+    Object.defineProperty(window, 'scrollY', { value: 240, configurable: true });
+    const scrollTo = vi.spyOn(window, 'scrollTo');
+    void navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    pageBtn('cancel')!.click();
+    await settle();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 240 });
+    expect(document.activeElement).toBe(courseLink());
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+  });
+
+  it('Discard with focus left on <body>: one check focuses the course link, and only once', async () => {
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDraft();
+    (document.activeElement as HTMLElement | null)?.blur();
+    const nav = navigate('/courses/c/edit/v/1?tab=x');
+    await settle();
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
+    await tick0();
+    expect(currentRoute.search).toBe('?tab=x');
+    expect(document.activeElement).toBe(courseLink());
+    courseLink().blur();
+    await navigate('/courses/c/edit/v/1?tab=y');
+    await tick0();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('a read-only Version settings + a navigation asks at the top of its body; Cancel → its ×', async () => {
+    tree.version = mkVersion({ state: 'published' });
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDirty();
+    gearBtn().click();
+    await settle();
+    expect(modal()!.querySelector('footer.modal-foot')).toBeNull();
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    expect(pageRow()).toBeNull();
+    expect(bodyAskBtn('cancel')).not.toBeNull();
+    expect(modal()!.querySelector('.modal-body > .ask-slot .warning')!.textContent!.trim()).toBe('Discard unsaved changes and continue?');
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    bodyAskBtn('cancel')!.click();
+    await nav;
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(document.activeElement).toBe(xBtn());
   });
 });

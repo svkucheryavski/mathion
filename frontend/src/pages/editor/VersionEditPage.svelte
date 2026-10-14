@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { setContext, onDestroy, onMount, tick, untrack } from 'svelte';
+  import { setContext, onDestroy, tick, untrack } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
@@ -10,6 +10,8 @@
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import AskSlot from '../../components/ui/AskSlot.svelte';
+  import { PageAsk, PAGE_ASK_KEY, focusIsFree, usable, type GuardAsk } from '../../lib/askInPlace.svelte';
   import VersionSettingsModal from '../../components/editor/VersionSettingsModal.svelte';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
@@ -43,6 +45,13 @@
   // consumers ordering per spec).
   const dirtyRegistry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, dirtyRegistry);
+  // Polish 1 (D38, R46): the one navigation question. The top-most modal that
+  // hosts it draws it, else the row under the title, which freezes the page
+  // below it (R48). Provided before any host mounts, as the registry is.
+  const page = new PageAsk();
+  setContext(PAGE_ASK_KEY, page);
+  const pageAsk = page.ask;
+  const rowAsking = $derived(pageAsk.open && page.hosts.length === 0);
 
   const tree = $derived(currentEditorVersion.value);
   const loadError = $derived(currentEditorVersion.error);
@@ -223,18 +232,11 @@
   });
 
   let alive = true;
-  onDestroy(() => { alive = false; clearEditorVersion(); });
+  onDestroy(() => { alive = false; pageAsk.dismiss(); clearEditorVersion(); });
 
   function stillOnVid(savedVid: number): boolean {
     return alive && vid === savedVid;
   }
-
-  // D7: a guard cancelled at the prompt leaves the item open — re-arm ×.
-  onMount(() => {
-    const onPop = () => { closing = false; };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  });
 
   function seqUrl(): string {
     return `/courses/${courseSlug}/edit/v/${vid}/blocks/${routeBid}/sequences/${routeSid}`;
@@ -244,6 +246,9 @@
   // instance; otherwise (deep link / reload) replace the address with the
   // sequence — × can never take the user out of the app. Guards run.
   function requestCloseItem() {
+    // The page question is open in this modal (R46): × and Esc go to its
+    // Cancel and never navigate twice.
+    if (pageAsk.open) { pageAsk.focusCancel(); return; }
     if (closing) return;
     if (deletingIid !== null && String(deletingIid) === routeIid) return;
     closing = true;
@@ -255,10 +260,10 @@
   }
 
   // D9: page-owned, so the reload, toast and focus survive the modal's unmount.
+  // The item modal asked first (#19) and awaits this.
   async function deleteOpenItem() {
     const it = expansion.expandedItem;
     if (!it || deletingIid !== null || !perms?.canEditStructure) return;
-    if (!confirm(`Delete item "${it.title}"? This cannot be undone.`)) return;
     const id = it.id;
     const savedVid = vid;
     const savedSid = routeSid;
@@ -289,6 +294,51 @@
       document.getElementById(`seq-${savedSid}-header`)?.focus();
     }
     deletingIid = null;
+  }
+
+  // DirtyGuard's `ask` (D38). The row under the title remembers where the
+  // person was — the focused element and the scroll position — before it
+  // scrolls itself into view.
+  let rowReturnEl: HTMLElement | null = null;
+  let rowScrollY = 0;
+  let courseLinkEl = $state<HTMLAnchorElement>();
+
+  function askPage(): GuardAsk {
+    if (page.hosts.length === 0) {
+      const a = document.activeElement;
+      rowReturnEl = a instanceof HTMLElement && a !== document.body ? a : null;
+      rowScrollY = window.scrollY;
+    }
+    const iid = routeIid;
+    return page.guard((answer, host) => {
+      // D7: × re-arms once the question is answered or refused, unless it closed the item.
+      void tick().then(() => { if (alive && routeIid === iid) closing = false; });
+      if (answer === 'confirm') setTimeout(rescueFocus, 0);
+      else if (answer === 'cancel' && !host) void restoreAfterRowCancel();
+    });
+  }
+
+  // Page-row Cancel: back to the saved element; without one (a mouse click in
+  // Safari focuses nothing), back to the saved scroll position and the course link.
+  async function restoreAfterRowCancel() {
+    await tick();   // the page thaws
+    if (!alive || !focusIsFree()) return;
+    const back = rowReturnEl;
+    rowReturnEl = null;
+    if (usable(back)) { back.focus(); return; }
+    window.scrollTo({ top: rowScrollY });
+    courseLinkEl?.focus({ preventScroll: true });
+  }
+
+  // Discard: once the router committed and Svelte flushed, focus is never left
+  // on <body> — the route's deepest header, else the course link. Runs once.
+  function rescueFocus() {
+    if (!alive) return;
+    const a = document.activeElement;
+    if (a && a !== document.body) return;
+    const deep = routeSid !== null ? document.getElementById(`seq-${routeSid}-header`)
+      : routeBid !== null ? document.getElementById(`block-${routeBid}-header`) : null;
+    (usable(deep) ? deep : courseLinkEl)?.focus();
   }
 
   // "+ Add block" (5c D9): a quiet line after the list opens an inline title
@@ -499,17 +549,22 @@
         </div>
       {/if}
       <div class="editor-heading">
-        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
+        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" bind:this={courseLinkEl} onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
         <!-- 5c T5 (user): the id and the attempt limit as quiet chips, then the state badge last. -->
         <span class="hchip">v. {v.id}</span>
         <span class="hchip">max {v.max_quiz_attempts} quiz {v.max_quiz_attempts === 1 ? 'attempt' : 'attempts'}</span>
         <VersionBadges state={v.state} isDisabled={v.is_disabled} outlined />
         <!-- 5c D12: version settings live in a modal, opened here. -->
         <span class="head-push">
-          <IconButton size="sm" glyph="pencil" title="Version settings" aria-label="Version settings"
-            bind:element={settingsBtn} onclick={() => (settingsOpen = true)} />
+          <IconButton size="sm" glyph="pencil" title={rowAsking ? 'Answer the question first' : 'Version settings'}
+            aria-label="Version settings" aria-disabled={rowAsking}
+            bind:element={settingsBtn} onclick={() => { if (!rowAsking) settingsOpen = true; }} />
         </span>
       </div>
+      {#if rowAsking}
+        <!-- D38: the page's question while no modal hosts it. -->
+        <div class="page-ask"><AskSlot ask={pageAsk} /></div>
+      {/if}
       {#if v.info_html}
         <!-- 5c T5 (user): the version's info, rendered (sanitized server-side, as CourseView), muted. -->
         <div class="vinfo">{@html v.info_html}</div>
@@ -519,7 +574,7 @@
         <p class="banner">This version is disabled — editing is not allowed. Enable it first.</p>
       {/if}
 
-      <section class="blocks" aria-labelledby={blocksHeadingId}>
+      <section class="blocks" aria-labelledby={blocksHeadingId} {@attach (el) => { el.toggleAttribute('inert', rowAsking); }}>
         <!-- 5c: the card head is gone, but block h3s keep an h2 parent. -->
         <h2 id={blocksHeadingId} class="sr-only">Blocks</h2>
         {#if tree.blocks.length === 0}
@@ -573,7 +628,7 @@
         {/if}
       </section>
 
-      <div class="state-actions">
+      <div class="state-actions" {@attach (el) => { el.toggleAttribute('inert', rowAsking); }}>
         {#if perms.canPublish}
           <Button variant="primary" disabled={busy} onclick={() => transition('publish')}>Publish</Button>
         {/if}
@@ -611,7 +666,7 @@
             itemCount={hostSeq.items.length}
             {stillOnVid}
             onRequestClose={requestCloseItem}
-            onDeleteItem={() => void deleteOpenItem()}
+            onDeleteItem={deleteOpenItem}
             deleting={deletingIid === it.id}
           />
         {/key}
@@ -622,7 +677,7 @@
           onClose={() => { settingsOpen = false; void tick().then(() => settingsBtn?.focus()); }} />
       {/if}
 
-      <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} />
+      <DirtyGuard isDirty={() => dirtyRegistry.isAnyDirty()} onDiscard={() => dirtyRegistry.discardAll()} ask={askPage} />
     </div>
   {/if}
 </div>
@@ -713,4 +768,8 @@
     padding-top: 14px;
     border-top: 1px solid var(--border); /* ref 1639 */
   }
+  /* D38: the row under the title. When it scrolls into view, the fixed Toaster
+     (components/chrome/Toaster.svelte) stays clear of it. */
+  .page-ask { margin: 0 0 18px; }
+  .page-ask :global(.inline-confirm) { scroll-margin-top: 4.5rem; }
 </style>

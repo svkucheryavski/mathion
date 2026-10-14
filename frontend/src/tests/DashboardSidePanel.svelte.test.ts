@@ -5,6 +5,7 @@ import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
 import type { PanelTarget } from '../components/runs/DashboardSidePanel.svelte';
 import type { DashboardMpRow, DashboardMpGroupEntry } from '../lib/dashboards';
 import { formatLocalWithTz } from '../lib/datetime';
+import { navigate, __resetGuardsForTests } from '../lib/router.svelte';
 
 vi.mock('../stores/toasts.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../stores/toasts.svelte')>();
@@ -2293,5 +2294,60 @@ describe('DashboardSidePanel — earlier submissions and Retry (6c T6)', () => {
     await settle();
     expect(host.querySelector('[data-test="thread-error"]')).toBeNull();
     expect(document.activeElement).toBe(panelTitle());
+  });
+});
+
+describe('DashboardSidePanel — leaving with an unsaved evaluation (Polish 1 D37)', () => {
+  beforeEach(() => { __resetGuardsForTests(); });
+  afterEach(async () => { __resetGuardsForTests(); await navigate('/', { force: true }); });
+
+  it('a navigation asks in the form with "…and continue?"; Cancel keeps the text and refocuses the field', async () => {
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    const textarea = await typeFeedback('unsaved');
+    const start = location.pathname;
+    const nav = navigate('/sp-nav-away');
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"] .sp-discard .warning')!.textContent!.trim())
+      .toBe('Discard unsaved changes and continue?');
+    expect(document.activeElement).toBe(discardCancel());
+    expect(frozen()).toEqual([true, true, true, true]);
+    discardCancel()!.click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe(start);
+    expect(textarea.value).toBe('unsaved');
+    expect(document.activeElement).toBe(textarea);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Discard ends the edit and lets the navigation through', async () => {
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    await typeFeedback('unsaved');
+    const nav = navigate('/sp-nav-gone');
+    await settle();
+    discardConfirm()!.click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe('/sp-nav-gone');
+    expect(discardCancel()).toBeNull();
+    expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('R53: with the × question open, a navigation is refused; focus stays on its Cancel', async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    await typeFeedback('unsaved');
+    const start = location.pathname;
+    closeX().click();
+    await settle();
+    closeX().focus();
+    await navigate('/sp-nav-refused');
+    await settle();
+    expect(location.pathname).toBe(start);
+    expect(document.activeElement).toBe(discardCancel());
+    expect(host.querySelector('.sp-discard .warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
   });
 });

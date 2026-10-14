@@ -6,6 +6,8 @@
   import { getContext, onDestroy, untrack } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
+  import AskSlot from '../ui/AskSlot.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, useModalAsk } from '../../lib/askInPlace.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
@@ -48,10 +50,25 @@
     return () => registry.unregister(tracker);
   });
 
-  function requestClose() {
+  // Polish 1: the close question in place of the footer buttons (#10), and the
+  // page question while this is the top modal (R46). Read-only, there is no
+  // footer: the page question asks at the top of the body, with nothing to freeze.
+  const { own: footAsk, page, here } = useModalAsk(labelId);
+  const asking = $derived(footAsk.open || here());
+
+  async function requestClose() {
     if (saving) return;
-    if (dirty && !window.confirm('Discard unsaved changes and continue?')) return;
-    onClose();
+    // × and Esc while a question shows: back to its Cancel (R48).
+    if (footAsk.open) { footAsk.focusCancel(); return; }
+    if (here()) { page!.ask.focusCancel(); return; }
+    if (!dirty) { onClose(); return; }
+    const a = await footAsk.ask(DISCARD_ASK);
+    if (a === 'confirm') {
+      footAsk.settle();
+      if (alive) onClose();
+      return;
+    }
+    if (a === 'cancel') void focusAfter(() => modalClose(labelId));
   }
 
   function discard() {
@@ -111,12 +128,21 @@
 
 {#snippet foot()}
   <span class="dirty mono">{dirty ? 'unsaved changes' : ''}</span>
-  <Button variant="ghost" disabled={!dirty || saving} onclick={discard}>Discard</Button>
-  <Button variant="primary" disabled={!dirty || saving} loading={saving} onclick={() => void save()}>Save</Button>
+  {#if footAsk.open}
+    <AskSlot ask={footAsk} />
+  {:else if here()}
+    <AskSlot ask={page!.ask} />
+  {:else}
+    <Button variant="ghost" disabled={!dirty || saving} onclick={discard}>Discard</Button>
+    <Button variant="primary" disabled={!dirty || saving} loading={saving} onclick={() => void save()}>Save</Button>
+  {/if}
 {/snippet}
 
-<Modal labelledby={labelId} width={640} maxHeight={600} onRequestClose={requestClose} closeDisabled={saving}
-  header={head} footer={editable ? foot : undefined}>
+<Modal labelledby={labelId} width={640} maxHeight={600} onRequestClose={() => void requestClose()} closeDisabled={saving}
+  bodyInert={editable && asking} header={head} footer={editable ? foot : undefined}>
+  {#if !editable && here()}
+    <AskSlot ask={page!.ask} />
+  {/if}
   {#if editable}
     <div class="form">
       <!-- top + line: the label stays level with the input when the error shows below it. -->

@@ -6,10 +6,12 @@
   import { getContext, untrack } from 'svelte';
   import Modal from '../../ui/Modal.svelte';
   import Button from '../../ui/Button.svelte';
+  import AskSlot from '../../ui/AskSlot.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, useModalAsk } from '../../../lib/askInPlace.svelte';
   import MarkdownEditor from '../MarkdownEditor.svelte';
   import QuestionTypePicker from '../QuestionTypePicker.svelte';
   import { ApiError } from '../../../lib/api';
-  import { DISCARD_PROMPT, FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
+  import { FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { pushToast } from '../../../stores/toasts.svelte';
   import { validateNumericAnswer, type QuestionCreateBody, type QuestionType } from '../../../lib/quizAuthoring';
@@ -60,10 +62,26 @@
     return () => { mounted = false; ctx.edits.release(handle); };
   });
 
-  function requestClose() {
+  // Polish 1: the close question in place of the footer buttons (#7, #13, #15),
+  // and the page question while this is the top modal (R46).
+  const { own: footAsk, page, here } = useModalAsk(labelId);
+  const asking = $derived(footAsk.open || here());
+  let cancelEl = $state<HTMLButtonElement>();
+
+  async function requestClose(from: 'x' | 'cancel') {
     if (saving) return;
-    if (handle.dirty && !window.confirm(DISCARD_PROMPT)) return;
-    onClose(true);
+    // × and Esc while a question shows: back to its Cancel (R48).
+    if (footAsk.open) { footAsk.focusCancel(); return; }
+    if (here()) { page!.ask.focusCancel(); return; }
+    if (!handle.dirty) { onClose(true); return; }
+    const a = await footAsk.ask(DISCARD_ASK);
+    if (a === 'confirm') {
+      footAsk.settle();
+      if (mounted) onClose(true);
+      return;
+    }
+    // Back to the control that asked; Esc counts as ×.
+    if (a === 'cancel') void focusAfter(() => (from === 'cancel' ? cancelEl : modalClose(labelId)));
   }
 
   function body(): QuestionCreateBody {
@@ -111,7 +129,7 @@
     if (!(e.target instanceof Element)) return;
     if (e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
     e.preventDefault();
-    void save();
+    if (!asking) void save();
   }
 </script>
 
@@ -123,15 +141,22 @@
 
 {#snippet foot()}
   <span class="nq-gap"></span>
-  <Button variant="ghost" disabled={saving} onclick={requestClose}>Cancel</Button>
-  <Button variant="primary" loading={saving} disabled={!valid || uploading || !ctx.canStruct}
-          title={ctx.canStruct ? undefined : FORBIDDEN_TITLE} onclick={() => void save()}>Add question</Button>
+  {#if footAsk.open}
+    <AskSlot ask={footAsk} />
+  {:else if here()}
+    <AskSlot ask={page!.ask} />
+  {:else}
+    <Button variant="ghost" disabled={saving} bind:element={cancelEl} onclick={() => void requestClose('cancel')}>Cancel</Button>
+    <Button variant="primary" loading={saving} disabled={!valid || uploading || !ctx.canStruct}
+            title={ctx.canStruct ? undefined : FORBIDDEN_TITLE} onclick={() => void save()}>Add question</Button>
+  {/if}
 {/snippet}
 
 <Modal
   labelledby={labelId}
   width={760}
-  onRequestClose={requestClose}
+  onRequestClose={() => void requestClose('x')}
+  bodyInert={asking}
   closeDisabled={saving}
   autofocusSelector={'input[type="radio"]:checked, header.modal-head button[aria-label="Close"]'}
   header={head}

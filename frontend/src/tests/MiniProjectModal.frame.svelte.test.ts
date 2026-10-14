@@ -503,17 +503,56 @@ describe('MiniProjectModal — the two confirms', () => {
   });
 });
 
-describe('MiniProjectModal — leaving with edits (D16)', () => {
-  it('a tab jump asks while dirty, and never while clean', async () => {
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+describe('MiniProjectModal — leaving with edits (D16, Polish 1 D37)', () => {
+  it('a tab jump asks in the footer while dirty, never while clean; Cancel keeps the edit and focuses ×', async () => {
     open();
     await settle();
     await navigate('/mp-frame-clean');
-    expect(ask).not.toHaveBeenCalled();
+    expect(panel().querySelector('.modal-foot .inline-confirm')).toBeNull();
     type('changed');
     await settle();
-    await navigate('/mp-frame-dirty');
-    expect(ask).toHaveBeenCalledWith('Discard unsaved changes and continue?');
-    ask.mockRestore();
+    const nav = navigate('/mp-frame-dirty');
+    await settle();
+    expect(panel().querySelector('.modal-foot .inline-confirm .warning')!.textContent!.trim())
+      .toBe('Discard unsaved changes and continue?');
+    expect(document.activeElement).toBe(confirmCancel());
+    expect(bodyInert()).toBe(true);
+    confirmCancel().click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe('/mp-frame-clean');
+    expect(ta().value).toBe('changed');
+    expect(document.activeElement).toBe(closeX());
+  });
+
+  it('Discard on the tab-jump question lets the navigation through without onClose', async () => {
+    const onClose = vi.fn();
+    open({ onClose });
+    await settle();
+    type('changed');
+    await settle();
+    const nav = navigate('/mp-frame-left');
+    await settle();
+    btn('confirm-discard')!.click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe('/mp-frame-left');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('R53: with the × question open, a navigation is refused; focus stays on its Cancel', async () => {
+    open();
+    await settle();
+    await navigate('/mp-frame-start');
+    type('changed');
+    await settle();
+    closeX().click();
+    await settle();
+    closeX().focus();
+    await navigate('/mp-frame-away');
+    await settle();
+    expect(location.pathname).toBe('/mp-frame-start');
+    expect(document.activeElement).toBe(confirmCancel());
+    expect(panel().querySelector('.modal-foot .inline-confirm .warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
   });
 });

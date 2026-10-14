@@ -5,8 +5,10 @@
   import { getContext, untrack } from 'svelte';
   import Modal from '../../ui/Modal.svelte';
   import Button from '../../ui/Button.svelte';
+  import AskSlot from '../../ui/AskSlot.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, modalPanel, usable, useModalAsk } from '../../../lib/askInPlace.svelte';
   import MarkdownEditor from '../MarkdownEditor.svelte';
-  import { DISCARD_PROMPT, FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
+  import { FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { pushToast } from '../../../stores/toasts.svelte';
   import { updateQuestion, type AuthoringQuestion } from '../../../lib/quizAuthoring';
@@ -39,13 +41,29 @@
     return () => { mounted = false; ctx.edits.release(handle); };
   });
 
-  function requestClose() {
+  // Polish 1: the close question in place of the footer buttons (#7, #13, #15),
+  // and the page question while this is the top modal (R46).
+  const { own: footAsk, page, here } = useModalAsk(labelId);
+  const asking = $derived(footAsk.open || here());
+  let cancelEl = $state<HTMLButtonElement>();
+
+  async function requestClose(from: 'x' | 'cancel') {
     if (saving) return;
-    if (handle.dirty && !window.confirm(DISCARD_PROMPT)) return;
-    onClose(true);
+    // × and Esc while a question shows: back to its Cancel (R48).
+    if (footAsk.open) { footAsk.focusCancel(); return; }
+    if (here()) { page!.ask.focusCancel(); return; }
+    if (!handle.dirty) { onClose(true); return; }
+    const a = await footAsk.ask(DISCARD_ASK);
+    if (a === 'confirm') {
+      footAsk.settle();
+      if (mounted) onClose(true);
+      return;
+    }
+    // Back to the control that asked; Esc counts as ×.
+    if (a === 'cancel') void focusAfter(() => (from === 'cancel' ? cancelEl : modalClose(labelId)));
   }
 
-  async function send(md: string | null) {
+  async function send(md: string | null): Promise<boolean> {
     error = null;
     saving = true;
     try {
@@ -53,14 +71,16 @@
       // As InlineEdit.commit: never left saving, and a stale success says nothing.
       saving = false;
       ctx.patch(qid, { explanation_md: echo.explanation_md, explanation_html: echo.explanation_html });
-      if (!alive()) return;
+      if (!alive()) return true;
       ctx.say('Saved');
       onClose(true);
+      return true;
     } catch (e) {
       const m = ctx.failed(e, qid);
-      if (!alive()) { saving = false; pushToast(m, 'error'); return; }
+      if (!alive()) { saving = false; pushToast(m, 'error'); return false; }
       saving = false;
       error = m;
+      return false;
     }
   }
 
@@ -71,10 +91,40 @@
     void send(value.trim() === '' ? null : value);
   }
 
-  function remove() {
+  let removeEl = $state<HTMLButtonElement>();
+  const panelText = () => modalPanel(labelId)?.querySelector<HTMLTextAreaElement>('textarea');
+
+  // #8: Remove asks in place of the footer buttons; the question stays, busy,
+  // while the request runs (R54).
+  async function remove() {
     if (saving || !ctx.canText) return;
-    if (!window.confirm(`Remove the explanation for question ${n}?`)) return;
-    void send(null);
+    if (here()) { page!.ask.focusCancel(); return; }
+    const a = await footAsk.ask({
+      warning: `Remove the explanation for question ${n}?`,
+      confirmLabel: 'Remove', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-remove-explanation',
+    });
+    if (a === 'cancel') { void focusAfter(() => removeEl); return; }
+    if (a !== 'confirm') return;
+    // After the question goes: "Remove explanation", else (the right to edit
+    // went, R10) the text, else Cancel or ×, never <body>.
+    const back = () => [removeEl, panelText(), cancelEl, modalClose(labelId)].find(usable);
+    // R49: the right to save may have gone while it asked.
+    if (!alive() || saving || !ctx.canText) {
+      const free = footAsk.focusFree;
+      footAsk.dismiss();
+      if (mounted && free) void focusAfter(back);
+      return;
+    }
+    let ok = false;
+    try {
+      ok = await send(null);
+    } finally {
+      // Success closes this modal (as today); a failure brings focus back to
+      // "Remove explanation" if it was still in the question (R57).
+      const free = footAsk.focusFree;
+      footAsk.settle();
+      if (!ok && free && mounted) void focusAfter(back);
+    }
   }
 
   // R10: a 403/409 reload can take the right to save away while Save or
@@ -98,7 +148,7 @@
     if (!(e.target instanceof Element)) return;
     if (e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
     e.preventDefault();
-    save();
+    if (!asking) save();
   }
 </script>
 
@@ -110,21 +160,27 @@
 {/snippet}
 
 {#snippet foot()}
-  {#if exists}
-    <!-- Stays enabled while its own request runs (re-entry is blocked in remove()), so focus is never dropped. -->
-    <Button variant="danger" disabled={!ctx.canText} title={ctx.canText ? undefined : FORBIDDEN_TITLE}
-            onclick={remove}>Remove explanation</Button>
+  {#if exists && !asking}
+    <Button variant="danger" bind:element={removeEl} disabled={!ctx.canText} title={ctx.canText ? undefined : FORBIDDEN_TITLE}
+            onclick={() => void remove()}>Remove explanation</Button>
   {/if}
   <span class="ex-gap"></span>
-  <Button variant="ghost" disabled={saving} onclick={requestClose}>Cancel</Button>
-  <Button variant="primary" loading={saving} disabled={!ctx.canText} title={ctx.canText ? undefined : FORBIDDEN_TITLE}
-          onclick={save}>Save</Button>
+  {#if footAsk.open}
+    <AskSlot ask={footAsk} />
+  {:else if here()}
+    <AskSlot ask={page!.ask} />
+  {:else}
+    <Button variant="ghost" disabled={saving} bind:element={cancelEl} onclick={() => void requestClose('cancel')}>Cancel</Button>
+    <Button variant="primary" loading={saving} disabled={!ctx.canText} title={ctx.canText ? undefined : FORBIDDEN_TITLE}
+            onclick={save}>Save</Button>
+  {/if}
 {/snippet}
 
 <Modal
   labelledby={labelId}
   width={560}
-  onRequestClose={requestClose}
+  onRequestClose={() => void requestClose('x')}
+  bodyInert={asking}
   closeDisabled={saving}
   autofocusSelector={'textarea, header.modal-head button[aria-label="Close"]'}
   header={head}
