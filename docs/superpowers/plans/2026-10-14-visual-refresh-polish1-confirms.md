@@ -17,7 +17,7 @@
 - **Gate:** the zsh gate `frontend/scripts/visual-refresh-gate.sh`.
 - **Backend:** no change.
 
-**Spec:** `docs/superpowers/specs/2026-10-14-visual-refresh-polish1-confirms-design.md` (rev 10, commit `18fc841`, approved by the user on 2026-10-14). Its D30–D41 and R46–R57, its §Focus table and its §Every converted call site (#1–#21) are binding; this plan cites them by number. Where it is silent, the 6a, 6b and 6c specs hold (6a §Focus, 6b R19/R20/P23, 6c R44 and rev 8).
+**Spec:** `docs/superpowers/specs/2026-10-14-visual-refresh-polish1-confirms-design.md` (rev 10, commit `18fc841`, approved by the user on 2026-10-14; rev 11 adds D42 from Task 1's look review). Its D30–D42 and R46–R57, its §Focus table and its §Every converted call site (#1–#21) are binding; this plan cites them by number. Where it is silent, the 6a, 6b and 6c specs hold (6a §Focus, 6b R19/R20/P23, 6c R44 and rev 8).
 **Factual base:** `.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/inventory.md` (every call site, test and gate pin at `7e02f70`). Mock-ups: `{q1-style,q2-red,q4-danger,s1-look,s2-how,s3-tasks}.html` in the same folder.
 
 ## Global Constraints
@@ -113,6 +113,7 @@ Each states what it costs if wrong. P-numbers continue from 6c's P55.
 
 **Review Focus**
 - **P95 — InlineConfirm's `.warning` gets `overflow-wrap: anywhere`** (Review Focus 1), pinned in the gate. *Cost:* one declaration, +1 check.
+- **P96 — D42 is `InlineConfirm`'s `align?: 'start' | 'end'` prop** (class `end`: `display: flex; justify-content: flex-end`) and an `Ask`'s `align`, which AskSlot passes on. Pinned in the gate (+2 checks). *Cost:* one prop.
 
 ## Review Focus
 
@@ -131,13 +132,13 @@ The five inputs or conditions most likely to bite an author or a teacher that th
 | Task | Adds | `EXPECTED_CHECKS` |
 |---|---|---|
 | start | | 2062 |
-| 1 — The look | 84 | 2146 |
-| 2 — Ask in place, links and modal footers | 15 | 2161 |
-| 3 — Course tree deletes (#3, #4, #5) | 9 | 2170 |
-| 4 — Versions (#16, #17, #18, #20, #21) | 7 | 2177 |
-| 5 — The quiz edit slot (#14, #6, #2, D10) | 12 | 2189 |
-| 6 — App and quiz-question removals (#9, #12) | 6 | 2195 |
-| 7 — No pop-ups left | 2 | 2197 |
+| 1 — The look | 86 | 2148 |
+| 2 — Ask in place, links and modal footers | 15 | 2163 |
+| 3 — Course tree deletes (#3, #4, #5) | 9 | 2172 |
+| 4 — Versions (#16, #17, #18, #20, #21) | 7 | 2179 |
+| 5 — The quiz edit slot (#14, #6, #2, D10) | 12 | 2191 |
+| 6 — App and quiz-question removals (#9, #12) | 6 | 2197 |
+| 7 — No pop-ups left | 2 | 2199 |
 
 ## File map
 
@@ -195,7 +196,7 @@ Paths under `frontend/src` unless stated.
 - Consumes: nothing from other tasks.
 - Produces:
   - Tokens `--danger: #C8102E`, `--danger-press`, `--primary-press`, `--cancel-border`, `--cancel-hover`, `--cancel-press`, `--danger-panel-bg`, `--danger-panel-fg`.
-  - `InlineConfirm` props: `confirmLabel: string` (required), `confirmDataAction?: string`, `warning?: string` | `message?: Snippet` (exclusive), `onConfirm: () => void`, `onCancel?: () => void`, `takeFocus?: boolean`, `label?: string`, `tone?: 'danger' | 'primary'` (default `'danger'`), `layout?: 'row' | 'column'`, `row?: boolean` (alias), `busy?: boolean`. Hooks: `.inline-confirm`, `.row`, `.warning`, `button.confirm` (+ `.danger` / `.primary`), `button.cancel`, both `.ic-btn`.
+  - `InlineConfirm` props: `confirmLabel: string` (required), `confirmDataAction?: string`, `warning?: string` | `message?: Snippet` (exclusive), `onConfirm: () => void`, `onCancel?: () => void`, `takeFocus?: boolean`, `label?: string`, `tone?: 'danger' | 'primary'` (default `'danger'`), `layout?: 'row' | 'column'`, `row?: boolean` (alias), `align?: 'start' | 'end'` (D42), `busy?: boolean`. Hooks: `.inline-confirm`, `.row`, `.warning`, `button.confirm` (+ `.danger` / `.primary`), `button.cancel`, both `.ic-btn`.
   - Busy title text `'Wait for the request to finish'` on both buttons.
   - Gate section (am) with the `hover_only` helper; Tasks 2–7 append to it.
 
@@ -1429,6 +1430,12 @@ Run the gate. Expected: `VISUAL-REFRESH GATE: ALL PASS (2146 checks)`.
 
 Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors and 13 warnings (a missing `confirmLabel` anywhere is an error now: every caller passes one); gate `ALL PASS (2146 checks)`.
 
+- [ ] **Step 15b: D42 — the row questions end under the row's actions** (added after the user's look review)
+
+- InlineConfirm: prop `align?: 'start' | 'end'` (default `'start'`), `class:end={align === 'end'}` on the group, and the rule `.inline-confirm.end { display: flex; justify-content: flex-end; }`. Test: `align="end" puts the question at the end of its line, under the row's actions (D42); start by default`.
+- `align="end"` on RunMiniProjectsTab's plain delete row, RunAssetsTab's `tr.delete-row` and RunRosterTab's row remove. Each site's existing row-confirm test asserts `.inline-confirm` has class `end`.
+- Gate, in the InlineConfirm block after the `.warning` row: `d '\.inline-confirm\.end' '' 'display:flex' 'justify-content:flex-end'`. `EXPECTED_CHECKS=2148`. Run the full checks again: vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2148 checks)`.
+
 - [ ] **Step 16: Create the backlog**
 
 Create `docs/backlog/polish1-confirms-debt.md`:
@@ -1815,6 +1822,7 @@ type AskBase = {
   confirmLabel: string;
   tone: 'danger' | 'primary';
   layout?: 'row' | 'column';
+  align?: 'start' | 'end';     // 'end': under a row, under its actions (D42)
   confirmDataAction: string;   // test hook, e.g. 'confirm-delete-block'
   key?: string | number;       // which row of a list asks (R53)
 };
@@ -2037,6 +2045,7 @@ Create `frontend/src/components/ui/AskSlot.svelte`:
         confirmDataAction={q.confirmDataAction}
         tone={q.tone}
         layout={q.layout}
+        align={q.align}
         busy={ask.busy}
         takeFocus
         onConfirm={() => ask.answer('confirm')}
@@ -4352,13 +4361,13 @@ In `GLOBAL_ALLOW` (`:388`), after the two InlineConfirm entries from Task 1, add
     ('src/pages/editor/VersionEditPage.svelte', '.inline-confirm'),
 ```
 
-Set `EXPECTED_CHECKS=2161` (`:90`).
+Set `EXPECTED_CHECKS=2163` (`:90`).
 
-Run the gate (Global Constraints). Expected: `ALL PASS (2161 checks)` once the code of Steps 3–31 is in. To see these rows fail first, run it with the Step 27 and Step 31 style blocks stashed: the four `.ask-slot` rows pass, the eight `.page-ask` / `.body-rest` rows fail.
+Run the gate (Global Constraints). Expected: `ALL PASS (2163 checks)` once the code of Steps 3–31 is in. To see these rows fail first, run it with the Step 27 and Step 31 style blocks stashed: the four `.ask-slot` rows pass, the eight `.page-ask` / `.body-rest` rows fail.
 
 - [ ] **Step 34: Full checks**
 
-Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2161 checks)`.
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2163 checks)`.
 
 - [ ] **Step 35: Screenshots, the user's OK, review lanes, commit**
 
@@ -4603,6 +4612,8 @@ Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TZ=Europ
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing SequenceAccordion tests (#3, #4)**
+
+D42: in each site's first "the question appears" test, also assert that its `.inline-confirm` has class `end` (the row questions end under the row's actions).
 
 In `frontend/src/tests/SequenceAccordion.interactive.svelte.test.ts`, after the `trash` helper add:
 
@@ -5090,7 +5101,7 @@ Replace `deleteSeq()` with:
     const q: Ask = {
       // A getter: the suffix follows the page while it asks.
       warning: () => `Delete sequence "${title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`,
-      confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-sequence', key: seqKey,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-sequence', key: seqKey,
     };
     const a = await treeAsk.ask(q);
     if (a === 'cancel') { void focusAfter(seqTrash); return; }
@@ -5136,7 +5147,7 @@ Replace `deleteItem()` with:
     const check = stillOnVid;
     const q: Ask = {
       warning: `Delete "${itemTitle}"? This cannot be undone.`,   // D3: never the unsaved suffix
-      confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-item', key: `item-${itemId}`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-item', key: `item-${itemId}`,
     };
     const a = await treeAsk.ask(q);
     if (a === 'cancel') { void focusAfter(() => itemTrash(itemId)); return; }
@@ -5233,7 +5244,7 @@ Replace `deleteBlock()` with:
     const q: Ask = {
       // A getter: the suffix follows the page while it asks.
       warning: () => `Delete block "${title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`,
-      confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-block', key: askKey,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-block', key: askKey,
     };
     const a = await treeAsk.ask(q);
     if (a === 'cancel') { void focusAfter(trashEl); return; }
@@ -5357,13 +5368,13 @@ colour_scan polish1-tree src/components/editor/TreeAskRow.svelte \
   src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte
 ```
 
-Set `EXPECTED_CHECKS=2170` (`:90`).
+Set `EXPECTED_CHECKS=2172` (`:90`).
 
-Run the gate (Global Constraints). Expected: `ALL PASS (2170 checks)`. To see the `.tree-ask` rows fail first, run it with TreeAskRow's `<style>` block stashed: `own`, `uniq1` and `d` fail.
+Run the gate (Global Constraints). Expected: `ALL PASS (2172 checks)`. To see the `.tree-ask` rows fail first, run it with TreeAskRow's `<style>` block stashed: `own`, `uniq1` and `d` fail.
 
 - [ ] **Step 16: Full checks**
 
-Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2170 checks)`.
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2172 checks)`.
 
 - [ ] **Step 17: Screenshots, the user's OK, review lanes, commit**
 
@@ -5403,6 +5414,8 @@ EOF
 - Produces: VersionsPage ids `v-<id>-title`, `v-<id>-toggle`, `v-<id>-delete`, `li.ask-row`, the `<h1 tabindex="-1">`; confirms `confirm-disable-version`, `confirm-enable-version`, `confirm-delete-version`; VersionEditPage bar `data-action`s `version-publish|archive|revert|disable|enable|delete` and confirms `confirm-<action>`, `confirm-delete-version`.
 
 - [ ] **Step 1: Write the failing VersionsPage tests**
+
+D42: in each site's first "the question appears" test, also assert that its `.inline-confirm` has class `end` (the row questions end under the row's actions).
 
 In `frontend/src/tests/VersionsPage.slots.svelte.test.ts`:
 
@@ -5656,7 +5669,7 @@ Replace `transition()` and `deleteVersion()` with:
     const verb = action === 'disable' ? 'Disable' : 'Enable';
     const id = v.id;
     const q: Ask = {
-      warning: `${verb} version ${id}?`, confirmLabel: verb, tone: 'primary', layout: 'row',
+      warning: `${verb} version ${id}?`, confirmLabel: verb, tone: 'primary', layout: 'row', align: 'end',
       confirmDataAction: `confirm-${action}-version`, key: id,
     };
     const a = await rowAsk.ask(q);
@@ -5698,7 +5711,7 @@ Replace `transition()` and `deleteVersion()` with:
     if (busy || deleteVersionReason(v) !== null) return;
     const id = v.id;
     const q: Ask = {
-      warning: `Delete draft version ${id}? This cannot be undone.`, confirmLabel: 'Delete', tone: 'danger', layout: 'row',
+      warning: `Delete draft version ${id}? This cannot be undone.`, confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end',
       confirmDataAction: 'confirm-delete-version', key: id,
     };
     const a = await rowAsk.ask(q);
@@ -6158,13 +6171,13 @@ if grep -qF '<h1 bind:this={h1El} tabindex="-1">' src/pages/editor/VersionsPage.
 else echo "FAIL  VersionsPage focus targets: the <h1> (tabindex -1) and the row ids (R54)"; fail=1; fi
 ```
 
-Set `EXPECTED_CHECKS=2177` (`:90`).
+Set `EXPECTED_CHECKS=2179` (`:90`).
 
-Run the gate (Global Constraints). Expected: `ALL PASS (2177 checks)`.
+Run the gate (Global Constraints). Expected: `ALL PASS (2179 checks)`.
 
 - [ ] **Step 10: Full checks**
 
-Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2177 checks)`.
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2179 checks)`.
 
 - [ ] **Step 11: Screenshots, the user's OK, review lanes, commit**
 
@@ -7627,13 +7640,13 @@ else echo "PASS  the quiz edit slot calls no confirm()"; fi
 
 `KeyQuestion.svelte` joins `FILES_5D` (`quiz/*.svelte`) by itself, so the 5d emoji and colour scans and the "texts, not copies" check cover it with no new row.
 
-Set `EXPECTED_CHECKS=2189` (`:90`).
+Set `EXPECTED_CHECKS=2191` (`:90`).
 
-Run the gate (Global Constraints). Expected: `ALL PASS (2189 checks)`. To see the `.ans-ask` rows fail first, run it with ChoiceAnswers' `.ans-ask` rule removed: `own`, `uniq1` and `d` fail.
+Run the gate (Global Constraints). Expected: `ALL PASS (2191 checks)`. To see the `.ans-ask` rows fail first, run it with ChoiceAnswers' `.ans-ask` rule removed: `own`, `uniq1` and `d` fail.
 
 - [ ] **Step 15: Full checks**
 
-Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2189 checks)`.
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2191 checks)`.
 
 - [ ] **Step 16: Screenshots, the user's OK, review lanes, commit**
 
@@ -7676,6 +7689,8 @@ EOF
 - Produces: AppBody's `data-action="app-upload"` / `"app-remove"` and confirm `confirm-remove-app`; QuestionCard's `ask?: InPlaceAsk | null` prop and `div.qask`; confirm `confirm-delete-question`. After this task no `confirm(` call is left in the quiz or app bodies; Task 7 pins that for all of `src`.
 
 - [ ] **Step 1: Write the failing tests**
+
+D42: in #12's first test, also assert that the card's `.qask .inline-confirm` has class `end`. #9 asks in place of its buttons and keeps the start alignment.
 
 In `frontend/src/tests/ItemEditorModal.svelte.test.ts`, in `describe('ItemEditorModal — app body …')`, after `const scriptBtn = …` add:
 
@@ -8090,7 +8105,7 @@ Replace the whole `// ---- Delete: confirms (D14) ----` section (Task 5's `remov
     const trash = () => rootEl?.querySelector<HTMLElement>(`[data-q-id="${qid}"] .qhead button[data-glyph="trash"]`) ?? null;
     const q: Ask = {
       key: qid, warning: `Delete question "${title}"? This cannot be undone.`,
-      confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-question',
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-question',
     };
     askedIds = questions.map((x) => x.id);
     const a = await cardAsk.ask(q);                 // … then the delete question (#12)
@@ -8172,13 +8187,13 @@ else echo "PASS  AppBody and QuizBody call no confirm()"; fi
 
 AppBody and the quiz files are already in the 5b and 5d emoji and colour scans, so no scan row is added.
 
-Set `EXPECTED_CHECKS=2195` (`:90`).
+Set `EXPECTED_CHECKS=2197` (`:90`).
 
-Run the gate (Global Constraints). Expected: `ALL PASS (2195 checks)`. To see the `.qask` rows fail first, run it with QuestionCard's `.qask` rule removed: `own`, `uniq1` and `d` fail.
+Run the gate (Global Constraints). Expected: `ALL PASS (2197 checks)`. To see the `.qask` rows fail first, run it with QuestionCard's `.qask` rule removed: `own`, `uniq1` and `d` fail.
 
 - [ ] **Step 8: Full checks**
 
-Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2195 checks)`.
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2197 checks)`.
 
 - [ ] **Step 9: Screenshots, the user's OK, review lanes, commit**
 
@@ -8244,9 +8259,9 @@ if [[ ${#cft[@]} -eq 0 ]]; then echo "PASS  no test answers a confirm() pop-up (
 else echo "FAIL  tests still spy on confirm(): $cft"; fail=1; fi
 ```
 
-Set `EXPECTED_CHECKS=2197` (`:90`).
+Set `EXPECTED_CHECKS=2199` (`:90`).
 
-Run the gate (Global Constraints). Expected: `ALL PASS (2197 checks)`. To see the first row fail, add `const x = () => confirm('probe');` to the end of the `<script>` in `frontend/src/components/ui/AskSlot.svelte`, run the gate (`FAIL  confirm() calls left in src: …AskSlot.svelte…`), then remove the line and run it again.
+Run the gate (Global Constraints). Expected: `ALL PASS (2199 checks)`. To see the first row fail, add `const x = () => confirm('probe');` to the end of the `<script>` in `frontend/src/components/ui/AskSlot.svelte`, run the gate (`FAIL  confirm() calls left in src: …AskSlot.svelte…`), then remove the line and run it again.
 
 - [ ] **Step 4: The Polish 1 backlog, and the items it closes**
 
@@ -8296,7 +8311,7 @@ In `docs/backlog/slice6c-teacher-overview-roster-panel-debt.md`, at the end of t
 
 - [ ] **Step 5: Full checks**
 
-Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2197 checks)`.
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2199 checks)`.
 
 - [ ] **Step 6: The user's OK, review lanes, commit**
 

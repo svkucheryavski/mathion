@@ -373,7 +373,7 @@ describe('AssetSidebar — delete UI', () => {
     const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
-    const confirm = target.querySelector<HTMLElement>('[data-testid="delete-confirm"]')!;
+    const confirm = target.querySelector<HTMLElement>('.inline-confirm button.confirm')!;
     confirm.click();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     expect(deleteSpy).toHaveBeenCalledWith(1);
@@ -395,7 +395,7 @@ describe('AssetSidebar — delete UI', () => {
     const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
-    const confirm = target.querySelector<HTMLElement>('[data-testid="delete-confirm"]')!;
+    const confirm = target.querySelector<HTMLElement>('.inline-confirm button.confirm')!;
     confirm.click();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     const err = target.querySelector('[data-testid="delete-error"]');
@@ -403,7 +403,7 @@ describe('AssetSidebar — delete UI', () => {
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
   });
 
-  it('confirm button is disabled while delete is in flight (re-entrancy guard)', async () => {
+  it('the question stays, busy, while the delete is in flight (re-entrancy guard, R54)', async () => {
     let resolveDelete!: () => void;
     (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(
       new Promise<void>((resolve) => { resolveDelete = () => resolve(); })
@@ -418,10 +418,12 @@ describe('AssetSidebar — delete UI', () => {
     const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
-    const confirm = target.querySelector<HTMLButtonElement>('[data-testid="delete-confirm"]')!;
+    const confirm = target.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!;
     confirm.click();
     flushSync();
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
+    confirm.click();
+    expect(stubCtx.remove).toHaveBeenCalledTimes(1);
     resolveDelete();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
   });
@@ -451,7 +453,7 @@ describe('AssetSidebar — delete UI', () => {
     const trash1 = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
     trash1.click();
     flushSync();
-    const confirm1 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-confirm"]')!;
+    const confirm1 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .inline-confirm button.confirm')!;
     confirm1.click();
     flushSync();
 
@@ -461,23 +463,23 @@ describe('AssetSidebar — delete UI', () => {
     flushSync();
 
     // Row 2's confirm pair should now be visible.
-    const confirm2 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-confirm"]')!;
+    const confirm2 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] .inline-confirm button.confirm')!;
     expect(confirm2).toBeTruthy();
-    expect(confirm2.disabled).toBe(false);
+    expect(confirm2.hasAttribute('aria-disabled')).toBe(false);
 
     // Confirm row 2 (now both deletes are in flight).
     confirm2.click();
     flushSync();
-    expect(confirm2.disabled).toBe(true);
+    expect(confirm2.getAttribute('aria-disabled')).toBe('true');
 
     // Row 1 resolves first. Its finally must NOT clear row 2's UI.
     resolveDelete1();
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
 
     // Row 2's confirm pair must still be present and STILL DISABLED (row 2 delete still in flight).
-    const confirm2After = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-confirm"]')!;
+    const confirm2After = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] .inline-confirm button.confirm')!;
     expect(confirm2After).toBeTruthy();
-    expect(confirm2After.disabled).toBe(true);
+    expect(confirm2After.getAttribute('aria-disabled')).toBe('true');
 
     // Now resolve row 2 to clean up.
     resolveDelete2();
@@ -556,13 +558,13 @@ describe('AssetSidebar — Slice-5b restyle', () => {
     await settleList();
     target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
     await Promise.resolve(); flushSync(); await Promise.resolve();
-    const cancel = target.querySelector<HTMLButtonElement>('[data-testid="delete-cancel"]')!;
+    const cancel = target.querySelector<HTMLButtonElement>('.inline-confirm button.cancel')!;
     expect(document.activeElement).toBe(cancel);
     const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     cancel.dispatchEvent(ev);
     await Promise.resolve(); flushSync(); await Promise.resolve();
     expect(ev.defaultPrevented).toBe(true);
-    expect(target.querySelector('[data-testid="delete-confirm"]')).toBeNull();
+    expect(target.querySelector('.inline-confirm button.confirm')).toBeNull();
     expect(document.activeElement).toBe(target.querySelector('[data-testid="delete-trash"] button'));
   });
 
@@ -584,7 +586,7 @@ describe('AssetSidebar — focus after a confirmed delete (R7)', () => {
   const confirmRow = async (target: HTMLElement, id: number) => {
     target.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!.click();
     await settleAll();
-    target.querySelector<HTMLButtonElement>('[data-testid="delete-confirm"]')!.click();
+    target.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
     await settleAll();
   };
 
@@ -618,5 +620,117 @@ describe('AssetSidebar — focus after a confirmed delete (R7)', () => {
     await settleAll();
     await confirmRow(target, 1);
     expect(document.activeElement).toBe(target.querySelector('[data-testid="drop-zone"]'));
+  });
+});
+
+describe('AssetSidebar — the delete question (Polish 1)', () => {
+  const settleAll = async () => { for (let i = 0; i < 6; i++) { await Promise.resolve(); flushSync(); } };
+
+  // The sidebar inside a modal panel, as MarkdownEditor mounts it in the item
+  // and mini-project modals; `disabled` flips through the $state props.
+  function mountInPanel() {
+    const panel = document.createElement('section');
+    panel.className = 'modal-panel';
+    panel.tabIndex = -1;
+    document.body.appendChild(panel);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props: any = $state({
+      assetContext: stubCtx,
+      onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
+      disabled: false,
+      uploading: false,
+    });
+    const cmp = mount(AssetSidebar, { target: panel, props });
+    cleanup = () => unmount(cmp);
+    return { panel, props };
+  }
+
+  it('the question is a row named "Delete <file>?" with Delete and Cancel; Cancel focuses the trash', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
+    flushSync();
+    const g = panel.querySelector('.inline-confirm') as HTMLElement;
+    expect(g.getAttribute('aria-label')).toBe('Delete a.png?');
+    expect(g.querySelector('button.confirm')?.textContent?.trim()).toBe('Delete');
+    expect(document.activeElement).toBe(g.querySelector('button.cancel'));
+    (g.querySelector('button.cancel') as HTMLButtonElement).click();
+    await settleAll();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(panel.querySelector('[data-testid="delete-trash"] button'));
+  });
+
+  it('turning disabled while the question is idle closes it, deletes nothing, and focus goes to the panel', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
+    flushSync();
+    props.disabled = true;
+    await settleAll();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(stubCtx.remove).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(panel);
+  });
+
+  it('turning disabled while the delete runs keeps the busy question; once it settles focus goes to the panel, never <body>', async () => {
+    let resolve!: () => void;
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { resolve = r; }));
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
+      .mockResolvedValue([]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
+    flushSync();
+    (panel.querySelector('.inline-confirm button.confirm') as HTMLButtonElement).click();
+    flushSync();
+    props.disabled = true;
+    await settleAll();
+    const busy = panel.querySelector('.inline-confirm button.confirm') as HTMLButtonElement;
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    resolve();
+    await settleAll();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(panel);
+  });
+
+  it('two questions (one busy): turning disabled closes the idle one that has focus; focus goes to the panel, never <body> (review)', async () => {
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>(() => {}));
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' }),
+    ]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    const trashOf = (id: number) => panel.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!;
+    trashOf(1).click();
+    flushSync();
+    (panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm') as HTMLButtonElement).click();
+    flushSync();
+    trashOf(2).click();
+    await settleAll();
+    expect(document.activeElement).toBe(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm button.cancel'));
+    props.disabled = true;
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).toBeNull();
+    expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm')?.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(panel);
+  });
+
+  it('the drop zone is aria-disabled with its reason while the sidebar is disabled or uploading', async () => {
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    const zone = panel.querySelector('[data-testid="drop-zone"]') as HTMLElement;
+    expect(zone.hasAttribute('aria-disabled')).toBe(false);
+    expect(zone.hasAttribute('title')).toBe(false);
+    props.disabled = true;
+    flushSync();
+    expect(zone.getAttribute('aria-disabled')).toBe('true');
+    expect(zone.getAttribute('title')).toBe('Wait for the request to finish');
+    props.uploading = true;
+    flushSync();
+    expect(zone.getAttribute('title')).toBe('Wait for the upload to finish');
   });
 });

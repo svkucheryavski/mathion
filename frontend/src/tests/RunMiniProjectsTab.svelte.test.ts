@@ -845,6 +845,7 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     expect(row.previousElementSibling?.getAttribute('data-role')).toBe('mp-row');
     expect(row.querySelector('td')?.getAttribute('colspan')).toBe('4');
     expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete this mini-project\?/);
+    expect(row.querySelector('.inline-confirm')?.classList.contains('end')).toBe(true);   // under the 🗑 (D42)
     const cell = target.querySelector('tr[data-role="mp-row"] .mp-actions') as HTMLElement;
     expect(cell.querySelector('.inline-confirm')).toBeNull();
     expect(cell.querySelector('[data-action="delete"]')).not.toBeNull();

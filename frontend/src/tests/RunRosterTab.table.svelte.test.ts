@@ -625,6 +625,7 @@ describe('RunRosterTab — the row confirm', () => {
     expect(confirmRow.classList.contains('ro-confirm-row')).toBe(true);
     expect(confirmRow.querySelector('td')!.getAttribute('colspan')).toBe('5');
     expect(text(confirmRow.querySelector('.warning'))).toBe('Remove s2@x.com from this run?');
+    expect(confirmRow.querySelector('.inline-confirm')?.classList.contains('end')).toBe(true);   // under the 🗑 (D42)
     expect(text(act('confirm-delete-student'))).toBe('Remove');
     const cancel = confirmRow.querySelector('button.cancel') as HTMLButtonElement;
     expect(document.activeElement).toBe(cancel);

@@ -36,6 +36,7 @@
   --primary: #3F5C77;         /* steel blue */
   --primary-text: #fff;
   --primary-soft: #EAEFF4;    /* code badges, current item, hover fills */
+  --primary-press: #2F465B;   /* a pressed primary confirm (Polish 1 D31) */
 
   /* --- gold: the logo's second peak, and chrome that marks "you are here" ---
      Decorative only. It never carries state and never carries body text.     */
@@ -44,7 +45,8 @@
   --gold-text: #7A5410;       /* label on --gold-soft (6.6:1) */
 
   /* --- semantic --- */
-  --danger: #991B1B;
+  --danger: #C8102E;          /* 5.9:1 on white, 4.6:1 on --focus-2 (Polish 1 D32) */
+  --danger-press: #A50D26;    /* a pressed danger button */
   --success: #065F46;
 
   /* --- geometry --- */
@@ -68,9 +70,19 @@
      A disabled Force delete stays recognisably destructive: it keeps the red
      family and only loses saturation. Never grey it out — the operator must
      still read it as the dangerous button while it is unarmed. */
-  --danger-off-bg: #FFFAFA;
-  --danger-off-border: #F2D9D9;
-  --danger-off-text: #C99B9B;
+  --danger-off-bg: #FFF7F8;
+  --danger-off-border: #F4D2D8;
+  --danger-off-text: #DFA3AE;
+
+  /* --- confirm buttons (Polish 1 D31): Cancel's outline and fills --- */
+  --cancel-border: var(--focus-line-strong);
+  --cancel-hover: var(--focus-1);
+  --cancel-press: var(--focus-2);
+
+  /* --- the danger panel (Polish 1 D40): its text is 9.2:1 on its background,
+     --danger 5.3:1, --text-2 12.1:1. The status badges keep --status-rejected-*. --- */
+  --danger-panel-bg: #FDF0F2;
+  --danger-panel-fg: #7A1F2B;
 
   /* --- type --- */
   --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;

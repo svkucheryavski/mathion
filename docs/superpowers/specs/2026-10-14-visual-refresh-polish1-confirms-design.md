@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** draft rev 10 (2026-10-14), for review.
+**Status:** rev 11 (2026-10-14), approved at rev 10; rev 11 adds the user's D42.
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -43,6 +43,7 @@
   - line citations and test mounts are corrected.
 - Rev 8 folds in round 7's minors: AssetSidebar's drop zone and the fallback after a busy delete, the #4 404-race chain, #3 in the early-settle list, and test wording.
 - Rev 9–10 give the asset drop zone a `title` with its reason (rounds 8–9).
+- Rev 11 adds D42 (the user, Task 1's look review): a question under a row ends under the row's actions.
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -85,6 +86,7 @@ The user's (2026-10-14), continuing the Slice-6 numbering:
 - **D39 — In a list, the question follows the click.** With a question open under row A, a click on row B's trash (or another row action) closes A's question without acting and opens the question under row B. A second click on the same row, or on a toolbar, footer or bar, keeps the open question and brings focus back to it. This matches the Teaching rows (RunGroupsTab, RunListPage, AssetSidebar). (User, round 2.)
 - **D40 — The danger panel takes the mock-up's colours:** `#FDF0F2` background, `#7A1F2B` message text, `--text-2` for "I understand". The "rejected" status badges keep `--status-rejected-*`. (User, round 2.)
 - **D41 — Seven tasks** (Process). (User, round 2.)
+- **D42 — A question under a row ends under the row's actions.** The row's trash is at its right end, so the question line under it is right-aligned: `InlineConfirm align="end"` (an `Ask`'s `align: 'end'`). It applies to every one-line question under a row: Mini-projects, Assets and Roster rows, the course tree (#3, #4, #5), the VersionsPage rows (#17, #18) and the quiz cards (#12). Questions in place of buttons, footers and bars, multi-line questions (RunAssetsTab's replace) and the danger panel keep their places. In-row placement was rejected because the action column widens and the table's columns shift. (User, Task 1 look review, after an A/B mock-up on the live pages.)
 
 ## Rulings
 

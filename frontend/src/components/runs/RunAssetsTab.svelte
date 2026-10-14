@@ -184,10 +184,6 @@
     mounted = false;
   });
 
-  function autoFocus(el: HTMLElement): void {
-    el.focus();
-  }
-
   function isExtensionAllowed(name: string): boolean {
     const idx = name.lastIndexOf('.');
     const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
@@ -611,13 +607,6 @@
     return n !== undefined && block ? `Block ${n} — ${block.title}` : mp.title;
   }
 
-  function onReplaceKeydown(e: KeyboardEvent, assetId: number): void {
-    if (e.key !== 'Escape') return;
-    e.preventDefault();
-    e.stopPropagation();
-    onReplaceCancel(assetId);
-  }
-
   function serveUrl(filename: string): string {
     return `/api/runs/${runId}/assets/${encodeURIComponent(filename)}`;
   }
@@ -711,7 +700,7 @@
           </div>
         {:else}
           <InlineConfirm takeFocus warning="Delete {total} selected ({bc.orphanCount} orphan, {bc.referencedCount} referenced)?"
-                         onConfirm={performBulkDelete} onCancel={() => void cancelBulk()} />
+                         confirmLabel="Delete" onConfirm={performBulkDelete} onCancel={() => void cancelBulk()} />
         {/if}
       {:else}
         <Button variant="danger" disabled={versionIsDisabled} title={versionIsDisabled ? VERSION_OFF : undefined}
@@ -811,7 +800,7 @@
                  and the danger panel (Safari pass). -->
             <tr class="delete-row">
               <td colspan="7">
-                <InlineConfirm row takeFocus warning="Delete this asset?" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
+                <InlineConfirm row align="end" takeFocus warning="Delete this asset?" confirmLabel="Delete" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
               </td>
             </tr>
           {/if}
@@ -820,19 +809,15 @@
               <td colspan="7">
                 <!-- A full-width row under its row (browser pass): in the 1%-wide
                      actions cell the text squeezed to a narrow column. -->
-                <div class="row-confirm" role="group" aria-label="Replace {a.filename}">
-                  <p>
-                    Replace <code>{a.filename}</code> (new size: {formatFileSize(rc.file.size)})?
-                    The current content will be overwritten and cannot be recovered.
-                    {#if refIds.length > 0}
-                      {refIds.length} mini-project{refIds.length === 1 ? '' : 's'} that reference this file will continue to point at the new content.
-                    {/if}
-                  </p>
-                  <div class="rc-actions">
-                    <button type="button" class="rc-confirm" onclick={performReplace} onkeydown={(e) => onReplaceKeydown(e, a.id)}>Confirm</button>
-                    <button type="button" class="rc-cancel" use:autoFocus onclick={() => onReplaceCancel(a.id)} onkeydown={(e) => onReplaceKeydown(e, a.id)}>Cancel</button>
-                  </div>
-                </div>
+                {#snippet replaceMessage()}
+                  Replace <code>{a.filename}</code> (new size: {formatFileSize(rc.file.size)})?
+                  The current content will be overwritten and cannot be recovered.
+                  {#if refIds.length > 0}
+                    {refIds.length} mini-project{refIds.length === 1 ? '' : 's'} that reference this file will continue to point at the new content.
+                  {/if}
+                {/snippet}
+                <InlineConfirm takeFocus layout="column" label="Replace {a.filename}?" message={replaceMessage}
+                               confirmLabel="Replace" onConfirm={performReplace} onCancel={() => onReplaceCancel(a.id)} />
               </td>
             </tr>
           {/if}
@@ -952,13 +937,7 @@
 
   .actions-cell { width: 1%; white-space: nowrap; text-align: right; }
   .row-icons { display: inline-flex; gap: 4px; }
-  .row-confirm { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; background: var(--surface-2); border-left: 3px solid var(--primary); border-radius: var(--radius); font-size: 12.5px; color: var(--text-2); }
-  .row-confirm p { margin: 0; }
-  .row-confirm code, .sp-head code { font-family: var(--font-mono); }
-  .rc-actions { display: flex; gap: 6px; }
-  .rc-confirm, .rc-cancel { padding: var(--btn-pad); border-radius: var(--radius); font: inherit; font-size: var(--control-font); cursor: pointer; }
-  .rc-confirm { background: var(--primary); color: var(--primary-text); border: 1px solid var(--primary); }
-  .rc-cancel { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); }
+  .sp-head code { font-family: var(--font-mono); }
 
   .danger-row td, .sub-panel-row td, .replace-row td, .delete-row td { padding: 0 10px 10px; border-top: 0; }
   .sub-panel { padding: 8px 12px; background: var(--surface-2); border-radius: var(--radius); }

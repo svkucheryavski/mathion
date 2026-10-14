@@ -722,11 +722,11 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       await settle();
       target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
       await settle();
-      const cancel = target.querySelector<HTMLButtonElement>('[data-testid="delete-cancel"]')!;
+      const cancel = target.querySelector<HTMLButtonElement>('.inline-confirm button.cancel')!;
       expect(document.activeElement).toBe(cancel);
       cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       await settle();
-      expect(target.querySelector('[data-testid="delete-confirm"]')).toBeNull();
+      expect(target.querySelector('.inline-confirm button.confirm')).toBeNull();
       expect(onClose).not.toHaveBeenCalled();
       expect(target.querySelector('[data-testid="discard-confirm"], .inline-confirm')).toBeNull();
     });

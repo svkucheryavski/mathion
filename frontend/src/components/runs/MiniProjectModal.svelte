@@ -495,6 +495,7 @@
     <InlineConfirm
       row
       takeFocus
+      tone="primary"
       warning="Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."
       confirmLabel="Publish"
       confirmDataAction="confirm-publish"

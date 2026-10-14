@@ -348,6 +348,7 @@
           <InlineConfirm
             row
             takeFocus
+            tone="primary"
             warning="Students lose access immediately; their progress is kept."
             confirmLabel="Unpublish"
             confirmDataAction="confirm-unpublish"

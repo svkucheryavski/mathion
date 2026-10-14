@@ -238,7 +238,7 @@ describe('AssetSidebar error surfaces — asset delete 409 (spec line 526)', () 
     const row1 = target.querySelector('[data-testid="asset-row-1"]') as HTMLElement;
     (row1.querySelector('[data-testid="delete-trash"] button') as HTMLButtonElement).click();
     await settle();
-    (row1.querySelector('[data-testid="delete-confirm"]') as HTMLButtonElement).click();
+    (row1.querySelector('.inline-confirm button.confirm') as HTMLButtonElement).click();
     await settle();
     expect(deleteUrl).toBe('/api/runs/42/assets/1');
     expect(target.textContent).toContain('referenced by 2 mini-project');

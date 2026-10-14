@@ -87,8 +87,15 @@
   .primary { background: var(--primary); color: var(--primary-text); }
   .secondary { background: var(--surface); color: var(--text-3); border-color: var(--border-strong); }
   .ghost { padding: var(--btn-pad-sm); background: transparent; color: var(--muted); }
-  /* Danger is a text treatment, never a red fill. */
-  .danger { background: transparent; color: var(--danger); }
+  /* D31: outlined at rest, filled on hover (pointer devices) and on keyboard
+     focus, darker while pressed. Disabled, blocked and busy keep their looks. */
+  .danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
+  @media (hover: hover) {
+    .danger:not(:disabled):not(.blocked):not([aria-busy="true"]):hover { background: var(--danger); color: var(--primary-text); }
+  }
+  .danger:not(:disabled):not(.blocked):not([aria-busy="true"]):focus-visible { background: var(--danger); color: var(--primary-text); }
+  .danger:not(:disabled):not(.blocked):not([aria-busy="true"]):active { background: var(--danger-press); border-color: var(--danger-press); color: var(--primary-text); }
+  .danger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
   /* Danger-off = an unarmed Force delete: keeps the red family, drops saturation. */
   .danger-off {
     background: var(--danger-off-bg);

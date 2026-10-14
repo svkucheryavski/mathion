@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import IconButton from '../ui/IconButton.svelte';
+  import InlineConfirm from '../ui/InlineConfirm.svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
@@ -88,15 +89,13 @@
       ? 'Remove asset — referenced by a mini-project'
       : 'Remove asset — still referenced in this version',
   );
-  // R7: the inline confirm takes focus on Cancel so Escape reaches it, and
-  // gives it back to the row's trash when it closes.
+  // R7: the question (InlineConfirm, takeFocus) puts focus on its Cancel, so
+  // Escape reaches it (default-prevented, so an enclosing modal stays open), and
+  // Cancel gives it back to the row's trash.
   const trashEls = $state<Record<number, HTMLButtonElement | undefined>>({});
-  const cancelEls = $state<Record<number, HTMLButtonElement | undefined>>({});
-  async function askDelete(id: number) {
+  function askDelete(id: number) {
     if (disabled) return;
     confirmId = id;
-    await tick();
-    cancelEls[id]?.focus();
   }
   async function cancelDelete() {
     const id = confirmId;
@@ -104,12 +103,17 @@
     await tick();
     if (id !== null) trashEls[id]?.focus();
   }
-  // Escape = Cancel. preventDefault so an enclosing modal does not close (§1).
-  function onConfirmKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return;
-    e.preventDefault();
-    void cancelDelete();
-  }
+  // An idle question closes when the sidebar turns disabled (a save or another
+  // request froze the editor); a busy one stays until its DELETE settles (R54).
+  $effect(() => {
+    if (!disabled || confirmId === null || deletingIds.has(confirmId)) return;
+    const id = confirmId;
+    const idx = untrack(() => assets.findIndex((a) => a.id === id));
+    // This row's question: another row's busy one may be on screen too (P60).
+    const inside = asideEl?.querySelector(`[data-testid="asset-row-${id}"] .inline-confirm`)?.contains(document.activeElement) ?? false;
+    confirmId = null;
+    if (inside) void refocusAfterDelete(id, idx);
+  });
   async function confirmDelete(id: number) {
     if (disabled) return;
     if (deletingIds.has(id)) return;
@@ -128,17 +132,26 @@
       if (closing) await refocusAfterDelete(id, idx);
     }
   }
-  // R7, the Confirm path: the confirm pair is gone (and the list re-rendered),
-  // so focus would fall to <body>. Land on this row's trash (failed delete),
-  // else the trash now at its position, the one before it, else the drop zone.
-  // Leave focus alone if the author moved it elsewhere or opened another confirm.
+  // R7, the Delete path: the question is gone (and the list re-rendered), so
+  // focus would fall to <body>. Land on this row's trash (failed delete), else
+  // the trash now at its position, the one before it, the drop zone, else the
+  // modal panel. Leave focus alone if the author moved it elsewhere or opened
+  // another question.
   async function refocusAfterDelete(id: number, idx: number) {
     await tick();
     const active = document.activeElement;
     if (confirmId !== null || (active && active !== document.body && !asideEl?.contains(active))) return;
-    const near = [trashEls[id], trashEls[assets[idx]?.id ?? -1], trashEls[assets[idx - 1]?.id ?? -1]];
-    const target = near.find((el) => el?.isConnected && !el.disabled) ?? dropZoneEl;
+    const near: (HTMLElement | null | undefined)[] = [
+      trashEls[id], trashEls[assets[idx]?.id ?? -1], trashEls[assets[idx - 1]?.id ?? -1], dropZoneEl,
+    ];
+    const target = near.find(usable) ?? asideEl?.closest<HTMLElement>('section.modal-panel');
     target?.focus();
+  }
+  // A focus target counts only if it is connected, enabled (natively and by
+  // aria) and not inert (Polish 1 §Focus).
+  function usable(el: HTMLElement | null | undefined): el is HTMLElement {
+    return !!el && el.isConnected && !(el as HTMLButtonElement).disabled
+      && el.getAttribute('aria-disabled') !== 'true' && !el.closest('[inert]');
   }
 
   function pickFile() { if (disabled || uploading) return; fileInputEl?.click(); }
@@ -308,24 +321,13 @@
               title="Remove this reference from content and save to enable delete."
             >used</span>
           {/if}
-          {#if confirmId === a.id}
-            <span class="confirm-pair">
-              <button
-                type="button"
-                class="confirm"
-                data-testid="delete-confirm"
-                disabled={disabled || deletingIds.has(a.id)}
-                onkeydown={onConfirmKeydown}
-                onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
-              >Confirm</button>
-              <button
-                type="button"
-                class="cancel"
-                data-testid="delete-cancel"
-                bind:this={cancelEls[a.id]}
-                onkeydown={onConfirmKeydown}
-                onclick={(e) => { e.stopPropagation(); void cancelDelete(); }}
-              >Cancel</button>
+          {#if confirmId === a.id || deletingIds.has(a.id)}
+            <!-- The row's own click (insert) must not run under the question. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+            <span onclick={(e) => e.stopPropagation()}>
+              <InlineConfirm takeFocus label="Delete {a.filename}?" confirmLabel="Delete"
+                             busy={deletingIds.has(a.id)}
+                             onConfirm={() => void confirmDelete(a.id)} onCancel={() => void cancelDelete()} />
             </span>
           {:else}
             <span data-testid="delete-trash">
@@ -357,6 +359,8 @@
     onclick={pickFile}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFile(); } }}
     class:disabled={disabled || uploading}
+    aria-disabled={disabled || uploading ? 'true' : undefined}
+    title={uploading ? 'Wait for the upload to finish' : disabled ? 'Wait for the request to finish' : undefined}
   >
     Drop here or click to pick
   </div>
@@ -460,18 +464,6 @@
     font-weight: 500;
     white-space: nowrap; /* ref 1726 */
   }
-  .confirm-pair { display: flex; gap: 4px; /* the 4px step */ }
-  .confirm-pair button {
-    padding: 2px 8px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
-    font-size: 11.5px;
-    cursor: pointer;
-  }
-  .confirm-pair .confirm { color: var(--danger); }
-  .confirm-pair button:disabled { color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
   .drop-zone {
     margin-top: 2px;
     padding: 11px 10px;

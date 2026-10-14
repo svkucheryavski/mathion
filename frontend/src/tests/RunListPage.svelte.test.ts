@@ -151,7 +151,7 @@ describe('RunListPage', () => {
     trash(target)[0]!.click();
     await settle();
     expect(target.querySelector('.inline-confirm[role="group"]')?.getAttribute('aria-label')).toBe('Delete run Spring 2026?');
-    (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Confirm Delete') as HTMLButtonElement).click();
+    (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
     await settle();
     await settle();
     expect(target.querySelector('tbody')).toBeNull();
@@ -166,7 +166,7 @@ describe('RunListPage', () => {
     await settle();
     trash(target)[0]!.click();
     await settle();
-    (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Confirm Delete') as HTMLButtonElement).click();
+    (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
     await settle();
     await settle();
     expect(document.activeElement).toBe(trash(target)[0]);

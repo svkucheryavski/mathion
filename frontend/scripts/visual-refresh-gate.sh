@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2062
+EXPECTED_CHECKS=2148
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -390,6 +390,11 @@ GLOBAL_ALLOW = {
     # (a filename). Ancestor-scoped under its own .dc-msg, which wraps only that
     # text, never a quiz.
     ('src/components/ui/DangerConfirm.svelte', 'code'),
+    # Polish 1 T1: InlineConfirm's `message` snippet (R52's bold lead, a
+    # filename in <code>). Ancestor-scoped under its own hashed .warning, which
+    # wraps only the caller's question text, never a quiz.
+    ('src/components/ui/InlineConfirm.svelte', 'code'),
+    ('src/components/ui/InlineConfirm.svelte', 'strong'),
     # Slice-5d: the authoring quiz card's rendered question text / explanation
     # (.qtext, .qexpl-body). It lives only in the item editor modal, which never
     # renders the student quiz components (T3 files).
@@ -532,9 +537,14 @@ else:
 # Then once more in the 6a Safari pass (aaed0f95 -> 2448f67f, user 2026-10-11):
 # +--page-max (one page width for the whole site), the ONLY change (dropping it
 # reproduces aaed0f95).
+# Then once more in Polish 1 T1 (2448f67f -> a066ce4c, user 2026-10-14): --danger
+# #991B1B -> #C8102E (D32), the --danger-off-* trio re-derived from it, and
+# +--danger-press, --primary-press, --cancel-border/-hover/-press and
+# --danger-panel-bg/-fg (D31, D40). Those are the ONLY changes (reverting them
+# reproduces 2448f67f).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
-    ('', ':focus-visible', '1684b043'), ('', ':root', '2448f67f'),
+    ('', ':focus-visible', '1684b043'), ('', ':root', 'a066ce4c'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
@@ -4731,9 +4741,9 @@ fi
 uniq1 danger-confirm
 if [[ -n $REPLY ]]; then
   N=DangerConfirm; H=$REPLY
-  d '\.danger-confirm' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  d '\.danger-confirm' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)'
   d '\.dc-force' '' 'background:var\(--danger-off-bg\)' 'color:var\(--danger-off-text\)' 'border:1px solid var\(--danger-off-border\)'
-  d '\.dc-force\.armed' '' 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.dc-force\.armed' '' 'background:var\(--surface\)' 'color:var\(--danger\)'
   sweep DangerConfirm $H
 fi
 
@@ -5102,6 +5112,97 @@ if [[ -n $REPLY ]]; then
   d '\.te-badge' '' 'margin-left:auto'
   none "SubmissionThreadEntry's old banner rule is gone" "\.banner-info\.${H}[{ ,:.]"
   sweep SubmissionThreadEntry $H
+fi
+
+echo
+echo "--- (am) Polish 1 — one confirm style ---"
+# hover_only LABEL HASH — every :hover rule carrying HASH sits inside
+# `@media (hover: hover)`: a touch tap leaves no fill behind (R50).
+hover_only() {
+  if python3 - "$CSS" "$2" <<'HO'
+import re, sys
+css, h = open(sys.argv[1]).read(), re.escape(sys.argv[2])
+hov = re.compile(r'[^{}]*\.' + h + r'[^{}]*:hover[^{}]*\{')
+inside = sum(len(hov.findall(m.group(1)))
+             for m in re.finditer(r'@media \(hover: ?hover\)\{((?:[^{}]*\{[^{}]*\})*)\}', css))
+total = len(hov.findall(css))
+sys.exit(0 if total > 0 and total == inside else 1)
+HO
+  then echo "PASS  $1 :hover fills sit only under @media (hover: hover) (R50)"
+  else echo "FAIL  $1 :hover fills sit only under @media (hover: hover) (R50)"; fail=1; fi
+}
+# D32: the new red, and every Polish-1 token defined exactly once.
+if grep -qE '^[[:space:]]*--danger: #C8102E;' src/styles/theme-default.css; then echo "PASS  --danger is #C8102E (D32)"
+else echo "FAIL  --danger is #C8102E (D32)"; fail=1; fi
+p1tok=0
+for t in danger-press primary-press cancel-border cancel-hover cancel-press danger-panel-bg danger-panel-fg; do
+  [[ $(grep -cE "^[[:space:]]*--$t:" src/styles/theme-default.css) -eq 1 ]] || { p1tok=1; echo "      --$t is not defined exactly once"; }
+done
+if [[ $p1tok -eq 0 ]]; then echo "PASS  the seven Polish-1 tokens are defined once in theme-default.css"
+else echo "FAIL  the seven Polish-1 tokens are defined once in theme-default.css"; fail=1; fi
+# The two hand-rolled confirms are InlineConfirm now (spec §Tone and labels).
+none "AssetSidebar and RunAssetsTab author no hand-rolled confirm rules" "\.(confirm-pair|row-confirm|rc-actions|rc-confirm|rc-cancel)\.svelte-"
+# InlineConfirm: D31/D34 geometry and states, guarded so busy wins (spec §Look).
+uniq1 inline-confirm
+if [[ -n $REPLY ]]; then
+  N=InlineConfirm; H=$REPLY
+  IC=':not\(\[aria-disabled=true\]\)'
+  d '\.ic-btn' '' 'height:22px' 'padding:0 9px' 'border-radius:4px' 'background:var\(--surface\)' 'font-size:12px' 'font-weight:500'
+  d '\.danger' '' 'color:var\(--danger\)' 'border-color:var\(--danger\)'
+  d '\.primary' '' 'color:var\(--primary\)' 'border-color:var\(--primary\)'
+  d '\.cancel' '' 'color:var\(--text-3\)' 'border-color:var\(--cancel-border\)'
+  d '\.danger' "${IC}:hover" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.danger' "${IC}:focus-visible" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.danger' "${IC}:active" 'background:var\(--danger-press\)' 'border-color:var\(--danger-press\)'
+  d '\.primary' "${IC}:hover" 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.primary' "${IC}:focus-visible" 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.primary' "${IC}:active" 'background:var\(--primary-press\)' 'border-color:var\(--primary-press\)'
+  d '\.cancel' "${IC}:hover" 'background:var\(--cancel-hover\)'
+  d '\.cancel' "${IC}:focus-visible" 'background:var\(--cancel-hover\)'
+  d '\.cancel' "${IC}:active" 'background:var\(--cancel-press\)'
+  d '\.ic-btn' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
+  d '\.cancel\[aria-disabled=true\]' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+  d '\.confirm\[aria-busy=true\]' '' 'cursor:progress'
+  d '\.warning' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'overflow-wrap:anywhere'
+  d '\.inline-confirm\.end' '' 'display:flex' 'justify-content:flex-end'
+  chk "@media \(pointer: ?coarse\)\{\.ic-btn\.${H}" 'min-height:28px'
+  none "InlineConfirm fills only an enabled, idle button" "\.(danger|primary|cancel)\.${H}:(hover|focus-visible|active)"
+  hover_only InlineConfirm $H
+  sweep InlineConfirm $H
+fi
+# DangerConfirm: the D40 panel, InlineConfirm's geometry, fills only when armed and idle.
+uniq1 danger-confirm
+if [[ -n $REPLY ]]; then
+  N=DangerConfirm; H=$REPLY
+  DC=':not\(:disabled\)'
+  d '\.dc-msg' '' 'color:var\(--danger-panel-fg\)'
+  d '\.dc-ack' '' 'color:var\(--text-2\)'
+  d '\.dc-btn' '' 'height:22px' 'padding:0 9px' 'border-radius:4px' 'font-size:12px' 'font-weight:500'
+  d '\.dc-force\.armed' "${DC}:hover" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.dc-force\.armed' "${DC}:focus-visible" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.dc-force\.armed' "${DC}:active" 'background:var\(--danger-press\)' 'border-color:var\(--danger-press\)'
+  d '\.dc-cancel' '' 'border:1px solid var\(--cancel-border\)'
+  d '\.dc-cancel' "${DC}:hover" 'background:var\(--cancel-hover\)'
+  d '\.dc-cancel' "${DC}:focus-visible" 'background:var\(--cancel-hover\)'
+  d '\.dc-cancel' "${DC}:active" 'background:var\(--cancel-press\)'
+  d '\.dc-btn' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
+  d '\.dc-force\.armed\[aria-busy=true\]' '' 'cursor:progress'
+  chk "@media \(pointer: ?coarse\)\{\.dc-btn\.${H}" 'min-height:28px'
+  none "DangerConfirm fills only an armed, idle Force delete and an enabled Cancel" "\.dc-(force|cancel)[.a-z-]*\.${H}:(hover|focus-visible|active)"
+  hover_only DangerConfirm $H
+fi
+# Button danger (D34 at page size): the same states, guarded by disabled, blocked and busy.
+uniq1 btn
+if [[ -n $REPLY ]]; then
+  N=Button; H=$REPLY
+  BT=':not\(:disabled\):not\(\.blocked\):not\(\[aria-busy=true\]\)'
+  d '\.danger' '' 'background:var\(--surface\)' 'color:var\(--danger\)' 'border-color:var\(--danger\)'
+  d '\.danger' "${BT}:hover" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.danger' "${BT}:focus-visible" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
+  d '\.danger' "${BT}:active" 'background:var\(--danger-press\)' 'border-color:var\(--danger-press\)'
+  d '\.danger' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
+  none "Button .danger fills only an enabled, idle button" "\.danger\.${H}:((hover|active)\{|focus-visible\{[^}]*background)"
+  hover_only Button $H
 fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

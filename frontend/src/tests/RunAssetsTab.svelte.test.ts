@@ -941,7 +941,7 @@ describe('RunAssetsTab — replace flow', () => {
 
     expect(target.textContent).toMatch(/Replace.*doc\.pdf/i);
 
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(replaceRunAsset).toHaveBeenCalledTimes(1);
@@ -965,7 +965,7 @@ describe('RunAssetsTab — replace flow', () => {
     pickReplaceFile(new File(['NEW'], 'doc.png', { type: 'image/png' }));
     await settle();
 
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
     expect(target.textContent).toMatch(/same extension/i);
     expect(replaceRunAsset).not.toHaveBeenCalled();
   });
@@ -983,7 +983,7 @@ describe('RunAssetsTab — replace flow', () => {
     pickReplaceFile(new File(['NEW'], 'NEW.PDF', { type: 'application/pdf' }));
     await settle();
 
-    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).not.toBeNull();
   });
 
   it('oversize file → inline error before InlineConfirm', async () => {
@@ -1002,7 +1002,7 @@ describe('RunAssetsTab — replace flow', () => {
     await settle();
 
     expect(target.textContent).toMatch(/file too large/i);
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
   });
 
   it('Cancel on InlineConfirm clears state without calling replaceRunAsset', async () => {
@@ -1017,11 +1017,11 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).not.toBeNull();
 
     findButton(target, /^Cancel$/)!.click();
     flushSync();
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
     expect(replaceRunAsset).not.toHaveBeenCalled();
   });
 
@@ -1041,7 +1041,7 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/deleted by another user/i);
@@ -1063,7 +1063,7 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/same extension/i);
@@ -1084,7 +1084,7 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/exceed.*quota/i);
@@ -1122,7 +1122,7 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await Promise.resolve();
     flushSync();
     expect(capturedSignal?.aborted).toBe(false);
@@ -1151,7 +1151,7 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await Promise.resolve();
     flushSync();
     expect(capturedSignal?.aborted).toBe(false);
@@ -1171,11 +1171,11 @@ describe('RunAssetsTab — replace flow', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).not.toBeNull();
 
     box.runId = 999;
     flushSync();
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
   });
 
   it('runId prop change clears a stale banner', async () => {
@@ -1250,7 +1250,7 @@ describe('RunAssetsTab — delete (orphan)', () => {
     flushSync();
     expect(target.textContent).toMatch(/Delete this asset\?/);
 
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(deleteRunAsset).toHaveBeenCalledTimes(1);
@@ -1271,11 +1271,11 @@ describe('RunAssetsTab — delete (orphan)', () => {
 
     findDeleteBtn('orphan.pdf').click();
     flushSync();
-    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).not.toBeNull();
 
     findButton(target, /^Cancel$/)!.click();
     flushSync();
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
     expect(deleteRunAsset).not.toHaveBeenCalled();
   });
 
@@ -1476,7 +1476,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('orphan.pdf').click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(onRefetchAssets).toHaveBeenCalled();
@@ -1496,7 +1496,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('orphan.pdf').click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/Server boom|Delete failed/i);
@@ -1515,7 +1515,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('orphan.pdf').click();
     flushSync();
-    const confirm = findButton(target, /^Confirm$/)!;
+    const confirm = findButton(target, /^(Delete|Replace)$/)!;
     confirm.click();
     confirm.click();
     await Promise.resolve();
@@ -1551,7 +1551,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
 
     findDeleteBtn('orphan.pdf').click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await Promise.resolve();
     flushSync();
 
@@ -1770,7 +1770,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     // No checkbox needed in this branch
     expect(target.querySelector('input[type="checkbox"][data-role="danger-ack"]')).toBeNull();
     expect(findButton(target, /Force delete/i)).toBeNull();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(deleteRunAsset).toHaveBeenCalledTimes(2);
@@ -1794,7 +1794,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     const deleteBtn = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
     deleteBtn!.click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/Delete failed: backend on fire/);
@@ -1821,7 +1821,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
       const deleteBtn = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
       deleteBtn!.click();
       flushSync();
-      findButton(target, /^Confirm$/)!.click();
+      findButton(target, /^(Delete|Replace)$/)!.click();
       // Drain microtasks without real-time advance.
       for (let i = 0; i < 12; i++) await Promise.resolve();
       flushSync();
@@ -1859,7 +1859,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     flushSync();
     findButton(target, /Delete 2 selected/i)!.click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/Deleted 2 of 2/);
@@ -1914,7 +1914,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     flushSync();
     findButton(target, /Delete 3 selected/i)!.click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
     expect(target.textContent).toMatch(/Deleted 2 of 3/);
@@ -1933,11 +1933,11 @@ describe('RunAssetsTab — bulk delete execution', () => {
     flushSync();
     findButton(target, /Delete 1 selected/i)!.click();
     flushSync();
-    expect(findButton(target, /^Confirm$/)).not.toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).not.toBeNull();
     findButton(target, /^Cancel$/)!.click();
     flushSync();
 
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
     expect(deleteRunAsset).not.toHaveBeenCalled();
   });
 
@@ -1999,7 +1999,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       flushSync();
       findButton(target, /Delete 2 selected/i)!.click();
       flushSync();
-      findButton(target, /^Confirm$/)!.click();
+      findButton(target, /^(Delete|Replace)$/)!.click();
       // Microtask drain so both rejections + note404 schedule the timer.
       for (let i = 0; i < 20; i++) await Promise.resolve();
       flushSync();
@@ -2039,7 +2039,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       const deleteBtn = target.querySelector(`button[aria-label="Delete a.pdf"]`) as HTMLButtonElement;
       deleteBtn.click();
       flushSync();
-      findButton(target, /^Confirm$/)!.click();
+      findButton(target, /^(Delete|Replace)$/)!.click();
       for (let i = 0; i < 12; i++) await Promise.resolve();
       flushSync();
 
@@ -2081,7 +2081,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       ) as HTMLButtonElement;
       deleteBtn.click();
       flushSync();
-      findButton(target, /^Confirm$/)!.click();
+      findButton(target, /^(Delete|Replace)$/)!.click();
       for (let i = 0; i < 12; i++) await Promise.resolve();
       flushSync();
 
@@ -2097,7 +2097,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       flushSync();
       findButton(target, /Delete 2 selected/i)!.click();
       flushSync();
-      findButton(target, /^Confirm$/)!.click();
+      findButton(target, /^(Delete|Replace)$/)!.click();
       for (let i = 0; i < 30; i++) await Promise.resolve();
       flushSync();
 
@@ -2257,7 +2257,7 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
     del.click();
     flushSync();
     expect(target.textContent).toMatch(/Delete this asset\?/);
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     expect(deleteRunAsset).toHaveBeenCalledTimes(1);
     expect((deleteRunAsset as any).mock.calls[0][2]).toMatchObject({ force: false });
@@ -2423,7 +2423,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     const del = target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement;
     del.click();
     flushSync();
-    const row = findButton(target, /^Confirm$/)!.closest('tr') as HTMLTableRowElement;
+    const row = findButton(target, /^(Delete|Replace)$/)!.closest('tr') as HTMLTableRowElement;
     expect(row.classList.contains('delete-row')).toBe(true);
     expect(row.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
     expect(row.querySelector('td')?.getAttribute('colspan')).toBe('7');
@@ -2445,6 +2445,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
     flushSync();
     expect(target.querySelector('tr.delete-row')).not.toBeNull();
+    expect(target.querySelector('tr.delete-row .inline-confirm')?.classList.contains('end')).toBe(true);   // under the 🗑 (D42)
     expect(target.querySelector('#uses-1')).toBeNull();
     expect(chip.getAttribute('aria-expanded')).toBe('false');
     chip.click();
@@ -2463,7 +2464,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
     (document.activeElement as HTMLButtonElement).click();
     await settle();
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
     expect(document.activeElement).toBe(replaceBtn());
 
     replaceBtn()!.click();
@@ -2472,8 +2473,25 @@ describe('RunAssetsTab — 6a restyle', () => {
     await settle();
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
-    expect(findButton(target, /^Confirm$/)).toBeNull();
+    expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
     expect(document.activeElement).toBe(replaceBtn());
+  });
+
+  it('the replace question is an InlineConfirm column named "Replace <file>?", its button "Replace" (Polish 1)', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'doc.pdf')] }) });
+    flushSync();
+    replaceBtn()!.click();
+    flushSync();
+    pickReplaceFile(new File(['N'], 'doc.pdf', { type: 'application/pdf' }));
+    await settle();
+    const g = target.querySelector('tr.replace-row .inline-confirm') as HTMLElement;
+    expect(g.getAttribute('aria-label')).toBe('Replace doc.pdf?');
+    expect(g.classList.contains('row')).toBe(false);
+    const confirm = g.querySelector('button.confirm') as HTMLButtonElement;
+    expect(confirm.textContent?.trim()).toBe('Replace');
+    expect(confirm.classList.contains('danger')).toBe(true);
+    expect(g.querySelector('.warning')?.textContent).toContain('cannot be recovered');
+    expect(document.activeElement).toBe(g.querySelector('button.cancel'));
   });
 
   it('the replace confirm is a full-width row under its row; Replace and Delete stay in the row (browser pass)', async () => {
@@ -2486,9 +2504,9 @@ describe('RunAssetsTab — 6a restyle', () => {
     const row = target.querySelector('tr.replace-row') as HTMLTableRowElement;
     expect(row.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
     expect(row.querySelector('td')?.getAttribute('colspan')).toBe('7');
-    expect(row.querySelector('.row-confirm code')?.textContent).toBe('doc.pdf');
+    expect(row.querySelector('.inline-confirm .warning code')?.textContent).toBe('doc.pdf');
     const cells = target.querySelector('tr[data-asset-id="1"] .actions-cell') as HTMLElement;
-    expect(cells.querySelector('.row-confirm')).toBeNull();
+    expect(cells.querySelector('.inline-confirm')).toBeNull();
     expect(cells.querySelector('button[data-action="replace"]')).not.toBeNull();
     expect(cells.querySelector('button[data-action="delete-asset"]')).not.toBeNull();
   });
@@ -2504,7 +2522,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     flushSync();
     (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     await settle();
     expect(target.textContent).toMatch(/No assets yet/);
@@ -2537,7 +2555,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     flushSync();
     findButton(target, /Delete 1 selected/i)!.click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     expect(target.querySelector('.banner-info')?.getAttribute('role')).toBe('status');
   });
@@ -2559,7 +2577,7 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
       flushSync();
       (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
       flushSync();
-      findButton(target, /^Confirm$/)!.click();
+      findButton(target, /^(Delete|Replace)$/)!.click();
       await settle();
       await vi.advanceTimersByTimeAsync(500);
       await settle();
@@ -2581,7 +2599,7 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
     flushSync();
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     await settle();
     expect(target.textContent).toMatch(/deleted by another user/i);
@@ -2597,7 +2615,7 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
     flushSync();
     findButton(target, /Delete 1 selected/i)!.click();
     flushSync();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     expect(deleteRunAsset).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(findButton(target, /Delete 1 selected/i));
@@ -2659,7 +2677,7 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
     flushSync();
     pickReplaceFile(new File(['NEWER'], 'a.pdf', { type: 'application/pdf' }));
     await settle();
-    findButton(target, /^Confirm$/)!.click();
+    findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     await settle();
     expect(box.onRefetchAssets).toHaveBeenCalledTimes(1);

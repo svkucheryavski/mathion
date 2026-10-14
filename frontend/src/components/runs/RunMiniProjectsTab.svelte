@@ -336,7 +336,7 @@
                                    disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
                                    onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
                   {:else}
-                    <InlineConfirm row takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
+                    <InlineConfirm row align="end" takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
                                    confirmDataAction="confirm-delete"
                                    onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
                   {/if}

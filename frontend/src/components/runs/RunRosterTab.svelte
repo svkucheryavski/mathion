@@ -851,6 +851,7 @@
                 <td colspan={colCount}>
                   <InlineConfirm
                     row
+                    align="end"
                     takeFocus
                     warning="Remove {s.user_email} from this run?"
                     confirmLabel="Remove"

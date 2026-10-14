@@ -179,7 +179,7 @@
               {@render cap(g)}
               <span class="g-actions">
                 {#if pendingDelete === g.id}
-                  <InlineConfirm takeFocus label="Delete {g.name}?" confirmLabel="Confirm Delete" confirmDataAction="confirm-delete-group"
+                  <InlineConfirm takeFocus label="Delete {g.name}?" confirmLabel="Delete" confirmDataAction="confirm-delete-group"
                                  onConfirm={() => confirmDelete(g.id)} onCancel={() => cancelDelete(g.id)} />
                 {:else}
                   <IconButton glyph="pencil" size="sm" title="Rename" aria-label="Rename {g.name}"

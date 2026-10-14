@@ -41,7 +41,7 @@
     if (busy) busySeen = true;
   });
 
-  async function confirm() {
+  async function force() {
     if (!armed || blocked || pending) return;
     pending = true;
     busySeen = busy;
@@ -79,7 +79,7 @@
   <div class="dc-actions">
     <button
       type="button"
-      class="dc-force"
+      class="dc-btn dc-force"
       bind:this={forceEl}
       class:armed={armed && disabledReason === undefined}
       data-action="force-delete"
@@ -87,10 +87,10 @@
       aria-disabled={!armed && !blocked ? 'true' : undefined}
       aria-busy={busy ? 'true' : undefined}
       title={forceTitle}
-      onclick={confirm}
+      onclick={force}
       onkeydown={onKeydown}
     >{#if busy}<span class="dc-spin" aria-hidden="true"></span>{/if}{confirmLabel}</button>
-    <button type="button" class="dc-cancel" disabled={busy} onclick={onCancel} onkeydown={onKeydown}>Cancel</button>
+    <button type="button" class="dc-btn dc-cancel" disabled={busy} onclick={onCancel} onkeydown={onKeydown}>Cancel</button>
   </div>
 </div>
 
@@ -100,47 +100,66 @@
     flex-direction: column;
     gap: 8px;
     padding: 10px 12px;
-    background: var(--status-rejected-bg);
+    background: var(--danger-panel-bg);
     border-left: 3px solid var(--danger);
     border-radius: var(--radius);
   }
-  .dc-msg { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--status-rejected-fg); }
+  .dc-msg { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--danger-panel-fg); }
   .dc-msg :global(code) { font-family: var(--font-mono); background: var(--surface); padding: 0 4px; border-radius: var(--radius-pill); }
   .dc-ack { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
   .dc-actions { display: flex; gap: 6px; }
-  .dc-force, .dc-cancel {
+  /* D34: InlineConfirm's small button geometry. */
+  .dc-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: var(--btn-pad);
-    border-radius: var(--radius);
-    font-size: 13px;
+    height: 22px;
+    padding: 0 9px;
+    border-radius: 4px;
+    font-size: 12px;
     font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
   }
-  /* Unarmed (and natively disabled): the muted red family, never grey. */
+  /* Unarmed (and natively disabled): the muted red family, never grey, no fills. */
   .dc-force {
     background: var(--danger-off-bg);
     color: var(--danger-off-text);
     border: 1px solid var(--danger-off-border);
     cursor: not-allowed;
   }
+  /* Armed: the red action at rest (D31). Busy keeps this look with the spinner. */
   .dc-force.armed {
-    background: var(--danger);
-    color: var(--primary-text);
+    background: var(--surface);
+    color: var(--danger);
     border-color: var(--danger);
     cursor: pointer;
   }
+  .dc-force.armed[aria-busy="true"] { cursor: progress; }
   .dc-cancel {
     background: var(--surface);
     color: var(--text-3);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--cancel-border);
     cursor: pointer;
   }
+  @media (hover: hover) {
+    .dc-force.armed:not(:disabled):hover { background: var(--danger); color: var(--primary-text); }
+    .dc-cancel:not(:disabled):hover { background: var(--cancel-hover); }
+  }
+  .dc-force.armed:not(:disabled):focus-visible { background: var(--danger); color: var(--primary-text); }
+  .dc-cancel:not(:disabled):focus-visible { background: var(--cancel-hover); }
+  .dc-force.armed:not(:disabled):active { background: var(--danger-press); border-color: var(--danger-press); color: var(--primary-text); }
+  .dc-cancel:not(:disabled):active { background: var(--cancel-press); }
+  /* Armed or not, a focused button shows the ring (P57). */
+  .dc-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
   .dc-cancel:disabled {
     background: var(--bg);
     color: var(--faint);
     border-color: var(--border-faint);
     cursor: not-allowed;
+  }
+  @media (pointer: coarse) {
+    .dc-btn { min-height: 28px; }
   }
   .dc-spin {
     width: 10px;
