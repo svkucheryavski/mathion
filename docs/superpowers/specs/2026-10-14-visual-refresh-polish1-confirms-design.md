@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** draft rev 4 (2026-10-14), for review.
+**Status:** draft rev 5 (2026-10-14), for review.
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -24,6 +24,13 @@
   - DirtyGuard's `ask` hands back `focusCancel`;
   - the D10 Cancel returns to the dirty edit;
   - Code changes is now complete.
+- Rev 5 folds in round 4 (`spec-r4-*.md`):
+  - R57 allows a site's second focus move from its own interim target;
+  - #17 settles before the reload like #18;
+  - the tree keys are kind-prefixed;
+  - the Discard `<body>` rescue is a single check;
+  - AssetSidebar keeps the question open when the sidebar turns disabled;
+  - a focus target must be enabled and not inert.
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -94,7 +101,7 @@ These were made from the reviews. Each one says what it costs if it is wrong.
   - **The duplicate form under a VersionsPage row** goes inert while that row asks (#17).
 
   *Cost if wrong:* typed text survives a Discard nobody meant.
-- **R49 — Every site re-checks after the answer.** Before asking, a site captures its subject: version id, ids and titles. After the await, it re-runs its full pre-gate and recomputes indexes from the live list, and returns if anything changed. A question whose subject goes away (the row is deleted, the version switches) is dismissed. A tree question (#3, #4, #5) is also dismissed when its node leaves `open-focus` or the route changes, as AccordionHeader's rename closes itself (`AccordionHeader.svelte:158-160`).
+- **R49 — Every site re-checks after the answer.** Before asking, a site captures its subject: version id, ids and titles. After the await, it re-runs its full pre-gate and recomputes indexes from the live list, and returns if anything changed. A question whose subject goes away (the row is deleted, the version switches) is dismissed. A tree question (#3, #4, #5) is also dismissed when its block or sequence (for an item, its sequence) leaves `open-focus` or the route changes, as AccordionHeader's rename closes itself (`AccordionHeader.svelte:158-160`).
 
   *Cost if wrong:* an action on the wrong thing.
 - **R50 — The question ignores pointer clicks for 400 ms after it appears.** The rule is `if (e.detail > 0 && performance.now() - openedAt < 400) return;`, on both buttons. A real mouse click has `detail ≥ 1`; keyboard activation and `HTMLElement.click()` have `detail === 0`, so keyboard users and the existing tests are untouched. Hover fills apply only under `@media (hover: hover)`. Without the guard, a double-click on a trigger whose question appears under the pointer would answer it.
@@ -112,10 +119,10 @@ These were made from the reviews. Each one says what it costs if it is wrong.
 
   *Cost if wrong:* a copy change.
 - **R53 — One question per place.** A place shows at most one question.
-  - **Rows in a list** (keyed: VersionsPage rows, the course tree, quiz cards): a newcomer with a different key replaces the open question, which is dismissed (D39). The course tree is one place: VersionEditPage provides one `treeAsk` by context, keyed by node id, which every BlockAccordion and SequenceAccordion uses. QuizBody owns one for its cards, keyed by question id.
+  - **Rows in a list** (keyed: VersionsPage rows, the course tree, quiz cards): a newcomer with a different key replaces the open question, which is dismissed (D39). The course tree is one place: VersionEditPage provides one `treeAsk` by context, which every BlockAccordion and SequenceAccordion uses. Its keys are prefixed by kind (`block-<id>`, `seq-<id>`, `item-<id>`, as the DOM ids are), because blocks, sequences and items number their ids separately. Mounted without the context (tests), BlockAccordion and SequenceAccordion make a local `InPlaceAsk`. QuizBody owns one for its cards, keyed by question id.
   - **The same key, or a place without keys** (toolbar, footer, bar, body-top row): a newcomer is dismissed at once. The open question's Cancel takes focus and is scrolled into view. In Chrome a script focus after a mouse click shows no ring, so the refusal is quiet when the question is already on screen; that is accepted.
   - **Page question vs. a host's own question:** when a host's own question is open (#7, #8, #10, #11, #13, #15, #19, the quiz title's D10), the page `ask` refuses. It returns `false`, the router restores the address, and focus goes to that question's Cancel. A host's own `ask` while the page question is drawn at that host refuses the same way.
-  - **While busy** (R54), every newcomer is dismissed without moving focus.
+  - **While busy** (R54), every newcomer is dismissed without moving focus. That includes the page `ask` when the top host's own question is busy: the refusal does not call `focusOwnCancel()`.
 
   *Cost if wrong:* a refused navigation the person must repeat.
 - **R54 — The question stays, busy, until its action settles.** `answer('confirm')` moves focus to the confirm. In Safari a mouse click leaves it on Cancel, so the move is explicit. The question then stays in its place with `busy` until the host calls `settle()` (in `finally`):
@@ -125,7 +132,9 @@ These were made from the reviews. Each one says what it costs if it is wrong.
 
   Then the question goes and focus moves to the table's target (R57). Actions with no request (closes, navigation Discard) settle at once. This is AssetSidebar's pattern today. It keeps focus off `<body>` while the triggers underneath stay natively `disabled={busy}`; no trigger changes.
 
-  **Deletes whose row goes with the reload** (#4, #5, #18) settle when the DELETE succeeds, before the reload. Focus then moves to a target that `busy` does not disable, and the targets after the reload are resolved by id before it (the table). A failed DELETE settles in `catch`, and focus goes to the trash.
+  **Actions whose row goes with the reload** (#4, #5, #17, #18) settle when the request succeeds, before the reload. Focus then moves to an interim target that `busy` does not disable, with `{ preventScroll: true }`. The final targets after the reload are resolved by id before it (the table). A failed request settles in `catch`, and focus goes to the trigger.
+
+  A busy tree question that its own site's forced navigate dismisses (#3, #5; R49) counts as settled; the site's `finally` then finds it closed and does nothing.
 
   `settle()` and `dismiss()` on a question that is closed, or whose host is gone, do nothing. Each question resolves exactly once, and there is no focus call after unmount.
 
@@ -147,7 +156,7 @@ These were made from the reviews. Each one says what it costs if it is wrong.
   Without this, in Safari (where a click on row B's trash leaves focus in row A's question), row A's Cancel focus would run after row B's question took focus and pull focus back to row A.
 
   *Cost if wrong:* a three-way result instead of a boolean.
-- **R57 — Focus moves after an answer only if the person has not moved it.** Every post-answer move applies only if focus is inside the question, on `<body>`, or nowhere: the Cancel target, the post-action target and the dismissal target alike. Otherwise focus is left where the person put it, as AssetSidebar's `refocusAfterDelete` (`AssetSidebar.svelte:130-133`) and DangerConfirm (`:57-59`) do today. A long request leaves time to Tab away or press Back.
+- **R57 — Focus moves after an answer only if the person has not moved it.** Every post-answer move applies only if focus is inside the question, on `<body>`, or nowhere: the Cancel target, the post-action target and the dismissal target alike. A site's second move (R54: from its interim target to the final one once `busy` clears) applies only if focus is still on the interim element the site itself focused, which it keeps a ref to, or on `<body>`. Otherwise focus is left where the person put it, as AssetSidebar's `refocusAfterDelete` (`AssetSidebar.svelte:130-133`) and DangerConfirm (`:57-59`) do today. A long request leaves time to Tab away or press Back.
 
   *Cost if wrong:* a stale question's target is not focused after the person moved on.
 
@@ -237,7 +246,7 @@ Disabled, blocked and busy looks win in every state.
 | RunAssetsTab:713 bulk delete | Confirm → Delete | danger |
 | RunAssetsTab:814 delete asset | Confirm → Delete | danger |
 | RunAssetsTab replace (`.row-confirm`, :823-835) | Confirm → Replace. Becomes InlineConfirm with `message` and `label="Replace {filename}?"`. Cancel keeps its first focus; Esc works as today. | danger |
-| AssetSidebar `.confirm-pair` (:311-329) | Confirm → Delete. Becomes InlineConfirm with `label="Delete {filename}?"` and `busy={deletingIds.has(a.id)}`, inside a wrapper element that stops click propagation. When the sidebar's `disabled` prop turns true while the question is open, the question closes and focus goes to the trash (R57). Esc keeps `preventDefault` (Modal checks `defaultPrevented`, :93-95). After Cancel, focus goes to the trash (`trashEls`); after Delete, `refocusAfterDelete` as today. Behaviour change: Cancel waits during the request too (R54). | danger |
+| AssetSidebar `.confirm-pair` (:311-329) | Confirm → Delete. Becomes InlineConfirm with `label="Delete {filename}?"` and `busy={deletingIds.has(a.id)}`, inside a wrapper element that stops click propagation. When the sidebar's `disabled` prop turns true while the question is open, the question stays open with Cancel live. The confirm becomes `aria-disabled` with `title="Wait for the editor to finish"` until `disabled` is false again. Its trash, row and drop zone are natively disabled then (`AssetSidebar.svelte:289, :338, :369`), so a Cancel while `disabled` uses the dismissal chain: the first connected, enabled, not-inert target, ending at the enclosing modal's ×. Esc keeps `preventDefault` (Modal checks `defaultPrevented`, :93-95). After Cancel, focus goes to the trash (`trashEls`); after Delete, `refocusAfterDelete` as today. Behaviour change: Cancel waits during the request too (R54). | danger |
 | RunOverviewTab:348 Unpublish | Unpublish | primary |
 | MiniProjectModal:495 Publish | Publish | primary |
 | RunMiniProjectsTab:339, RunRosterTab:695 / :852, DashboardSidePanel:654, MiniProjectModal:485 | unchanged (Delete, Remove, Discard) | danger |
@@ -285,7 +294,8 @@ export class InPlaceAsk {
 
 ### Focus
 - **On open:** the question's Cancel, after `scrollIntoView?.({ block: 'nearest' })`.
-- **A modal host** puts the question's Cancel first in its FocusTrap `autofocusSelector` (`.modal-foot .inline-confirm button.cancel, .body-ask .inline-confirm button.cancel, …`). FocusTrap autofocuses in a microtask (`FocusTrap.svelte:47-67`), so this keeps the order deterministic when a host takes over an open question (R46 hand-over on unmount).
+- **A host that takes over an open question** (R46 hand-over on unmount) mounts a fresh InlineConfirm whose `takeFocus` focuses its Cancel. The host is already mounted, so FocusTrap's one-time autofocus (`FocusTrap.svelte:47-67`) has run already. Since the settings button is frozen (R48), no modal can mount while the page row asks.
+- **A focus target counts** only if it is connected, not disabled and not inert. Otherwise the site takes the next one in its chain.
 - **Esc** on either button means Cancel, and it does not reach an enclosing modal.
 - **While the action runs:** the question's confirm, busy (R54).
 - **Every move below obeys R57** (only if focus is inside the question, on `<body>`, or nowhere) and R56 (Cancel targets only on `'cancel'`).
@@ -325,7 +335,7 @@ export class InPlaceAsk {
   - **Host registration:** each modal that can host the page question registers an entry `{ ownOpen(): boolean; focusOwnCancel(): void }` while mounted. This covers ItemEditorModal, VersionSettingsModal, NewItemModal and the three level-3 quiz modals. All of them mount inside VersionEditPage's tree, with no portal. Entries are added on mount and removed by identity, not `pop()`: ItemEditorModal is keyed (`:602`).
   - **Where it draws:** the last entry draws `{#if pageAsk.current}` in its footer in place of its buttons, or in its body-top row when it has no footer. With no entry, the `.page-ask` row under the `<h1>` draws it, scrolled into view. No modal is open then, so there is no scroll lock. `.page-ask` has `scroll-margin-top: 4.5rem`, so the Toaster (`components/chrome/Toaster.svelte:13-17`, fixed top right) does not cover it.
   - **Freezing and hand-over:** the page row freezes the page (R48), including the settings button, so no modal can open under it. A host that unmounts while asking hands the question to the next host. VersionEditPage's teardown dismisses `pageAsk`.
-  - **Discard:** the guard's `onDiscard` (`dirtyRegistry.discardAll()`) runs and drops every dirty tracker, the hosting modal included. The Discard arms a one-shot `$effect` on `currentRoute.path`. When it next runs, if focus is on `<body>`, it focuses the route's deepest header, else the `<h1>` course link. Then it disarms.
+  - **Discard:** the guard's `onDiscard` (`dirtyRegistry.discardAll()`) runs and drops every dirty tracker, the hosting modal included. The Discard schedules one check in a `setTimeout(…, 0)`. By then the router has committed (it resumes in microtasks after the answer) and Svelte has flushed. If focus is then on `<body>`, the check focuses the route's deepest header, else the `<h1>` course link. It runs once, whether or not the route changed.
   - **Page-row Cancel:**
     - On open, the page saves the element that had focus when the guard ran and `window.scrollY`, before `scrollIntoView`.
     - On Cancel, after `tick()` (the tree thaws), focus goes to the saved element if it is connected and is not `<body>`. That is the keyboard-activated header or link, or the dirty field after ⌘[.
@@ -337,7 +347,7 @@ export class InPlaceAsk {
 - `closing` re-arms when the page question settles, on either answer, if `routeIid` is unchanged after `tick()`. It does not re-arm in the bare `popstate` listener (`:233-237`), which with an async guard would fire while the question is open.
 
 ### `quizEdits` (D10) becomes async
-- **The handle:** `EditHandle` (`quizEdits.svelte.ts:17-23`) gains `ask?(q: Ask): Promise<boolean>`.
+- **The handle:** `EditHandle` (`quizEdits.svelte.ts:17-23`) gains `ask?(q: Ask): Promise<Answer>`.
   - `InlineEdit` implements it with its own `asking: InPlaceAsk`, unless `InlineOptions.asking` passes one in.
   - The quiz title edit passes ItemEditorModal's `bodyAsk`.
   - The level-3 handles leave it undefined. They are modal on top, so no `request()` can come from beneath them.
@@ -384,7 +394,7 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
 | 14 | quizEdits.request (D10) | at the dirty edit (above) | Discard / danger (`DISCARD_CONTINUE`) | the dirty edit's field (it stays open) | the caller's action proceeds |
 | 15 | QuestionTextModal close, dirty | in place of the footer buttons | Discard / danger | the close control that asked | as today |
 | 16 | VersionsPage Esc in the create form | in place of the form's Cancel/Create (`div.submit`) | Discard / danger | the field where Esc was pressed | as today ("+ Add version") |
-| 17 | VersionsPage enable/disable | a confirm row (`li.ask-row`) under the version row, above an open `li.dup-row` (frozen while asking) | Enable or Disable / primary | the trigger | the swapped button in the same slot |
+| 17 | VersionsPage enable/disable | a confirm row (`li.ask-row`) under the version row, above an open `li.dup-row` (frozen while asking) | Enable or Disable / primary | the trigger | while the reload runs (`load()` shows a Skeleton for the whole list, `VersionsPage.svelte:215-216`): the page's `<h1>` (R54). Once `busy` clears: the swapped button in the same slot, found by version id. After a failure: the trigger |
 | 18 | VersionsPage delete draft | a confirm row under the version row | Delete / danger | the trash | while the reload runs: the page's `<h1>` (it gets `tabindex="-1"`) (R54). Once `busy` clears: the next row's first control, else the previous, else "+ Add version", resolved by version id before the reload |
 | 19 | delete item (item modal trash) | ItemEditorModal's body-top row. ItemEditorModal asks (it has `item.title`), re-checks `trashDisabled` after the await, then calls `onDeleteItem`; `VersionEditPage.deleteOpenItem` (`:261`) drops its `confirm` | Delete / danger | the trash | as today (`seq-<sid>-header`) |
 | 20 | VersionEditPage publish / archive / revert / disable / enable | in place of the whole bottom bar (`div.state-actions`). `vid` is captured before asking (R49). The question is dismissed on a version switch by an `$effect` like `settingsOpen`'s (`VersionEditPage.svelte:339-342`); a dismissal while busy closes it | the verb / primary | the trigger | the first button of the new bar, else the `<h1>` course link |
@@ -416,6 +426,7 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
   - `pages/editor/VersionsPage.svelte`: #16, #17, #18, the `<h1>` `tabindex="-1"`;
   - `components/editor/quiz/{QuizBody,QuestionCard,KeyAnswer,ChoiceAnswers,ChoiceRow,InlineInput}.svelte`: #2, #6, #12, #14 and the 12 `request()` callers;
   - `components/editor/item/AppBody.svelte`: #9.
+- `frontend/scripts/visual-refresh-gate.sh`: the gate changes below.
 - No backend change.
 
 ## Process
@@ -427,10 +438,10 @@ Seven tasks (D41). Each one runs: TDD → full checks → screenshots → the us
    - Screenshots: every Teaching confirm (6a/6b/6c), the danger panel unticked, ticked and busy, and the authoring `Button danger` uses (VersionEditPage Delete, ExplanationModal "Remove explanation", RunAssetsTab "Delete N selected"), one of them Tab-focused.
 2. **Ask in place, links and modal footers.**
    - The helper and the two discard texts; DirtyGuard `ask`, `pending` and R55, the router line and its tests.
-   - The owners: DashboardSidePanel, MiniProjectModal, VersionEditPage's title row and host stack.
+   - The owners: DashboardSidePanel, MiniProjectModal, VersionEditPage's title row and host stack. (`treeAsk` comes with Task 3.)
    - Every question in the editor modal footers: #7, #8, #10, #11, #13, #15. Also the item modal's body-top row (with #19's place, and #19 itself) and the × rule.
    - After this task no modal footer holds both an in-place question and a `confirm()`.
-3. **Course tree deletes:** #3, #4, #5.
+3. **Course tree deletes:** `treeAsk`, #3, #4, #5.
 4. **Versions:** #16, #17, #18, #20, #21.
 5. **The quiz edit slot:** async `request` and `confirm` (#14, #6, #2), and the quiz title's D10 question.
 6. **App and quiz-question removals:** #9, #12.
@@ -480,9 +491,12 @@ Then a whole-branch review (fresh Opus + Fable) and a Safari pass, one step at a
   - a read-only Version settings + Back asks at the top of its body;
   - the page row: Enter on a block header with a dirty rename elsewhere → Cancel → focus on that header; a mouse-style trigger (nothing focused) → Cancel → `scrollTo` with the saved position and focus on the `<h1>` course link; Discard at the version root → focus not on `<body>`; the tree is inert and the settings button `aria-disabled` while asking;
   - #19 with the DELETE held: focus on the busy confirm; on failure the trash;
-  - #4, #5, #18 with the reload held: focus is never `<body>`;
+  - #4, #5, #17, #18 with the reload held: focus is never `<body>`, and it reaches the final target once `busy` clears;
+  - the tree with block 1, sequence 1 and item 1: one question shows, under the right node, and D39 moves it between them;
   - a tree question is dismissed when its node leaves `open-focus`.
-- **Standalone mounts** of ItemEditorModal, VersionSettingsModal and NewItemModal keep working without the page context.
+- **Inert pins to update:** `ItemEditorModal.svelte.test.ts:303-308` (`bodyInert` → the wrapper) and `VersionEditPage.svelte.test.ts:843`, `:873`, `:891`.
+- **The Discard rescue:** with fake timers, the single check runs once after the answer and not on a later navigation.
+- **Standalone mounts** of ItemEditorModal, VersionSettingsModal, NewItemModal, BlockAccordion and SequenceAccordion keep working without the page context.
 - **jsdom:** `scrollIntoView` is called optionally (`?.`), because jsdom lacks it.
 
 ## Gate
