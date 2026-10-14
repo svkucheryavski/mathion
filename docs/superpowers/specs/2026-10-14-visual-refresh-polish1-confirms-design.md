@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** draft rev 9 (2026-10-14), for review.
+**Status:** draft rev 10 (2026-10-14), for review.
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -42,7 +42,7 @@
   - AssetSidebar dismisses only an idle question;
   - line citations and test mounts are corrected.
 - Rev 8 folds in round 7's minors: AssetSidebar's drop zone and the fallback after a busy delete, the #4 404-race chain, #3 in the early-settle list, and test wording.
-- Rev 9 gives the asset drop zone a `title` with its reason (round 8).
+- Rev 9–10 give the asset drop zone a `title` with its reason (rounds 8–9).
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -260,9 +260,7 @@ Disabled, blocked and busy looks win in every state.
 | RunAssetsTab:713 bulk delete | Confirm → Delete | danger |
 | RunAssetsTab:814 delete asset | Confirm → Delete | danger |
 | RunAssetsTab replace (`.row-confirm`, :823-835) | Confirm → Replace. Becomes InlineConfirm with `message` and `label="Replace {filename}?"`. Cancel keeps its first focus; Esc works as today. | danger |
-| AssetSidebar `.confirm-pair` (:311-329) | Confirm → Delete. Becomes InlineConfirm with `label="Delete {filename}?"` and `busy={deletingIds.has(a.id)}`, inside a wrapper element that stops click propagation. When the sidebar's `disabled` prop turns true while the question is open and idle, the question is dismissed (nothing is deleted). A busy question (its DELETE in flight) stays until it settles. `refocusAfterDelete` then runs as today, except that its last fallback is the drop zone only when that is enabled, else the panel below. Its trash and row are natively disabled then (`AssetSidebar.svelte:289, :338`). The drop zone (`:349-359`, a `div role="button" tabindex="0"`) gets `aria-disabled={disabled || uploading}` and counts as disabled. It also gets a `title` naming the reason:
-  - "Wait for the upload to finish" while uploading;
-  - else the new optional prop `disabledReason`. MarkdownEditor passes `FORBIDDEN_TITLE` when it is `disabled` (read-only) and `WAIT_TITLE` when it is `frozen` (a save), both from `quizEdits.svelte.ts`. The modal's × may be disabled too (`ItemEditorModal.svelte:338`, the level-3 `closeDisabled={saving}`). Focus therefore takes the dismissal chain: the first connected, enabled, not-inert target, ending at `asideEl.closest('section.modal-panel')` (as `Modal.svelte:75-81` does). In a standalone mount there is no panel, and focus is left alone. Esc keeps `preventDefault` (Modal checks `defaultPrevented`, :93-95). After Cancel, focus goes to the trash (`trashEls`); after Delete, `refocusAfterDelete` as today. Behaviour change: Cancel waits during the request too (R54). | danger |
+| AssetSidebar `.confirm-pair` (:311-329) | Confirm → Delete. Becomes InlineConfirm with `label="Delete {filename}?"` and `busy={deletingIds.has(a.id)}`, inside a wrapper element that stops click propagation. When the sidebar's `disabled` prop turns true while the question is open and idle, the question is dismissed (nothing is deleted). A busy question (its DELETE in flight) stays until it settles. `refocusAfterDelete` then runs as today, except that its last fallback is the drop zone only when that is enabled, else the panel below. Its trash and row are natively disabled then (`AssetSidebar.svelte:289, :338`). The drop zone (`:349-359`, a `div role="button" tabindex="0"`) gets `aria-disabled={disabled || uploading}` and counts as disabled. It also gets a `title` naming the reason: "Wait for the upload to finish" while uploading, else "Wait for the request to finish" (every production caller disables it only through MarkdownEditor's `frozen`, a save or a delete). The modal's × may be disabled too (`ItemEditorModal.svelte:338`, the level-3 `closeDisabled={saving}`). Focus therefore takes the dismissal chain: the first connected, enabled, not-inert target, ending at `asideEl.closest('section.modal-panel')` (as `Modal.svelte:75-81` does). In a standalone mount there is no panel, and focus is left alone. Esc keeps `preventDefault` (Modal checks `defaultPrevented`, :93-95). After Cancel, focus goes to the trash (`trashEls`); after Delete, `refocusAfterDelete` as today. Behaviour change: Cancel waits during the request too (R54). | danger |
 | RunOverviewTab:348 Unpublish | Unpublish | primary |
 | MiniProjectModal:495 Publish | Publish | primary |
 | RunMiniProjectsTab:339, RunRosterTab:695 / :852, DashboardSidePanel:654, MiniProjectModal:485 | unchanged (Delete, Remove, Discard) | danger |
@@ -430,7 +428,7 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
 - `lib/quizEdits.svelte.ts`: async `request`, `EditHandle.ask`, `InlineEdit.asking`, `InlineOptions.asking` and `confirm`.
 - `lib/router.svelte.ts`: one line (R47).
 - `components/editor/DirtyGuard.svelte`: `ask`, `pending`, R55.
-- **Task 1 label and tone files** (they need `confirmLabel` once it is required): `components/runs/{RunTeachersTab,RunGroupsTab,RunOverviewTab,RunMiniProjectsTab,RunRosterTab,RunAssetsTab,DashboardSidePanel,MiniProjectModal}.svelte`, `pages/runs/RunListPage.svelte`, `components/editor/AssetSidebar.svelte`, and `components/editor/MarkdownEditor.svelte` (it passes AssetSidebar's `disabledReason`).
+- **Task 1 label and tone files** (they need `confirmLabel` once it is required): `components/runs/{RunTeachersTab,RunGroupsTab,RunOverviewTab,RunMiniProjectsTab,RunRosterTab,RunAssetsTab,DashboardSidePanel,MiniProjectModal}.svelte`, `pages/runs/RunListPage.svelte`, `components/editor/AssetSidebar.svelte`.
 - **Owners and hosts:**
   - `pages/editor/VersionEditPage.svelte`: `pageAsk`, `treeAsk`, the host stack, the title row, the × rule, #19's `onDeleteItem`, #20, #21;
   - `components/editor/ItemEditorModal.svelte`: the header title, the body-top row and wrapper, host registration, #19;
