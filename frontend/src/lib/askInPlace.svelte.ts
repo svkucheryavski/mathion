@@ -1,7 +1,8 @@
 // Polish 1 (spec §Ask in place): a question in place of the browser's confirm dialog.
 // A host owns an InPlaceAsk and draws it with <AskSlot> where the question
 // belongs; the site awaits ask() and acts only on 'confirm'.
-import { getContext, tick, untrack, type Snippet } from 'svelte';
+import { getContext, setContext, tick, untrack, type Snippet } from 'svelte';
+import { currentRoute } from './router.svelte';
 import { DISCARD, DISCARD_CONTINUE } from './editorReasons';
 
 /** R56: Cancel and a dismissal are different answers. */
@@ -59,6 +60,12 @@ export async function focusAfter(target: () => Element | null | undefined): Prom
   if (!focusIsFree()) return;
   const t = target();
   if (usable(t)) t.focus();
+}
+
+/** §Focus: the first target in a site's chain that counts. */
+export function firstUsable(...els: (Element | null | undefined)[]): HTMLElement | null {
+  for (const el of els) if (usable(el)) return el;
+  return null;
 }
 
 /** The modal panel whose heading has id `labelId`, and its ×. */
@@ -203,4 +210,65 @@ export function useModalAsk(labelId: string): { own: InPlaceAsk; page: PageAsk |
     return () => { off?.(); own.dismiss(); };
   });
   return { own, page, here: () => !!page && page.ask.open && page.top === entry };
+}
+
+// ---- Task 3: settling, the second move, withdrawing; the course tree ----
+
+/** R54: closes question `q` once its action settles and, after the re-render,
+ *  focuses `target` — only if focus was in the question or nowhere and still
+ *  is (R57). Returns what it focused. A no-op unless `q` is the busy question:
+ *  a dismissed one, or another site's on a shared ask, is left alone. */
+export async function settleTo(
+  ask: InPlaceAsk, q: Ask, target: () => Element | null | undefined, opts?: FocusOptions,
+): Promise<HTMLElement | null> {
+  if (!ask.busy || ask.current !== q) return null;
+  const host = ask.host;
+  const free = ask.focusFree;
+  ask.settle();
+  await tick();
+  if (!free || !focusIsFree(host)) return null;
+  const t = target();
+  if (!usable(t)) return null;
+  t.focus(opts);
+  return t;
+}
+
+/** R57's second move (R54): from the interim element a site focused to its
+ *  final target, only while focus is still on the interim element or <body>. */
+export async function moveOn(interim: HTMLElement, target: () => Element | null | undefined): Promise<void> {
+  await tick();
+  const a = document.activeElement;
+  if (a && a !== document.body && a !== interim) return;
+  const t = target();
+  if (usable(t)) t.focus();
+}
+
+/** R49 after a confirm: the subject changed, so question `q` goes without
+ *  acting, and focus that was in it follows to `target`. */
+export function withdraw(ask: InPlaceAsk, q: Ask, target: () => Element | null | undefined): void {
+  if (ask.current !== q) return;
+  const free = ask.focusFree;
+  ask.dismiss();
+  if (free) void focusAfter(target);
+}
+
+export const TREE_ASK_KEY = Symbol('treeAsk');
+
+/** The course tree's one question (R53), keyed `block-<id>`, `seq-<id>` or
+ *  `item-<id>` (the three number their ids separately). The first caller —
+ *  VersionEditPage, or an accordion mounted on its own — creates it and
+ *  provides it to its subtree. It goes when the route moves on (R49) and with
+ *  its creator. Call during component init. */
+export function useTreeAsk(): InPlaceAsk {
+  const shared = getContext<InPlaceAsk | undefined>(TREE_ASK_KEY);
+  if (shared) return shared;
+  const a = new InPlaceAsk();
+  setContext(TREE_ASK_KEY, a);
+  $effect(() => {
+    void currentRoute.path;
+    void currentRoute.search;
+    untrack(() => a.dismiss());   // a no-op on the first run: nothing is open
+  });
+  $effect(() => () => a.dismiss());
+  return a;
 }

@@ -6,6 +6,8 @@
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
+  import TreeAskRow from './TreeAskRow.svelte';
+  import { useTreeAsk, settleTo, moveOn, withdraw, firstUsable, focusAfter, type Ask } from '../../lib/askInPlace.svelte';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -59,6 +61,14 @@
   const headerId = $derived(`block-${String(block.id)}-header`);
   const panelId = $derived(`block-${String(block.id)}-panel`);
 
+  // Polish 1 #5 (R53): the tree's one question, keyed by node. Mounted on its
+  // own (tests), the block makes it and shares it with its sequences.
+  const treeAsk = useTreeAsk();
+  const askKey = $derived(`block-${String(block.id)}`);
+  let cardEl = $state<HTMLDivElement>();
+  const trashEl = () => cardEl?.querySelector<HTMLElement>('[data-action="delete-block"]');
+  const courseLink = () => document.querySelector('[data-action="course-link"]');
+
   const version = $derived(currentEditorVersion.value?.version ?? null);
   const perms = $derived(version ? versionPermissions(version) : null);
   const canStructure = $derived(perms?.canEditStructure ?? false);
@@ -108,12 +118,38 @@
 
   async function deleteBlock() {
     if (creating || !canStructure || busy || createBusy || parentBusy || block.sequences.length > 0) return;
-    if (!confirm(`Delete block "${block.title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`)) return;
     const savedVid = vid;
     const savedSlug = courseSlug;
+    const savedId = block.id;
+    const title = block.title;
+    const q: Ask = {
+      // A getter: the suffix follows the page while it asks.
+      warning: () => `Delete block "${title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-block', key: askKey,
+    };
+    const a = await treeAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(trashEl); return; }
+    if (a !== 'confirm') return;
+    // R49: the same block, still deletable, at the focus, on the same version.
+    if (!stillOnVid(savedVid) || block.id !== savedId || block.title !== title || mode !== 'open-focus'
+        || creating || !canStructure || busy || createBusy || parentBusy || block.sequences.length > 0) {
+      withdraw(treeAsk, q, () => firstUsable(trashEl(), document.getElementById(headerId)));
+      return;
+    }
+    // R54: where focus goes on success, resolved by id before the reload: the
+    // next block's header, else the previous (block headers are never
+    // disabled); with no block left, the course link meanwhile and
+    // "+ Add block" once the reload lands. The block itself unmounts with that
+    // reload, so the last move finds its target by data-action.
+    const ids = currentEditorVersion.value?.blocks.map((b) => b.id) ?? [];
+    const at = ids.indexOf(savedId);
+    const nextId = at < 0 ? undefined : (ids[at + 1] ?? ids[at - 1]);
     busy = true;
     try {
-      await api.delete(`/api/blocks/${block.id}`);
+      await api.delete(`/api/blocks/${savedId}`);
+      const interim = nextId !== undefined
+        ? await settleTo(treeAsk, q, () => document.getElementById(`block-${nextId}-header`))
+        : await settleTo(treeAsk, q, courseLink, { preventScroll: true });
       if (stillOnVid(savedVid)) {
         // Navigate FIRST so the route no longer names the deleted block when
         // the new tree lands (otherwise the page's validation effect shows a
@@ -124,6 +160,7 @@
         // URL out of history.
         if (expanded) void navigate(`/courses/${savedSlug}/edit/v/${savedVid}`, { replace: true, force: true });
         await loadAdminTree(savedVid, { force: true });
+        if (interim && nextId === undefined) await moveOn(interim, () => document.querySelector('[data-action="add-block"]'));
       }
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
@@ -132,6 +169,9 @@
       }
     } finally {
       busy = false;
+      // A failure keeps the row: the question stayed busy through the reload
+      // above and settles now, back on the trash (R54). After success: nothing.
+      void settleTo(treeAsk, q, trashEl);
     }
   }
 
@@ -283,7 +323,7 @@
   }
 </script>
 
-<div class="block-card" class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'} class:parent={mode === 'open-parent'}>
+<div class="block-card" bind:this={cardEl} class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'} class:parent={mode === 'open-parent'}>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -305,6 +345,8 @@
     onDelete={() => void deleteBlock()}
     onRename={renameBlock}
   />
+  <!-- #5: the delete question, under the header. -->
+  <TreeAskRow ask={treeAsk} {askKey} live={mode === 'open-focus'} fallback={courseLink} />
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">

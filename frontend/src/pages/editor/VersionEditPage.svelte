@@ -11,7 +11,7 @@
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
-  import { PageAsk, PAGE_ASK_KEY, focusIsFree, usable, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import { PageAsk, PAGE_ASK_KEY, focusIsFree, usable, useTreeAsk, type GuardAsk } from '../../lib/askInPlace.svelte';
   import VersionSettingsModal from '../../components/editor/VersionSettingsModal.svelte';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
@@ -52,6 +52,9 @@
   setContext(PAGE_ASK_KEY, page);
   const pageAsk = page.ask;
   const rowAsking = $derived(pageAsk.open && page.hosts.length === 0);
+  // R53: one question for the whole course tree (#3, #4, #5), provided to
+  // every accordion; it goes when the route moves on and with the page.
+  useTreeAsk();
 
   const tree = $derived(currentEditorVersion.value);
   const loadError = $derived(currentEditorVersion.error);
@@ -549,7 +552,7 @@
         </div>
       {/if}
       <div class="editor-heading">
-        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" bind:this={courseLinkEl} onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
+        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" data-action="course-link" bind:this={courseLinkEl} onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
         <!-- 5c T5 (user): the id and the attempt limit as quiet chips, then the state badge last. -->
         <span class="hchip">v. {v.id}</span>
         <span class="hchip">max {v.max_quiz_attempts} quiz {v.max_quiz_attempts === 1 ? 'attempt' : 'attempts'}</span>
@@ -623,7 +626,7 @@
               <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new block" disabled={createBusy} onclick={() => void cancelAdd()} />
             </form>
           {:else}
-            <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openAdd()}>+ Add block</button>
+            <button bind:this={addLineEl} type="button" class="add-line" data-action="add-block" disabled={busy} onclick={() => void openAdd()}>+ Add block</button>
           {/if}
         {/if}
       </section>

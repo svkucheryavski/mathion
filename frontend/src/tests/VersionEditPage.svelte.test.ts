@@ -286,6 +286,8 @@ async function makeDraft() {
   await settle();
   return t;
 }
+// Polish 1 #3, #4, #5: the tree's question, under the node.
+const treeBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.tree-ask .inline-confirm button.${k}`);
 
 describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
   const addLine = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add block'));
@@ -635,11 +637,10 @@ describe('VersionEditPage — a create-sequence draft and a confirmed collapse (
   });
 });
 
-describe('VersionEditPage — no spurious stale-id toast after a delete (T5b)', () => {
+describe('VersionEditPage — tree deletes (T5b, Polish 1 #3, #5)', () => {
   const seq20: AdminTreeSequence = { id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] };
 
-  it('deleting the expanded block lands on the version with no "Block not found."', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('deleting the expanded block lands on the version with no "Block not found."; focus ends on "+ Add block"', async () => {
     serve((url, init) => {
       if (url === '/api/blocks/10' && init?.method === 'DELETE') { tree.blocks = []; return jres({}); }
       return undefined;
@@ -648,14 +649,37 @@ describe('VersionEditPage — no spurious stale-id toast after a delete (T5b)', 
     await renderRouted();
     target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Block 10"]')!.click();
     await settle();
+    expect(target.querySelector('.block-card > .tree-ask .warning')!.textContent!.trim())
+      .toBe('Delete block "Block 10"? This cannot be undone.');
+    treeBtn('confirm')!.click();
+    await settle();
+    await settle();
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
     expect(target.querySelector('#block-10-header')).toBeNull();
     expect(toasts.list.map((t) => t.message)).not.toContain('Block not found.');
+    expect(document.activeElement).toBe(target.querySelector('[data-action="add-block"]'));
   });
 
-  it('deleting the expanded sequence lands on its block with no "Sequence not found."', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('#5: with another block left, focus goes to its header', async () => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+    serve((url, init) => {
+      if (url === '/api/blocks/10' && init?.method === 'DELETE') { tree.blocks = [mkBlock(11)]; return jres({}); }
+      return undefined;
+    });
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Block 10"]')!.click();
+    await settle();
+    treeBtn('confirm')!.click();
+    await settle();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(document.activeElement).toBe(target.querySelector('#block-11-header'));
+  });
+
+  it('deleting the expanded sequence lands on its block with no "Sequence not found."; focus on the block header', async () => {
     tree.blocks = [mkBlock(10, { sequences: [seq20] })];
     serve((url, init) => {
       if (url === '/api/sequences/20' && init?.method === 'DELETE') { tree.blocks[0].sequences = []; return jres({}); }
@@ -665,10 +689,27 @@ describe('VersionEditPage — no spurious stale-id toast after a delete (T5b)', 
     await renderRouted();
     target.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq 20"]')!.click();
     await settle();
+    treeBtn('confirm')!.click();
+    await settle();
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
     expect(target.querySelector('#seq-20-header')).toBeNull();
     expect(toasts.list.map((t) => t.message)).not.toContain('Sequence not found.');
+    expect(document.activeElement).toBe(target.querySelector('#block-10-header'));
+  });
+
+  it('a tree question goes when the route moves on (R49), and sends nothing', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq 20"]')!.click();
+    await settle();
+    expect(treeBtn('cancel')).not.toBeNull();
+    target.querySelector<HTMLButtonElement>('#seq-20-header')!.click();     // collapse the sequence
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
   });
 });
 

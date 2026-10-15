@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { flushSync } from 'svelte';
-import { InPlaceAsk, PageAsk, focusIsFree, usable, refused, DISCARD_ASK, type Answer, type Ask, type AskHost } from '../lib/askInPlace.svelte';
+import { InPlaceAsk, PageAsk, focusIsFree, usable, refused, settleTo, moveOn, withdraw, firstUsable, DISCARD_ASK, type Answer, type Ask, type AskHost } from '../lib/askInPlace.svelte';
 import { DISCARD, DISCARD_CONTINUE } from '../lib/editorReasons';
 
 const Q = (over: Partial<Ask> = {}): Ask =>
@@ -242,5 +242,83 @@ describe('PageAsk — the host stack and the guard (R46, R53)', () => {
     r.focusCancel();
     expect(await r.promise).toBe(false);
     await flush();
+  });
+});
+
+describe('settleTo / moveOn / withdraw (Task 3, R54, R57, R49)', () => {
+  async function confirmed(a: InPlaceAsk, q: Ask) {
+    const p = a.ask(q);
+    const b = drawn(a);
+    a.answer('confirm');
+    await p;
+    return b;
+  }
+  let t: HTMLButtonElement;
+  beforeEach(() => { t = document.createElement('button'); document.body.appendChild(t); });
+  afterEach(() => { t.remove(); });
+
+  it('settleTo closes the busy question and focuses the target when focus was in it', async () => {
+    const a = new InPlaceAsk();
+    const q = Q();
+    await confirmed(a, q);
+    expect(await settleTo(a, q, () => t)).toBe(t);
+    expect(a.open).toBe(false);
+    expect(document.activeElement).toBe(t);
+  });
+
+  it('settleTo still closes, but leaves focus the person moved (R57)', async () => {
+    const a = new InPlaceAsk();
+    const q = Q();
+    await confirmed(a, q);
+    const away = document.createElement('input');
+    document.body.appendChild(away);
+    away.focus();
+    expect(await settleTo(a, q, () => t)).toBeNull();
+    expect(a.open).toBe(false);
+    expect(document.activeElement).toBe(away);
+    away.remove();
+  });
+
+  it('settleTo leaves another question and a dismissed one alone', async () => {
+    const a = new InPlaceAsk();
+    const q = Q();
+    await confirmed(a, q);
+    a.dismiss();
+    expect(await settleTo(a, q, () => t)).toBeNull();
+    const other = Q({ warning: 'Other?' });
+    await confirmed(a, other);
+    expect(await settleTo(a, q, () => t)).toBeNull();
+    expect(a.current).toBe(other);
+    expect(a.busy).toBe(true);
+  });
+
+  it('moveOn moves only from the interim element or <body>; firstUsable skips a disabled one', async () => {
+    const final = document.createElement('button');
+    document.body.appendChild(final);
+    t.focus();
+    await moveOn(t, () => final);
+    expect(document.activeElement).toBe(final);
+    const away = document.createElement('input');
+    document.body.appendChild(away);
+    away.focus();
+    await moveOn(t, () => final);
+    expect(document.activeElement).toBe(away);
+    final.disabled = true;
+    expect(firstUsable(null, final, t)).toBe(t);
+    final.remove();
+    away.remove();
+  });
+
+  it('withdraw dismisses its own question and follows focus out of it; another question stays', async () => {
+    const a = new InPlaceAsk();
+    const q = Q();
+    await confirmed(a, q);
+    withdraw(a, Q(), () => t);
+    expect(a.open).toBe(true);
+    withdraw(a, q, () => t);
+    expect(a.open).toBe(false);
+    host.innerHTML = '';                       // the slot unmounts
+    await flush();
+    expect(document.activeElement).toBe(t);
   });
 });

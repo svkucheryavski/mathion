@@ -66,7 +66,7 @@
     <!-- id: the item modal's close falls back here (Slice-5b D18). -->
     <IconButton id={`item-${item.id}-open`} size="sm" glyph="pencil" title="Open" aria-label={`Open ${ariaName}`} disabled={busy} onclick={onOpen} />
     {#if canStructure}
-      <IconButton size="sm" glyph="trash" danger title="Delete" aria-label={`Delete ${ariaName}`} disabled={busy} onclick={onDelete} />
+      <IconButton size="sm" glyph="trash" danger title="Delete" aria-label={`Delete ${ariaName}`} data-action="delete-item" disabled={busy} onclick={onDelete} />
     {/if}
   </span>
 </div>

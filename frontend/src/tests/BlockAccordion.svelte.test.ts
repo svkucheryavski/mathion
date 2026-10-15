@@ -162,6 +162,9 @@ describe('BlockAccordion — body (T5b)', () => {
     await navigate('/courses/c/edit/v/1/blocks/3', { force: true });
     await settle();
   }
+  // Polish 1 #5: the tree's question, under the header.
+  const treeBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.tree-ask .inline-confirm button.${k}`)!;
+  const warning = () => target.querySelector('.block-card > .tree-ask .warning')!.textContent!.trim();
 
   it('collapse resets the create-sequence form', async () => {
     await expand();
@@ -191,30 +194,55 @@ describe('BlockAccordion — body (T5b)', () => {
     expect(registry.isAnyDirty()).toBe(false);
   });
 
-  it('delete success: navigates to the version (replace, no prompt) BEFORE the reload', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('#5: the question sits under the header, its suffix live; Delete navigates to the version (replace) BEFORE the reload', async () => {
     const replaceSpy = vi.spyOn(history, 'replaceState');
     await expand();
     mountBlock();
     await settle();
-    // Some other draft on the page (the header rename swaps the trash for ✓ ✕).
-    registry.register({ isDirty: true, discard: () => {} });
     trash().click();
+    flushSync();
+    expect(warning()).toBe('Delete block "Vectors"? This cannot be undone.');
+    expect(target.querySelector('.block-card > .tree-ask .inline-confirm')!.classList.contains('end')).toBe(true);   // D42
+    expect(treeBtn('confirm').textContent!.trim()).toBe('Delete');
+    expect(treeBtn('confirm').classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(treeBtn('cancel'));
+    // Some other draft on the page appears while it asks: the suffix follows (a getter).
+    registry.register({ isDirty: true, discard: () => {} });
+    flushSync();
+    expect(warning()).toBe('Delete block "Vectors"? This cannot be undone. Unsaved edits may be lost.');
+    treeBtn('confirm').click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith('Delete block "Vectors"? This cannot be undone. Unsaved edits may be lost.');
     expect(currentRoute.path).toBe('/courses/c/edit/v/1');
     expect(replaceSpy).toHaveBeenCalledWith(null, '', '/courses/c/edit/v/1');
     expect(treeFetchPaths).toEqual(['/courses/c/edit/v/1']);
   });
 
+  it('#5: Cancel sends nothing and focuses the trash; the route moving on withdraws the question (R49)', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    trash().click();
+    flushSync();
+    treeBtn('cancel').click();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(trash());
+    trash().click();
+    flushSync();
+    await navigate('/courses/c/edit/v/1/blocks/3?tab=x', { force: true });   // the route moves on
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+
   it('delete success while another block is expanded: reload only, no navigate', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const del = deferredDelete('/api/blocks/3');
     await expand();
     mountBlock();
     await settle();
     trash().click();
+    await settle();
+    treeBtn('confirm').click();
     await settle();
     await navigate('/courses/c/edit/v/1/blocks/4', { force: true });
     await settle();
@@ -225,12 +253,13 @@ describe('BlockAccordion — body (T5b)', () => {
   });
 
   it('a sequence delete still reloads after the parent block collapsed (stillOnVid prop)', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const del = deferredDelete('/api/sequences/7');
     await navigate('/courses/c/edit/v/1/blocks/3/sequences/7', { force: true });
     mountBlock(mkBlock({ sequences: [mkSeq(7)] }));
     await settle();
     target.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence S 7"]')!.click();
+    await settle();
+    treeBtn('confirm').click();
     await settle();
     await navigate('/courses/c/edit/v/1', { force: true });
     await settle();
@@ -259,12 +288,13 @@ describe('BlockAccordion — body (T5b)', () => {
   });
 
   it('a late delete after an unmount neither navigates nor reloads', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const del = deferredDelete('/api/blocks/3');
     await expand();
     mountBlock();
     await settle();
     trash().click();
+    await settle();
+    treeBtn('confirm').click();
     await settle();
     teardown();
     del.release();

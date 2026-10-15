@@ -245,6 +245,7 @@
           danger
           title={deleteBlockedReason ?? `Delete this ${level}`}
           aria-label={`Delete ${level} ${ariaName}`}
+          data-action={level === 'block' ? 'delete-block' : 'delete-sequence'}
           disabled={busy || deleteBlockedReason !== null}
           onclick={onDelete}
         />

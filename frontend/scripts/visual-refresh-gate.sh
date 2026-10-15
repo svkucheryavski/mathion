@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2163
+EXPECTED_CHECKS=2172
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5244,6 +5244,26 @@ if [[ -n $REPLY ]]; then
   d '\.body-rest' '' 'display:contents'
   chk "\.body-rest\.${H}>\*" 'flex:0 0 auto'
 fi
+# Task 3 — the course tree's question (#3, #4, #5).
+own tree-ask TreeAskRow.svelte
+uniq1 tree-ask
+if [[ -n $REPLY ]]; then
+  N=TreeAskRow; H=$REPLY
+  # The cards clip (overflow: hidden): the padding keeps the focus ring inside, with no border of its own.
+  d '\.tree-ask' '' 'padding:6px 12px'
+  none "TreeAskRow draws no border" "\.tree-ask\.${H}[^{]*\{[^}]*border"
+  sweep $N $H
+fi
+if grep -qF "data-action={level === 'block' ? 'delete-block' : 'delete-sequence'}" src/components/editor/AccordionHeader.svelte \
+   && grep -qF 'data-action="delete-item"' src/components/editor/ItemRow.svelte \
+   && grep -qF 'data-action="course-link"' src/pages/editor/VersionEditPage.svelte \
+   && grep -qF 'data-action="add-block"' src/pages/editor/VersionEditPage.svelte; then
+  echo "PASS  the tree's focus targets carry their data-action (focus by identity)"
+else echo "FAIL  the tree's focus targets carry their data-action (focus by identity)"; fail=1; fi
+emoji_scan "the Polish-1 tree files" src/components/editor/TreeAskRow.svelte \
+  src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte
+colour_scan polish1-tree src/components/editor/TreeAskRow.svelte \
+  src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

@@ -90,6 +90,25 @@ function mountAccordion(seq: AdminTreeSequence = mkSeq(), version = mkVersion())
 // + Add sequence; T4: it opens the New item modal.
 const addItem = (t: HTMLElement) => [...t.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!;
 const trash = (t: HTMLElement) => t.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq"]')!;
+// Polish 1 #3, #4: the tree's question, under the node that asked.
+const askBtn = (t: HTMLElement, k: 'confirm' | 'cancel') => t.querySelector<HTMLButtonElement>(`.tree-ask .inline-confirm button.${k}`)!;
+const itemTrash = (t: HTMLElement, name: string) => t.querySelector<HTMLButtonElement>(`button[aria-label="Delete ${name}"]`)!;
+const deletes = () => fetchSpy.mock.calls.filter(([, i]) => (i as RequestInit | undefined)?.method === 'DELETE');
+// Hold the DELETE at `path` (answered with `status`) and the admin-tree reloads after it.
+function holdDeleteAndReload(path: string, status = 200) {
+  const h = { del: () => {}, reload: () => {} };
+  serve((url, init) => {
+    if (url === path && init?.method === 'DELETE') {
+      return new Promise<void>((r) => { h.del = r; }).then(() => jres(status < 400 ? {} : { detail: 'Boom' }, status));
+    }
+    if (url.endsWith('/admin-tree')) {
+      treeFetchPaths.push(currentRoute.path);
+      return new Promise<void>((r) => { h.reload = r; }).then(() => jres(structuredClone(served)));
+    }
+    return undefined;
+  });
+  return h;
+}
 function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -340,30 +359,55 @@ describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
     expect(target.querySelector('button[aria-label="Delete sequence Seq"]')).toBeNull();
   });
 
-  it('success: navigates to the block (replace, no prompt) BEFORE the reload', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('#3: the question sits under the header; Delete sends one DELETE and navigates to the block (replace) BEFORE the reload', async () => {
     const replaceSpy = vi.spyOn(history, 'replaceState');
     const { target } = mountAccordion();
     trash(target).click();
+    flushSync();
+    const q = target.querySelector('.seq-card > .tree-ask .inline-confirm')!;
+    expect(q.classList.contains('end')).toBe(true);   // D42: under the row's actions
+    expect(q.querySelector('.warning')!.textContent!.trim()).toBe('Delete sequence "Seq"? This cannot be undone.');
+    expect(askBtn(target, 'confirm').textContent!.trim()).toBe('Delete');
+    expect(askBtn(target, 'confirm').classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(askBtn(target, 'cancel'));
+    expect(deletes()).toHaveLength(0);
+    askBtn(target, 'confirm').click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledWith('Delete sequence "Seq"? This cannot be undone.');
-    expect(fetchSpy.mock.calls.some(([u, i]) => String(u) === '/api/sequences/2' && (i as RequestInit).method === 'DELETE')).toBe(true);
+    expect(deletes().map(([u]) => String(u))).toEqual(['/api/sequences/2']);
     expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3');
     expect(replaceSpy).toHaveBeenCalledWith(null, '', '/courses/c/edit/v/1/blocks/3');
     expect(treeFetchPaths).toEqual(['/courses/c/edit/v/1/blocks/3']);
   });
 
-  it('delete success while a sibling sequence is expanded: reload only, no navigate', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('#3: Cancel sends nothing and focuses the trash; leaving the focus withdraws an open question (R49)', async () => {
+    const { target, props } = mountAccordion();
+    trash(target).click();
+    flushSync();
+    askBtn(target, 'cancel').click();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(trash(target));
+    trash(target).click();
+    flushSync();
+    props.routeSid = null;                       // the sequence collapses
+    flushSync();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('delete success while a sibling sequence is expanded: the busy question goes; reload only, no navigate', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2' && init?.method === 'DELETE'
       ? new Promise<void>((r) => { release = r; }).then(() => jres({}))
       : undefined));
     const { target, props } = mountAccordion();
     trash(target).click();
+    flushSync();
+    askBtn(target, 'confirm').click();
     await settle();
     props.routeSid = '5';
     flushSync();
+    expect(target.querySelector('.tree-ask')).toBeNull();
     release();
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
@@ -371,13 +415,14 @@ describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
   });
 
   it('a late delete after a version change neither navigates nor reloads', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2' && init?.method === 'DELETE'
       ? new Promise<void>((r) => { release = r; }).then(() => jres({}))
       : undefined));
     const { target, stillOnVid } = mountAccordion();
     trash(target).click();
+    flushSync();
+    askBtn(target, 'confirm').click();
     await settle();
     stillOnVid.mockReturnValue(false);
     release();
@@ -429,13 +474,111 @@ describe('SequenceAccordion — item rows (T6)', () => {
   });
 
   it('an item delete never carries the unsaved suffix (D3)', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const { target } = mountAccordion(mkSeq({ items: [item] }));
     target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!.click();
     await settle();
     type(titleInput(target)!, 'Dirty');
-    target.querySelector<HTMLButtonElement>('button[aria-label="Delete Page"]')!.click();
-    expect(confirmSpy).toHaveBeenCalledWith('Delete "Page"? This cannot be undone.');
+    itemTrash(target, 'Page').click();
+    flushSync();
+    const row = target.querySelector('#item-9-open')!.closest('li')!;
+    expect(row.querySelector('.tree-ask .inline-confirm .warning')!.textContent!.trim()).toBe('Delete "Page"? This cannot be undone.');
+  });
+
+  it('#4: busy confirm while the DELETE runs, the sequence header during the reload, then the next item', async () => {
+    const h = holdDeleteAndReload('/api/items/9');
+    const { target } = mountAccordion(two());
+    itemTrash(target, 'Page').click();
+    flushSync();
+    expect(target.querySelector('.tree-ask .inline-confirm')!.classList.contains('end')).toBe(true);   // D42
+    expect(askBtn(target, 'confirm').textContent!.trim()).toBe('Delete');
+    expect(askBtn(target, 'confirm').classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(askBtn(target, 'cancel'));
+    askBtn(target, 'confirm').click();
+    await settle();
+    expect(document.activeElement).toBe(askBtn(target, 'confirm'));
+    expect(askBtn(target, 'confirm').getAttribute('aria-busy')).toBe('true');
+    h.del();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('#seq-2-header'));
+    h.reload();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('#item-10-open'));
+    expect(deletes()).toHaveLength(1);
+  });
+
+  it('#4: a failed DELETE keeps the busy question through the reload, then focus goes to the trash (R54)', async () => {
+    const h = holdDeleteAndReload('/api/items/9', 500);
+    const { target } = mountAccordion(two());
+    itemTrash(target, 'Page').click();
+    flushSync();
+    askBtn(target, 'confirm').click();
+    await settle();
+    h.del();
+    await settle();
+    expect(document.activeElement).toBe(askBtn(target, 'confirm'));
+    expect(askBtn(target, 'confirm').getAttribute('aria-busy')).toBe('true');
+    h.reload();
+    await settle();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(itemTrash(target, 'Page'));
+  });
+
+  it('#4: Cancel and Esc send nothing and focus the trash', async () => {
+    const { target } = mountAccordion(two());
+    itemTrash(target, 'Page').click();
+    flushSync();
+    askBtn(target, 'cancel').click();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(itemTrash(target, 'Page'));
+    itemTrash(target, 'Page').click();
+    flushSync();
+    askBtn(target, 'cancel').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(itemTrash(target, 'Page'));
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('D39: another item\'s trash moves the question there; the same trash again only brings it back (R53, R56)', async () => {
+    const { target } = mountAccordion(two());
+    itemTrash(target, 'Page').click();
+    flushSync();
+    itemTrash(target, 'Two').click();
+    await settle();
+    const row10 = target.querySelector('#item-10-open')!.closest('li')!;
+    expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+    expect(row10.querySelector('.inline-confirm')).not.toBeNull();
+    expect(document.activeElement).toBe(askBtn(target, 'cancel'));
+    expect(row10.contains(document.activeElement)).toBe(true);
+    itemTrash(target, 'Two').focus();
+    itemTrash(target, 'Two').click();
+    await settle();
+    expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+    expect(document.activeElement).toBe(askBtn(target, 'cancel'));
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('R57: focus moved away while the DELETE runs stays there', async () => {
+    const h = holdDeleteAndReload('/api/items/9');
+    const { target } = mountAccordion(two());
+    const away = document.createElement('button');
+    document.body.appendChild(away);
+    itemTrash(target, 'Page').click();
+    flushSync();
+    askBtn(target, 'confirm').click();
+    await settle();
+    away.focus();
+    h.del();
+    await settle();
+    h.reload();
+    await settle();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement).toBe(away);
   });
 });
 

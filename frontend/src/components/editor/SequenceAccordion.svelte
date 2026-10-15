@@ -2,6 +2,8 @@
   import { getContext, onDestroy, tick } from 'svelte';
   import AccordionHeader, { type HeaderMode } from './AccordionHeader.svelte';
   import ItemRow from './ItemRow.svelte';
+  import TreeAskRow from './TreeAskRow.svelte';
+  import { useTreeAsk, settleTo, moveOn, withdraw, firstUsable, focusAfter, type Ask } from '../../lib/askInPlace.svelte';
   import NewItemModal from './NewItemModal.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
@@ -63,6 +65,14 @@
   const headerId = $derived(`seq-${String(seq.id)}-header`);
   const panelId = $derived(`seq-${String(seq.id)}-panel`);
 
+  // Polish 1 #3, #4 (R53): the tree's one question, keyed by node.
+  const treeAsk = useTreeAsk();
+  const seqKey = $derived(`seq-${String(seq.id)}`);
+  let cardEl = $state<HTMLDivElement>();
+  const seqTrash = () => cardEl?.querySelector<HTMLElement>('[data-action="delete-sequence"]');
+  const itemTrash = (id: number) =>
+    document.getElementById(`item-${id}-open`)?.closest('li')?.querySelector<HTMLElement>('[data-action="delete-item"]');
+
   const version = $derived(currentEditorVersion.value?.version ?? null);
   const perms = $derived(version ? versionPermissions(version) : null);
   const canStructure = $derived(perms?.canEditStructure ?? false);
@@ -96,15 +106,32 @@
 
   async function deleteSeq() {
     if (creating || !canStructure || busy || parentBusy || seq.items.length > 0) return;
-    if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`)) return;
     const savedVid = vid;
     const check = stillOnVid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
+    const title = seq.title;
+    const q: Ask = {
+      // A getter: the suffix follows the page while it asks.
+      warning: () => `Delete sequence "${title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-sequence', key: seqKey,
+    };
+    const a = await treeAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(seqTrash); return; }
+    if (a !== 'confirm') return;
+    // R49: the same sequence, still deletable, at the focus, on the same version.
+    if (!alive || !check(savedVid) || seq.id !== savedSid || seq.title !== title || mode !== 'open-focus'
+        || creating || !canStructure || busy || parentBusy || seq.items.length > 0) {
+      withdraw(treeAsk, q, () => firstUsable(seqTrash(), document.getElementById(headerId)));
+      return;
+    }
     busy = true;
     try {
       await api.delete(`/api/sequences/${savedSid}`);
+      // R54: the row goes with the reload, so the question settles now and
+      // focus moves to the block header (never disabled) before the navigate.
+      await settleTo(treeAsk, q, () => document.getElementById(`block-${savedBid}-header`));
       // Navigate FIRST (no spurious "Sequence not found."), only while the
       // live route still names this sequence; `force` — already confirmed;
       // `replace` — keep the deleted URL out of history. Then reload, gated on
@@ -118,6 +145,9 @@
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
+      // A failure keeps the row: the question stayed busy through the reload
+      // above and settles now, back on the trash (R54). After success: nothing.
+      void settleTo(treeAsk, q, seqTrash);
     }
   }
 
@@ -148,12 +178,33 @@
 
   async function deleteItem(itemId: number, itemTitle: string) {
     if (busy || !canStructure) return;
-    if (!confirm(`Delete "${itemTitle}"? This cannot be undone.`)) return;
     const savedVid = vid;
     const check = stillOnVid;
+    const q: Ask = {
+      warning: `Delete "${itemTitle}"? This cannot be undone.`,   // D3: never the unsaved suffix
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-item', key: `item-${itemId}`,
+    };
+    const a = await treeAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => itemTrash(itemId)); return; }
+    if (a !== 'confirm') return;
+    // R49: re-run the gate and find the item again in the live list.
+    const ids = seq.items.map((i) => i.id);
+    const at = ids.indexOf(itemId);
+    if (!alive || !check(savedVid) || busy || !canStructure || at < 0 || seq.items[at].title !== itemTitle) {
+      withdraw(treeAsk, q, () => firstUsable(itemTrash(itemId), document.getElementById(headerId)));
+      return;
+    }
+    // R54: where focus lands once `busy` clears, resolved by id before the
+    // reload: the next item's ✎, else the previous, else "+ Add item".
+    const nextId = ids[at + 1] ?? ids[at - 1];
+    const final = () => firstUsable(nextId !== undefined ? document.getElementById(`item-${nextId}-open`) : null, addLineEl);
+    let interim: HTMLElement | null = null;
     busy = true;
     try {
       await api.delete(`/api/items/${itemId}`);
+      // The row goes with the reload: settle now, and hold focus on the
+      // sequence header (never disabled) meanwhile.
+      interim = await settleTo(treeAsk, q, () => document.getElementById(headerId), { preventScroll: true });
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
       pushToast('Item deleted', 'success');
     } catch (e) {
@@ -161,6 +212,9 @@
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
+      if (interim) { if (alive) void moveOn(interim, final); }
+      // A failure: the question stayed busy through the reload; back to the trash.
+      else void settleTo(treeAsk, q, () => itemTrash(itemId));
     }
   }
 
@@ -214,7 +268,7 @@
   $effect(() => { if (creating && (!expanded || !canStructure)) creating = false; });
 </script>
 
-<div class="seq-card" class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'}>
+<div class="seq-card" bind:this={cardEl} class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'}>
   <AccordionHeader
     {headerId}
     {panelId}
@@ -236,6 +290,9 @@
     onDelete={() => void deleteSeq()}
     onRename={renameSeq}
   />
+  <!-- #3: the delete question, under the header. -->
+  <TreeAskRow ask={treeAsk} askKey={seqKey} live={mode === 'open-focus'}
+              fallback={() => document.getElementById(`block-${block.id}-header`)} />
 
   {#if expanded}
     <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
@@ -257,6 +314,8 @@
                 onOpen={() => openItem(item.id)}
                 onDelete={() => void deleteItem(item.id, item.title)}
               />
+              <!-- #4: under its row; it goes with the row (R49). -->
+              <TreeAskRow ask={treeAsk} askKey={`item-${item.id}`} fallback={() => document.getElementById(headerId)} />
             </li>
           {/each}
         </ul>
