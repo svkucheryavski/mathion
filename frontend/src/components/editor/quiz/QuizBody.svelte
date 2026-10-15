@@ -341,6 +341,7 @@
     },
     hasQuestion: (qid) => questions.some((x) => x.id === qid),
     focusFallback: (qid) => { void focusFallback(qid); },
+    fallbackTarget,
   });
 </script>
 

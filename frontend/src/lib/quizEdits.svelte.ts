@@ -227,6 +227,9 @@ export class InlineEdit<T> {
     }
     this.saving = true;
     let ok = false;
+    // R57: after a confirmed save, the field's opener takes focus back only if
+    // focus stayed in the question (or nowhere) while the save ran.
+    let free = true;
     try {
       await o.edits.track(o.send(this.value));
       ok = true;
@@ -242,7 +245,7 @@ export class InlineEdit<T> {
       // #6: the question leaves once the save settles (R54). After a failure
       // focus goes back to the field, which keeps the typed key and the error.
       if (q) {
-        if (ok) { if (this.asking.current === q) this.asking.settle(); }
+        if (ok) { free = this.asking.focusFree; if (this.asking.current === q) this.asking.settle(); }
         else await settleTo(this.asking, q, () => this.fieldEl);
       }
     }
@@ -252,7 +255,7 @@ export class InlineEdit<T> {
     o.edits.say('Saved');
     if (!this.#alive) return;
     if (o.after === 'reset') this.value = o.initial;
-    else o.close(true);
+    else o.close(free);
   }
 
   /** Enter saves and Esc cancels; Esc never reaches the modal, even while

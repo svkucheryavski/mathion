@@ -235,6 +235,19 @@ describe('BlockAccordion — body (T5b)', () => {
     expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
   });
 
+  it('#5: Cancel with the trash disabled meanwhile lands on the block header, never <body> (whole-branch review)', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    trash().click();
+    flushSync();
+    trash().disabled = true;
+    treeBtn('cancel').click();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement?.id).toBe('block-3-header');
+  });
+
   it('delete success while another block is expanded: reload only, no navigate', async () => {
     const del = deferredDelete('/api/blocks/3');
     await expand();

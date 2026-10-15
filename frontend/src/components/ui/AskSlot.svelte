@@ -40,7 +40,8 @@
 
 <style>
   /* The slot only anchors the question; the host's layout places it. Inside a
-     modal body its child stays a full-size flex item, as Modal's own are. */
+     modal body its child stays a full-size flex item, as Modal's own are; in a
+     row (a bar, a footer, a field's row) it may shrink, so a long text wraps. */
   .ask-slot { display: contents; }
-  .ask-slot > :global(*) { flex: 0 0 auto; }
+  :global(.modal-body) > .ask-slot > :global(*) { flex: 0 0 auto; }
 </style>

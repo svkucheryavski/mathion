@@ -520,6 +520,31 @@ describe('Choice answers — version states (5d T5)', () => {
     expect(document.activeElement).toBe(marker(rows(cards()[0])[1]));
   });
 
+  it('#2: Cancel while its marker is disabled (a title save runs) lands on a live control, never <body> (whole-branch review)', async () => {
+    const s = single();
+    const hold = s.hold('PATCH', /\/api\/items\/7$/);
+    await renderQuiz(s, { version: { state: 'published' } });
+    marker(rows(cards()[0])[1]).click();
+    await settle();
+    const cancel = btnOf(keyLine(cards()[0]), 'cancel');
+    byName(panel(), 'Edit title')!.click();
+    await settle();
+    const title = panel().querySelector<HTMLInputElement>('h2.item-name input[aria-label="Title"]')!;
+    typeInto(title, 'Slow');
+    press(title, 'Enter');
+    await settle();
+    expect(marker(rows(cards()[0])[1]).disabled).toBe(true);
+    cancel.focus();
+    cancel.click();
+    await settle();
+    expect(keyLine(cards()[0])).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(panel().contains(document.activeElement)).toBe(true);
+    expect(optWrites(s)).toEqual([]);
+    hold.release();
+    await settle();
+  });
+
   it('#2 R57: focus moved away during the save stays where the author put it', async () => {
     const s = single();
     const hold = s.hold('PATCH', /\/api\/options\/12$/);

@@ -348,6 +348,25 @@ describe('Level 3 — review fixes (5d T7)', () => {
     expect(document.activeElement).toBe(area());
   });
 
+  it('#8: the right to edit goes while Remove asks; Cancel sends nothing and focus lands on a live control, never <body> (whole-branch review)', async () => {
+    const s = new QuizServer([q({ id: 1, explanation_md: 'Old', explanation_html: '<p>Old</p>' })]);
+    const r = await renderQuiz(s);
+    byName(cards()[0], 'Edit explanation for question 1')!.click();
+    await settle();
+    byName(topPanel(), 'Remove explanation')!.click();
+    await settle();
+    archive(r);
+    await settle();
+    // A browser ignores focus() on the inert body (jsdom does not): focus is still on Cancel.
+    footAskBtn('cancel')!.focus();
+    footAskBtn('cancel')!.click();
+    await settle();
+    expect(qWrites(s)).toEqual([]);
+    expect(footAsk()).toBeNull();
+    expect(byName(topPanel(), 'Remove explanation')!.disabled).toBe(true);
+    expect(document.activeElement).toBe(area());
+  });
+
   it('R10 in Preview (no textarea): a 409 on a focused Save moves focus to Cancel', async () => {
     const s = new QuizServer([q({ id: 1 })]);
     s.failNext('PATCH', /\/api\/questions\/1$/, 409, 'Version is not editable');

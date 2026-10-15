@@ -512,7 +512,8 @@
       confirmLabel: VERB[action], tone: 'primary', layout: 'row', confirmDataAction: `confirm-${action}`,
     };
     const a = await barAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(() => barBtn(action)); return; }
+    // The trigger, else (the bar disabled meanwhile) the course link: never <body>.
+    if (a === 'cancel') { void focusAfter(() => firstUsable(barBtn(action), barFirst())); return; }
     if (a !== 'confirm') return;
     // R49: the same version, and the action still offered.
     if (!stillOnVid(savedVid) || busy || !offered(action)) {
@@ -560,7 +561,7 @@
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-version',
     };
     const a = await barAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(() => barBtn('delete')); return; }
+    if (a === 'cancel') { void focusAfter(() => firstUsable(barBtn('delete'), barFirst())); return; }
     if (a !== 'confirm') return;
     // R49: the same version, still deletable.
     if (!stillOnVid(savedVid) || busy || !perms?.canDeleteVersion) {

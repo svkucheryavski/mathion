@@ -70,16 +70,27 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 - **Ring and fill are the same `--primary`**: a focused secondary's ring stands apart only by the 2px offset gap. Fine on `--surface`; the Safari "Tab-focused" step covers it. (Fable)
 - **The gate cannot pin source order**: a reorder putting `.secondary:…:active` before the `@media (hover: hover)` block would let the hover fill win while pressing. Not pinnable by grep. (Fable)
 
+## Whole-branch review
+
+Fresh Opus + Fable on 7e02f70..ec0d5bc. Fixed in this pass (test-first): the published key's save no longer pulls focus back after the author moved it (R57); an asset question whose row a reload removes closes and focus moves on; Cancel at #2, #3, #4, #5, #17, #18, #19, #20 and #21 falls back along the site's chain when its trigger is disabled; AskSlot's full-size flex rule only in the modal body, so a question in a row wraps; #8's Cancel falls back too; the asset list stays on screen during a reload ("Loading…" only on the first load), so an open question never takes focus back (R57).
+
+- **Two questions on screen in the quiz item modal**: with an inline edit's own question open (D10 at an answer row, or the key question), × or Back draws the page question in the body-top row; the inline one sits inert beneath it. Cancel brings it back; nothing is lost. Fix: `ownOpen()` also reports the open edit's question, so the guard refuses and focuses it (R53). (Fable)
+- **Body-top precedence is not defended**: `{#if bodyAsk.open}` comes before the page question; a `bodyAsk.ask()` while the page question is drawn would hide it with its navigation pending. Unreachable today (the body is inert; `openTitle` / `askDelete` check `asking`). (Fable)
+- **AssetSidebar: a failed list reload with an idle question focused** — the list error replaces the list, and focus falls to `<body>`. Contrived (a list GET failing right after a click). (controller)
+- **AssetSidebar: an `assetContext` swap with focus in the sidebar's question** drops focus to `<body>` (the rows go before anything refocuses). Unreachable today: a version or run change unmounts the host modal. Fix: read `untrack(questionHasFocus)` before clearing, then fall back to the drop zone or panel. (Fable, round 4)
+- Ruling (not fixed): ChoiceAnswers' `onDestroy` dismisses the key question without moving focus — the key question exists only on a published version, where no question can be deleted, so its card cannot leave while it asks; a whole-modal teardown has its own focus. (Opus)
+
 ## Carried to the Safari pass (spec §Carried to the Safari pass)
 
 One step at a time, every write mocked, no VoiceOver step.
 
 - **The look:** hover and focus fills and the focus ring in Safari, also in a modal footer (a mouse click shows no ring; Tab skips buttons by default); the danger panel's colours, and the unarmed Force delete's label at 12px.
   A secondary Button (D44) at rest, hovered, pressed and Tab-focused, beside a filled primary (the player's Previous / Next, the version bar); the publish-conflicts modal opening by keyboard with its only button, Close, filled.
+  A narrow window (about 700px): the version bar's question ("Publish version N? Students will see it. Unsaved edits may be lost.") wraps and its start stays on screen; the same for a modal footer's question.
 - **Back with unsaved work:** the address bar shows the target while the question is open and comes back on Cancel; Back twice while asking, and a link then Back while asking; a dirty New question modal + Back asks in that modal's footer.
 - **The item modal and quiz edits:** the item modal's × on an in-page item with a dirty quiz edit, and × again while asking; scroll-into-view of a question in another quiz card.
 - **The page row:** Cancel brings you back where you were (keyboard); a toast does not cover it; the settings button is blocked while it asks; after a mouse click on a header, Cancel scrolls back.
-- **Clicks:** a double-click on a trigger whose question appears under the pointer (R50); a click on another row's trash moves the question (D39).
+- **Clicks:** a double-click on a trigger whose question appears under the pointer (R50); a click on another row's trash moves the question (D39); a question opened by keyboard, then Enter on its confirm within 400 ms, acts at once (Safari's keyboard click must report `detail: 0`).
 
 ## For the VoiceOver pass at beta
 

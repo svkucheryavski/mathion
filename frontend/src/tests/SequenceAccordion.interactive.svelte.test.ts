@@ -395,6 +395,18 @@ describe('SequenceAccordion — header trash (Slice-5c T2, D6)', () => {
     expect(deletes()).toHaveLength(0);
   });
 
+  it('#3: Cancel with the trash disabled meanwhile lands on the sequence header, never <body> (whole-branch review)', async () => {
+    const { target } = mountAccordion();
+    trash(target).click();
+    flushSync();
+    trash(target).disabled = true;
+    askBtn(target, 'cancel').click();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement?.id).toMatch(/^seq-\d+-header$/);
+    expect(deletes()).toHaveLength(0);
+  });
+
   it('delete success while a sibling sequence is expanded: the busy question goes; reload only, no navigate', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2' && init?.method === 'DELETE'
@@ -540,6 +552,18 @@ describe('SequenceAccordion — item rows (T6)', () => {
     await settle();
     expect(target.querySelector('.tree-ask')).toBeNull();
     expect(document.activeElement).toBe(itemTrash(target, 'Page'));
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it('#4: Cancel with the item trash disabled meanwhile lands on the sequence header, never <body> (whole-branch review)', async () => {
+    const { target } = mountAccordion(two());
+    itemTrash(target, 'Page').click();
+    flushSync();
+    itemTrash(target, 'Page').disabled = true;
+    askBtn(target, 'cancel').click();
+    await settle();
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(document.activeElement?.id).toMatch(/^seq-\d+-header$/);
     expect(deletes()).toHaveLength(0);
   });
 

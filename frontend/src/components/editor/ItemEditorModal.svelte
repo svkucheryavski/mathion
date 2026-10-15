@@ -265,11 +265,11 @@
       warning: `Delete item "${item.title}"? This cannot be undone.`,
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-item',
     });
-    if (a === 'cancel') { void focusAfter(() => trashEl); return; }
-    if (a !== 'confirm') return;
     // After the question goes: the trash, else × (the trash disables when the
     // right to delete goes), never <body>.
     const back = () => [trashEl, modalClose(labelId)].find(usable);
+    if (a === 'cancel') { void focusAfter(back); return; }
+    if (a !== 'confirm') return;
     // R49: a save or an edit may have started while it asked.
     if (!alive || trashDisabled) {
       const free = bodyAsk.focusFree;

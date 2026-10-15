@@ -163,7 +163,8 @@
       confirmDataAction: `confirm-${action}-version`, key: id,
     };
     const a = await rowAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(() => toggleBtn(id)); return; }
+    // The trigger, else (disabled meanwhile) the <h1>: never <body>.
+    if (a === 'cancel') { void focusAfter(() => firstUsable(toggleBtn(id), h1El)); return; }
     if (a !== 'confirm') return;
     // R49: the row is still there, in the state the question named.
     const live = versions.find((x) => x.id === id);
@@ -205,7 +206,7 @@
       confirmDataAction: 'confirm-delete-version', key: id,
     };
     const a = await rowAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(() => trashBtn(id)); return; }
+    if (a === 'cancel') { void focusAfter(() => firstUsable(trashBtn(id), h1El)); return; }
     if (a !== 'confirm') return;
     // R49: the row is still there and still deletable.
     const live = versions.find((x) => x.id === id);

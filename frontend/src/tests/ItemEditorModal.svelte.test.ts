@@ -171,6 +171,22 @@ describe('ItemEditorModal — header and Title (T3a)', () => {
     expect(bodyAsk()).toBeNull();
   });
 
+  it('#19: Cancel after the right to delete went lands on ×, never <body> (whole-branch review)', async () => {
+    await render();
+    trash().click();
+    flushSync();
+    // The right to delete goes while it asks (the version was published elsewhere).
+    const published = mkVersion({ state: 'published' });
+    props.modal.version = published;
+    props.modal.perms = versionPermissions(published);
+    flushSync();
+    bodyAskBtn('cancel')!.click();
+    await settle();
+    expect(bodyAsk()).toBeNull();
+    expect(trash().disabled).toBe(true);
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
   it('#19: while it asks, × and Esc go to its Cancel and never close', async () => {
     await render();
     trash().click();

@@ -429,6 +429,23 @@ describe('VersionsPage — row actions through the slots', () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
+  it('#17, #18: Cancel with the trigger disabled meanwhile lands on the <h1>, never <body> (whole-branch review)', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    for (const label of ['Disable v7', 'Delete v7']) {
+      byLabel(label)!.click();
+      await settle();
+      (byLabel(label) as HTMLButtonElement).disabled = true;
+      rowBtn('cancel').click();
+      await settle();
+      expect(askRow()).toBeNull();
+      expect([label, document.activeElement]).toEqual([label, target.querySelector('h1')]);
+      (byLabel(label) as HTMLButtonElement).disabled = false;
+    }
+    expect(postMock).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
   it('D39: another row\'s action moves the question there; the same row again only brings it back', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8 })];
     await render();

@@ -10,7 +10,7 @@
   import InlineInput from './InlineInput.svelte';
   import { keyAsk } from './KeyQuestion.svelte';
   import { ApiError } from '../../../lib/api';
-  import { InPlaceAsk, focusAfter, settleTo, withdraw } from '../../../lib/askInPlace.svelte';
+  import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw } from '../../../lib/askInPlace.svelte';
   import { InlineEdit, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { pushToast } from '../../../stores/toasts.svelte';
@@ -210,7 +210,8 @@
     if (!markable(o.id)) return;
     if (!(await ctx.edits.request())) return;                 // D10 first (#14) …
     if (!markable(o.id)) return;
-    const marker = () => markerEl(o.id);
+    // The marker, else (disabled by another write) the §Focus fallback: never <body>.
+    const marker = () => firstUsable(markerEl(o.id), ctx.fallbackTarget(q.id));
     if (!ctx.published) {
       // After a D10 Discard the question took focus with it: the marker, not <body>.
       await focusAfter(marker);
@@ -219,15 +220,15 @@
     }
     if (markAsk.open) { markAsk.focusCancel(); return; }    // R53: one question here
     markingId = o.id;
-    const q = keyAsk();
-    const a = await markAsk.ask(q);                          // … then the key question (#2)
+    const kq = keyAsk();
+    const a = await markAsk.ask(kq);                         // … then the key question (#2)
     if (a === 'cancel') { void focusAfter(marker); return; }
     if (a !== 'confirm') return;
-    if (!markable(o.id)) { withdraw(markAsk, q, marker); return; }
+    if (!markable(o.id)) { withdraw(markAsk, kq, marker); return; }
     try {
       await setCorrect(o.id);
     } finally {
-      await settleTo(markAsk, q, marker);
+      await settleTo(markAsk, kq, marker);
     }
   }
 

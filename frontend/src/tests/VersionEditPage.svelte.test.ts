@@ -536,6 +536,28 @@ describe('VersionEditPage — state bar (T4)', () => {
     expect(posts()).toEqual([]);
   });
 
+  it('#20, #21: Cancel while a block reorder disables the bar lands on the course link, never <body> (whole-branch review)', async () => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+    let release: () => void = () => {};
+    serve((url, init) => (url.endsWith('/blocks/reorder') && init?.method === 'POST'
+      ? new Promise<Response>((r) => { release = () => r(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })); })
+      : undefined));
+    await render();
+    for (const action of ['publish', 'delete']) {
+      trigger(action)!.click();
+      await settle();
+      target.querySelector<HTMLButtonElement>('[aria-label^="Move block down"]:not([disabled])')!.click();
+      await settle();
+      expect(trigger(action)).toBeNull();          // the question stands in place of the bar
+      barBtn('cancel').click();
+      await settle();
+      expect(trigger(action)!.hasAttribute('disabled')).toBe(true);
+      expect([action, document.activeElement]).toEqual([action, target.querySelector('h1 a')]);
+      release();
+      await settle();
+    }
+  });
+
   it('enable never carries the suffix', async () => {
     tree.version = mkVersion({ is_disabled: true });
     await render();

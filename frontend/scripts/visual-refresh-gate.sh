@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2215
+EXPECTED_CHECKS=2216
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -401,6 +401,9 @@ GLOBAL_ALLOW = {
     # `:global(.inline-confirm)` sets only scroll-margin, scoped under the hashed
     # .page-ask. None renders inside SequencePlayer.
     ('src/components/ui/AskSlot.svelte', '*'),
+    # Whole-branch review: that full-size rule only under the modal body's
+    # column (`:global(.modal-body) > .ask-slot`), the hashed class in between.
+    ('src/components/ui/AskSlot.svelte', '.modal-body'),
     ('src/components/editor/ItemEditorModal.svelte', '*'),
     ('src/pages/editor/VersionEditPage.svelte', '.inline-confirm'),
     # Slice-5d: the authoring quiz card's rendered question text / explanation
@@ -5235,7 +5238,10 @@ uniq1 ask-slot
 if [[ -n $REPLY ]]; then
   N=AskSlot; H=$REPLY
   d '\.ask-slot' '' 'display:contents'
-  chk "\.ask-slot\.${H}>\*" 'flex:0 0 auto'
+  # Full size only in the modal body's column; in a row (a bar, a footer, a
+  # field's row) the question shrinks and its text wraps (whole-branch review).
+  chk "\.modal-body>\.ask-slot\.${H}>\*" 'flex:0 0 auto'
+  none "AskSlot keeps no unscoped flex rule (a row host must let it wrap)" "[{},]\.ask-slot\.${H}>\*\{"
 fi
 # D38: the row under the title, clear of the fixed Toaster when it scrolls into view.
 own page-ask VersionEditPage.svelte

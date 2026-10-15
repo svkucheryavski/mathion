@@ -128,7 +128,8 @@
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-block', key: askKey,
     };
     const a = await treeAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(trashEl); return; }
+    // The trash, else (disabled meanwhile) the header: never <body>.
+    if (a === 'cancel') { void focusAfter(() => firstUsable(trashEl(), document.getElementById(headerId))); return; }
     if (a !== 'confirm') return;
     // R49: the same block, still deletable, at the focus, on the same version.
     if (!stillOnVid(savedVid) || block.id !== savedId || block.title !== title || mode !== 'open-focus'

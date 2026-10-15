@@ -118,7 +118,8 @@
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-sequence', key: seqKey,
     };
     const a = await treeAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(seqTrash); return; }
+    // The trash, else (disabled meanwhile) the header: never <body>.
+    if (a === 'cancel') { void focusAfter(() => firstUsable(seqTrash(), document.getElementById(headerId))); return; }
     if (a !== 'confirm') return;
     // R49: the same sequence, still deletable, at the focus, on the same version.
     if (!alive || !check(savedVid) || seq.id !== savedSid || seq.title !== title || mode !== 'open-focus'
@@ -185,7 +186,7 @@
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-item', key: `item-${itemId}`,
     };
     const a = await treeAsk.ask(q);
-    if (a === 'cancel') { void focusAfter(() => itemTrash(itemId)); return; }
+    if (a === 'cancel') { void focusAfter(() => firstUsable(itemTrash(itemId), document.getElementById(headerId))); return; }
     if (a !== 'confirm') return;
     // R49: re-run the gate and find the item again in the live list.
     const ids = seq.items.map((i) => i.id);

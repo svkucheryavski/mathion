@@ -459,6 +459,39 @@ describe('InlineEdit', () => {
     expect(close).toHaveBeenCalledWith(true);
   });
 
+  it('#6 confirm (R57): focus moved elsewhere while the key saved stays there; the field closes without refocusing (whole-branch review)', async () => {
+    let resolve!: () => void;
+    const send = vi.fn(() => new Promise<void>((r) => { resolve = r; }));
+    const { ed, close } = make({ confirm: keyQ, send });
+    ed.value = 'new';
+    const p = ed.commit();
+    drawn(ed.asking);
+    ed.asking.answer('confirm');
+    await flush();
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    elsewhere.focus();
+    resolve();
+    await p;
+    expect(ed.asking.open).toBe(false);
+    expect(close).toHaveBeenCalledWith(false);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('#6 confirm (R57): focus still in the busy question when the key saves → the field closes and refocuses its opener', async () => {
+    let resolve!: () => void;
+    const send = vi.fn(() => new Promise<void>((r) => { resolve = r; }));
+    const { ed, close } = make({ confirm: keyQ, send });
+    ed.value = 'new';
+    const p = ed.commit();
+    drawn(ed.asking);
+    ed.asking.answer('confirm');
+    await flush();
+    expect(ed.asking.host?.contains(document.activeElement)).toBe(true);
+    resolve();
+    await p;
+    expect(close).toHaveBeenCalledWith(true);
+  });
+
   it('#6 confirm: a failed save keeps the field and its error; the question settles and focus returns to the field', async () => {
     const { ed, close, field } = make({ confirm: keyQ, send: vi.fn().mockRejectedValue(new ApiError(422, 'Nope')) });
     ed.value = 'new';

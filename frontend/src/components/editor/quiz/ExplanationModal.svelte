@@ -103,11 +103,11 @@
       warning: `Remove the explanation for question ${n}?`,
       confirmLabel: 'Remove', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-remove-explanation',
     });
-    if (a === 'cancel') { void focusAfter(() => removeEl); return; }
-    if (a !== 'confirm') return;
     // After the question goes: "Remove explanation", else (the right to edit
     // went, R10) the text, else Cancel or ×, never <body>.
     const back = () => [removeEl, panelText(), cancelEl, modalClose(labelId)].find(usable);
+    if (a === 'cancel') { void focusAfter(back); return; }
+    if (a !== 'confirm') return;
     // R49: the right to save may have gone while it asked.
     if (!alive() || saving || !ctx.canText) {
       const free = footAsk.focusFree;

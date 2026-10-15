@@ -28,4 +28,6 @@ export type QuizCtx = {
   hasQuestion(qid: number): boolean;
   // Focus the card's ✎, else "+ Add question", else × (spec §Focus, Fallback).
   focusFallback(qid: number | null): void;
+  // The same chain's first target, for a site's own chain (none: null).
+  fallbackTarget(qid: number | null): HTMLElement | null;
 };

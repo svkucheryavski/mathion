@@ -640,6 +640,7 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       onUploadFile: vi.fn(),
       disabled: false,
       uploading: false,
+      refreshKey: 0,
     });
     const cmp = mount(AssetSidebar, { target: panel, props });
     cleanup = () => unmount(cmp);
@@ -717,6 +718,98 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
     expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).toBeNull();
     expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm')?.getAttribute('aria-busy')).toBe('true');
     expect(document.activeElement).toBe(panel);
+  });
+
+  it('another row\'s delete reload removes the row of an idle question: it closes, deletes nothing, focus lands on a live trash, never <body> (whole-branch review)', async () => {
+    let resolve!: () => void;
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { resolve = r; }));
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' }), mkAsset({ id: 3, filename: 'c.png' }),
+      ])
+      // Row 2 went in another tab meanwhile.
+      .mockResolvedValue([mkAsset({ id: 3, filename: 'c.png' })]);
+    const { panel } = mountInPanel();
+    await settleAll();
+    const trashOf = (id: number) => panel.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!;
+    trashOf(1).click();
+    flushSync();
+    (panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm') as HTMLButtonElement).click();
+    flushSync();
+    trashOf(2).click();
+    await settleAll();
+    expect(document.activeElement).toBe(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm button.cancel'));
+    resolve();
+    await settleAll();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(stubCtx.remove).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(trashOf(3));
+  });
+
+  it('a refresh that removes the row of an idle question closes it; focus lands on a live trash, never <body> (whole-branch review)', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })])
+      .mockResolvedValue([mkAsset({ id: 2, filename: 'b.png' })]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    flushSync();
+    expect(document.activeElement).toBe(panel.querySelector('.inline-confirm button.cancel'));
+    props.refreshKey = 1;
+    await settleAll();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(stubCtx.remove).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(
+      panel.querySelector('[data-testid="asset-row-2"] [data-testid="delete-trash"] button'));
+  });
+
+  it('a reload that keeps the row of an idle question leaves focus where the author moved it (R57, whole-branch review)', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!.click();
+    flushSync();
+    const zone = panel.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
+    zone.focus();
+    props.refreshKey = 1;
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).not.toBeNull();
+    expect(document.activeElement).toBe(zone);
+  });
+
+  it('a deleted row leaves the list at once, before the reload returns (whole-branch review)', async () => {
+    let releaseList!: (l: AssetItem[]) => void;
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })])
+      .mockReturnValue(new Promise<AssetItem[]>((r) => { releaseList = r; }));
+    const { panel } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    flushSync();
+    (panel.querySelector('.inline-confirm button.confirm') as HTMLButtonElement).click();
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    releaseList([mkAsset({ id: 2, filename: 'b.png' })]);
+    await settleAll();
+    expect(document.activeElement).toBe(
+      panel.querySelector('[data-testid="asset-row-2"] [data-testid="delete-trash"] button'));
+  });
+
+  it('a new asset context drops the old rows and their question until its list arrives (whole-branch review)', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    flushSync();
+    const ctxB = makeStubAssetContext();
+    (ctxB.list as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<AssetItem[]>(() => {}));
+    props.assetContext = ctxB;
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(panel.querySelector('[data-testid="loading-indicator"]')).not.toBeNull();
+    expect(stubCtx.remove).not.toHaveBeenCalled();
   });
 
   it('the drop zone is aria-disabled with its reason while the sidebar is disabled or uploading', async () => {

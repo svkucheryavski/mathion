@@ -60,7 +60,11 @@
     listError = null;
     try {
       const list = await assetContext.list();
-      if (myToken === loadToken) assets = list;
+      if (myToken === loadToken) {
+        const gone = idleQuestionGone(list);
+        assets = list;
+        if (gone) void refocusAfterDelete(gone.id, gone.idx);
+      }
     } catch (e) {
       if (myToken === loadToken) {
         listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
@@ -77,10 +81,16 @@
   // the pre-onMount tick.
   $effect(() => {
     void refreshKey;
-    void assetContext;
-    if (mountDone) void fetchAssets();
+    const ctx = assetContext;
+    if (!mountDone) return;
+    // A new context: the old rows (and a question about one) go at once, so
+    // nothing of the previous version or run can be clicked while its list loads.
+    if (ctx !== shownCtx) { shownCtx = ctx; assets = []; confirmId = null; }
+    void fetchAssets();
   });
-  onMount(() => { mountDone = true; void fetchAssets(); });
+  // The context the list shows (plain `let`, as above).
+  let shownCtx: AssetContext | null = null;
+  onMount(() => { mountDone = true; shownCtx = assetContext; void fetchAssets(); });
 
   // R2: `is_referenced` counts references across the whole version (course) or
   // the whole run, never one item — the reason says so.
@@ -114,13 +124,30 @@
     confirmId = null;
     if (inside) void refocusAfterDelete(id, idx);
   });
+  function questionHasFocus(): boolean {
+    return confirmId !== null
+      && (asideEl?.querySelector(`[data-testid="asset-row-${confirmId}"] .inline-confirm`)?.contains(document.activeElement) ?? false);
+  }
+  // A reload without the asked-about row (another tab deleted it) closes its
+  // idle question without acting. Read while the row is still on screen: if
+  // focus is in the question, the caller moves it on (§Focus, never <body>).
+  function idleQuestionGone(list: AssetItem[]): { id: number; idx: number } | null {
+    const id = confirmId;
+    if (id === null || deletingIds.has(id) || list.some((a) => a.id === id)) return null;
+    const idx = assets.findIndex((a) => a.id === id);
+    const hadFocus = questionHasFocus();
+    confirmId = null;
+    return hadFocus ? { id, idx } : null;
+  }
   async function confirmDelete(id: number) {
     if (disabled) return;
     if (deletingIds.has(id)) return;
     deletingIds.add(id);
     deleteErrorMsg = null;
+    let ok = false;
     try {
       await assetContext.remove(id);
+      ok = true;
     } catch (e) {
       deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
     } finally {
@@ -128,8 +155,14 @@
       if (closing) confirmId = null;
       deletingIds.delete(id);
       const idx = assets.findIndex((a) => a.id === id);
-      await fetchAssets();
+      // The reload keeps the list on screen: a deleted row leaves at once, so
+      // it cannot be clicked meanwhile; focus moves on now, and again only if
+      // the reload took its target away.
+      if (ok) assets = assets.filter((a) => a.id !== id);
+      const reload = fetchAssets();
       if (closing) await refocusAfterDelete(id, idx);
+      await reload;
+      if (closing && document.activeElement === document.body) await refocusAfterDelete(id, idx);
     }
   }
   // R7, the Delete path: the question is gone (and the list re-rendered), so
@@ -286,7 +319,9 @@
     </div>
   {/if}
 
-  {#if loading}
+  <!-- "Loading…" only on the first load: a reload keeps the list, so an open
+       question stays put and never takes focus back (R57). -->
+  {#if loading && assets.length === 0}
     <p class="muted" data-testid="loading-indicator">Loading…</p>
   {:else if listError}
     <p class="error-inline">{listError}</p>
