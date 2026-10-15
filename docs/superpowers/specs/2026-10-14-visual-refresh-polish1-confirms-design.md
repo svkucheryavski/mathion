@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** rev 12 (2026-10-15), approved at rev 10; rev 11 adds the user's D42, rev 12 the user's D43.
+**Status:** rev 13 (2026-10-15), approved at rev 10; rev 11 adds the user's D42, rev 12 the user's D43, rev 13 the user's D44 (Task 8).
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -45,6 +45,7 @@
 - Rev 9–10 give the asset drop zone a `title` with its reason (rounds 8–9).
 - Rev 11 adds D42 (the user, Task 1's look review): a question under a row ends under the row's actions.
 - Rev 12 adds D43 (the user, Task 4's look review): a VersionsPage row's question sits inside the row's box, under a thin line.
+- Rev 13 adds D44 (the user, after Task 7): every secondary Button takes the confirm's primary-action look, as Task 8.
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -89,6 +90,7 @@ The user's (2026-10-14), continuing the Slice-6 numbering:
 - **D41 — Seven tasks** (Process). (User, round 2.)
 - **D42 — A question under a row ends under the row's actions.** The row's trash is at its right end, so the question line under it is right-aligned: `InlineConfirm align="end"` (an `Ask`'s `align: 'end'`). It applies to every one-line question under a row: Mini-projects, Assets and Roster rows, the course tree (#3, #4, #5), the VersionsPage rows (#17, #18) and the quiz cards (#12). Questions in place of buttons, footers and bars, multi-line questions (RunAssetsTab's replace) and the danger panel keep their places. In-row placement was rejected because the action column widens and the table's columns shift. (User, Task 1 look review, after an A/B mock-up on the live pages.)
 - **D43 — A VersionsPage row's question sits inside the row's box.** The row's `li.vrow` keeps the box (padding, border, background); its line moves into an inner `div.vline` (the flex row), and while the row asks its question is a `div.ask-row` under that line in the same box, not a list item of its own. A thin grey line (`border-top: 1px solid var(--focus-line)`) runs across the whole box above the question, with 8px under it. An open duplicate form stays its own box below. (User, Task 4 look review, after an A/B mock-up: more space vs a thin line.)
+- **D44 — Secondary buttons look like the confirm's primary action.** Every `Button variant="secondary"`, on every screen (authoring, Teaching and the student screens: the player's Previous, "Show correct answers", the error pages' Back and Retry), is outlined in `--primary` with `--primary` text at rest and fills `--primary` with `--primary-text` on hover (pointer devices) and on keyboard focus, `--primary-press` while pressed, with the confirm buttons' focus ring. It keeps the page size (`--btn-pad`, 13px). Primary (filled), ghost, danger, IconButton and the hand-rolled buttons (pills, tabs) stay as they are. (User, after Task 7: "I like this idea. Can we use it for other buttons as well?"; scope "secondary only", fill steel blue, blue outline at rest, student screens included.)
 
 ## Rulings
 
@@ -182,6 +184,7 @@ These were made from the reviews. Each one says what it costs if it is wrong.
 
 In:
 - the tokens, `ui/InlineConfirm`, `ui/DangerConfirm`, and `ui/Button`'s `danger` variant (Look);
+- `ui/Button`'s `secondary` variant (D44, Task 8);
 - the 12 existing `InlineConfirm` uses and the 4 `DangerConfirm` uses (restyle, tone, labels);
 - the two hand-rolled confirms, which become `InlineConfirm`: AssetSidebar's `.confirm-pair` (asset delete) and RunAssetsTab's replace confirm `.row-confirm`;
 - the 21 `confirm()` call sites (inventory §1);
@@ -195,7 +198,7 @@ Not in:
 - The error banners keep `--status-rejected-*` with their `--danger` rule: RunMiniProjectsTab `:393-395`, MiniProjectModal `:714-718`, DashboardSidePanel `:929-933`, NewRunModal, RosterImportModal, RunOverviewTab `.ov-err` and RunAssetsTab `.banner-error`. Where a banner shows beside the danger panel there are two pinks; aligning the banners with the panel tokens is a Polish 3 candidate.
 - The Toast stays a red fill (`--danger` background, `--bg` text, 5.7:1).
 - VersionsPage's create form: its Cancel button and in-app links discard silently today, and that stays. Only its Esc prompt is converted. Adding a guard there is a Polish 3 candidate.
-- The global focus halo on other Button variants (`base.css:22-26`, 1.16:1) stays. Polish 2 takes it with the forced-colors ring, so for now the version bar mixes the strong ring (Delete) with the halo (the others).
+- The global focus halo on the primary and ghost Button variants (`base.css:22-26`, 1.16:1) stays. Polish 2 takes it with the forced-colors ring, so for now a bar mixes the strong ring (Delete and the secondaries, D44) with the halo (primary and ghost).
 
 ## Look (Task 1)
 
@@ -254,6 +257,12 @@ Disabled, blocked and busy looks win in every state.
 ### `ui/Button` `danger` variant
 - `.danger` follows the shared red action states at page size (`--btn-pad`, 13px). Its resting background is `--surface`. A busy `.danger` keeps the rest look with its spinner.
 - `.danger-off` has no consumer (inventory §4.3); it stays for its test.
+
+### `ui/Button` `secondary` variant (Task 8, D44)
+- `.secondary` follows the shared **primary action** states (table above) at page size (`--btn-pad`, 13px, weight 500, `--radius`): rest `--surface` background, `--primary` 1px border and text; `:hover` (only under `@media (hover: hover)`) and `:focus-visible` `--primary` background, `--primary-text` text; `:active` `--primary-press` background and border, `--primary-text` text.
+- Every hover, focus-visible and active rule carries Button's guard `:not(:disabled):not(.blocked):not([aria-busy="true"])`, so the disabled and blocked looks (`.btn:disabled`, `.btn.blocked`) and a busy secondary's rest look with its spinner win.
+- **Focus ring:** `.secondary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }`, as `.danger`.
+- No markup, prop or class name changes: all 23 call sites keep `variant="secondary"`.
 
 ### Tone and labels of the existing confirms
 | place | label (old → new) | tone |
@@ -449,7 +458,7 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
 
 ## Process
 
-Seven tasks (D41). Each one runs: TDD → full checks → screenshots → the user's OK → Opus + Fable reviews of the uncommitted diff until clean → commit → wait for "go".
+Seven tasks (D41), and Task 8 for D44. Each one runs: TDD → full checks → screenshots → the user's OK → Opus + Fable reviews of the uncommitted diff until clean → commit → wait for "go".
 1. **The look.**
    - Tokens; InlineConfirm (tone, size, states, the required label, `message`, `layout`, `busy`, R50, button `aria-describedby`); DangerConfirm and its panel (D40); Button danger.
    - The existing confirms' tones and labels, and the two hand-rolled confirms.
@@ -464,6 +473,7 @@ Seven tasks (D41). Each one runs: TDD → full checks → screenshots → the us
 5. **The quiz edit slot:** async `request` and `confirm` (#14, #6, #2), and the quiz title's D10 question.
 6. **App and quiz-question removals:** #9, #12.
 7. **No pop-ups left:** the gate check, clean-up, full checks.
+8. **Secondary buttons (D44):** Button `.secondary` takes the primary action states. Screenshots: a secondary at rest, hovered and Tab-focused on the version bar, in a Teaching screen, in a modal footer and in the student player (Previous beside Next).
 
 Then a whole-branch review (fresh Opus + Fable) and a Safari pass, one step at a time.
 
@@ -542,12 +552,14 @@ By task (the plan's ladder sets `EXPECTED_CHECKS` per task):
   ```
 
   It must find nothing. DangerConfirm's function is renamed and the `editorReasons.ts` comment reworded, so there are no exclusions.
+- **Task 8:** pins for Button `.secondary`: the rest colours; the hover rule alone under `@media (hover: hover)`; focus-visible and active fills; the focus ring; the `:not(:disabled)`, `:not(.blocked)`, `:not([aria-busy="true"])` guards on every state rule (no unguarded `.secondary` state rule).
 
 ## Carried to the Safari pass
 
 - **The look:**
   - hover and focus fills and the focus ring in Safari, including in a modal footer (a mouse click shows no ring; Tab skips buttons by default);
-  - the danger panel's new colours, and that the unarmed Force delete's label is readable at 12px.
+  - the danger panel's new colours, and that the unarmed Force delete's label is readable at 12px;
+  - a secondary Button (D44) at rest, hovered, pressed and Tab-focused, beside a filled primary (the player's Previous / Next, the version bar).
 - **Back with unsaved work:**
   - the address bar shows the target while the question is open, and comes back on Cancel;
   - Back twice while asking, and a link then Back while asking (the history is `[…, Back's target, the link]`);

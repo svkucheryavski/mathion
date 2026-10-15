@@ -10,6 +10,7 @@
 - **Leaving with unsaved work (Task 2).** `DirtyGuard` asks the owner of the unsaved work instead of the browser. The router waits for the answer (D37), and a second navigation joins it (R47). The page question goes to the top-most open modal, or to a row under the version page's title (D38, R46).
 - **The call sites (Tasks 2–6).** Each `confirm()` becomes a question under its row, in place of its toolbar or footer buttons, or under the answers. Each re-checks its subject after the answer (R49) and freezes what it guards (R48).
 - **No pop-ups left (Task 7).** Two gate rows keep `confirm()` out of `src` and its spies out of the tests.
+- **Secondary buttons (Task 8, D44).** Button's `.secondary` takes the confirm's primary-action states at page size.
 
 **Tech Stack:**
 - **Svelte:** Svelte 5.55, runes only, no JS/CSS dependencies.
@@ -139,6 +140,9 @@ The five inputs or conditions most likely to bite an author or a teacher that th
 | 5 — The quiz edit slot (#14, #6, #2, D10) | 12 | 2191 |
 | 6 — App and quiz-question removals (#9, #12) | 6 | 2197 |
 | 7 — No pop-ups left | 2 | 2199 |
+| 8 — Secondary buttons (D44, added after Task 7) | 14 | 2215 |
+
+Executed: D43 (Task 4) added 2 checks, so the real values are Task 4 2181, Task 5 2193, Task 6 2199, Task 7 2201 (ledger rulings); Task 8's 2215 already counts from 2201.
 
 ## File map
 
@@ -8328,5 +8332,103 @@ EOF
 )"
 ```
 
-After Task 7: the whole-branch review (fresh Opus + Fable on `main..HEAD`), then the Safari pass from the backlog's list, one step at a time.
+
+### Task 8: Secondary buttons look like the confirm's primary action (D44)
+
+Added after Task 7 at the user's request (spec rev 13, D44). The gate is at **2201** (Task 7, with the D43 shift).
+
+**Files:**
+- Modify: `frontend/src/components/ui/Button.svelte` (the `.secondary` rule in `<style>`)
+- Modify: `frontend/scripts/visual-refresh-gate.sh` (the Button block in section (am), `EXPECTED_CHECKS`)
+- Modify: `docs/backlog/polish1-confirms-debt.md` (one line in "## Carried to the Safari pass")
+
+**Interfaces:**
+- Consumes (Task 1): the tokens `--primary`, `--primary-text`, `--primary-press`, `--surface`; Button's state guard `:not(:disabled):not(.blocked):not([aria-busy="true"])`; the gate's Button block (`uniq1 btn`, `BT`, `d`, `none`, `hover_only Button`).
+- Produces: nothing new for code. The 23 `variant="secondary"` call sites keep their markup.
+
+- [ ] **Step 1: Write the failing gate rows**
+
+In section (am), in the Button block (`# Button danger (D34 at page size)…`), after the line `none "Button .danger fills only an enabled, idle button" …` and before `hover_only Button $H`, add:
+
+```zsh
+  # D44 (Task 8): secondary = the confirm's primary action at page size.
+  d '\.secondary' '' 'background:var\(--surface\)' 'color:var\(--primary\)' 'border-color:var\(--primary\)'
+  d '\.secondary' "${BT}:hover" 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.secondary' "${BT}:focus-visible" 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.secondary' "${BT}:active" 'background:var\(--primary-press\)' 'border-color:var\(--primary-press\)' 'color:var\(--primary-text\)'
+  d '\.secondary' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px' 'box-shadow:none'
+  none "Button .secondary fills only an enabled, idle button" "\.secondary\.${H}:((hover|active)\{|focus-visible\{[^}]*background)"
+```
+
+`hover_only Button $H` (already there) then also covers the new `:hover` rule: it must sit inside `@media (hover: hover)`.
+
+Set `EXPECTED_CHECKS=2215` (`:90`): 13 `d` checks and one `none`.
+
+Run the gate (Global Constraints). Expected: FAIL — the rest row (today `color:var(--text-3)`, `border-color:var(--border-strong)`) and every state row; `ALL PASS` is not printed.
+
+- [ ] **Step 2: Button `.secondary` — the primary action states**
+
+In `frontend/src/components/ui/Button.svelte`, replace
+
+```css
+  .secondary { background: var(--surface); color: var(--text-3); border-color: var(--border-strong); }
+```
+
+with
+
+```css
+  /* D44: the confirm's primary action at page size — outlined at rest, filled
+     on hover (pointer devices) and on keyboard focus, darker while pressed.
+     Disabled, blocked and busy keep their looks. Kept apart from the .danger
+     rules: the minifier merges adjacent identical rules (the two rings). */
+  .secondary { background: var(--surface); color: var(--primary); border-color: var(--primary); }
+  @media (hover: hover) {
+    .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):hover { background: var(--primary); color: var(--primary-text); }
+  }
+  .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):focus-visible { background: var(--primary); color: var(--primary-text); }
+  .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):active { background: var(--primary-press); border-color: var(--primary-press); color: var(--primary-text); }
+  .secondary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
+```
+
+The `.ghost` rule stays between these and the `.danger` rules, so the two focus rings never sit side by side in the built CSS.
+
+- [ ] **Step 3: Run the gate to verify it passes**
+
+Run the gate. Expected: `ALL PASS (2215 checks)`. If the `.danger` ring pin (`d '\.danger' ':focus-visible' …`) fails, the minifier merged the two rings: check the order in Step 2.
+
+- [ ] **Step 4: The Safari list**
+
+In `docs/backlog/polish1-confirms-debt.md`, in "## Carried to the Safari pass", at the end of the **The look** item add:
+
+```markdown
+  A secondary Button (D44) at rest, hovered, pressed and Tab-focused, beside a filled primary (the player's Previous / Next, the version bar).
+```
+
+- [ ] **Step 5: Full checks**
+
+Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest green (2408, unchanged: `Button.svelte.test.ts` checks the class, not the colours); svelte-check 0 errors, 13 warnings; gate `ALL PASS (2215 checks)`.
+
+- [ ] **Step 6: Screenshots, the user's OK, review lanes, commit**
+
+Screenshots at 1280 wide, dev data, writes held. Each one shows a secondary at rest beside the same button hovered (mouse) and Tab-focused:
+- the version bar of a published version (Archive / Revert beside the filled Publish or the ghost Disable);
+- a Teaching screen (the Roster tab's secondary button);
+- a modal footer with a secondary (e.g. RosterImportModal or PublishConflictsModal);
+- the student player: Previous beside the filled Next;
+- one disabled secondary (the player's Previous on the first item), to show the disabled look is unchanged.
+
+Then the per-task loop: the user's OK, both lanes until clean, commit:
+
+```bash
+cd /Users/svkucheryavski/Documents/Developing/mathion && git add frontend/src/components/ui/Button.svelte \
+  frontend/scripts/visual-refresh-gate.sh docs/backlog/polish1-confirms-debt.md
+git commit -m "$(cat <<'EOF'
+feat(polish1): secondary buttons look like the confirm's primary action
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+After Task 8: the whole-branch review (fresh Opus + Fable on `main..HEAD`), then the Safari pass from the backlog's list, one step at a time.
 
