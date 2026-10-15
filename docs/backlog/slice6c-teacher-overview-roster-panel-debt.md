@@ -100,3 +100,4 @@ Known and as specified: Safari shows no focus ring after a mouse click, Tab skip
 ## For the Polish slice (user, 6c Safari pass)
 
 - **FIRST ITEM: confirms as real small buttons, and a crimson danger red.** Every confirm that asks (`InlineConfirm`: "Discard unsaved changes?", Unpublish, the roster row and bulk confirms; and `DangerConfirm`) shows its action and Cancel as real buttons with a lower height and smaller padding: red for the action, grey for Cancel. Every danger button and error uses a stronger red, like crimson (the `--danger` token and its uses). Check this on every screen that uses them (6a, 6b and 6c), with screenshots and a review.
+  **Done in Polish 1** (`docs/superpowers/plans/2026-10-14-visual-refresh-polish1-confirms.md`, Task 1).

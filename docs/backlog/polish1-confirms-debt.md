@@ -1,5 +1,8 @@
 # Polish 1 (confirms) — deferred minors
 
+Spec: `docs/superpowers/specs/2026-10-14-visual-refresh-polish1-confirms-design.md`.
+Plan: `docs/superpowers/plans/2026-10-14-visual-refresh-polish1-confirms.md`.
+
 Minors the review lanes raised and the user did not take into the slice, by task.
 
 ## Task 1 — the look
@@ -56,3 +59,28 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 - **Test gaps:** the QuizBody R49 effect with an idle question whose card leaves the list on a resync (only the busy 404 path is tested); AppBody R49 on a switch to another item or version (only "script gone" is tested); no test pins `.qask .inline-confirm` inside `li[data-q-id]` (the gate's grep does). (both lanes)
 - **QuizBody `fallbackTarget` queries × without `:not([disabled])`**, so `back` can return null when ✎, "+ Add question" and × are all disabled — reachable only during the item's own delete, when `.body-rest` is inert. (Fable lane, r2)
 - **AppBody `orModal` lands on the panel while × is disabled** (footer Save in flight); after the save focus stays on the panel rather than returning to Remove. Consistent with PageAsk's panel fallback. (Fable lane, r2)
+
+## Task 7
+
+- **Gate `cft` row (no test answers a confirm() pop-up) has blind spots**: it scans only `src/tests` (colocated `src/lib/*.test.ts` sit outside both rows) and misses `vi.stubGlobal('confirm', …)` (a live idiom here for `fetch`) and double-quoted `spyOn(window, "confirm")`. Second-line only: a real spy implies a `confirm(` in `src`, which the first row catches. Widen to `src --include='*.test.ts'` with `|stubGlobal\(['"]confirm`. (both lanes)
+
+## Carried to the Safari pass (spec §Carried to the Safari pass)
+
+One step at a time, every write mocked, no VoiceOver step.
+
+- **The look:** hover and focus fills and the focus ring in Safari, also in a modal footer (a mouse click shows no ring; Tab skips buttons by default); the danger panel's colours, and the unarmed Force delete's label at 12px.
+- **Back with unsaved work:** the address bar shows the target while the question is open and comes back on Cancel; Back twice while asking, and a link then Back while asking; a dirty New question modal + Back asks in that modal's footer.
+- **The item modal and quiz edits:** the item modal's × on an in-page item with a dirty quiz edit, and × again while asking; scroll-into-view of a question in another quiz card.
+- **The page row:** Cancel brings you back where you were (keyboard); a toast does not cover it; the settings button is blocked while it asks; after a mouse click on a header, Cancel scrolls back.
+- **Clicks:** a double-click on a trigger whose question appears under the pointer (R50); a click on another row's trash moves the question (D39).
+
+## For the VoiceOver pass at beta
+
+- Each question group is named by its text ("Delete block "Vectors"? This cannot be undone., group") before its buttons; the key question reads its bold lead and the warning as one name (R52).
+- A busy confirm announces busy (`aria-busy`), and Cancel is announced as unavailable while it runs.
+
+## Polish 2 / Polish 3 candidates (spec §Scope, "Not in")
+
+- The error banners keep `--status-rejected-*`; beside the danger panel there are two pinks. Aligning them with the panel tokens is a Polish 3 candidate.
+- VersionsPage's create form: Cancel and in-app links discard silently; only Esc asks. A guard there is a Polish 3 candidate.
+- The global focus halo on other Button variants (`base.css:22-26`) stays until Polish 2 takes it with the forced-colors ring.

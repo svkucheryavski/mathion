@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2199
+EXPECTED_CHECKS=2201
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5344,5 +5344,13 @@ if grep -qE '(^|[^.[:alnum:]_])confirm[[:space:]]*\(|(window|globalThis)\.confir
      src/components/editor/item/AppBody.svelte src/components/editor/quiz/QuizBody.svelte; then
   echo "FAIL  AppBody and QuizBody call no confirm()"; fail=1
 else echo "PASS  AppBody and QuizBody call no confirm()"; fi
+# Task 7 — no pop-ups left (spec §Gate): no confirm() anywhere in src, no
+# confirm spy in the tests. The close-tab warning (beforeunload) is no confirm().
+cfl=(${(f)"$(grep -rnE '(^|[^.[:alnum:]_])confirm[[:space:]]*\(|(window|globalThis)\.confirm' src --include='*.svelte' --include='*.ts' --exclude-dir=tests --exclude='*.test.ts')"})
+if [[ ${#cfl[@]} -eq 0 ]]; then echo "PASS  no confirm() call anywhere in src (Polish 1)"
+else echo "FAIL  confirm() calls left in src: $cfl"; fail=1; fi
+cft=(${(f)"$(grep -rnE "spyOn\((window|globalThis), 'confirm'\)|(window|globalThis)\.confirm" src/tests)"})
+if [[ ${#cft[@]} -eq 0 ]]; then echo "PASS  no test answers a confirm() pop-up (Polish 1)"
+else echo "FAIL  tests still spy on confirm(): $cft"; fail=1; fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
