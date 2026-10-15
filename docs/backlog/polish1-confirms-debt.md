@@ -31,3 +31,10 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 - **`live={mode === 'open-focus'}` on the block / sequence TreeAskRows is redundant** with `useTreeAsk`'s route dismissal (their mode comes from the route). Harmless; a one-line comment would explain why item rows don't pass it. (Opus lane)
 - **TreeAskRow's "Kept past unmount" comment misleads** (`TreeAskRow.svelte`): by teardown the DOM is detached, so `wrap.contains(activeElement)` is always false and the check works through the `<body>` branch. Reword, or drop `wrap` and call `focusIsFree()`; behaviour unchanged. (Fable lane)
 - **#4's failure `settleTo` finds the trash via `item-<id>-open` → `closest('li')`** (`SequenceAccordion.svelte` `itemTrash`), coupling it to the ✎ having an id; a `data-action` lookup scoped to the `<li>` would match the other two sites. Cosmetic. (Fable lane)
+
+## Task 4
+
+- **A course switch mid-question** (VersionsPage stays mounted; only `courseSlug` rebinds): a row question is dismissed but its `<h1>` target is gone under the Skeleton, so focus stays on `<body>`; an open #16 question survives the switch with the form (`creating` was never reset — today's behaviour). Fix: dismiss `createAsk` and reset `creating` in the `courseSlug` effect; optionally focus the new `<h1>` once it loads. (both lanes)
+- **Test gaps, VersionsPage:** the R49 effect (an idle or busy row question while an external reload starts, or while its row disappears), an R49 `withdraw` after confirm (state flipped / row deleted while asking), the last row's delete falling back to "+ Add version", a failed #17 (focus to the trigger), and #16's R48 / R53 (Enter in a field does not submit while it asks; a second Esc refocuses its Cancel). (both lanes)
+- **Test gaps, VersionEditPage:** `withdraw` when `offered(action)` turns false while asking, and a failed #21 (focus back to Delete). (both lanes)
+- **`VersionsPage.svelte` comment "load() pins courseSlug internally"** is inaccurate (it reads the live prop; `loadGen` makes the race harmless). Pre-existing wording; fix when the file is next touched. (Fable lane)

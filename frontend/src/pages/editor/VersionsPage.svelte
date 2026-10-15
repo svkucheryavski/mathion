@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import Button from '../../components/ui/Button.svelte';
@@ -10,7 +10,8 @@
   import VersionBadges from '../../components/editor/VersionBadges.svelte';
   import { deleteVersionReason, duplicateVersionReason } from '../../lib/editorReasons';
   import { pushToast } from '../../stores/toasts.svelte';
-  import { DISCARD_PROMPT } from '../../lib/quizEdits.svelte';
+  import AskSlot from '../../components/ui/AskSlot.svelte';
+  import { InPlaceAsk, DISCARD_ASK, focusAfter, firstUsable, settleTo, moveOn, withdraw, type Ask } from '../../lib/askInPlace.svelte';
   import type { Version } from '../../lib/types';
   import {
     loadVersionsPage,
@@ -38,6 +39,29 @@
   // preventing double-submit / racing transitions on the same row.
   let busy = $state(false);
 
+  // Polish 1: the create form's question (#16) in place of its Cancel/Create,
+  // and one question for the list (#17, #18) under the row that asked, keyed
+  // by version id (R53).
+  const createAsk = new InPlaceAsk();
+  const rowAsk = new InPlaceAsk();
+  let h1El = $state<HTMLHeadingElement>();
+  const toggleBtn = (id: number) => document.getElementById(`v-${id}-toggle`);
+  const trashBtn = (id: number) => document.getElementById(`v-${id}-delete`);
+
+  // R49: a row question goes with its row — a reload (the Skeleton takes the
+  // list) or another course. Focus that was in it waits on the <h1>.
+  $effect(() => {
+    const k = rowAsk.current?.key;
+    if (k === undefined) return;
+    if (loading || !versions.some((x) => x.id === k)) {
+      untrack(() => {
+        const free = rowAsk.focusFree;
+        rowAsk.dismiss();
+        if (free) void focusAfter(() => h1El);
+      });
+    }
+  });
+
   // Create form — collapsed behind the "+ Add version" line under the list
   // (5c follow-up: the editor's add lines; it was a `+` in the Versions row).
   let creating = $state(false);
@@ -62,7 +86,7 @@
   // Reset module state on unmount so a fresh entry doesn't briefly render the
   // previous course's data before its own fetch resolves. Mirrors
   // VersionEditPage's clearEditorVersion onDestroy.
-  onDestroy(() => resetVersionsPageState());
+  onDestroy(() => { createAsk.dismiss(); rowAsk.dismiss(); resetVersionsPageState(); });
 
   function resetCreateForm() {
     newLabel = '';
@@ -85,17 +109,23 @@
   }
 
   // Escape in a field cancels, as the editor's add rows do — but a stray
-  // Escape must not silently drop typed input (final review): then it asks.
+  // Escape must not silently drop typed input (final review): then it asks,
+  // in place of Cancel/Create (#16). Cancel returns to the field.
   const createDirty = () => newLabel !== '' || info_md !== '' || max_quiz_attempts !== 3;
-  function escCancels(e: KeyboardEvent) {
+  async function escCancels(e: KeyboardEvent) {
     if (e.key !== 'Escape' || e.isComposing || busy) return;
     e.preventDefault();
-    if (createDirty() && !window.confirm(DISCARD_PROMPT)) return;
+    if (!createDirty()) { void cancelCreate(); return; }
+    const field = e.currentTarget as HTMLElement;
+    const a = await createAsk.ask(DISCARD_ASK);
+    if (a === 'cancel') { void focusAfter(() => field); return; }
+    if (a !== 'confirm') return;
+    createAsk.settle();   // a close: nothing to wait for (R54)
     void cancelCreate();
   }
 
   async function createVersion() {
-    if (!course || !newLabel.trim()) return; // the label is mandatory
+    if (!course || !newLabel.trim() || createAsk.open) return; // the label is mandatory; R48
     // bind:value on <input type="number"> yields null when empty and NaN on
     // partial input; decimals (e.g. 5.5) parse cleanly but the backend
     // requires int (Pydantic ge=1/le=10) and 422s with an opaque message.
@@ -124,39 +154,84 @@
   }
 
   async function transition(v: Version, action: 'disable' | 'enable') {
-    // Spec §8: all state transitions follow confirm → POST → refetch / toast.
+    if (busy) return;
+    // Spec §8: confirm → POST → refetch / toast. The question asks under the row (#17).
     const verb = action === 'disable' ? 'Disable' : 'Enable';
-    if (!confirm(`${verb} version ${v.id}?`)) return;
-    // Pin `v.id` already (closure arg). load() pins courseSlug internally, so
-    // a prop-change mid-await re-loads the original course's list, not the
-    // newly-routed-in slug.
+    const id = v.id;
+    const q: Ask = {
+      warning: `${verb} version ${id}?`, confirmLabel: verb, tone: 'primary', layout: 'row', align: 'end',
+      confirmDataAction: `confirm-${action}-version`, key: id,
+    };
+    const a = await rowAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => toggleBtn(id)); return; }
+    if (a !== 'confirm') return;
+    // R49: the row is still there, in the state the question named.
+    const live = versions.find((x) => x.id === id);
+    if (busy || !live || live.is_disabled !== (action === 'enable')) {
+      withdraw(rowAsk, q, () => firstUsable(toggleBtn(id), h1El));
+      return;
+    }
+    // load() pins courseSlug internally, so a prop-change mid-await re-loads
+    // the original course's list, not the newly-routed-in slug.
+    let interim: HTMLElement | null = null;
     busy = true;
     try {
-      await api.post(`/api/versions/${v.id}/${action}`);
+      await api.post(`/api/versions/${id}/${action}`);
+      // R54: the reload shows a Skeleton for the whole list, so the question
+      // settles now and focus waits on the page's <h1>.
+      interim = await settleTo(rowAsk, q, () => h1El, { preventScroll: true });
       await load();
       // Close a stale duplicate form on this row after any transition. The row
       // just changed state; a concurrent disable may have hidden the form via
       // the render guard, and a later enable must not spuriously re-open it.
-      if (duplicatingId === v.id) duplicatingId = null;
+      if (duplicatingId === id) duplicatingId = null;
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : `Could not ${action}`;
       pushToast(msg, 'error');
     } finally {
       busy = false;
+      // The row's toggle, found by version id once `busy` clears: after success
+      // the swapped button in the same slot, after a failure the trigger.
+      if (interim) void moveOn(interim, () => toggleBtn(id));
+      else void settleTo(rowAsk, q, () => toggleBtn(id));
     }
   }
 
   async function deleteVersion(v: Version) {
-    if (!confirm(`Delete draft version ${v.id}? This cannot be undone.`)) return;
+    if (busy || deleteVersionReason(v) !== null) return;
+    const id = v.id;
+    const q: Ask = {
+      warning: `Delete draft version ${id}? This cannot be undone.`, confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end',
+      confirmDataAction: 'confirm-delete-version', key: id,
+    };
+    const a = await rowAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => trashBtn(id)); return; }
+    if (a !== 'confirm') return;
+    // R49: the row is still there and still deletable.
+    const live = versions.find((x) => x.id === id);
+    if (busy || !live || deleteVersionReason(live) !== null) {
+      withdraw(rowAsk, q, () => firstUsable(trashBtn(id), h1El));
+      return;
+    }
+    // R54: where focus lands once `busy` clears, resolved by version id before
+    // the reload: the next row's title, else the previous, else "+ Add version".
+    const ids = versions.map((x) => x.id);
+    const at = ids.indexOf(id);
+    const nextId = ids[at + 1] ?? ids[at - 1];
+    const final = () => firstUsable(nextId !== undefined ? document.getElementById(`v-${nextId}-title`) : null, addLineEl);
+    let interim: HTMLElement | null = null;
     busy = true;
     try {
-      await api.delete(`/api/versions/${v.id}`);
+      await api.delete(`/api/versions/${id}`);
+      interim = await settleTo(rowAsk, q, () => h1El, { preventScroll: true });
       await load();
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Could not delete';
       pushToast(msg, 'error');
     } finally {
       busy = false;
+      if (interim) void moveOn(interim, final);
+      else void settleTo(rowAsk, q, () => trashBtn(id));
     }
   }
 
@@ -207,7 +282,7 @@
     {@const course = shownCourse}
     <div class="heading">
       <IconButton round glyph="back" title="Back to courses" onclick={() => navigate('/courses')} />
-      <h1>{course.name}</h1>
+      <h1 bind:this={h1El} tabindex="-1">{course.name}</h1>
       <span class="hchip">{versions.length} {versions.length === 1 ? 'version' : 'versions'}</span>
     </div>
     <!-- The visible "Versions" row is gone (5c follow-up); the outline keeps h1 > h2. -->
@@ -227,32 +302,40 @@
           {@const delReason = deleteVersionReason(v)}
           {@const vtitle = v.label || `Version ${v.id}`}
           <li class="vrow">
-            <!-- 5c follow-up (user): the label is the row title, as a block's; it opens the version like the pencil.
-                 The label is mandatory; "Version <id>" (the backfill's name) only guards an empty one.
-                 The name carries the id: two versions may share a label. -->
-            <button type="button" class="vtitle" class:off={v.is_disabled} disabled={busy}
-              aria-label={`${vtitle} (v${v.id})`}
-              onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)}>{vtitle}</button>
-            <span class="hchip">v. {v.id}</span>
-            <span class="badges"><VersionBadges state={v.state} isDisabled={v.is_disabled} /></span>
-            <span class="slots">
-              <IconButton size="sm" glyph="pencil" title="Open" aria-label="Open v{v.id}" disabled={busy}
-                onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)} />
-              <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}"
-                disabled={busy || dupReason !== null} onclick={() => void openDuplicate(v)} />
-              {#if v.is_disabled}
-                <IconButton size="sm" glyph="enable" title="Enable" aria-label="Enable v{v.id}" disabled={busy}
-                  onclick={() => transition(v, 'enable')} />
-              {:else}
-                <IconButton size="sm" glyph="disable" title="Disable" aria-label="Disable v{v.id}" disabled={busy}
-                  onclick={() => transition(v, 'disable')} />
-              {/if}
-              <IconButton size="sm" glyph="trash" danger title={delReason ?? 'Delete'} aria-label="Delete v{v.id}"
-                disabled={busy || delReason !== null} onclick={() => deleteVersion(v)} />
-            </span>
+            <!-- D43 (user, Task 4 look): the box holds the row line and, while it asks, the question. -->
+            <div class="vline">
+              <!-- 5c follow-up (user): the label is the row title, as a block's; it opens the version like the pencil.
+                   The label is mandatory; "Version <id>" (the backfill's name) only guards an empty one.
+                   The name carries the id: two versions may share a label. -->
+              <button type="button" class="vtitle" class:off={v.is_disabled} disabled={busy} id={`v-${v.id}-title`}
+                aria-label={`${vtitle} (v${v.id})`}
+                onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)}>{vtitle}</button>
+              <span class="hchip">v. {v.id}</span>
+              <span class="badges"><VersionBadges state={v.state} isDisabled={v.is_disabled} /></span>
+              <span class="slots">
+                <IconButton size="sm" glyph="pencil" title="Open" aria-label="Open v{v.id}" disabled={busy}
+                  onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)} />
+                <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}"
+                  disabled={busy || dupReason !== null} onclick={() => void openDuplicate(v)} />
+                {#if v.is_disabled}
+                  <IconButton size="sm" glyph="enable" title="Enable" aria-label="Enable v{v.id}" id={`v-${v.id}-toggle`} disabled={busy}
+                    onclick={() => void transition(v, 'enable')} />
+                {:else}
+                  <IconButton size="sm" glyph="disable" title="Disable" aria-label="Disable v{v.id}" id={`v-${v.id}-toggle`} disabled={busy}
+                    onclick={() => void transition(v, 'disable')} />
+                {/if}
+                <IconButton size="sm" glyph="trash" danger title={delReason ?? 'Delete'} aria-label="Delete v{v.id}" id={`v-${v.id}-delete`}
+                  disabled={busy || delReason !== null} onclick={() => void deleteVersion(v)} />
+              </span>
+            </div>
+            {#if rowAsk.current?.key === v.id}
+              <!-- #17, #18: the row's question, inside its box under the line (R53: one for the list). -->
+              <div class="ask-row"><AskSlot ask={rowAsk} /></div>
+            {/if}
           </li>
           {#if !v.is_disabled && duplicatingId === v.id}
-            <li class="dup-row">
+            <!-- R48: frozen while its row asks. -->
+            <li class="dup-row" {@attach (el) => { el.toggleAttribute('inert', rowAsk.current?.key === v.id); }}>
               <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
                 <label>New draft label
                   <input class="dup-label" type="text" maxlength="200" required bind:value={dupLabel} bind:this={dupInputEl} disabled={busy} />
@@ -268,18 +351,23 @@
     {#if creating}
       <form class="create" onsubmit={(e) => { e.preventDefault(); createVersion(); }}>
         <label>Label
-          <input class="new-label" type="text" maxlength="200" required bind:value={newLabel} bind:this={newLabelEl} onkeydown={escCancels} />
+          <input class="new-label" type="text" maxlength="200" required bind:value={newLabel} bind:this={newLabelEl} onkeydown={(e) => void escCancels(e)} />
         </label>
         <label>Info (markdown)
-          <textarea bind:value={info_md} rows="3" onkeydown={escCancels}></textarea>
+          <textarea bind:value={info_md} rows="3" onkeydown={(e) => void escCancels(e)}></textarea>
         </label>
         <label>Max quiz attempts
           <!-- Raw <input> — `Input.svelte` lacks min/max (spec Constraint 6). -->
-          <input class="mono" type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} onkeydown={escCancels} />
+          <input class="mono" type="number" min="1" max="10" step="1" required bind:value={max_quiz_attempts} onkeydown={(e) => void escCancels(e)} />
         </label>
         <div class="submit">
-          <Button variant="ghost" disabled={busy} onclick={() => void cancelCreate()}>Cancel</Button>
-          <Button type="submit" disabled={busy || !newLabel.trim()} loading={busy}>Create</Button>
+          {#if createAsk.open}
+            <!-- #16: in place of Cancel / Create. -->
+            <AskSlot ask={createAsk} />
+          {:else}
+            <Button variant="ghost" disabled={busy} onclick={() => void cancelCreate()}>Cancel</Button>
+            <Button type="submit" disabled={busy || !newLabel.trim()} loading={busy}>Create</Button>
+          {/if}
         </div>
       </form>
     {:else}
@@ -362,14 +450,13 @@
   /* 5c follow-up (user): separate boxed rows, like the block list (BlockAccordion .block-card). */
   .vlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .vrow {
-    display: flex;
-    align-items: center;
-    gap: 10px;
     padding: 9px 12px 9px 14px; /* ref 1482 */
     border: 1px solid var(--focus-line);
     border-radius: var(--radius);
     background: var(--focus-0);
   }
+  /* D43: the row line inside the box; the question goes under it. */
+  .vline { display: flex; align-items: center; gap: 10px; }
   /* The block row title (AccordionHeader .toggle / .title): 15px semibold, a bare button. */
   .vtitle {
     min-width: 0;
@@ -396,4 +483,12 @@
   }
   .dup { display: flex; align-items: flex-end; gap: 8px; /* the 8px create-form gap */ }
   .dup label { flex: 1; min-width: 0; }
+  /* #17, #18 (D43): the row's question, inside the row's box under its line,
+     set off by a thin grey line across the whole box (the negative margins undo
+     the row's padding; the padding puts it back for the question). */
+  .ask-row {
+    margin: 9px -12px 0 -14px;
+    padding: 8px 12px 0 14px;
+    border-top: 1px solid var(--focus-line);
+  }
 </style>

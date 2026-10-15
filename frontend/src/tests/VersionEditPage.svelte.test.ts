@@ -454,6 +454,10 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
 
 describe('VersionEditPage — state bar (T4)', () => {
   const labels = () => [...target.querySelectorAll('.state-actions button')].map((b) => [b.textContent?.trim(), (b as HTMLElement).dataset.variant]);
+  // Polish 1 #20, #21: the question in place of the whole bar.
+  const barBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.state-actions .inline-confirm button.${k}`)!;
+  const barWarning = () => target.querySelector('.state-actions .inline-confirm .warning')!.textContent!.trim();
+  const trigger = (action: string) => target.querySelector<HTMLButtonElement>(`.state-actions [data-action="version-${action}"]`);
 
   it('created: Publish (primary), Disable (ghost), Delete (danger)', async () => {
     await render();
@@ -472,77 +476,118 @@ describe('VersionEditPage — state bar (T4)', () => {
     expect(labels()).toEqual([['Enable', 'ghost']]);
   });
 
-  it('a dirty field does not block Publish; the confirm warns', async () => {
+  it('#20: a dirty field does not block Publish; the question replaces the bar and warns', async () => {
     await render();
     await makeDirty();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    btnByText('Publish')!.click();
+    trigger('publish')!.click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledWith('Publish version 1? Students will see it. Unsaved edits may be lost.');
+    expect(barWarning()).toBe('Publish version 1? Students will see it. Unsaved edits may be lost.');
+    expect(barBtn('confirm').textContent!.trim()).toBe('Publish');
+    expect(barBtn('confirm').classList.contains('primary')).toBe(true);
+    expect(trigger('publish')).toBeNull();
+    expect(trigger('delete')).toBeNull();
+    expect(document.activeElement).toBe(barBtn('cancel'));
+    barBtn('confirm').click();
+    await settle();
     expect(posts()).toContain('/api/versions/1/publish');
   });
 
-  it('a publish on the current version refreshes the page to the new state', async () => {
+  it('#20: a publish refreshes the page to the new state; focus goes to the first button of the new bar', async () => {
     await render();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     tree.version = mkVersion({ state: 'published' }); // the server's state after the POST
-    btnByText('Publish')!.click();
+    trigger('publish')!.click();
+    await settle();
+    barBtn('confirm').click();
+    await settle();
     await settle();
     expect(target.querySelector('.editor-heading .vbadge')!.textContent).toBe('published');
-    expect(btnByText('Archive')).toBeDefined();
+    expect(target.querySelector('.state-actions .inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(trigger('archive'));
   });
 
-  it('archive and disable warn when dirty; revert and enable never do', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('#20: a failed publish returns focus to the trigger', async () => {
+    serve((url, init) => (url === '/api/versions/1/publish' && init?.method === 'POST' ? jres({ detail: 'Conflict' }, 409) : undefined));
+    await render();
+    trigger('publish')!.click();
+    await settle();
+    barBtn('confirm').click();
+    await settle();
+    await settle();
+    expect(target.querySelector('.state-actions .inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(trigger('publish'));
+  });
+
+  it('archive and disable warn when dirty; revert never does — one question at a time, Cancel back to its trigger', async () => {
     tree.version = mkVersion({ state: 'published' });
     await render();
     hoisted.registry!.register({ isDirty: true });
-    btnByText('Archive')!.click();
-    btnByText('Disable')!.click();
-    btnByText('Revert')!.click();
-    expect(confirmSpy.mock.calls.map(([m]) => m)).toEqual([
-      'Archive version 1? Unsaved edits may be lost.',
-      'Disable version 1? Unsaved edits may be lost.',
-      'Revert version 1 to created?',
-    ]);
+    const ask = async (action: string, text: string, verb: string) => {
+      trigger(action)!.click();
+      await settle();
+      expect(barWarning()).toBe(text);
+      expect(barBtn('confirm').textContent!.trim()).toBe(verb);
+      barBtn('cancel').click();
+      await settle();
+      expect(document.activeElement).toBe(trigger(action));
+    };
+    await ask('archive', 'Archive version 1? Unsaved edits may be lost.', 'Archive');
+    await ask('disable', 'Disable version 1? Unsaved edits may be lost.', 'Disable');
+    await ask('revert', 'Revert version 1 to created?', 'Revert');
+    expect(posts()).toEqual([]);
   });
 
   it('enable never carries the suffix', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     tree.version = mkVersion({ is_disabled: true });
     await render();
     hoisted.registry!.register({ isDirty: true }); // dirty, so a suffix would show
-    btnByText('Enable')!.click();
-    expect(confirmSpy).toHaveBeenCalledWith('Enable version 1?');
+    trigger('enable')!.click();
+    await settle();
+    expect(barWarning()).toBe('Enable version 1?');
   });
 
-  it('a clean page confirms without the suffix', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('a clean page asks without the suffix', async () => {
     await render();
-    btnByText('Publish')!.click();
-    expect(confirmSpy).toHaveBeenCalledWith('Publish version 1? Students will see it.');
+    trigger('publish')!.click();
+    await settle();
+    expect(barWarning()).toBe('Publish version 1? Students will see it.');
   });
 
-  it('delete-version warns when dirty and navigates with force (one prompt only)', async () => {
+  it('#21: delete-version warns when dirty and navigates with force (one question only)', async () => {
     await render();
     await makeDirty();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    btnByText('Delete')!.click();
+    trigger('delete')!.click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith('Delete version v1? This cannot be undone. Unsaved edits may be lost.');
-    expect(fetchSpy.mock.calls.some(([u, init]) => String(u) === '/api/versions/1' && (init as RequestInit).method === 'DELETE')).toBe(true);
+    expect(barWarning()).toBe('Delete version v1? This cannot be undone. Unsaved edits may be lost.');
+    expect(barBtn('confirm').textContent!.trim()).toBe('Delete');
+    expect(barBtn('confirm').classList.contains('danger')).toBe(true);
+    barBtn('confirm').click();
+    await settle();
+    expect(fetchSpy.mock.calls.filter(([u, init]) => String(u) === '/api/versions/1' && (init as RequestInit).method === 'DELETE')).toHaveLength(1);
     expect(currentRoute.path).toBe('/courses/c/edit');
   });
 
   it('delete-version replaces the history entry, so Back skips the deleted version', async () => {
     await render();
     const replaceSpy = vi.spyOn(history, 'replaceState');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    btnByText('Delete')!.click();
+    trigger('delete')!.click();
+    await settle();
+    barBtn('confirm').click();
     await settle();
     expect(currentRoute.path).toBe('/courses/c/edit');
     expect(replaceSpy).toHaveBeenCalledWith(null, '', '/courses/c/edit');
+  });
+
+  it('R49: a version switch withdraws the bar question', async () => {
+    serve((url) => (url.endsWith('/versions/2/admin-tree')
+      ? jres({ ...structuredClone(tree), version: mkVersion({ id: 2, label: 'Second' }) })
+      : undefined));
+    const props = await renderReactive();
+    trigger('publish')!.click();
+    await settle();
+    props.versionId = '2';
+    await settle();
+    expect(target.querySelector('.state-actions .inline-confirm')).toBeNull();
+    expect(posts()).toEqual([]);
   });
 });
 
@@ -563,8 +608,9 @@ describe('VersionEditPage — a late transition / delete after a version switch 
   it('a publish that lands after switching to v2 does not reload v1 over it', async () => {
     const release = holdOn((u) => u === '/api/versions/1/publish');
     const props = await renderReactive();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     btnByText('Publish')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.state-actions .inline-confirm button.confirm')!.click();
     await settle();
     props.versionId = '2';
     await settle();
@@ -579,8 +625,9 @@ describe('VersionEditPage — a late transition / delete after a version switch 
   it('a delete that lands after switching to v2 does not navigate away', async () => {
     const release = holdOn((u, init) => u === '/api/versions/1' && init?.method === 'DELETE');
     const props = await renderReactive();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     btnByText('Delete')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.state-actions .inline-confirm button.confirm')!.click();
     await settle();
     props.versionId = '2';
     await settle();

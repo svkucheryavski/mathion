@@ -11,7 +11,7 @@
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
-  import { PageAsk, PAGE_ASK_KEY, focusIsFree, usable, useTreeAsk, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import { PageAsk, PAGE_ASK_KEY, InPlaceAsk, focusIsFree, usable, useTreeAsk, focusAfter, firstUsable, settleTo, withdraw, type Ask, type GuardAsk } from '../../lib/askInPlace.svelte';
   import VersionSettingsModal from '../../components/editor/VersionSettingsModal.svelte';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
@@ -235,7 +235,7 @@
   });
 
   let alive = true;
-  onDestroy(() => { alive = false; pageAsk.dismiss(); clearEditorVersion(); });
+  onDestroy(() => { alive = false; pageAsk.dismiss(); barAsk.dismiss(); clearEditorVersion(); });
 
   function stillOnVid(savedVid: number): boolean {
     return alive && vid === savedVid;
@@ -394,6 +394,18 @@
     untrack(() => { settingsOpen = false; });
   });
 
+  // ---- Polish 1 #20, #21: the state bar's question, in place of the whole
+  //      bar (a place without keys). A version switch withdraws it, as it
+  //      closes the settings modal (R49); while busy that closes it too.
+  const barAsk = new InPlaceAsk();
+  let barEl = $state<HTMLDivElement>();
+  const barBtn = (action: string) => barEl?.querySelector<HTMLElement>(`[data-action="version-${action}"]`);
+  const barFirst = () => firstUsable(barEl?.querySelector('button'), courseLinkEl);
+  $effect(() => {
+    void vid;
+    untrack(() => barAsk.dismiss());
+  });
+
   async function openAdd() {
     if (createBusy || busy || !perms?.canEditStructure) return;
     creating = true;
@@ -469,35 +481,64 @@
     }
   }
 
+  type Transition = 'publish' | 'archive' | 'revert' | 'disable' | 'enable';
+  const VERB: Record<Transition, string> = {
+    publish: 'Publish', archive: 'Archive', revert: 'Revert', disable: 'Disable', enable: 'Enable',
+  };
   // D3: transitions are never blocked by an open draft. Publish / archive /
-  // disable make every field read-only (closing open drafts), so their confirm
-  // warns; revert and enable never drop a draft.
-  async function transition(action: 'publish' | 'archive' | 'revert' | 'disable' | 'enable') {
+  // disable make every field read-only (closing open drafts), so their
+  // question warns; revert and enable never drop a draft.
+  function transitionText(action: Transition, v: number): string {
     const suffix = unsavedSuffix(dirtyRegistry.isAnyDirty());
-    const prompts: Record<string, string> = {
-      publish: `Publish version ${vid}? Students will see it.${suffix}`,
-      archive: `Archive version ${vid}?${suffix}`,
-      revert: `Revert version ${vid} to created?`,
-      disable: `Disable version ${vid}?${suffix}`,
-      enable: `Enable version ${vid}?`,
-    };
-    if (!confirm(prompts[action])) return;
+    switch (action) {
+      case 'publish': return `Publish version ${v}? Students will see it.${suffix}`;
+      case 'archive': return `Archive version ${v}?${suffix}`;
+      case 'revert': return `Revert version ${v} to created?`;
+      case 'disable': return `Disable version ${v}?${suffix}`;
+      case 'enable': return `Enable version ${v}?`;
+    }
+  }
+  function offered(action: Transition): boolean {
+    if (!perms) return false;
+    return { publish: perms.canPublish, archive: perms.canArchive, revert: perms.canRevert,
+             disable: perms.canDisable, enable: perms.canEnable }[action];
+  }
+
+  async function transition(action: Transition) {
+    if (busy) return;
     const savedVid = vid;
+    const q: Ask = {
+      warning: () => transitionText(action, savedVid),   // a getter: the suffix stays current
+      confirmLabel: VERB[action], tone: 'primary', layout: 'row', confirmDataAction: `confirm-${action}`,
+    };
+    const a = await barAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => barBtn(action)); return; }
+    if (a !== 'confirm') return;
+    // R49: the same version, and the action still offered.
+    if (!stillOnVid(savedVid) || busy || !offered(action)) {
+      withdraw(barAsk, q, () => firstUsable(barBtn(action), barFirst()));
+      return;
+    }
+    let ok = false;
     busy = true;
     try {
       await api.post(`/api/versions/${savedVid}/${action}`);
       // A version switch mid-request: a forced reload of the old version would
       // discard the new version's load and strand the page on its Skeleton.
       if (stillOnVid(savedVid)) await loadAdminTree(savedVid, { force: true });
-      const past: Record<typeof action, string> = {
+      const past: Record<Transition, string> = {
         publish: 'published', archive: 'archived', revert: 'reverted',
         disable: 'disabled', enable: 'enabled',
       };
       pushToast(`Version ${past[action]}`, 'success');
+      ok = true;
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : `Could not ${action}`, 'error');
     } finally {
       busy = false;
+      // R54: the question settles once the reload has landed. Success: the
+      // first button of the new bar; a failure: the trigger first.
+      void settleTo(barAsk, q, ok ? barFirst : () => firstUsable(barBtn(action), barFirst()));
     }
   }
 
@@ -511,20 +552,38 @@
   }
 
   async function deleteVersion() {
-    if (!confirm(`Delete version v${vid}? This cannot be undone.${unsavedSuffix(dirtyRegistry.isAnyDirty())}`)) return;
+    if (busy) return;
     const savedVid = vid;
     const savedSlug = courseSlug;
+    const q: Ask = {
+      warning: () => `Delete version v${savedVid}? This cannot be undone.${unsavedSuffix(dirtyRegistry.isAnyDirty())}`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-version',
+    };
+    const a = await barAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => barBtn('delete')); return; }
+    if (a !== 'confirm') return;
+    // R49: the same version, still deletable.
+    if (!stillOnVid(savedVid) || busy || !perms?.canDeleteVersion) {
+      withdraw(barAsk, q, () => firstUsable(barBtn('delete'), barFirst()));
+      return;
+    }
     busy = true;
     try {
       await api.delete(`/api/versions/${savedVid}`);
-      // force: the user already confirmed above — no second DirtyGuard prompt.
-      // replace: Back must not return to the deleted version. Only while still on
-      // it — after a version switch, a forced navigate would drop the new page's drafts.
-      if (stillOnVid(savedVid)) void navigate(`/courses/${savedSlug}/edit`, { replace: true, force: true });
+      // force: the user already answered the question — no second DirtyGuard
+      // question. replace: Back must not return to the deleted version. Only
+      // while still on it — after a version switch, a forced navigate would
+      // drop the new page's drafts. The page leaves: its own load focus applies.
+      if (stillOnVid(savedVid)) {
+        barAsk.settle();
+        void navigate(`/courses/${savedSlug}/edit`, { replace: true, force: true });
+      }
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
     } finally {
       busy = false;
+      // A failure: back to the trigger once the bar is back (R54).
+      void settleTo(barAsk, q, () => firstUsable(barBtn('delete'), barFirst()));
     }
   }
 </script>
@@ -631,24 +690,29 @@
         {/if}
       </section>
 
-      <div class="state-actions" {@attach (el) => { el.toggleAttribute('inert', rowAsking); }}>
-        {#if perms.canPublish}
-          <Button variant="primary" disabled={busy} onclick={() => transition('publish')}>Publish</Button>
-        {/if}
-        {#if perms.canArchive}
-          <Button variant="secondary" disabled={busy} onclick={() => transition('archive')}>Archive</Button>
-        {/if}
-        {#if perms.canRevert}
-          <Button variant="secondary" disabled={busy} onclick={() => transition('revert')}>Revert</Button>
-        {/if}
-        {#if perms.canDisable}
-          <Button variant="ghost" disabled={busy} onclick={() => transition('disable')}>Disable</Button>
-        {/if}
-        {#if perms.canEnable}
-          <Button variant="ghost" disabled={busy} onclick={() => transition('enable')}>Enable</Button>
-        {/if}
-        {#if perms.canDeleteVersion}
-          <Button variant="danger" disabled={busy} onclick={deleteVersion}>Delete</Button>
+      <div class="state-actions" bind:this={barEl} {@attach (el) => { el.toggleAttribute('inert', rowAsking); }}>
+        {#if barAsk.open}
+          <!-- #20, #21: the question, in place of the whole bar. -->
+          <AskSlot ask={barAsk} />
+        {:else}
+          {#if perms.canPublish}
+            <Button variant="primary" data-action="version-publish" disabled={busy} onclick={() => void transition('publish')}>Publish</Button>
+          {/if}
+          {#if perms.canArchive}
+            <Button variant="secondary" data-action="version-archive" disabled={busy} onclick={() => void transition('archive')}>Archive</Button>
+          {/if}
+          {#if perms.canRevert}
+            <Button variant="secondary" data-action="version-revert" disabled={busy} onclick={() => void transition('revert')}>Revert</Button>
+          {/if}
+          {#if perms.canDisable}
+            <Button variant="ghost" data-action="version-disable" disabled={busy} onclick={() => void transition('disable')}>Disable</Button>
+          {/if}
+          {#if perms.canEnable}
+            <Button variant="ghost" data-action="version-enable" disabled={busy} onclick={() => void transition('enable')}>Enable</Button>
+          {/if}
+          {#if perms.canDeleteVersion}
+            <Button variant="danger" data-action="version-delete" disabled={busy} onclick={() => void deleteVersion()}>Delete</Button>
+          {/if}
         {/if}
       </div>
 

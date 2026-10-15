@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** rev 11 (2026-10-14), approved at rev 10; rev 11 adds the user's D42.
+**Status:** rev 12 (2026-10-15), approved at rev 10; rev 11 adds the user's D42, rev 12 the user's D43.
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -44,6 +44,7 @@
 - Rev 8 folds in round 7's minors: AssetSidebar's drop zone and the fallback after a busy delete, the #4 404-race chain, #3 in the early-settle list, and test wording.
 - Rev 9–10 give the asset drop zone a `title` with its reason (rounds 8–9).
 - Rev 11 adds D42 (the user, Task 1's look review): a question under a row ends under the row's actions.
+- Rev 12 adds D43 (the user, Task 4's look review): a VersionsPage row's question sits inside the row's box, under a thin line.
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -87,6 +88,7 @@ The user's (2026-10-14), continuing the Slice-6 numbering:
 - **D40 — The danger panel takes the mock-up's colours:** `#FDF0F2` background, `#7A1F2B` message text, `--text-2` for "I understand". The "rejected" status badges keep `--status-rejected-*`. (User, round 2.)
 - **D41 — Seven tasks** (Process). (User, round 2.)
 - **D42 — A question under a row ends under the row's actions.** The row's trash is at its right end, so the question line under it is right-aligned: `InlineConfirm align="end"` (an `Ask`'s `align: 'end'`). It applies to every one-line question under a row: Mini-projects, Assets and Roster rows, the course tree (#3, #4, #5), the VersionsPage rows (#17, #18) and the quiz cards (#12). Questions in place of buttons, footers and bars, multi-line questions (RunAssetsTab's replace) and the danger panel keep their places. In-row placement was rejected because the action column widens and the table's columns shift. (User, Task 1 look review, after an A/B mock-up on the live pages.)
+- **D43 — A VersionsPage row's question sits inside the row's box.** The row's `li.vrow` keeps the box (padding, border, background); its line moves into an inner `div.vline` (the flex row), and while the row asks its question is a `div.ask-row` under that line in the same box, not a list item of its own. A thin grey line (`border-top: 1px solid var(--focus-line)`) runs across the whole box above the question, with 8px under it. An open duplicate form stays its own box below. (User, Task 4 look review, after an A/B mock-up: more space vs a thin line.)
 
 ## Rulings
 
@@ -410,8 +412,8 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
 | 14 | quizEdits.request (D10) | at the dirty edit (above) | Discard / danger (`DISCARD_CONTINUE`) | the dirty edit's field (it stays open) | the caller's action proceeds |
 | 15 | QuestionTextModal close, dirty | in place of the footer buttons | Discard / danger | the close control that asked | as today |
 | 16 | VersionsPage Esc in the create form | in place of the form's Cancel/Create (`div.submit`) | Discard / danger | the field where Esc was pressed | as today ("+ Add version") |
-| 17 | VersionsPage enable/disable | a confirm row (`li.ask-row`) under the version row, above an open `li.dup-row` (frozen while asking) | Enable or Disable / primary | the trigger | after success, while the reload runs (`load()` shows a Skeleton for the whole list, `VersionsPage.svelte:215-216`): the page's `<h1>` (R54). Once `busy` clears: the swapped button in the same slot, found by version id. After a failure (no reload): the trigger, once `busy` clears |
-| 18 | VersionsPage delete draft | a confirm row under the version row | Delete / danger | the trash | after success, while the reload runs: the page's `<h1>` (`VersionsPage.svelte:210`; it gets `tabindex="-1"`) (R54). After a failure: the trash, once `busy` clears. After success, once `busy` clears: the next row's first control, else the previous, else "+ Add version", resolved by version id before the reload |
+| 17 | VersionsPage enable/disable | a confirm row (`div.ask-row`) inside the version row's box, under its line (D43), above an open `li.dup-row` (frozen while asking) | Enable or Disable / primary | the trigger | after success, while the reload runs (`load()` shows a Skeleton for the whole list, `VersionsPage.svelte:215-216`): the page's `<h1>` (R54). Once `busy` clears: the swapped button in the same slot, found by version id. After a failure (no reload): the trigger, once `busy` clears |
+| 18 | VersionsPage delete draft | a confirm row inside the version row's box, under its line (D43) | Delete / danger | the trash | after success, while the reload runs: the page's `<h1>` (`VersionsPage.svelte:210`; it gets `tabindex="-1"`) (R54). After a failure: the trash, once `busy` clears. After success, once `busy` clears: the next row's first control, else the previous, else "+ Add version", resolved by version id before the reload |
 | 19 | delete item (item modal trash) | ItemEditorModal's body-top row. ItemEditorModal asks (it has `item.title`), re-checks `trashDisabled` after the await, then calls `onDeleteItem`; `VersionEditPage.deleteOpenItem` (`:261`) drops its `confirm` | Delete / danger | the trash | as today (`seq-<sid>-header`) |
 | 20 | VersionEditPage publish / archive / revert / disable / enable | in place of the whole bottom bar (`div.state-actions`). `vid` is captured before asking (R49). The question is dismissed on a version switch by an `$effect` like `settingsOpen`'s (`VersionEditPage.svelte:339-342`); a dismissal while busy closes it | the verb / primary | the trigger | the first button of the new bar, else the `<h1>` course link |
 | 21 | VersionEditPage delete version | in place of the whole bottom bar | Delete / danger | the trigger | as today (navigates away) |

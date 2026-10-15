@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2172
+EXPECTED_CHECKS=2181
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3747,8 +3747,10 @@ if [[ -n $REPLY ]]; then
   # boxed rows with a 6px gap on the shaded page, not one bordered box.
   d '\.vlist' '' 'list-style:none' 'display:flex' 'flex-direction:column' 'gap:6px'
   none "VersionsPage .vlist is no longer one bordered box" "\.vlist\.${H}\{[^}]*(border|background|overflow):"
-  d '\.vrow' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:9px 12px 9px 14px' \
+  # Polish 1 D43 (user, Task 4 look): the box holds the row line (.vline) and, while it asks, the question.
+  d '\.vrow' '' 'padding:9px 12px 9px 14px' \
                 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:var\(--focus-0\)'
+  d '\.vline' '' 'display:flex' 'align-items:center' 'gap:10px'
   none "VersionsPage no list-divider rule (.vlist > li)" "\.vlist\.${H}>li"
   none "VersionsPage rows carry no divider border-bottom" "\.(vrow|dup-row)\.${H}\{[^}]*border-bottom:"
   chk "body:has\(\.page\.${H}\)" 'background:var\(--focus-page\)'
@@ -3857,7 +3859,7 @@ if [[ -n $REPLY ]]; then
   sweep VersionEditPage $H
 fi
 # Source: the state bar uses Button's own variants; Delete is the danger variant.
-if grep -qE '<Button variant="danger" disabled=\{busy\} onclick=\{deleteVersion\}>Delete</Button>' src/pages/editor/VersionEditPage.svelte; then
+if grep -qE '<Button variant="danger" data-action="version-delete" disabled=\{busy\} onclick=\{\(\) => void deleteVersion\(\)\}>Delete</Button>' src/pages/editor/VersionEditPage.svelte; then
   echo "PASS  VersionEditPage Delete uses Button variant=danger"
 else
   echo "FAIL  VersionEditPage Delete uses Button variant=danger"; fail=1
@@ -5264,6 +5266,26 @@ emoji_scan "the Polish-1 tree files" src/components/editor/TreeAskRow.svelte \
   src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte
 colour_scan polish1-tree src/components/editor/TreeAskRow.svelte \
   src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte
-
+# Task 4 — the versions list's row question (#17, #18), inside the row's box under its line (D43).
+own ask-row VersionsPage.svelte
+uniq1 ask-row
+if [[ -n $REPLY ]]; then
+  N=VersionsPage; H=$REPLY
+  # D43 (user): a thin grey line across the box above the question, 8px under it.
+  d '\.ask-row' '' 'margin:9px -12px 0 -14px' 'padding:8px 12px 0 14px' 'border-top:1px solid var\(--focus-line\)'
+  none "VersionsPage .ask-row draws no box of its own (D43)" "\.ask-row\.${H}\{[^}]*(background|border:|border-(left|right|bottom))"
+fi
+if grep -qF '<div class="ask-row"><AskSlot ask={rowAsk} /></div>' src/pages/editor/VersionsPage.svelte; then
+  echo "PASS  VersionsPage row question is a div inside li.vrow (D43)"
+else echo "FAIL  VersionsPage row question is a div inside li.vrow (D43)"; fail=1; fi
+if grep -qF '<li class="ask-row"' src/pages/editor/VersionsPage.svelte; then
+  echo "FAIL  VersionsPage row question is not a list item of its own (D43)"; fail=1
+else echo "PASS  VersionsPage row question is not a list item of its own (D43)"; fi
+if grep -qF '<h1 bind:this={h1El} tabindex="-1">' src/pages/editor/VersionsPage.svelte \
+   && grep -qF 'id={`v-${v.id}-toggle`}' src/pages/editor/VersionsPage.svelte \
+   && grep -qF 'id={`v-${v.id}-delete`}' src/pages/editor/VersionsPage.svelte \
+   && grep -qF 'id={`v-${v.id}-title`}' src/pages/editor/VersionsPage.svelte; then
+  echo "PASS  VersionsPage focus targets: the <h1> (tabindex -1) and the row ids (R54)"
+else echo "FAIL  VersionsPage focus targets: the <h1> (tabindex -1) and the row ids (R54)"; fail=1; fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

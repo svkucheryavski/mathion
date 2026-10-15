@@ -260,7 +260,7 @@ describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
     expect(document.activeElement).toBe(addLine());
   });
 
-  it('Escape with typed input asks first; "no" keeps the form and the text (final review)', async () => {
+  it('#16: Escape with typed input asks in place of Cancel/Create; Cancel keeps the text and returns to the field; Discard closes', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 })];
     await render();
     addLine()!.click();
@@ -269,17 +269,25 @@ describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
     info.value = 'A long paragraph';
     info.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    info.focus();
+    const esc = () => info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    const submit = () => target.querySelector<HTMLElement>('form.create .submit')!;
+    esc();
     await settle();
-    expect(ask).toHaveBeenCalledWith('Discard unsaved changes and continue?');
-    expect(target.querySelector<HTMLTextAreaElement>('form.create textarea')?.value).toBe('A long paragraph');
-    ask.mockReturnValue(true);
-    info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(submit().querySelector('.inline-confirm .warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
+    expect([...submit().querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Discard', 'Cancel']);
+    expect(submit().querySelector('button.confirm')!.classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(submit().querySelector('button.cancel'));
+    submit().querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(target.querySelector<HTMLTextAreaElement>('form.create textarea')!.value).toBe('A long paragraph');
+    expect(document.activeElement).toBe(info);
+    esc();
+    await settle();
+    submit().querySelector<HTMLButtonElement>('button.confirm')!.click();
     await settle();
     expect(target.querySelector('form.create')).toBeNull();
     expect(document.activeElement).toBe(addLine());
-    ask.mockRestore();
   });
 });
 
@@ -341,19 +349,30 @@ describe('VersionsPage — row actions through the slots', () => {
   const postMock = vi.mocked(api.post);
   const deleteMock = vi.mocked(api.delete);
   const loadMock = vi.mocked(loadVersionsPage);
+  // Polish 1 #17, #18 (D43): the row's question, inside its box under the row line.
+  const askRow = () => target.querySelector<HTMLElement>('li.vrow > .ask-row');
+  const rowBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`li.vrow > .ask-row .inline-confirm button.${k}`)!;
+  // A reload the test releases, landing `next` as the new list.
+  function holdLoad(next: Version[]) {
+    let release!: () => void;
+    loadMock.mockImplementationOnce(() => new Promise<undefined>((r) => {
+      release = () => { versionsPageState.versions = next; r(undefined); };
+    }));
+    return () => release();
+  }
   beforeEach(() => {
     postMock.mockReset().mockResolvedValue(undefined);
     deleteMock.mockReset().mockResolvedValue(undefined);
     loadMock.mockClear();
-    vi.stubGlobal('confirm', vi.fn(() => true));
   });
-  afterEach(() => { vi.unstubAllGlobals(); });
 
   it('Disable POSTs /disable then reloads', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 })];
     await render();
     loadMock.mockClear();
     byLabel('Disable v7')!.click();
+    await settle();
+    rowBtn('confirm').click();
     await settle();
     expect(postMock).toHaveBeenCalledWith('/api/versions/7/disable');
     expect(deleteMock).not.toHaveBeenCalled();
@@ -365,6 +384,8 @@ describe('VersionsPage — row actions through the slots', () => {
     await render();
     byLabel('Enable v7')!.click();
     await settle();
+    rowBtn('confirm').click();
+    await settle();
     expect(postMock).toHaveBeenCalledWith('/api/versions/7/enable');
   });
 
@@ -373,19 +394,110 @@ describe('VersionsPage — row actions through the slots', () => {
     await render();
     byLabel('Delete v7')!.click();
     await settle();
+    rowBtn('confirm').click();
+    await settle();
     expect(deleteMock).toHaveBeenCalledWith('/api/versions/7');
     expect(postMock).not.toHaveBeenCalled();
   });
 
-  it('a cancelled confirm sends nothing', async () => {
-    vi.stubGlobal('confirm', vi.fn(() => false));
+  it('#17, #18: the question sits under its row; Cancel sends nothing and returns to the trigger, one question at a time', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 })];
     await render();
     byLabel('Disable v7')!.click();
+    await settle();
+    // D43: inside the version's own box, under its line — not a list item of its own.
+    expect(askRow()!.previousElementSibling!.classList.contains('vline')).toBe(true);
+    expect(target.querySelectorAll('ul.vlist > li')).toHaveLength(1);
+    expect(askRow()!.querySelector('.inline-confirm')!.classList.contains('end')).toBe(true);   // D42
+    expect(askRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Disable version 7?');
+    expect(rowBtn('confirm').textContent!.trim()).toBe('Disable');
+    expect(rowBtn('confirm').classList.contains('primary')).toBe(true);
+    expect(document.activeElement).toBe(rowBtn('cancel'));
+    rowBtn('cancel').click();
+    await settle();
+    expect(askRow()).toBeNull();
+    expect(document.activeElement).toBe(byLabel('Disable v7'));
     byLabel('Delete v7')!.click();
     await settle();
+    expect(askRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Delete draft version 7? This cannot be undone.');
+    expect(rowBtn('confirm').textContent!.trim()).toBe('Delete');
+    expect(rowBtn('confirm').classList.contains('danger')).toBe(true);
+    rowBtn('cancel').click();
+    await settle();
+    expect(document.activeElement).toBe(byLabel('Delete v7'));
     expect(postMock).not.toHaveBeenCalled();
     expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it('D39: another row\'s action moves the question there; the same row again only brings it back', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8 })];
+    await render();
+    byLabel('Disable v7')!.click();
+    await settle();
+    byLabel('Delete v8')!.click();
+    await settle();
+    expect(target.querySelectorAll('.ask-row')).toHaveLength(1);
+    expect(askRow()!.previousElementSibling!.querySelector('[aria-label="Open v8"]')).not.toBeNull();
+    expect(document.activeElement).toBe(rowBtn('cancel'));
+    byLabel('Disable v8')!.click();
+    await settle();
+    expect(target.querySelectorAll('.ask-row')).toHaveLength(1);
+    expect(askRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Delete draft version 8? This cannot be undone.');
+    expect(document.activeElement).toBe(rowBtn('cancel'));
+  });
+
+  it('R48: an open duplicate form under the row freezes while its row asks', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    byLabel('Duplicate v7')!.click();
+    await settle();
+    byLabel('Disable v7')!.click();
+    await settle();
+    const dup = target.querySelector('li.dup-row')!;
+    expect(askRow()!.parentElement!.nextElementSibling).toBe(dup);
+    expect(dup.hasAttribute('inert')).toBe(true);
+    rowBtn('cancel').click();
+    await settle();
+    expect(dup.hasAttribute('inert')).toBe(false);
+  });
+
+  it('#17: while the list reloads focus waits on the <h1>, then lands on the swapped button', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    const release = holdLoad([mkVersion({ id: 7, is_disabled: true })]);
+    byLabel('Disable v7')!.click();
+    await settle();
+    rowBtn('confirm').click();
+    await settle();
+    expect(askRow()).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('h1'));
+    release();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(byLabel('Enable v7'));
+  });
+
+  it('#18: after a delete focus lands on the next row\'s title; after a failure, on the trash', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8 })];
+    await render();
+    const release = holdLoad([mkVersion({ id: 8 })]);
+    byLabel('Delete v7')!.click();
+    await settle();
+    rowBtn('confirm').click();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('h1'));
+    release();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('#v-8-title'));
+    deleteMock.mockRejectedValueOnce(new Error('boom'));
+    byLabel('Delete v8')!.click();
+    await settle();
+    rowBtn('confirm').click();
+    await settle();
+    await settle();
+    expect(askRow()).toBeNull();
+    expect(document.activeElement).toBe(byLabel('Delete v8'));
   });
 
   it('while a request is in flight every slot and "+ Add version" are disabled', async () => {
@@ -394,6 +506,8 @@ describe('VersionsPage — row actions through the slots', () => {
     versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8 })];
     await render();
     byLabel('Disable v7')!.click();
+    await settle();
+    rowBtn('confirm').click();
     await settle();
     for (const id of [7, 8]) expect(slots(id).every((b) => b.disabled)).toBe(true);
     expect([...target.querySelectorAll<HTMLButtonElement>('button.vtitle')].every((b) => b.disabled)).toBe(true);
