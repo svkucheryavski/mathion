@@ -706,10 +706,10 @@
             <Button variant="secondary" data-action="version-revert" disabled={busy} onclick={() => void transition('revert')}>Revert</Button>
           {/if}
           {#if perms.canDisable}
-            <Button variant="ghost" data-action="version-disable" disabled={busy} onclick={() => void transition('disable')}>Disable</Button>
+            <Button variant="secondary" data-action="version-disable" disabled={busy} onclick={() => void transition('disable')}>Disable</Button>
           {/if}
           {#if perms.canEnable}
-            <Button variant="ghost" data-action="version-enable" disabled={busy} onclick={() => void transition('enable')}>Enable</Button>
+            <Button variant="secondary" data-action="version-enable" disabled={busy} onclick={() => void transition('enable')}>Enable</Button>
           {/if}
           {#if perms.canDeleteVersion}
             <Button variant="danger" data-action="version-delete" disabled={busy} onclick={() => void deleteVersion()}>Delete</Button>

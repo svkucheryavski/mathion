@@ -85,7 +85,7 @@ Fresh Opus + Fable on 7e02f70..ec0d5bc. Fixed in this pass (test-first): the pub
 One step at a time, every write mocked, no VoiceOver step.
 
 - **The look:** hover and focus fills and the focus ring in Safari, also in a modal footer (a mouse click shows no ring; Tab skips buttons by default); the danger panel's colours, and the unarmed Force delete's label at 12px.
-  A secondary Button (D44) at rest, hovered, pressed and Tab-focused, beside a filled primary (the player's Previous / Next, the version bar); the publish-conflicts modal opening by keyboard with its only button, Close, filled.
+  A secondary Button (D44) at rest, hovered, pressed and Tab-focused, beside a filled primary (the player's Previous / Next, the version bar, where Disable and Enable are secondary too, D45); the publish-conflicts modal opening by keyboard with its only button, Close, filled.
   A narrow window (about 700px): the version bar's question ("Publish version N? Students will see it. Unsaved edits may be lost.") wraps and its start stays on screen; the same for a modal footer's question.
 - **Back with unsaved work:** the address bar shows the target while the question is open and comes back on Cancel; Back twice while asking, and a link then Back while asking; a dirty New question modal + Back asks in that modal's footer.
 - **The item modal and quiz edits:** the item modal's × on an in-page item with a dirty quiz edit, and × again while asking; scroll-into-view of a question in another quiz card.

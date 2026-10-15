@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2216
+EXPECTED_CHECKS=2218
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5243,6 +5243,13 @@ if [[ -n $REPLY ]]; then
   chk "\.modal-body>\.ask-slot\.${H}>\*" 'flex:0 0 auto'
   none "AskSlot keeps no unscoped flex rule (a row host must let it wrap)" "[{},]\.ask-slot\.${H}>\*\{"
 fi
+# D45 (Task 9): the version bar's Disable and Enable are real state changes,
+# so they are secondary Buttons like Archive and Revert (no longer ghost).
+for act in disable enable; do
+  if grep -qF "<Button variant=\"secondary\" data-action=\"version-${act}\"" src/pages/editor/VersionEditPage.svelte; then
+    echo "PASS  VersionEditPage bar: ${act} is a secondary Button (D45)"
+  else echo "FAIL  VersionEditPage bar: ${act} is a secondary Button (D45)"; fail=1; fi
+done
 # D38: the row under the title, clear of the fixed Toaster when it scrolls into view.
 own page-ask VersionEditPage.svelte
 uniq1 page-ask

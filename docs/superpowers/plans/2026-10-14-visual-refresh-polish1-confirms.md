@@ -141,8 +141,9 @@ The five inputs or conditions most likely to bite an author or a teacher that th
 | 6 — App and quiz-question removals (#9, #12) | 6 | 2197 |
 | 7 — No pop-ups left | 2 | 2199 |
 | 8 — Secondary buttons (D44, added after Task 7) | 14 | 2215 |
+| 9 — The bar's Disable and Enable (D45, added in the Safari pass) | 2 | 2218 |
 
-Executed: D43 (Task 4) added 2 checks, so the real values are Task 4 2181, Task 5 2193, Task 6 2199, Task 7 2201 (ledger rulings); Task 8's 2215 already counts from 2201.
+Executed: D43 (Task 4) added 2 checks, so the real values are Task 4 2181, Task 5 2193, Task 6 2199, Task 7 2201 (ledger rulings); Task 8's 2215 already counts from 2201. The whole-branch review added 1 (AskSlot), so Task 9 starts at 2216.
 
 ## File map
 
@@ -8411,7 +8412,7 @@ Run vitest, svelte-check and the gate (Global Constraints). Expected: vitest gre
 - [ ] **Step 6: Screenshots, the user's OK, review lanes, commit**
 
 Screenshots at 1280 wide, dev data, writes held. Each one shows a secondary at rest beside the same button hovered (mouse) and Tab-focused:
-- the version bar of a published version (Archive / Revert beside the filled Publish or the ghost Disable);
+- the version bar of a published version (Archive / Revert beside the filled Publish or the ghost Disable (ghost until D45));
 - a Teaching screen (the Roster tab's secondary button);
 - a modal footer with a secondary (e.g. RosterImportModal or PublishConflictsModal);
 - the student player: Previous beside the filled Next;
@@ -8432,3 +8433,17 @@ EOF
 
 After Task 8: the whole-branch review (fresh Opus + Fable on `main..HEAD`), then the Safari pass from the backlog's list, one step at a time.
 
+### Task 9: The version bar's Disable and Enable are secondary (D45)
+
+Added in the Safari pass at the user's request (spec rev 14, D45). The gate is at **2216** (after the whole-branch review's AskSlot row).
+
+**Files:**
+- Modify: `frontend/src/pages/editor/VersionEditPage.svelte` (the bar's Disable and Enable Buttons)
+- Modify: `frontend/src/tests/VersionEditPage.svelte.test.ts` (the three state-bar variant tests)
+- Modify: `frontend/scripts/visual-refresh-gate.sh` (two rows before the D38 block; `EXPECTED_CHECKS`)
+
+- [ ] **Step 1: Failing tests.** In `VersionEditPage — state bar (T4)`, the expected variants become `['Disable', 'secondary']` (created and published) and `['Enable', 'secondary']` (disabled). Run them: Expected FAIL (today `ghost`).
+- [ ] **Step 2: Failing gate rows.** Before `# D38: the row under the title…`, a loop over `disable enable` that greps `<Button variant="secondary" data-action="version-${act}"` in `VersionEditPage.svelte`; `EXPECTED_CHECKS=2218`. Expected: 2 FAIL.
+- [ ] **Step 3: The change.** `variant="ghost"` → `variant="secondary"` on `data-action="version-disable"` and `data-action="version-enable"`.
+- [ ] **Step 4: Full checks.** vitest green, svelte-check 0 errors, gate ALL PASS 2218.
+- [ ] **Step 5:** the user's look in the Safari pass (step 1), both review lanes until clean, commit `feat(polish1): Disable and Enable on the version bar are secondary buttons (D45)`.

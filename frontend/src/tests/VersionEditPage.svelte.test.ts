@@ -459,21 +459,21 @@ describe('VersionEditPage — state bar (T4)', () => {
   const barWarning = () => target.querySelector('.state-actions .inline-confirm .warning')!.textContent!.trim();
   const trigger = (action: string) => target.querySelector<HTMLButtonElement>(`.state-actions [data-action="version-${action}"]`);
 
-  it('created: Publish (primary), Disable (ghost), Delete (danger)', async () => {
+  it('created: Publish (primary), Disable (secondary, D45), Delete (danger)', async () => {
     await render();
-    expect(labels()).toEqual([['Publish', 'primary'], ['Disable', 'ghost'], ['Delete', 'danger']]);
+    expect(labels()).toEqual([['Publish', 'primary'], ['Disable', 'secondary'], ['Delete', 'danger']]);
   });
 
-  it('published: Archive + Revert (secondary), Disable (ghost)', async () => {
+  it('published: Archive + Revert + Disable (secondary, D45)', async () => {
     tree.version = mkVersion({ state: 'published' });
     await render();
-    expect(labels()).toEqual([['Archive', 'secondary'], ['Revert', 'secondary'], ['Disable', 'ghost']]);
+    expect(labels()).toEqual([['Archive', 'secondary'], ['Revert', 'secondary'], ['Disable', 'secondary']]);
   });
 
-  it('disabled created: Enable (ghost) only', async () => {
+  it('disabled created: Enable (secondary, D45) only', async () => {
     tree.version = mkVersion({ is_disabled: true });
     await render();
-    expect(labels()).toEqual([['Enable', 'ghost']]);
+    expect(labels()).toEqual([['Enable', 'secondary']]);
   });
 
   it('#20: a dirty field does not block Publish; the question replaces the bar and warns', async () => {
