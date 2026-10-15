@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2201
+EXPECTED_CHECKS=2215
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5211,6 +5211,13 @@ if [[ -n $REPLY ]]; then
   d '\.danger' "${BT}:active" 'background:var\(--danger-press\)' 'border-color:var\(--danger-press\)'
   d '\.danger' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
   none "Button .danger fills only an enabled, idle button" "\.danger\.${H}:((hover|active)\{|focus-visible\{[^}]*background)"
+  # D44 (Task 8): secondary = the confirm's primary action at page size.
+  d '\.secondary' '' 'background:var\(--surface\)' 'color:var\(--primary\)' 'border-color:var\(--primary\)'
+  d '\.secondary' "${BT}:hover" 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.secondary' "${BT}:focus-visible" 'background:var\(--primary\)' 'color:var\(--primary-text\)'
+  d '\.secondary' "${BT}:active" 'background:var\(--primary-press\)' 'border-color:var\(--primary-press\)' 'color:var\(--primary-text\)'
+  d '\.secondary' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px' 'box-shadow:none'
+  none "Button .secondary fills only an enabled, idle button" "\.secondary\.${H}:((hover|active)\{|focus-visible\{[^}]*background)"
   hover_only Button $H
 fi
 # Task 2 — ask in place.

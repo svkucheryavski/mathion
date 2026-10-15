@@ -64,11 +64,18 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 
 - **Gate `cft` row (no test answers a confirm() pop-up) has blind spots**: it scans only `src/tests` (colocated `src/lib/*.test.ts` sit outside both rows) and misses `vi.stubGlobal('confirm', …)` (a live idiom here for `fetch`) and double-quoted `spyOn(window, "confirm")`. Second-line only: a real spy implies a `confirm(` in `src`, which the first row catches. Widen to `src --include='*.test.ts'` with `|stubGlobal\(['"]confirm`. (both lanes)
 
+## Task 8
+
+- **A modal whose only button is a secondary opens filled**: `PublishConflictsModal.svelte:62` Close carries `data-autofocus`; in a keyboard flow the programmatic focus matches `:focus-visible`, so it shows the steel-blue fill and reads as a primary. Consistent with the approved D44 rule; on the Safari list. (Fable)
+- **Ring and fill are the same `--primary`**: a focused secondary's ring stands apart only by the 2px offset gap. Fine on `--surface`; the Safari "Tab-focused" step covers it. (Fable)
+- **The gate cannot pin source order**: a reorder putting `.secondary:…:active` before the `@media (hover: hover)` block would let the hover fill win while pressing. Not pinnable by grep. (Fable)
+
 ## Carried to the Safari pass (spec §Carried to the Safari pass)
 
 One step at a time, every write mocked, no VoiceOver step.
 
 - **The look:** hover and focus fills and the focus ring in Safari, also in a modal footer (a mouse click shows no ring; Tab skips buttons by default); the danger panel's colours, and the unarmed Force delete's label at 12px.
+  A secondary Button (D44) at rest, hovered, pressed and Tab-focused, beside a filled primary (the player's Previous / Next, the version bar); the publish-conflicts modal opening by keyboard with its only button, Close, filled.
 - **Back with unsaved work:** the address bar shows the target while the question is open and comes back on Cancel; Back twice while asking, and a link then Back while asking; a dirty New question modal + Back asks in that modal's footer.
 - **The item modal and quiz edits:** the item modal's × on an in-page item with a dirty quiz edit, and × again while asking; scroll-into-view of a question in another quiz card.
 - **The page row:** Cancel brings you back where you were (keyboard); a toast does not cover it; the settings button is blocked while it asks; after a mouse click on a header, Cancel scrolls back.

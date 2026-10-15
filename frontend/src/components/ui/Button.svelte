@@ -85,7 +85,17 @@
      `flex:1` is inert outside a flex parent and exact inside `.actions` (ref 2010). */
   .btn.full { flex: 1; width: 100%; justify-content: center; }
   .primary { background: var(--primary); color: var(--primary-text); }
-  .secondary { background: var(--surface); color: var(--text-3); border-color: var(--border-strong); }
+  /* D44: the confirm's primary action at page size — outlined at rest, filled
+     on hover (pointer devices) and on keyboard focus, darker while pressed.
+     Disabled, blocked and busy keep their looks. Kept apart from the .danger
+     rules: the minifier merges adjacent identical rules (the two rings). */
+  .secondary { background: var(--surface); color: var(--primary); border-color: var(--primary); }
+  @media (hover: hover) {
+    .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):hover { background: var(--primary); color: var(--primary-text); }
+  }
+  .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):focus-visible { background: var(--primary); color: var(--primary-text); }
+  .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):active { background: var(--primary-press); border-color: var(--primary-press); color: var(--primary-text); }
+  .secondary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
   .ghost { padding: var(--btn-pad-sm); background: transparent; color: var(--muted); }
   /* D31: outlined at rest, filled on hover (pointer devices) and on keyboard
      focus, darker while pressed. Disabled, blocked and busy keep their looks. */
