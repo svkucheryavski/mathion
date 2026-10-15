@@ -49,9 +49,11 @@
   const upReason = $derived((moving ? null : structWait) ?? (n === 1 ? 'Move up — already first' : null));
   const downReason = $derived((moving ? null : structWait) ?? (n === count ? 'Move down — already last' : null));
   const deleteReason = $derived(deleting ? null : structWait);
-  function open(kind: 'text' | 'expl') {
+  async function open(kind: 'text' | 'expl') {
     if (l3 !== null || openReason !== null) return;
-    if (!ctx.edits.request()) return;
+    if (!(await ctx.edits.request())) return;
+    // R49: re-checked after the D10 question.
+    if (l3 !== null || openReason !== null || !alive()) return;
     l3 = kind;
   }
   async function closeL3(kind: 'text' | 'expl', refocus: boolean) {
@@ -82,7 +84,7 @@
       <span class="qacts">
         {#if ctx.canText}
           <IconButton glyph="pencil" size="sm" borderless title={openReason ?? 'Edit question'}
-                      aria-label={`Edit question ${n}`} disabled={openReason !== null} onclick={() => open('text')} />
+                      aria-label={`Edit question ${n}`} disabled={openReason !== null} onclick={() => void open('text')} />
         {/if}
         {#if ctx.canStruct}
           <IconButton glyph="up" size="sm" borderless title={upReason ?? 'Move up'}
@@ -111,7 +113,7 @@
         {#if ctx.canText}
           <IconButton glyph="pencil" size="sm" borderless title={openReason ?? 'Edit explanation'}
                       aria-label={`Edit explanation for question ${n}`} disabled={openReason !== null}
-                      onclick={() => open('expl')} />
+                      onclick={() => void open('expl')} />
         {/if}
       </span>
       {#if ctx.disabled}
@@ -122,7 +124,7 @@
     </div>
   {:else if ctx.canText}
     <button type="button" class="qexpl-add" aria-label={`Add explanation to question ${n}`}
-            title={openReason ?? 'Add explanation'} disabled={openReason !== null} onclick={() => open('expl')}>+ Add explanation</button>
+            title={openReason ?? 'Add explanation'} disabled={openReason !== null} onclick={() => void open('expl')}>+ Add explanation</button>
   {/if}
 
   <!-- Level 3 stays mounted whatever a 403/409 reload does to the permissions. -->

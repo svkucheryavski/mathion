@@ -2,13 +2,15 @@
   // The Number / Text answer key (spec §Number, §Text): a display line, and an
   // inline editor behind ✎ "Edit the answer to question N". Number saves value
   // + decimals in one PATCH. A key save takes the per-question lock; a
-  // published version confirms first (after the D10 prompt, which ran when the
-  // editor opened). A failed save re-fetches nothing (R8): these answers are
+  // published version asks first, under the field (#6; after the D10 question,
+  // which ran when the editor opened). A failed save re-fetches nothing (R8): these answers are
   // question fields, and the editor keeps the typed values and the error.
   import { getContext, onDestroy, tick, untrack } from 'svelte';
   import IconButton from '../../ui/IconButton.svelte';
+  import AskSlot from '../../ui/AskSlot.svelte';
   import InlineInput from './InlineInput.svelte';
-  import { FORBIDDEN_TITLE, InlineEdit, KEY_CONFIRM, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
+  import { keyAsk } from './KeyQuestion.svelte';
+  import { FORBIDDEN_TITLE, InlineEdit, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { decimalsText, formatNumber, sameNumber, toleranceText } from '../../../lib/quizFormat';
   import {
@@ -41,7 +43,8 @@
         : ` · ${decimalsText(q.precision)} (${toleranceText(q.precision)})`,
   );
   const editReason = $derived(ctx.edits.locked || ctx.busyQuestions.has(q.id) ? WAIT_TITLE : null);
-  const confirmKey = () => !ctx.published || window.confirm(KEY_CONFIRM);
+  // #6: a published key asks under the field first (R52); null sends at once.
+  const keyQuestion = () => (ctx.published ? keyAsk() : null);
   const DEC_MSG = 'Decimals must be a whole number from 0 to 10.';
   // The error marks the field it is about: Decimals for DEC_MSG, else Answer.
   const decBad = $derived(numEdit?.error === DEC_MSG);
@@ -71,9 +74,11 @@
     }
   }
 
-  function openNumber() {
+  async function openNumber() {
     if (numEdit || editReason !== null) return;
-    if (!ctx.edits.request()) return;
+    if (!(await ctx.edits.request())) return;
+    // R49: re-checked after the D10 question.
+    if (numEdit || editReason !== null || !alive() || !ctx.canText) return;
     const stored = q.correct_numeric;
     const storedD = q.precision;
     numEdit = new InlineEdit<NumDraft>({
@@ -88,7 +93,7 @@
         if (!c.ok) return c.reason;
         return decimalsOk(x.d) ? null : DEC_MSG;
       },
-      confirmSend: confirmKey,
+      confirm: keyQuestion,
       allowed: () => ctx.canText,
       send: (x) => {
         const c = validateNumericAnswer(x.v);
@@ -98,16 +103,18 @@
     });
   }
 
-  function openText() {
+  async function openText() {
     if (textEdit || editReason !== null) return;
-    if (!ctx.edits.request()) return;
+    if (!(await ctx.edits.request())) return;
+    // R49: re-checked after the D10 question.
+    if (textEdit || editReason !== null || !alive() || !ctx.canText) return;
     textEdit = new InlineEdit<string>({
       id: `key-${q.id}`,
       edits: ctx.edits,
       initial: q.correct_text ?? '',
       same: (a, b) => a.trim() === b.trim(),
       check: (v) => (v.trim() === '' ? 'Enter the answer' : null),
-      confirmSend: confirmKey,
+      confirm: keyQuestion,
       allowed: () => ctx.canText,
       send: (v) => sendKey({ correct_text: v.trim() }),
       close: (refocus) => { textEdit = null; if (refocus) void refocusPencil(); },
@@ -125,9 +132,14 @@
   });
 
   const attachNum = (el: HTMLElement) => {
-    el.querySelector<HTMLInputElement>('input')?.focus();
-    return untrack(() => numEdit!.attach());
+    const field = el.querySelector<HTMLInputElement>('input');
+    field?.focus();
+    return untrack(() => numEdit!.attach(field));
   };
+  // The Number edit's question: a row (D10) in place of ✓ and ✕, a column
+  // (the key, R52) in the message slot.
+  const numInRow = $derived(!!numEdit?.asking.current && numEdit.asking.current.layout === 'row');
+  const numInMsg = $derived(!!numEdit?.asking.current && numEdit.asking.current.layout !== 'row');
 </script>
 
 {#if numEdit}
@@ -136,24 +148,30 @@
       <label class="key-field">
         <span class="key-label">Answer</span>
         <input class="key-input mono" type="text" aria-label="Answer" maxlength="40"
-               readonly={numEdit.saving} aria-invalid={numEdit.error && !decBad ? 'true' : undefined}
-               aria-describedby={numEdit.error && !decBad ? errId : undefined}
+               readonly={numEdit.saving || numEdit.asking.open} aria-invalid={numEdit.error && !decBad ? 'true' : undefined}
+               aria-describedby={numEdit.error && !decBad && !numInMsg ? errId : undefined}
                bind:value={() => numEdit?.value.v ?? '', (v) => { if (numEdit) numEdit.value.v = v; }} onkeydown={(e) => numEdit?.keydown(e)}
                oninput={() => { if (numEdit) numEdit.error = null; }} />
       </label>
       <label class="key-field">
         <span class="key-label">Decimals</span>
         <input class="key-input key-dec mono" type="text" inputmode="numeric" aria-label="Decimals" maxlength="2"
-               aria-invalid={decBad ? 'true' : undefined} aria-describedby={decBad ? errId : undefined}
-               readonly={numEdit.saving} bind:value={() => numEdit?.value.d ?? '', (v) => { if (numEdit) numEdit.value.d = v; }} onkeydown={(e) => numEdit?.keydown(e)}
+               aria-invalid={decBad ? 'true' : undefined} aria-describedby={decBad && !numInMsg ? errId : undefined}
+               readonly={numEdit.saving || numEdit.asking.open} bind:value={() => numEdit?.value.d ?? '', (v) => { if (numEdit) numEdit.value.d = v; }} onkeydown={(e) => numEdit?.keydown(e)}
                oninput={() => { if (numEdit) numEdit.error = null; }} />
       </label>
-      <IconButton glyph="check" size="sm"
-                  title={numEdit.saving ? 'Saving…' : numEdit.canSave ? 'Save answer' : FORBIDDEN_TITLE}
-                  disabled={!numEdit.canSave} onclick={() => void numEdit?.commit()} />
-      <IconButton glyph="close" size="sm" title="Cancel" disabled={numEdit.saving} onclick={() => numEdit?.cancel()} />
+      {#if numInRow}
+        <AskSlot ask={numEdit.asking} />
+      {:else}
+        <IconButton glyph="check" size="sm"
+                    title={numEdit.saving ? 'Saving…' : numEdit.canSave ? 'Save answer' : FORBIDDEN_TITLE}
+                    disabled={!numEdit.canSave} onclick={() => void numEdit?.commit()} />
+        <IconButton glyph="close" size="sm" title="Cancel" disabled={numEdit.saving} onclick={() => numEdit?.cancel()} />
+      {/if}
     </div>
-    {#if numEdit.error}<span class="key-err" id={errId} role="alert">{numEdit.error}</span>{/if}
+    {#if numInMsg}
+      <AskSlot ask={numEdit.asking} />
+    {:else if numEdit.error}<span class="key-err" id={errId} role="alert">{numEdit.error}</span>{/if}
   </div>
 {:else if textEdit}
   <InlineInput edit={textEdit} label="Answer" saveTitle="Save answer" hint="Case-insensitive, trimmed match." />

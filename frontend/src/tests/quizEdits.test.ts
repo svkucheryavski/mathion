@@ -2,65 +2,103 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   QuizEdits, InlineEdit, DISCARD_PROMPT, type EditHandle, type InlineOptions,
 } from '../lib/quizEdits.svelte';
+import { InPlaceAsk, DISCARD_NAV_ASK, type Ask, type Answer } from '../lib/askInPlace.svelte';
 import { ApiError } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 
-afterEach(() => { vi.restoreAllMocks(); clearToasts(); });
+afterEach(() => { vi.restoreAllMocks(); clearToasts(); document.body.replaceChildren(); });
 
-function handle(over: { dirty?: boolean; saving?: boolean } = {}, id = 'a') {
+const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+
+function handle(over: { dirty?: boolean; saving?: boolean; ask?: (q: Ask) => Promise<Answer> } = {}, id = 'a') {
   const close = vi.fn();
-  const h: EditHandle = { id, dirty: over.dirty ?? false, saving: over.saving ?? false, close };
+  const h: EditHandle = { id, dirty: over.dirty ?? false, saving: over.saving ?? false, close, ask: over.ask };
   return { h, close };
 }
 
+/** Stands in for <AskSlot>: a drawn question with its two buttons. Returns its Cancel. */
+function drawn(a: InPlaceAsk): HTMLButtonElement {
+  const el = document.body.appendChild(document.createElement('div'));
+  el.innerHTML = '<div class="inline-confirm"><button class="confirm">OK</button><button class="cancel">Cancel</button></div>';
+  a.host = el;
+  return el.querySelector<HTMLButtonElement>('button.cancel')!;
+}
+
 describe('QuizEdits (D10)', () => {
-  it('lets any action through when nothing is open', () => {
-    expect(new QuizEdits().request()).toBe(true);
+  it('lets any action through when nothing is open', async () => {
+    expect(await new QuizEdits().request()).toBe(true);
   });
 
-  it('lets the open edit act on itself', () => {
+  it('lets the open edit act on itself', async () => {
     const e = new QuizEdits();
     e.open(handle({ dirty: true }).h);
-    expect(e.request('a')).toBe(true);
+    expect(await e.request('a')).toBe(true);
   });
 
-  it('closes a clean edit silently, without moving focus', () => {
+  it('closes a clean edit silently, without asking or moving focus', async () => {
     const e = new QuizEdits();
-    const { h, close } = handle();
+    const ask = vi.fn(async () => 'cancel' as Answer);
+    const { h, close } = handle({ ask });
     e.open(h);
-    const ask = vi.spyOn(window, 'confirm');
-    expect(e.request()).toBe(true);
+    expect(await e.request()).toBe(true);
     expect(ask).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledWith(false);
     expect(e.active).toBeNull();
   });
 
-  it('asks before discarding a changed edit', () => {
+  it('#14: a changed edit asks at itself; Cancel and a dismissal keep it, Discard drops it', async () => {
     const e = new QuizEdits();
-    const { h, close } = handle({ dirty: true });
+    const ask = vi.fn(async (_q: Ask): Promise<Answer> => 'cancel');
+    const { h, close } = handle({ dirty: true, ask });
     e.open(h);
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    expect(e.request()).toBe(false);
-    expect(ask).toHaveBeenCalledWith(DISCARD_PROMPT);
+    expect(await e.request()).toBe(false);
+    const q = ask.mock.calls[0]![0];
+    expect(q).toMatchObject({ warning: DISCARD_PROMPT, confirmLabel: 'Discard', tone: 'danger', layout: 'row' });
+    expect(q).not.toBe(DISCARD_NAV_ASK);   // a fresh object per question: sites compare by identity
     expect(close).not.toHaveBeenCalled();
     expect(e.active).toBe(h);
-    ask.mockReturnValue(true);
-    expect(e.request()).toBe(true);
+    ask.mockResolvedValue('dismissed');
+    expect(await e.request()).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    ask.mockResolvedValue('confirm');
+    expect(await e.request()).toBe(true);
     expect(close).toHaveBeenCalledWith(false);
     expect(e.active).toBeNull();
   });
 
-  it('never closes a saving edit, and a saving edit is not unsaved work', () => {
+  it('a changed edit that cannot ask (a level-3 modal) is kept', async () => {
     const e = new QuizEdits();
-    const { h, close } = handle({ dirty: true, saving: true });
+    const { h, close } = handle({ dirty: true });
     e.open(h);
-    const ask = vi.spyOn(window, 'confirm');
-    expect(e.request()).toBe(false);
+    expect(await e.request()).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('never closes a saving edit, and a saving edit is not unsaved work', async () => {
+    const e = new QuizEdits();
+    const ask = vi.fn(async () => 'confirm' as Answer);
+    const { h, close } = handle({ dirty: true, saving: true, ask });
+    e.open(h);
+    expect(await e.request()).toBe(false);
     expect(ask).not.toHaveBeenCalled();
     expect(e.locked).toBe(true);
     expect(e.dirty).toBe(false);
     e.discardAll();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it('an edit that starts saving while it asks is never closed, even on Discard', async () => {
+    const e = new QuizEdits();
+    const st = { saving: false };
+    const close = vi.fn();
+    const h: EditHandle = {
+      id: 'a', dirty: true, get saving() { return st.saving; }, close,
+      ask: async () => { st.saving = true; return 'confirm'; },
+    };
+    e.open(h);
+    expect(await e.request()).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(e.active).toBe(h);
   });
 
   it('dirty is an open, changed, not-saving edit; discardAll closes it', () => {
@@ -85,18 +123,26 @@ describe('QuizEdits (D10)', () => {
     expect(e.active).toBeNull();
   });
 
-  it('a move or delete passes a saving edit untouched; otherwise it is D10', () => {
+  it('a move or delete passes a saving edit untouched, before or after the question; otherwise it is D10', async () => {
     const e = new QuizEdits();
     const saving = handle({ dirty: true, saving: true });
     e.open(saving.h);
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    expect(e.requestStructure()).toBe(true);
+    expect(await e.requestStructure()).toBe(true);
     expect(saving.close).not.toHaveBeenCalled();
     expect(e.active).toBe(saving.h);
-    const changed = handle({ dirty: true }, 'b');
+    const ask = vi.fn(async (_q: Ask): Promise<Answer> => 'cancel');
+    const changed = handle({ dirty: true, ask }, 'b');
     e.open(changed.h);
-    expect(e.requestStructure()).toBe(false);
-    expect(ask).toHaveBeenCalledWith(DISCARD_PROMPT);
+    expect(await e.requestStructure()).toBe(false);
+    expect(ask.mock.calls[0]![0]).toMatchObject({ warning: DISCARD_PROMPT });
+    const st = { saving: false };
+    const late: EditHandle = {
+      id: 'c', dirty: true, get saving() { return st.saving; }, close: vi.fn(),
+      ask: async () => { st.saving = true; return 'cancel'; },
+    };
+    e.open(late);
+    expect(await e.requestStructure()).toBe(true);
+    expect(late.close).not.toHaveBeenCalled();
   });
 
   it('say clears the message, then sets it', async () => {
@@ -131,9 +177,13 @@ describe('InlineEdit', () => {
       check: (v) => (v.trim() === '' ? 'Required' : null),
       send, close, ...over,
     });
-    const detach = ed.attach();
-    return { edits, ed, close, send, detach };
+    const field = document.body.appendChild(document.createElement('input'));
+    const detach = ed.attach(field);
+    return { edits, ed, close, send, detach, field };
   }
+  const keyQ = (): Ask => ({
+    warning: 'Change the key?', confirmLabel: 'Change key', tone: 'primary', layout: 'column', confirmDataAction: 'confirm-change-key',
+  });
 
   it('takes the slot while attached', () => {
     const { edits, ed, detach } = make();
@@ -164,14 +214,6 @@ describe('InlineEdit', () => {
     await ed.commit();
     expect(ed.error).toBe('Required');
     expect(send).not.toHaveBeenCalled();
-  });
-
-  it('a declined confirm keeps the field open and sends nothing', async () => {
-    const { ed, send, close } = make({ confirmSend: () => false });
-    ed.value = 'new';
-    await ed.commit();
-    expect(send).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
   });
 
   it('saves, then closes; while saving it is locked but not unsaved', async () => {
@@ -274,17 +316,6 @@ describe('InlineEdit', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it('a declined key confirm clears an earlier check message', async () => {
-    const { ed, send } = make({ confirmSend: () => false });
-    ed.value = ' ';
-    await ed.commit();
-    expect(ed.error).toBe('Required');
-    ed.value = 'new';
-    await ed.commit();
-    expect(ed.error).toBeNull();
-    expect(send).not.toHaveBeenCalled();
-  });
-
   it('an IME-confirming Enter (Safari keyCode 229) does not save', async () => {
     const { ed, send } = make();
     ed.value = 'new';
@@ -327,5 +358,131 @@ describe('InlineEdit', () => {
     expect(esc.defaultPrevented).toBe(true);
     expect(close).not.toHaveBeenCalled();
     await p;
+  });
+
+  it('#14: its handle asks with the edit\'s own question; Cancel returns focus to the field', async () => {
+    const { edits, ed, field } = make();
+    ed.value = 'new';
+    const p = edits.request();
+    expect(ed.asking.current).toMatchObject({ warning: DISCARD_PROMPT });
+    ed.asking.answer('cancel');
+    expect(await p).toBe(false);
+    await flush();
+    expect(document.activeElement).toBe(field);
+    expect(edits.active).toBe(ed.handle);
+  });
+
+  it('#14: Discard settles the question at once (no request) and drops the edit', async () => {
+    const { edits, ed, close } = make();
+    ed.value = 'new';
+    const p = edits.request();
+    ed.asking.answer('confirm');
+    expect(await p).toBe(true);
+    expect(ed.asking.open).toBe(false);
+    expect(close).toHaveBeenCalledWith(false);
+    expect(edits.active).toBeNull();
+  });
+
+  it('while it asks, Enter, ✓, ✕ and Esc only bring the question back', async () => {
+    const { edits, ed, close, send, field } = make();
+    ed.value = 'new';
+    void edits.request();
+    const cancel = drawn(ed.asking);
+    field.focus();
+    ed.keydown(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    expect(document.activeElement).toBe(cancel);
+    field.focus();
+    await ed.commit();
+    expect(document.activeElement).toBe(cancel);
+    field.focus();
+    ed.cancel();
+    expect(document.activeElement).toBe(cancel);
+    field.focus();
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    ed.keydown(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(cancel);
+    expect(send).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(ed.asking.open).toBe(true);
+  });
+
+  it('closing the field withdraws its own question, never another site\'s on a shared row', async () => {
+    const shared = new InPlaceAsk();
+    const { edits, ed, detach } = make({ asking: shared });
+    ed.value = 'new';
+    const p = edits.request();
+    detach();
+    expect(await p).toBe(false);
+    expect(shared.open).toBe(false);
+    const other = make({ asking: shared });
+    const theirs = shared.ask({ warning: 'Delete it?', confirmLabel: 'Delete', tone: 'danger', confirmDataAction: 'confirm-x' });
+    other.detach();
+    expect(shared.open).toBe(true);
+    shared.answer('cancel');
+    expect(await theirs).toBe('cancel');
+  });
+
+  it('#6 confirm: asks after the checks, with the old message cleared; Cancel sends nothing and focuses the field', async () => {
+    const { ed, send, close, field } = make({ confirm: keyQ });
+    ed.value = ' ';
+    await ed.commit();
+    expect(ed.error).toBe('Required');
+    expect(ed.asking.open).toBe(false);          // the check comes first
+    ed.value = 'new';
+    const p = ed.commit();
+    expect(ed.error).toBeNull();
+    expect(ed.asking.current).toMatchObject({ confirmLabel: 'Change key' });
+    ed.asking.answer('cancel');
+    await p;
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('#6 confirm: the save runs with the question busy; it settles when the save succeeds', async () => {
+    let resolve!: () => void;
+    // make() returns its default `send`; keep the spy passed in.
+    const send = vi.fn(() => new Promise<void>((r) => { resolve = r; }));
+    const { ed, close } = make({ confirm: keyQ, send });
+    ed.value = 'new';
+    const p = ed.commit();
+    ed.asking.answer('confirm');
+    await flush();
+    expect(send).toHaveBeenCalledWith('new');
+    expect(ed.asking.busy).toBe(true);
+    expect(ed.saving).toBe(true);
+    resolve();
+    await p;
+    expect(ed.asking.open).toBe(false);
+    expect(close).toHaveBeenCalledWith(true);
+  });
+
+  it('#6 confirm: a failed save keeps the field and its error; the question settles and focus returns to the field', async () => {
+    const { ed, close, field } = make({ confirm: keyQ, send: vi.fn().mockRejectedValue(new ApiError(422, 'Nope')) });
+    ed.value = 'new';
+    const p = ed.commit();
+    ed.asking.answer('confirm');
+    await p;
+    expect(ed.asking.open).toBe(false);
+    expect(ed.error).toBe('Nope');
+    expect(ed.value).toBe('new');
+    expect(close).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('#6 confirm (R49): a save the version stopped allowing while it asked sends nothing; the field stays', async () => {
+    let ok = true;
+    const { ed, send, close } = make({ confirm: keyQ, allowed: () => ok });
+    ed.value = 'new';
+    const p = ed.commit();
+    ok = false;
+    ed.asking.answer('confirm');
+    await p;
+    expect(send).not.toHaveBeenCalled();
+    expect(ed.asking.open).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(ed.value).toBe('new');
   });
 });

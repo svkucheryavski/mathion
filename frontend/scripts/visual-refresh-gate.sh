@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2181
+EXPECTED_CHECKS=2193
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5287,5 +5287,40 @@ if grep -qF '<h1 bind:this={h1El} tabindex="-1">' src/pages/editor/VersionsPage.
    && grep -qF 'id={`v-${v.id}-title`}' src/pages/editor/VersionsPage.svelte; then
   echo "PASS  VersionsPage focus targets: the <h1> (tabindex -1) and the row ids (R54)"
 else echo "FAIL  VersionsPage focus targets: the <h1> (tabindex -1) and the row ids (R54)"; fail=1; fi
+# Task 5 — the quiz edit slot asks in place (#14, #6, #2).
+own ans-ask ChoiceAnswers.svelte
+uniq1 ans-ask
+if [[ -n $REPLY ]]; then
+  N=ChoiceAnswers; H=$REPLY
+  # The key question's line under the answer list lines up with "+ Add answer".
+  d '\.ans-ask' '' 'margin-top:4px' 'padding-left:8px'
+  sweep $N $H
+fi
+if grep -qF 'async request(id?: string): Promise<boolean>' src/lib/quizEdits.svelte.ts \
+   && grep -qF 'async requestStructure(): Promise<boolean>' src/lib/quizEdits.svelte.ts \
+   && grep -qF 'ask?(q: Ask): Promise<Answer>;' src/lib/quizEdits.svelte.ts; then
+  echo "PASS  quizEdits asks in place: async request / requestStructure, EditHandle.ask (#14)"
+else echo "FAIL  quizEdits asks in place: async request / requestStructure, EditHandle.ask (#14)"; fail=1; fi
+# Every D10 caller waits for the answer; R49 re-checks follow the await.
+qreq=(${(f)"$(grep -nE '(^|[^[:alnum:]_])(request|requestStructure)\(\)' src/components/editor/quiz/*.svelte src/components/editor/ItemEditorModal.svelte | grep -v 'await ')"})
+if [[ ${#qreq[@]} -eq 0 ]]; then echo "PASS  every quiz D10 caller awaits request() (#14)"
+else echo "FAIL  quiz D10 callers that do not await request(): $qreq"; fail=1; fi
+if grep -qF '{#snippet keyMessage()}<strong>Change the answer key?</strong> {KEY_CONFIRM}{/snippet}' src/components/editor/quiz/KeyQuestion.svelte \
+   && grep -qF "confirmLabel: 'Change key', tone: 'primary', layout: 'column', confirmDataAction: 'confirm-change-key'" src/components/editor/quiz/KeyQuestion.svelte; then
+  echo "PASS  the key question leads with its question; its button is Change key (R52)"
+else echo "FAIL  the key question leads with its question; its button is Change key (R52)"; fail=1; fi
+if grep -qF "'version instead.';" src/lib/quizEdits.svelte.ts && ! grep -qF 'Continue?' src/lib/quizEdits.svelte.ts; then
+  echo "PASS  KEY_CONFIRM ends without \"Continue?\" (R52)"
+else echo "FAIL  KEY_CONFIRM ends without \"Continue?\" (R52)"; fail=1; fi
+if grep -qF '<AskSlot ask={edit.asking} />' src/components/editor/quiz/InlineInput.svelte \
+   && grep -qF '<AskSlot ask={numEdit.asking} />' src/components/editor/quiz/KeyAnswer.svelte \
+   && grep -qF '<AskSlot ask={markAsk} />' src/components/editor/quiz/ChoiceAnswers.svelte \
+   && grep -qF 'asking: bodyAsk,' src/components/editor/ItemEditorModal.svelte; then
+  echo "PASS  the quiz edits' questions are drawn where they belong (#14, #6, #2)"
+else echo "FAIL  the quiz edits' questions are drawn where they belong (#14, #6, #2)"; fail=1; fi
+if grep -qE '(^|[^.[:alnum:]_])confirm[[:space:]]*\(|(window|globalThis)\.confirm' \
+     src/lib/quizEdits.svelte.ts src/components/editor/quiz/KeyAnswer.svelte src/components/editor/quiz/ChoiceAnswers.svelte; then
+  echo "FAIL  the quiz edit slot calls no confirm()"; fail=1
+else echo "PASS  the quiz edit slot calls no confirm()"; fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

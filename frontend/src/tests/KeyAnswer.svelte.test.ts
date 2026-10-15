@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   QuizServer, q, mkVersion, renderQuiz, panel, cleanup, settle, cards, byName, typeInto, press, live, toastTexts, text,
 } from './support/quizHarness.svelte';
@@ -196,26 +196,73 @@ describe('Text answer (5d T6)', () => {
 });
 
 describe('Answer key in a published version (5d T6)', () => {
-  it('the D10 prompt comes before the key confirm; Cancel on the confirm keeps the field', async () => {
+  it('#14 then #6: D10 asks at the dirty Number edit; the key question then asks under the Text field (R52)', async () => {
     const s = new QuizServer([num(), txt()]);
     await renderQuiz(s, { version: { state: 'published' } });
     pencil(0).click();
     await settle();
     typeInto(input(0, 'Answer'), '9');
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(true);
     pencil(1).click();
     await settle();
+    // #14: in place of the Number edit's ✓ and ✕; both its fields are readonly.
+    const d10 = cards()[0].querySelector<HTMLElement>('.key-fields .inline-confirm')!;
+    expect(text(d10.querySelector('.warning'))).toBe(DISCARD_PROMPT);
+    expect(document.activeElement).toBe(d10.querySelector('button.cancel'));
+    expect(input(0, 'Answer').readOnly).toBe(true);
+    expect(input(0, 'Decimals').readOnly).toBe(true);
+    expect(byName(cards()[0], 'Save answer')).toBeUndefined();
+    d10.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    expect(cards()[0].querySelector('.key-edit')).toBeNull();
     typeInto(input(1, 'Answer'), 'changed');
-    ask.mockReturnValue(false);
     press(input(1, 'Answer'), 'Enter');
     await settle();
-    expect(ask.mock.calls.map((c) => c[0])).toEqual([DISCARD_PROMPT, KEY_CONFIRM]);
+    // #6: in the field's message slot, led by its question.
+    const key = () => cards()[1].querySelector<HTMLElement>('.inline-field > .ask-slot .inline-confirm');
+    expect(key()!.classList.contains('row')).toBe(false);
+    expect(text(key()!.querySelector('.warning'))).toBe(`Change the answer key? ${KEY_CONFIRM}`);
+    expect(text(key()!.querySelector('button.confirm'))).toBe('Change key');
+    expect(cards()[1].querySelector('.inline-hint')).toBeNull();
+    expect(document.activeElement).toBe(key()!.querySelector('button.cancel'));
+    key()!.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(key()).toBeNull();
+    expect(document.activeElement).toBe(input(1, 'Answer'));
     expect(input(1, 'Answer').value).toBe('changed');
+    expect(input(1, 'Answer').readOnly).toBe(false);
     expect(qWrites(s)).toEqual([]);
-    ask.mockReturnValue(true);
     press(input(1, 'Answer'), 'Enter');
+    await settle();
+    key()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
     await settle();
     expect(qWrites(s).map((c) => c.body)).toEqual([{ correct_text: 'changed' }]);
+    expect(document.activeElement).toBe(pencil(1));
+  });
+
+  it('#6: while the key saves the question stays busy; a failed save brings focus back to the field with the error', async () => {
+    const s = new QuizServer([txt({ id: 1 })]);
+    const hold = s.hold('PATCH', /\/api\/questions\/1$/);
+    await renderQuiz(s, { version: { state: 'published' } });
+    pencil().click();
+    await settle();
+    typeInto(input(0, 'Answer'), 'basis');
+    press(input(0, 'Answer'), 'Enter');
+    await settle();
+    const key = () => cards()[0].querySelector<HTMLElement>('.inline-field > .ask-slot .inline-confirm');
+    key()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    const ok = key()!.querySelector<HTMLButtonElement>('button.confirm')!;
+    expect(document.activeElement).toBe(ok);
+    expect(ok.getAttribute('aria-busy')).toBe('true');
+    expect(input(0, 'Answer').readOnly).toBe(true);
+    press(ok, 'Escape');
+    expect(key()).not.toBeNull();             // Esc is ignored while busy
+    hold.fail(422, 'Nope');
+    await settle();
+    expect(key()).toBeNull();
+    expect(text(cards()[0].querySelector('.inline-err'))).toBe('Nope');
+    expect(input(0, 'Answer').value).toBe('basis');
+    expect(document.activeElement).toBe(input(0, 'Answer'));   // never a disabled ✓, never <body>
   });
 
   it('archived: no pencil', async () => {

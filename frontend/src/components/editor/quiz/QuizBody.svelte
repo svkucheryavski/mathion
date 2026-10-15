@@ -141,9 +141,11 @@
     status !== 'loaded' ? 'Wait for the questions to load'
       : quizLock || edits.locked ? WAIT_TITLE : null,
   );
-  function openAdd() {
+  async function openAdd() {
     if (adding || addReason !== null) return;
-    if (!edits.request()) return;
+    if (!(await edits.request())) return;
+    // R49: re-checked after the D10 question.
+    if (adding || addReason !== null || !live() || !perms.canEditStructure) return;
     adding = true;
   }
   async function closeAdd(refocus: boolean) {
@@ -195,11 +197,17 @@
 
   // ---- Move: optimistic; the moved card's arrows keep focus ----
   async function move(qid: number, dir: -1 | 1) {
-    if (quizLock || busyQuestions.has(qid)) return;
-    const i = questions.findIndex((x) => x.id === qid);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= questions.length) return;
-    if (!edits.requestStructure()) return;   // moves follow their locks alone
+    const at = () => {
+      const i = questions.findIndex((x) => x.id === qid);
+      const j = i + dir;
+      return i < 0 || j < 0 || j >= questions.length ? null : [i, j] as const;
+    };
+    if (quizLock || busyQuestions.has(qid) || !at()) return;
+    if (!(await edits.requestStructure())) return;   // moves follow their locks alone
+    // R49: recomputed from the live list after the D10 question.
+    const ij = at();
+    if (quizLock || busyQuestions.has(qid) || !live() || !ij) return;
+    const [i, j] = ij;
     const next = [...questions];
     [next[i], next[j]] = [next[j]!, next[i]!];
     questions = next.map((x, k) => ({ ...x, order: k + 1 }));
@@ -231,10 +239,11 @@
 
   // ---- Delete: confirms (D14) ----
   async function remove(qid: number) {
-    if (quizLock || busyQuestions.has(qid)) return;
+    if (quizLock || busyQuestions.has(qid) || !questions.some((x) => x.id === qid)) return;
+    if (!(await edits.requestStructure())) return;   // deletes follow their locks alone
+    // R49: re-checked, and the index recomputed, after the D10 question.
     const idx = questions.findIndex((x) => x.id === qid);
-    if (idx < 0) return;
-    if (!edits.requestStructure()) return;   // deletes follow their locks alone
+    if (quizLock || busyQuestions.has(qid) || !live() || idx < 0) return;
     // Inert parse (no image loads), so entities read as characters.
     const plain = new DOMParser().parseFromString(questions[idx]!.text_html, 'text/html').body.textContent ?? '';
     const title = plain.replace(/\s+/g, ' ').trim().slice(0, 80) || `Question ${idx + 1}`;
@@ -293,7 +302,7 @@
     {#if perms.canEditStructure}
       <!-- 5c D9 exception: in the quiz overview, adding a question is the main action. -->
       <span class="q-add">
-        <Button variant="primary" disabled={addReason !== null} title={addReason ?? undefined} onclick={openAdd}>+ Add question</Button>
+        <Button variant="primary" disabled={addReason !== null} title={addReason ?? undefined} onclick={() => void openAdd()}>+ Add question</Button>
       </span>
     {/if}
   </div>

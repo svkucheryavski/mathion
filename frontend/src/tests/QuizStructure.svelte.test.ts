@@ -173,11 +173,10 @@ describe('Adding a question (5d T8)', () => {
     await settle();
     const f = cards()[0].querySelector<HTMLInputElement>('input[aria-label="Answer"]')!;
     typeInto(f, '9');
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     hold.release();
     await settle();
     await settle();
-    expect(ask).not.toHaveBeenCalled();
+    expect(panel().querySelector('.inline-confirm')).toBeNull();
     expect(cards()[0].querySelector<HTMLInputElement>('input[aria-label="Answer"]')?.value).toBe('9');
     expect(cards()[1].querySelector('.ans-add input')).toBeNull();
     expect(document.activeElement).toBe(f);
@@ -363,16 +362,22 @@ describe('Moving and deleting questions (5d T8)', () => {
     await settle();
   });
 
-  it('D10: deleting the question that holds a changed edit asks the discard prompt first', async () => {
+  it('#14: deleting the question that holds a changed edit asks the discard question first, at the edit', async () => {
     const s = two();
     await renderQuiz(s);
     rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
     await settle();
-    typeInto(cards()[0].querySelector<HTMLInputElement>('input.inline-input')!, 'changed');
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const f = cards()[0].querySelector<HTMLInputElement>('input.inline-input')!;
+    typeInto(f, 'changed');
     byName(cards()[0], 'Delete question 1')!.click();
     await settle();
-    expect(ask.mock.calls.map((c) => c[0])).toEqual([DISCARD_PROMPT]);
+    const d10 = cards()[0].querySelector<HTMLElement>('.inline-row .inline-confirm')!;
+    expect(text(d10.querySelector('.warning'))).toBe(DISCARD_PROMPT);
+    expect(document.activeElement).toBe(d10.querySelector('button.cancel'));
+    d10.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(document.activeElement).toBe(f);
+    expect(f.value).toBe('changed');
     expect(s.writes()).toEqual([]);
   });
 

@@ -1,9 +1,12 @@
 <script lang="ts">
   // The markup of one inline text edit (spec §Saving): the field, the check
-  // and cancel buttons, and the error or hint under it. The owner creates the
-  // InlineEdit; this takes the edit slot while mounted and focuses the field.
+  // and cancel buttons, and the error or hint under it. A question at the edit
+  // (Polish 1) stands in place of ✓ and ✕ (row), or of the message (column).
+  // The owner creates the InlineEdit; this takes the edit slot while mounted
+  // and focuses the field.
   import { untrack } from 'svelte';
   import IconButton from '../../ui/IconButton.svelte';
+  import AskSlot from '../../ui/AskSlot.svelte';
   import { FORBIDDEN_TITLE, type InlineEdit } from '../../../lib/quizEdits.svelte';
 
   let { edit, label, saveTitle = 'Save', maxlength = 500, hint = undefined }: {
@@ -17,8 +20,12 @@
   let rowEl = $state<HTMLElement>();
   const attach = (el: HTMLInputElement) => {
     el.focus();
-    return untrack(() => edit.attach());
+    return untrack(() => edit.attach(el));
   };
+  // Where the edit's question asks: a row question (D10) in place of ✓ and ✕,
+  // a column question (the key, R52) in the message slot.
+  const asksInRow = $derived(!!edit.asking.current && edit.asking.current.layout === 'row');
+  const asksInMsg = $derived(!!edit.asking.current && edit.asking.current.layout !== 'row');
   // A 403/409 reload can take the right to save away while ✓ holds focus (R10).
   // Before the DOM disables it, focus moves to the field the author must cancel.
   $effect.pre(() => {
@@ -35,20 +42,26 @@
       type="text"
       aria-label={label}
       {maxlength}
-      readonly={edit.saving}
+      readonly={edit.saving || edit.asking.open}
       aria-invalid={edit.error ? 'true' : undefined}
-      aria-describedby={edit.error || hint ? msgId : undefined}
+      aria-describedby={(edit.error || hint) && !asksInMsg ? msgId : undefined}
       bind:this={inputEl}
       bind:value={() => edit?.value ?? '', (v) => { if (edit) edit.value = v; }}
       onkeydown={(e) => edit.keydown(e)}
       oninput={() => { edit.error = null; }}
       {@attach attach}
     />
-    <IconButton glyph="check" size="sm" title={edit.saving ? 'Saving…' : edit.canSave ? saveTitle : FORBIDDEN_TITLE}
-                disabled={!edit.canSave} onclick={() => void edit.commit()} />
-    <IconButton glyph="close" size="sm" title="Cancel" disabled={edit.saving} onclick={() => edit.cancel()} />
+    {#if asksInRow}
+      <AskSlot ask={edit.asking} />
+    {:else}
+      <IconButton glyph="check" size="sm" title={edit.saving ? 'Saving…' : edit.canSave ? saveTitle : FORBIDDEN_TITLE}
+                  disabled={!edit.canSave} onclick={() => void edit.commit()} />
+      <IconButton glyph="close" size="sm" title="Cancel" disabled={edit.saving} onclick={() => edit.cancel()} />
+    {/if}
   </span>
-  {#if edit.error}
+  {#if asksInMsg}
+    <AskSlot ask={edit.asking} />
+  {:else if edit.error}
     <span class="inline-err" id={msgId} role="alert">{edit.error}</span>
   {:else if hint}
     <span class="inline-hint" id={msgId}>{hint}</span>

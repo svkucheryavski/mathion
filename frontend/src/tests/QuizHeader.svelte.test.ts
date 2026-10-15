@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
-  QuizServer, q, mkVersion, renderQuiz, cleanup, settle, panel, byName, typeInto, press, live, toastTexts, text,
+  QuizServer, q, mkVersion, renderQuiz, cleanup, settle, panel, byName, typeInto, press, live, toastTexts, text, cards,
 } from './support/quizHarness.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
-import { FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
+import { DISCARD_PROMPT, FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
+import { navigate } from '../lib/router.svelte';
 
 afterEach(cleanup);
 
@@ -13,6 +14,9 @@ const field = () => h2().querySelector<HTMLInputElement>('input[aria-label="Titl
 const trash = () => panel().querySelector<HTMLButtonElement>('button[aria-label="Delete item"]')!;
 const closeX = () => panel().querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
 const itemPatches = (s: QuizServer) => s.writes().filter((c) => c.path === '/api/items/7');
+// The title's D10 question asks in the body-top row (Polish 1 #14).
+const topAsk = () => panel().querySelector<HTMLElement>('.modal-body > .ask-slot .inline-confirm');
+const head = () => panel().querySelector<HTMLElement>('header.modal-head')!;
 
 async function openTitle() {
   pencil().click();
@@ -197,5 +201,51 @@ describe('Quiz header (5d T4)', () => {
     await settle();
     expect(trash().title).toBe('Delete this item');
     vi.restoreAllMocks();
+  });
+
+  it('#14: a changed title asks in the body-top row; the body freezes; Cancel returns to the title; Discard opens the next editor', async () => {
+    await renderQuiz(new QuizServer([q({ id: 1 })]));
+    await openTitle();
+    typeInto(field(), 'Changed');
+    byName(cards()[0], 'Edit question 1')!.click();
+    await settle();
+    expect(text(topAsk()!.querySelector('.warning'))).toBe(DISCARD_PROMPT);
+    expect(document.activeElement).toBe(topAsk()!.querySelector('button.cancel'));
+    expect(field().readOnly).toBe(true);
+    expect(panel().querySelector('.body-rest')!.hasAttribute('inert')).toBe(true);
+    // Enter, ✓ and ✕ in the header only bring the question back (R48).
+    for (const act of [() => press(field(), 'Enter'), () => byName(head(), 'Save title')!.click(), () => byName(head(), 'Cancel')!.click()]) {
+      field().focus();
+      act();
+      expect(document.activeElement).toBe(topAsk()!.querySelector('button.cancel'));
+    }
+    topAsk()!.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(topAsk()).toBeNull();
+    expect(document.activeElement).toBe(field());
+    expect(field().value).toBe('Changed');
+    expect(field().readOnly).toBe(false);
+    expect(panel().querySelector('.body-rest')!.hasAttribute('inert')).toBe(false);
+    byName(cards()[0], 'Edit question 1')!.click();
+    await settle();
+    topAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    expect(h2().querySelector('input')).toBeNull();
+    expect(document.querySelectorAll('section.modal-panel').length).toBe(2);   // the question text editor
+  });
+
+  it('R53: while the title\'s D10 question asks, a navigation is refused and focus returns to it', async () => {
+    await renderQuiz(new QuizServer([q({ id: 1 })]), { page: true });
+    await openTitle();
+    typeInto(field(), 'Changed');
+    byName(cards()[0], 'Edit question 1')!.click();
+    await settle();
+    const before = location.pathname;
+    closeX().focus();
+    await navigate('/title-refused');
+    await settle();
+    expect(location.pathname).toBe(before);
+    expect(document.activeElement).toBe(topAsk()!.querySelector('button.cancel'));
+    expect(text(topAsk()!.querySelector('.warning'))).toBe(DISCARD_PROMPT);
   });
 });

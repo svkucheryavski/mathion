@@ -105,13 +105,18 @@
     untrack(() => { if (!titleEdit) shownTitle = t; });
   });
 
-  function openTitle() {
+  async function openTitle() {
     if (!quizEdits || titleEdit || deleting || asking || quizEdits.locked) return;
-    if (!quizEdits.request()) return;
+    const edits = quizEdits;
+    if (!(await edits.request())) return;
+    // R49: re-checked after the D10 question.
+    if (!alive || quizEdits !== edits || titleEdit || deleting || asking || edits.locked || !perms.canEditTextFields) return;
     const savedVid = vid;
     titleEdit = new InlineEdit<string>({
       id: 'title',
-      edits: quizEdits,
+      edits,
+      // The header has no room: the title's D10 question asks in the body-top row (#14).
+      asking: bodyAsk,
       initial: shownTitle,
       same: (a, b) => a.trim() === b.trim(),
       check: (v) => (v.trim() === '' ? 'Title is required' : null),
@@ -145,7 +150,7 @@
   const attachTitle = (el: HTMLInputElement) => {
     el.focus();
     el.select();
-    return untrack(() => titleEdit!.attach());
+    return untrack(() => titleEdit!.attach(el));
   };
 
   // ---- One tracker in the page registry (D5): the page's DirtyGuard prompts
@@ -321,7 +326,7 @@
         type="text"
         aria-label="Title"
         maxlength="200"
-        readonly={titleEdit.saving}
+        readonly={titleEdit.saving || titleEdit.asking.open}
         aria-invalid={titleEdit.error ? 'true' : undefined}
         aria-describedby={titleEdit.error ? titleErrId : undefined}
         bind:value={
