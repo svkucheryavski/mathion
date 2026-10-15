@@ -251,6 +251,15 @@ describe('Adding a question (5d T8)', () => {
 
 describe('Moving and deleting questions (5d T8)', () => {
   const two = () => new QuizServer([q({ id: 1 }), q({ id: 2 })], [opt(11, 1, 'A', true), opt(21, 2, 'B', true)]);
+  // #12: the delete question under a card's head.
+  const cardAsk = (card: HTMLElement) => card.querySelector<HTMLElement>('.qask .inline-confirm');
+  async function confirmDelete(i: number, n: number) {
+    byName(cards()[i], `Delete question ${n}`)!.click();
+    await settle();
+    cardAsk(cards()[i])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    await settle();
+  }
 
   it('move down: optimistic, announced, one reorder, focus on the other arrow at the end', async () => {
     const s = two();
@@ -296,35 +305,89 @@ describe('Moving and deleting questions (5d T8)', () => {
     s.failNext('DELETE', /\/api\/questions\/2$/, 404, 'Question not found');
     await renderQuiz(s);
     s.questions = s.questions.filter((x) => x.id !== 2);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const b = byName(cards()[1], 'Delete question 2')!;
     b.focus();
     b.click();
+    await settle();
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
     for (let i = 0; i < 3; i++) await settle();
     expect(cards().map((c) => c.dataset.qId)).toEqual(['1', '3']);
     expect(toastTexts()).toEqual(['Question not found']);
     expect(document.activeElement).toBe(byName(cards()[1], 'Edit question 2'));
   });
 
-  it('delete confirms; focus goes to the next card, then the previous, then + Add question', async () => {
+  it('#12: delete asks under the card\'s head; Cancel returns to the trash; Delete removes it and focus goes to the next card, then the previous, then + Add question', async () => {
     const s = new QuizServer([q({ id: 1 }), q({ id: 2 }), q({ id: 3 })]);
     await renderQuiz(s);
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     byName(cards()[1], 'Delete question 2')!.click();
     await settle();
-    expect(ask).toHaveBeenCalledWith('Delete question "Q2"? This cannot be undone.');
+    const ask = cardAsk(cards()[1])!;
+    expect(text(ask.querySelector('.warning'))).toBe('Delete question "Q2"? This cannot be undone.');
+    expect(ask.classList.contains('row')).toBe(true);
+    expect(ask.classList.contains('end')).toBe(true);   // D42: under a row, under its actions
+    expect(text(ask.querySelector('button.confirm'))).toBe('Delete');
+    expect(ask.querySelector('button.confirm')!.classList.contains('danger')).toBe(true);
+    expect(document.activeElement).toBe(ask.querySelector('button.cancel'));
+    ask.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(cardAsk(cards()[1])).toBeNull();
+    expect(document.activeElement).toBe(byName(cards()[1], 'Delete question 2'));
     expect(cards().length).toBe(3);
-    ask.mockReturnValue(true);
-    byName(cards()[1], 'Delete question 2')!.click();
-    await settle();
+    expect(s.writes()).toEqual([]);
+    await confirmDelete(1, 2);
     expect(cards().map((c) => c.dataset.qId)).toEqual(['1', '3']);
     expect(document.activeElement).toBe(byName(cards()[1], 'Edit question 2'));
-    byName(cards()[1], 'Delete question 2')!.click();
-    await settle();
+    await confirmDelete(1, 2);
     expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+    await confirmDelete(0, 1);
+    expect(document.activeElement).toBe(addQ());
+  });
+
+  it('#12 D39: another card\'s trash moves the question there, with focus on its Cancel', async () => {
+    await renderQuiz(new QuizServer([q({ id: 1 }), q({ id: 2 })]));
     byName(cards()[0], 'Delete question 1')!.click();
     await settle();
-    expect(document.activeElement).toBe(addQ());
+    expect(document.activeElement).toBe(cardAsk(cards()[0])!.querySelector('button.cancel'));
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    expect(cardAsk(cards()[0])).toBeNull();
+    expect(document.activeElement).toBe(cardAsk(cards()[1])!.querySelector('button.cancel'));
+    expect(panel().querySelectorAll('.inline-confirm').length).toBe(1);
+  });
+
+  it('#12: while the delete runs, focus is on the busy Delete; a failure keeps the card and returns to its trash', async () => {
+    const s = new QuizServer([q({ id: 1 }), q({ id: 2 })]);
+    const hold = s.hold('DELETE', /\/api\/questions\/2$/);
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    const ok = cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!;
+    expect(document.activeElement).toBe(ok);
+    expect(ok.getAttribute('aria-busy')).toBe('true');
+    hold.fail(500, 'Boom');
+    for (let i = 0; i < 3; i++) await settle();
+    expect(toastTexts()).toEqual(['Boom']);
+    expect(cardAsk(cards()[1])).toBeNull();
+    expect(cards().length).toBe(2);
+    expect(document.activeElement).toBe(byName(cards()[1], 'Delete question 2'));
+  });
+
+  it('#12 R57: focus moved away while the delete runs stays there', async () => {
+    const s = new QuizServer([q({ id: 1 }), q({ id: 2 })]);
+    const hold = s.hold('DELETE', /\/api\/questions\/2$/);
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    const elsewhere = byName(panel(), 'Edit title')!;
+    elsewhere.focus();
+    hold.release();
+    for (let i = 0; i < 3; i++) await settle();
+    expect(cards().map((c) => c.dataset.qId)).toEqual(['1']);
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   it('the per-quiz lock: during a move, other structure controls wait; the moving card\'s arrows do not', async () => {
@@ -344,6 +407,72 @@ describe('Moving and deleting questions (5d T8)', () => {
     hold.release();
     await settle();
     expect(s.writes().length).toBe(1);
+  });
+
+  it('#12 R49: Delete while another card moves withdraws; the trash is disabled, so focus goes to the card\'s ✎ (never <body>)', async () => {
+    const s = new QuizServer([q({ id: 1 }), q({ id: 2 }), q({ id: 3 })]);
+    s.hold('POST', /\/questions\/reorder$/);
+    await renderQuiz(s);
+    byName(cards()[0], 'Delete question 1')!.click();
+    await settle();
+    byName(cards()[1], 'Move question 2 down')!.click();
+    await settle();
+    expect(byName(cards()[0], 'Delete question 1')!.disabled).toBe(true);
+    cardAsk(cards()[0])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    await settle();
+    expect(cardAsk(cards()[0])).toBeNull();
+    expect(s.writes().filter((c) => c.method === 'DELETE')).toEqual([]);
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+  });
+
+  it('#12: Cancel while the trash is disabled (another card moves) returns focus to the card\'s ✎ (never <body>)', async () => {
+    const s = new QuizServer([q({ id: 1 }), q({ id: 2 }), q({ id: 3 })]);
+    s.hold('POST', /\/questions\/reorder$/);
+    await renderQuiz(s);
+    byName(cards()[0], 'Delete question 1')!.click();
+    await settle();
+    byName(cards()[1], 'Move question 2 down')!.click();
+    await settle();
+    const cancel = cardAsk(cards()[0])!.querySelector<HTMLButtonElement>('button.cancel')!;
+    cancel.focus();
+    cancel.click();
+    await settle();
+    expect(cardAsk(cards()[0])).toBeNull();
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+  });
+
+  it('#12 R49: the right to delete going while it asks withdraws the question; focus goes to the card\'s ✎', async () => {
+    const s = new QuizServer([q({ id: 1 }), q({ id: 2 })]);
+    const r = await renderQuiz(s);
+    byName(cards()[0], 'Delete question 1')!.click();
+    await settle();
+    expect(document.activeElement).toBe(cardAsk(cards()[0])!.querySelector('button.cancel'));
+    const published = mkVersion({ state: 'published' });
+    r.props.modal.version = published;
+    r.props.modal.perms = versionPermissions(published);
+    await settle();
+    expect(byName(cards()[0], 'Delete question 1')).toBeUndefined();
+    expect(cardAsk(cards()[0])).toBeNull();
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+    expect(s.writes()).toEqual([]);
+  });
+
+  it('#12: focus on the deleting card\'s own trash when the card goes moves to the next card (never <body>)', async () => {
+    const s = new QuizServer([q({ id: 1 }), q({ id: 2 }), q({ id: 3 })]);
+    const hold = s.hold('DELETE', /\/api\/questions\/2$/);
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    const own = byName(cards()[1], 'Delete question 2')!;
+    expect(own.disabled).toBe(false);
+    own.focus();
+    hold.release();
+    for (let i = 0; i < 3; i++) await settle();
+    expect(cards().map((c) => c.dataset.qId)).toEqual(['1', '3']);
+    expect(document.activeElement).toBe(byName(cards()[1], 'Edit question 2'));
   });
 
   it('the per-question lock: an answer write disables that question\'s move and delete', async () => {
@@ -378,6 +507,25 @@ describe('Moving and deleting questions (5d T8)', () => {
     await settle();
     expect(document.activeElement).toBe(f);
     expect(f.value).toBe('changed');
+    expect(s.writes()).toEqual([]);
+  });
+
+  it('#14 then #12: on Discard the delete question follows under the card\'s head; its Cancel returns to the trash', async () => {
+    const s = two();
+    await renderQuiz(s);
+    rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    typeInto(cards()[0].querySelector<HTMLInputElement>('input.inline-input')!, 'changed');
+    byName(cards()[0], 'Delete question 1')!.click();
+    await settle();
+    expect(cardAsk(cards()[0])).toBeNull();
+    cards()[0].querySelector<HTMLButtonElement>('.inline-row .inline-confirm button.confirm')!.click();
+    await settle();
+    expect(cards()[0].querySelector('input.inline-input')).toBeNull();
+    expect(document.activeElement).toBe(cardAsk(cards()[0])!.querySelector('button.cancel'));
+    cardAsk(cards()[0])!.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(document.activeElement).toBe(byName(cards()[0], 'Delete question 1'));
     expect(s.writes()).toEqual([]);
   });
 

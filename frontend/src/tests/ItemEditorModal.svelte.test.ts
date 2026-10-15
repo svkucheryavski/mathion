@@ -639,6 +639,14 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
   }
   const scriptBtn = (label: string) =>
     [...panel().querySelectorAll<HTMLButtonElement>('.script-row button')].find((b) => b.textContent!.trim() === label)!;
+  // #9: the remove question, in place of Replace / Remove.
+  const scriptAsk = () => panel().querySelector<HTMLElement>('.script-row .inline-confirm');
+  const uploadBtn = () => panel().querySelector<HTMLButtonElement>('.script-row [data-action="app-upload"]');
+  // §Focus past a frozen row: the modal's ×, or its panel while × is disabled (saving).
+  const modalOut = () => {
+    const x = panel().querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+    return x.disabled ? panel() : x;
+  };
   const uploadPosts = () => calls(/\/api\/versions\/1\/assets$/, 'POST');
   const serveUpload = (extra: (u: string, init?: RequestInit) => Promise<Response> | undefined = () => undefined) =>
     serve((u, init) => extra(u, init) ?? (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? jres(APP_ASSET) : undefined));
@@ -712,21 +720,135 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(calls(/\/api\/assets\/5$/, 'DELETE').length).toBe(0);
   });
 
-  it('Remove confirms first: Cancel sends nothing; OK unlinks, reloads and toasts', async () => {
+  it('#9: Remove asks in place of Replace / Remove; Cancel sends nothing and returns to Remove; Remove unlinks, reloads and toasts', async () => {
     serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
     scriptBtn('Remove').click();
     await settle();
-    expect(confirmSpy).toHaveBeenCalledWith('Remove the app script? Students will see an empty app.');
+    const ask = scriptAsk()!;
+    expect(ask.querySelector('.warning')!.textContent!.trim()).toBe('Remove the app script? Students will see an empty app.');
+    expect(ask.classList.contains('row')).toBe(true);
+    expect([...ask.querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Remove', 'Cancel']);
+    expect(ask.querySelector('button.confirm')!.classList.contains('danger')).toBe(true);
+    expect(scriptBtn('Replace')).toBeUndefined();
+    expect(document.activeElement).toBe(ask.querySelector('button.cancel'));
+    ask.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(scriptAsk()).toBeNull();
     expect(patchBodies()).toEqual([]);
-    confirmSpy.mockReturnValue(true);
+    expect(document.activeElement).toBe(scriptBtn('Remove'));
     scriptBtn('Remove').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
     await settle();
     await settle();
     expect(patchBodies()).toEqual([{ script_url: null }]);
     expect(calls(/\/admin-tree$/).length).toBe(1);
     expect(toastTexts()).toContain('App removed');
+    expect(scriptAsk()).toBeNull();
+    expect(document.activeElement).toBe(uploadBtn());
+  });
+
+  it('#9: while the remove runs, focus is on the busy Remove; a failure shows the error and returns to the first button', async () => {
+    let fail!: () => void;
+    serve((u, init) => {
+      if (u.includes('/assets/')) return Promise.resolve(resp("getElementById('app-root')"));
+      if (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH') {
+        return new Promise<Response>((r) => { fail = () => r(resp({ detail: 'Nope' }, 422)); });
+      }
+      return undefined;
+    });
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    const ok = scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!;
+    expect(document.activeElement).toBe(ok);
+    expect(ok.getAttribute('aria-busy')).toBe('true');
+    ok.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    flushSync();
+    expect(scriptAsk()).not.toBeNull();       // Esc is ignored while busy
+    fail();
+    await settle();
+    await settle();
+    expect(scriptAsk()).toBeNull();
+    expect(panel().querySelector('.field-err')!.textContent).toBe('Nope');
+    expect(document.activeElement).toBe(uploadBtn());   // "Replace": the script stayed
+    expect(uploadBtn()!.textContent!.trim()).toBe('Replace');
+  });
+
+  it('#9 R49: the script going while it asks (a tree reload) withdraws the question; focus goes to Upload', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    props.modal.item = mkItem({ type: 'interactive_app', script_url: null });
+    await settle();
+    expect(scriptAsk()).toBeNull();
+    expect(document.activeElement).toBe(uploadBtn());
+    expect(uploadBtn()!.textContent!.trim()).toBe('Upload');
+    expect(patchBodies()).toEqual([]);
+  });
+
+  it('#9 R49: the right to edit going while it asks withdraws the question for good; focus goes to × (never <body>)', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    expect(document.activeElement).toBe(scriptAsk()!.querySelector('button.cancel'));
+    const archived = mkVersion({ state: 'archived' });
+    props.modal.version = archived;
+    props.modal.perms = versionPermissions(archived);
+    await settle();
+    expect(scriptAsk()).toBeNull();
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+    const draft = mkVersion();
+    props.modal.version = draft;
+    props.modal.perms = versionPermissions(draft);
+    await settle();
+    expect(scriptAsk()).toBeNull();          // the stale question never comes back
+    expect(scriptBtn('Remove')).toBeDefined();
+    expect(patchBodies()).toEqual([]);
+  });
+
+  it('#9 R49: a footer Save freezing the row while it asks; Remove withdraws, focus never drops to <body>', async () => {
+    serve((u, init) => {
+      if (u.includes('/assets/')) return Promise.resolve(resp("getElementById('app-root')"));
+      if (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH') return new Promise<Response>(() => {});
+      return undefined;
+    });
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    type(titleInput(), 'App 2');
+    scriptBtn('Remove').click();
+    await settle();
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ title: 'App 2' }]);
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    expect(scriptAsk()).toBeNull();
+    expect(patchBodies()).toEqual([{ title: 'App 2' }]);   // the remove sent nothing
+    expect(document.activeElement).toBe(modalOut());
+  });
+
+  it('#9: Cancel while a footer Save freezes the row; focus never drops to <body>', async () => {
+    serve((u, init) => {
+      if (u.includes('/assets/')) return Promise.resolve(resp("getElementById('app-root')"));
+      if (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH') return new Promise<Response>(() => {});
+      return undefined;
+    });
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    type(titleInput(), 'App 2');
+    scriptBtn('Remove').click();
+    await settle();
+    footBtn('Save').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(scriptAsk()).toBeNull();
+    expect(scriptBtn('Remove').disabled).toBe(true);
+    expect(document.activeElement).toBe(modalOut());
   });
 
   it('the footer Save sends the title alone', async () => {

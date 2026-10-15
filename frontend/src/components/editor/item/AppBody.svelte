@@ -1,10 +1,13 @@
 <script lang="ts">
   // Interactive-app body (D4; no artboard, so it borrows 3e). Implements
   // ItemBodyApi (§2). The App script row acts immediately (files, not drafts);
-  // the footer Save sends only the title. Previews the stored app in the real
+  // its Remove asks in place of the row's buttons (Polish 1 #9). The footer
+  // Save sends only the title. Previews the stored app in the real
   // strict-sandboxed frame (fetch → inline). NEVER renders a stored filename as
   // a link (security §6/§9).
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
+  import AskSlot from '../../ui/AskSlot.svelte';
+  import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw, type Ask } from '../../../lib/askInPlace.svelte';
   import InteractiveFrame from '../../items/InteractiveFrame.svelte';
   import Button from '../../ui/Button.svelte';
   import { fetchAssetSource, uploadAsset, deleteAsset, type AssetResponse } from '../../../lib/assets';
@@ -25,7 +28,34 @@
   } = $props();
 
   let alive = true;
-  onDestroy(() => { alive = false; });
+  // #9: the remove asks in place of Replace / Remove (R48: only they freeze).
+  const removeAsk = new InPlaceAsk();
+  let askedFor: { id: number; vid: number } | null = null;
+  let rowEl = $state<HTMLElement>();
+  const rowBtn = (a: 'app-upload' | 'app-remove') => rowEl?.querySelector<HTMLElement>(`[data-action="${a}"]`) ?? null;
+  // §Focus: the first usable of `els`, else the modal's ×, else its panel (× is
+  // disabled while the modal saves) — never <body>.
+  const orModal = (...els: (Element | null)[]) => {
+    const panel = rowEl?.closest<HTMLElement>('section.modal-panel') ?? null;
+    return firstUsable(...els, panel?.querySelector('header.modal-head button[aria-label="Close"]')) ?? panel;
+  };
+  onDestroy(() => { alive = false; removeAsk.dismiss(); });
+  // R49: another item or version, the script gone (a tree reload) or the
+  // right to edit gone withdraws an idle question — for good, so it never
+  // comes back with the row; focus that was in it goes to Upload.
+  $effect(() => {
+    const id = item?.id;
+    const v = vid;
+    const has = !!item?.script_url;
+    const can = editable;
+    untrack(() => {
+      if (!removeAsk.open || removeAsk.busy || !askedFor) return;
+      if (id === askedFor.id && v === askedFor.vid && has && can) return;
+      const free = removeAsk.focusFree;
+      removeAsk.dismiss();
+      if (free) void focusAfter(() => orModal(rowBtn('app-upload')));
+    });
+  });
 
   let source = $state<string | null>(null);
   let status = $state<'empty' | 'loading' | 'ready' | 'error'>('empty');
@@ -114,10 +144,22 @@
   }
 
   async function removeApp() {
-    if (uploadBusy || frozen || !item) return;
-    if (!confirm('Remove the app script? Students will see an empty app.')) return;
+    if (uploadBusy || frozen || !item?.script_url) return;
     const itemId = item.id;
     const savedVid = vid;
+    const q: Ask = {
+      warning: 'Remove the app script? Students will see an empty app.',
+      confirmLabel: 'Remove', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-remove-app',
+    };
+    askedFor = { id: itemId, vid: savedVid };
+    const a = await removeAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => orModal(rowBtn('app-remove'), rowBtn('app-upload'))); return; }
+    if (a !== 'confirm') return;
+    // R49: re-checked after the question.
+    if (!alive || uploadBusy || frozen || item?.id !== itemId || vid !== savedVid || !item.script_url) {
+      withdraw(removeAsk, q, () => orModal(rowBtn('app-remove'), rowBtn('app-upload')));
+      return;
+    }
     uploadBusy = true;
     uploadError = null;
     try {
@@ -129,6 +171,9 @@
       if (alive) uploadError = err instanceof ApiError ? err.displayMessage : 'Remove failed.';
     } finally {
       if (alive) uploadBusy = false;
+      // R54: the question leaves once the request settles; then the first
+      // button — Upload, or Replace after a failure.
+      await settleTo(removeAsk, q, () => orModal(rowBtn('app-upload')));
     }
   }
 
@@ -153,7 +198,7 @@
 {#if item}
   <div class="field-row">
     <span class="field-label">App script</span>
-    <div class="script-row">
+    <div class="script-row" bind:this={rowEl}>
       <span class="mono script-name" class:none={!item.script_url}>{item.script_url ?? 'No script'}</span>
       {#if editable}
         <input
@@ -164,11 +209,15 @@
           disabled={uploadBusy || frozen}
           onchange={onFileChosen}
         />
-        <Button variant="secondary" disabled={uploadBusy || frozen} onclick={() => fileEl?.click()}>
-          {item.script_url ? 'Replace' : 'Upload'}
-        </Button>
-        {#if item.script_url}
-          <Button variant="ghost" disabled={uploadBusy || frozen} onclick={() => void removeApp()}>Remove</Button>
+        {#if removeAsk.open}
+          <AskSlot ask={removeAsk} />
+        {:else}
+          <Button variant="secondary" data-action="app-upload" disabled={uploadBusy || frozen} onclick={() => fileEl?.click()}>
+            {item.script_url ? 'Replace' : 'Upload'}
+          </Button>
+          {#if item.script_url}
+            <Button variant="ghost" data-action="app-remove" disabled={uploadBusy || frozen} onclick={() => void removeApp()}>Remove</Button>
+          {/if}
         {/if}
       {/if}
     </div>

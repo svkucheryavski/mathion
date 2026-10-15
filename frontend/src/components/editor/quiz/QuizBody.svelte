@@ -13,6 +13,7 @@
   import NewQuestionModal from './NewQuestionModal.svelte';
   import { ApiError } from '../../../lib/api';
   import { QuizEdits, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
+  import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw, type Ask } from '../../../lib/askInPlace.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import {
     listQuestions, createQuestion, deleteQuestion, reorderQuestions,
@@ -52,7 +53,11 @@
   // Still showing this version (spec §Stale responses: today's `alive && vid === savedVid`).
   const live = () => alive && stillOnVid(savedVid);
   let loadToken = 0;
-  onDestroy(() => { alive = false; loadToken++; });
+  // #12: one question for the cards, keyed by question id: another card's
+  // trash moves it there (D39). QuestionCard draws it under its head.
+  const cardAsk = new InPlaceAsk();
+  let askedIds: number[] = [];   // the list when it asked: the nearest card if its own goes
+  onDestroy(() => { alive = false; loadToken++; cardAsk.dismiss(); });
 
   let questions = $state<AuthoringQuestion[]>([]);
   let status = $state<'loading' | 'loaded' | 'error'>('loading');
@@ -135,6 +140,29 @@
     await tick();
     if (live()) fallbackTarget(qid)?.focus();
   }
+  // The nearest card still listed after `qid`, else before it, in `ids`' order.
+  function nearOf(qid: number, ids: number[]): number | null {
+    const i = ids.indexOf(qid);
+    const left = (id: number) => questions.some((x) => x.id === id);
+    return ids.slice(i + 1).find(left) ?? ids.slice(0, i).reverse().find(left) ?? null;
+  }
+  // R49: a card leaving the list (a resync, a 404) takes its question, busy or
+  // not — the card was its host; focus that was in it goes to the nearest card.
+  // The right to delete going (a 403/409 reload) takes an idle one; focus goes
+  // to the card's ✎.
+  $effect(() => {
+    const list = questions;
+    const can = perms.canEditStructure && !versionDisabled;
+    untrack(() => {
+      const k = cardAsk.current?.key;
+      if (typeof k !== 'number') return;
+      const here = list.some((x) => x.id === k);
+      if (here && (can || cardAsk.busy)) return;
+      const free = cardAsk.focusFree;
+      cardAsk.dismiss();
+      if (free) void focusFallback(here ? k : nearOf(k, askedIds));
+    });
+  });
 
   // ---- Add ----
   const addReason = $derived(
@@ -237,17 +265,32 @@
     }
   }
 
-  // ---- Delete: confirms (D14) ----
+  // ---- Delete: asks under the card's head (D14, #12) ----
   async function remove(qid: number) {
     if (quizLock || busyQuestions.has(qid) || !questions.some((x) => x.id === qid)) return;
-    if (!(await edits.requestStructure())) return;   // deletes follow their locks alone
-    // R49: re-checked, and the index recomputed, after the D10 question.
-    const idx = questions.findIndex((x) => x.id === qid);
+    if (!(await edits.requestStructure())) return;   // D10 first (#14); deletes follow their locks alone
+    let idx = questions.findIndex((x) => x.id === qid);
     if (quizLock || busyQuestions.has(qid) || !live() || idx < 0) return;
     // Inert parse (no image loads), so entities read as characters.
     const plain = new DOMParser().parseFromString(questions[idx]!.text_html, 'text/html').body.textContent ?? '';
     const title = plain.replace(/\s+/g, ' ').trim().slice(0, 80) || `Question ${idx + 1}`;
-    if (!window.confirm(`Delete question "${title}"? This cannot be undone.`)) return;
+    const trash = () => rootEl?.querySelector<HTMLElement>(`[data-q-id="${qid}"] .qhead button[data-glyph="trash"]`) ?? null;
+    // The trash, or the §Focus fallback while it is disabled or gone (never <body>).
+    const back = () => firstUsable(trash(), fallbackTarget(qid));
+    const q: Ask = {
+      key: qid, warning: `Delete question "${title}"? This cannot be undone.`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-question',
+    };
+    askedIds = questions.map((x) => x.id);
+    const a = await cardAsk.ask(q);                 // … then the delete question (#12)
+    if (a === 'cancel') { void focusAfter(back); return; }
+    if (a !== 'confirm') return;
+    // R49: re-checked, and the index recomputed, after the question.
+    idx = questions.findIndex((x) => x.id === qid);
+    if (quizLock || busyQuestions.has(qid) || !live() || idx < 0 || !perms.canEditStructure) {
+      withdraw(cardAsk, q, back);
+      return;
+    }
     const ids = questions.map((x) => x.id);
     quizLock = true;
     busyQuestions.add(qid);
@@ -255,22 +298,28 @@
     try {
       await edits.track(deleteQuestion(qid));
       if (!live()) return;
+      // R54: the card goes, and its question with it, so the question settles
+      // first; focus moves on only if it was in the question or on the card
+      // that goes (its trash stays enabled while it deletes) (R57).
+      const free = cardAsk.focusFree || !!rootEl?.querySelector(`[data-q-id="${qid}"]`)?.contains(document.activeElement);
+      if (cardAsk.current === q) cardAsk.settle();
       questions = questions.filter((x) => x.id !== qid);
       if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
-      void focusFallback(ids[idx + 1] ?? ids[idx - 1] ?? null);
+      if (free) void focusFallback(ids[idx + 1] ?? ids[idx - 1] ?? null);
     } catch (e) {
       pushToast(failed(e, qid), 'error');
       if (live()) {
         await resync();
         await tick();
-        // Gone already (deleted elsewhere): focus as after a delete, over the cards left.
-        const left = (id: number | undefined) => id !== undefined && questions.some((x) => x.id === id);
-        const near = ids.slice(idx + 1).find(left) ?? ids.slice(0, idx).reverse().find(left) ?? null;
-        if (live() && dropped()) fallbackTarget(questions.some((x) => x.id === qid) ? qid : near)?.focus();
+        // Gone already (deleted elsewhere): the R49 effect took the question and
+        // its focus. This repairs only a drop, over the cards left.
+        if (live() && dropped()) fallbackTarget(questions.some((x) => x.id === qid) ? qid : nearOf(qid, ids))?.focus();
       }
     } finally {
       busyQuestions.delete(qid);
       if (alive) { quizLock = false; deletingId = null; }
+      // A failure keeps the card: back to its trash once enabled (R54).
+      await settleTo(cardAsk, q, back);
     }
   }
 
@@ -329,6 +378,7 @@
           deleting={deletingId === q.id}
           autoAdd={autoAddId === q.id}
           onAutoAddDone={() => { autoAddId = null; }}
+          ask={cardAsk}
           onMove={(d) => void move(q.id, d)}
           onDelete={() => void remove(q.id)}
         />

@@ -6,6 +6,8 @@
   // ↔ "+ Add explanation"), else the §Focus fallback.
   import { getContext, onDestroy, tick } from 'svelte';
   import IconButton from '../../ui/IconButton.svelte';
+  import AskSlot from '../../ui/AskSlot.svelte';
+  import type { InPlaceAsk } from '../../../lib/askInPlace.svelte';
   import ChoiceAnswers from './ChoiceAnswers.svelte';
   import KeyAnswer from './KeyAnswer.svelte';
   import QuestionTextModal from './QuestionTextModal.svelte';
@@ -17,7 +19,7 @@
   import type { AuthoringOption, AuthoringQuestion } from '../../../lib/quizAuthoring';
 
   let {
-    q, n, count, moving = false, deleting = false, autoAdd = false, onAutoAddDone = () => {}, onMove, onDelete,
+    q, n, count, moving = false, deleting = false, autoAdd = false, onAutoAddDone = () => {}, ask = null, onMove, onDelete,
   }: {
     q: AuthoringQuestion; n: number; count: number;
     // This card's own move / delete is in flight: the control that started it
@@ -25,6 +27,8 @@
     moving?: boolean; deleting?: boolean;
     // A just-created choice question opens its "+ Add answer" row once loaded.
     autoAdd?: boolean; onAutoAddDone?: () => void;
+    // #12: QuizBody's one question for its cards; drawn here when it is about this card.
+    ask?: InPlaceAsk | null;
     onMove: (dir: -1 | 1) => void; onDelete: () => void;
   } = $props();
   const ctx = getContext<QuizCtx>(QUIZ_CTX);
@@ -97,6 +101,9 @@
       </span>
     </span>
   </div>
+  {#if ask && ask.current?.key === q.id}
+    <div class="qask"><AskSlot {ask} /></div>
+  {/if}
 
   <div class="qanswers">
     {#if choice}
@@ -154,5 +161,7 @@
   .qtext :global(p + p), .qexpl-body :global(p + p) { margin-top: 6px; }
   .qtext :global(img), .qexpl-body :global(img) { max-width: 100%; height: auto; }
   .qtext :global(:is(h1, h2, h3, h4, h5, h6)), .qexpl-body :global(:is(h1, h2, h3, h4, h5, h6)) { font-size: inherit; margin: 0; }
+  /* Under the head, on the answers' left edge. */
+  .qask { padding: 0 12px 8px 38px; }
   @media (max-width: 560px) { .qmeta { flex-basis: 100%; margin-left: 26px; } }
 </style>

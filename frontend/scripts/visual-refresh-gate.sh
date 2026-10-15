@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2193
+EXPECTED_CHECKS=2199
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5322,5 +5322,27 @@ if grep -qE '(^|[^.[:alnum:]_])confirm[[:space:]]*\(|(window|globalThis)\.confir
      src/lib/quizEdits.svelte.ts src/components/editor/quiz/KeyAnswer.svelte src/components/editor/quiz/ChoiceAnswers.svelte; then
   echo "FAIL  the quiz edit slot calls no confirm()"; fail=1
 else echo "PASS  the quiz edit slot calls no confirm()"; fi
+# Task 6 — the app script and quiz-question removals (#9, #12).
+own qask QuestionCard.svelte
+uniq1 qask
+if [[ -n $REPLY ]]; then
+  N=QuestionCard; H=$REPLY
+  # On the answers' left edge (.qanswers pads 38px), under the card's head.
+  d '\.qask' '' 'padding:0 12px 8px 38px'
+fi
+if grep -qF '<AskSlot ask={removeAsk} />' src/components/editor/item/AppBody.svelte \
+   && grep -qF 'data-action="app-upload"' src/components/editor/item/AppBody.svelte \
+   && grep -qF 'data-action="app-remove"' src/components/editor/item/AppBody.svelte; then
+  echo "PASS  AppBody's Remove asks in place of the row's buttons; its focus targets carry data-action (#9)"
+else echo "FAIL  AppBody's Remove asks in place of the row's buttons; its focus targets carry data-action (#9)"; fail=1; fi
+if grep -qF 'ask={cardAsk}' src/components/editor/quiz/QuizBody.svelte \
+   && grep -qF "confirmDataAction: 'confirm-delete-question'" src/components/editor/quiz/QuizBody.svelte \
+   && grep -qF '<div class="qask"><AskSlot {ask} /></div>' src/components/editor/quiz/QuestionCard.svelte; then
+  echo "PASS  a quiz question's delete asks under its card's head (#12)"
+else echo "FAIL  a quiz question's delete asks under its card's head (#12)"; fail=1; fi
+if grep -qE '(^|[^.[:alnum:]_])confirm[[:space:]]*\(|(window|globalThis)\.confirm' \
+     src/components/editor/item/AppBody.svelte src/components/editor/quiz/QuizBody.svelte; then
+  echo "FAIL  AppBody and QuizBody call no confirm()"; fail=1
+else echo "PASS  AppBody and QuizBody call no confirm()"; fi
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

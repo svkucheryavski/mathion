@@ -48,3 +48,11 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 - **ChoiceAnswers `mark`: the R53 check (`ctx.published && markAsk.open` → `focusCancel`) runs after the D10 question**: with the key question open for answer A and another answer's text edit dirty, clicking marker C asks D10 first; after Discard the mark only refocuses the open key question, so the draft went for an action that never runs. Fix: move the check above `request()`. (Opus lane)
 - **Uneven permission re-checks after the D10 await**: QuestionCard `open` (canText), ChoiceAnswers `move` / `remove` and QuizBody `move` / `remove` (canStruct) do not re-check perms; a 403/409 reload during the question lets the action go and the server rejects it (toast + resync, nothing lost). Add the checks for consistency with R49. (Opus lane)
 - **QuizBody `remove`: focus is on `<body>` after a D10 Discard** while the `window.confirm` shows; Task 6's in-place question should focus the trash first (P87). (Opus lane — feeds Task 6)
+
+## Task 6
+
+- **QuizBody `remove`: the post-question re-check never re-asks D10**: open the delete question on one card, then open and change an answer edit on another, then Delete — the delete runs with a dirty edit open elsewhere (the old synchronous `confirm()` could not interleave). Consider `edits.active?.dirty` in the re-check, or re-running `requestStructure()`. (Fable lane)
+- **AppBody R49 after a `vid` change** with the question idle focuses the *new* item's Upload / Replace — a different row than the one asked; acceptable. (Fable lane)
+- **Test gaps:** the QuizBody R49 effect with an idle question whose card leaves the list on a resync (only the busy 404 path is tested); AppBody R49 on a switch to another item or version (only "script gone" is tested); no test pins `.qask .inline-confirm` inside `li[data-q-id]` (the gate's grep does). (both lanes)
+- **QuizBody `fallbackTarget` queries × without `:not([disabled])`**, so `back` can return null when ✎, "+ Add question" and × are all disabled — reachable only during the item's own delete, when `.body-rest` is inert. (Fable lane, r2)
+- **AppBody `orModal` lands on the panel while × is disabled** (footer Save in flight); after the save focus stays on the panel rather than returning to Remove. Consistent with PageAsk's panel fallback. (Fable lane, r2)
