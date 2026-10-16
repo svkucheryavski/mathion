@@ -41,7 +41,9 @@
 <style>
   /* The slot only anchors the question; the host's layout places it. Inside a
      modal body its child stays a full-size flex item, as Modal's own are; in a
-     row (a bar, a footer, a field's row) it may shrink, so a long text wraps. */
+     row (a bar, a footer, a field's row) it may shrink, so a long text wraps.
+     D46: drawn directly in the body (the body-top row) it ends at the right,
+     under the header's buttons, as a footer's question does. */
   .ask-slot { display: contents; }
-  :global(.modal-body) > .ask-slot > :global(*) { flex: 0 0 auto; }
+  :global(.modal-body) > .ask-slot > :global(*) { flex: 0 0 auto; align-self: flex-end; }
 </style>

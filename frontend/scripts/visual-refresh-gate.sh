@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2218
+EXPECTED_CHECKS=2219
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5241,6 +5241,9 @@ if [[ -n $REPLY ]]; then
   # Full size only in the modal body's column; in a row (a bar, a footer, a
   # field's row) the question shrinks and its text wraps (whole-branch review).
   chk "\.modal-body>\.ask-slot\.${H}>\*" 'flex:0 0 auto'
+  # D46: a question drawn directly in the body (the body-top row) ends at the
+  # right, under the header's buttons, as a footer's does.
+  chk "\.modal-body>\.ask-slot\.${H}>\*" 'align-self:flex-end'
   none "AskSlot keeps no unscoped flex rule (a row host must let it wrap)" "[{},]\.ask-slot\.${H}>\*\{"
 fi
 # D45 (Task 9): the version bar's Disable and Enable are real state changes,

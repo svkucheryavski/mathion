@@ -142,6 +142,7 @@ The five inputs or conditions most likely to bite an author or a teacher that th
 | 7 — No pop-ups left | 2 | 2199 |
 | 8 — Secondary buttons (D44, added after Task 7) | 14 | 2215 |
 | 9 — The bar's Disable and Enable (D45, added in the Safari pass) | 2 | 2218 |
+| 10 — The body-top question at the right (D46, added in the Safari pass) | 1 | 2219 |
 
 Executed: D43 (Task 4) added 2 checks, so the real values are Task 4 2181, Task 5 2193, Task 6 2199, Task 7 2201 (ledger rulings); Task 8's 2215 already counts from 2201. The whole-branch review added 1 (AskSlot), so Task 9 starts at 2216.
 
@@ -8447,3 +8448,16 @@ Added in the Safari pass at the user's request (spec rev 14, D45). The gate is a
 - [ ] **Step 3: The change.** `variant="ghost"` → `variant="secondary"` on `data-action="version-disable"` and `data-action="version-enable"`.
 - [ ] **Step 4: Full checks.** vitest green, svelte-check 0 errors, gate ALL PASS 2218.
 - [ ] **Step 5:** the user's look in the Safari pass (step 1), both review lanes until clean, commit `feat(polish1): Disable and Enable on the version bar are secondary buttons (D45)`.
+
+### Task 10: A body-top question ends at the right (D46)
+
+Added in the Safari pass at the user's request (spec rev 15, D46). The gate is at **2218**.
+
+**Files:**
+- Modify: `frontend/src/components/ui/AskSlot.svelte` (the `.modal-body > .ask-slot > *` rule)
+- Modify: `frontend/scripts/visual-refresh-gate.sh` (one row in the AskSlot block; `EXPECTED_CHECKS`)
+
+- [ ] **Step 1: Failing gate row.** In the AskSlot block, after the `flex:0 0 auto` row: `chk "\.modal-body>\.ask-slot\.${H}>\*" 'align-self:flex-end'`; `EXPECTED_CHECKS=2219`. Expected: 1 FAIL. (CSS only: jsdom computes no layout, so the gate row is the test, as in Task 8.)
+- [ ] **Step 2: The change.** `:global(.modal-body) > .ask-slot > :global(*) { flex: 0 0 auto; align-self: flex-end; }`, with a D46 line in the comment above.
+- [ ] **Step 3: Full checks.** vitest green, svelte-check 0 errors, gate ALL PASS 2219.
+- [ ] **Step 4:** the user's look in the Safari pass (the quiz item modal's × with an unsaved inline edit, and the narrow window), both review lanes until clean, commit `feat(polish1): a body-top question ends at the right (D46)`.
