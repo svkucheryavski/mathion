@@ -92,6 +92,26 @@ One step at a time, every write mocked, no VoiceOver step.
 - **The page row:** Cancel brings you back where you were (keyboard); a toast does not cover it; the settings button is blocked while it asks; after a mouse click on a header, Cancel scrolls back.
 - **Clicks:** a double-click on a trigger whose question appears under the pointer (R50); a click on another row's trash moves the question (D39); a question opened by keyboard, then Enter on its confirm within 400 ms, acts at once (Safari's keyboard click must report `detail: 0`).
 
+## Safari pass (2026-10-15 – 2026-10-17): DONE
+
+Twenty-one steps, run one at a time. Every write was held or mocked by a console guard (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/probe/safari-p1-guard.js`): `__p1.conflicts` mocks run 8's publish 409, and `__p1.fail` (added for step 14) fails writes at once so an error toast shows. All steps OK. The user's changes along the way:
+
+- **D45 → Task 9 `8348d1d`:** the version bar's Disable and Enable are secondary Buttons ("But why disable does not look like button?").
+- **D46 → Task 10 `398a9eb`:** a question drawn directly in a modal body (the body-top row) is right-aligned, under the header's × and trash.
+- **D47 → Task 11 `1e3e873`:** a question scrolled into view keeps 16px of room (`scroll-margin-block`), so the dirty inline quiz edit's row shows whole.
+
+Checked:
+- **The look:** the bar at rest, hovered and pressed; ⌥Tab fill and ring; a mouse click shows no ring; the item modal's footer question, with Discard's red hover and ring; the danger panel and the unarmed Force delete label; the publish-conflicts modal opened by keyboard, with Close focused and filled; the player's Previous beside a filled Next.
+- **Narrow window (~700px):** the bar question, a body-top question and a footer question wrap, and their buttons stay on screen.
+- **Back with unsaved work:**
+  - the address bar shows the target while asking and is restored on Cancel;
+  - Back twice while asking gives one question;
+  - a link, then Back while asking;
+  - a dirty New question modal asks in its footer.
+- **The item modal and quiz edits:** × on a quiz item with a dirty inline answer edit asks in the body-top row, and × again gives still one question; another card's edit brings the D10 question into view at the dirty edit. Step 10 was first run against a question-text edit, which is a level-3 modal, so it was redone with an inline answer edit.
+- **The page row:** keyboard ⌘[ then Cancel brings focus and scroll back to the field; a mouse click on a header, then Cancel, scrolls back with no ring; the settings button says "Answer the question first" and stays shut; an error toast does not cover the row.
+- **Clicks:** a double-click on the bar's Delete leaves its question open (R50); another row's toggle moves the VersionsPage question (D39); a double Enter cancels at once (keyboard `detail: 0`).
+
 ## For the VoiceOver pass at beta
 
 - Each question group is named by its text ("Delete block "Vectors"? This cannot be undone., group") before its buttons; the key question reads its bold lead and the warning as one name (R52).
