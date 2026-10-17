@@ -1,6 +1,6 @@
 # Visual refresh — Polish 1: one confirm style
 
-**Status:** rev 15 (2026-10-16), approved at rev 10; rev 11 adds the user's D42, rev 12 the user's D43, rev 13 the user's D44 (Task 8), rev 14 the user's D45 (Task 9), rev 15 the user's D46 (Task 10).
+**Status:** rev 16 (2026-10-17), approved at rev 10; rev 11 adds the user's D42, rev 12 the user's D43, rev 13 the user's D44 (Task 8), rev 14 the user's D45 (Task 9), rev 15 the user's D46 (Task 10), rev 16 the user's D47 (Task 11).
 - Rev 2 folded in round 1 (Opus on the code, Opus on the design, Fable): the top-most host for the page question, a second navigation while a question is open, re-checks after every await, freezing, a focus table, the focus ring, disabled-state guards, AssetSidebar's busy confirm, the task order, the gate.
 - Rev 3 folds in round 2 (`.superpowers/sdd/2026-10-14-visual-refresh-polish1-confirms/spec-r2-*.md`) and the user's answers D39–D41:
   - one question per place, across the page question and a host's own question (R53);
@@ -48,6 +48,7 @@
 - Rev 13 adds D44 (the user, after Task 7): every secondary Button takes the confirm's primary-action look, as Task 8.
 - Rev 14 adds D45 (the user, in the Safari pass): the version bar's Disable and Enable become secondary Buttons, as Task 9.
 - Rev 15 adds D46 (the user, in the Safari pass): a modal's body-top question is right-aligned, as Task 10.
+- Rev 16 adds D47 (the user, in the Safari pass): a question scrolled into view keeps 16px of room around it, as Task 11.
 
 **Branch:** `feat/visual-refresh-polish1-confirms`, cut from the 6c tip (`7e02f70`). It stays local: no push, no merge.
 
@@ -95,6 +96,7 @@ The user's (2026-10-14), continuing the Slice-6 numbering:
 - **D44 — Secondary buttons look like the confirm's primary action.** Every `Button variant="secondary"`, on every screen (authoring, Teaching and the student screens: the player's Previous, "Show correct answers", the error pages' Back and Retry), is outlined in `--primary` with `--primary` text at rest and fills `--primary` with `--primary-text` on hover (pointer devices) and on keyboard focus, `--primary-press` while pressed, with the confirm buttons' focus ring. It keeps the page size (`--btn-pad`, 13px). Primary (filled), ghost, danger, IconButton and the hand-rolled buttons (pills, tabs) stay as they are. (User, after Task 7: "I like this idea. Can we use it for other buttons as well?"; scope "secondary only", fill steel blue, blue outline at rest, student screens included.)
 - **D45 — Disable and Enable on the version bar are secondary.** They are real state changes, like Archive and Revert, so `VersionEditPage`'s bar renders them as `Button variant="secondary"` (was `ghost`, 5a). The bar is then Publish primary; Archive, Revert, Disable, Enable secondary; Delete danger. Ghost stays everywhere else (the modal Cancels, Discard, Logout, Collapse all, and also AppBody's Remove and ChoiceAnswers' Retry, which are outside D45's bar-only scope). (User, Safari pass: "But why disable does not look like button?"; scope "bar only".)
 - **D46 — A body-top question ends at the right.** A question drawn directly in a modal body (the body-top row: every item modal's #19, the quiz title's D10 question, the page question when the modal has no footer, and the read-only Version settings modal's page question) is right-aligned, under the header's buttons (the × and the trash), as a footer's question is. AskSlot's `.modal-body > .ask-slot > *` rule adds `align-self: flex-end`; the question keeps its own width and wraps when the modal is narrow. (User, Safari pass: "It will be better if the warning and the buttons are also aligned by the right side"; scope "right, always" for the row.)
+- **D47 — A question scrolled into view keeps some room around it.** InlineConfirm's `.inline-confirm` carries `scroll-margin-block: 16px`, so its `scrollIntoView({ block: 'nearest' })` (on open with `takeFocus`, and `focusCancel()`) stops 16px short of the scroll edge. A taller field beside the question (an inline quiz edit's input, in its answer row) then shows whole. The page row keeps its own `scroll-margin-top: 4.5rem` (D38, more specific). (User, Safari pass: the row with the edited answer was about 10% hidden after the scroll; "I would scroll a bit further up, just a little".)
 
 ## Rulings
 
@@ -462,7 +464,7 @@ Texts are today's unless a column says otherwise. `unsavedSuffix()` stays where 
 
 ## Process
 
-Seven tasks (D41), Task 8 for D44, Task 9 for D45 and Task 10 for D46. Each one runs: TDD → full checks → screenshots → the user's OK → Opus + Fable reviews of the uncommitted diff until clean → commit → wait for "go".
+Seven tasks (D41), Task 8 for D44, Task 9 for D45, Task 10 for D46 and Task 11 for D47. Each one runs: TDD → full checks → screenshots → the user's OK → Opus + Fable reviews of the uncommitted diff until clean → commit → wait for "go".
 1. **The look.**
    - Tokens; InlineConfirm (tone, size, states, the required label, `message`, `layout`, `busy`, R50, button `aria-describedby`); DangerConfirm and its panel (D40); Button danger.
    - The existing confirms' tones and labels, and the two hand-rolled confirms.
@@ -480,6 +482,7 @@ Seven tasks (D41), Task 8 for D44, Task 9 for D45 and Task 10 for D46. Each one 
 8. **Secondary buttons (D44):** Button `.secondary` takes the primary action states. Screenshots: a secondary at rest, hovered and Tab-focused on the version bar, in a Teaching screen, in a modal footer and in the student player (Previous beside Next).
 9. **The bar's Disable and Enable (D45):** `variant="secondary"` in place of `ghost`; the three bar-variant tests and two gate rows. Checked in the Safari pass (its first step).
 10. **The body-top question at the right (D46):** AskSlot's modal-body rule gains `align-self: flex-end`; one gate row. Checked in the Safari pass.
+11. **Room around a scrolled question (D47):** `.inline-confirm` gains `scroll-margin-block: 16px`; one gate row. Checked in the Safari pass.
 
 Then a whole-branch review (fresh Opus + Fable) and a Safari pass, one step at a time.
 
@@ -561,6 +564,7 @@ By task (the plan's ladder sets `EXPECTED_CHECKS` per task):
 - **Task 8:** pins for Button `.secondary`: the rest colours; the hover rule alone under `@media (hover: hover)`; focus-visible and active fills; the focus ring; the `:not(:disabled)`, `:not(.blocked)`, `:not([aria-busy="true"])` guards on every state rule (no unguarded `.secondary` state rule).
 - **Task 9:** the version bar's Disable and Enable carry `variant="secondary"` (two rows, D45).
 - **Task 10:** AskSlot's `.modal-body > .ask-slot > *` rule carries `align-self: flex-end` (one row, D46).
+- **Task 11:** InlineConfirm's `.inline-confirm` carries `scroll-margin-block: 16px` (one row, D47).
 
 ## Carried to the Safari pass
 

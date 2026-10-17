@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2219
+EXPECTED_CHECKS=2220
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5177,6 +5177,9 @@ if [[ -n $REPLY ]]; then
   d '\.confirm\[aria-busy=true\]' '' 'cursor:progress'
   d '\.warning' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'overflow-wrap:anywhere'
   d '\.inline-confirm\.end' '' 'display:flex' 'justify-content:flex-end'
+  # D47: scrolled into view, the question keeps some room around it, so a taller
+  # field beside it (an inline quiz edit) and its row show whole.
+  d '\.inline-confirm' '' 'scroll-margin-block:16px'
   chk "@media \(pointer: ?coarse\)\{\.ic-btn\.${H}" 'min-height:28px'
   none "InlineConfirm fills only an enabled, idle button" "\.(danger|primary|cancel)\.${H}:(hover|focus-visible|active)"
   hover_only InlineConfirm $H

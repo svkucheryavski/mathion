@@ -97,7 +97,9 @@
 </div>
 
 <style>
-  .inline-confirm { display: inline-flex; flex-direction: column; gap: 4px; }
+  /* D47: scrolled into view (on open, focusCancel) it keeps some room around it,
+     so a taller field beside it (an inline quiz edit) and its row show whole. */
+  .inline-confirm { display: inline-flex; flex-direction: column; gap: 4px; scroll-margin-block: 16px; }
   .inline-confirm.row { flex-direction: row; align-items: center; gap: 12px; }
   /* D42: the question takes its whole line and ends under the row's actions. */
   .inline-confirm.end { display: flex; justify-content: flex-end; }
