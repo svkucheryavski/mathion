@@ -1,8 +1,9 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 3 (2026-10-18), in review.
+**Status:** rev 4 (2026-10-18), in review.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
-- Rev 3 folds in round 2 (`spec-r2-*.md`).
+- Rev 3 folded in round 2 (`spec-r2-*.md`).
+- Rev 4 folds in round 3 (`spec-r3-*.md`) and the user's decision D59.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -34,6 +35,7 @@ Polish 1 (confirms) is done. Polish 3 (triage of the reviewers' minors) follows.
 - the reviewers' minors from every slice;
 - the existing per-component forced-colors rules, the seven `:focus { outline: none }` heading rules and the hidden inputs' `box-shadow: none` rules. They stay, even where the new global rules make them redundant or no-ops;
 - focus not obscured in the Progress and Submissions grids (WCAG 2.4.11: a cell scrolled under the sticky columns or header);
+- three fields that carry `aria-invalid` but have no error border (the VersionEditPage and BlockAccordion create fields, the AccordionHeader title field);
 - internal links in authored content do a full page reload. There is no router link interception, so a mid-quiz click on an internal link still loses unsubmitted answers. Routing same-origin links through `navigate()` is the candidate fix.
 
 ## Decisions
@@ -61,6 +63,7 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - The scattered per-surface `:global` content rules go.
 - **D57 — Links in authored content are always underlined:** a thin underline at a 2px offset, in `--primary`. App chrome links do not change.
 - **D58 — External links in authored content open in a new tab** with `rel="noopener noreferrer"`, on every surface. Links inside Mathion stay in the tab.
+- **D59 — Links to Mathion's own files open in a new tab** (decided after round 3). These are same-origin `/assets/…` and `/api/…` links, such as a teacher's PDF, and they open like external links, so a student mid-quiz keeps unsubmitted answers. Links to Mathion pages (a course, a sequence) stay in the tab.
 - **D53 — The 404 page uses ErrorState, and its button names the place.**
   - The card reads "Page not found" with one line and one secondary button.
   - The button reads "Back to courses" or "Back to teaching", whichever is the person's start page. Signed out, it reads "Sign in".
@@ -78,7 +81,9 @@ Checked in `frontend/dist/_app/index-*.css` on the Polish 1 tip.
   - `.input` → `.input.svelte-h` is (0,2,0);
   - `.input.error` → (0,3,0);
   - `.x[aria-invalid='true']` → (0,3,0);
-  - `.create input` → `.create.svelte-h input:where(.svelte-h)` is (0,2,1).
+  - `.create input` → `.create.svelte-h input:where(.svelte-h)` is (0,2,1);
+  - a bare element rule, `textarea:focus-visible` → `textarea.svelte-h:focus-visible`, is (0,2,1).
+- **So a scoped override of the global field rule must be (0,3,0) or more**: a class plus `:focus-visible` (`.x:focus-visible` → `.x.svelte-h:focus-visible`), or a compound. At (0,2,1) it ties the field rule and loses, because the global rule comes later.
 
 ## Focus ring and reduced motion (Task 1)
 
@@ -103,15 +108,17 @@ Checked in `frontend/dist/_app/index-*.css` on the Polish 1 tip.
 - **The field rule** covers text entry only.
   - Native checkboxes, radios and the rest take the ring. Visible checkboxes that change: the DangerConfirm acknowledgement (`DangerConfirm.svelte:76`), the roster selection boxes (`RunRosterTab.svelte:781`, `:808`) and the assets boxes (`RunAssetsTab.svelte:731`, `:754`).
   - The hidden radios and checkboxes (quiz options, Login, the type pickers, the mini-project `.drop`) are `opacity: 0`. They draw their ring on the label, so nothing changes for them. Their `input:focus-visible { box-shadow: none }` rules become no-ops and stay (see Scope).
-  - Its specificity is (0,2,1). By the cascade facts above, it wins over every scoped field rule up to (0,2,1), including ties such as `VersionsPage`'s `.create input`. It loses to scoped rules of (0,3,0) and up: two classes, or a class plus an attribute. That covers the error states, `.input.error` (`Input.svelte:38`) and the `[aria-invalid='true']` rules, so their red border stays on focus.
+  - Its specificity is (0,2,1). By the cascade facts above, it wins over every scoped field rule up to (0,2,1), including ties such as `VersionsPage`'s `.create input`. It loses to scoped rules of (0,3,0) and up: two classes, or a class plus an attribute. That covers the error states, `.input.error` (`Input.svelte:38`) and the class-plus-`[aria-invalid='true']` rules, so their red border stays on focus.
+  - Three fields carry `aria-invalid` with no error border at all: the VersionEditPage and BlockAccordion create fields and the AccordionHeader title field. They turn blue on focus as any field does. This predates Polish 2; the audit notes it, and it goes to the Polish 3 list.
   - **Two error rules are single-class** and would turn blue on focus: `NewRunModal.svelte:229` `.nr-invalid` and `MiniProjectModal.svelte:752` `.mpm-invalid`. `MiniProjectModal.focusFirstError()` (`:303`) focuses exactly that field after a failed submit. Both become compound, `.nr-input.nr-invalid` and `.mpm-input.mpm-invalid` (0,3,0), with gate rows.
-- **The field audit.** Task 1 lists every field from dist: its class, its border rule, that rule's specificity, and whether the field turns blue on focus. A field needs its own scoped `:focus-visible { border-color: var(--primary); }`, placed before its error rules, only where a (0,3,0)+ rule sets its rest border. The table is expected to be mostly "no rule needed".
+- **The field audit.** Task 1 lists every field from dist: its class, its border rule, that rule's specificity, and whether the field turns blue on focus. A field needs its own scoped `.x:focus-visible { border-color: var(--primary); }` (at least (0,3,0), see Cascade facts), placed before its error rules, only where a (0,3,0)+ rule sets its rest border. The table is expected to be mostly "no rule needed".
   - The files with text fields: BlockAccordion (`input.add-input`), MarkdownEditor, MiniProjectModal, NewRunModal, RosterImportModal, RunProgressTab, RunRosterTab, RunSubmissionTab, RunTeachersTab (`.t-input`), `ui/Input`, VersionEditPage, VersionsPage, DashboardSidePanel, and the files whose fields already have their own focus rule (InlineInput, InlineName, KeyAnswer, NewQuestionModal, ItemEditorModal, NewItemModal, VersionSettingsModal, VideoBody).
   - AssetSidebar and AppBody have only file inputs.
-  - **MarkdownEditor.** Its textarea has `border: 0` and sits flush inside `.md-card { overflow: hidden }`. Three rules:
-    - **The card shows the focus:** `.md-card:has(textarea:focus-visible) { border-color: var(--primary); }`. It uses `:has()` rather than `:focus-within`, so a focused Write/Preview tab does not also turn the card blue.
-    - **The halo goes:** `textarea:focus-visible { box-shadow: none; }`. The halo would be clipped, and its top would paint over the tab bar.
-    - **High Contrast gets an inset outline:** `textarea:focus-visible { outline-offset: -2px; }`. In normal mode the outline is `none`, so this changes nothing there. In forced colors the global outline is drawn inside the clip, and the card's border colour is overridden.
+  - **MarkdownEditor.** Its textarea has no class, `border: 0`, and sits flush inside `.md-card { overflow: hidden }`. Two rules:
+    - **The card shows the focus:** `.md-card:has(textarea:focus-visible) { border-color: var(--primary); }` (0,3,1). It uses `:has()` rather than `:focus-within`, so a focused Write/Preview tab does not also turn the card blue.
+    - **The halo goes, and High Contrast gets an inset outline:** `.md-card textarea:focus-visible { box-shadow: none; outline-offset: -2px; }`. It compiles to (0,3,1), so it beats the field rule; a bare `textarea:focus-visible` would tie and lose.
+      - The halo would otherwise be clipped, and its top would paint over the tab bar.
+      - In normal mode the outline is `none`, so the offset changes nothing there. In forced colors the global outline is drawn inside the clip, where the card's border colour is overridden.
   - The audit flags any other text field that sits flush against an `overflow` clip, which gets the same `outline-offset: -2px`.
 - **Parking spots.** Script moves focus to `tabindex="-1"` targets after an action. These now show no ring in either mode. That matches the seven `:focus { outline: none }` heading rules that already do this on purpose: the six run-tab `h2:focus` rules (RunTeachersTab, RunOverviewTab ×2, RunGroupsTab, RunMiniProjectsTab, RunAssetsTab) and `RunListPage.svelte:216` `h1:focus`. The targets:
   - the VersionsPage `<h1>` (`VersionsPage.svelte:286`), the fallback after a confirm's Cancel or withdraw;
@@ -187,7 +194,7 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   - the Switch reduced-motion rule;
   - the `.sp-seg-opt` forced-colors rule;
   - each inset `outline-offset:-2px` rule;
-  - the MarkdownEditor's three rules;
+  - the MarkdownEditor's two rules;
   - the two compound error rules;
   - each field focus rule that the audit adds.
 - **`EXPECTED_CHECKS`** (`gate:91`) moves by the rows added.
@@ -344,7 +351,7 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   - No heading falls below 12px on any surface. That includes the 13px explanation and the 12.5px editor explanation, where h5 and h6 hit the floor.
   - On the compact scale h2 and h3 differ by less than 1px. h3 and h4 differ only in colour on both scales. That is the approved mock-up (`content-scale-mock.html`). Task 4 shows the user all six levels on a compact surface before approval.
 - **Muted surfaces.** Course info, version info and the editor explanation render their body in `--muted`.
-  - There a quote has the same colour as the body. Its bar (`--focus-line-strong`, 1.62:1 on the ground, 1.80:1 on white) is the cue.
+  - There a quote has the same colour as the body. Its bar (`--focus-line-strong`, about 1.6:1 on the ground and 1.8:1 on white) and its 15px indent are the cues. The bar is decorative, not a 1.4.11 graphic: the indent alone already marks the quote.
   - h5 and h6 have the same colour as the body and keep their weight.
   - h4 (`--text-3`) is darker than the body, as a heading should be.
 - **Code in a `--surface-2` panel** (the explanation `.exp`, the editor `.qexpl`): the fill matches the panel, and the hairline draws the box. In forced colors the hairline goes, and the mono font remains.
@@ -373,29 +380,33 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
 
 ### External links (D58)
 - **One attachment.** `frontend/src/lib/externalLinks.ts` exports `externalLinks(html: string)`, an attachment factory like today's `newTabLinks`. Passing the HTML makes the attachment run again when the content changes.
-- **The test is by origin, not by prefix:**
+- **The test is by origin, not by prefix, plus Mathion's file paths (D59):**
   ```ts
   const u = new URL(href, document.baseURI);
-  const external = (u.protocol === 'http:' || u.protocol === 'https:') && u.origin !== location.origin;
+  const web = u.protocol === 'http:' || u.protocol === 'https:';
+  const external = web && u.origin !== location.origin;
+  const file = web && u.origin === location.origin && /^\/(assets|api)\//.test(u.pathname);
+  const newTab = external || file;
   ```
-  - An external link gets `target="_blank"` and `rel="noopener noreferrer"`.
+  - A new-tab link gets `target="_blank"` and `rel="noopener noreferrer"`. That covers external links (D58) and Mathion's own files (D59): course assets at `/assets/{version_id}/…` (the renderer's rewrite, `markdown.py:85-86`) and run assets at `/api/runs/{id}/assets/…`.
   - Everything else is left alone and stays in the tab (D58):
-    - an absolute URL to Mathion itself, which a teacher may paste from the address bar and D54 now links;
-    - relative paths and `/api/...` assets;
+    - a Mathion page, relative or absolute (a teacher may paste one from the address bar, and D54 now links it);
     - `#…`, `mailto:` and `tel:`.
   - The `URL` parser lowercases the scheme, so `HTTPS://X.ORG` (the renderer keeps scheme case) is caught. A `//host` href resolves to the page's scheme and takes the same test. An href that fails to parse is left alone.
   - The backend sanitiser already adds `rel`; the attachment sets it again as defence in depth, as `rewriteExternalLinks` does today.
 - **Where it goes:** every authored-content surface in the table, in the same task and edit that adds the surface's class. That way the markup scanner's rows for each surface change once.
 - **What it replaces:**
   - `lib/newTabLinks.ts`. Today it sets `target` on every link in QuestionCard, internal ones too. Internal links in the editor now stay in the tab, where DirtyGuard covers unsaved work.
-  - `rewriteExternalLinks` in `lib/studentMiniProjects.ts:137`, with its `$effect`, `assignmentEl` and `bind:this` in MiniProjectDetailPage (`:46`, `:183-190`, `:505`). Nothing else uses them. `data-testid` stays. The F8/L1/M7 trust comment moves to `externalLinks.ts`.
-  - The tests move to `externalLinks`: `studentMiniProjects.test.ts:234-257`, `MiniProjectDetailPage.svelte.test.ts:669`, `:680-700`, `QuizOverview.svelte.test.ts:106` and `QuizModals.svelte.test.ts:45`. The D6.12 re-render test (`:680-700`) keeps running against the attachment; it is the only test that shows the rewrite follows a content change.
+  - `rewriteExternalLinks` in `lib/studentMiniProjects.ts:137`, with its `$effect`, `assignmentEl` and `bind:this` in MiniProjectDetailPage (`:46`, `:183-190`, `:505`). Nothing else uses them. `data-testid` stays. The F8/L1/M7 trust comment moves to `externalLinks.ts`, and the header comment at `studentMiniProjects.ts:8` is updated.
+  - The tests move to `externalLinks`: `studentMiniProjects.test.ts:233-288` (and its import at `:6`), `MiniProjectDetailPage.svelte.test.ts:669`, `:680-700` (and the comment at `:961`), `QuizOverview.svelte.test.ts:106` and `QuizModals.svelte.test.ts:45`. The D6.12 re-render test (`:680-700`) keeps running against the attachment; it is the only test that shows the rewrite follows a content change.
 - **Why on student surfaces.** Quiz answers are in-memory `$state` (`QuizItem.svelte:16`). A student who follows an external link in a prompt mid-quiz would lose unsubmitted answers if the link replaced the tab. Internal links still reload the page (see Scope).
 - **Tests:**
-  - unit tests: `https://` and `http://` to another origin, `HTTPS://`, `//host`, a same-origin absolute URL, relative, `/api/...`, `#`, `mailto:`, `tel:`, an unparseable href;
-  - one test per surface that an external link gets `target="_blank"` and a same-origin one does not.
+  - unit tests. New tab: `https://` and `http://` to another origin, `HTTPS://`, `//host`, `/assets/12/notes.pdf`, `/api/runs/3/assets/data.csv`, and the same two as same-origin absolute URLs. Same tab: a same-origin absolute page URL, a relative page path (`/courses/x`), `#…`, `mailto:`, `tel:`, an unparseable href;
+  - same-origin hrefs in tests are built from `location.origin` (jsdom's is `http://localhost:3000`), never a hard-coded host;
+  - one test per surface that an external link gets `target="_blank"` and a same-origin page link does not.
 - **The markup scanner.** It is fail-closed on attribute types (`gate:1408`, `:1895`), and its header says `{@attach}` reds on purpose (`gate:1216-1218`). Six of the surfaces are in its set: PageItem, QuizItem, and the four question components (`gate:1360-1402`).
-  - Those six files get a per-file `attachOn` carve-out, in the manner of the existing `hiddenOn` and `styleOn` (for example `attachOn: { "div:content": "{@attach externalLinks(item.content_html)}" }`). It is pinned to the exact source and required exactly once. `AttachTag` is allowed only where `attachOn` names it.
+  - Those six files get a per-file `attachOn` carve-out, in the manner of the existing `hiddenOn` and `styleOn`. It is keyed by the element's signature with its new class (for example `attachOn: { "div:content.prose": "{@attach externalLinks(item.content_html)}" }`; `div:exp.prose.compact`, `div:text.prose.compact`), pinned to the exact source, and required exactly once.
+  - The scanner gets an `AttachTag` branch before the attribute-type check (`gate:1895`) and a `seenAttach` counter. `AttachTag` is allowed only where `attachOn` names it.
   - A negative test shows that any other attachment, or the same one on another element, still reds.
   - QuestionCard, CourseView, VersionEditPage, MarkdownEditor and MiniProjectDetailPage are not scanned. Their class and attachment are pinned by jsdom tests and `d` rows.
 
@@ -432,8 +443,10 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   - the moved container typography (`.content` line-height, `.assignment-html` metrics);
   - the preview's three variants;
   - a `none` row that no `.svelte` file outside the content surfaces renders the class `prose`;
-  - a `none` row that no file but `externalLinks.ts` and its tests mentions `newTabLinks` or `rewriteExternalLinks`;
+  - a `none` row, over `frontend/src` and `frontend/scripts`, that nothing mentions `newTabLinks` or `rewriteExternalLinks` any more (the docs keep their history);
+  - the loose-list rule `.prose :where(ul,ol):has(>li>p)>li+li` (0,1,4), pinned with a Task 3 screenshot;
   - a `none` row, limited to the content-surface files, that no rule re-declares a content element. Its payload is anchored on exactly `:global\((p|ul|ol|li|code|pre|blockquote|hr|h[1-6])\)`, so `pre:focus-visible` and the confirms' `:global(code)` do not match.
+- **The Slice-5d emoji scan** (`gate:4526-4527`) names `src/lib/newTabLinks.ts`. Opening a missing file fails the check, so the entry becomes `src/lib/externalLinks.ts` in Task 4, when `newTabLinks.ts` is deleted.
 - **`EXPECTED_CHECKS`** moves by the net count.
 
 ## The 404 page (Task 5)
@@ -517,7 +530,7 @@ Each task deletes or closes the notes it resolves:
 - Task 4: the `.vinfo` bullet in `slice5c-constructor-polish-debt.md:66`;
 - Task 6: `bare-urls-not-autolinked-in-markdown.md` and `stored-content-html-not-rerendered-after-renderer-change.md`. The second notes that stored HTML picks up the renderer on the next save, publish or clone.
 
-Task 1 also adds the new Polish 3 items from Scope to the Polish 3 list: 2.4.11 in the grids, internal-link reloads, and the no-op rules.
+Task 1 also adds the new Polish 3 items from Scope to the Polish 3 list: 2.4.11 in the grids, the three `aria-invalid` fields without an error border, internal-link reloads, and the no-op rules.
 
 ## Process
 
@@ -579,7 +592,8 @@ Then a whole-branch review (fresh Opus and Fable), and a Safari pass, one step a
 - **External links:**
   - a link in a quiz prompt mid-quiz opens in a new tab, and the answers stay;
   - a link in the editor preview opens in a new tab;
-  - a link pasted from Mathion's own address bar stays in the tab.
+  - a link pasted from Mathion's own address bar stays in the tab;
+  - a linked course file (a PDF) in a quiz prompt opens in a new tab, and the answers stay (D59).
 - **404:** a typed bad URL, signed in and signed out, and a nested one (`/courses/x/y/z`).
 - **Bare URLs:** a page body with a pasted URL, after a save. The link opens in a new tab; a URL inside code and a `www.` address stay plain.
 
