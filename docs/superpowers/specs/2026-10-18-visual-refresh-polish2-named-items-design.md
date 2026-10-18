@@ -1,9 +1,10 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 4 (2026-10-18), in review.
+**Status:** rev 5 (2026-10-18), in review.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
-- Rev 4 folds in round 3 (`spec-r3-*.md`) and the user's decision D59.
+- Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
+- Rev 5 folds in the round-4 minors (`spec-r4-*.md`; no Critical or Important findings in round 4).
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -397,8 +398,9 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
 - **Where it goes:** every authored-content surface in the table, in the same task and edit that adds the surface's class. That way the markup scanner's rows for each surface change once.
 - **What it replaces:**
   - `lib/newTabLinks.ts`. Today it sets `target` on every link in QuestionCard, internal ones too. Internal links in the editor now stay in the tab, where DirtyGuard covers unsaved work.
-  - `rewriteExternalLinks` in `lib/studentMiniProjects.ts:137`, with its `$effect`, `assignmentEl` and `bind:this` in MiniProjectDetailPage (`:46`, `:183-190`, `:505`). Nothing else uses them. `data-testid` stays. The F8/L1/M7 trust comment moves to `externalLinks.ts`, and the header comment at `studentMiniProjects.ts:8` is updated.
-  - The tests move to `externalLinks`: `studentMiniProjects.test.ts:233-288` (and its import at `:6`), `MiniProjectDetailPage.svelte.test.ts:669`, `:680-700` (and the comment at `:961`), `QuizOverview.svelte.test.ts:106` and `QuizModals.svelte.test.ts:45`. The D6.12 re-render test (`:680-700`) keeps running against the attachment; it is the only test that shows the rewrite follows a content change.
+  - `rewriteExternalLinks` in `lib/studentMiniProjects.ts:137`, with its `$effect`, `assignmentEl` and `bind:this` in MiniProjectDetailPage (`:46`, `:183-190`, `:505`). Nothing else uses them. `data-testid` stays. The F8/L1/M7 trust comment (`studentMiniProjects.ts:130-136`) moves to `externalLinks.ts`, reworded for D59: it says same-origin asset URLs are untouched, and now they open in a new tab. The header comment at `studentMiniProjects.ts:8` is updated.
+  - The tests move to `externalLinks`: `studentMiniProjects.test.ts:233-287` (and its import at `:6`), `MiniProjectDetailPage.svelte.test.ts:669`, `:680-700` (and the comment at `:961`), `QuizOverview.svelte.test.ts:106` and `QuizModals.svelte.test.ts:45`. The D6.12 re-render test (`:680-700`) keeps running against the attachment; it is the only test that shows the rewrite follows a content change.
+  - **Two assertions reverse under D59:** `MiniProjectDetailPage.svelte.test.ts:672-674` (D6.11: a `/api/runs/1/assets/x.png` link has no `target`) and `studentMiniProjects.test.ts:261-268` ("leaves /api/runs/... same-origin asset links unchanged"). Both now expect `target="_blank"`, and the titles change with them.
 - **Why on student surfaces.** Quiz answers are in-memory `$state` (`QuizItem.svelte:16`). A student who follows an external link in a prompt mid-quiz would lose unsubmitted answers if the link replaced the tab. Internal links still reload the page (see Scope).
 - **Tests:**
   - unit tests. New tab: `https://` and `http://` to another origin, `HTTPS://`, `//host`, `/assets/12/notes.pdf`, `/api/runs/3/assets/data.csv`, and the same two as same-origin absolute URLs. Same tab: a same-origin absolute page URL, a relative page path (`/courses/x`), `#…`, `mailto:`, `tel:`, an unparseable href;
@@ -442,10 +444,11 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   - one per surface, pinning its class (`prose` or `prose compact`);
   - the moved container typography (`.content` line-height, `.assignment-html` metrics);
   - the preview's three variants;
-  - a `none` row that no `.svelte` file outside the content surfaces renders the class `prose`;
-  - a `none` row, over `frontend/src` and `frontend/scripts`, that nothing mentions `newTabLinks` or `rewriteExternalLinks` any more (the docs keep their history);
   - the loose-list rule `.prose :where(ul,ol):has(>li>p)>li+li` (0,1,4), pinned with a Task 3 screenshot;
-  - a `none` row, limited to the content-surface files, that no rule re-declares a content element. Its payload is anchored on exactly `:global\((p|ul|ol|li|code|pre|blockquote|hr|h[1-6])\)`, so `pre:focus-visible` and the confirms' `:global(code)` do not match.
+  - three **source checks**. The gate's `none()` helper (`gate:147`) greps only the CSS bundle, so these are custom source greps in the style of `gate:4529-4536`:
+    - no `.svelte` file outside the content surfaces renders the class `prose`;
+    - nothing under `frontend/src` mentions `newTabLinks` or `rewriteExternalLinks` any more. The check is limited to `src`, so it does not match its own pattern in the gate script, and the docs keep their history;
+    - limited to the content-surface files, no rule re-declares a content element. Its payload is anchored on exactly `:global\((p|ul|ol|li|code|pre|blockquote|hr|h[1-6])\)`, so `pre:focus-visible` and the confirms' `:global(code)` do not match.
 - **The Slice-5d emoji scan** (`gate:4526-4527`) names `src/lib/newTabLinks.ts`. Opening a missing file fails the check, so the entry becomes `src/lib/externalLinks.ts` in Task 4, when `newTabLinks.ts` is deleted.
 - **`EXPECTED_CHECKS`** moves by the net count.
 
