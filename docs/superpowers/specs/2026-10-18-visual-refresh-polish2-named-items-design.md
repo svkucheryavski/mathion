@@ -25,7 +25,7 @@ Polish 1 (confirms) is done. Polish 3 (triage of the reviewers' minors) follows.
 **In:**
 - the focus ring and reduced motion (D48, D49);
 - the page ground and the reading sheets (D50, D56);
-- authored content at two scales, with its links (D51, D52, D57, D58);
+- authored content at two scales, with its links (D51, D52, D57, D58, D59);
 - the 404 page (D53);
 - bare URLs linkified (D54, D55).
 
