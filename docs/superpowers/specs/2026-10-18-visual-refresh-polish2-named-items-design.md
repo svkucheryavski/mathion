@@ -1,8 +1,8 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 1 (2026-10-18), in review.
+**Status:** rev 2 (2026-10-18), in review. Rev 2 folds in spec review round 1 (Opus code, Opus design, Fable) and the user's decisions D56–D58 and the D54 amendment.
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
-**Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`).
+**Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the round-1 reviews `spec-r1-*.md`).
 
 ## Goal
 
@@ -10,7 +10,7 @@ Earlier slices deferred six named items "to the end". Polish 2 closes them:
 - a keyboard focus ring people can see, also in High Contrast;
 - reduced motion;
 - a page ground that reads as depth;
-- one style for the content teachers write;
+- one style for the content teachers write, with links that look like links and open safely;
 - a styled 404 page;
 - clickable bare URLs.
 
@@ -20,8 +20,9 @@ Polish 1 (confirms) is done. Polish 3 (triage of the reviewers' minors) follows.
 
 **In:**
 - the focus ring and reduced motion (D48, D49);
-- the page ground (D50);
-- authored content at two scales (D51, D52);
+- the page ground and the reading sheets (D50, D56);
+- authored content at two scales (D51, D52, D57);
+- external links in authored content (D58);
 - the 404 page (D53);
 - bare URLs linkified (D54, D55).
 
@@ -29,16 +30,17 @@ Polish 1 (confirms) is done. Polish 3 (triage of the reviewers' minors) follows.
 - the error banners' `--status-rejected-*` pinks beside the danger panel;
 - the VersionsPage create form's silent discard on Cancel and links;
 - the reviewers' minors from every slice;
-- the existing per-component forced-colors rules, which stay even where the new global rule makes them redundant.
+- the existing per-component forced-colors rules and `h2:focus { outline: none }` suppressions, which stay even where the new global rules make them redundant;
+- focus not obscured in the Progress and Submissions grids (WCAG 2.4.11: a cell scrolled under the sticky columns or header). Task 1 adds it to the Polish 3 list in `docs/backlog/polish1-confirms-debt.md`.
 
 ## Decisions
 
 All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18.
 
 - **D48 — Focus ring: a ring on controls, and fields keep theirs.**
-  - Buttons, links, icon buttons, cards, accordion headers and the strip icons show `outline: 2px solid var(--primary); outline-offset: 2px`. This is the Polish 1 confirm ring.
-  - Text fields (`input`, `textarea`, `select`) keep today's look: a `--primary` border with the soft halo.
-  - In High Contrast (`forced-colors: active`) every `:focus-visible` gets an outline.
+  - Buttons, links, icon buttons, checkboxes, cards, accordion headers and the strip icons show `outline: 2px solid var(--primary); outline-offset: 2px`. This is the Polish 1 confirm ring.
+  - Text fields (text-entry `input`, `textarea`, `select`) keep today's intended look: a `--primary` border with the soft halo.
+  - In High Contrast (`forced-colors: active`) every focusable control gets an outline.
   - This is a deliberate departure from the design handoff (`docs/design/visual-refresh/base.css:132`), whose halo measures 1.16:1 against `--surface`.
 - **D49 — Reduced motion: the knob jumps and the spinners keep turning.**
   - Under `prefers-reduced-motion: reduce`, the Switch knob moves without its 0.12s slide.
@@ -46,177 +48,339 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
 - **D50 — The page ground is a clear tint, `#F2F3F6`.** The user chose it from a three-way mock-up (`page-ground-mock.html`).
   - Every page shares the editor's existing `--focus-page` shade.
   - White cards and the white header read as steps above it.
-  - Whether the student player's reading column needs a white sheet is checked in the Safari pass (user: "check it in the browser pass").
+- **D56 — A white sheet behind reading content.** The player's content area (page content, quiz, video, app) and the mini-project page sit on a white card, so their grey tints read as before on the new ground.
 - **D51 — One shared style for authored content, on every surface.**
   - It applies wherever teachers write markdown: page content, quiz prompts, explanations, course and version info, mini-project assignments, and the editor's preview and question cards.
   - Smaller surfaces use a compact scale.
 - **D52 — The build is one global stylesheet plus a class.**
-  - `styles/content.css` defines `.md` (the page scale) and `.md.compact`.
+  - `styles/content.css` defines `.prose` (the page scale) and `.prose.compact`. (Rev 1 said `.md`; that name is IconButton's default size class, so rev 2 renames it.)
   - Each surface keeps its own element, binding and attachments, and adds the class.
   - The scattered per-surface `:global` content rules go.
+- **D57 — Links in authored content are always underlined:** a thin underline at a 2px offset, in `--primary`. App chrome links do not change.
+- **D58 — External links in authored content open in a new tab** with `rel="noopener noreferrer"`, on every surface. Links inside Mathion stay in the tab.
 - **D53 — The 404 page uses ErrorState, and its button names the place.**
   - The card reads "Page not found" with one line and one secondary button.
   - The button reads "Back to courses" or "Back to teaching", whichever is the person's start page. Signed out, it reads "Sign in".
-- **D54 — Linkify only full URLs.**
-  - Text starting with `http://` or `https://` becomes a link, and so does `www.` (see §Bare URLs).
-  - Bare domains (`example.org`), file-like names (`numpy.py`) and e-mail addresses stay plain text.
+- **D54 — Linkify only full URLs (amended after round 1):** only text starting with `http://` or `https://` becomes a link.
+  - `www.` addresses, bare domains (`example.org`), file-like names (`numpy.py`), e-mail addresses, `ftp:` and `//` addresses all stay plain text.
 - **D55 — Stored HTML changes only on the next save.**
   - Existing content gets links when it is next edited, published or cloned.
   - There is no backfill or migration, because no real courses exist yet (pre-beta).
 
 ## Focus ring and reduced motion (Task 1)
 
-### The global rule
+### The global rules
 - **Today.** `base.css:22-26` is the only focus indicator for most controls: `:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }`.
-  - The ring (`#EAEFF4`) measures 1.16:1 against `--surface`.
+  - The halo (`#EAEFF4`) measures 1.16:1 against `--surface`.
   - Forced-colors mode drops `box-shadow` and keeps `outline: none`, so these controls show no indicator at all (backlog `global-focus-ring-invisible-in-forced-colors.md`).
 - **New rules.** In `base.css` they replace the old one, in this order:
   ```css
   :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-  :is(input, textarea, select):focus-visible {
+  :is(input:not([type=checkbox], [type=radio], [type=file], [type=range], [type=color], [type=button], [type=submit], [type=reset]), textarea, select):focus-visible {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-soft);
   }
+  /* Focus parking spots: headings and panels that script focuses after an action. */
+  [tabindex="-1"]:focus-visible { outline: none; }
   @media (forced-colors: active) {
-    :focus-visible { outline: 2px solid Highlight !important; }
+    :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
   }
   ```
-- **Why `!important`.** About 18 components set `outline: none` in their own scoped `:focus-visible` rules: the inline inputs, the run tabs' fields, the modal inputs and others. A scoped rule beats a global one, so without `!important` those controls would stay invisible in High Contrast.
+- **The field rule** covers text entry only.
+  - Native checkboxes, radios and the rest take the ring. Visible checkboxes that change: the DangerConfirm acknowledgement (`DangerConfirm.svelte:76`), the roster selection boxes (`RunRosterTab.svelte:781`, `:808`) and the assets boxes (`RunAssetsTab.svelte:731`, `:754`).
+  - The hidden radios and checkboxes (quiz options, Login, the type pickers, the mini-project `.drop`) are `opacity: 0`. They draw their ring on the label, so nothing changes for them.
+  - Its specificity is (0,2,1). It beats a single-class scoped rule (0,2,0), such as `Input.svelte`'s `.input { border }`, and loses to compound scoped rules (0,3,0 and up), such as `VersionsPage`'s `.create input` and every error state (`.input.error`, `[aria-invalid]`). So error borders stay red on focus.
+- **The field audit.** Today most fields never turn blue on focus, because their scoped border rule beats the global (0,1,0) rule. Task 1 audits every field and, where a compound scoped rule sets the border, adds a scoped `:focus-visible { border-color: var(--primary); }` to that field, placed before its error rules.
+  - Files with fields and no focus rule: AccordionHeader, AssetSidebar, AppBody, MarkdownEditor, MiniProjectModal, NewRunModal, RosterImportModal, RunProgressTab, RunRosterTab, RunSubmissionTab, `ui/Input`, VersionEditPage, VersionsPage.
+  - Files whose one focus rule is not on a field: BlockAccordion, DashboardSidePanel, RunAssetsTab, RunTeachersTab.
+  - The audit's result is a table in the plan: each field class, its border rule, and whether it needs a rule.
+  - **MarkdownEditor.** Its textarea has `border: 0` and sits flush inside `.md-card { overflow: hidden }`, so the halo is clipped. The card shows the focus instead: `.md-card:has(textarea:focus-visible) { border-color: var(--primary); }`. It uses `:has()` rather than `:focus-within`, so a focused Write/Preview tab does not also turn the card blue.
+- **Parking spots.** Script moves focus to `tabindex="-1"` targets after an action. These now show no ring in either mode, which matches the six run-tab `h2:focus { outline: none }` rules that already do this on purpose:
+  - the VersionsPage `<h1>` (`VersionsPage.svelte:286`), the fallback after a confirm's Cancel or withdraw;
+  - the side panel's title and Evaluation heading (`DashboardSidePanel.svelte:689`, `:714`);
+  - the modal panel (`Modal.svelte:157`), the last-resort target when nothing inside is tabbable;
+  - the run-tab headings (RunTeachersTab, RunGroupsTab, RunMiniProjectsTab, RunAssetsTab, RunOverviewTab, RunListPage).
+- **Why `!important` in forced colors.** Eight components set `outline: none` in their own scoped `:focus-visible` rules: ItemEditorModal, NewItemModal, VersionSettingsModal, VideoBody, InlineInput, KeyAnswer, NewQuestionModal and InlineName. A scoped rule beats a global one, so without `!important` those controls would stay invisible in High Contrast.
   - The forced-colors rule sets only `outline` (width, style, colour), never `outline-offset`. Components that draw an inset ring with a negative offset keep it.
-  - The 21 existing per-component forced-colors rules become redundant. They stay, out of scope.
-- **Components with their own ring keep it.** 28 files author `:focus-visible`. These include:
-  - the inset `--primary` rings: SequenceLink, MiniProjectLink, Login, the four quiz question components, ItemMark and ItemTypePicker;
-  - the Polish 1 confirm buttons (InlineConfirm, DangerConfirm);
-  - Button `.secondary` (D44);
-  - the text-field rules (InlineInput and others).
+  - The 16 existing per-component `@media (forced-colors: active)` blocks become partly redundant. They stay, out of scope.
 
-  A scoped rule wins over the global one, so nothing changes for them in normal mode.
-- **Button's halo.** Button `.primary` and `.ghost` have no own focus rule. They now take the global ring, which retires the Polish 1 spec's note that they keep the halo "until Polish 2" (`2026-10-14-…-polish1-confirms-design.md:203`).
-- **The tight places.** These are checked in the Safari pass:
-  - the 22px `ItemIcon` squares in the sequence strip: a 2px ring at a 2px offset on a wrapped line must not touch the neighbouring icon;
-  - IconButton `primary` (filled), whose ring sits off the fill.
+### Own rings: the cascade is per property
+An own `:focus-visible` rule replaces the global ring only for the properties it sets. A rule that draws its ring with `box-shadow` and does not set `outline` now gets the global outline as well.
+- **SequenceLink and MiniProjectLink.** `.row:focus-visible { box-shadow: inset 0 0 0 2px var(--primary); }` (`SequenceLink.svelte:51-53`, `MiniProjectLink.svelte:82-84`) sets no `outline`. Without a fix, the course page would show an inset ring plus an outset outline, clipped by `BlockGroup .block { overflow: hidden }` and painted over the neighbouring rows. Both rules gain `outline: none`. Their forced-colors rules keep `outline-offset: -2px`, so the global rule then draws an inset Highlight ring.
+- **Already safe.** The other box-shadow rings sit on labels (`label:has(input:focus-visible)` in Login, the quiz options, the pickers, `.drop`, `.sp-seg-opt`), where the outline lands on the hidden input. The Button, InlineConfirm and DangerConfirm rings set `outline` themselves.
+- **The own-ring files**, for the record: SequenceLink, MiniProjectLink, Login, the four quiz question components, ItemTypePicker, QuestionTypePicker, ChoiceRow, ChoiceAnswers, QuestionCard `.qexpl-add`, DashboardSidePanel `.sp-seg-opt`, the MiniProjectDetailPage `.drop`, InlineConfirm, DangerConfirm, Button `.secondary` (D44) and `.danger`, and the field rules (InlineInput and others). ItemIcon has no rule and takes the global ring.
+- **Button's halo.** Button `.primary` and `.ghost` have no own focus rule. They now take the global ring, which retires the Polish 1 spec's note that they keep the halo "until Polish 2" (`2026-10-14-visual-refresh-polish1-confirms-design.md:207`). No gate row pins that halo today.
+
+### High Contrast: a clipped hidden radio
+DashboardSidePanel's evaluation control hides its radio with `clip: rect(0 0 0 0)` (`DashboardSidePanel.svelte:1064-1074`) and draws the ring on the label as a box-shadow, with no forced-colors rule. `clip` clips the outline too, so in High Contrast nothing shows. It gains:
+```css
+@media (forced-colors: active) {
+  .sp-seg-opt:has(.sp-radio:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+```
+
+### Inset rings where a control is flush against a clip
+A control that fills its container, or sits flush against an `overflow` clip, uses `outline-offset: -2px` on `:focus-visible`, as SequenceLink already does. Named:
+- RunProgressTab `.seg-btn` (inside `.seg { overflow: hidden }`, `RunProgressTab.svelte:426`);
+- the MarkdownEditor Write/Preview tab buttons (flush at the top of `.md-card`);
+- the Progress grid `.cell-btn` and its header `th button`s (inside `.table-scroll`);
+- RunSubmissionTab's header sort buttons and `status-cell-btn`;
+- the iframes in `VideoItem.svelte:75` and `InteractiveAppItem.svelte:113`, whose boxes are `overflow: hidden`.
+
+The plan confirms each one in the built page before adding the rule.
+
+### The tight places
+These are checked in the Safari pass:
+- the 22px `ItemIcon` squares in the sequence strip. At their 6px gap, a 2px ring at a 2px offset leaves 2px clear of the neighbour;
+- IconButton `primary` (filled), whose ring sits off the fill.
 
 ### Reduced motion
 - `Switch.svelte` gets: `@media (prefers-reduced-motion: reduce) { .knob { transition: none; } }`.
-- No other rule changes. Nothing in the app scrolls smoothly.
+- No other rule changes. Nothing in the app scrolls smoothly; the only scroll `behavior` used is `'instant'`.
 
-### Gate
-- **The (b4) hashless freeze** (`visual-refresh-gate.sh:524-…`) re-pins `:focus-visible` and records two new rows: the `:is(input, textarea, select):focus-visible` rule and the `@media (forced-colors: active)` rule. The comment block explains the change, as it has for every earlier move.
-- **Switch:** one row for the reduced-motion rule.
-- **Polish 1's rows** that assert the halo on primary and ghost Buttons, if any exist, are updated to the ring.
+### Comments that go stale
+They are updated in the same commit. They cite base.css's `outline: none` or "the global glow":
+- `SequenceLink.svelte:54`, `MiniProjectLink.svelte:85`, `Login.svelte:138`;
+- `TextQuestion.svelte:88`, `:124`, `NumericQuestion.svelte:90`, `:126`;
+- `ItemIcon.svelte:31`, BlockGroup's `.acc` comment, `Switch.svelte:49`;
+- the quiz and `.drop` `input:focus-visible { box-shadow: none }` comments (`SingleChoiceQuestion.svelte:220` and the others);
+- gate comments `:188-189`, `:299-300`, `:626-628`, `:2208-2211`.
 
-## The page ground (Task 2)
+### Gate rows that change
+- **(b4) hashless freeze** (`visual-refresh-gate.sh:524-…`): `:focus-visible` is re-pinned (hash `1684b043` moves). New rows: the field rule, the `[tabindex="-1"]` rule and the forced-colors rule, each in `WANT_FULL` and `WANT_ORDER` in document order. The comment block explains the change, as it has for every earlier move.
+- **T8a inventory:** `FOCUS` at gate `:2212` gains `outline:none`; rows `:2230` and `:2298` follow.
+- **New rows:**
+  - the Switch reduced-motion rule;
+  - the `.sp-seg-opt` forced-colors rule;
+  - each inset `outline-offset:-2px` rule;
+  - each field focus rule that the audit adds, and the `.md-card:has(…)` rule.
+- **`EXPECTED_CHECKS`** (`gate:91`) moves by the rows added.
 
-- **Tokens** (`theme-default.css`):
-  - `--bg: #F2F3F6`, was `#FBFBFC`.
-  - `--focus-page: var(--bg)`. It is kept so the 5c focus-by-depth names still read.
-  - `--disabled-bg: #FBFBFC` is new and holds today's disabled fill.
-  - `--surface-3` keeps `#FCFCFD`. Its comment becomes "a near-white tint inside a white surface". Every use is inside a white surface, never on the page ground:
-    - the modal foot (`Modal.svelte:251`);
-    - the CourseCard footer;
-    - SubmissionCards;
-    - AssetSidebar;
-    - the App and Video bodies;
-    - the mini-project file rows.
-- **Disabled fills move to `--disabled-bg`.** Otherwise disabled controls would darken and blend into the ground:
+## The page ground and the reading sheets (Task 2)
+
+### Tokens (`theme-default.css`)
+- `--bg: #F2F3F6`, was `#FBFBFC`.
+- `--focus-page: var(--bg)`. It is kept so the 5c focus-by-depth names still read. Its comment notes that a theme which changes `--bg` must keep it below `--focus-1` and `--focus-2`, which stay literals.
+- `--disabled-bg: #FBFBFC` is new and holds today's disabled fill.
+- `--surface-3` keeps `#FCFCFD`. Its comment becomes "a near-white tint inside a white surface". decisions.md asked that `--surface-3` sit darker than the page. That is not needed, because every one of its seven uses is inside a white surface, never on the ground:
+  - the modal foot (`Modal.svelte:251`);
+  - the CourseCard footer (`:108`);
+  - SubmissionCards (`:122`);
+  - AssetSidebar (`:419`);
+  - the App and Video bodies (`AppBody.svelte:317`, `VideoBody.svelte:196`);
+  - the mini-project file rows (`MiniProjectDetailPage.svelte:711`).
+
+### Disabled controls
+- **Fills move to `--disabled-bg`.** Otherwise disabled controls would darken and blend into the ground:
   - `Button.svelte:70`, `:78`;
   - `IconButton.svelte:213`, `:220`;
   - `InlineConfirm.svelte:149` (`.cancel[aria-disabled="true"]`);
   - `DangerConfirm.svelte:156`;
   - `QuestionTypePicker.svelte:48`;
   - `MiniProjectDetailPage.svelte:695`.
-- **The Toast** (`Toast.svelte:19`) uses `--bg` as its text colour and switches to `--surface`, `#FFFFFF`. The difference is not visible.
-- **Two rules become redundant and go:**
-  - `VersionsPage.svelte:384`: `:global(body):has(.page) { background: var(--focus-page); }`;
-  - `VersionEditPage.svelte:800`: `:global(body):has(.canvas.d0) { background: var(--focus-page); }`.
+- **Ghost and borderless controls stay transparent when disabled.** Their enabled look has no fill, so a `--disabled-bg` tile would make the disabled one look raised:
+  - Button: `.btn.ghost:disabled, .btn.ghost.blocked { background: transparent; border-color: transparent; }`;
+  - IconButton: `.icon-btn.borderless:disabled, .icon-btn.borderless.blocked { background: transparent; border-color: transparent; }`.
 
-  Their gate rows and `:global` allow-list entries go too. The VersionEditPage comment at `:763` keeps its meaning.
-- **Contrast.** `--muted` `#5A616E` on `#F2F3F6` is about 5.6:1, and body text is far higher. `--ordinal` is decorative by design.
-- **Gate.** The (b4) `:root` hash moves once more, with the usual note in the comment: `--bg` changed, `--focus-page` aliased, `--disabled-bg` added, the `--surface-3` comment changed. Rows pin:
-  - `--disabled-bg` in each of the eight recipes;
+  Both come after the disabled rules they override.
+- **On the ground,** a disabled bordered control is faint: `#FBFBFC` on `#F2F3F6` is about 1.06:1, with a `--border-faint` edge. The text (`--faint`) is the real cue, as today. The Safari pass checks the player's footer and the editor bars.
+
+### The reading sheets (D56)
+- **The player.** `SequencePlayer.svelte`'s `main.content` becomes the sheet:
+  ```css
+  .content { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; }
+  ```
+  - The padding is reference artboard 2c's card (`padding:16px 20px 20px`, the card the player comment at `:303-333` already measures).
+  - The crumbs, the strip and the footer stay on the ground.
+  - Video and interactive apps render inside the sheet too.
+  - The 652px measure on PageItem and QuizItem is unchanged.
+- **The mini-project page.** A new `div.sheet` in the loaded branch wraps everything from the title row down: header, assignment, the group and submit cards, the precondition and the history.
+  - The breadcrumb moves out of `<header>` to sit above the sheet, on the ground, as the player's crumbs do.
+  - The sheet takes the same declarations as the player's.
+  - The cards inside (assignment, group, submit, history entries) keep their own white fill and border. On the sheet they read as bordered sections.
+  - Loading and error states stay on the ground, as on the player.
+- **What the sheets fix.** These fills and lines would otherwise be lighter than, or fade into, the new ground:
+  - `--surface-2` (`#F5F6F9`, 1.03:1 on the ground): code chips and blocks, the explanation panel `.exp`, the result card `.result`, the locked and neutral quiz options, the disabled T3 fields, the `.precondition` banner;
+  - `--border-faint` and `--border`: the quiz separators and option borders;
+  - the neutral StatusPill ("Not submitted") next to the mini-project `<h1>`.
+
+  On the white sheet each reads as it did before.
+
+### Other changes on the ground
+- **FilterPills, pressed** (`FilterPills.svelte:35`) gets `border-color: var(--primary)`. Its `--primary-soft` fill and border are 1.04:1 on the ground, so the selected pill would read weaker than the white ones. The pills sit on the Teaching page ground.
+- **The Toast** (`Toast.svelte:19`) uses `--bg` as its text colour. It switches to `--primary-text` (`#FFFFFF`), the "text on a dark fill" token.
+- **Two rules become redundant:**
+  - `VersionsPage.svelte:384` `:global(body):has(.page) { background: var(--focus-page); }` goes. Its `GLOBAL_ALLOW` entry `('…VersionsPage.svelte', 'body')` (`gate:491`) goes too.
+  - In `VersionEditPage.svelte:800-802`, only the d0 rule `:global(body):has(.canvas.d0) { background: var(--focus-page); }` goes. The d1 and d2 rules stay, so its `GLOBAL_ALLOW` entry stays. The R3 comment at `:797-799` and the comment at `:763` are reworded.
+- **Comments that go stale:** `QuizItem.svelte:249`, `:268-269` (they reason about `--bg`), and `BlockGroup.svelte:130` ("inherits `--bg` (#FBFBFC)").
+
+### Contrast on the ground
+- **Text:**
+  - `--muted` `#5A616E` is 5.62:1;
+  - `--danger` is 5.30:1;
+  - the `--status-*-fg` colours are 6.5:1 and up;
+  - body text is far higher;
+  - the new ring (`--primary`) is 6.29:1.
+- **Exempt:** `--placeholder` (2.37:1) and `--faint` (1.77:1) appear only inside white fields or on disabled and decorative marks. `--ordinal` (2.52:1) is decorative by design.
+- **Fills** are covered by the sheets and the FilterPills fix above.
+
+### Gate rows that change
+- **(b4):** the `:root` hash `a066ce4c` moves once more, with the usual note in the comment: `--bg` changed, `--focus-page` aliased, `--disabled-bg` added, the `--surface-3` comment changed.
+- **The `var(--bg)` disabled rows** flip to `--disabled-bg`: `gate:3636`, `:3700`, `:4973`, `:4978`, `:5176`. New rows for the three recipes without one: Button `:disabled`, QuestionTypePicker and DangerConfirm.
+- **New rows:**
+  - the two transparent ghost and borderless rules;
   - the Toast colour;
-  - the absence of the two `body:has` rules.
+  - the FilterPills pressed border;
+  - the player `.content` sheet;
+  - the mini-project `.sheet`.
+- **Markup SIG** for MiniProjectDetailPage: it changes with the new `div.sheet` and the moved breadcrumb.
+- **The `body:has` rows:**
+  - `gate:3759` (the VersionsPage `chk`) goes, and so does its paired `none` at `:3760`, which would otherwise pass vacuously (gate rule `:28-29`);
+  - `gate:3852` (the d0 `chk`) goes;
+  - `gate:4405` counts 2 `body:has(.canvas.d[12])` rules instead of 3, and its token alternation becomes `--focus-(1|2)`.
+- **A `none` row** checks that no `body:has(…)` rule sets `--focus-page`.
 
 ## Authored content (Tasks 3 and 4)
 
 ### `styles/content.css`
-- **The file.** A new global stylesheet, imported in `app.css` after `base.css`. Each surface keeps its own `font-size`, `line-height` and `color`. The file sets only structure. Every rule is scoped under `.md`, and there are no bare element rules.
+- **The file.** A new global stylesheet, imported in `app.css` after `base.css`. Every rule is scoped under `.prose`; there are no bare element rules. No component uses the class `prose` today, and a gate row keeps it that way outside the content surfaces.
+- **Surface typography moves to the container.** Each surface keeps its own `font-size`, `line-height` and `color` on its box, not on `p`. Two surfaces keep theirs on `p` today, and Task 3 moves them:
+  - `PageItem.svelte:81` `line-height: 1.6` moves onto `.content`;
+  - `MiniProjectDetailPage.svelte:664` `font-size: 14px; line-height: 1.65; color: var(--text-2)` moves onto `.assignment-html`.
+
+  Lists, quotes and headings on those surfaces then inherit the same metrics. That is intended, and the screenshots show it.
+- **The rules:**
   ```css
-  .md { overflow-wrap: anywhere; }
-  .md > * { margin: 0; }
-  .md :is(h1, h2, h3, h4, h5, h6) { font-weight: 600; color: var(--text); }
-  .md h1 { font-size: 1.5em; letter-spacing: -.015em; }
-  .md h2 { font-size: 1.15em; }
-  .md h3 { font-size: 1em; }
-  .md h4 { font-size: 1em; color: var(--text-3); }
-  .md h5 { font-size: .93em; color: var(--muted); }
-  .md h6 { font-size: .86em; color: var(--muted); letter-spacing: .02em; }
-  .md.compact h1 { font-size: 1.15em; }
-  .md.compact h2 { font-size: 1.05em; }
-  /* Spacing: :where() keeps every spacing rule at (0,1,0) or (0,2,0), so the
-     source order below decides, and the first/last-child rules come last. */
-  .md :where(p, ul, ol, pre, blockquote) { margin-bottom: var(--space-3); }
-  .md :where(h1, h2, h3) { margin: var(--space-4) 0 var(--space-2); }
-  .md :where(h4, h5, h6) { margin: var(--space-3) 0 var(--space-1); }
-  .md.compact :where(p, ul, ol, pre, blockquote) { margin-bottom: var(--space-2); }
-  .md.compact :where(h1, h2, h3, h4, h5, h6) { margin: .75rem 0 var(--space-1); }
-  .md > :first-child { margin-top: 0; }
-  .md > :last-child { margin-bottom: 0; }
-  .md :where(ul, ol) { padding-left: var(--space-4); }
-  .md ul > li { list-style: disc; }
-  .md ol > li { list-style: decimal; }
-  .md blockquote { border-left: 3px solid var(--border-strong); padding: 2px 0 2px 12px; color: var(--text-3); }
-  .md code { background: var(--surface-2); padding: 2px 4px; border-radius: var(--radius); font-family: var(--font-mono); }
-  .md pre { background: var(--surface-2); padding: var(--control-pad-textarea); border-radius: var(--radius); overflow-x: auto; max-width: 100%; }
-  .md pre code { padding: 0; background: none; }
-  .md a { color: var(--primary); }
-  .md img { max-width: 100%; height: auto; }
+  .prose { overflow-wrap: anywhere; }
+
+  /* Headings. Weight 600 comes from reset.css. */
+  .prose :is(h1, h2, h3, h4, h5, h6) { color: var(--text); line-height: 1.3; }
+  .prose h1 { font-size: 1.5em; letter-spacing: -.015em; }
+  .prose h2 { font-size: 1.143em; }   /* 16px on the 14px page */
+  .prose h3 { font-size: 1em; }
+  .prose h4 { font-size: 1em; color: var(--text-3); }
+  .prose h5 { font-size: max(12px, .93em); color: var(--muted); }
+  .prose h6 { font-size: max(12px, .86em); color: var(--muted); letter-spacing: .02em; }
+  .prose.compact h1 { font-size: 1.15em; }
+  .prose.compact h2 { font-size: 1.05em; }
+
+  /* Spacing. Every margin is set by element, not by position, so nested blocks
+     (a quote in a list item, a code block in a quote) never keep browser margins.
+     :where() keeps these at (0,1,0) and the compact ones at (0,2,0); the
+     first/last-child rules come last at (0,2,0) and win by order. */
+  .prose :where(p, ul, ol, pre, blockquote, hr, div.math) { margin: 0 0 var(--space-3); }
+  .prose :where(h1, h2, h3) { margin: var(--space-4) 0 var(--space-2); }
+  .prose :where(h4, h5, h6) { margin: var(--space-3) 0 var(--space-1); }
+  .prose.compact :where(p, ul, ol, pre, blockquote, hr, div.math) { margin: 0 0 var(--space-2); }
+  .prose.compact :where(h1, h2, h3, h4, h5, h6) { margin: 12px 0 var(--space-1); }   /* 12px: between --space-2 and --space-3 */
+  .prose > :first-child { margin-top: 0; }
+  .prose > :last-child,
+  .prose :where(li, blockquote) > :last-child { margin-bottom: 0; }
+
+  /* Lists and quotes. */
+  .prose :where(ul, ol) { padding-inline-start: var(--space-4); }
+  .prose ul > li { list-style: disc; }
+  .prose ol > li { list-style: decimal; }
+  .prose blockquote { border-inline-start: 3px solid var(--border-strong); padding: 2px 0; padding-inline-start: 12px; color: var(--muted); }
+  .prose hr { border: 0; border-top: 1px solid var(--border); }
+
+  /* Code: the fill plus a hairline, so it reads on white, on the ground and on --surface-2 panels. */
+  .prose code { font-size: .93em; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); padding: 2px 4px; border-radius: var(--radius); }
+  .prose pre { font-size: .93em; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); padding: var(--control-pad-textarea); border-radius: var(--radius); overflow-x: auto; max-width: 100%; }
+  .prose pre code { font-size: inherit; padding: 0; background: none; box-shadow: none; }
+
+  /* Links (D57). App chrome links keep base.css's no-underline style. */
+  .prose a { color: var(--primary); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
   ```
-- **What the scale does.** On the 14px page, h1–h3 come out at today's 21/16/14px (`PageItem.svelte:82-85`). h6 at 0.86em of 14px is 12px, so no heading falls below 12px on any surface.
-- **Math.** Math wrappers (`span.math`, `div.math`) keep their own rules. `.md > *` zeroes margins only on direct children.
-- **The `:first-child` / `:last-child` rules** replace the per-surface `p:last-child { margin: 0 }` rules. They come after the scale rules at equal specificity, so a prompt that opens with a heading has no top margin on either scale (a gate row pins that the first/last-child rules come after the compact rules).
+- **What the scale gives:**
+  - On the 14px page, h1–h3 come out at today's 21/16/14px (`PageItem.svelte:82-85`).
+  - No heading falls below 12px on any surface. That includes the 13px explanation and the 12.5px editor explanation, where h5 and h6 hit the floor.
+  - On the compact scale h2 and h3 differ by less than 1px, and h3 and h4 differ only in colour on both scales. That is the approved mock-up (`content-scale-mock.html`). Task 4 shows the user all six levels on a compact surface before approval.
+- **Muted surfaces.** Course info, version info and the editor explanation render their body in `--muted`.
+  - There a quote has the same colour as the body and keeps its bar.
+  - h5 and h6 have the same colour as the body and keep their weight.
+  - h4 (`--text-3`) is darker than the body, as a heading should be.
+- **Code in a `--surface-2` panel** (the explanation `.exp`, the editor `.qexpl`): the fill matches the panel, and the hairline draws the box. In forced colors the hairline goes, and the mono font remains.
+- **Math.** The frontend has no math CSS; the backend emits `span.math` and `div.math block`. `div.math` joins the spacing list, so display math no longer sits flush on the next paragraph. `span.math` is untouched.
+- **Images** keep reset.css's `img { max-width: 100%; height: auto; }`. content.css does not repeat it.
 
 ### Who gets which scale
-| Surface | File | Element | Scale |
+| Surface | File | Element | Class |
 |---|---|---|---|
-| Page content | `items/PageItem.svelte:35` | `div.content` | `.md` |
-| Mini-project assignment | `pages/MiniProjectDetailPage.svelte:504-506` | `div.assignment-html` | `.md` |
-| Quiz prompts | `items/quiz/{SingleChoice,MultiChoice,Numeric,Text}Question.svelte:20/26` | `div.text` | `.md.compact` |
-| Explanation | `items/QuizItem.svelte:169` | `div.exp` | `.md.compact` |
-| Course info | `pages/CourseView.svelte:89`, `:94` | `div.info` | `.md.compact` |
-| Version info | `pages/editor/VersionEditPage.svelte:633` | `div.vinfo` | `.md.compact` |
-| Editor question card | `editor/quiz/QuestionCard.svelte:83`, `:129` | `div.qtext`, `div.qexpl-body` | `.md.compact` |
-| Editor preview | `editor/MarkdownEditor.svelte:327` | `div.preview` | from the host's new `scale` prop |
+| Page content | `items/PageItem.svelte:35` | `div.content` | `prose` |
+| Mini-project assignment | `pages/MiniProjectDetailPage.svelte:504-506` | `div.assignment-html` | `prose` |
+| Quiz prompts | `items/quiz/{SingleChoice,MultiChoice,Numeric,Text}Question.svelte:20/26` | `div.text` | `prose compact` |
+| Explanation | `items/QuizItem.svelte:169` | `div.exp` | `prose compact` |
+| Course info | `pages/CourseView.svelte:89`, `:94` | `div.info` | `prose compact` |
+| Version info | `pages/editor/VersionEditPage.svelte:633` | `div.vinfo` | `prose compact` |
+| Editor question card | `editor/quiz/QuestionCard.svelte:83`, `:129` | `div.qtext`, `div.qexpl-body` | `prose compact` |
+| Editor preview | `editor/MarkdownEditor.svelte:327` | `div.preview` | from the host's new `variant` prop |
 
-- **MarkdownEditor's prop.** `scale?: 'page' | 'compact'` defaults to `'page'`.
-  - `'page'`: `PageBody` and the `MiniProjectModal` assignment.
-  - `'compact'`: `NewQuestionModal`, `QuestionTextModal` and `ExplanationModal`.
+### The editor preview
+`MarkdownEditor` gets `variant?: 'page' | 'prompt' | 'explanation'`, defaulting to `'page'`. The variant sets both the class and the text metrics, so the preview matches the student view.
+- **`'page'`** (`prose`, 14px / 1.6 / `--text-2`, PageItem's): used by `PageBody` and the `MiniProjectModal` assignment. The assignment's line-height is 1.65, a difference of 0.05 that is accepted.
+- **`'prompt'`** (`prose compact`, 14.5px / 1.6 / `--text-2`, the quiz prompt's): used by `NewQuestionModal` and `QuestionTextModal`.
+- **`'explanation'`** (`prose compact`, 13px / `--text-2`, QuizItem `.exp`'s): used by `ExplanationModal`.
+- Today's `.preview { font-size: 13px; color: var(--text) }` (`:373`) keeps only its padding and `min-height`; `.preview.err` keeps its danger colour.
+- Under D55 the preview renders live while the student view shows stored HTML. A comparison uses freshly saved content.
 
 ### What goes and what stays
-- **Go:** each surface's `:global` rules for `p`, `ul`, `ol`, `li`, `code`, `pre`, `pre code`, `a`, `img`, the headings and `p:last-child`, which content.css now covers. Examples:
-  - `PageItem.svelte:81-119`;
-  - the quiz prompts' `p` rules;
-  - `MiniProjectDetailPage.svelte:664-668`;
-  - `QuestionCard.svelte:160-163`, including its `font-size: inherit` heading rule;
-  - the 5c `.vinfo` backlog fix, which is now moot.
+- **Go:**
+  - Each surface's `:global` rules for `p`, `ul`, `ol`, `li`, `code`, `pre`, `pre code`, `a`, `img`, the headings and `p:last-child`, which content.css now covers. That includes:
+    - `PageItem.svelte:81-119`, after its line-height moves;
+    - the quiz prompts' `p` rules;
+    - `MiniProjectDetailPage.svelte:664-670`, after its typography moves;
+    - `QuestionCard.svelte:160-163`, including its `font-size: inherit` heading rule.
+  - The `:global(pre)` overflow rules, which `.prose pre` covers: `SingleChoiceQuestion.svelte:129`, `MultiChoiceQuestion.svelte:141`, `QuizItem.svelte:300`, `TextQuestion.svelte:91`, `NumericQuestion.svelte:93`.
+  - The 5c `.vinfo` backlog bullet (`docs/backlog/slice5c-constructor-polish-debt.md:66`), which is now moot.
 - **Stay:** rules that are not content structure:
-  - `pre:focus-visible` rings (`TextQuestion.svelte:92` and the others);
-  - each surface's own `font-size`, `line-height`, `color` and `text-wrap`;
-  - `newTabLinks` and the mini-project link rewrite;
+  - the `pre:focus-visible` rings (`TextQuestion.svelte:92`, `NumericQuestion.svelte:94`);
+  - the legend's own `max-width: 100%` (`SingleChoiceQuestion.svelte:108`), which is on the legend, not on `pre`;
+  - each surface's own `font-size`, `line-height`, `color` and `text-wrap`, on its box;
   - the trust-boundary comments;
   - `overflow-wrap` on surfaces where the box itself needs it.
+- **Spacing changes.** The surfaces had their own paragraph spacing: 10px, `space-2`, `space-3` and 6px. One style means one spacing per scale. The screenshots in Tasks 3 and 4 show each surface before and after. A surface keeps a different spacing only by a ruling recorded in the ledger.
 
-  The surfaces keep their `p` spacing only where a spacing rule differs on purpose. Each such case is a Task 3/4 ruling, recorded in the ledger.
-- **Spacing changes.** The surfaces had their own paragraph spacing: 10px, `space-2`, `space-3` and 6px. One style means one spacing per scale. The screenshots in Tasks 3 and 4 show each surface before and after.
+### Gate rows that change
+- **(b4):** content.css joins the reviewed global files. Every rule gets a hashless row in `WANT_FULL` and `WANT_ORDER`, in document order, with selectors copied from dist (esbuild minifies them, for example `.prose :where(p,ul,ol,pre,blockquote,hr,div.math)`). A row pins that the first/last-child rules come after the compact rules.
+- **T3 (a) inventory** (`gate:277-301`, and `:288` where `pre` goes): the exact rule sets lose `.text p`, `.text p:last-child` and `.text pre` per component. The `dd` rows at `:178-179` follow.
+- **T3 (b) `WANT_GLOBAL`** (`gate:337-338`) shrinks to `.text :global(pre:focus-visible)`.
+- **(f) cumulative** (`gate:764-773`): it requires at least 4 `.text p` / `p:last-child` pairs and is rewritten for the class.
+- **The choice-prompt inventory** (`gate:2878-2880`) and **QuizItem `.exp`** (`gate:3181-3184`).
+- **The (g2) TARGETS** (`gate:983-986`): page content `p`, list padding, `ul>li`, `ol>li`.
+- **PageItem's block** (`gate:1082-1135`, the `p` line-height rows `:1111-1112`) and **the mini-project assignment rows** (`gate:3560-3566`).
+- **Markup SIG:** `div:content[class="content"]` (`gate:1574`), `div:exp[class="exp"]` (`:1551`) and `div:text[class="text"]` (`:1562`, `:1613`, `:1617`, `:1621`) gain the class. CourseView, VersionEditPage, QuestionCard and MarkdownEditor follow.
+- **`GLOBAL_ALLOW`** loses about 30 entries: PageItem 13, MiniProjectDetailPage 8, QuestionCard 4, SingleChoice and MultiChoice 3 each, QuizItem 1. The plan counts them exactly.
+- **New rows:**
+  - one per surface, pinning its class (`prose` or `prose compact`);
+  - the moved container typography (`.content` line-height, `.assignment-html` metrics);
+  - the preview's three variants;
+  - a `none` row that no `.svelte` file outside the content surfaces renders the class `prose`;
+  - a `none` row, limited to the content-surface files, that no rule re-declares a content element. Its payload is anchored on exactly `:global\((p|ul|ol|li|code|pre|blockquote|hr|h[1-6])\)`, so `pre:focus-visible` and the confirms' `:global(code)` do not match.
+- **`EXPECTED_CHECKS`** moves by the net count.
 
-### Gate
-- `content.css` joins the reviewed global files, and its rules join the (b4) freeze.
-- One row per surface pins its class, `md` or `md compact`.
-- The `:global` allow-list loses the entries that are removed.
-- A `none` row checks that no surface re-declares a content rule (`:global(p|ul|ol|code|pre|blockquote|h[1-6])`) beside `.md`.
+## External links in authored content (Task 5)
 
-## The 404 page (Task 5)
+- **One attachment.** `frontend/src/lib/externalLinks.ts` exports `externalLinks(html: string)`, an attachment factory like today's `newTabLinks`. Passing the HTML makes the attachment run again when the content changes. For each `a[href]` whose href starts with `http://`, `https://` or `//`, it sets `target="_blank"` and `rel="noopener noreferrer"`.
+  - Every other href is left alone: relative paths, `/api/...` assets, `#…`, `mailto:` and `tel:`. These stay in the tab (D58).
+  - The backend sanitiser already adds `rel`; the attachment sets it again as defence in depth, as `rewriteExternalLinks` does today.
+- **Where it goes:** every authored-content surface, which is the table above:
+  - page content and the mini-project assignment;
+  - the four quiz prompts and the explanation;
+  - course info (both) and version info;
+  - the editor's question cards (both) and the preview.
+- **What it replaces:**
+  - `lib/newTabLinks.ts`. Today it sets `target` on every link in QuestionCard, internal ones too. Internal links in the editor now stay in the tab, where DirtyGuard covers unsaved work.
+  - `rewriteExternalLinks` in `lib/studentMiniProjects.ts:137` and its `$effect` in MiniProjectDetailPage (`:189`). The F8/L1/M7 trust comment moves with it, and the `bind:this` stays only if something else uses it.
+  - Their tests move to `externalLinks`.
+- **Why on student surfaces.** Quiz answers are in-memory `$state` (`QuizItem.svelte:16`). A student who follows a link in a prompt mid-quiz would lose unsubmitted answers if the link replaced the tab.
+- **Tests:**
+  - unit tests for each href class above;
+  - one test per surface that an external link gets `target="_blank"` and an internal one does not.
+- **Gate:** the markup SIG rows for the surfaces gain the attachment where the scanner records it. The plan checks how the scanner treats `{@attach}`, using QuestionCard's existing rows as the precedent.
+
+## The 404 page (Task 6)
 
 - **`NotFound.svelte`** renders in the shared page column:
   ```svelte
@@ -224,45 +388,83 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
     <ErrorState variant="page" title="Page not found" message="The address may be mistyped, or the page has moved." action={back} />
   </div>
   ```
-  - The `back` snippet is a `Button variant="secondary"` that calls `navigate(target)`.
+  - The `back` snippet is a `Button variant="secondary"` that calls `navigate(target)`. This matches the other page ErrorStates. Today's plain link is lost, and with it cmd-click.
 - **Target and label:**
   - signed in: `defaultLandingPath(session.user)`. `/teaching` reads "Back to teaching", and anything else reads "Back to courses";
-  - signed out (`session.user === null`): `/login`, labelled "Sign in".
-- **Header.** Signed out there is no AppHeader, as today (`App.svelte:64`).
+  - signed out (`session.user === null`): `/login`, labelled "Sign in". `defaultLandingPath(null)` returns `/courses`, so NotFound branches on `session.user === null` itself.
+- **Header.** Signed out there is no AppHeader, as today (`App.svelte:64`). One edge: an unmatched `/superuser/...` path also renders NotFound without the header, even when signed in. The button still works, and a test pins it.
+- **Announcement.** ErrorState's root is `role="alert"` (`ErrorState.svelte:27`), so the 404 announces on load. It goes on the list for the beta VoiceOver pass.
 - **Tests:**
   - the three labels and targets;
   - the ErrorState `<h1>`;
-  - an unknown path rendering NotFound through `App.svelte:74`.
+  - an unknown path rendering NotFound through `App.svelte:74`;
+  - an unknown `/superuser/...` path.
 
-## Bare URLs (Task 6, backend)
+## Bare URLs (Task 7, backend)
 
-- **The renderer.** `backend/mathion/markdown.py:7` becomes `MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("linkify")`, and `_md.linkify.set({"fuzzy_link": False, "fuzzy_email": False, "fuzzy_ip": False})`.
-  - New dependency: `linkify-it-py` in `backend/pyproject.toml`, which also goes into the Docker image.
-- **`www.`** The plan's first step checks whether `www.example.org` links with `fuzzy_link` off.
-  - If it does not, the plan rules between two options, and the tests pin the result:
-    - (a) a custom `www.` schema (`linkify.add("www.", …)`, with linkify-it's own `www.` validator);
-    - (b) `http(s)://` only.
-  - In either case bare domains stay plain.
+- **The dependency first.** `backend/pyproject.toml`'s `markdown-it-py>=3.0` becomes `markdown-it-py[linkify]>=3.0`, plus `linkify-it-py>=2.0`, because the inline linkify rule needs `match_at_start` from 2.x.
+  - The Dockerfile (`:23-25`, `pip install /tmp/backend`) and CI (`ci.yml:36`, `pip install './backend[dev]'`) both install from pyproject, so neither needs an edit.
+  - The plan's first step reinstalls `backend/.venv` from pyproject. Without linkify-it-py, `_md.linkify` is `None`, and the configuration below raises at import, which would break every backend test and the running dev server.
+- **The renderer** (`backend/mathion/markdown.py:7`):
+  ```python
+  _md = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("linkify")
+  _md.linkify.set({"fuzzy_link": False, "fuzzy_email": False, "fuzzy_ip": False})
+  # D54: only http:// and https://. linkify-it's other default schemas stay plain text.
+  _md.linkify.add("ftp:", None).add("//", None).add("mailto:", None)
+  dollarmath_plugin(_md)
+  ```
+  - With `fuzzy_link` off, `www.` addresses and bare domains are not matched.
+  - `ftp:` would come out as an `<a>` without `href` (nh3 strips the scheme), and `//host` as a live protocol-relative link. Both are disabled.
+  - An authored `[text](mailto:…)` still works, because it is a markdown link, not linkify.
 - **Output and sanitising.**
   - Links come out as `<a href="…">…</a>`. They pass `nh3` with the existing `_ALLOWED_TAGS` and `_ALLOWED_ATTRS`, and the `_URL_SCHEMES = {http, https, mailto}` filter.
-  - `www.` links get `http://` from linkify-it's normaliser.
-  - On every surface the frontend treats them like an authored `[text](url)`: the editor's `newTabLinks`, the mini-project page's `rewriteExternalLinks`, and the default elsewhere.
-- **Not linked.** Each case is pinned by a test:
+  - On every surface the frontend treats them like an authored `[text](url)`, through the Task 5 attachment.
+- **Linked**, each pinned by a test:
+  - `https://example.org/path?q=1`;
+  - `http://example.org`;
+  - a URL with parentheses (`https://en.wikipedia.org/wiki/Function_(mathematics)`);
+  - trailing punctuation: "see https://x.org." links without the full stop.
+- **Not linked**, each pinned by a test:
   - a URL inside inline code or a code block;
   - inside math (`$…$`, `$$…$$`);
-  - an existing `[text](url)` or `<url>`;
-  - bare domains;
+  - an existing `[text](url)` or `<url>` (it stays one link);
+  - `www.example.org`;
+  - bare domains (`example.org`);
   - `numpy.py`;
-  - e-mail addresses;
-  - trailing punctuation: "see https://x.org." links without the full stop.
-- **Stored HTML (D55).** No migration. The two backlog items (`bare-urls-not-autolinked-in-markdown.md`, `stored-content-html-not-rerendered-after-renderer-change.md`) are updated to say linkify shipped, and that stored HTML picks it up on the next save, publish or clone.
-- **Tests.** `backend/tests/test_markdown.py` (or the existing renderer test file) covers each case above. One API-level test checks that saving page content with a bare URL stores a link.
+  - e-mail addresses and typed `mailto:a@b.org`;
+  - `ftp://files.example.org/x` and `//cdn.example.org/x`.
+- **Stored HTML (D55).** No migration. Publish and clone both re-render (`versions.py:318-350`, `version_clone.py:143`).
+- **Tests:**
+  - `backend/tests/test_markdown.py` covers each case above;
+  - `backend/tests/test_items.py` gets one API-level test: saving page content with a bare URL stores a link.
+- **Backlog:** `bare-urls-not-autolinked-in-markdown.md` and `stored-content-html-not-rerendered-after-renderer-change.md` close. The second one notes that stored HTML picks up the renderer on the next save, publish or clone.
+
+## Testing CSS tasks
+
+jsdom computes neither layout nor the cascade, so for Tasks 1–4:
+- the gate row is the red/green. Each row is written first and run against the old dist (red), then the CSS changes (green). Hashes are derived from dist, never hand-written;
+- cheap jsdom tests pin what jsdom can see:
+  - the class on each surface (`.text.prose.compact`, `.content.prose`);
+  - the preview `variant` → class and metrics class;
+  - the mini-project `div.sheet` and the moved breadcrumb.
+
+Tasks 5–7 are TDD in the usual sense.
+
+## Backlog lifecycle
+Each task deletes or closes the notes it resolves:
+- Task 1: `global-focus-ring-invisible-in-forced-colors.md`;
+- Task 2: `page-background-reads-gray-against-header.md`;
+- Task 3: `page-content-h4-h6-and-blockquote-unstyled.md`;
+- Task 4: the `.vinfo` bullet in `slice5c-constructor-polish-debt.md:66`;
+- Task 7: `bare-urls-not-autolinked-in-markdown.md`, `stored-content-html-not-rerendered-after-renderer-change.md`.
+
+Task 1 also adds the grid focus-not-obscured item (2.4.11) to the Polish 3 list.
 
 ## Process
 
-Six tasks, each run as in Polish 1:
-1. TDD;
-2. vitest (`TZ=Europe/Copenhagen`), svelte-check and the gate (absolute `TMPDIR`); for Task 6 also `backend/.venv` pytest;
+Seven tasks, each run as in Polish 1:
+1. TDD (for CSS tasks, the gate row first; see above);
+2. vitest (`TZ=Europe/Copenhagen`), svelte-check and the gate (absolute `TMPDIR`); for Task 7 also `backend/.venv` pytest;
 3. screenshots or a look check;
 4. the user's OK;
 5. Opus and Fable review lanes on the uncommitted diff, re-run after every fix until clean;
@@ -271,28 +473,52 @@ Six tasks, each run as in Polish 1:
 8. wait for "go".
 
 The tasks:
-1. **Focus ring and reduced motion:** the `base.css` rules, the forced-colors outline, Switch, the (b4) re-freeze. Screenshots: a Tab-focused primary Button, a ghost Button, an IconButton, a CourseCard, an accordion header, the strip icons and a text field.
-2. **The page ground:** the tokens, `--disabled-bg`, the Toast, the two `body:has` removals. Screenshots: a course list, the player, the versions page, a disabled Button and IconButton on the ground.
-3. **Authored content, page scale:** `content.css`, PageItem and the mini-project assignment. Screenshots: a page with h1–h6, a blockquote, a list and code, before and after.
-4. **Authored content, compact surfaces:** the quiz prompts, the explanation, course and version info, the editor's question cards, the preview's `scale`. Screenshots: each surface with a heading and a quote.
-5. **The 404 page:** ErrorState, the labels, the tests.
-6. **Bare URLs:** linkify, the dependency, the tests, the backlog notes.
+1. **Focus ring and reduced motion:** the `base.css` rules, the field audit, the SequenceLink and MiniProjectLink fix, the inset rings, the side-panel forced-colors rule, Switch, the (b4) re-freeze.
+   - Screenshots: a Tab-focused primary Button, a ghost Button, an IconButton, a CourseCard, a SequenceLink row, an accordion header, the strip icons, the DangerConfirm checkbox, a Progress segment, the Login field and the MarkdownEditor.
+2. **The page ground and the sheets:** the tokens, `--disabled-bg` and the transparent ghost rules, the player and mini-project sheets, FilterPills, the Toast, the two `body:has` removals.
+   - Screenshots: a course list, a course view, the player with a page that has code and with a submitted quiz, the mini-project page, Teaching with a pressed filter, the versions page, a disabled Button and IconButton on the ground.
+3. **Authored content, page scale:** `content.css`, PageItem and the mini-project assignment, the typography moves.
+   - Screenshots: a page with h1–h6, a quote, a nested quote, a loose and a nested list, code, a link and an `hr`, before and after.
+4. **Authored content, compact surfaces:** the quiz prompts (Single and Multi as one step, Numeric and Text as another), the explanation, course and version info, the editor's question cards, the preview's `variant`.
+   - Screenshots: each surface with all six heading levels, a quote and code, including the editor explanation and course info.
+5. **External links:** `externalLinks`, all surfaces, the two old helpers removed.
+6. **The 404 page:** ErrorState, the labels, the tests.
+7. **Bare URLs:** the venv, linkify, the dependency, the tests, the backlog notes.
 
 Then a whole-branch review (fresh Opus and Fable), and a Safari pass, one step at a time.
 
 ## Carried to the Safari pass
-- **The focus ring.**
-  - ⌥Tab through the header, a course card, the strip icons (the 22px squares, on a wrapped line), a primary and a ghost Button, an IconButton, a filled IconButton, and an accordion header.
-  - Text fields keep the border and halo.
-  - A mouse click shows no ring.
-- **High Contrast.** Use Chrome's DevTools forced-colors emulation if it is practical. Otherwise note it for the beta pass.
-- **Reduced motion.** With macOS "Reduce motion" on, the Switch knob jumps.
-- **The page ground.**
-  - Every screen family: course list, course view, player, mini-project page, Teaching, the editor and the versions page.
-  - Does the player's reading column feel grey on the tint? If so, a white sheet is a follow-up (D50).
-  - Disabled controls are still distinct.
-- **Authored content.** A page and a quiz prompt with every heading level, a quote, lists and code. The editor's preview matches the student view.
-- **404.** A typed bad URL, signed in and signed out.
-- **Bare URLs.** A page body with a pasted URL, after a save. The link opens, and a URL inside code stays plain.
+- **The focus ring (Tab, or ⌥Tab in Safari):**
+  - the header, a course card, a SequenceLink row (one ring only), the strip icons (the 22px squares, on a wrapped line), a primary and a ghost Button, an IconButton, a filled IconButton, an accordion header;
+  - the DangerConfirm checkbox and a roster checkbox;
+  - the Progress tab's segments, a heat cell next to the sticky columns, the MarkdownEditor Write/Preview tabs;
+  - text fields turn the border blue with the halo: Login's e-mail and PIN, the VersionsPage create field, the roster search, the MarkdownEditor card;
+  - after a keyboard Cancel, the VersionsPage `<h1>` and the side-panel title show no ring.
+- **Mouse-only flows show no ring.** Script focus after a mouse action can match `:focus-visible` in Safari, and the old halo hid it:
+  - close a modal with ✕;
+  - rename a title and click away;
+  - cancel a confirm with the mouse;
+  - open the side panel by clicking a cell.
 
-No VoiceOver steps; those are collected for the beta pass.
+  If rings appear, the finding goes to the plan as a follow-up ruling.
+- **High Contrast.** Use Chrome's DevTools forced-colors emulation if it is practical, including the side panel's Evaluation control. Otherwise note it for the beta pass.
+- **Reduced motion.** With macOS "Reduce motion" on, the Switch knob jumps.
+- **The page ground:**
+  - every screen family: Login, course list, course view, player, mini-project page, Teaching, a run's tabs (Overview, Roster, Progress, Submissions), the editor, the versions page, the superuser page and the 404 page;
+  - the player sheet with a page, a quiz (explanation panel, result card, locked options), a video and an app;
+  - the mini-project sheet with its cards and the "Not submitted" pill;
+  - the Teaching filter pills, pressed;
+  - disabled controls: the player's Previous on the first item, the editor bars.
+- **Authored content:**
+  - a page and a quiz prompt with every heading level, a quote (its bar ends with its text), nested and loose lists, code and an `hr`;
+  - all six levels on the editor explanation and on course info;
+  - links are underlined and readable on the muted surfaces;
+  - the editor preview matches the student view, using freshly saved content.
+- **External links:**
+  - a link in a quiz prompt mid-quiz opens in a new tab, and the answers stay;
+  - a link in the editor preview opens in a new tab;
+  - an internal link stays in the tab.
+- **404:** a typed bad URL, signed in and signed out, and a nested one (`/courses/x/y/z`).
+- **Bare URLs:** a page body with a pasted URL, after a save. The link opens in a new tab; a URL inside code and a `www.` address stay plain.
+
+No VoiceOver steps; those are collected for the beta pass (the 404's `role="alert"` among them).
