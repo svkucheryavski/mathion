@@ -17,7 +17,7 @@
 - **Gate:** the zsh gate `frontend/scripts/visual-refresh-gate.sh`; the build is vite 5.4 with esbuild 0.21's minifier.
 - **Backend:** Python through `backend/.venv`; markdown-it-py 4.0, nh3; Task 6 adds `linkify-it-py>=2.0`.
 
-**Spec:** `docs/superpowers/specs/2026-10-18-visual-refresh-polish2-named-items-design.md` (rev 5, commit `55be40e`, approved by the user on 2026-10-18). Its decisions D48–D59, its cascade facts and its gate sections are binding; this plan cites them by name. Decisions log: `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/decisions.md`. Mock-ups: `page-ground-mock.html`, `content-scale-mock.html` in the same folder.
+**Spec:** `docs/superpowers/specs/2026-10-18-visual-refresh-polish2-named-items-design.md` (rev 5, commit `55be40e`, approved by the user on 2026-10-18; rev 6 adds D60 during Task 1). Its decisions D48–D60, its cascade facts and its gate sections are binding; this plan cites them by name. Decisions log: `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/decisions.md`. Mock-ups: `page-ground-mock.html`, `content-scale-mock.html` in the same folder.
 
 **Line numbers** are from the Polish 1 tip `ba8ace4`. An earlier task shifts them in files it also touches (the gate above all): find the place by the quoted text, which is exact.
 
@@ -91,6 +91,7 @@ Each states what it costs if wrong. P-numbers continue from Polish 1's P96.
 **Task 6 — bare URLs**
 - **P114 — The API test creates a static page.** D55's publish and clone paths already re-render (`versions.py:318-350`, `version_clone.py:143`) and are not re-tested. *Cost:* none.
 - **P115 — The look check uses the editor's Preview tab,** which renders through the backend without saving. *Cost:* none.
+- **P116 — D60 sets `--ring` in resting rules, not in new `:focus-visible` selectors** (added during Task 1). The Polish 1 `none` guards on InlineConfirm and DangerConfirm match any `.danger.H:focus-visible` or `.dc-force.H:focus-visible` selector, so an `outline-color` override there would trip them. `--ring` inherits, so it is set only on the focusable element itself. *Cost if wrong:* a container that sets `--ring` would recolour the rings inside it; none does.
 
 ## Review Focus
 
@@ -109,12 +110,12 @@ The five inputs or conditions most likely to bite a student, teacher or author t
 | Task | Adds | `EXPECTED_CHECKS` |
 |---|---|---|
 | start | | 2220 |
-| 1 — Focus ring and reduced motion | +19 | 2239 |
-| 2 — The page ground and the sheets | +26 −3 | 2262 |
-| 3 — Authored content, page scale | +4 −13 | 2253 |
-| 4 — Authored content, compact surfaces | +15 −5 | 2263 |
-| 5 — The 404 page | 0 | 2263 |
-| 6 — Bare URLs | 0 | 2263 |
+| 1 — Focus ring and reduced motion | +19, then +14 for D60 (Step 9b) | 2253 |
+| 2 — The page ground and the sheets | +26 −3 | 2276 |
+| 3 — Authored content, page scale | +4 −13 | 2267 |
+| 4 — Authored content, compact surfaces | +15 −5 | 2277 |
+| 5 — The 404 page | 0 | 2277 |
+| 6 — Bare URLs | 0 | 2277 |
 
 ## File map
 
@@ -613,6 +614,59 @@ Plan: `docs/superpowers/plans/2026-10-18-visual-refresh-polish2-named-items.md`.
 
 3. Delete `docs/backlog/global-focus-ring-invisible-in-forced-colors.md` (`git rm`).
 
+- [ ] **Step 9b: Ring colours (D60, added during Task 1 at the look review)**
+
+The user's D60: the ring colour follows the element (spec rev 6, §Ring colour). Gate rows first. Append to section (an), after the Task 1 rows:
+
+```zsh
+# D60 — the ring colour follows the element. The global ring reads
+# var(--ring,var(--primary)); a coloured element sets --ring in its resting rule
+# (P116: not in a new :focus-visible selector, which the Polish 1 none-guards catch).
+uniq1 app-header
+if [[ -n $REPLY ]]; then
+  N=AppHeader; H=$REPLY
+  chk "\.links\.${H} a:where\(\.${H}\)" '--ring:var\(--gold-text\)'
+fi
+uniq1 btn
+if [[ -n $REPLY ]]; then
+  N=Button; H=$REPLY
+  d '\.ghost' '' '--ring:var\(--muted\)'
+  d '\.danger' '' '--ring:var\(--danger\)'
+  d '\.danger-off' '' '--ring:var\(--danger\)'
+fi
+uniq1 icon-btn
+if [[ -n $REPLY ]]; then
+  N=IconButton; H=$REPLY
+  d '\.danger' '' '--ring:var\(--danger\)'
+fi
+uniq1 inline-confirm
+if [[ -n $REPLY ]]; then
+  N=InlineConfirm; H=$REPLY
+  d '\.danger' '' '--ring:var\(--danger\)'
+  d '\.cancel' '' '--ring:var\(--muted\)'
+fi
+uniq1 danger-confirm
+if [[ -n $REPLY ]]; then
+  N=DangerConfirm; H=$REPLY
+  d '\.dc-force' '' '--ring:var\(--danger\)'
+  d '\.dc-cancel' '' '--ring:var\(--muted\)'
+fi
+```
+
+In the Polish 1 blocks, the three own-ring rows change in place: InlineConfirm's `d '\.ic-btn' ':focus-visible' …`, DangerConfirm's `d '\.dc-btn' ':focus-visible' …` and Button's `d '\.danger' ':focus-visible' …` pin `'outline:2px solid var\(--ring,var\(--primary\)\)'` instead of `var\(--primary\)`. In (b4) the `:focus-visible` hash becomes `<FV>` again, with a comment line `# D60 (user, 2026-10-18): the ring reads var(--ring,var(--primary)) (5b0269c3 -> <FV>).` `EXPECTED_CHECKS=2253` (+14: five `uniq1` lines and nine declaration rows).
+
+Run the gate. Expected FAIL, exactly: (b4) `the hashless rule inventory changed (23 -> 23)` (same order, one changed body), the nine new declaration rows and the three re-pinned own-ring rows.
+
+Then the CSS:
+1. `base.css`: `:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }`. The D48 comment gains a line: D60, an element sets `--ring` to colour its ring.
+2. `components/chrome/AppHeader.svelte`: `.links a { … }` gains `--ring: var(--gold-text);`.
+3. `components/ui/Button.svelte`: `.ghost { … }` gains `--ring: var(--muted);`; `.danger { … }` and `.danger-off { … }` gain `--ring: var(--danger);`; `.danger:focus-visible` reads `outline: 2px solid var(--ring, var(--primary))`.
+4. `components/ui/IconButton.svelte`: `.danger { color: var(--danger); }` gains `--ring: var(--danger);`.
+5. `components/ui/InlineConfirm.svelte`: `.danger { … }` gains `--ring: var(--danger);`, `.cancel { … }` gains `--ring: var(--muted);`, `.ic-btn:focus-visible` reads `var(--ring, var(--primary))`.
+6. `components/ui/DangerConfirm.svelte`: `.dc-force { … }` gains `--ring: var(--danger);`, `.dc-cancel { … }` gains `--ring: var(--muted);`, `.dc-btn:focus-visible` reads `var(--ring, var(--primary))`.
+
+Build, print the new hash (`python3 $SDD/probe/hashless.py focus-visible`), put it in place of `<FV>`, then the full checks. Expected: vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2253 checks)`. Re-shoot the coloured cases for the overlay: "Authoring", "Logout", "Collapse all", an InlineConfirm Cancel and red Delete, a trash IconButton, a danger Button. The commit in Step 10 adds the five D60 files (AppHeader, Button, IconButton, InlineConfirm, DangerConfirm) to its `git add` list.
+
 - [ ] **Step 10: Screenshots, the user's OK, review lanes, commit**
 
 Screenshots at 1280 wide, each with the focus put there by Tab (`agent-browser press Tab` until the target is focused; check with `agent-browser eval "document.activeElement.outerHTML.slice(0,120)"`):
@@ -832,7 +886,7 @@ fi
 none "no body:has() rule sets --focus-page (Polish 2 D50)" "body:has\([^)]*\)\{[^}]*--focus-page"
 ```
 
-9. `EXPECTED_CHECKS` becomes `2262`: +26 new PASS lines (the FilterPills declaration; in (an) six uniq1 lines, Button 5, IconButton 4, QuestionTypePicker 1, DangerConfirm 1, Toast 1, the sheet 6, the `none`), −3 removed (the VersionsPage pair and the d0 row).
+9. `EXPECTED_CHECKS` becomes `2276`: +26 new PASS lines (the FilterPills declaration; in (an) six uniq1 lines, Button 5, IconButton 4, QuestionTypePicker 1, DangerConfirm 1, Toast 1, the sheet 6, the `none`), −3 removed (the VersionsPage pair and the d0 row).
 
 Run the gate (Global Constraints). Expected: FAIL. The failures are exactly:
 - (b4) `the hashless rule inventory changed` (the `:root` hash);
@@ -1012,7 +1066,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run build 
 
 Expected: `('', ':root', '7bfdd12a'),`. If the printed hash differs, the dist one wins: use it in `WANT_FULL` and in the Step 2 comment, and ledger a ruling with both values.
 
-Then the full checks (Global Constraints). Expected: vitest green, including the two new tests; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2262 checks)`. If the ghost or borderless rows fail because dist merged a pair into one selector list (`.btn.ghost.svelte-H:disabled,.btn.ghost.blocked.svelte-H{…}`), replace that pair's two `d` rows with one `chk` on the emitted list (two declarations, the same count) and ledger it.
+Then the full checks (Global Constraints). Expected: vitest green, including the two new tests; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2276 checks)`. If the ghost or borderless rows fail because dist merged a pair into one selector list (`.btn.ghost.svelte-H:disabled,.btn.ghost.blocked.svelte-H{…}`), replace that pair's two `d` rows with one `chk` on the emitted list (two declarations, the same count) and ledger it.
 
 - [ ] **Step 10: The backlog**
 
@@ -1527,7 +1581,7 @@ if [[ $(grep -cF '<div class="assignment-html prose" data-testid="assignment-htm
 else echo "FAIL  the mini-project assignment is page-scale prose with the link attachment"; fail=1; fi
 ```
 
-12. `EXPECTED_CHECKS` becomes `2253`: −4 (g2), −4 (h) (nine rows become five), −5 (s) (ten rows become five), +4 (an).
+12. `EXPECTED_CHECKS` becomes `2267`: −4 (g2), −4 (h) (nine rows become five), −5 (s) (ten rows become five), +4 (an).
 
 Run the gate. Expected: FAIL. The failures are exactly:
 - (b4) `hashless rule ORDER changed` and the inventory row (no content.css yet);
@@ -1696,7 +1750,7 @@ Expected: a FAIL naming `<h2> {@attach} {@attach externalLinks(item.content_html
 
 - [ ] **Step 12: Full checks**
 
-Expected: vitest green (the three Step 4 tests now pass, the 16 `externalLinks` tests, D6.12); svelte-check 0 errors, 13 warnings; gate `ALL PASS (2253 checks)`.
+Expected: vitest green (the three Step 4 tests now pass, the 16 `externalLinks` tests, D6.12); svelte-check 0 errors, 13 warnings; gate `ALL PASS (2267 checks)`.
 
 - [ ] **Step 13: The backlog**
 
@@ -1978,7 +2032,7 @@ fi
 
    (`'"''"'` is zsh for two apostrophes inside a single-quoted literal: the source reads `?? ''`. This section is zsh, outside every `node -e` payload.)
 
-14. `EXPECTED_CHECKS` becomes `2263`: −4 (the T3 `dd` rows), −1 (the `.preview` row loses a declaration), +15 in (an) (five `src_count` rows, one `uniq1`, eight variant declarations, the `none`).
+14. `EXPECTED_CHECKS` becomes `2277`: −4 (the T3 `dd` rows), −1 (the `.preview` row loses a declaration), +15 in (an) (five `src_count` rows, one `uniq1`, eight variant declarations, the `none`).
 
 Run the gate. Expected: FAIL. The failures are exactly:
 - T3 (a) inventories for Numeric and Text (the `p`, `p:last-child`, `pre` rules still exist), (b) `:global` usage, (f);
@@ -2084,7 +2138,7 @@ Expected: no output (comments included: the gate check reads them too).
 
 - [ ] **Step 8: Full checks**
 
-Expected: vitest green (Step 1's tests pass; `QuizModals.svelte.test.ts:45` still finds `target="_blank"` on its external `.qtext` link); svelte-check 0 errors, 13 warnings (a new "unused CSS selector" warning for a `.pv-*` rule is a finding: the class is dynamic, so Svelte keeps the rules); gate `ALL PASS (2263 checks)`.
+Expected: vitest green (Step 1's tests pass; `QuizModals.svelte.test.ts:45` still finds `target="_blank"` on its external `.qtext` link); svelte-check 0 errors, 13 warnings (a new "unused CSS selector" warning for a `.pv-*` rule is a finding: the class is dynamic, so Svelte keeps the rules); gate `ALL PASS (2277 checks)`.
 
 - [ ] **Step 9: The backlog**
 
@@ -2137,7 +2191,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `ErrorState` (`variant="page"`, `title`, `message`, the `action` snippet; root `role="alert"`, page title `h1.title`), `Button` (`variant="secondary"`), `defaultLandingPath(user)` and `navigate(path)` from `frontend/src/lib/router.svelte.ts`, `session` from `frontend/src/stores/session.svelte.ts`.
-- Produces: nothing other tasks use. No gate rows change (`EXPECTED_CHECKS` stays `2263`).
+- Produces: nothing other tasks use. No gate rows change (`EXPECTED_CHECKS` stays `2277`).
 
 - [ ] **Step 1: Write the failing component tests**
 
@@ -2349,7 +2403,7 @@ Run both test files. Expected: PASS (5 + 3).
 
 - [ ] **Step 4: Full checks**
 
-Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2263 checks)` (the page column check still finds NotFound's `.page` rule).
+Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2277 checks)` (the page column check still finds NotFound's `.page` rule).
 
 - [ ] **Step 5: The backlog**
 
@@ -2532,7 +2586,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytes
 
 Expected: all pass (the count rises by the new cases). Then the running dev backend: its log (`.superpowers/sdd/2026-10-07-visual-refresh-slice5b-item-editor-modal/probe/backend.log`) shows a reload after the `markdown.py` edit and no traceback in its last lines. Do not restart it.
 
-Frontend checks too (nothing there changed): vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2263 checks)`.
+Frontend checks too (nothing there changed): vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2277 checks)`.
 
 - [ ] **Step 5: The backlog**
 

@@ -1,10 +1,11 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 5 (2026-10-18), in review.
+**Status:** rev 6 (2026-10-18), approved; Task 1 executing.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
 - Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
 - Rev 5 folds in the round-4 minors (`spec-r4-*.md`; no Critical or Important findings in round 4).
+- Rev 6 adds the user's decision D60 (the ring colour follows the element), made at Task 1's look review.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -48,6 +49,11 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - Text fields (text-entry `input`, `textarea`, `select`) keep today's intended look: a `--primary` border with the soft halo.
   - In High Contrast (`forced-colors: active`) every focusable control gets an outline.
   - This is a deliberate departure from the design handoff (`docs/design/visual-refresh/base.css:132`), whose halo measures 1.16:1 against `--surface`.
+- **D60 — The ring colour follows the element** (user, at Task 1's look review).
+  - Header nav links ("Authoring", "Teaching"): dark amber `--gold-text` (#7A5410). The logo gold `--gold` (#E8A317) is 2.17:1 on white, below the 3:1 a focus indicator needs.
+  - Gray buttons: dark gray `--muted` (#5A616E). These are the InlineConfirm and DangerConfirm Cancel buttons and the ghost Buttons ("Logout", "Collapse all").
+  - Red elements: crimson `--danger` (#C8102E). These are the danger and danger-off Buttons, the red InlineConfirm and DangerConfirm buttons and the trash IconButtons.
+  - Everything else: steel blue `--primary`.
 - **D49 — Reduced motion: the knob jumps and the spinners keep turning.**
   - Under `prefers-reduced-motion: reduce`, the Switch knob moves without its 0.12s slide.
   - The four spinners (Button, InlineConfirm, DangerConfirm, Spinner) keep rotating. They are the only sign that something is busy, which is essential motion.
@@ -94,7 +100,7 @@ Checked in `frontend/dist/_app/index-*.css` on the Polish 1 tip.
   - Forced-colors mode drops `box-shadow` and keeps `outline: none`, so these controls show no indicator at all (backlog `global-focus-ring-invisible-in-forced-colors.md`).
 - **New rules.** In `base.css` they replace the old one, in this order:
   ```css
-  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
   :is(input:not([type=checkbox], [type=radio], [type=file], [type=range], [type=color], [type=button], [type=submit], [type=reset]), textarea, select):focus-visible {
     outline: none;
     border-color: var(--primary);
@@ -150,6 +156,18 @@ An own `:focus-visible` rule replaces the global ring only for the properties it
   ItemIcon has no rule and takes the global ring.
 - **Button's halo.** Button `.primary` and `.ghost` have no own focus rule. They now take the global ring, which retires the Polish 1 spec's note that they keep the halo "until Polish 2" (`2026-10-14-visual-refresh-polish1-confirms-design.md:207`). No gate row pins that halo today.
 
+### Ring colour (D60)
+- **Mechanism.** The global ring reads `var(--ring, var(--primary))`. A coloured element sets `--ring` in its resting rule, never in a new `:focus-visible` selector, so the Polish 1 guards ("fills only an enabled, idle button") stay exact. The three own outline rules (InlineConfirm `.ic-btn`, DangerConfirm `.dc-btn`, Button `.danger`) read the same variable. Button `.secondary` stays `var(--primary)`.
+- **Who sets it:**
+  - AppHeader `.links a`: `--ring: var(--gold-text)`;
+  - Button `.ghost`: `--ring: var(--muted)`; Button `.danger` and `.danger-off`: `--ring: var(--danger)`;
+  - IconButton `.danger` (trash): `--ring: var(--danger)`;
+  - InlineConfirm `.danger`: `--ring: var(--danger)`; `.cancel`: `--ring: var(--muted)`;
+  - DangerConfirm `.dc-force`: `--ring: var(--danger)`; `.dc-cancel`: `--ring: var(--muted)`.
+- **A blocked or busy control keeps its kind's colour.** The ring names what the control does (a delete stays red), not its momentary look.
+- **No new token.** `--ring` is a per-element property, not a theme token, so `:root` does not change.
+- **High Contrast** is unaffected: the forced-colors rule sets the whole `outline` shorthand with `!important`.
+
 ### High Contrast: a clipped hidden radio
 DashboardSidePanel's evaluation control hides its radio with `clip: rect(0 0 0 0)` (`DashboardSidePanel.svelte:1064-1074`) and draws the ring on the label as a box-shadow, with no forced-colors rule. `clip` clips the outline too, so in High Contrast nothing shows. It gains:
 ```css
@@ -197,7 +215,8 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   - each inset `outline-offset:-2px` rule;
   - the MarkdownEditor's two rules;
   - the two compound error rules;
-  - each field focus rule that the audit adds.
+  - each field focus rule that the audit adds;
+  - D60: each `--ring` declaration above, and the three own outline rules re-pinned to `var(--ring,var(--primary))`.
 - **`EXPECTED_CHECKS`** (`gate:91`) moves by the rows added.
 
 ## The page ground and the reading sheets (Task 2)
