@@ -749,7 +749,7 @@
     font-size: 13px;
   }
   .mpm-date { font-family: var(--font-mono); font-size: 12.5px; }
-  .mpm-invalid {
+  .mpm-input.mpm-invalid {
     border-color: var(--danger);
   }
   .mpm-error { font-size: 12px; color: var(--danger); }

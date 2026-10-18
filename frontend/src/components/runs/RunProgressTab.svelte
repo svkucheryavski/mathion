@@ -436,6 +436,7 @@
   }
   .seg-btn + .seg-btn { border-left: 1px solid var(--border-strong); }
   .seg-btn[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+  .seg-btn:focus-visible { outline-offset: -2px; }
 
   .pg-control {
     box-sizing: border-box;
@@ -529,7 +530,11 @@
     width: 100%;
     height: 100%;
   }
-  .cell-btn { padding: 6px 12px; font-family: var(--font-mono); font-size: 11.5px; }
+  /* D61: the ring sits on the heat fill, where --primary is 2.38:1 on --heat-4; the cell text colour is 6:1 or more. */
+  .cell-btn { padding: 6px 12px; font-family: var(--font-mono); font-size: 11.5px; --ring: var(--heat-fg); }
+  /* Flush in `padding: 0` cells inside .table-scroll: inset, or the clip eats the ring. */
+  .cell-btn:focus-visible { outline-offset: -2px; }
+  .progress-grid th button:focus-visible { outline-offset: -2px; }
   .cell { background: var(--cell-bg, none); color: var(--heat-fg); }
   .empty { color: var(--muted); padding: 1rem; text-align: center; }
 </style>

@@ -1061,6 +1061,10 @@
   }
   .sp-seg-opt.locked { color: var(--faint); cursor: not-allowed; }
   .sp-seg-opt:has(.sp-radio:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }
+  /* The radio is hidden with clip(), which clips its outline too. */
+  @media (forced-colors: active) {
+    .sp-seg-opt:has(.sp-radio:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+  }
   .sp-radio {
     position: absolute;
     width: 1px;

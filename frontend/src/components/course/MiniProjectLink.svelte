@@ -72,23 +72,16 @@
     background: var(--primary-soft);
     text-decoration: none;
   }
-  /* An INSET ring. The global :focus-visible (base.css:21-25) paints
-     `box-shadow: 0 0 0 3px var(--primary-soft)` OUTSIDE the border box, and T8a's
-     card is `overflow: hidden` with these rows spanning its padding box exactly —
-     so the left and right bands were clipped away entirely, and the first and last
-     row lost their outer band too. Painted inside, the ring survives the clip.
-     2px `--primary` rather than 3px `--primary-soft`: at ~1.15:1 against
-     `--surface` the soft token was never a usable indicator on its own. */
+  /* An INSET ring, the twin of SequenceLink's. The global outline (base.css)
+     would be clipped by T8a's `overflow: hidden` card, whose rows span its
+     padding box exactly, and paint over the neighbouring rows; so it is dropped. */
   .row:focus-visible {
+    outline: none;
     box-shadow: inset 0 0 0 2px var(--primary);
   }
-  /* Forced-colors drops `box-shadow` outright while base.css:22's `outline: none`
-     still applies, so without this the row has NO focus indicator at all in that
-     mode — the exact mechanism recorded at visual-refresh-gate.sh:296. `Highlight`
-     is a system colour, allowed by Constraint 1's forced-colors exemption. The
-     idiom is the slice's own: Login.svelte:146 pairs it with the identical
-     `box-shadow: inset 0 0 0 2px var(--primary)`, and all four question
-     components ship the same companion. */
+  /* Forced colors drop box-shadow. This offset keeps the global forced-colors
+     outline (base.css) inside the row. `Highlight` is a system colour, allowed
+     by Constraint 1's forced-colors exemption. */
   @media (forced-colors: active) {
     .row:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   }

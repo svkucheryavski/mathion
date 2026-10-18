@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2220
+EXPECTED_CHECKS=2256
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -184,9 +184,9 @@ for pair in "Numeric:$NH:\\.num:160px" "Text:$TH:\\.txt:100%"; do
                 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' \
                 "width:${W}"
 
-  # ---- focus: restore the border the scoped field rule out-specifies ----
-  # The global :focus-visible is (0,1,0), this rule is (0,2,0), so without the
-  # (0,3,0) restore the only focus signal is a 1.12:1 halo.
+  # ---- focus: the field's border turns --primary ----
+  # Pinned since T3, when the global rule could not reach the scoped border.
+  # The Polish 2 field rule (base.css) sets it too; this pin stays.
   d "$FIELD" ':focus-visible' 'border-color:var\(--primary\)'
 
   # ---- disabled treatment on the reserved disabled-control tokens ----
@@ -296,8 +296,7 @@ for name, h, field, width in SPECS:
         ('', '.%s.%s:focus-visible' % (field, h), 'border-color:var(--primary)'),
         ('', '.correct-line.%s' % h,
              'overflow-wrap:anywhere;margin:0;color:var(--status-accepted-fg);font-size:13px'),
-        # forced-colors: that mode drops box-shadow while base.css:22's
-        # `outline:none` still applies, so this is the ONLY focus indicator left.
+        # forced-colors: the offset keeps the global forced-colors outline inside the field.
         (FC, '.%s.%s:focus-visible' % (field, h), 'outline:2px solid Highlight;outline-offset:-2px'),
     ]
     for _m, _s, _b in want:
@@ -553,25 +552,41 @@ else:
 # +--danger-press, --primary-press, --cancel-border/-hover/-press and
 # --danger-panel-bg/-fg (D31, D40). Those are the ONLY changes (reverting them
 # reproduces 2448f67f).
+# Polish 2 T1 (user D48, 2026-10-18): `:focus-visible` is the 2px --primary
+# outline at a 2px offset (1684b043 -> 5b0269c3). Its old declaration set moved
+# unchanged to the new text-field rule, so that rule hashes to 1684b043. Two
+# more rules follow it: `[tabindex="-1"]:focus-visible` (script focus parking
+# spots show no ring) and the forced-colors outline, `!important` because eight
+# components set `outline: none` in their own :focus-visible rules.
+# D60 (user, 2026-10-18): the ring reads var(--ring, var(--primary)) (5b0269c3 -> ebbf7147).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
-    ('', ':focus-visible', '1684b043'), ('', ':root', 'a066ce4c'),
+    ('', ':focus-visible', 'ebbf7147'),
+    ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
+    ('', ':root', 'a066ce4c'),
+    ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
     ('', 'h1,h2,h3,h4,h5,h6', '610dd856'), ('', 'h2', 'a8b134e8'),
     ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html,body', '3bd2fa51'),
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
+    ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
 ]
-# Document ORDER of the same 20 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 23 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
+# The four focus rules close it, frozen in order like the rest. None depends on
+# order today: the field rule (0,2,1) and `[tabindex="-1"]` (0,2,0) win by specificity.
 WANT_ORDER = [
     ('', '*,*:before,*:after'), ('', 'html,body'), ('', 'body'), ('', 'ul,ol'),
     ('', 'h1,h2,h3,h4,h5,h6'), ('', 'p'), ('', 'button,input,select,textarea'),
     ('', 'button'), ('', 'img,video'), ('', 'a'), ('', ':root'), ('', 'body'),
     ('', '.mono,code,kbd'), ('', 'a'), ('', 'a:hover'), ('', 'h1'), ('', 'h2'),
     ('', 'h3'), ('', 'h4'), ('', ':focus-visible'),
+    ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
+    ('', '[tabindex="-1"]:focus-visible'),
+    ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])'),
 ]
 def dhash(b):
     return hashlib.sha1(';'.join(sorted(decls(b))).encode()).hexdigest()[:8]
@@ -623,10 +638,13 @@ else:
 #      its body holds declarations, not rules); an inline `style="--t:…"`; and
 #      Svelte's `style:--t={…}` directive, which compiles to a runtime
 #      setProperty and touches no CSS at all.
-# Seed from the frozen global rules too: (b4) pins `:focus-visible`'s
+# Seed from the frozen global rules too: (b4) pins the field focus rule's
 # `box-shadow: … var(--primary-soft)` as a STRING, leaving the value it resolves
 # to unguarded — `.q-block{--primary-soft:transparent}` erased the field's focus
 # halo with the whole gate green.
+# A `var(--x, fallback)` reference is skipped by this regex. That is right for
+# `--ring` (D60: components set it per element, so it is not a token), but a
+# pinned token written with a fallback would slip past (b5) the same way.
 for _k, _b in bodies.items():
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', _b))
 # PINNED_TOKENS above is derived from T3's pinned bodies only, because those are
@@ -2197,19 +2215,16 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 35px 8px 12px;'
          'border-bottom:1px solid var(--border-soft);color:var(--text)')
 HOVER = 'background:var(--primary-soft);text-decoration:none'
-# An INSET ring, not the global outset one. base.css:21-25 gives every focusable
-# element `box-shadow: 0 0 0 3px var(--primary-soft)`, painted OUTSIDE the border
-# box -- and T8a's card is `overflow:hidden` with these rows spanning its padding
-# box EXACTLY, so the left and right bands were clipped away entirely and the
-# first/last row lost its outer band too. An inset ring paints inside the border
-# box and survives the clip. Pinned in full because "just use the global ring"
-# reads as a tidy-up in review and would silently re-clip it.
-FOCUS = 'box-shadow:inset 0 0 0 2px var(--primary)'
-# ...and its forced-colors companion, which is NOT optional decoration: that mode
-# drops box-shadow outright while base.css:22's `outline:none` still applies, so
-# without this the row has NO focus indicator at all there. Same statement as the
-# T3 heredoc's note above. `Highlight` is a system colour under Constraint 1's
-# forced-colors exemption. Normalised (unspaced) form -- dist is minified.
+# An INSET ring. The global outline (base.css) would be clipped by T8a's
+# `overflow:hidden` card, whose rows span its padding box EXACTLY, and paint
+# over the neighbouring rows; so the row drops it (`outline:none`) and draws
+# the ring inside. Pinned in full because "just use the global ring" reads as
+# a tidy-up in review and would silently re-clip it.
+FOCUS = 'outline:none;box-shadow:inset 0 0 0 2px var(--primary)'
+# ...and its forced-colors companion: that mode drops box-shadow, and this
+# offset keeps the global forced-colors outline inside the row. `Highlight`
+# is a system colour under Constraint 1's forced-colors exemption.
+# Normalised (unspaced) form -- dist is minified.
 FC    = '@media (forced-colors:active)'
 FCRING = 'outline:2px solid Highlight;outline-offset:-2px'
 # `flex:1 1 auto`, NOT `flex:1`. The shorthand `flex:1` means basis ZERO; when
@@ -2862,7 +2877,7 @@ def want(h, ctl_radius, selected_ctl, dot):
       AFTER them, which is the cascade the source-order gate below protects.
 
       The focus pair is the slice's inset-ring idiom: the visually-hidden input
-      has its global glow suppressed (`box-shadow: none`) and the ROW takes the
+      draws no ring of its own (opacity 0) and the ROW takes the
       ring via :has(), with the forced-colors companion because that mode drops
       box-shadow entirely. `.opt.selected` also outlines in forced-colors --
       there the --primary tint is not rendered, so selection would otherwise be
@@ -4858,7 +4873,7 @@ if [[ -n $REPLY ]]; then
   N=NewRunModal; H=$REPLY
   d '\.nr-label' '' 'font-size:12\.5px' 'font-weight:500' 'color:var\(--text-3\)'
   d '\.nr-input' '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)'
-  d '\.nr-invalid' '' 'border-color:var\(--danger\)'
+  d '\.nr-input\.nr-invalid' '' 'border-color:var\(--danger\)'
   d '\.nr-err' '' 'font-size:12px' 'color:var\(--danger\)'
   d '\.nr-dates' '' 'display:grid' 'grid-template-columns:1fr 1fr' 'gap:14px'
   d '\.nr-help' '' 'font-size:12px' 'color:var\(--muted\)'
@@ -4905,7 +4920,7 @@ if [[ -n $REPLY ]]; then
   d '\.mpm-deadlines' '' 'display:grid' 'grid-template-columns:repeat\(3,1fr\)' 'gap:12px'
   d '\.mpm-zone' '' 'font-size:10\.5px' 'color:var\(--muted\)'
   d '\.mpm-input' '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)'
-  d '\.mpm-invalid' '' 'border-color:var\(--danger\)'
+  d '\.mpm-input\.mpm-invalid' '' 'border-color:var\(--danger\)'
   d '\.mpm-dirty' '' 'flex:1' 'font-size:11\.5px' 'color:var\(--status-needs-revision-fg\)'
   d '\.mpm-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
   d '\.mpm-box' '' 'padding:8px 10px' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)' 'border-radius:0 5px 5px 0' 'color:var\(--status-needs-revision-fg\)'
@@ -5172,7 +5187,7 @@ if [[ -n $REPLY ]]; then
   d '\.cancel' "${IC}:hover" 'background:var\(--cancel-hover\)'
   d '\.cancel' "${IC}:focus-visible" 'background:var\(--cancel-hover\)'
   d '\.cancel' "${IC}:active" 'background:var\(--cancel-press\)'
-  d '\.ic-btn' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
+  d '\.ic-btn' ':focus-visible' 'outline:2px solid var\(--ring, var\(--primary\)\)' 'outline-offset:2px'
   d '\.cancel\[aria-disabled=true\]' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
   d '\.confirm\[aria-busy=true\]' '' 'cursor:progress'
   d '\.warning' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'overflow-wrap:anywhere'
@@ -5200,7 +5215,7 @@ if [[ -n $REPLY ]]; then
   d '\.dc-cancel' "${DC}:hover" 'background:var\(--cancel-hover\)'
   d '\.dc-cancel' "${DC}:focus-visible" 'background:var\(--cancel-hover\)'
   d '\.dc-cancel' "${DC}:active" 'background:var\(--cancel-press\)'
-  d '\.dc-btn' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
+  d '\.dc-btn' ':focus-visible' 'outline:2px solid var\(--ring, var\(--primary\)\)' 'outline-offset:2px'
   d '\.dc-force\.armed\[aria-busy=true\]' '' 'cursor:progress'
   chk "@media \(pointer: ?coarse\)\{\.dc-btn\.${H}" 'min-height:28px'
   none "DangerConfirm fills only an armed, idle Force delete and an enabled Cancel" "\.dc-(force|cancel)[.a-z-]*\.${H}:(hover|focus-visible|active)"
@@ -5215,7 +5230,7 @@ if [[ -n $REPLY ]]; then
   d '\.danger' "${BT}:hover" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
   d '\.danger' "${BT}:focus-visible" 'background:var\(--danger\)' 'color:var\(--primary-text\)'
   d '\.danger' "${BT}:active" 'background:var\(--danger-press\)' 'border-color:var\(--danger-press\)'
-  d '\.danger' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px'
+  d '\.danger' ':focus-visible' 'outline:2px solid var\(--ring, var\(--primary\)\)' 'outline-offset:2px'
   none "Button .danger fills only an enabled, idle button" "\.danger\.${H}:((hover|active)\{|focus-visible\{[^}]*background)"
   # D44 (Task 8): secondary = the confirm's primary action at page size.
   d '\.secondary' '' 'background:var\(--surface\)' 'color:var\(--primary\)' 'border-color:var\(--primary\)'
@@ -5378,5 +5393,94 @@ else echo "FAIL  confirm() calls left in src: $cfl"; fail=1; fi
 cft=(${(f)"$(grep -rnE "spyOn\((window|globalThis), 'confirm'\)|(window|globalThis)\.confirm" src/tests)"})
 if [[ ${#cft[@]} -eq 0 ]]; then echo "PASS  no test answers a confirm() pop-up (Polish 1)"
 else echo "FAIL  tests still spy on confirm(): $cft"; fail=1; fi
+
+echo
+echo "--- (an) Polish 2 — named items ---"
+# Task 1 — the focus ring (D48) and reduced motion (D49). The global rules are
+# frozen in (b4); these are the component rules the new ring needs.
+uniq1 switch
+if [[ -n $REPLY ]]; then
+  N=Switch; H=$REPLY
+  check "Switch knob jumps under reduced motion (D49)" "@media \(prefers-reduced-motion: ?reduce\)\{\.knob\.${H}\{transition:none\}"
+fi
+# The evaluation radio is hidden with clip(), which clips the outline too, so
+# High Contrast needs the ring on the label.
+uniq1 sp-card
+if [[ -n $REPLY ]]; then
+  N=DashboardSidePanel; H=$REPLY
+  chk "@media \(forced-colors: ?active\)\{\.sp-seg-opt\.${H}:has\(\.sp-radio:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+fi
+# Inset rings where a control is flush against an overflow clip (spec §Inset rings).
+uniq1 seg-btn
+if [[ -n $REPLY ]]; then
+  N=RunProgressTab; H=$REPLY
+  d '\.seg-btn' ':focus-visible' 'outline-offset:-2px'
+  d '\.cell-btn' ':focus-visible' 'outline-offset:-2px'
+  chk "\.progress-grid\.${H} th:where\(\.${H}\) button:where\(\.${H}\):focus-visible" 'outline-offset:-2px'
+fi
+uniq1 md-card
+if [[ -n $REPLY ]]; then
+  N=MarkdownEditor; H=$REPLY
+  # The card shows the textarea focus; :has, not :focus-within, so a focused tab does not.
+  chk "\.md-card\.${H}:has\(textarea:where\(\.${H}\):focus-visible\)" 'border-color:var\(--primary\)'
+  # (0,3,1): beats the (0,2,1) field rule. The halo would be clipped and paint over the tabs.
+  chk "\.md-card\.${H} textarea:where\(\.${H}\):focus-visible" 'box-shadow:none' 'outline-offset:-2px'
+  chk "\.tabs\.${H} button:where\(\.${H}\):focus-visible" 'outline-offset:-2px'
+fi
+frames=$(grep -oE '\.frame\.svelte-[a-z0-9]+ iframe:where\(\.svelte-[a-z0-9]+\):focus-visible\{outline-offset:-2px\}' $CSS | sort -u | wc -l | tr -d ' ')
+if [[ $frames -eq 2 ]]; then echo "PASS  the video and app iframes draw an inset ring (VideoFrame, InteractiveFrame)"
+else echo "FAIL  the video and app iframes draw an inset ring (found $frames of 2)"; fail=1; fi
+# P97: the retry select is drawn as an underlined link with no border, so the
+# field rule would leave it only the 1.16:1 halo. It takes the ring instead.
+uniq1 ro-retry
+if [[ -n $REPLY ]]; then
+  N=RunRosterTab; H=$REPLY
+  d '\.ro-retry' ':focus-visible' 'outline:2px solid var\(--primary\)' 'outline-offset:2px' 'box-shadow:none'
+fi
+# D60 — the ring colour follows the element. The global ring reads
+# var(--ring, var(--primary)); a coloured element sets --ring in its resting rule
+# (P116: not in a new :focus-visible selector, which the Polish 1 none-guards catch).
+uniq1 app-header
+if [[ -n $REPLY ]]; then
+  N=AppHeader; H=$REPLY
+  chk "\.links\.${H} a:where\(\.${H}\)" '--ring: var\(--gold-text\)'
+fi
+uniq1 btn
+if [[ -n $REPLY ]]; then
+  N=Button; H=$REPLY
+  d '\.ghost' '' '--ring: var\(--muted\)'
+  d '\.danger' '' '--ring: var\(--danger\)'
+  d '\.danger-off' '' '--ring: var\(--danger\)'
+fi
+uniq1 icon-btn
+if [[ -n $REPLY ]]; then
+  N=IconButton; H=$REPLY
+  d '\.danger' '' '--ring: var\(--danger\)'
+fi
+uniq1 inline-confirm
+if [[ -n $REPLY ]]; then
+  N=InlineConfirm; H=$REPLY
+  d '\.danger' '' '--ring: var\(--danger\)'
+  d '\.cancel' '' '--ring: var\(--muted\)'
+fi
+uniq1 danger-confirm
+if [[ -n $REPLY ]]; then
+  N=DangerConfirm; H=$REPLY
+  d '\.dc-force' '' '--ring: var\(--danger\)'
+  d '\.dc-cancel' '' '--ring: var\(--muted\)'
+fi
+# D61 (user, 2026-10-18): a Progress cell draws its ring inset on its own heat
+# fill; --primary is 2.38:1 on --heat-4, so the cells ring in --heat-fg (6.05:1).
+uniq1 seg-btn
+if [[ -n $REPLY ]]; then
+  N=RunProgressTab; H=$REPLY
+  d '\.cell-btn' '' '--ring: var\(--heat-fg\)'
+fi
+# P116: --ring is set only on leaf controls. A tenth declaration (a card, a
+# wrapper) would silently recolour every ring inside it.
+nring=$(grep -oE -- '--ring: ?var\(' $CSS | wc -l | tr -d ' ')
+if [[ $nring -eq 10 ]]; then echo "PASS  --ring is declared exactly ten times, all on leaf controls (D60, D61)"
+else echo "FAIL  --ring is declared exactly ten times, all on leaf controls (D60, D61) (found $nring)"; fail=1; fi
+
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

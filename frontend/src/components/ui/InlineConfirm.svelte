@@ -127,9 +127,9 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .danger { color: var(--danger); border-color: var(--danger); }
+  .danger { color: var(--danger); border-color: var(--danger); --ring: var(--danger); }
   .primary { color: var(--primary); border-color: var(--primary); }
-  .cancel { color: var(--text-3); border-color: var(--cancel-border); }
+  .cancel { color: var(--text-3); border-color: var(--cancel-border); --ring: var(--muted); }
   @media (hover: hover) {
     .danger:not([aria-disabled="true"]):hover { background: var(--danger); color: var(--primary-text); }
     .primary:not([aria-disabled="true"]):hover { background: var(--primary); color: var(--primary-text); }
@@ -141,8 +141,8 @@
   .danger:not([aria-disabled="true"]):active { background: var(--danger-press); border-color: var(--danger-press); color: var(--primary-text); }
   .primary:not([aria-disabled="true"]):active { background: var(--primary-press); border-color: var(--primary-press); color: var(--primary-text); }
   .cancel:not([aria-disabled="true"]):active { background: var(--cancel-press); }
-  /* The ring sits outside the button, on the page (P57). */
-  .ic-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
+  /* The ring sits outside the button, on the page (P57); its colour follows the button (D60). */
+  .ic-btn:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; box-shadow: none; }
   /* Busy (6b P23): the confirm keeps its rest look with a spinner; Cancel
      takes the blocked look (Button's .btn.blocked). */
   .confirm[aria-busy="true"] { cursor: progress; }

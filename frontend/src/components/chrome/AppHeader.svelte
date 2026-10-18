@@ -92,6 +92,7 @@
     padding: 4px 10px;
     /* 4px is a literal here (matches no token: --radius is 5, --radius-pill 3). */
     border-radius: 4px;
+    --ring: var(--gold-text); /* D60: the nav's own amber, 6.8:1 on white (--gold is 2.17:1) */
   }
   /* Active pill = gold. */
   .links a[aria-current="page"] {

@@ -46,13 +46,14 @@
     background: var(--primary-soft);
     text-decoration: none;
   }
-  /* An INSET ring: the global outset ring is clipped by the card's
-     `overflow:hidden`. 2px `--primary` because `--primary-soft` is ~1.15:1. */
+  /* An INSET ring. The global outline would be clipped by the card's
+     `overflow:hidden` and paint over the neighbouring rows, so it is dropped. */
   .row:focus-visible {
+    outline: none;
     box-shadow: inset 0 0 0 2px var(--primary);
   }
-  /* Forced colors drop box-shadow while the global `outline:none` still applies,
-     so without this the row has no focus indicator in that mode. */
+  /* Forced colors drop box-shadow. This offset keeps the global forced-colors
+     outline (base.css) inside the row. */
   @media (forced-colors: active) {
     .row:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   }

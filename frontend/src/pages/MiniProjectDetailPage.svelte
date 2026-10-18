@@ -683,7 +683,7 @@
   .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }        /* visually-hidden file input (sr-only, not a disabled treatment — Login.svelte:137 idiom) */
   .drop.has-file .drop-label { color: var(--text); overflow-wrap: anywhere; /* a picked filename is content, not a hint */ }
   .drop.dragover { border-color: var(--primary); background: var(--primary-soft); /* 5(b): the affordance the artboard cannot show */ }
-  .drop input:focus-visible { box-shadow: none; }                                                /* suppress the global :focus-visible glow (base.css:21-25) on the hidden input */
+  .drop input:focus-visible { box-shadow: none; }                                                /* a no-op since Polish 2 (the field rule skips this input); kept for Polish 3 */
   .drop:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }                 /* redraw it on the label */
   /* Forced-colors drops background-color AND box-shadow: restore the focus ring and the
      drag highlight with outlines (forced-colors keeps outlines). Highlight is a system colour

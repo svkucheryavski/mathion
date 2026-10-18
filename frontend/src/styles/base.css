@@ -19,10 +19,23 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; }
 h3 { font-size: 14px; font-weight: 600; margin: 0; }
 h4 { font-size: 13px; font-weight: 600; margin: 0; }
 
-:focus-visible {
+/* D48: a ring on controls; text fields keep their blue border and halo. The
+   field rule is (0,2,1), so a scoped error rule of (0,3,0) or more keeps its
+   red border on focus. D60: an element sets --ring in its resting rule to
+   colour its ring (amber nav, gray quiet buttons, crimson destructive). */
+:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
+:is(input:not([type=checkbox], [type=radio], [type=file], [type=range], [type=color], [type=button], [type=submit], [type=reset]), textarea, select):focus-visible {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-soft);
+}
+/* Focus parking spots: headings and panels that script focuses after an action. */
+[tabindex="-1"]:focus-visible { outline: none; }
+/* High Contrast drops box-shadow. `!important` because eight components set
+   `outline: none` in their own :focus-visible rules. No offset here, so an
+   inset ring keeps its own. */
+@media (forced-colors: active) {
+  :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
 }
 
 /* ---------------------------------------------------------------------------

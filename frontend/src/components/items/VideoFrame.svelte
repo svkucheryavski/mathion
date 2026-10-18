@@ -16,4 +16,5 @@
   .frame { position: relative; padding-bottom: 56.25%; height: 0; margin-bottom: var(--space-3); }
   .frame.fixed { padding-bottom: 0; height: var(--frame-h); margin-bottom: 0; /* (c): the caller sizes it */ }
   .frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .frame iframe:focus-visible { outline-offset: -2px; /* the player card clips the frame */ }
 </style>

@@ -1055,6 +1055,8 @@
     text-decoration: underline;
     cursor: pointer;
   }
+  /* A select drawn as a link has no border to colour: it takes the ring (P97). */
+  .ro-retry:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
   .ro-dismiss { color: inherit; }
 
   /* The 6a table look; the wrapper scrolls sideways on a narrow window. */

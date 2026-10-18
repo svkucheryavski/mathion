@@ -217,7 +217,7 @@
   .opt.reveal-missed .mark { color: var(--status-accepted-fg); }
   .opt.reveal-wrong .mark { color: var(--status-rejected-fg); }
 
-  .opt input:focus-visible { box-shadow: none; }              /* suppress the global glow (base.css:21-25) on the hidden input */
+  .opt input:focus-visible { box-shadow: none; }              /* a no-op since Polish 2 (the field rule skips this input); kept for Polish 3 */
   .opt:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }
   /* Forced-colors drops background-color AND box-shadow, so both the selection
      fill and the focus ring vanish — restore them as outlines. The reveal rows

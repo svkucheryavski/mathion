@@ -226,7 +226,7 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
   }
-  .nr-invalid {
+  .nr-input.nr-invalid {
     border-color: var(--danger);
   }
   .nr-err {

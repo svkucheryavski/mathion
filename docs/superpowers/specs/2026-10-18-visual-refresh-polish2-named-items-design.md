@@ -1,11 +1,12 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 6 (2026-10-18), approved; Task 1 executing.
+**Status:** rev 7 (2026-10-18), approved; Task 1 executing.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
 - Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
 - Rev 5 folds in the round-4 minors (`spec-r4-*.md`; no Critical or Important findings in round 4).
 - Rev 6 adds the user's decision D60 (the ring colour follows the element), made at Task 1's look review.
+- Rev 7 adds D61 (Progress grid cells ring near-black), from Task 1's review round 1.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -54,6 +55,7 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - Gray buttons: dark gray `--muted` (#5A616E). These are the InlineConfirm and DangerConfirm Cancel buttons and the ghost Buttons ("Logout", "Collapse all").
   - Red elements: crimson `--danger` (#C8102E). These are the danger and danger-off Buttons, the red InlineConfirm and DangerConfirm buttons and the trash IconButtons.
   - Everything else: steel blue `--primary`.
+- **D61 — Progress grid cells ring near-black** (user, after Task 1's review round 1). A cell's ring is drawn inset on its own heat fill, where `--primary` is 2.38:1 on `--heat-4`. Every cell, empty or filled, rings in `--heat-fg` (#16181D, the cell text colour): 6.05:1 or more.
 - **D49 — Reduced motion: the knob jumps and the spinners keep turning.**
   - Under `prefers-reduced-motion: reduce`, the Switch knob moves without its 0.12s slide.
   - The four spinners (Button, InlineConfirm, DangerConfirm, Spinner) keep rotating. They are the only sign that something is busy, which is essential motion.
@@ -163,7 +165,9 @@ An own `:focus-visible` rule replaces the global ring only for the properties it
   - Button `.ghost`: `--ring: var(--muted)`; Button `.danger` and `.danger-off`: `--ring: var(--danger)`;
   - IconButton `.danger` (trash): `--ring: var(--danger)`;
   - InlineConfirm `.danger`: `--ring: var(--danger)`; `.cancel`: `--ring: var(--muted)`;
-  - DangerConfirm `.dc-force`: `--ring: var(--danger)`; `.dc-cancel`: `--ring: var(--muted)`.
+  - DangerConfirm `.dc-force`: `--ring: var(--danger)`; `.dc-cancel`: `--ring: var(--muted)`;
+  - RunProgressTab `.cell-btn`: `--ring: var(--heat-fg)` (D61).
+- **A guard.** The gate counts the `--ring` declarations in dist (ten), so a container that sets it, recolouring every ring inside, fails the gate.
 - **A blocked or busy control keeps its kind's colour.** The ring names what the control does (a delete stays red), not its momentary look.
 - **No new token.** `--ring` is a per-element property, not a theme token, so `:root` does not change.
 - **High Contrast** is unaffected: the forced-colors rule sets the whole `outline` shorthand with `!important`.

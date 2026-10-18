@@ -135,7 +135,7 @@
   .segment:not(:first-child) { border-left: 1px solid var(--border); }
   .segment.selected { background: var(--primary-soft); color: var(--text); font-weight: 500; }
   .segment input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }        /* visually-hidden radio (sr-only, not a disabled treatment) */
-  .segment input:focus-visible { box-shadow: none; }                                                /* suppress the global :focus-visible glow (base.css:21-25) on the hidden radio */
+  .segment input:focus-visible { box-shadow: none; }                                                /* a no-op since Polish 2 (the field rule skips this input); kept for Polish 3 */
   .segment:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }                 /* --primary: visible on both --surface and the selected --primary-soft */
   /* Forced-colors (Windows High Contrast) drops background-color AND box-shadow, so
      both the selected fill (.segment.selected) and the focus ring above vanish —

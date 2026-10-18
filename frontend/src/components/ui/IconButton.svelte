@@ -192,7 +192,7 @@
   .sm svg { width: 12px; height: 12px; }
   .md svg { width: 14px; height: 14px; }
   /* Danger (trash): a red glyph, never a red fill. */
-  .danger { color: var(--danger); }
+  .danger { color: var(--danger); --ring: var(--danger); }
   /* Borderless (chevron/fold controls): no chrome, just the muted mark. */
   .borderless {
     border-color: transparent;

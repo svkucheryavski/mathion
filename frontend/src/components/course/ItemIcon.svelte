@@ -28,7 +28,7 @@
      What remains is only what the global button reset (reset.css:8, which
      already zeroes padding/border/background and sets cursor) does NOT give:
      `display:inline-flex` so the button shrink-wraps its mark, and
-     `border-radius` so the global :focus-visible ring (base.css:21-25) stays
+     `border-radius` so the global focus ring (base.css) stays
      rounded on the now-bare button.
 
      The state class stays in the class attribute — ItemIcon's own tests pin it

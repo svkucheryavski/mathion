@@ -85,9 +85,8 @@
      scrollable <pre> is conforming; a mangled one is lost information.
      The scroller is keyboard-focusable in Chromium (measured: tabIndex -1,
      :focus-visible matches), which is what lets a keyboard user scroll it at
-     all — but base.css:22's `outline:none` leaves only the --primary-soft halo
-     at 1.12:1 on --bg, drawing nothing. So the ring below is load-bearing,
-     exactly as `.txt:focus-visible` is for the field. */
+     all. The global ring (base.css) draws the same outline since Polish 2; the
+     rule below stays pinned, so a change to the global ring cannot drop it. */
   .text :global(pre) { overflow-x: auto; max-width: 100%; }
   .text :global(pre:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
   /* A local <input> on the control tokens, NOT ui/Input — whose prop list has no
@@ -112,18 +111,13 @@
      `.num:disabled, .txt:disabled` list: `.num` does not exist in this
      stylesheet, so the combined form would emit css_unused_selector for it. */
   .txt:disabled { background: var(--surface-2); color: var(--muted); border-color: var(--border-faint); /* theme-default.css:22, "disabled control borders" */ }
-  /* mechanism: the global `:focus-visible` (base.css:21-25) is (0,1,0) while
-     this scoped field rule is (0,2,0), so the rule's own
-     `border:1px solid var(--border-strong)` out-specifies the global
-     `border-color:var(--primary)` and the only surviving focus signal is a
-     3px --primary-soft halo at 1.12:1 against the page. Restoring it at
-     (0,3,0) is the whole fix. Per-component, NOT a combined `.num,.txt` list:
-     the absent member would warn, exactly as for `:disabled`. */
+  /* The global field rule (base.css) also sets this border colour since
+     Polish 2. This rule stays pinned by the T3 inventory. Per-component, NOT a
+     combined `.num,.txt` list: the absent member would warn, exactly as for
+     `:disabled`. */
   .txt:focus-visible { border-color: var(--primary); }
-  /* Forced-colors drops box-shadow AND border colours are system-forced, and
-     base.css:22's `outline:none` is still in force — so without this a focused
-     field has no indicator at all in that mode. Same restoration T2 made for
-     the option rows. */
+  /* Forced colors drop box-shadow and force border colours. This offset keeps
+     the global forced-colors outline (base.css) inside the field. */
   @media (forced-colors: active) {
     .txt:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   }

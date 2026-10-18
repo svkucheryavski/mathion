@@ -46,7 +46,7 @@
 ><span class="knob" aria-hidden="true"></span></button>
 
 <style>
-  /* 10k: a 30×17 track with a 13px knob. Focus shows the global ring (base.css). */
+  /* 10k: a 30×17 track with a 13px knob. Focus shows the global ring (base.css). Under reduced motion the knob jumps (D49). */
   .switch {
     box-sizing: border-box;
     display: inline-flex;
@@ -76,5 +76,8 @@
   }
   .switch.on .knob {
     transform: translateX(13px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .knob { transition: none; }
   }
 </style>

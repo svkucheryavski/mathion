@@ -127,6 +127,7 @@
     color: var(--danger-off-text);
     border: 1px solid var(--danger-off-border);
     cursor: not-allowed;
+    --ring: var(--danger);
   }
   /* Armed: the red action at rest (D31). Busy keeps this look with the spinner. */
   .dc-force.armed {
@@ -141,6 +142,7 @@
     color: var(--text-3);
     border: 1px solid var(--cancel-border);
     cursor: pointer;
+    --ring: var(--muted);
   }
   @media (hover: hover) {
     .dc-force.armed:not(:disabled):hover { background: var(--danger); color: var(--primary-text); }
@@ -150,8 +152,8 @@
   .dc-cancel:not(:disabled):focus-visible { background: var(--cancel-hover); }
   .dc-force.armed:not(:disabled):active { background: var(--danger-press); border-color: var(--danger-press); color: var(--primary-text); }
   .dc-cancel:not(:disabled):active { background: var(--cancel-press); }
-  /* Armed or not, a focused button shows the ring (P57). */
-  .dc-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
+  /* Armed or not, a focused button shows the ring (P57), in its own colour (D60). */
+  .dc-btn:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; box-shadow: none; }
   .dc-cancel:disabled {
     background: var(--bg);
     color: var(--faint);

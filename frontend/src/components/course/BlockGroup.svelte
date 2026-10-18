@@ -184,7 +184,7 @@
     text-align: left;
     font-size: 15px;
     font-weight: 600;
-    /* So the global :focus-visible halo (base.css:21-25) follows the card corner
+    /* So the global focus ring (base.css) follows the card corner
        instead of drawing square. Exactly what D5 added to ItemIcon's button, and
        this is the more prominent keyboard target of the two. */
     border-radius: var(--radius);

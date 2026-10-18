@@ -350,6 +350,7 @@
   }
   .tabs button[aria-pressed="true"] { background: var(--surface-2); font-weight: 600; color: var(--text); /* ref 1704 */ }
   .tabs button:disabled { color: var(--faint); cursor: not-allowed; }
+  .tabs button:focus-visible { outline-offset: -2px; }
   .edit-content { display: flex; flex-direction: row; align-items: stretch; min-height: 0; /* ref 1707 */ }
   /* Spec (mini-projects-frontend §"Layout") mandates the textarea + asset
      sidebar collapse to a single column below 880px (50%-split-screen on
@@ -370,6 +371,12 @@
     caret-color: var(--primary);
     resize: vertical; /* ref 1708 */
   }
+  /* The card shows the textarea's focus (:has, not :focus-within, so a focused
+     tab does not). The halo would be clipped by the card and paint over the
+     tabs; (0,3,1) beats the global field rule. In High Contrast the outline is
+     drawn inside the clip. */
+  .md-card:has(textarea:focus-visible) { border-color: var(--primary); }
+  .md-card textarea:focus-visible { box-shadow: none; outline-offset: -2px; }
   .preview { min-height: 200px; padding: 12px 14px; font-size: 13px; color: var(--text); /* ref 1708 */ }
   .preview.err { color: var(--danger); }
   .plain-src {

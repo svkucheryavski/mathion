@@ -110,12 +110,12 @@ The five inputs or conditions most likely to bite a student, teacher or author t
 | Task | Adds | `EXPECTED_CHECKS` |
 |---|---|---|
 | start | | 2220 |
-| 1 — Focus ring and reduced motion | +19, then +14 for D60 (Step 9b) | 2253 |
-| 2 — The page ground and the sheets | +26 −3 | 2276 |
-| 3 — Authored content, page scale | +4 −13 | 2267 |
-| 4 — Authored content, compact surfaces | +15 −5 | 2277 |
-| 5 — The 404 page | 0 | 2277 |
-| 6 — Bare URLs | 0 | 2277 |
+| 1 — Focus ring and reduced motion | +19, then +14 for D60 and +3 for D61 (Step 9b) | 2256 |
+| 2 — The page ground and the sheets | +26 −3 | 2279 |
+| 3 — Authored content, page scale | +4 −13 | 2270 |
+| 4 — Authored content, compact surfaces | +15 −5 | 2280 |
+| 5 — The 404 page | 0 | 2280 |
+| 6 — Bare URLs | 0 | 2280 |
 
 ## File map
 
@@ -665,7 +665,7 @@ Then the CSS:
 5. `components/ui/InlineConfirm.svelte`: `.danger { … }` gains `--ring: var(--danger);`, `.cancel { … }` gains `--ring: var(--muted);`, `.ic-btn:focus-visible` reads `var(--ring, var(--primary))`.
 6. `components/ui/DangerConfirm.svelte`: `.dc-force { … }` gains `--ring: var(--danger);`, `.dc-cancel { … }` gains `--ring: var(--muted);`, `.dc-btn:focus-visible` reads `var(--ring, var(--primary))`.
 
-Build, print the new hash (`python3 $SDD/probe/hashless.py focus-visible`), put it in place of `<FV>`, then the full checks. Expected: vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2253 checks)`. Re-shoot the coloured cases for the overlay: "Authoring", "Logout", "Collapse all", an InlineConfirm Cancel and red Delete, a trash IconButton, a danger Button. The commit in Step 10 adds the five D60 files (AppHeader, Button, IconButton, InlineConfirm, DangerConfirm) to its `git add` list.
+Build, print the new hash (`python3 $SDD/probe/hashless.py focus-visible`), put it in place of `<FV>`, then the full checks. Expected: vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2253 checks)`. **D61, from review round 1:** `.cell-btn { …; --ring: var(--heat-fg); }` in RunProgressTab, with a `uniq1 seg-btn` block pinning it and a row that counts ten `--ring` declarations in dist (`EXPECTED_CHECKS=2256`). Re-shoot the coloured cases for the overlay: "Authoring", "Logout", "Collapse all", an InlineConfirm Cancel and red Delete, a trash IconButton, a danger Button. The commit in Step 10 adds the five D60 files (AppHeader, Button, IconButton, InlineConfirm, DangerConfirm) to its `git add` list.
 
 - [ ] **Step 10: Screenshots, the user's OK, review lanes, commit**
 
@@ -886,7 +886,7 @@ fi
 none "no body:has() rule sets --focus-page (Polish 2 D50)" "body:has\([^)]*\)\{[^}]*--focus-page"
 ```
 
-9. `EXPECTED_CHECKS` becomes `2276`: +26 new PASS lines (the FilterPills declaration; in (an) six uniq1 lines, Button 5, IconButton 4, QuestionTypePicker 1, DangerConfirm 1, Toast 1, the sheet 6, the `none`), −3 removed (the VersionsPage pair and the d0 row).
+9. `EXPECTED_CHECKS` becomes `2279`: +26 new PASS lines (the FilterPills declaration; in (an) six uniq1 lines, Button 5, IconButton 4, QuestionTypePicker 1, DangerConfirm 1, Toast 1, the sheet 6, the `none`), −3 removed (the VersionsPage pair and the d0 row).
 
 Run the gate (Global Constraints). Expected: FAIL. The failures are exactly:
 - (b4) `the hashless rule inventory changed` (the `:root` hash);
@@ -1066,7 +1066,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && npm run build 
 
 Expected: `('', ':root', '7bfdd12a'),`. If the printed hash differs, the dist one wins: use it in `WANT_FULL` and in the Step 2 comment, and ledger a ruling with both values.
 
-Then the full checks (Global Constraints). Expected: vitest green, including the two new tests; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2276 checks)`. If the ghost or borderless rows fail because dist merged a pair into one selector list (`.btn.ghost.svelte-H:disabled,.btn.ghost.blocked.svelte-H{…}`), replace that pair's two `d` rows with one `chk` on the emitted list (two declarations, the same count) and ledger it.
+Then the full checks (Global Constraints). Expected: vitest green, including the two new tests; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2279 checks)`. If the ghost or borderless rows fail because dist merged a pair into one selector list (`.btn.ghost.svelte-H:disabled,.btn.ghost.blocked.svelte-H{…}`), replace that pair's two `d` rows with one `chk` on the emitted list (two declarations, the same count) and ledger it.
 
 - [ ] **Step 10: The backlog**
 
@@ -1581,7 +1581,7 @@ if [[ $(grep -cF '<div class="assignment-html prose" data-testid="assignment-htm
 else echo "FAIL  the mini-project assignment is page-scale prose with the link attachment"; fail=1; fi
 ```
 
-12. `EXPECTED_CHECKS` becomes `2267`: −4 (g2), −4 (h) (nine rows become five), −5 (s) (ten rows become five), +4 (an).
+12. `EXPECTED_CHECKS` becomes `2270`: −4 (g2), −4 (h) (nine rows become five), −5 (s) (ten rows become five), +4 (an).
 
 Run the gate. Expected: FAIL. The failures are exactly:
 - (b4) `hashless rule ORDER changed` and the inventory row (no content.css yet);
@@ -1750,7 +1750,7 @@ Expected: a FAIL naming `<h2> {@attach} {@attach externalLinks(item.content_html
 
 - [ ] **Step 12: Full checks**
 
-Expected: vitest green (the three Step 4 tests now pass, the 16 `externalLinks` tests, D6.12); svelte-check 0 errors, 13 warnings; gate `ALL PASS (2267 checks)`.
+Expected: vitest green (the three Step 4 tests now pass, the 16 `externalLinks` tests, D6.12); svelte-check 0 errors, 13 warnings; gate `ALL PASS (2270 checks)`.
 
 - [ ] **Step 13: The backlog**
 
@@ -2032,7 +2032,7 @@ fi
 
    (`'"''"'` is zsh for two apostrophes inside a single-quoted literal: the source reads `?? ''`. This section is zsh, outside every `node -e` payload.)
 
-14. `EXPECTED_CHECKS` becomes `2277`: −4 (the T3 `dd` rows), −1 (the `.preview` row loses a declaration), +15 in (an) (five `src_count` rows, one `uniq1`, eight variant declarations, the `none`).
+14. `EXPECTED_CHECKS` becomes `2280`: −4 (the T3 `dd` rows), −1 (the `.preview` row loses a declaration), +15 in (an) (five `src_count` rows, one `uniq1`, eight variant declarations, the `none`).
 
 Run the gate. Expected: FAIL. The failures are exactly:
 - T3 (a) inventories for Numeric and Text (the `p`, `p:last-child`, `pre` rules still exist), (b) `:global` usage, (f);
@@ -2138,7 +2138,7 @@ Expected: no output (comments included: the gate check reads them too).
 
 - [ ] **Step 8: Full checks**
 
-Expected: vitest green (Step 1's tests pass; `QuizModals.svelte.test.ts:45` still finds `target="_blank"` on its external `.qtext` link); svelte-check 0 errors, 13 warnings (a new "unused CSS selector" warning for a `.pv-*` rule is a finding: the class is dynamic, so Svelte keeps the rules); gate `ALL PASS (2277 checks)`.
+Expected: vitest green (Step 1's tests pass; `QuizModals.svelte.test.ts:45` still finds `target="_blank"` on its external `.qtext` link); svelte-check 0 errors, 13 warnings (a new "unused CSS selector" warning for a `.pv-*` rule is a finding: the class is dynamic, so Svelte keeps the rules); gate `ALL PASS (2280 checks)`.
 
 - [ ] **Step 9: The backlog**
 
@@ -2191,7 +2191,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `ErrorState` (`variant="page"`, `title`, `message`, the `action` snippet; root `role="alert"`, page title `h1.title`), `Button` (`variant="secondary"`), `defaultLandingPath(user)` and `navigate(path)` from `frontend/src/lib/router.svelte.ts`, `session` from `frontend/src/stores/session.svelte.ts`.
-- Produces: nothing other tasks use. No gate rows change (`EXPECTED_CHECKS` stays `2277`).
+- Produces: nothing other tasks use. No gate rows change (`EXPECTED_CHECKS` stays `2280`).
 
 - [ ] **Step 1: Write the failing component tests**
 
@@ -2403,7 +2403,7 @@ Run both test files. Expected: PASS (5 + 3).
 
 - [ ] **Step 4: Full checks**
 
-Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2277 checks)` (the page column check still finds NotFound's `.page` rule).
+Expected: vitest green; svelte-check 0 errors, 13 warnings; gate `ALL PASS (2280 checks)` (the page column check still finds NotFound's `.page` rule).
 
 - [ ] **Step 5: The backlog**
 
@@ -2586,7 +2586,7 @@ cd /Users/svkucheryavski/Documents/Developing/mathion/backend && .venv/bin/pytes
 
 Expected: all pass (the count rises by the new cases). Then the running dev backend: its log (`.superpowers/sdd/2026-10-07-visual-refresh-slice5b-item-editor-modal/probe/backend.log`) shows a reload after the `markdown.py` edit and no traceback in its last lines. Do not restart it.
 
-Frontend checks too (nothing there changed): vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2277 checks)`.
+Frontend checks too (nothing there changed): vitest green, svelte-check 0 errors and 13 warnings, gate `ALL PASS (2280 checks)`.
 
 - [ ] **Step 5: The backlog**
 
