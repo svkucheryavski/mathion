@@ -816,3 +816,14 @@ def test_upload_empty_asset_rejected(admin_client):
         files={"file": ("blank.js", b"   \n\t", "application/javascript")},
     )
     assert resp2.status_code == 400
+
+
+def test_api_static_page_bare_url_is_stored_as_a_link(admin_client):
+    """D54/D55: a pasted https:// address becomes a link when the content is saved."""
+    seq, version = _setup_sequence(admin_client)
+    response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Links", "type": "static_page", "content_md": "Read https://example.org/notes first.",
+    })
+    assert response.status_code == 201
+    assert 'href="https://example.org/notes"' in response.json()["content_html"]
+
