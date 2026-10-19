@@ -142,7 +142,7 @@
   header={head}
   footer={foot}
 >
-  <MarkdownEditor ariaLabel="Question text" assetContext={ctx.assetContext} bind:value bind:uploading
+  <MarkdownEditor ariaLabel="Question text" variant="prompt" assetContext={ctx.assetContext} bind:value bind:uploading
                   frozen={saving} ariaDescribedby={error ? errId : undefined} />
   {#if error}<p class="qt-err" id={errId} role="alert">{error}</p>{/if}
 </Modal>

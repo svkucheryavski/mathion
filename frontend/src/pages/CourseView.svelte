@@ -10,6 +10,7 @@
   import IconButton from '../components/ui/IconButton.svelte';
   import CourseProgress from '../components/course/CourseProgress.svelte';
   import { progressOf, firstUnfinishedBlockId } from '../lib/progress';
+  import { externalLinks } from '../lib/externalLinks';
 
   let { courseSlug }: { courseSlug: string } = $props();
 
@@ -86,12 +87,12 @@
       <!-- Info text left, the course summary card right (user, 2026-10-08). -->
       <div class="top">
         {#if currentCourse.value.version.info_html}
-          <div class="info">{@html currentCourse.value.version.info_html}</div>
+          <div class="info prose compact" {@attach externalLinks(currentCourse.value.version.info_html)}>{@html currentCourse.value.version.info_html}</div>
         {/if}
         <CourseProgress p={courseP} />
       </div>
     {:else if currentCourse.value.version.info_html}
-      <div class="info">{@html currentCourse.value.version.info_html}</div>
+      <div class="info prose compact" {@attach externalLinks(currentCourse.value.version.info_html)}>{@html currentCourse.value.version.info_html}</div>
     {/if}
     {#if currentCourse.value.blocks.length === 0}
       <EmptyState title="This course has no published blocks yet." />

@@ -12,7 +12,7 @@
   import KeyAnswer from './KeyAnswer.svelte';
   import QuestionTextModal from './QuestionTextModal.svelte';
   import ExplanationModal from './ExplanationModal.svelte';
-  import { newTabLinks } from '../../../lib/newTabLinks';
+  import { externalLinks } from '../../../lib/externalLinks';
   import { TYPE_LABEL, questionHints } from '../../../lib/quizFormat';
   import { WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
@@ -80,7 +80,7 @@
     {#if ctx.disabled}
       <pre class="qsrc" id={textId}>{q.text_md}</pre>
     {:else}
-      <div class="qtext" id={textId} {@attach newTabLinks(q.text_html)}>{@html q.text_html}</div>
+      <div class="qtext prose compact" id={textId} {@attach externalLinks(q.text_html)}>{@html q.text_html}</div>
     {/if}
     <span class="qmeta">
       <span class="qchip">{TYPE_LABEL[q.type]}</span>
@@ -126,7 +126,7 @@
       {#if ctx.disabled}
         <pre class="qsrc">{q.explanation_md}</pre>
       {:else}
-        <div class="qexpl-body" {@attach newTabLinks(q.explanation_html ?? '')}>{@html q.explanation_html ?? ''}</div>
+        <div class="qexpl-body prose compact" {@attach externalLinks(q.explanation_html ?? '')}>{@html q.explanation_html ?? ''}</div>
       {/if}
     </div>
   {:else if ctx.canText}
@@ -156,11 +156,6 @@
   .qexpl-add { margin: 0 12px 10px 38px; border: 0; padding: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--primary); cursor: pointer; }
   .qexpl-add:disabled { color: var(--faint); cursor: default; }
   .qexpl-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-  /* Rendered author content: images fit the card; headings keep their tags at body size. */
-  .qtext :global(p), .qexpl-body :global(p) { margin: 0; }
-  .qtext :global(p + p), .qexpl-body :global(p + p) { margin-top: 6px; }
-  .qtext :global(img), .qexpl-body :global(img) { max-width: 100%; height: auto; }
-  .qtext :global(:is(h1, h2, h3, h4, h5, h6)), .qexpl-body :global(:is(h1, h2, h3, h4, h5, h6)) { font-size: inherit; margin: 0; }
   /* Under the head, on the answers' left edge. */
   .qask { padding: 0 12px 8px 38px; }
   @media (max-width: 560px) { .qmeta { flex-basis: 100%; margin-left: 26px; } }

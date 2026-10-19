@@ -4,6 +4,7 @@
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import AssetSidebar from './AssetSidebar.svelte';
+  import { externalLinks } from '../../lib/externalLinks';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
@@ -23,6 +24,7 @@
     plain = false,
     frozen = false,
     noAssets = false,
+    variant = 'page',
   }: {
     assetContext: AssetContext;
     value?: string;
@@ -47,6 +49,9 @@
     // Slice-5d D11: the explanation editor. Edit/Preview stay; there is no
     // sidebar and no upload path. The window file-drop guard still runs.
     noAssets?: boolean;
+    // Polish 2 D51: which student surface the rendered preview matches, in
+    // class (`prose`, `prose compact`) and text metrics.
+    variant?: 'page' | 'prompt' | 'explanation';
   } = $props();
 
   let _mode = $state<'edit' | 'preview'>('edit');
@@ -324,7 +329,7 @@
     {:else if error}
       <div class="preview err">{error}</div>
     {:else}
-      <div class="preview">{@html html ?? ''}</div>
+      <div class="preview prose pv-{variant}" class:compact={variant !== 'page'} {@attach externalLinks(html ?? '')}>{@html html ?? ''}</div>
     {/if}
   {/if}
 </div>
@@ -377,7 +382,13 @@
      drawn inside the clip. */
   .md-card:has(textarea:focus-visible) { border-color: var(--primary); }
   .md-card textarea:focus-visible { box-shadow: none; outline-offset: -2px; }
-  .preview { min-height: 200px; padding: 12px 14px; font-size: 13px; color: var(--text); /* ref 1708 */ }
+  /* The rendered preview matches the student surface (Polish 2 D51): content.css's
+     `.prose` plus that surface's text metrics. Line breaks still differ: the
+     preview is narrower than the 652px measure. */
+  .preview { min-height: 200px; padding: 12px 14px; }
+  .preview.pv-page { font-size: 14px; line-height: 1.6; color: var(--text-2); /* PageItem .content */ }
+  .preview.pv-prompt { font-size: 14.5px; line-height: 1.6; color: var(--text-2); /* the quiz prompt */ }
+  .preview.pv-explanation { font-size: 13px; color: var(--text-2); /* QuizItem .exp */ }
   .preview.err { color: var(--danger); }
   .plain-src {
     margin: 0;

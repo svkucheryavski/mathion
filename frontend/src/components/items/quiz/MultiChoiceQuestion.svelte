@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MultipleChoiceQuestion } from '../../../lib/types';
+  import { externalLinks } from '../../../lib/externalLinks';
 
   let { question, value, onanswer, disabled = false, correctOptionIds = null }: {
     question: MultipleChoiceQuestion;
@@ -23,7 +24,7 @@
 </script>
 
 <fieldset>
-  <legend><div class="text">{@html question.text_html}</div></legend>
+  <legend><div class="text prose compact" {@attach externalLinks(question.text_html)}>{@html question.text_html}</div></legend>
   <div class="opts">
     {#each question.options as opt (opt.id)}
       {@const isChosen = selected.has(opt.id)}
@@ -114,33 +115,23 @@
     text-wrap: pretty;
     /* Load-bearing for reflow, not defensive. A rendered <legend> is
        SHRINK-TO-FIT, so a <pre> inside it widens the legend itself and the
-       scroller below never fires — measured 784px of page scroll at a 320px
+       `.prose pre` scroller never fires — measured 784px of page scroll at a 320px
        viewport with the `pre` rule present but this line absent. `.text {
        max-width: 100% }` does NOT substitute: the legend is the box that grows. */
     max-width: 100%;
   }
-  /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
-     `p` globally, so this is its only source) and zero ONLY the trailing gap —
-     the legend margin above already owns prompt→options. */
   /* Reflow (WCAG 1.4.10). The prompt renders UNBOUNDED teacher markdown through
-     `{@html}` (`text_md` is uncapped — backend/mathion/schemas.py:323), and until
-     the whole-branch review it carried NEITHER guard. Measured at a 320px
-     viewport: one hyphen-free URL produced 659px of PAGE-level horizontal scroll,
-     a fenced code block 784px. `overflow-wrap` closes the prose case and the
-     `pre` scroller closes the code case — the identical pair already on
-     TextQuestion, NumericQuestion and PageItem, each on its own `.text` /
-     `.content` rule and its `:global(pre)` companion (cited by SELECTOR, not by
-     line: the line form was stale on arrival — the same commit that added this
-     comment added four lines to the PageItem block above the lines it named,
-     which is the fourth time that has happened in this slice).
+     `{@html}` (`text_md` is uncapped — backend/mathion/schemas.py:323). Measured
+     at a 320px viewport before the guards: one hyphen-free URL produced 659px of
+     PAGE-level horizontal scroll, a fenced code block 784px. `overflow-wrap`
+     closes the prose case; content.css's `.prose pre` scroller (Polish 2), with
+     the legend's `max-width` above, closes the code case. Paragraph spacing is
+     content.css's too (`.prose.compact`).
 
      The fieldset's `min-inline-size: 0` above is a DIFFERENT fix and does not
      cover this: it stops an unbreakable prompt token from dragging the OPTION
      rows wide, but never wraps the prompt itself. */
   .text { overflow-wrap: anywhere; }
-  .text :global(pre) { overflow-x: auto; max-width: 100%; }
-  .text :global(p) { margin: 0 0 var(--space-2); }
-  .text :global(p:last-child) { margin: 0; }
   /* max-width matches `.txt`'s 480px (TextQuestion.svelte) so every answer
      control in a quiz — choice rows, text field, numeric field — stops at one
      shared right edge instead of each question type picking its own. Before

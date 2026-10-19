@@ -506,7 +506,7 @@ describe('QuizItem result card (T4)', () => {
           id: item.questions[0].id,
           type: 'single_choice',
           text_html: '<p>Prompt</p>',
-          explanation_html: '<p>Because the determinant is negative.</p>',
+          explanation_html: `<p>Because the determinant is negative. <a href="https://example.org/d">More</a> <a href="${location.origin}/courses/x">Course</a></p>`,
           correct_option_ids: [item.questions[0].id * 10 + 1],
           correct_numeric: null,
           correct_text: null,
@@ -521,6 +521,10 @@ describe('QuizItem result card (T4)', () => {
 
     const exp = host.querySelector('.q-block .exp');
     expect(exp?.textContent).toContain('Because the determinant is negative.');
+    expect(exp!.classList.contains('prose')).toBe(true);
+    expect(exp!.classList.contains('compact')).toBe(true);
+    expect(exp!.querySelector('a[href="https://example.org/d"]')!.getAttribute('target')).toBe('_blank');
+    expect(exp!.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
   });
 });
 

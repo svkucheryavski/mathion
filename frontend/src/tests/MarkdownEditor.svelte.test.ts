@@ -693,3 +693,23 @@ describe('MarkdownEditor — noAssets (5d D11)', () => {
     expect(winDrop.defaultPrevented).toBe(true);
   });
 });
+
+describe('MarkdownEditor — preview variant (Polish 2 D51)', () => {
+  it.each([
+    [undefined, 'pv-page', false],
+    ['page', 'pv-page', false],
+    ['prompt', 'pv-prompt', true],
+    ['explanation', 'pv-explanation', true],
+  ])('variant %s: the preview is prose with %s (compact: %s); external links open in a new tab, page links stay', async (variant, cls, compact) => {
+    (stubCtx.renderPreview as ReturnType<typeof vi.fn>).mockResolvedValue({ html: `<p><a href="https://example.org/p">x</a> <a href="${location.origin}/courses/x">y</a></p>` });
+    const { target } = mountEditor(variant === undefined ? { readOnly: true } : { readOnly: true, variant });
+    await vi.waitFor(() => expect(target.querySelector('.preview a')).not.toBeNull());
+    const preview = target.querySelector('.preview')!;
+    expect(preview.classList.contains('prose')).toBe(true);
+    expect(preview.classList.contains(cls)).toBe(true);
+    expect(preview.classList.contains('compact')).toBe(compact);
+    expect(preview.querySelector('a[href="https://example.org/p"]')!.getAttribute('target')).toBe('_blank');
+    // D58: inside the editor a Mathion page link stays in the tab, where DirtyGuard covers unsaved work.
+    expect(preview.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
+  });
+});

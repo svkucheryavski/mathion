@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { NumericQuestion } from '../../../lib/types';
+  import { externalLinks } from '../../../lib/externalLinks';
 
   let { question, value, onanswer, disabled = false, correctValue = null }: {
     question: NumericQuestion;
@@ -17,7 +18,7 @@
 </script>
 
 <div class="row">
-  <div class="text" id={promptId}>{@html question.text_html}</div>
+  <div class="text prose compact" id={promptId} {@attach externalLinks(question.text_html)}>{@html question.text_html}</div>
   <input
     class="num mono"
     type="text"
@@ -65,31 +66,13 @@
      wraps unaided, which is why "long URLs are fine" is a trap. Pixel figures
      are deliberately omitted: they move with fixture length and with whether
      the webfont has loaded, and two earlier revisions of this comment quoted
-     numbers that did not reproduce. This closes PROSE only — a <pre> needs its
-     own rule (below). T2's `legend` carried both gaps when this was written and
-     was left out of T3's scope; the whole-branch review measured it at 659-784px
-     of page scroll and both choice questions now ship the same pair. */
+     numbers that did not reproduce. This closes PROSE only; a <pre> scrolls
+     by content.css's `.prose pre` (Polish 2). */
   .text { overflow-wrap: anywhere; font-size: 14.5px; /* ref 2125 */ line-height: 1.6; /* ref 2125 */ font-weight: 400; color: var(--text-2); text-wrap: pretty; }
-  /* Server-rendered markdown: keep the inter-paragraph rhythm (reset.css zeroes
-     `p` globally, so this is its only source) and zero ONLY the trailing gap —
-     the .row gap already owns prompt→field. */
-  .text :global(p) { margin: 0 0 var(--space-2); }
-  .text :global(p:last-child) { margin: 0; }
-  /* CommonMark (markdown.py:7) emits fenced AND indented code blocks, and
-     `text_md` is unbounded (schemas.py:323). `overflow-wrap` above IS inherited
-     and computes to `anywhere` on the <pre> — what stops it is the UA's
-     `white-space:pre`, which disables soft wrapping so there is no break
-     opportunity to act on.
-     `overflow-x:auto`, NOT `white-space:pre-wrap`: both reach 0px page
-     overflow, but WCAG 1.4.10 excepts "content which requires two-dimensional
-     layout for usage or meaning", and a fenced block is the canonical case —
-     wrapping shreds ASCII diagrams, aligned tables and indentation. A
-     scrollable <pre> is conforming; a mangled one is lost information.
-     The scroller is keyboard-focusable in Chromium (measured: tabIndex -1,
-     :focus-visible matches), which is what lets a keyboard user scroll it at
-     all. The global ring (base.css) draws the same outline since Polish 2; the
-     rule below stays pinned, so a change to the global ring cannot drop it. */
-  .text :global(pre) { overflow-x: auto; max-width: 100%; }
+  /* Code blocks scroll by content.css's `.prose pre` (Polish 2), and its
+     paragraph spacing is content.css's too. The scroller is keyboard-focusable
+     in Chromium, which is what lets a keyboard user scroll it at all; this ring
+     is pinned by the T3 inventory, so a change to the global ring cannot drop it. */
   .text :global(pre:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
   /* A local <input> on the control tokens, NOT ui/Input — whose `mono` is the
      PIN-specific 17px/.34em (Input.svelte:40) and whose prop list has neither

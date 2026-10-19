@@ -153,6 +153,26 @@ describe('CourseView header and course summary', () => {
     expect(btns[1].getAttribute('aria-label')!.startsWith('2. B,')).toBe(true);
   });
 
+  it('Polish 2: course info is compact prose, beside the summary and alone; links follow D58', async () => {
+    const html = `<p><a href="https://example.org/c">ext</a> <a href="${location.origin}/courses/y">page</a></p>`;
+    seedCourse(twoBlocks, {}, html);
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const info = target.querySelector('.top .info')!;
+    expect(info.classList.contains('prose')).toBe(true);
+    expect(info.classList.contains('compact')).toBe(true);
+    expect(info.querySelector('a[href="https://example.org/c"]')!.getAttribute('target')).toBe('_blank');
+    expect(info.querySelector(`a[href="${location.origin}/courses/y"]`)!.hasAttribute('target')).toBe(false);
+    unmount(component); component = null;
+    target.innerHTML = '';
+    seedCourse([], {}, html);
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const alone = target.querySelector('.info')!;
+    expect(alone.classList.contains('prose')).toBe(true);
+    expect(alone.querySelector('a[href="https://example.org/c"]')!.getAttribute('target')).toBe('_blank');
+  });
+
   it('summarises the WHOLE course beside the info: items over every block, quiz score over the quizzes tried', async () => {
     // 2 of 4 items → 50%; quizzes (3 + 1) / (4 + 4) = 50%.
     seedCourse(twoBlocks, { '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(false, [1, 4]) });

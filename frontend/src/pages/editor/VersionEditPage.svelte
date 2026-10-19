@@ -9,6 +9,7 @@
   import { deriveExpansion } from '../../lib/deriveExpansion';
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { externalLinks } from '../../lib/externalLinks';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
   import { PageAsk, PAGE_ASK_KEY, InPlaceAsk, focusIsFree, usable, useTreeAsk, focusAfter, firstUsable, settleTo, withdraw, type Ask, type GuardAsk } from '../../lib/askInPlace.svelte';
@@ -630,7 +631,7 @@
       {/if}
       {#if v.info_html}
         <!-- 5c T5 (user): the version's info, rendered (sanitized server-side, as CourseView), muted. -->
-        <div class="vinfo">{@html v.info_html}</div>
+        <div class="vinfo prose compact" {@attach externalLinks(v.info_html)}>{@html v.info_html}</div>
       {/if}
 
       {#if v.is_disabled}

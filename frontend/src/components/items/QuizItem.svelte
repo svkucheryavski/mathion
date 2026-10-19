@@ -4,6 +4,7 @@
   import { markItemCovered, currentCourse } from '../../stores/currentCourse.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { assertNever } from '../../lib/types';
+  import { externalLinks } from '../../lib/externalLinks';
   import SingleChoice from './quiz/SingleChoiceQuestion.svelte';
   import MultiChoice from './quiz/MultiChoiceQuestion.svelte';
   import Numeric from './quiz/NumericQuestion.svelte';
@@ -166,7 +167,7 @@
             disabled={locked} correctValue={r?.correct_text ?? null} />
         {/if}
         {#if r?.explanation_html}
-          <div class="exp">{@html r.explanation_html}</div>
+          <div class="exp prose compact" {@attach externalLinks(r.explanation_html)}>{@html r.explanation_html}</div>
         {/if}
       </div>
     {/each}
@@ -292,9 +293,8 @@
        (uncapped — backend/mathion/schemas.py:325). Measured at a 320px viewport
        before this: 614px of page scroll from one hyphen-free URL, 718px from a
        fenced code block. Unlike the <legend> there, `.exp` is an ordinary block
-       in a column flex, so it needs no `max-width` — these two rules are the
-       whole fix. */
+       in a column flex, so it needs no `max-width`: this and content.css's
+       `.prose pre` scroller are the whole fix. */
     overflow-wrap: anywhere;
   }
-  .exp :global(pre) { overflow-x: auto; max-width: 100%; }
 </style>

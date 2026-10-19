@@ -63,7 +63,7 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 ## T5
 
 - **`metaReason` (`lib/editorReasons.ts`) is now dead code.** Its only caller was the deleted Version info card; only `editorReasons.test.ts` still uses it. Check whether the other reasons (`structureReason`, `textReason`) still have callers after T3, and drop the unused ones with their tests.
-- **Rich version info under the title (review r1, both lanes).** `.vinfo` shows `info_html` as rendered markdown. A `# Heading` in the info then renders as a 21px h1 under the 18px title, and paragraphs run together because the reset sets `p { margin: 0 }`. Fix: `.vinfo :global(h1…h6) { font-size: inherit }` plus `p + p` spacing (a reviewed-`:global` gate entry), or render the first paragraph only.
+- ~~**Rich version info under the title (review r1, both lanes).**~~ Done in Polish 2 Task 4: `.vinfo` is `prose compact` (content.css), with a heading scale and paragraph spacing.
 - **The attempts error is not announced (r1).** The `<small>` is linked via `aria-describedby`, but nothing moves focus to it or makes it a live region, so a screen reader hears nothing on Save. Focus the attempts input on a validation error.
 - **Back + discard while saving still saves (r1).** The tracker reports `isDirty` while a PATCH is in flight; Back → "Discard" closes the modal, yet the PATCH lands and toasts "Saved". Use `isDirty: dirty && !saving`, or block the guard mid-save.
 - **Stale permissions after a 403/409 (r1).** When the version was published elsewhere, Save shows the server message, but the modal stays editable until a reload. Reload the tree on 403/409 so it turns read-only.

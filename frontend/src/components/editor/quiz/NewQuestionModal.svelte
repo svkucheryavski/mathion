@@ -163,7 +163,7 @@
   footer={foot}
 >
   <QuestionTypePicker bind:value={type} disabled={saving} />
-  <MarkdownEditor ariaLabel="Question text" assetContext={ctx.assetContext} bind:value={text} bind:uploading frozen={saving} />
+  <MarkdownEditor ariaLabel="Question text" variant="prompt" assetContext={ctx.assetContext} bind:value={text} bind:uploading frozen={saving} />
   {#if type === 'numeric_answer'}
     <div class="nq-row">
       <label class="nq-field">

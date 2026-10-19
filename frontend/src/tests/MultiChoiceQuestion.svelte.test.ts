@@ -106,6 +106,15 @@ function toggle(index: number): void {
 }
 
 describe('MultiChoiceQuestion structure (T2)', () => {
+  it('Polish 2: the prompt is compact prose; an external link opens in a new tab, a Mathion page link stays', () => {
+    render({ question: { ...question(), text_html: `<p><a href="https://example.org/x">ext</a> <a href="${location.origin}/courses/x">page</a></p>` } });
+    const text = host.querySelector('.text')!;
+    expect(text.classList.contains('prose')).toBe(true);
+    expect(text.classList.contains('compact')).toBe(true);
+    expect(text.querySelector('a[href="https://example.org/x"]')!.getAttribute('target')).toBe('_blank');
+    expect(text.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
+  });
+
   it('wraps the option rows in .opts, each a label.opt with a native input + drawn .ctl', () => {
     render();
 

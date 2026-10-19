@@ -186,7 +186,7 @@
   header={head}
   footer={foot}
 >
-  <MarkdownEditor ariaLabel="Explanation" assetContext={ctx.assetContext} bind:value noAssets
+  <MarkdownEditor ariaLabel="Explanation" variant="explanation" assetContext={ctx.assetContext} bind:value noAssets
                   frozen={saving} ariaDescribedby={error ? `${errId} ${noteId}` : noteId} />
   <p class="ex-note" id={noteId}>Markdown. Images already in an explanation keep working; new ones cannot be added here.</p>
   {#if error}<p class="ex-err" id={errId} role="alert">{error}</p>{/if}

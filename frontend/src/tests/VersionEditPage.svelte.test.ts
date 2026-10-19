@@ -100,11 +100,15 @@ describe('VersionEditPage — heading (3b, §5.2)', () => {
   });
 
   it('non-empty version info shows as muted rendered text between the heading and the blocks (5c T5, user)', async () => {
-    tree.version = mkVersion({ info_md: 'Hi **all**', info_html: '<p>Hi <strong>all</strong></p>' });
+    tree.version = mkVersion({ info_md: 'Hi **all**', info_html: `<p>Hi <strong>all</strong> <a href="https://example.org/v">ext</a> <a href="${location.origin}/courses/x">page</a></p>` });
     await render();
     const info = target.querySelector('.vinfo')!;
     expect(info.querySelector('strong')!.textContent).toBe('all');   // rendered, not the markdown source
     expect(info.textContent).not.toContain('**');
+    expect(info.classList.contains('prose')).toBe(true);
+    expect(info.classList.contains('compact')).toBe(true);
+    expect(info.querySelector('a[href="https://example.org/v"]')!.getAttribute('target')).toBe('_blank');
+    expect(info.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
     const heading = target.querySelector('.editor-heading')!;
     const blocks = target.querySelector('section.blocks')!;
     expect(heading.compareDocumentPosition(info) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

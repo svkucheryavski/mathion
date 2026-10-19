@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2270
+EXPECTED_CHECKS=2282
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -167,16 +167,6 @@ for pair in "Numeric:$NH:\\.num:160px" "Text:$TH:\\.txt:100%"; do
   # Without it the div inherits body copy and one quiz shows two prompt sizes.
   d '\.text' '' 'font-size:14\.5px' 'line-height:1\.6' 'font-weight:400' \
                 'color:var\(--text-2\)' 'text-wrap:pretty'
-
-  # ---- paired .text paragraph margins (`:global(p)` stays bare in dist) ----
-  # Paired, not a blanket zero: the first keeps multi-paragraph prompts
-  # separated, the second zeroes the trailing gap the .row gap already owns.
-  # These greps stay declaration-level, but the parse below now pins each rule's
-  # full declaration set, so an ADDED declaration here does red the gate. That
-  # retires round 1's laneA-M1 exemption deliberately: "nothing added" is the
-  # stronger property, and the prompt rhythm is exactly what T2 and T3 share.
-  dd '\.text' 'p'            'margin:0 0 var\(--space-2\)'
-  dd '\.text' 'p:last-child' 'margin:0'
 
   # ---- the field: control tokens, retained width ----
   d "$FIELD" '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' \
@@ -285,11 +275,8 @@ for name, h, field, width in SPECS:
     want = [
         ('', '.row.%s' % h, 'display:flex;flex-direction:column;gap:16px;margin:0'),
         ('', '.text.%s' % h, 'overflow-wrap:anywhere;font-size:14.5px;line-height:1.6;font-weight:400;color:var(--text-2);text-wrap:pretty'),
-        ('', '.text.%s pre' % h, 'overflow-x:auto;max-width:100%'),
         ('', '.text.%s pre:focus-visible' % h,
              'outline:2px solid var(--primary);outline-offset:2px'),
-        ('', '.text.%s p' % h, 'margin:0 0 var(--space-2)'),
-        ('', '.text.%s p:last-child' % h, 'margin:0'),
         ('', '.%s.%s' % (field, h), FIELD + width),
         ('', '.%s.%s:disabled' % (field, h),
              'background:var(--surface-2);color:var(--muted);border-color:var(--border-faint)'),
@@ -333,8 +320,9 @@ for name, h, field, width in SPECS:
 # NO scope hash, so it evades the source test and the dist inventory at once
 # (laneA3-I1). Compare normalised SELECTORS rather than raw lines, so
 # reformatting cannot red the gate (laneA3-M3).
-WANT_GLOBAL = ['.text :global(p)', '.text :global(p:last-child)',
-               '.text :global(pre)', '.text :global(pre:focus-visible)']
+# Polish 2: the prompts' p and pre rules moved to content.css (`.prose.compact`);
+# only the code-block focus ring stays a :global of the component.
+WANT_GLOBAL = ['.text :global(pre:focus-visible)']
 def global_selectors(path):
     src = open(path).read()
     sm = re.search(r'<style[^>]*>(.*?)</style>', src, re.S)
@@ -405,36 +393,12 @@ GLOBAL_ALLOW = {
     ('src/components/ui/AskSlot.svelte', '.modal-body'),
     ('src/components/editor/ItemEditorModal.svelte', '*'),
     ('src/pages/editor/VersionEditPage.svelte', '.inline-confirm'),
-    # Slice-5d: the authoring quiz card's rendered question text / explanation
-    # (.qtext, .qexpl-body). It lives only in the item editor modal, which never
-    # renders the student quiz components (T3 files).
-    ('src/components/editor/quiz/QuestionCard.svelte', 'p'),
-    ('src/components/editor/quiz/QuestionCard.svelte', 'p + p'),
-    ('src/components/editor/quiz/QuestionCard.svelte', 'img'),
-    ('src/components/editor/quiz/QuestionCard.svelte', ':is(h1, h2, h3, h4, h5, h6)'),
     # T5 card framing. Ancestor-scoped under .video-card/.app-card, which wrap
     # only their own shared frame component -- never a quiz. A BARE top-level
     # :global(.frame) is forbidden by the spec: it would also reach the
     # deferred editor previews.
     ('src/components/items/VideoItem.svelte', '.frame'),
     ('src/components/items/InteractiveAppItem.svelte', '.frame'),
-    # The choice questions are SIBLINGS of T3 under QuizItem's `.q-block`, and
-    # their prefix `.text` carries their own hash, so these cannot match T3.
-    ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'p'),
-    ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'p:last-child'),
-    ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'p'),
-    ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'p:last-child'),
-    # Reflow fix (whole-branch review I2): the two choice prompts and QuizItem's
-    # explanation panel render unbounded teacher markdown and had no <pre>
-    # scroller, measured at 294-464px of PAGE-level horizontal scroll on a 320px
-    # viewport — a WCAG 1.4.10 AA failure of the same class this slice already
-    # treated as ship-blocking in T5. Each is ancestor-scoped (`.text :global(pre)`
-    # / `.exp :global(pre)`), so the hashed prefix pins it inside its own
-    # component. None can reach T3: T3's own `.text` carries a different hash and
-    # already ships the identical rule (TextQuestion.svelte:91).
-    ('src/components/items/QuizItem.svelte', 'pre'),
-    ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'pre'),
-    ('src/components/items/quiz/SingleChoiceQuestion.svelte', 'pre'),
     # T8a. Ancestor-scoped as `ul li:last-child :global(.row)`, so the hashed part
     # pins it inside BlockGroup own panel list; the only thing a <li> there
     # contains is a SequenceLink or MiniProjectLink whose root IS `.row`. It
@@ -796,18 +760,16 @@ for name, h, field, width in SPECS:
     else:
         print('PASS  %s sets no component-local font-family' % name)
 
-# (f) CUMULATIVE — T2's two prompt-paragraph pairs plus T3's two, in one bundle.
+# (f) CUMULATIVE — Polish 2 moved the prompts' paragraph and code rules to
+#     content.css (`.prose.compact`). No `.text` rule of any component may
+#     re-declare them, or the prompt spacing forks again.
 BASE = [(s, b) for s, b, m in ALL if not m]
-pairs = sorted({s.split()[0] for s, b in BASE if re.fullmatch(r'\.text\.svelte-[a-z0-9]+ p', s)})
-last  = {s.split()[0] for s, b in BASE if re.fullmatch(r'\.text\.svelte-[a-z0-9]+ p:last-child', s)}
-mine = {'.text.%s' % nh, '.text.%s' % th}
-if set(pairs) == last and mine <= set(pairs) and len(pairs) >= 4:
-    print('PASS  %d .text prompt-paragraph rules, each with a :last-child companion, T3\'s two among them'
-          % len(pairs))
+left = sorted(s for s, b in BASE if re.fullmatch(r'\.text\.svelte-[a-z0-9]+ (p|p:last-child|pre)', s))
+if not left:
+    print('PASS  no .text prompt rule re-declares p, p:last-child or pre (content.css owns them)')
 else:
     bad = 1
-    print('FAIL  .text prompt-paragraph pairs: %d inter-para / %d last-child, matched=%s, T3 present=%s'
-          % (len(pairs), len(last), set(pairs) == last, mine <= set(pairs)))
+    print('FAIL  .text prompt rules left: %s' % left)
 
 sys.exit(bad)
 PYEOF
@@ -1389,13 +1351,16 @@ const SPEC = {
   "SequencePlayer.svelte":  { nodes: BASE.concat("EachBlock", "RenderTag", "SnippetBlock"),
                               tags: ["a", "div", "footer", "h1", "main", "nav", "p", "span"] },
   "QuizItem.svelte":        { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
-                              tags: ["article", "div", "h2", "p", "span", "strong"] },
+                              tags: ["article", "div", "h2", "p", "span", "strong"],
+                              attachOn: { "div:exp.prose.compact": "{@attach externalLinks(r.explanation_html)}" } },
   "SingleChoiceQuestion.svelte": { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
                               tags: ["div", "fieldset", "input", "label", "legend",
-                                     "line", "polyline", "span", "svg"] },
+                                     "line", "polyline", "span", "svg"],
+                              attachOn: { "div:text.prose.compact": "{@attach externalLinks(question.text_html)}" } },
   "MultiChoiceQuestion.svelte":  { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
                               tags: ["div", "fieldset", "input", "label", "legend",
-                                     "line", "polyline", "span", "svg"] },
+                                     "line", "polyline", "span", "svg"],
+                              attachOn: { "div:text.prose.compact": "{@attach externalLinks(question.text_html)}" } },
   // Round 3. Section (p) gave these four CSS inventories in the very commit
   // whose SPEC comment above explains that a CSS inventory closes only HALF of
   // the problem -- and then did not wire them in here. All three named attacks
@@ -1416,8 +1381,10 @@ const SPEC = {
   // sibling class assertion reads `el.className.split(" ")[0]` -- the FIRST
   // token only -- so `class="text mono"` set every numeric prompt in Plex Mono
   // with the gate green and all 1349 tests passing (reviewer, round 3).
-  "NumericQuestion.svelte": { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"] },
-  "TextQuestion.svelte":    { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"] },
+  "NumericQuestion.svelte": { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"],
+                              attachOn: { "div:text.prose.compact": "{@attach externalLinks(question.text_html)}" } },
+  "TextQuestion.svelte":    { nodes: BASE.concat("HtmlTag"), tags: ["div", "input", "p", "strong"],
+                              attachOn: { "div:text.prose.compact": "{@attach externalLinks(question.text_html)}" } },
   "BlockGroup.svelte":      { nodes: BASE.concat("EachBlock"),
                               tags: ["section", "header", "h2", "button", "span", "svg",
                                      "polyline", "div", "ul", "li"],
@@ -1566,7 +1533,7 @@ const SIG = {
      "Numeric:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_numeric ?? null}]",
      "#else:", "#if:",
      "Text:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_text ?? null}]",
-     "#if:", "div:exp[class=\"exp\"]", "@html:r.explanation_html", "#if:",
+     "#if:", "div:exp.prose.compact[class=\"exp prose compact\"]", "@html:r.explanation_html", "#if:",
      "div:submit-row[class=\"submit-row\"]",
      "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
      "#if:", "p:hint[class=\"hint\"]", "span:mono[class=\"mono\"]", "#else:", "#if:",
@@ -1577,7 +1544,7 @@ const SIG = {
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
   "SingleChoiceQuestion.svelte":
-    ["fieldset:", "legend:", "div:text[class=\"text\"]", "@html:question.text_html",
+    ["fieldset:", "legend:", "div:text.prose.compact[class=\"text prose compact\"]", "@html:question.text_html",
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
      "input:[type=\"radio\" name value={opt.id} checked={isChosen} {disabled} onchange]",
@@ -1628,15 +1595,15 @@ const SIG = {
      "span:count[class=\"count\"]", "span:cta[class=\"cta\"]",
      "div:footer.footer-status[class=\"footer footer-status\"]"],
   "NumericQuestion.svelte":
-    ["div:row[class=\"row\"]", "div:text[class=\"text\" id]", "@html:question.text_html",
+    ["div:row[class=\"row\"]", "div:text.prose.compact[class=\"text prose compact\" id]", "@html:question.text_html",
      "input:num.mono[class=\"num mono\" type=\"text\" inputmode aria-labelledby value={text} {disabled} oninput]",
      "#if:", "p:correct-line[class=\"correct-line\"]", "strong:mono[class=\"mono\"]"],
   "TextQuestion.svelte":
-    ["div:row[class=\"row\"]", "div:text[class=\"text\" id]", "@html:question.text_html",
+    ["div:row[class=\"row\"]", "div:text.prose.compact[class=\"text prose compact\" id]", "@html:question.text_html",
      "input:txt[class=\"txt\" type=\"text\" aria-labelledby value={text} {disabled} oninput]",
      "#if:", "p:correct-line[class=\"correct-line\"]", "strong:"],
   "MultiChoiceQuestion.svelte":
-    ["fieldset:", "legend:", "div:text[class=\"text\"]", "@html:question.text_html",
+    ["fieldset:", "legend:", "div:text.prose.compact[class=\"text prose compact\"]", "@html:question.text_html",
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
      "input:[type=\"checkbox\" value={opt.id} checked={isChosen} {disabled} onchange]",
@@ -2904,7 +2871,7 @@ def want(h, ctl_radius, selected_ctl, dot):
       an option is an interactive target, and the faint line reads as disabled.
       `overflow-wrap: anywhere` on both `.opt` and `.text` is the I2 reflow fix
       (long unbroken option/prompt text used to push the page into horizontal
-      scroll); `.text pre { overflow-x: auto; max-width: 100% }` is its
+      scroll); content.css's `.prose pre` scroller (Polish 2) is its
       companion, and `legend { max-width: 100% }` is load-bearing with it --
       a rendered <legend> is shrink-to-fit, so without the cap the legend simply
       grows to the <pre> and the scroller never fires.
@@ -2934,9 +2901,6 @@ def want(h, ctl_radius, selected_ctl, dot):
          'display:block;padding:0;margin:0 0 16px;font-size:14.5px;line-height:1.6;'
          'font-weight:400;color:var(--text-2);text-wrap:pretty;max-width:100%', ()),
         ('.text' + W, 'overflow-wrap:anywhere', ()),
-        ('.text%s pre' % W, 'overflow-x:auto;max-width:100%', ()),
-        ('.text%s p' % W, 'margin:0 0 var(--space-2)', ()),
-        ('.text%s p:last-child' % W, 'margin:0', ()),
         ('.opts' + W, 'display:flex;flex-direction:column;gap:8px;max-width:480px', ()),
         ('.opt' + W,
          'position:relative;display:flex;align-items:center;gap:10px;'
@@ -3213,7 +3177,7 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 #   that step. `.exp` is the opposite treatment — a 3px `--primary` LEFT accent,
 #   no full border — which is what distinguishes explanation from verdict.
 #
-#   `.exp`'s `overflow-wrap: anywhere` and `.exp pre { overflow-x: auto }` are
+#   `.exp`'s `overflow-wrap: anywhere` and content.css's `.prose pre` scroller are
 #   the I2 reflow fix; teacher-authored explanations carry code and URLs, and
 #   without the pair a single long token pushed the whole page into horizontal
 #   scroll.
@@ -3240,7 +3204,6 @@ WANT = [
     ('.exp' + W,
      'background:var(--surface-2);border-left:3px solid var(--primary);color:var(--text-2);'
      'font-size:13px;padding:8px 10px;margin:0;overflow-wrap:anywhere'),
-    ('.exp%s pre' % W, 'overflow-x:auto;max-width:100%'),
 ]
 
 got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
@@ -4090,7 +4053,7 @@ if [[ -n $REPLY ]]; then
   chk "\.tabs\.${H} button\[aria-pressed=\"?true\"?\]:where\(\.${H}\)" 'background:var\(--surface-2\)' 'font-weight:600' 'color:var\(--text\)'
   chk "\.tabs\.${H} button:where\(\.${H}\):disabled" 'color:var\(--faint\)' 'cursor:not-allowed'
   d 'textarea' '' 'flex:1 1 0' 'min-width:0' 'min-height:230px' 'padding:12px 14px' 'border:0' 'font:13px/1\.7 var\(--font-mono\)' 'color:var\(--text-2\)' 'caret-color:var\(--primary\)' 'resize:vertical'
-  d '\.preview' '' 'padding:12px 14px' 'font-size:13px' 'color:var\(--text\)'
+  d '\.preview' '' 'padding:12px 14px' 'min-height:200px'
   d '\.preview\.err' '' 'color:var\(--danger\)'
   d '\.plain-src' '' 'margin:0' 'padding:12px 14px' 'font:13px/1\.7 var\(--font-mono\)' 'color:var\(--text-2\)' 'white-space:pre-wrap'
   d '\.edit-content\.flash' '' 'box-shadow:inset 0 0 0 2px var\(--danger\)'
@@ -4559,7 +4522,7 @@ fi
 
 FILES_5D=(src/components/editor/quiz/*.svelte)
 emoji_scan "all Slice-5d quiz files" $FILES_5D src/lib/quizFormat.ts src/lib/quizEdits.svelte.ts \
-  src/lib/quizContext.ts src/lib/newTabLinks.ts
+  src/lib/quizContext.ts src/lib/externalLinks.ts
 colour_scan 5d-quiz $FILES_5D
 # D13: no "disabled with a reason" for version-forbidden structure — the quiz
 # components never read structureReason (the header trash in ItemEditorModal is the exception).
@@ -5552,8 +5515,8 @@ CONTENT_SURFACES=(src/components/items/PageItem.svelte src/pages/MiniProjectDeta
   src/components/items/quiz/NumericQuestion.svelte src/components/items/quiz/TextQuestion.svelte
   src/components/items/QuizItem.svelte src/pages/CourseView.svelte src/pages/editor/VersionEditPage.svelte
   src/components/editor/quiz/QuestionCard.svelte src/components/editor/MarkdownEditor.svelte)
-# The surfaces converted so far. Task 4 sets this to the whole list.
-CONTENT_DONE=(src/components/items/PageItem.svelte src/pages/MiniProjectDetailPage.svelte)
+# Every content surface is converted (Polish 2 Task 4).
+CONTENT_DONE=($CONTENT_SURFACES)
 nstray=$(grep -rlE 'class="([^"]* )?prose( [^"]*)?"' src --include='*.svelte' | grep -vxF -f <(print -l $CONTENT_SURFACES) | grep -c .)
 if [[ $nstray -eq 0 ]]; then echo "PASS  only the content surfaces render the prose class"
 else echo "FAIL  the prose class outside the content surfaces ($nstray files)"; fail=1; fi
@@ -5562,11 +5525,51 @@ else echo "FAIL  the prose class outside the content surfaces ($nstray files)"; 
 nredecl=$(grep -lE ':global\((:is\()?(p|ul|ol|li|a|img|code|pre|blockquote|hr|h[1-6])([ ,)]|:last-child)' $CONTENT_DONE | grep -c .)
 if [[ $nredecl -eq 0 ]]; then echo "PASS  no converted content surface re-declares a content element"
 else echo "FAIL  a converted content surface re-declares a content element ($nredecl files)"; fail=1; fi
-if grep -rqE 'rewriteExternalLinks' src; then echo "FAIL  src still mentions rewriteExternalLinks"; fail=1
-else echo "PASS  nothing under src mentions rewriteExternalLinks (externalLinks replaces it)"; fi
+if grep -rqE 'newTabLinks|rewriteExternalLinks' src; then echo "FAIL  src still mentions newTabLinks or rewriteExternalLinks"; fail=1
+else echo "PASS  nothing under src mentions newTabLinks or rewriteExternalLinks (externalLinks replaces both)"; fi
 if [[ $(grep -cF '<div class="assignment-html prose" data-testid="assignment-html" {@attach externalLinks(data.assignment_html)}>' src/pages/MiniProjectDetailPage.svelte) -eq 1 ]]; then
   echo "PASS  the mini-project assignment is page-scale prose with the link attachment"
 else echo "FAIL  the mini-project assignment is page-scale prose with the link attachment"; fail=1; fi
+
+# Task 4 — authored content on the compact surfaces. The scanned files (quiz)
+# are pinned by SIG and attachOn; these four are not scanned, so their class
+# and attachment are pinned by source, exactly.
+src_count() { if [[ $(grep -cF -- "$4" $3) -eq $2 ]]; then echo "PASS  $1"; else echo "FAIL  $1"; fail=1; fi }
+src_count "course info is compact prose with the link attachment (both branches)" 2 src/pages/CourseView.svelte \
+  '<div class="info prose compact" {@attach externalLinks(currentCourse.value.version.info_html)}>'
+src_count "version info is compact prose with the link attachment" 1 src/pages/editor/VersionEditPage.svelte \
+  '<div class="vinfo prose compact" {@attach externalLinks(v.info_html)}>'
+src_count "the editor question text is compact prose with the link attachment" 1 src/components/editor/quiz/QuestionCard.svelte \
+  '<div class="qtext prose compact" id={textId} {@attach externalLinks(q.text_html)}>'
+src_count "the editor explanation is compact prose with the link attachment" 1 src/components/editor/quiz/QuestionCard.svelte \
+  '<div class="qexpl-body prose compact" {@attach externalLinks(q.explanation_html ?? '"''"')}>'
+src_count "the editor preview is prose, by variant, with the link attachment" 1 src/components/editor/MarkdownEditor.svelte \
+  '<div class="preview prose pv-{variant}" class:compact={variant !== '"'page'"'} {@attach externalLinks(html ?? '"''"')}>'
+# The preview takes the student surface's metrics, by variant (spec §The editor preview).
+uniq1 md-card
+if [[ -n $REPLY ]]; then
+  N=MarkdownEditor; H=$REPLY
+  d '\.preview\.pv-page' '' 'font-size:14px' 'line-height:1\.6' 'color:var\(--text-2\)'
+  d '\.preview\.pv-prompt' '' 'font-size:14\.5px' 'line-height:1\.6' 'color:var\(--text-2\)'
+  d '\.preview\.pv-explanation' '' 'font-size:13px' 'color:var\(--text-2\)'
+  none "MarkdownEditor .preview sets no type metrics of its own (the variant does)" "\.preview\.${H}\{[^}]*(font-size|color):"
+fi
+# Ruling (Task 3 review m2): the scanner's attachOn and the src_count rows pin
+# the attachment's TEXT, not what it does. The attachment may only set a link's
+# target and rel, and every content surface takes it from the lib, once, with no
+# local binding that could shadow it.
+ndo=$(grep -cE '\.style|classList|className|cssText|innerHTML|outerHTML|insertAdjacent|append|prepend|replaceWith|\.remove\(|toggleAttribute|setAttributeNS' src/lib/externalLinks.ts)
+nset=$(grep -oE 'setAttribute\([^,)]*' src/lib/externalLinks.ts | sort -u | tr '\n' ' ')
+if [[ $ndo -eq 0 && $nset == "setAttribute('rel' setAttribute('target' " ]]; then
+  echo "PASS  externalLinks only sets a link's target and rel"
+else echo "FAIL  externalLinks does more than set a link's target and rel ($ndo; $nset)"; fail=1; fi
+nbind=0
+for f in $CONTENT_SURFACES; do
+  [[ $(grep -cE "^  import \{ externalLinks \} from '(\.\./)+lib/externalLinks';$" $f) -eq 1 ]] || nbind=$((nbind+1))
+  [[ $(grep -vE '^[[:space:]]*(//|/?\*)' $f | grep -cE '\bexternalLinks\b') -eq $(( 1 + $(grep -cF '{@attach externalLinks(' $f) )) ]] || nbind=$((nbind+1))
+done
+if [[ $nbind -eq 0 ]]; then echo "PASS  every content surface imports externalLinks once, from the lib, and binds the name nowhere else"
+else echo "FAIL  a content surface imports or binds externalLinks otherwise ($nbind)"; fail=1; fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

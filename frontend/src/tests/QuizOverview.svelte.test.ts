@@ -96,14 +96,19 @@ describe('Quiz overview (5d T3)', () => {
     expect(r2.querySelector('.ans-ok')).toBeNull();
   });
 
-  it('links in question text and explanations open in a new tab', async () => {
+  it('links in question text and explanations: external ones open in a new tab, a Mathion page stays (D58)', async () => {
     const s = new QuizServer([q({
-      id: 1, text_html: '<p><a href="https://a.test" rel="noopener noreferrer">a</a></p>',
+      id: 1, text_html: `<p><a href="https://a.test" rel="noopener noreferrer">a</a> <a href="${location.origin}/courses/x">c</a></p>`,
       explanation_md: 'see', explanation_html: '<p><a href="https://b.test" rel="noopener noreferrer">b</a></p>',
     })]);
     await renderQuiz(s);
-    const links = [...cards()[0].querySelectorAll('a')];
-    expect(links.map((a) => a.getAttribute('target'))).toEqual(['_blank', '_blank']);
+    const card = cards()[0];
+    for (const sel of ['.qtext', '.qexpl-body']) {
+      expect(card.querySelector(sel)!.classList.contains('prose')).toBe(true);
+      expect(card.querySelector(sel)!.classList.contains('compact')).toBe(true);
+    }
+    const links = [...card.querySelectorAll('a')];
+    expect(links.map((a) => a.getAttribute('target'))).toEqual(['_blank', null, '_blank']);
   });
 
   it('question list: a skeleton, then "Couldn\'t load the questions" + Retry, which loads', async () => {
