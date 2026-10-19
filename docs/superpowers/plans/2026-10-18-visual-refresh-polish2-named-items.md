@@ -9,13 +9,13 @@
 - **Ground and sheets (Task 2).** Tokens: `--bg` becomes the clear tint `#F2F3F6`, `--focus-page` aliases it, and `--disabled-bg` keeps the old disabled fill. The player's content slot and the mini-project page become white sheets.
 - **Authored content (Tasks 3, 4).** One global stylesheet, `styles/content.css`, styles `.prose` (page scale) and `.prose.compact`. Every surface that renders teacher markdown adds the class and the `externalLinks` attachment, which opens external links and Mathion's own files in a new tab. The per-surface `:global` content rules go.
 - **404 (Task 5).** `NotFound` becomes a page `ErrorState` whose one button names the start page.
-- **Bare URLs (Task 6, backend).** markdown-it's linkify, limited to `http://` and `https://`.
+- **Bare URLs (Task 6, backend).** An own markdown-it rule (D64), limited to `http://` and `https://` and to URL characters (D65).
 
 **Tech Stack:**
 - **Svelte:** Svelte 5.55, runes only; attachments (`{@attach}`).
 - **Frontend tests:** Vitest + jsdom, with `mount` / `unmount` / `flushSync` from `svelte`.
 - **Gate:** the zsh gate `frontend/scripts/visual-refresh-gate.sh`; the build is vite 5.4 with esbuild 0.21's minifier.
-- **Backend:** Python through `backend/.venv`; markdown-it-py 4.0, nh3; Task 6 adds `linkify-it-py>=2.0`.
+- **Backend:** Python through `backend/.venv`; markdown-it-py 4.0, nh3; no new package (D64: Task 6 is an own markdown-it rule).
 
 **Spec:** `docs/superpowers/specs/2026-10-18-visual-refresh-polish2-named-items-design.md` (rev 5, commit `55be40e`, approved by the user on 2026-10-18; rev 6 adds D60 during Task 1). Its decisions D48–D60, its cascade facts and its gate sections are binding; this plan cites them by name. Decisions log: `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/decisions.md`. Mock-ups: `page-ground-mock.html`, `content-scale-mock.html` in the same folder.
 
@@ -26,7 +26,7 @@
 - **Branch:** `feat/visual-refresh-polish2-named-items` (cut from the Polish 1 tip `ba8ace4`). LOCAL only: never push, never merge.
 - **Directory:** never leave `/Users/svkucheryavski/Documents/Developing/mathion`. Use absolute `cd` only, never `cd ..`. Scratch files go in `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`$SDD`: probes in `probe/`, gate temp files and logs in `tmp/`, screenshots in `shots/`), never `/tmp`. Tell every subagent the same.
 - **Code style:**
-  - Svelte 5 runes only. No new npm dependencies; the one new pip dependency is Task 6's `linkify-it-py`.
+  - Svelte 5 runes only. No new npm dependencies and no new pip dependencies (D64).
   - Component tests use `mount` / `unmount` / `flushSync` from `svelte`, NOT `@testing-library/svelte`.
   - Python, pytest and alembic only through `backend/.venv`.
   - Match the surrounding comment density. No comments that narrate the change ("added in Polish 2") beyond the decision tag the codebase already uses (`D56`, `Polish 2 D51`).
@@ -148,7 +148,7 @@ Paths under `frontend/src` unless stated.
 | `lib/newTabLinks.ts` | 4 | deleted |
 | `pages/NotFound.svelte` | 5 | the ErrorState page |
 | `tests/*` | 2–5 | new: `externalLinks.test.ts`, `PageItem.svelte.test.ts`, `NotFound.svelte.test.ts`, `App.notFound.svelte.test.ts`; changed per task |
-| `backend/pyproject.toml`, `backend/mathion/markdown.py`, `backend/tests/test_markdown.py`, `backend/tests/test_items.py` (repo root) | 6 | linkify |
+| `backend/pyproject.toml`, `backend/mathion/markdown.py`, `backend/tests/test_markdown.py`, `backend/tests/test_items.py` (repo root) | 6 | bare-URL rule (`pyproject.toml` unchanged, D64) |
 | `scripts/visual-refresh-gate.sh` (`frontend/`) | 1–4 | (b4), the inventories, section (an), `EXPECTED_CHECKS` |
 | `docs/backlog/*` (repo root) | 1–6 | `polish2-named-items-debt.md` created (1); resolved notes deleted per task (spec §Backlog lifecycle) |
 
@@ -2438,6 +2438,12 @@ EOF
 - Test: `backend/tests/test_markdown.py` (append), `backend/tests/test_items.py` (append)
 - Delete: `docs/backlog/bare-urls-not-autolinked-in-markdown.md`, `docs/backlog/stored-content-html-not-rerendered-after-renderer-change.md`
 - Modify: `docs/backlog/polish2-named-items-debt.md` (`## Task 6` heading)
+
+> **D64 (user, at Task 6's start, 2026-10-19):** no new package. Step 1 (the dependency and the pip install) is dropped and `backend/pyproject.toml` is not touched or committed. Step 3's renderer is replaced by the own core rule in spec rev 10 §Bare URLs ("The rule"); every Step 2 test stands, plus tests for the rule's own edges. The Dockerfile and CI need nothing either way.
+>
+> **D65 (user, at Task 6's commit OK, 2026-10-19):** a bare address holds only URL characters (RFC 3986), so it ends at a space, `|`, `{`, `^` or a letter such as `é`; its link text is exactly as typed (no `normalizeLinkText`). Seven more test cases in `test_markdown.py`.
+>
+> **D66 (user, after review round 3, 2026-10-19):** an address that runs straight into a letter or digit stays plain as a whole (no cut link to `https://b`); quotes and other symbols still end it with the part before linked.
 
 **Interfaces:**
 - Consumes: nothing from the frontend tasks. The frontend treats a linkified URL like an authored `[text](url)`: Tasks 3 and 4's `externalLinks` opens it in a new tab.

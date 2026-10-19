@@ -1,6 +1,6 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 9 (2026-10-19), approved; Task 3 executing.
+**Status:** rev 10 (2026-10-19), approved; Task 6 executing.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
 - Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
@@ -9,6 +9,7 @@
 - Rev 7 adds D61 (Progress grid cells ring near-black), from Task 1's review round 1.
 - Rev 8 adds the user's decision D62 (the player strip as tabs), made at Task 2's look review.
 - Rev 9 adds D63 (headings take relative margins), made at Task 3's look review.
+- Rev 10 adds D64 (no new package for bare URLs: an own markdown-it rule), made at Task 6's start, D65 (a bare address holds only URL characters; its text is exactly as typed), made at Task 6's commit OK, and D66 (an address that runs into a letter stays plain), from Task 6's review round 3.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -72,6 +73,9 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - Done items are pale gray (`--border` fill, `--border-strong` edge, `--muted` glyph, about 5:1). Not-done items are steel blue (`--primary` fill, white glyph), like the main buttons.
   - Only in the player strip. The teacher breakdown keeps blue = done; the course rows and the editor keep the shared look.
 - **D63 — Headings take relative margins** (user, at Task 3's look review). One rule, `margin: 1em 0 .5em`, for all six levels and both scales, so the space follows each heading's own size. A paragraph's bottom margin collapses into the next heading's top margin; between two headings the gap is the second one's 1em.
+- **D64 — No new package for bare URLs** (user, at Task 6's start: "Do not install any additional packages, the amount of external dependencies must be limited", then "Own small rule"). D54's behaviour stands, built as a small markdown-it core rule in `markdown.py` on the markdown-it-py already installed. `linkify-it-py` is not added and `pyproject.toml` does not change.
+- **D65 — A bare address holds only URL characters, shown as typed** (user, at Task 6's commit OK: "Do not allow spaces and other strange symbols which usually are not used in URL"). Only the characters RFC 3986 allows in a URL belong to a bare address: letters A–Z, digits, `-._~:/?#[]@!$&'()*+,;=` and `%`. The address ends at anything else (a space, `|`, `{`, `^`, `\`, a letter such as `é` or `п`), and an address that starts with such a letter is not linked. The link text is the address exactly as typed: `%20` is not shown as a space and an `xn--` host is not shown as look-alike letters.
+- **D66 — An address that runs into a letter stays plain** (user, after Task 6's review round 3: "Leave it plain"). When the character right after a bare address is a letter, digit or combining mark (`https://bücher.de`, `https://x.org/café`, a Kelvin sign, also written as an entity such as `&uuml;` or an escape such as `\_`), the whole address stays plain text, up to the next space, including any address inside it: a cut link to `https://b` would open another site. Other non-URL characters (`|`, `^`, `{`, quotes, brackets) still end the address, and the part before them is linked, so `„https://x.org“` and `«https://x.org»` work.
 - **D51 — One shared style for authored content, on every surface.**
   - It applies wherever teachers write markdown: page content, quiz prompts, explanations, course and version info, mini-project assignments, and the editor's preview and question cards.
   - Smaller surfaces use a compact scale.
@@ -521,22 +525,17 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
 
 ## Bare URLs (Task 6, backend)
 
-- **The dependency first.** `backend/pyproject.toml`'s `markdown-it-py>=3.0` becomes `markdown-it-py[linkify]>=3.0`, plus `linkify-it-py>=2.0`.
-  - The extra alone resolves to `linkify-it-py>=1,<3`. The explicit `>=2.0` pin guarantees `match_at_start`, which the inline linkify rule uses.
-  - The Dockerfile (`:23-25`, `pip install /tmp/backend`) and CI (`ci.yml:36`, `pip install './backend[dev]'`) both install from pyproject, so neither needs an edit.
-  - The plan's first step reinstalls `backend/.venv` from pyproject. Without linkify-it-py, `_md.linkify` is `None`, and the configuration below raises at import. That would break every backend test and the running dev server.
-- **The renderer** (`backend/mathion/markdown.py:7`):
-  ```python
-  _md = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("linkify")
-  _md.linkify.set({"fuzzy_link": False, "fuzzy_email": False, "fuzzy_ip": False})
-  # D54: only http:// and https://. linkify-it's other default schemas stay plain text.
-  _md.linkify.add("ftp:", None).add("//", None).add("mailto:", None)
-  dollarmath_plugin(_md)
-  ```
-  - `add` returns `self` (linkify-it-py 2.2.0 `main.py:423`, verified by probe), so the chain works.
-  - With `fuzzy_link` off, `www.` addresses and bare domains are not matched.
-  - Without the `add` line, `ftp:` would come out as an `<a>` without `href` (nh3 strips the scheme), and `//host` as a live protocol-relative link. Both are disabled.
-  - An authored `[text](mailto:…)` or `<mailto:a@b.org>` still works, because it is a markdown link, not linkify. So does the CommonMark autolink `<a@b.org>`: it is written on purpose, and it is not a D54 violation.
+- **No new dependency (D64).** `pyproject.toml` does not change. The renderer gains a small core rule on the markdown-it-py already installed; `linkify-it-py` is not used.
+- **The rule** (`backend/mathion/markdown.py`), registered with `_md.core.ruler.before("text_join", "bare_url", …)`:
+  - It runs before `text_join`, where markdown-it's own linkify rule runs. A backslash escape is still a separate `text_special` token there, so `http\://example.com/` never forms an address and stays plain.
+  - It scans only `text` tokens inside inline content, and skips everything between `link_open` and `link_close`. Code spans, code blocks and math are other token types and are never touched; an authored `[text](url)` or `<url>` stays one link.
+  - The match is `(?<!\w)[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+`: only URL characters (D65), one character class, linear, with no nested quantifiers. The scheme's case is spelled out, not matched with `re.IGNORECASE`, which would let the Kelvin sign, a long s and a dotted I stand in for k, s and i.
+  - Trimming, in one pass from the end: trailing `.,;:!?'*_~` leave the link; a closing `)` or `]` leaves it only while it has no partner inside the address, so `https://en.wikipedia.org/wiki/Function_(mathematics)` keeps its `)` and `(see https://x.org)` loses the outer one.
+  - An address with nothing after `://` is not linked.
+  - An address followed directly by a letter, digit (Unicode `\w`) or combining mark is not linked at all (D66), and nothing up to the next space is linked either. The next character may sit in the next token (an entity or escape is a separate `text_special` token here), so the rule looks into it and carries the plain stretch across such tokens. The check runs after the match, not as a lookahead, so the regex never backs off to a shorter address.
+  - The link is `link_open` (`href` = the address with its scheme lowercased, through `md.normalizeLink` and `md.validateLink`), a `text` token with the address exactly as typed (D65: not through `md.normalizeLinkText`, which would decode `%20` and `xn--` hosts), and `link_close` — the same tokens an autolink makes.
+  - With no `linkify` machinery, `www.` addresses, bare domains, `ftp:`, `//host`, `mailto:` and plain e-mail addresses are never matched.
+  - An authored `[text](mailto:…)` or `<mailto:a@b.org>` still works, because it is a markdown link. So does the CommonMark autolink `<a@b.org>`: it is written on purpose, and it is not a D54 violation.
 - **Output and sanitising.**
   - Links come out as `<a href="…">…</a>`. They pass `nh3` with the existing `_ALLOWED_TAGS` and `_ALLOWED_ATTRS`, and the `_URL_SCHEMES = {http, https, mailto}` filter.
   - On every surface the frontend treats them like an authored `[text](url)`, through `externalLinks`.
@@ -604,7 +603,7 @@ The tasks:
 4. **Authored content, compact surfaces:** the quiz prompts (Single and Multi as one step, Numeric and Text as another), the explanation, course and version info, the editor's question cards, the preview's `variant`, each with `externalLinks`; `newTabLinks` removed.
    - Screenshots: each surface with all six heading levels, a quote and code, including the editor explanation and course info.
 5. **The 404 page:** ErrorState, the labels, the tests.
-6. **Bare URLs:** the venv, linkify, the dependency, the tests, the backlog notes.
+6. **Bare URLs:** the own core rule (D64), the tests, the backlog notes.
 
 Then a whole-branch review (fresh Opus and Fable), and a Safari pass, one step at a time.
 
