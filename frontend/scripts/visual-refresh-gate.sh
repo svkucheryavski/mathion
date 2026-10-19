@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2279
+EXPECTED_CHECKS=2270
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -412,29 +412,12 @@ GLOBAL_ALLOW = {
     ('src/components/editor/quiz/QuestionCard.svelte', 'p + p'),
     ('src/components/editor/quiz/QuestionCard.svelte', 'img'),
     ('src/components/editor/quiz/QuestionCard.svelte', ':is(h1, h2, h3, h4, h5, h6)'),
-    # PageItem renders the Page item type; it never contains a quiz.
-    ('src/components/items/PageItem.svelte', 'h1'),
-    ('src/components/items/PageItem.svelte', 'h2'),
-    ('src/components/items/PageItem.svelte', 'h3'),
-    # T5 SPLIT the blanket `li` rule by list type (reset.css:4 zeroes markers,
-    # so the blanket disc forced bullets onto <ol>). Both stay ancestor-scoped
-    # under `.content`, PageItem's own {@html} container. ItemRouter dispatches
-    # exactly ONE component per item, so a PageItem never wraps a quiz.
-    ('src/components/items/PageItem.svelte', 'ul > li'),
-    ('src/components/items/PageItem.svelte', 'ol > li'),
-    ('src/components/items/PageItem.svelte', 'a'),
-    ('src/components/items/PageItem.svelte', 'code'),
-    ('src/components/items/PageItem.svelte', 'pre'),
-    ('src/components/items/PageItem.svelte', 'pre code'),
     # T5 card framing. Ancestor-scoped under .video-card/.app-card, which wrap
     # only their own shared frame component -- never a quiz. A BARE top-level
     # :global(.frame) is forbidden by the spec: it would also reach the
     # deferred editor previews.
     ('src/components/items/VideoItem.svelte', '.frame'),
     ('src/components/items/InteractiveAppItem.svelte', '.frame'),
-    ('src/components/items/PageItem.svelte', 'ol'),
-    ('src/components/items/PageItem.svelte', 'p'),
-    ('src/components/items/PageItem.svelte', 'ul'),
     # The choice questions are SIBLINGS of T3 under QuizItem's `.q-block`, and
     # their prefix `.text` carries their own hash, so these cannot match T3.
     ('src/components/items/quiz/MultiChoiceQuestion.svelte', 'p'),
@@ -459,21 +442,6 @@ GLOBAL_ALLOW = {
     # question renders inside SequencePlayer. It kills the last row hairline that
     # would otherwise double up against the card border.
     ('src/components/course/BlockGroup.svelte', '.row'),
-    # Slice-4 T3. The mini-project assignment card's content typography (spec
-    # §3.3), every rule ancestor-scoped under `.assignment-html` — the page own
-    # {@html} container, which carries this component hash. None can reach
-    # Slice-3 T3: those questions render inside SequencePlayer QuizItem, and a
-    # mini-project detail page is a different route that renders no quiz at all.
-    # The list is the assignment SUBSET of PageItem block above (no headings,
-    # no pre, no img), so it also cannot widen what PageItem already froze.
-    ('src/pages/MiniProjectDetailPage.svelte', 'p'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'p:last-child'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'a'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'ul'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'ol'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'ul > li'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'ol > li'),
-    ('src/pages/MiniProjectDetailPage.svelte', 'code'),
     # Slice-5b T1: `.modal-body > :global(*)` (spec :220-221). Child-combinator
     # scoped under the hashed `.modal-body`, so it reaches only the direct
     # children of a modal body. A T3 question renders inside SequencePlayer,
@@ -559,8 +527,41 @@ else:
 # 7bfdd12a): --bg is the page ground #F2F3F6 (was #FBFBFC), --focus-page is
 # var(--bg), and --disabled-bg (#FBFBFC) is new and holds the old disabled
 # fill. The --surface-3 comment changed, which hashes nothing.
+# Polish 2 T3 (user D51/D52, 2026-10-18): content.css joins the global files,
+# imported after base.css: 28 rules, every one scoped under `.prose`. ORDER
+# matters here: the first/last-child margin rules (0,2,0) win over the compact
+# spacing rules (0,2,0) only by coming after them.
+# D63 (user, 2026-10-19, Task 3 look review): one relative heading margin,
+# `1em 0 .5em`, for all six levels and both scales; the h1-h3, h4-h6 and
+# compact heading rules merged into it (26 rules).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '.prose', '115422ed'),
+    ('', '.prose :is(h1,h2,h3,h4,h5,h6)', '9dabc362'),
+    ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
+    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)', '13af6f60'),
+    ('', '.prose :where(ul,ol)', '17bebee9'),
+    ('', '.prose :where(ul,ol):has(>li>p)>li+li', 'ca5345b0'),
+    ('', '.prose a', '0be0b8c6'),
+    ('', '.prose a:hover', '98e62ed4'),
+    ('', '.prose blockquote', '5fe22df0'),
+    ('', '.prose code', 'a92bcf18'),
+    ('', '.prose h1', '8d5cc1f9'),
+    ('', '.prose h2', '805a16ec'),
+    ('', '.prose h3', '85586ccb'),
+    ('', '.prose h4', '08f874dd'),
+    ('', '.prose h5', 'a838c678'),
+    ('', '.prose h6', 'fdbae480'),
+    ('', '.prose hr', 'a216bc6c'),
+    ('', '.prose ol>li', 'd67e9248'),
+    ('', '.prose pre', 'bd339863'),
+    ('', '.prose pre code', 'f4859c1f'),
+    ('', '.prose ul>li', '20d7366f'),
+    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)', 'e291811a'),
+    ('', '.prose.compact h1', 'a5b38d68'),
+    ('', '.prose.compact h2', 'c2943c7b'),
+    ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
+    ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
     ('', ':root', '7bfdd12a'),
@@ -573,11 +574,12 @@ WANT_FULL = [
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
 ]
-# Document ORDER of the same 23 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 49 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
 # order today: the field rule (0,2,1) and `[tabindex="-1"]` (0,2,0) win by specificity.
+# content.css follows base.css: its first/last-child rules must come after the compact spacing rules.
 WANT_ORDER = [
     ('', '*,*:before,*:after'), ('', 'html,body'), ('', 'body'), ('', 'ul,ol'),
     ('', 'h1,h2,h3,h4,h5,h6'), ('', 'p'), ('', 'button,input,select,textarea'),
@@ -587,6 +589,18 @@ WANT_ORDER = [
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
     ('', '[tabindex="-1"]:focus-visible'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])'),
+    ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
+    ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
+    ('', '.prose h5'), ('', '.prose h6'), ('', '.prose.compact h1'), ('', '.prose.compact h2'),
+    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)'),
+    ('', '.prose :where(h1,h2,h3,h4,h5,h6)'),
+    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)'),
+    ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child'),
+    ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child'),
+    ('', '.prose :where(ul,ol):has(>li>p)>li+li'),
+    ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
+    ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
+    ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),
 ]
 def dhash(b):
     return hashlib.sha1(';'.join(sorted(decls(b))).encode()).hexdigest()[:8]
@@ -701,6 +715,10 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            # column, heading top margins collapse and code blocks lose their
            # padding -- gate ALL PASS, 1349 tests green (reviewer, round 4).
            'src/components/items/PageItem.svelte',
+           # Polish 2: PageItem's {@html} rules moved to content.css, and with
+           # them --space-4 and --control-pad-textarea. Harvest it too, or an
+           # ancestor could zero them unguarded.
+           'src/styles/content.css',
            'src/components/items/VideoItem.svelte',
            'src/components/items/InteractiveAppItem.svelte',
            'src/components/items/UnsupportedItem.svelte',
@@ -994,14 +1012,6 @@ TARGETS = [
     ('item-mark current',     r'\.item-mark\.current\.svelte-[a-z0-9]+$', 1, FC),
     ('item-mark not-yet',     r'\.item-mark\.not-yet\.svelte-[a-z0-9]+$', 1, FC),
     ('ItemIcon .icon wrapper',r'\.icon\.svelte-[a-z0-9]+$', 1),
-    # PageItem's {@html} rules: `:global` leaves the PAYLOAD hashless but the
-    # LEADING part keeps the scope hash, so they are pinnable here. This is what
-    # makes their dist checks duplicate- and @media-proof; as source greps both
-    # mutations escaped.
-    ('page content p',        r'\.content\.svelte-[a-z0-9]+ p$', 1),
-    ('page list padding',     r'\.content\.svelte-[a-z0-9]+ ul,\.content\.svelte-[a-z0-9]+ ol$', 1),
-    ('page ul markers',       r'\.content\.svelte-[a-z0-9]+ ul>li$', 1),
-    ('page ol markers',       r'\.content\.svelte-[a-z0-9]+ ol>li$', 1),
     # .opts has two rightful authors (Single+Multi). .notice had two until
     # Slice 5b replaced InteractiveAppEditor with AppBody (whose rule is
     # .app-hint), so InteractiveAppItem is now its only author.
@@ -1097,19 +1107,10 @@ else
   echo "FAIL  .interactive-app is not dist-unique (${#ih[@]}: $ih)"; fail=1
 fi
 
-# PageItem {@html} content rules. Load-bearing against reset.css:4, which zeroes
-# ul/ol padding AND markers; the split by list type is a content-correctness fix
-# -- a blanket `list-style:disc` renders <ol> as bullets instead of 1. 2. 3.
-#
-# Checked in DIST, not source. These were source greps until a mutation round
-# showed that form unsound in BOTH directions: a later duplicate
-# `:global(ol > li){list-style:none}` and an `@media`-wrapped `padding-left:0`
-# both ESCAPED (the grep still matched the original rule while the later one won
-# the cascade), and merely reflowing the selector list across two lines RED the
-# gate on a semantically identical file. `:global` keeps the payload hashless but
-# the LEADING part still takes the scope hash, so every one of these rules is
-# visible in dist and hash-couplable -- and (g2) then pins each to exactly one
-# top-level declaration, which is what closes the duplicate/@media hole.
+# PageItem's {@html} body is styled by content.css (`.prose`, Polish 2 D51).
+# The component keeps only its box: the reflow guard, the page line-height and
+# the text colour, which the content inherits. Checked in DIST and anchored on
+# the PageItem hash.
 P=src/components/items/PageItem.svelte
 ph=(${(f)"$(grep -ohE '\.page-item\.svelte-[a-z0-9]+' $CSS | grep -ohE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#ph[@]} -eq 1 ]]; then
@@ -1126,14 +1127,10 @@ if [[ ${#ph[@]} -eq 1 ]]; then
   # they missed. Inherited by every descendant rule below.
   check "PageItem {@html} prose wraps unbreakable tokens" \
         "\\.content\\.${PI_H}\\{([^}]*;)?overflow-wrap:anywhere[;}]"
-  check "PageItem :global(p) margin-bottom"   "\.content\.${PI_H} p\{([^}]*;)?margin-bottom:var\(--space-3\)[;}]"
-  check "PageItem :global(p) line-height"     "\.content\.${PI_H} p\{([^}]*;)?line-height:1\.6[;}]"
-  check "PageItem ul/ol padding restored"     "\.content\.${PI_H} ul,\.content\.${PI_H} ol\{([^}]*;)?padding-left:var\(--space-4\)[;}]"
-  check "PageItem ul/ol bottom margin"        "\.content\.${PI_H} ul,\.content\.${PI_H} ol\{([^}]*;)?margin-bottom:var\(--space-3\)[;}]"
-  check "PageItem <ul> markers are disc"      "\.content\.${PI_H} ul>li\{([^}]*;)?list-style:disc[;}]"
-  check "PageItem <ol> markers are decimal"   "\.content\.${PI_H} ol>li\{([^}]*;)?list-style:decimal[;}]"
-  # The whole point of the split: a blanket disc would render <ol> as bullets.
-  none  "no blanket list-style:disc reaching <ol>" "\.content\.${PI_H} (ol>li|ul,[^{]*ol)\{[^}]*list-style:disc"
+  check "PageItem .content carries the page line-height (moved off p, Polish 2)" \
+        "\.content\.${PI_H}\{([^}]*;)?line-height:1\.6[;}]"
+  check "PageItem .content text colour" "\.content\.${PI_H}\{([^}]*;)?color:var\(--text-2\)[;}]"
+  none  "PageItem has no {@html} element rules left (content.css styles them)" "\.content\.${PI_H} [a-z]"
 else
   echo "FAIL  .page-item is not dist-unique (${#ph[@]}: $ph) -- cannot anchor .content"; fail=1
 fi
@@ -1234,7 +1231,9 @@ done
 # (codex-r2-C). The check is an ALLOWLIST on THREE axes — node type, tag and
 # attribute NAME — so `use:`, `{@attach}`, `bind:this`, spreads,
 # `<svelte:element>` and an attribute nobody reviewed all red rather than
-# needing to be enumerated as they are invented. It does NOT judge the VALUE of
+# needing to be enumerated as they are invented. Polish 2: an {@attach} passes
+# only where the file's attachOn names it, by element and exact source, exactly
+# once (the authored-content links, D58). It does NOT judge the VALUE of
 # an allowed non-visual attribute; the scope note on the walk below says so in
 # full, and says which lane does.
 node -e '
@@ -1405,7 +1404,8 @@ const SPEC = {
   // and `{@html "<style>…</style>"}` injected a stylesheet into the JS chunk
   // where no CSS lane can reach it. Gate ALL PASS (228), 1349 tests green
   // (reviewer, close-out round 3, all reproduced).
-  "PageItem.svelte":        { nodes: BASE.concat("HtmlTag"), tags: ["article", "div", "h2"] },
+  "PageItem.svelte":        { nodes: BASE.concat("HtmlTag"), tags: ["article", "div", "h2"],
+                              attachOn: { "div:content.prose": "{@attach externalLinks(item.content_html)}" } },
   "VideoItem.svelte":       { nodes: BASE, tags: ["article", "div", "h2", "p", "polyline", "svg"] },
   "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"] },
   "UnsupportedItem.svelte": { nodes: BASE, tags: ["div", "p"] },
@@ -1589,7 +1589,7 @@ const SIG = {
      "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:",
      "span:sr-only[class=\"sr-only\"]"],
   "PageItem.svelte":
-    ["article:page-item[class=\"page-item\"]", "h2:", "div:content[class=\"content\"]",
+    ["article:page-item[class=\"page-item\"]", "h2:", "div:content.prose[class=\"content prose\"]",
      "@html:item.content_html"],
   "VideoItem.svelte":
     ["article:video-item[class=\"video-item\"]", "h2:", "div:video-card[class=\"video-card\"]",
@@ -1760,6 +1760,7 @@ for (const f of process.argv.slice(1)) {
   // channel required, exactly once.
   const seenStyle = {};
   const seenHidden = {};
+  const seenAttach = {};
   // `owner` is the signature of the nearest enclosing element, so a text node
   // is reported against the thing that renders it rather than in isolation --
   // and a glyph appended straight into the row reads as `a:row:...`, which no
@@ -1910,6 +1911,17 @@ for (const f of process.argv.slice(1)) {
         for (const a of n.attributes || []) {
           const nm = a.name || "";
           const low = nm.toLowerCase();
+          // Polish 2 D58: the authored-content link attachment is the only
+          // {@attach} a scanned file may carry. Pinned by element and exact
+          // source, and required exactly once, as styleOn is.
+          if (a.type === "AttachTag") {
+            const want = (spec.attachOn || {})[me];
+            const got = srcText.slice(a.start, a.end).split(/\s+/).join(" ");
+            if (want === undefined) hits.push(`<${n.name}> {@attach} ${got}`);
+            else if (got !== want) hits.push(`<${n.name}> attachment is ${got} (pinned ${want})`);
+            else seenAttach[me] = (seenAttach[me] || 0) + 1;
+            continue;
+          }
           if (!ATTR.has(a.type)) { hits.push(`<${n.name}> ${a.type} ${nm}`.trim()); continue; }
           // A ClassDirective is read by the class collector above, and an
           // OnDirective names an EVENT rather than an attribute, so neither
@@ -1985,6 +1997,10 @@ for (const f of process.argv.slice(1)) {
   }
   for (const [k, v] of Object.entries(spec.hiddenOn || {})) {
     const c = seenHidden[k] || 0;
+    if (c !== 1) hits.push(`approved ${v} on ${k} appears ${c} times (pinned exactly once)`);
+  }
+  for (const [k, v] of Object.entries(spec.attachOn || {})) {
+    const c = seenAttach[k] || 0;
     if (c !== 1) hits.push(`approved ${v} on ${k} appears ${c} times (pinned exactly once)`);
   }
   const base = f.split("/").pop();
@@ -3340,34 +3356,14 @@ def spec(name, h, extra):
 SPECS = [
     # `max-width:652px` is the corrected measure -- the handoff sets no root
     # font-size so its `ch` resolves against 16px while this app sets 14px on
-    # BODY, and 68ch would silently shrink the measure 12.5% here. `.content`
-    # descendants are the `{@html}` body: they are authored `:global(...)` and so
-    # carry the hash on the ANCESTOR only, which is what scopes them.
-    # `overflow-wrap:anywhere` on `.content` is the I2 reflow fix and is
-    # INHERITED by every descendant, which is why no descendant repeats it;
-    # `pre` keeps its own `overflow-x:auto` because inheritance cannot help a
-    # box that must scroll. `ol>li{list-style:decimal}` is the T5 split that
-    # made stored ordered lists render as numbers.
+    # BODY, and 68ch would silently shrink the measure 12.5% here. The {@html}
+    # body is styled by content.css since Polish 2; `.content` keeps the I2
+    # reflow fix (`overflow-wrap:anywhere`) and the page's text metrics, which
+    # the content inherits.
     spec('PageItem', pi, [
         ('.page-item@W@', SHELL + ';max-width:652px'),
         ('.page-item@W@ h2:where(@W@)', H2),
-        ('.content@W@', 'overflow-wrap:anywhere;color:var(--text-2)'),
-        ('.content@W@ p', 'margin-bottom:var(--space-3);line-height:1.6'),
-        ('.content@W@ h1,.content@W@ h2,.content@W@ h3', 'margin:var(--space-4) 0 var(--space-2)'),
-        ('.content@W@ h1', 'font-size:21px;font-weight:600;color:var(--text)'),
-        ('.content@W@ h2', H2),
-        ('.content@W@ h3', 'font-size:14px;font-weight:600;color:var(--text)'),
-        ('.content@W@ a', 'color:var(--primary)'),
-        ('.content@W@ ul,.content@W@ ol', 'padding-left:var(--space-4);margin-bottom:var(--space-3)'),
-        ('.content@W@ ul>li', 'list-style:disc'),
-        ('.content@W@ ol>li', 'list-style:decimal'),
-        ('.content@W@ code',
-         'background:var(--surface-2);padding:2px 4px;border-radius:var(--radius);'
-         'font-family:var(--font-mono)'),
-        ('.content@W@ pre',
-         'background:var(--surface-2);padding:var(--control-pad-textarea);'
-         'border-radius:var(--radius);overflow-x:auto'),
-        ('.content@W@ pre code', 'padding:0;background:none'),
+        ('.content@W@', 'overflow-wrap:anywhere;color:var(--text-2);line-height:1.6'),
     ]),
     # No measure on the video and app shells: both wrap a 16:9 frame that owns
     # its own width. `.frame { margin-bottom: 0 }` cancels the shared frame
@@ -3600,13 +3596,10 @@ else
   d '\.deadline-soft' '' 'font-size:11\.5px'
   d '\.assignment' '' 'padding:16px 18px' 'margin-bottom:14px' 'border:1px solid var\(--border\)'
   chk "\.assignment\.${H} h2:where\(\.${H}\)" 'font-size:14px' 'margin:0 0 8px'
-  d '\.assignment-html' '' 'overflow-wrap:anywhere'
-  chk "\.assignment-html\.${H} p"            'font-size:14px' 'line-height:1\.65' 'color:var\(--text-2\)' 'margin:0 0 10px'
-  chk "\.assignment-html\.${H} p:last-child" 'margin-bottom:0'
-  chk "\.assignment-html\.${H} a"            'color:var\(--primary\)'
-  chk "\.assignment-html\.${H} ul>li"        'list-style:disc'
-  chk "\.assignment-html\.${H} ol>li"        'list-style:decimal'
-  chk "\.assignment-html\.${H} code"         'font-family:var\(--font-mono\)'
+  # The assignment's content is styled by content.css (Polish 2 D51); the box
+  # keeps ref 1279's metrics, which the content inherits.
+  d '\.assignment-html' '' 'overflow-wrap:anywhere' 'font-size:14px' 'line-height:1\.65' 'color:var\(--text-2\)'
+  none "MP .assignment-html has no element rules left (content.css styles them)" "\.assignment-html\.${H} [a-z]"
   d '\.grid2' '' 'display:grid' 'grid-template-columns:repeat\(auto-fit,minmax\(min\(280px,100%\),1fr\)\)' 'gap:14px' 'margin-bottom:14px'
   chk "\.group-block\.${H},\.submit-block\.${H}"  'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:14px 16px'
   chk "\.group-block\.${H} h2:where\(\.${H}\),\.submit-block\.${H} h2:where\(\.${H}\)" 'font-size:13px' 'margin:0 0 8px'
@@ -5551,6 +5544,29 @@ if [[ -n $REPLY ]]; then
 fi
 # One page ground: no page re-shades the body with it any more.
 none "no body:has() rule sets --focus-page (Polish 2 D50)" "body:has\([^)]*\)\{[^}]*--focus-page"
+
+# Task 3 — authored content (D51, D52, D57-D59). content.css is frozen in (b4).
+# The content surfaces are the only files that may render the `prose` class.
+CONTENT_SURFACES=(src/components/items/PageItem.svelte src/pages/MiniProjectDetailPage.svelte
+  src/components/items/quiz/SingleChoiceQuestion.svelte src/components/items/quiz/MultiChoiceQuestion.svelte
+  src/components/items/quiz/NumericQuestion.svelte src/components/items/quiz/TextQuestion.svelte
+  src/components/items/QuizItem.svelte src/pages/CourseView.svelte src/pages/editor/VersionEditPage.svelte
+  src/components/editor/quiz/QuestionCard.svelte src/components/editor/MarkdownEditor.svelte)
+# The surfaces converted so far. Task 4 sets this to the whole list.
+CONTENT_DONE=(src/components/items/PageItem.svelte src/pages/MiniProjectDetailPage.svelte)
+nstray=$(grep -rlE 'class="([^"]* )?prose( [^"]*)?"' src --include='*.svelte' | grep -vxF -f <(print -l $CONTENT_SURFACES) | grep -c .)
+if [[ $nstray -eq 0 ]]; then echo "PASS  only the content surfaces render the prose class"
+else echo "FAIL  the prose class outside the content surfaces ($nstray files)"; fail=1; fi
+# Content structure lives in content.css alone. Anchored on the element right
+# after `:global(`, so the prompts' `pre:focus-visible` ring does not match.
+nredecl=$(grep -lE ':global\((:is\()?(p|ul|ol|li|a|img|code|pre|blockquote|hr|h[1-6])([ ,)]|:last-child)' $CONTENT_DONE | grep -c .)
+if [[ $nredecl -eq 0 ]]; then echo "PASS  no converted content surface re-declares a content element"
+else echo "FAIL  a converted content surface re-declares a content element ($nredecl files)"; fail=1; fi
+if grep -rqE 'rewriteExternalLinks' src; then echo "FAIL  src still mentions rewriteExternalLinks"; fail=1
+else echo "PASS  nothing under src mentions rewriteExternalLinks (externalLinks replaces it)"; fi
+if [[ $(grep -cF '<div class="assignment-html prose" data-testid="assignment-html" {@attach externalLinks(data.assignment_html)}>' src/pages/MiniProjectDetailPage.svelte) -eq 1 ]]; then
+  echo "PASS  the mini-project assignment is page-scale prose with the link attachment"
+else echo "FAIL  the mini-project assignment is page-scale prose with the link attachment"; fail=1; fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

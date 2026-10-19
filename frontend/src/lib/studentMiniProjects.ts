@@ -1,11 +1,10 @@
 // Student-facing mini-projects wire module.
 //
-// Owns the four endpoints behind the student MP slice:
+// Owns the three endpoints behind the student MP slice:
 //
 //   - fetchListSwallow403  → course-view block-link cache (loadCourse fan-out)
 //   - fetchDetail          → detail page initial + visibilitychange refetch
 //   - submit               → detail page submit-section POST
-//   - rewriteExternalLinks → DOM post-processor for assignment_html (F8)
 //
 // REASON_LABELS is the single source of truth for the copy shown when the
 // backend returns `can_submit: false` with a `can_submit_reason_if_not`
@@ -123,29 +122,5 @@ export async function submit(mpId: number, file: File): Promise<void> {
     const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? 'Submission failed';
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(r.status, detail, errorCode, parsedBody);
-  }
-}
-
-// Defense-in-depth pass over assignment_html after Svelte commits {@html}.
-// `nh3.clean` already permits teacher-authored <a href="https://..."> tags;
-// this walker adds `target="_blank" rel="noopener noreferrer"` to anything
-// that looks external so a click can't accidentally hijack the session
-// cookie and so external links open in a new tab. Same-origin asset URLs
-// (`/api/runs/...`), `mailto:`, and `tel:` are untouched — teachers remain
-// the authoring trust boundary (F8/L1/M7). Svelte's `$effect` is the
-// change trigger; no MutationObserver here.
-export function rewriteExternalLinks(container: HTMLElement): void {
-  const anchors = container.querySelectorAll('a');
-  for (const a of anchors) {
-    const href = a.getAttribute('href');
-    if (href === null) continue;
-    if (
-      href.startsWith('http://') ||
-      href.startsWith('https://') ||
-      href.startsWith('//')
-    ) {
-      a.setAttribute('target', '_blank');
-      a.setAttribute('rel', 'noopener noreferrer');
-    }
   }
 }

@@ -3,7 +3,7 @@ import { mount, unmount, flushSync, tick } from 'svelte';
 
 // Mock the student-MP wire layer BEFORE importing the page so the page's
 // import binding resolves to the mock. We re-export the real REASON_LABELS /
-// LATEST_STATUS_META / rewriteExternalLinks so the page's runtime UI plumbing
+// LATEST_STATUS_META so the page's runtime UI plumbing
 // stays intact; only `fetchDetail` is replaced with a vi.fn() the tests can
 // program per-scenario.
 vi.mock('../lib/studentMiniProjects', async (importOriginal) => {
@@ -658,22 +658,32 @@ describe('MiniProjectDetailPage (D6 — state machine)', () => {
 });
 
 describe('MiniProjectDetailPage (D6 — misc)', () => {
-  it('D6.11 external link rewrite on mount', async () => {
+  it('D6.11 external and file links open in a new tab; a page link and mailto stay (D58, D59)', async () => {
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-      assignment_html: '<p><a href="https://example.com">ext</a><a href="/api/runs/1/assets/x.png">asset</a><a href="mailto:t@x">mail</a></p>',
+      assignment_html: `<p><a href="https://example.com">ext</a><a href="/api/runs/1/assets/x.png">asset</a><a href="${location.origin}/courses/x">page</a><a href="mailto:t@x">mail</a></p>`,
     }));
     await mountPage();
 
-    const ext = target.querySelector('[data-testid="assignment-html"] a[href="https://example.com"]');
+    const box = target.querySelector('[data-testid="assignment-html"]')!;
+    expect(box.classList.contains('prose')).toBe(true);
+    expect(box.classList.contains('compact')).toBe(false);
+
+    const ext = box.querySelector('a[href="https://example.com"]');
     if (!ext) throw new Error('expected external link');
     expect(ext.getAttribute('target')).toBe('_blank');
     expect(ext.getAttribute('rel')).toBe('noopener noreferrer');
 
-    const asset = target.querySelector('[data-testid="assignment-html"] a[href="/api/runs/1/assets/x.png"]');
+    // D59: Mathion's own files open in a new tab too, so unsubmitted work stays.
+    const asset = box.querySelector('a[href="/api/runs/1/assets/x.png"]');
     if (!asset) throw new Error('expected asset link');
-    expect(asset.getAttribute('target')).toBeNull();
+    expect(asset.getAttribute('target')).toBe('_blank');
+    expect(asset.getAttribute('rel')).toBe('noopener noreferrer');
 
-    const mail = target.querySelector('[data-testid="assignment-html"] a[href="mailto:t@x"]');
+    const page = box.querySelector(`a[href="${location.origin}/courses/x"]`);
+    if (!page) throw new Error('expected page link');
+    expect(page.getAttribute('target')).toBeNull();
+
+    const mail = box.querySelector('a[href="mailto:t@x"]');
     if (!mail) throw new Error('expected mailto link');
     expect(mail.getAttribute('target')).toBeNull();
   });
@@ -989,7 +999,7 @@ describe('MiniProjectDetailPage 9c assignment + group (Slice-4 T3)', () => {
     expect(card!.querySelector('h2')!.textContent).toBe('Assignment');
     const html = card!.querySelector('[data-testid="assignment-html"]');
     expect(html).not.toBeNull();
-    expect(html!.querySelector('a')!.getAttribute('target')).toBe('_blank');   // rewriteExternalLinks still bound (L1/M1)
+    expect(html!.querySelector('a')!.getAttribute('target')).toBe('_blank');   // the externalLinks attachment (D58)
   });
 
   it('group card: "Your group", current member bold and first, group name in the sentence; no opacity class', async () => {

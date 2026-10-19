@@ -3,7 +3,7 @@
   //
   // D5 owns: page-mount sequencing (parallel loadCourse + fetchDetail),
   // header (breadcrumb + H1 + StatusPill + deadline summary), assignment
-  // {@html} block with rewriteExternalLinks effect (L1/M1/M7), group context
+  // {@html} block with the externalLinks attachment (D58/D59), group context
   // (3 branches per spec §6 step 3 — D4 + F10), submission history block
   // (DESC, D15 Late-pill sibling-of-h3), and fetch-error full-page banner
   // (spec §6 step 7 — 403 / 404 / generic); Slice-4 (2026-09-06) restyled
@@ -22,12 +22,12 @@
   import { ApiError } from '../lib/api';
   import {
     fetchDetail,
-    rewriteExternalLinks,
     submit,
     LATEST_STATUS_META,
     REASON_LABELS,
     MAX_FILE_SIZE,
   } from '../lib/studentMiniProjects';
+  import { externalLinks } from '../lib/externalLinks';
   import type { StudentMiniProjectDetail } from '../lib/types';
   import StatusPill from '../components/course/StatusPill.svelte';
   import Skeleton from '../components/ui/Skeleton.svelte';
@@ -42,8 +42,6 @@
   let { courseSlug, blockSlug }: { courseSlug: string; blockSlug: string } = $props();
 
   let data: StudentMiniProjectDetail | null = $state(null);
-  // N4 — `$state()` with no arg per RunTeachersTab.svelte:20 precedent.
-  let assignmentEl: HTMLDivElement | undefined = $state();
   // Bound to the native <input type="file"> so the success path can reset
   // its value — browsers ignore re-picking an identical filename when the
   // input's stored value isn't cleared.
@@ -177,16 +175,6 @@
       document.removeEventListener('visibilitychange', onVisChange);
       controller.abort();
     };
-  });
-
-  // L1/M7 — link rewriter effect. `void data.assignment_html;` tracks the
-  // assignment_html dep without using the value (the M7 idiom). assignmentEl
-  // is bound on the SAME div as
-  // {@html}, so by the time this effect fires the anchors exist in the DOM.
-  $effect(() => {
-    if (!assignmentEl || !data) return;
-    void data.assignment_html;
-    rewriteExternalLinks(assignmentEl);
   });
 
   // D16 — empty/whitespace block_title falls back to "Untitled block".
@@ -503,8 +491,8 @@
 
         <section class="assignment">
           <h2>Assignment</h2>
-          <!-- L1 + M1: bind:this and {@html} on the SAME div; data-testid is the test seam. -->
-          <div class="assignment-html" data-testid="assignment-html" bind:this={assignmentEl}>
+          <!-- D58/D59: the attachment and {@html} on the SAME div, so the links follow a content change; data-testid is the test seam. -->
+          <div class="assignment-html prose" data-testid="assignment-html" {@attach externalLinks(data.assignment_html)}>
             {@html data.assignment_html}
           </div>
         </section>
@@ -664,18 +652,12 @@
   .deadline strong { font-weight: 600; }
   .deadline-resub { color: var(--status-needs-revision-fg); /* ref 1273 — the one amber: names the revision the student must act on */ }
   .deadline-soft { font-size: 11.5px; color: var(--muted); margin: 0; /* ref 1274 */ }
-  /* Assignment card — ref 1277-1280. Content typography is the assignment SUBSET of
-     PageItem's block (paragraphs, list, link, code); headings/pre/img are not copied. */
+  /* Assignment card — ref 1277-1280. Its content is styled by content.css
+     (`.prose`, Polish 2 D51); the box keeps ref 1279's metrics, so lists,
+     quotes and headings inherit them. */
   .assignment { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 16px 18px; margin-bottom: 14px; /* ref 1277 */ }
   .assignment h2 { font-size: 14px; margin: 0 0 8px; /* ref 1278 */ }
-  .assignment-html { overflow-wrap: anywhere; /* PageItem.svelte:80 precedent */ }
-  .assignment-html :global(p) { font-size: 14px; line-height: 1.65; color: var(--text-2); margin: 0 0 10px; /* ref 1279 */ }
-  .assignment-html :global(p:last-child) { margin-bottom: 0; /* ref 1280 */ }
-  .assignment-html :global(a) { color: var(--primary); }
-  .assignment-html :global(ul), .assignment-html :global(ol) { padding-left: var(--space-4); margin: 0 0 10px; }
-  .assignment-html :global(ul > li) { list-style: disc; /* reset.css:16 strips markers (PageItem.svelte:99-100 split form) */ }
-  .assignment-html :global(ol > li) { list-style: decimal; }
-  .assignment-html :global(code) { font-family: var(--font-mono); }
+  .assignment-html { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--text-2); /* ref 1279 */ }
   /* Group + submit grid — ref 1283-1285. auto-fit collapses to one column under ~600px (5(b)). */
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 14px; margin-bottom: 14px; /* ref 1283; 5(c): min(280px, 100%) so the track never exceeds the container — inside the Polish 2 sheet a 320px viewport leaves well under 280px, so the min() is what keeps one column from overflowing the page */ }
   .group-block, .submit-block { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; /* ref 1284 */ }
