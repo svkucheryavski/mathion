@@ -1,12 +1,13 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 7 (2026-10-18), approved; Task 1 executing.
+**Status:** rev 8 (2026-10-19), approved; Task 2 executing.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
 - Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
 - Rev 5 folds in the round-4 minors (`spec-r4-*.md`; no Critical or Important findings in round 4).
 - Rev 6 adds the user's decision D60 (the ring colour follows the element), made at Task 1's look review.
 - Rev 7 adds D61 (Progress grid cells ring near-black), from Task 1's review round 1.
+- Rev 8 adds the user's decision D62 (the player strip as tabs), made at Task 2's look review.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -63,6 +64,12 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - Every page shares the editor's existing `--focus-page` shade.
   - White cards and the white header read as steps above it.
 - **D56 — A white sheet behind reading content.** The player's content area (page content, quiz, video, app) and the mini-project page sit on a white card, so their grey tints read as before on the new ground.
+- **D62 — The player strip as tabs** (user, at Task 2's look review, after the variant overlay `strip-variants.html`).
+  - The strip stands on the sheet. The other marks float 6px above the sheet's edge (the gap was 20px).
+  - The current item is a white tab, 32px wide (the others stay 22px). Its 2px `--border` runs on top, left and right, none at the bottom, and it lies over the sheet's top edge, so tab and sheet read as one shape.
+  - Both sheets (the player and the mini-project page) get a 2px border.
+  - Done items are pale gray (`--border` fill, `--border-strong` edge, `--muted` glyph, about 5:1). Not-done items are steel blue (`--primary` fill, white glyph), like the main buttons.
+  - Only in the player strip. The teacher breakdown keeps blue = done; the course rows and the editor keep the shared look.
 - **D51 — One shared style for authored content, on every surface.**
   - It applies wherever teachers write markdown: page content, quiz prompts, explanations, course and version info, mini-project assignments, and the editor's preview and question cards.
   - Smaller surfaces use a compact scale.
@@ -258,6 +265,7 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   ```css
   .content { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; }
   ```
+  D62 (rev 8) made the border 2px on both sheets; see §The player strip.
   - The padding is reference artboard 2c's card (`padding:16px 20px 20px`, the card the player comment at `:303-332` already measures).
   - The crumbs, the strip and the footer stay on the ground.
   - Video and interactive apps render inside the sheet too.
@@ -276,6 +284,22 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
   - the neutral StatusPill ("Not submitted") next to the mini-project `<h1>`.
 
   On the white sheet each reads as it did before.
+
+### The player strip (D62)
+- **ItemMark** takes an `inStrip` prop (default false) that adds the class `in-strip`; ItemIcon, which renders only in the player strip, passes it. Not `strip`: that class is SequencePlayer's dist-unique gate anchor.
+  ```css
+  .item-mark.in-strip.current { width: 32px; height: 31px; border-width: 2px 2px 0; border-radius: var(--radius) var(--radius) 0 0; padding-bottom: 2px; }
+  @media (forced-colors: none) {
+    .item-mark.in-strip.covered { background: var(--border); color: var(--muted); border-color: var(--border-strong); }
+    .item-mark.in-strip.not-yet { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+    .item-mark.in-strip.current { background: var(--surface); color: var(--primary); border-color: var(--border); }
+  }
+  ```
+  - The colours sit under `forced-colors: none`: the `in-strip` rules out-specify ItemMark's High Contrast block and would otherwise replace its solid done fill. In High Contrast the tab shape (three-sided border) still shows.
+- **ItemIcon** carries the strip spacing on its button: `.icon { …; margin-bottom: 6px; }` and `.icon.current { margin-bottom: -2px; }`. On the mark, the margin would grow the inline-flex button and leave the focus ring lopsided, with its bottom stroke across the tab's joint (Task 2 review round 1).
+- **SequencePlayer:** `.strip { …; padding: 0 0 0 12px; margin-bottom: 0; align-items: flex-end; position: relative; z-index: 1; }`. The 12px inset keeps a tab off the sheet's rounded corner; z-index lifts the tab over the sheet's border. `.counter` gets `align-self: center`. `.content` and the mini-project `.sheet` take `border: 2px solid var(--border)`.
+- **Known limit:** when a long sequence wraps the strip on a phone, a current item on an upper row cannot touch the sheet and reads as a white button. Sequences hold 3–8 items in practice.
+- **Gate:** the ItemMark inventory in section (i) gains the five rules; the (m) `.strip`, `.counter` and `.content` rows and the `.sheet` row change in place; the ItemIcon inventory gains `margin-bottom:6px` and an `.icon.current` rule; the ItemMark and ItemIcon markup pins gain `class:in-strip` and `inStrip`. `EXPECTED_CHECKS` is unchanged (2279).
 
 ### Other changes on the ground
 - **FilterPills, pressed** (`FilterPills.svelte:35`) gets `border-color: var(--primary)`. Its `--primary-soft` fill and border are 1.04:1 on the ground, so the selected pill would read weaker than the white ones. FilterPills appears on the Teaching page and in RunAssetsTab (`:670`).

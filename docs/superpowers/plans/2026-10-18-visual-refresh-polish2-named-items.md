@@ -717,6 +717,7 @@ EOF
 - Modify (comments only): `frontend/src/components/items/QuizItem.svelte:249-252`, `:268-269`, `frontend/src/components/course/BlockGroup.svelte:128-133`
 - Modify: `frontend/scripts/visual-refresh-gate.sh` ((b4) `:root` hash and comment log; GLOBAL_ALLOW VersionsPage entry `:489-492`; rows `:2716-2723`, `:3636`, `:3700`, `:3759-3760`, `:3852`, `:4400-4403`, `:4632`, `:4973`, `:4978`, `:5176`; section (an); `EXPECTED_CHECKS`)
 - Test: `frontend/src/tests/MiniProjectDetailPage.svelte.test.ts` (the "9c frame + header" describe, `:850`)
+- **D62 (added at the look review, 2026-10-19; spec rev 8 §The player strip):** Modify `frontend/src/components/course/ItemMark.svelte` (`inStrip` prop, `class:in-strip`, the `in-strip` rules), `frontend/src/components/course/ItemIcon.svelte` (passes `inStrip`; the strip margins on `.icon` and `.icon.current`); the SequencePlayer `.strip`, `.counter`, `.content` and the mini-project `.sheet` as the spec says; gate section (i) inventory, (m) rows, the `.sheet` row and the two markup pins, `EXPECTED_CHECKS` unchanged. Test: `frontend/src/tests/ItemMark.svelte.test.ts` and `ItemIcon.svelte.test.ts` (one test each). The commit adds these files to Step 11's `git add` list.
 - Modify: `docs/backlog/polish2-named-items-debt.md` (`## Task 2` heading)
 - Delete: `docs/backlog/page-background-reads-gray-against-header.md`
 
