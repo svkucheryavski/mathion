@@ -1,6 +1,6 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 8 (2026-10-19), approved; Task 2 executing.
+**Status:** rev 9 (2026-10-19), approved; Task 3 executing.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
 - Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
@@ -8,6 +8,7 @@
 - Rev 6 adds the user's decision D60 (the ring colour follows the element), made at Task 1's look review.
 - Rev 7 adds D61 (Progress grid cells ring near-black), from Task 1's review round 1.
 - Rev 8 adds the user's decision D62 (the player strip as tabs), made at Task 2's look review.
+- Rev 9 adds D63 (headings take relative margins), made at Task 3's look review.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -70,6 +71,7 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - Both sheets (the player and the mini-project page) get a 2px border.
   - Done items are pale gray (`--border` fill, `--border-strong` edge, `--muted` glyph, about 5:1). Not-done items are steel blue (`--primary` fill, white glyph), like the main buttons.
   - Only in the player strip. The teacher breakdown keeps blue = done; the course rows and the editor keep the shared look.
+- **D63 — Headings take relative margins** (user, at Task 3's look review). One rule, `margin: 1em 0 .5em`, for all six levels and both scales, so the space follows each heading's own size. A paragraph's bottom margin collapses into the next heading's top margin; between two headings the gap is the second one's 1em.
 - **D51 — One shared style for authored content, on every surface.**
   - It applies wherever teachers write markdown: page content, quiz prompts, explanations, course and version info, mini-project assignments, and the editor's preview and question cards.
   - Smaller surfaces use a compact scale.
@@ -367,10 +369,8 @@ They are updated in the same commit. They cite base.css's `outline: none`, "the 
      :where() keeps these at (0,1,0) and the compact ones at (0,2,0); the
      first/last-child rules come last at (0,2,0) and win by order. */
   .prose :where(p, ul, ol, pre, blockquote, hr, div.math) { margin: 0 0 var(--space-3); }
-  .prose :where(h1, h2, h3) { margin: var(--space-4) 0 var(--space-2); }
-  .prose :where(h4, h5, h6) { margin: var(--space-3) 0 var(--space-1); }
+  .prose :where(h1, h2, h3, h4, h5, h6) { margin: 1em 0 .5em; }   /* D63: relative to each heading's size, both scales */
   .prose.compact :where(p, ul, ol, pre, blockquote, hr, div.math) { margin: 0 0 var(--space-2); }
-  .prose.compact :where(h1, h2, h3, h4, h5, h6) { margin: 12px 0 var(--space-1); }   /* 12px: between --space-2 and --space-3 */
   .prose > :first-child,
   .prose :where(li, blockquote) > :first-child { margin-top: 0; }
   .prose > :last-child,

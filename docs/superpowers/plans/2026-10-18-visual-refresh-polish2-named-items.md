@@ -1123,6 +1123,8 @@ EOF
 - Modify: `docs/backlog/polish2-named-items-debt.md` (`## Task 3` heading)
 - Delete: `docs/backlog/page-content-h4-h6-and-blockquote-unstyled.md`
 
+- **D63 (added at the look review, 2026-10-19; spec rev 9):** the three heading-margin rules in `content.css` become one, `.prose :where(h1, h2, h3, h4, h5, h6) { margin: 1em 0 .5em; }`; (b4) `WANT_FULL` / `WANT_ORDER` drop `.prose :where(h1,h2,h3)`, `.prose :where(h4,h5,h6)` and `.prose.compact :where(h1,h2,h3,h4,h5,h6)` and gain `.prose :where(h1,h2,h3,h4,h5,h6)` (`8f770fc2`, dist); 26 `.prose` rules; `EXPECTED_CHECKS` unchanged (2270).
+
 **Interfaces:**
 - Consumes: Task 1's (b4) lists and section (an); Task 2's `div.sheet` on the mini-project page.
 - Produces:
