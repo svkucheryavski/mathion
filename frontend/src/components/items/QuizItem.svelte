@@ -246,10 +246,9 @@
        which paint it on every option ring in THIS view once the quiz locks, so a
        divider drawn in it is the colour this design uses to mean "disabled".
        --border-soft is the semantically-labelled "row separators inside a card",
-       but it is LIGHTER (contrast on --bg: --border 1.22:1, --border-faint
-       1.11:1, --border-soft 1.09:1), which works against the very complaint this
-       rule answers. --border is also what the two rules bracketing this quiz on
-       the same screen use (SequencePlayer .strip bottom, footer top). */
+       but it is LIGHTER (on the white player sheet: --border 1.26:1,
+       --border-faint 1.15:1, --border-soft 1.13:1), which works against the
+       very complaint this rule answers. --border is also the sheet's own edge. */
     border-top: 1px solid var(--border);
     padding-top: 20px; /* Constraint 5(b) no-ref — the group-boundary step, above the 16px article gap */
   }
@@ -265,8 +264,8 @@
   .q-counter { font-size: 12.5px; color: var(--muted); }
   .submit-row { display: flex; align-items: center; gap: 12px; /* ref 2132 */ }
   .hint { color: var(--muted); font-size: 12.5px; /* ref 2134 */ margin: 0; }
-  /* --surface-2, not --surface-3: the card sits on the article's inherited
-     --bg, against which --surface-3 is a near-invisible step. flex-start keeps
+  /* --surface-2, not --surface-3: the card sits on the white player sheet
+     (D56), against which --surface-3 is a near-invisible step. flex-start keeps
      the Button children from blockifying under the default stretch. */
   .result {
     background: var(--surface-2);

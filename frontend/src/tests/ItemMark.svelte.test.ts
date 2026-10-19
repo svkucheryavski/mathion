@@ -8,10 +8,10 @@ let component: ReturnType<typeof mount> | null = null;
 
 /** `state` is genuinely optional here — omitting it is what exercises D5's
  *  `state = 'not-yet'` default, which the MiniProjectLink flag (T7) relies on. */
-function render(type: ItemMarkType, state?: ItemMarkState) {
+function render(type: ItemMarkType, state?: ItemMarkState, inStrip?: boolean) {
   host = document.createElement('div');
   document.body.appendChild(host);
-  const props = state === undefined ? { type } : { type, state };
+  const props = { type, ...(state === undefined ? {} : { state }), ...(inStrip === undefined ? {} : { inStrip }) };
   component = mount(ItemMark, { target: host, props });
   flushSync();
   return host.querySelector('.item-mark') as HTMLSpanElement;
@@ -178,5 +178,14 @@ describe('ItemMark', () => {
     expect(mark.classList.contains('not-yet')).toBe(true);
     expect(mark.classList.contains('covered')).toBe(false);
     expect(mark.classList.contains('current')).toBe(false);
+  });
+
+  // D62: the player's strip look (done pale gray, not done steel blue, the
+  // current item a tab joined to the sheet) hangs off an `in-strip` class, so the
+  // teacher's breakdown, the course rows and the editor keep the shared look.
+  it('adds the in-strip class only when `inStrip` is set', () => {
+    expect(render('quiz', 'current', true).classList.contains('in-strip')).toBe(true);
+    unmount(component!); component = null; host.parentNode?.removeChild(host);
+    expect(render('quiz', 'current').classList.contains('in-strip')).toBe(false);
   });
 });

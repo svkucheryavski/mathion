@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2256
+EXPECTED_CHECKS=2279
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -484,10 +484,6 @@ GLOBAL_ALLOW = {
     # so the rule matches only while VersionEditPage is mounted; no quiz
     # question renders under it (the editor never mounts SequencePlayer).
     ('src/pages/editor/VersionEditPage.svelte', 'body'),
-    # 5c follow-up (user, 2026-10-08): the versions list takes the editor's
-    # page shade. `:global(body):has(.page)` keeps `.page` SCOPED, so it matches
-    # only while VersionsPage is mounted; that page never renders a quiz.
-    ('src/pages/editor/VersionsPage.svelte', 'body'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -559,11 +555,15 @@ else:
 # spots show no ring) and the forced-colors outline, `!important` because eight
 # components set `outline: none` in their own :focus-visible rules.
 # D60 (user, 2026-10-18): the ring reads var(--ring, var(--primary)) (5b0269c3 -> ebbf7147).
+# Polish 2 T2 (user D50, 2026-10-18): the :root hash moved (a066ce4c ->
+# 7bfdd12a): --bg is the page ground #F2F3F6 (was #FBFBFC), --focus-page is
+# var(--bg), and --disabled-bg (#FBFBFC) is new and holds the old disabled
+# fill. The --surface-3 comment changed, which hashes nothing.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', 'a066ce4c'),
+    ('', ':root', '7bfdd12a'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -1490,7 +1490,7 @@ const CONTENT = new Set([
 // same intentional speed bump as EXPECTED_CHECKS.
 const SIG = {
   "ItemMark.svelte":
-    ["span:item-mark.{expr}[class=\"item-mark {state}\" aria-hidden]",
+    ["span:item-mark.{expr}.class:in-strip[class=\"item-mark {state}\" aria-hidden]",
      "svg:[width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width={type === '\''quiz'\'' ? '\''1.9'\'' : '\''1.6'\''} stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "#if:", "line:[x1=\"3\" y1=\"4\" x2=\"13\" y2=\"4\"]",
      "line:[x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\"]", "line:[x1=\"3\" y1=\"12\" x2=\"9\" y2=\"12\"]",
@@ -1510,7 +1510,7 @@ const SIG = {
      "line:[x1=\"8\" y1=\"4.6\" x2=\"8\" y2=\"14\"]"],
   "ItemIcon.svelte":
     ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label]",
-     "ItemMark:[type={item.type} state={istate}]"],
+     "ItemMark:[type={item.type} state={istate} inStrip]"],
   "SequenceLink.svelte":
     ["a:row[class=\"row\" href aria-label onclick]",
      "span:seq-glyph[class=\"seq-glyph\" aria-hidden]", "ItemMark:[type=\"sequence\"]",
@@ -2088,9 +2088,29 @@ SPECS = [
              'background:Canvas;color:Highlight;border:2px solid Highlight'),
         ('@media (forced-colors:active)', '.item-mark.not-yet.%s' % im_h,
              'background:Canvas;color:GrayText;border:1px dashed GrayText'),
+        # Polish 2 D62: the player strip (ItemIcon passes `inStrip`). The
+        # current mark is a 32px tab, 2px border on three sides; its overlap of
+        # the sheet's top border is ItemIcon's margin (below), so the focus ring
+        # on the button hugs the mark. The colours sit under forced-colors:none,
+        # so the higher-specificity strip rules never beat the High Contrast
+        # block above (the solid done fill).
+        ('', '.item-mark.in-strip.current.%s' % im_h,
+             'width:32px;height:31px;border-width:2px 2px 0;'
+             'border-radius:var(--radius) var(--radius) 0 0;padding-bottom:2px'),
+        ('@media (forced-colors:none)', '.item-mark.in-strip.covered.%s' % im_h,
+             'background:var(--border);color:var(--muted);border-color:var(--border-strong)'),
+        ('@media (forced-colors:none)', '.item-mark.in-strip.not-yet.%s' % im_h,
+             'background:var(--primary);color:var(--primary-text);border-color:var(--primary)'),
+        ('@media (forced-colors:none)', '.item-mark.in-strip.current.%s' % im_h,
+             'background:var(--surface);color:var(--primary);border-color:var(--border)'),
     ]),
     ('ItemIcon', ic_h, [
-        ('', '.icon.%s' % ic_h, 'display:inline-flex;border-radius:var(--radius)'),
+        ('', '.icon.%s' % ic_h, 'display:inline-flex;border-radius:var(--radius);margin-bottom:6px'),
+        # D62: the strip spacing sits on the BUTTON, not the mark, so the
+        # inline-flex button hugs its mark and the focus ring wraps it evenly
+        # (Task 2 review round 1). The current tab overlaps the sheet's 2px top
+        # border.
+        ('', '.icon.current.%s' % ic_h, 'margin-bottom:-2px'),
     ]),
 ]
 
@@ -2728,14 +2748,22 @@ WANT = [
     ('.sr-only' + W,
      'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;'
      'clip-path:inset(50%);white-space:nowrap;border:0'),
+    # Polish 2 D62: the strip stands on the sheet. The marks align to its
+    # bottom edge, so the current item's tab (ItemMark .in-strip.current) can
+    # overlap the sheet's top border; z-index lifts the strip over the sheet.
     ('.strip' + W,
-     'display:flex;gap:6px;padding:0 0 14px;margin-bottom:20px;'
-     'border-bottom:1px solid var(--border);align-items:center;flex-wrap:wrap'),
-    ('.counter' + W, 'margin-left:auto;font-family:var(--font-mono);font-size:12.5px;color:var(--muted)'),
-    ('.content' + W, 'padding:0;min-height:200px'),
+     'display:flex;gap:6px;padding:0 0 0 12px;margin-bottom:0;align-items:flex-end;'
+     'flex-wrap:wrap;position:relative;z-index:1'),
+    ('.counter' + W,
+     'margin-left:auto;align-self:center;font-family:var(--font-mono);font-size:12.5px;color:var(--muted)'),
+    # Polish 2 D56: the content slot is the white reading sheet (artboard 2c's
+    # card padding). The strip's bottom rule and the footer's top rule went
+    # with it: each would run parallel to the sheet's edge.
+    ('.content' + W,
+     'background:var(--surface);border:2px solid var(--border);'
+     'border-radius:var(--radius-lg);padding:16px 20px 20px;min-height:200px'),
     ('footer' + W,
-     'display:flex;justify-content:space-between;align-items:center;'
-     'margin-top:24px;padding-top:14px;border-top:1px solid var(--border)'),
+     'display:flex;justify-content:space-between;align-items:center;margin-top:24px'),
     ('.next-label' + W, 'white-space:nowrap;min-width:0'),
     ('.next-title' + W,
      'display:inline-block;max-width:22ch;overflow:hidden;text-overflow:ellipsis;'
@@ -3648,7 +3676,7 @@ else
   FCM="@media \(forced-colors: ?active\)\{(\.[^{]*\{[^}]*\})*"
   chk "${FCM}\.drop\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
   chk "${FCM}\.drop\.dragover\.${H}"                                 'outline:2px dashed'
-  chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)"    'background:var\(--bg\)' 'border-color:var\(--border-faint\)' 'color:var\(--faint\)' 'cursor:not-allowed'
+  chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)"    'background:var\(--disabled-bg\)' 'border-color:var\(--border-faint\)' 'color:var\(--faint\)' 'cursor:not-allowed'
   none  "MP disabled drop uses no opacity"   "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)\{[^}]*opacity"
   d '\.submit-error' '' 'margin-top:10px'
   d '\.precondition' '' 'border-left:3px solid var\(--primary\)' 'background:var\(--surface-2\)' 'padding:14px 16px' 'font-size:13px' 'line-height:1\.55' 'color:var\(--text-3\)' 'border-radius:var\(--radius\)'
@@ -3712,7 +3740,7 @@ if [[ -n $REPLY ]]; then
   d '\.round' '' 'border-radius:50%'
   d '\.primary' '' 'background:var\(--primary\)' 'color:var\(--primary-text\)' 'border-color:var\(--primary\)'
   # The disabled rule must outrank .primary/.danger: it carries the extra :disabled pseudo-class.
-  d '\.icon-btn' ':disabled' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+  d '\.icon-btn' ':disabled' 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
   # ...and only while .primary/.danger stay BARE rules: a compound (`.icon-btn.primary`) or any
   # pseudo/suffix form would reach (0,3,0) and could out-cascade the :disabled rule.
   none "IconButton .primary/.danger are emitted only as bare rules (so :disabled outranks them)" "[^{},]\.(primary|danger)\.${H}|\.(primary|danger)\.${H}[^{]"
@@ -3771,8 +3799,6 @@ if [[ -n $REPLY ]]; then
   d '\.vline' '' 'display:flex' 'align-items:center' 'gap:10px'
   none "VersionsPage no list-divider rule (.vlist > li)" "\.vlist\.${H}>li"
   none "VersionsPage rows carry no divider border-bottom" "\.(vrow|dup-row)\.${H}\{[^}]*border-bottom:"
-  chk "body:has\(\.page\.${H}\)" 'background:var\(--focus-page\)'
-  none "VersionsPage no fully-global body:has(.page) (.page stays scoped)" "body:has\(\.page\)"
   # 5c follow-up (user, 2026-10-08): the label is the row title (the block title's
   # 15px/600), the id a .hchip after it; a disabled version is muted. The label is
   # mandatory (2026-10-08), so there is no "(no label)" placeholder.
@@ -3863,8 +3889,7 @@ if [[ -n $REPLY ]]; then
   none "VersionEditPage has no .blocks-card / .card-head (5c T1)" "\.(blocks-card|card-head)\.${H}"
   # The card head's h2 lives on as a visually hidden heading (outline h1 > h2 > h3).
   d '\.sr-only' '' 'position:absolute' 'width:1px' 'height:1px' 'overflow:hidden' 'clip-path:inset\(50%\)'
-  # 5c T5 (user): with nothing open the page is one half-step darker, so the white block rows stand out.
-  chk "body:has\(\.canvas\.d0\.${H}\)" 'background:var\(--focus-page\)'
+  # 5c T5: one level open, the page is a step darker. With nothing open it is the page ground (Polish 2 D50).
   chk "body:has\(\.canvas\.d1\.${H}\)" 'background:var\(--focus-1\)'
   chk "body:has\(\.canvas\.d2\.${H}\)" 'background:var\(--focus-2\)'
   none "VersionEditPage no fully-global body:has() (5c R3: .canvas stays scoped)" "body:has\(\.canvas\.d[012]\)"
@@ -4416,10 +4441,12 @@ if [[ -n $REPLY ]]; then
   d '\.app-header' '' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
   d 'nav' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
 fi
-# R3 / T1 ruling: the canvas shades <body> through a scoped :has() and the tokens only.
-if [[ $(grep -cE ':global\(body\):has\(\.canvas\.d[012]\)[[:space:]]*\{[[:space:]]*background:[[:space:]]*var\(--focus-(page|1|2)\);?[[:space:]]*\}' src/pages/editor/VersionEditPage.svelte) -eq 3 ]]; then
-  echo "PASS  the canvas shades the body only through the focus tokens (d0/d1/d2)"
-else echo "FAIL  the canvas shades the body only through the focus tokens (d0/d1/d2)"; fail=1; fi
+# R3 / T1 ruling: the canvas shades <body> through a scoped :has() and the tokens
+# only. Polish 2 D50: with nothing open (d0) the page ground is already
+# --focus-page, so only d1 and d2 shade it.
+if [[ $(grep -cE ':global\(body\):has\(\.canvas\.d[12]\)[[:space:]]*\{[[:space:]]*background:[[:space:]]*var\(--focus-(1|2)\);?[[:space:]]*\}' src/pages/editor/VersionEditPage.svelte) -eq 2 ]]; then
+  echo "PASS  the canvas shades the body only through the focus tokens (d1/d2)"
+else echo "FAIL  the canvas shades the body only through the focus tokens (d1/d2)"; fail=1; fi
 # The focus container's border: one rule each in the block and sequence accordions.
 fls=$(cat src/components/editor/BlockAccordion.svelte src/components/editor/SequenceAccordion.svelte | grep -c 'var(--focus-line-strong)')
 if [[ $fls -eq 2 ]]; then echo "PASS  the focus panels take --focus-line-strong (block + sequence)"
@@ -4644,7 +4671,7 @@ uniq1 fp
 if [[ -n $REPLY ]]; then
   N=FilterPills; H=$REPLY
   d '\.fp' '' 'background:var\(--surface\)' 'border:1px solid var\(--border-strong\)'
-  chk "\.fp(\.${H})?\[aria-pressed=['\"]?true['\"]?\](\.${H})?" 'background:var\(--primary-soft\)' 'color:var\(--primary\)'
+  chk "\.fp(\.${H})?\[aria-pressed=['\"]?true['\"]?\](\.${H})?" 'background:var\(--primary-soft\)' 'color:var\(--primary\)' 'border-color:var\(--primary\)'
   d '\.fp-n' '' 'font-family:var\(--font-mono\)'
   sweep FilterPills $H
 fi
@@ -4985,12 +5012,12 @@ own btn Button.svelte
 uniq1 btn
 if [[ -n $REPLY ]]; then
   N=Button; H=$REPLY
-  d '\.btn\.blocked' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+  d '\.btn\.blocked' '' 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
 fi
 uniq1 icon-btn
 if [[ -n $REPLY ]]; then
   N=IconButton; H=$REPLY
-  d '\.icon-btn\.blocked' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+  d '\.icon-btn\.blocked' '' 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
 fi
 # Publish run lives in the Overview: the run page's title row has no publish bar.
 none "RunDetailPage has no .publish-bar rule" "\.publish-bar\."
@@ -5188,7 +5215,7 @@ if [[ -n $REPLY ]]; then
   d '\.cancel' "${IC}:focus-visible" 'background:var\(--cancel-hover\)'
   d '\.cancel' "${IC}:active" 'background:var\(--cancel-press\)'
   d '\.ic-btn' ':focus-visible' 'outline:2px solid var\(--ring, var\(--primary\)\)' 'outline-offset:2px'
-  d '\.cancel\[aria-disabled=true\]' '' 'background:var\(--bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
+  d '\.cancel\[aria-disabled=true\]' '' 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
   d '\.confirm\[aria-busy=true\]' '' 'cursor:progress'
   d '\.warning' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'overflow-wrap:anywhere'
   d '\.inline-confirm\.end' '' 'display:flex' 'justify-content:flex-end'
@@ -5481,6 +5508,49 @@ fi
 nring=$(grep -oE -- '--ring: ?var\(' $CSS | wc -l | tr -d ' ')
 if [[ $nring -eq 10 ]]; then echo "PASS  --ring is declared exactly ten times, all on leaf controls (D60, D61)"
 else echo "FAIL  --ring is declared exactly ten times, all on leaf controls (D60, D61) (found $nring)"; fail=1; fi
+
+# Task 2 — the page ground (D50) and the reading sheets (D56).
+# Disabled fills use --disabled-bg (the old #FBFBFC), so they stay a step above
+# the darker ground. Ghost and borderless stay transparent when disabled: a
+# filled tile would make the disabled control look raised.
+uniq1 btn
+if [[ -n $REPLY ]]; then
+  N=Button; H=$REPLY
+  d '\.btn' ':disabled' 'background:var\(--disabled-bg\)'
+  d '\.btn\.ghost' ':disabled' 'background:transparent' 'border-color:transparent'
+  d '\.btn\.ghost\.blocked' '' 'background:transparent' 'border-color:transparent'
+fi
+uniq1 icon-btn
+if [[ -n $REPLY ]]; then
+  N=IconButton; H=$REPLY
+  d '\.icon-btn\.borderless' ':disabled' 'background:transparent' 'border-color:transparent'
+  d '\.icon-btn\.borderless\.blocked' '' 'background:transparent' 'border-color:transparent'
+fi
+uniq1 qtype-picker
+if [[ -n $REPLY ]]; then
+  N=QuestionTypePicker; H=$REPLY
+  chk "\.qtype-picker\.${H}:disabled label:where\(\.${H}\)" 'background:var\(--disabled-bg\)'
+fi
+uniq1 danger-confirm
+if [[ -n $REPLY ]]; then
+  N=DangerConfirm; H=$REPLY
+  d '\.dc-cancel' ':disabled' 'background:var\(--disabled-bg\)'
+fi
+# The toast's text was --bg; on the dark fill it is the "text on a dark fill" token.
+uniq1 toast
+if [[ -n $REPLY ]]; then
+  N=Toast; H=$REPLY
+  d '\.toast' '' 'color:var\(--primary-text\)'
+fi
+# The mini-project page's white sheet: the player's declarations (D56).
+uniq1 sheet
+if [[ -n $REPLY ]]; then
+  N=MiniProjectDetailPage; H=$REPLY
+  d '\.sheet' '' 'background:var\(--surface\)' 'border:2px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'padding:16px 20px 20px' 'min-height:200px'
+  chk "\.sheet\.${H}>(:where\(\.${H}\))?:last-child(:where\(\.${H}\))?" 'margin-bottom:0'
+fi
+# One page ground: no page re-shades the body with it any more.
+none "no body:has() rule sets --focus-page (Polish 2 D50)" "body:has\([^)]*\)\{[^}]*--focus-page"
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

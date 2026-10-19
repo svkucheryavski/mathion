@@ -273,14 +273,19 @@
     white-space: nowrap;
     border: 0;
   }
+  /* D62: the strip stands on the sheet. The marks sit on its bottom edge so
+     the current item's tab (ItemMark) can overlap the sheet's top border; the
+     12px inset keeps a tab off the sheet's rounded corner, and z-index lifts
+     the strip over the sheet. */
   .strip {
     display: flex;
     gap: 6px; /* ref 2112 — no --space token is 6px */
-    padding: 0 0 14px; /* ref 2112 — no top padding */
-    margin-bottom: 20px; /* ref 2112 */
-    border-bottom: 1px solid var(--border);
-    align-items: center;
+    padding: 0 0 0 12px;
+    margin-bottom: 0;
+    align-items: flex-end;
     flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
   }
   /* 12.5px, NOT ref 2117's 11.5px — a deliberate, user-directed deviation
      applied to BOTH mono "N of M" counters so they stay consistent: this one and
@@ -299,7 +304,7 @@
      (an earlier revision of this comment, and of spec:124) is FALSE. The two
      families never share a screen: ratios live on CourseList and CourseView,
      positions on the player. */
-  .counter { margin-left: auto; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+  .counter { margin-left: auto; align-self: center; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
   /* No max-width here — the measure lives on the components that have prose to
      measure (QuizItem, PageItem), not on the player's content slot.
      WHY THE CAP MOVED, precisely, because the first two attempts at this were
@@ -330,14 +335,15 @@
      video and interactive apps stay uncapped because they are UI, not prose, and
      the reference gives them no measure. Do not "simplify" 652px back to a ch
      value: that is the round trip that caused this. */
-  .content { padding: 0; min-height: 200px; }
+  /* D56: the white reading sheet. The padding is artboard 2c's card (measured
+     above); the crumbs, the strip and the footer stay on the ground. D62: a 2px
+     border, shared with the current item's tab. */
+  .content { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; }
   footer {
     display: flex;
     justify-content: space-between;
     align-items: center; /* ref 2138 */
     margin-top: 24px; /* ref 2138 */
-    padding-top: 14px; /* ref 2138 */
-    border-top: 1px solid var(--border);
   }
   /* One flex item (no .btn gap between segments); nowrap keeps "Next:" + title
      + "→" on one line while the title ellipsizes via its own max-width. */

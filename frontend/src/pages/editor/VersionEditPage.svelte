@@ -760,7 +760,7 @@
   /* Pulled up under the heading (its 18px gap), so it reads as the heading's subtitle. */
   .vinfo { margin: -8px 0 18px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
   .vlabel { color: var(--text); /* ref 1526 */ }
-  /* The state badge's size and shape (VersionBadges .vbadge), neutral; the 1px line keeps it visible on --focus-page. */
+  /* The state badge's size and shape (VersionBadges .vbadge), neutral; the 1px line keeps it visible on the page ground. */
   .hchip {
     font-size: 11px;
     font-weight: 500;
@@ -794,10 +794,10 @@
     white-space: nowrap;
     border: 0;
   }
-  /* R3: the page shade spans the viewport. body:has() needs no JS and ends
-     with the page (no .canvas → no rule). `.canvas` stays scoped, so the rule
-     matches only while THIS page is mounted. */
-  :global(body):has(.canvas.d0) { background: var(--focus-page); }
+  /* R3: one level open shades the whole viewport a step darker. body:has()
+     needs no JS and ends with the page (no .canvas → no rule). `.canvas` stays
+     scoped, so the rule matches only while THIS page is mounted. With nothing
+     open (d0) the page ground is already --focus-page (D50). */
   :global(body):has(.canvas.d1) { background: var(--focus-1); }
   :global(body):has(.canvas.d2) { background: var(--focus-2); }
   /* "+ Add block" (5c D9): a quiet line; its row is a field with ✓ ✕. */

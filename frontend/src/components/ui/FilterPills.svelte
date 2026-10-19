@@ -32,6 +32,6 @@
     cursor: pointer;
   }
   .fp:hover { color: var(--text); }
-  .fp[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); border-color: var(--primary-soft); }
+  .fp[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
   .fp-n { font-family: var(--font-mono); }
 </style>

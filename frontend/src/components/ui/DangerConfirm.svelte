@@ -155,7 +155,7 @@
   /* Armed or not, a focused button shows the ring (P57), in its own colour (D60). */
   .dc-btn:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; box-shadow: none; }
   .dc-cancel:disabled {
-    background: var(--bg);
+    background: var(--disabled-bg);
     color: var(--faint);
     border-color: var(--border-faint);
     cursor: not-allowed;

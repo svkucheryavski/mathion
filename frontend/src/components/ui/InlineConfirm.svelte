@@ -146,7 +146,7 @@
   /* Busy (6b P23): the confirm keeps its rest look with a spinner; Cancel
      takes the blocked look (Button's .btn.blocked). */
   .confirm[aria-busy="true"] { cursor: progress; }
-  .cancel[aria-disabled="true"] { background: var(--bg); color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
+  .cancel[aria-disabled="true"] { background: var(--disabled-bg); color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
   @media (pointer: coarse) {
     .ic-btn { min-height: 28px; }
   }

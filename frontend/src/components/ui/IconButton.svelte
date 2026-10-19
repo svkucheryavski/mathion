@@ -210,16 +210,19 @@
      `.icon-btn:disabled` (0,3,0 with the scope hash) beats `.danger` and
      `.primary` (0,2,0), so a disabled trash or a disabled filled `+` greys out too. */
   .icon-btn:disabled {
-    background: var(--bg);
+    background: var(--disabled-bg);
     color: var(--faint);
     border-color: var(--border-faint);
     cursor: not-allowed;
   }
   /* P23: aria-disabled looks like :disabled; (0,3,0) also beats .primary/.danger. */
   .icon-btn.blocked {
-    background: var(--bg);
+    background: var(--disabled-bg);
     color: var(--faint);
     border-color: var(--border-faint);
     cursor: not-allowed;
   }
+  /* Borderless stays transparent when disabled, as the ghost Button does. */
+  .icon-btn.borderless:disabled { background: transparent; border-color: transparent; }
+  .icon-btn.borderless.blocked { background: transparent; border-color: transparent; }
 </style>

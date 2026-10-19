@@ -17,7 +17,7 @@
   <!-- `state` MUST be forwarded: the visual state now lives on the child, so
        dropping it here would leave the button's own state class intact while
        every mark rendered as the default `not-yet`. -->
-  <ItemMark type={item.type} state={istate} />
+  <ItemMark type={item.type} state={istate} inStrip />
 </button>
 
 <style>
@@ -32,9 +32,15 @@
      rounded on the now-bare button.
 
      The state class stays in the class attribute — ItemIcon's own tests pin it
-     there — but it deliberately carries no rule of its own any more. */
+     there. D62: ItemIcon renders only in the player strip, so the strip's
+     spacing sits here, on the button, where the focus ring is drawn: the
+     marks stand 6px above the sheet and the current tab overlaps the sheet's
+     2px top border. On the mark instead, the margin would grow this
+     inline-flex button and leave the ring lopsided. */
   .icon {
     display: inline-flex;
     border-radius: var(--radius);
+    margin-bottom: 6px;
   }
+  .icon.current { margin-bottom: -2px; }
 </style>

@@ -96,4 +96,11 @@ describe('ItemIcon', () => {
     expect(btn.getAttribute('title')).toBe('T');
     expect(btn.getAttribute('aria-label')).toBe('T');
   });
+
+  // D62: ItemIcon renders only in the player's strip, so its mark takes the
+  // strip look.
+  it('puts its ItemMark in strip mode', () => {
+    const btn = render('quiz', 'current');
+    expect(btn.querySelector('.item-mark')!.classList.contains('in-strip')).toBe(true);
+  });
 });

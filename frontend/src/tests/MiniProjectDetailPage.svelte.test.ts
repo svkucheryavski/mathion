@@ -888,6 +888,37 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     expect(nav!.textContent).not.toContain('›');
   });
 
+  it('D56: the breadcrumb sits above the white sheet, which holds the header and everything below it', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ submission_history: [makeEntry({ submission_number: 1, evaluation: null })] }));
+    await mountPage();
+    const sheet = target.querySelector('.mp-col > .sheet');
+    expect(sheet).not.toBeNull();
+    const nav = target.querySelector('nav.breadcrumb');
+    // The crumbs stay on the ground, as the player's do: before the sheet, not inside it.
+    expect(nav!.parentElement!.classList.contains('mp-col')).toBe(true);
+    expect(nav!.nextElementSibling).toBe(sheet);
+    expect(sheet!.querySelector('header .title-row h1')).not.toBeNull();
+    expect(sheet!.querySelector('header nav.breadcrumb')).toBeNull();
+    expect(sheet!.querySelector('section.assignment')).not.toBeNull();
+    expect(sheet!.querySelector('.grid2')).not.toBeNull();
+    expect(sheet!.querySelector('section.history')).not.toBeNull();
+  });
+
+  it('D56: the loading and error states stay on the ground (no sheet)', async () => {
+    vi.mocked(fetchDetail).mockReturnValueOnce(new Promise<StudentMiniProjectDetail>(() => {}));
+    component = mount(MiniProjectDetailPage, { target, props: { courseSlug: 'course-x', blockSlug: 'block-y' } });
+    flushSync();
+    expect(target.querySelector('.skeleton')).not.toBeNull();
+    expect(target.querySelector('.sheet')).toBeNull();
+    unmount(component);
+    component = null;
+    target.innerHTML = '';
+    vi.mocked(fetchDetail).mockRejectedValueOnce(new ApiError(403, 'forbidden'));
+    await mountPage();
+    expect(target.querySelector('[data-testid="fetch-error-banner"]')).not.toBeNull();
+    expect(target.querySelector('.sheet')).toBeNull();
+  });
+
   it('title row: h1 reads "Mini-project — {block title}" beside the StatusPill', async () => {
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ block_title: 'Final Project' }));
     await mountPage();

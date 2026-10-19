@@ -127,7 +127,7 @@
      `padding: 0` + `overflow: hidden` are what let the rows sit edge-flush so
      their `--border-soft` separators reach the card edge; `background:
      var(--surface)` is load-bearing, not decorative — `CourseView.svelte:63`'s
-     `.page` sets no background, so without it the card inherits `--bg` (#FBFBFC)
+     `.page` sets no background, so without it the card inherits the page ground `--bg`
      and both the `--surface-2` header strip and the row separators lose their
      tint step. */
   .block {

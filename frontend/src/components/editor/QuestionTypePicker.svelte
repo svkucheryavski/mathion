@@ -45,7 +45,7 @@
   /* Constraint 2: the sr-only idiom for a still-focusable radio, not a dim. */
   label input { position: absolute; opacity: 0; pointer-events: none; }
   /* Disabled recedes via the disabled-control tokens (IconButton's), never opacity. */
-  .qtype-picker:disabled label { border-color: var(--border-faint); background: var(--bg); color: var(--faint); cursor: not-allowed; }
+  .qtype-picker:disabled label { border-color: var(--border-faint); background: var(--disabled-bg); color: var(--faint); cursor: not-allowed; }
   @media (forced-colors: active) {
     label.selected { border: 2px solid Highlight; }
     label:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }

@@ -7,7 +7,8 @@
   //
   // `state` defaults so a consumer with no state to give — MiniProjectLink's
   // single flag (T7) — need not supply one.
-  let { type, state = 'not-yet' }: { type: ItemMarkType; state?: ItemMarkState } = $props();
+  // `inStrip` (D62): the player's item strip look; only ItemIcon passes it.
+  let { type, state = 'not-yet', inStrip = false }: { type: ItemMarkType; state?: ItemMarkState; inStrip?: boolean } = $props();
 
   // Item-type marks are transcribed verbatim from the "Item types" card of the
   // visual-system reference (docs/design/visual-refresh/reference-screens.dc.html).
@@ -21,7 +22,7 @@
      ItemIcon's `aria-label`, the course rows' `aria-label` ("Sequence: …, 2 of 3
      items completed"). A label here would be a second, unlabelled reading of
      the same fact. -->
-<span class="item-mark {state}" aria-hidden="true">
+<span class="item-mark {state}" class:in-strip={inStrip} aria-hidden="true">
   <svg
     width="11"
     height="11"
@@ -127,6 +128,40 @@
       background: Canvas;
       color: GrayText;
       border: 1px dashed GrayText;
+    }
+  }
+  /* D62: the player's strip. The current item is a wider tab whose 2px border
+     runs on three sides; ItemIcon's margin lays it over the sheet's 2px top
+     edge, so tab and sheet read as one shape (SequencePlayer lifts the strip
+     above the sheet). The spacing lives on ItemIcon's button, not here: a
+     margin on this span would grow the inline-flex button and pull its focus
+     ring off the mark. */
+  .item-mark.in-strip.current {
+    width: 32px;
+    height: 31px;
+    border-width: 2px 2px 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: 2px;
+  }
+  /* Done is pale gray, not done is steel blue, like the main buttons (the
+     reverse of the shared look, which the teacher breakdown keeps). The colours
+     sit under forced-colors:none: these rules out-specify the High Contrast
+     block above and would otherwise replace its solid done fill. */
+  @media (forced-colors: none) {
+    .item-mark.in-strip.covered {
+      background: var(--border);
+      color: var(--muted);
+      border-color: var(--border-strong);
+    }
+    .item-mark.in-strip.not-yet {
+      background: var(--primary);
+      color: var(--primary-text);
+      border-color: var(--primary);
+    }
+    .item-mark.in-strip.current {
+      background: var(--surface);
+      color: var(--primary);
+      border-color: var(--border);
     }
   }
 </style>

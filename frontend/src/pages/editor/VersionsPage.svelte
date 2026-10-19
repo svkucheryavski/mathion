@@ -379,9 +379,6 @@
 
 <style>
   .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
-  /* 5c follow-up (user): the editor's page shade, so the course page and the
-     version page read alike. `.page` stays scoped: the rule ends with the page. */
-  :global(body):has(.page) { background: var(--focus-page); }
   /* The h1 is 18px (below); the h2 is visually hidden (.sr-only). 5c follow-up. */
   .heading { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; /* ref 1472 */ }
   /* 5c follow-up (user): the version page's title size (VersionEditPage .editor-heading h1). */

@@ -67,7 +67,7 @@
   /* Disabled: recede via tokens, never opacity (opacity would composite the
      whole button — glyphs included — against the page). Keep the tooltip. */
   .btn:disabled {
-    background: var(--bg);
+    background: var(--disabled-bg);
     color: var(--faint);
     border-color: var(--border-faint);
     cursor: not-allowed;
@@ -75,7 +75,7 @@
   /* P23: blocked (aria-disabled, not busy) looks disabled but keeps focus. A
      busy button keeps its variant look and its spinner. */
   .btn.blocked {
-    background: var(--bg);
+    background: var(--disabled-bg);
     color: var(--faint);
     border-color: var(--border-faint);
     cursor: not-allowed;
@@ -97,6 +97,11 @@
   .secondary:not(:disabled):not(.blocked):not([aria-busy="true"]):active { background: var(--primary-press); border-color: var(--primary-press); color: var(--primary-text); }
   .secondary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
   .ghost { padding: var(--btn-pad-sm); background: transparent; color: var(--muted); --ring: var(--muted); }
+  /* Disabled ghost stays transparent: its enabled look has no fill, so a
+     --disabled-bg tile would make the disabled one look raised. (0,4,0) beats
+     .btn:disabled and .btn.blocked. */
+  .btn.ghost:disabled { background: transparent; border-color: transparent; }
+  .btn.ghost.blocked { background: transparent; border-color: transparent; }
   /* D31: outlined at rest, filled on hover (pointer devices) and on keyboard
      focus, darker while pressed. Disabled, blocked and busy keep their looks. */
   .danger { background: var(--surface); color: var(--danger); border-color: var(--danger); --ring: var(--danger); }
