@@ -39,3 +39,12 @@ Plan: `docs/superpowers/plans/2026-10-18-visual-refresh-polish2-named-items.md`.
 - A second attachment on another element of the unscanned surfaces (CourseView, VersionEditPage, QuestionCard, MarkdownEditor, MiniProjectDetailPage) passes: `src_count` pins the div line, and `nbind` rises on both sides for a second `externalLinks` attachment. Widens the Task 3 MiniProjectDetailPage item. Fix: per file, `grep -c '{@attach'` equals the known count (CourseView 2, QuestionCard 2, MarkdownEditor 1, VersionEditPage 3, MiniProjectDetailPage 1) (Fable r1 M2, Opus r1 m3).
 - Which `variant` each editor host passes is pinned nowhere: dropping `variant="prompt"` from NewQuestionModal or QuestionTextModal, or `variant="explanation"` from ExplanationModal, renders that preview at the page scale with tests and gate green. Fix: a `src_count` per host, or one assertion per QuizModals test that `.preview` has `pv-prompt`/`pv-explanation` and `compact` (Opus r1 m1).
 - **For the Safari pass:** "Rendering…" and the error preview carry no variant class, so they take the modal's 14px; in the explanation modal the text changes size (14px → 13px) as the preview resolves. Spec-consistent (`.preview` keeps only padding and min-height) (Fable r1 M3, Opus r1 note).
+
+## Task 5 — the 404 page
+
+- The 404 button's label is keyed on the literal `'/teaching'` (`NotFound.svelte:11-13`), apart from `defaultLandingPath`. A third landing path (a superuser landing on `/superuser`, say) would read "Back to courses" while going elsewhere. Fix: a label beside `defaultLandingPath` in router.svelte.ts, so path and name come from one place (Fable r1 M1, Opus r1 note).
+
+## For the beta VoiceOver pass
+
+- The 404 announces itself on load (ErrorState's `role="alert"`): check it reads once, title then message, and does not repeat on re-render.
+- Nothing announces that an authored link opens a new tab. A visually hidden "(opens in a new tab)" added by `externalLinks` is the candidate.
