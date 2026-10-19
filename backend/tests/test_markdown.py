@@ -256,6 +256,14 @@ def test_render_bare_url_ends_at_a_character_urls_do_not_use(md, href, rest):
     # D66 with a decomposed accent (a letter, then a combining mark).
     "See https://x.org/a\u0301 here.",
     "See https://bu\u0308cher.de here.",
+    # D66 at any inline seam: an address glued to emphasis, a dunder name or code.
+    "See https://docs.python.org/3/reference/datamodel.html#object.__init__ here.",
+    "See https://example.com/files/__pycache__/x here.",
+    "See https://x.org/caf*\u00e9* here.",
+    "See https://x.org/`code` here.",
+    "See https://x.org/__init__/https://y.org here.",
+    # Past a closing delimiter the next token still decides: a letter glues.
+    "See *https://x.org/caf*\u00e9 here.",
 ])
 def test_render_address_of_non_url_characters_stays_plain(md):
     assert "<a" not in render_markdown(md)
@@ -267,3 +275,30 @@ def test_render_address_after_a_plain_one_still_links():
     assert result.count("<a ") == 1
     assert 'href="https://y.org"' in result
 
+
+
+@pytest.mark.parametrize("md", [
+    "See https://x.org *note* here.",
+    "See https://x.org\nnext line.",
+    "See https://x.org  \nnext line.",
+    "See https://x.org `code` here.",
+])
+def test_render_address_before_a_space_or_line_break_still_links(md):
+    # D66 leaves plain only what is glued; a space or a line break ends the address.
+    assert 'href="https://x.org"' in render_markdown(md)
+
+
+@pytest.mark.parametrize("md, href", [
+    ("**https://x.org**", "https://x.org"),
+    ("*https://x.org*", "https://x.org"),
+    ("_https://x.org_", "https://x.org"),
+    ("*see https://x.org*", "https://x.org"),
+    ("Read *https://x.org/paper.pdf*.", "https://x.org/paper.pdf"),
+    ("(**https://x.org**)", "https://x.org"),
+    ("# **https://x.org**", "https://x.org"),
+    ("> *https://x.org*", "https://x.org"),
+    ("**Docs**: **https://docs.python.org**", "https://docs.python.org"),
+])
+def test_render_address_last_inside_emphasis_links(md, href):
+    # A closing delimiter is not a letter: the address before it is whole (D66).
+    assert f'href="{href}"' in render_markdown(md)

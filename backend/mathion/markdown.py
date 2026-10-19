@@ -64,12 +64,13 @@ def _link_tokens(state: StateCore, url: str, level: int) -> list[Token] | None:
     return [link_open, text, link_close]
 
 
-def _split_text(state: StateCore, tok: Token, glued: bool, next_char: str) -> tuple[list[Token], bool]:
+def _split_text(state: StateCore, tok: Token, glued: bool, next_glues: bool) -> tuple[list[Token], bool]:
     """Link the bare addresses in one text token.
 
     glued: the token continues a word that D66 left plain, up to its first space.
-    next_char: the first character of the next token when it is text or an
-    escape or entity (a letter written as &uuml; is a separate token here).
+    next_glues: the next token continues the word: text, an escape or an entity
+    starting with a letter (&uuml; is a separate token here), or emphasis, code
+    or math right after it (#object.__init__). A line break does not.
     Returns the tokens, and whether the plain word runs on into the next token.
     """
     content = tok.content
@@ -80,8 +81,7 @@ def _split_text(state: StateCore, tok: Token, glued: bool, next_char: str) -> tu
     for m in _BARE_URL.finditer(content):
         if m.start() < skip_to:
             continue
-        after = content[m.end()] if m.end() < len(content) else next_char
-        if _runs_into_word(after):
+        if _runs_into_word(content[m.end()]) if m.end() < len(content) else next_glues:
             skip_to = _NON_SPACE.match(content, m.end()).end()
             skipping = True
             continue
@@ -99,6 +99,26 @@ def _split_text(state: StateCore, tok: Token, glued: bool, next_char: str) -> tu
     if pos < len(content):
         out.append(Token("text", "", 0, content=content[pos:], level=tok.level))
     return out, runs_on
+
+
+_BREAKS = ("softbreak", "hardbreak")
+
+
+def _glues(kids: list[Token], i: int) -> bool:
+    """Whether the token after kids[i] continues the same word (D66).
+
+    Closing delimiters are looked past: in **https://x.org** the address is
+    whole, while in *https://x.org/caf*é the letter after them glues.
+    """
+    i += 1
+    while i < len(kids) and kids[i].nesting == -1:
+        i += 1
+    tok = kids[i] if i < len(kids) else None
+    if tok is None or tok.type in _BREAKS:
+        return False
+    if tok.type in ("text", "text_special"):
+        return _runs_into_word(tok.content[:1])
+    return True
 
 
 def _bare_urls(state: StateCore) -> None:
@@ -121,14 +141,13 @@ def _bare_urls(state: StateCore) -> None:
             elif tok.type == "link_close":
                 in_link -= 1
             if tok.type == "text" and not in_link and (glued or "://" in tok.content):
-                nxt = kids[i + 1] if i + 1 < len(kids) else None
-                next_char = nxt.content[:1] if nxt is not None and nxt.type in ("text", "text_special") else ""
-                split, glued = _split_text(state, tok, glued, next_char)
+                split, glued = _split_text(state, tok, glued, _glues(kids, i))
                 children.extend(split)
             else:
                 children.append(tok)
-                # An escape or entity inside a plain word keeps it plain; anything else ends it.
-                glued = glued and tok.type == "text_special" and not tok.content.isspace()
+                # Escapes, entities, emphasis, code and math inside a plain word keep
+                # it plain; a line break, a space entity or link text ends it.
+                glued = glued and tok.type not in _BREAKS and tok.type != "text" and not tok.content.isspace()
         block.children = children
 
 
