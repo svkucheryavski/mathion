@@ -5410,9 +5410,12 @@ if [[ -n $REPLY ]]; then
   chk "\.md-card\.${H} textarea:where\(\.${H}\):focus-visible" 'box-shadow:none' 'outline-offset:-2px'
   chk "\.tabs\.${H} button:where\(\.${H}\):focus-visible" 'outline-offset:-2px'
 fi
-frames=$(grep -oE '\.frame\.svelte-[a-z0-9]+ iframe:where\(\.svelte-[a-z0-9]+\):focus-visible\{outline-offset:-2px\}' $CSS | sort -u | wc -l | tr -d ' ')
-if [[ $frames -eq 2 ]]; then echo "PASS  the video and app iframes draw an inset ring (VideoFrame, InteractiveFrame)"
-else echo "FAIL  the video and app iframes draw an inset ring (found $frames of 2)"; fail=1; fi
+# D67: no ring on the video and app frames. CSS has no hook for a focused frame in
+# Safari (and :focus-visible never matched one in Chrome); the embedded page draws
+# its own focus. No focus rule on the frames' iframes, so a dead one cannot return.
+frames=$(grep -oE '\.frame\.svelte-[a-z0-9]+ iframe:where\(\.svelte-[a-z0-9]+\):focus' $CSS | sort -u | wc -l | tr -d ' ')
+if [[ $frames -eq 0 ]]; then echo "PASS  the video and app iframes have no focus rule of their own (D67)"
+else echo "FAIL  the video and app iframes have no focus rule of their own (found $frames)"; fail=1; fi
 # P97: the retry select is drawn as an underlined link with no border, so the
 # field rule would leave it only the 1.16:1 halo. It takes the ring instead.
 uniq1 ro-retry
