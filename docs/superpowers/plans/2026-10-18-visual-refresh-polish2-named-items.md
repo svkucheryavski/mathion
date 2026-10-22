@@ -206,6 +206,7 @@ Error rules that stay red on focus: `.input.error`, every `[aria-invalid=true]` 
 - RunProgressTab `.cell-btn` and `.progress-grid th button`: `width/height: 100%` in `th, td { padding: 0 }` inside `.table-scroll` → inset.
 - MarkdownEditor tab buttons: flush at the top of `.md-card { overflow: hidden }` → inset. Its textarea: the rules below.
 - `VideoFrame` and `InteractiveFrame` iframes: they fill `.frame` inside `.video-card` / `.app-card { overflow: hidden }` → inset.
+  > **D67 (user, Safari pass, 2026-10-22):** superseded. The inset iframe rule never drew in Chrome or Safari (a focused frame matches only `:focus-within`, and Safari not even that), so it is removed, and the user chose no frame ring. The frames' gate row below and the frame rule in this task's CSS step are replaced by a row that pins *no* focus rule on the frames' iframes. See spec rev 12, D67.
 - RunSubmissionTab's sort buttons (`th` padding `8px 12px`) and `status-cell-btn` (`td` padding `6px 12px`): the outset ring needs 4px and fits → no rule (P98).
 
 - [ ] **Step 1: Write the failing gate rows**

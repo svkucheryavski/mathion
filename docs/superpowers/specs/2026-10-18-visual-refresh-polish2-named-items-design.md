@@ -1,6 +1,6 @@
 # Visual refresh — Polish 2: named items
 
-**Status:** rev 11 (2026-10-19), approved; all six tasks done, whole-branch review.
+**Status:** rev 12 (2026-10-22), approved; all six tasks done, Safari pass.
 - Rev 2 folded in spec review round 1, the user's decisions D56–D58 and the D54 amendment.
 - Rev 3 folded in round 2 (`spec-r2-*.md`).
 - Rev 4 folded in round 3 (`spec-r3-*.md`) and the user's decision D59.
@@ -11,6 +11,7 @@
 - Rev 9 adds D63 (headings take relative margins), made at Task 3's look review.
 - Rev 10 adds D64 (no new package for bare URLs: an own markdown-it rule), made at Task 6's start, D65 (a bare address holds only URL characters; its text is exactly as typed), made at Task 6's commit OK, and D66 (an address that runs into a letter stays plain), from Task 6's review round 3.
 - Rev 11 widens D66 to every inline seam (emphasis, code, math right after an address), from the whole-branch review.
+- Rev 12 adds D67 (no focus ring on the video and app frames), from the Safari pass.
 
 **Branch:** `feat/visual-refresh-polish2-named-items`, cut from the Polish 1 tip `ba8ace4`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-17-visual-refresh-polish2-named-items/` (`decisions.md`, the mock-ups `page-ground-mock.html` and `content-scale-mock.html`, the review rounds `spec-r1-*.md` and `spec-r2-*.md`).
@@ -74,6 +75,7 @@ All of these are the user's, made in the brainstorm on 2026-10-17 and 2026-10-18
   - Done items are pale gray (`--border` fill, `--border-strong` edge, `--muted` glyph, about 5:1). Not-done items are steel blue (`--primary` fill, white glyph), like the main buttons.
   - Only in the player strip. The teacher breakdown keeps blue = done; the course rows and the editor keep the shared look.
 - **D63 — Headings take relative margins** (user, at Task 3's look review). One rule, `margin: 1em 0 .5em`, for all six levels and both scales, so the space follows each heading's own size. A paragraph's bottom margin collapses into the next heading's top margin; between two headings the gap is the second one's 1em.
+- **D67 — No focus ring on the video and app frames** (user, at the Safari pass: "Drop the frame ring"). CSS has no hook for a focused frame: Safari showed no ring with `:focus-visible`, `:focus` or `:focus-within` on the `<iframe>` (checked on screen, twice, after a reload), and in Chrome a focused frame matches only `:focus-within`, so Task 1's inset `:focus-visible` rule never drew in Chrome or Safari. Chrome could ring a frame through `:focus-within`; the user chose no ring over a Chrome-only one. The rule is removed from `VideoFrame.svelte` and `InteractiveFrame.svelte`, and a gate row keeps any frame focus rule out. When Tab enters a video, focus lands on the embedded player's own controls, which draw their own focus; an app frame shows whatever focus its page draws. A first answer ("Ring on any focus") rested on the wrong premise that `:focus` would match. For the beta keyboard pass.
 - **D64 — No new package for bare URLs** (user, at Task 6's start: "Do not install any additional packages, the amount of external dependencies must be limited", then "Own small rule"). D54's behaviour stands, built as a small markdown-it core rule in `markdown.py` on the markdown-it-py already installed. `linkify-it-py` is not added and `pyproject.toml` does not change.
 - **D65 — A bare address holds only URL characters, shown as typed** (user, at Task 6's commit OK: "Do not allow spaces and other strange symbols which usually are not used in URL"). Only the characters RFC 3986 allows in a URL belong to a bare address: letters A–Z, digits, `-._~:/?#[]@!$&'()*+,;=` and `%`. The address ends at anything else (a space, `|`, `{`, `^`, `\`, a letter such as `é` or `п`), and an address that starts with such a letter is not linked. The link text is the address exactly as typed: `%20` is not shown as a space and an `xn--` host is not shown as look-alike letters.
 - **D66 — An address that runs into a letter stays plain** (user, after Task 6's review round 3: "Leave it plain"). When the character right after a bare address is a letter, digit or combining mark (`https://bücher.de`, `https://x.org/café`, a Kelvin sign, also written as an entity such as `&uuml;` or an escape such as `\_`), or by emphasis, code or math (`#object.__init__`, `files/__pycache__/x`), the whole address stays plain text, up to the next space, including any address inside it: a cut link to `https://b` would open another site. Other non-URL characters (`|`, `^`, `{`, quotes, brackets) still end the address, and the part before them is linked, so `„https://x.org“` and `«https://x.org»` work.
@@ -200,7 +202,7 @@ A control that fills its container, or sits flush against an `overflow` clip, us
 - the MarkdownEditor Write/Preview tab buttons (flush at the top of `.md-card`) and its textarea (above);
 - the Progress grid `.cell-btn` and its header `th button`s (inside `.table-scroll`);
 - RunSubmissionTab's header sort buttons and `status-cell-btn`;
-- the iframes in `VideoFrame.svelte:12` and `InteractiveFrame.svelte:33`, clipped by the player's `.video-card` and `.app-card` (`VideoItem.svelte:75`, `InteractiveAppItem.svelte:113`). The editor's item previews share these frames, and the inset ring suits them too. Whether a focused `<iframe>` matches `:focus-visible` varies by browser, so the Safari pass checks it.
+- the iframes in `VideoFrame.svelte:12` and `InteractiveFrame.svelte:33`, clipped by the player's `.video-card` and `.app-card` (`VideoItem.svelte:75`, `InteractiveAppItem.svelte:113`). The editor's item previews share these frames. Safari has no CSS hook for a focused frame and Chrome only `:focus-within`; the user chose no ring over a Chrome-only one (D67), so these get no rule at all.
 
 The plan confirms each one in the built page before adding the rule.
 
@@ -613,7 +615,7 @@ Then a whole-branch review (fresh Opus and Fable), and a Safari pass, one step a
   - the header, a course card, a SequenceLink row (one ring only), the strip icons (the 22px squares, on a wrapped line), a primary and a ghost Button, an IconButton, a filled IconButton, an accordion header;
   - the DangerConfirm checkbox and a roster checkbox;
   - the Progress tab's segments, a heat cell next to the sticky columns, the MarkdownEditor Write/Preview tabs;
-  - a video or app iframe in the player;
+  - a video or app iframe in the player (done: no ring is possible, D67);
   - text fields turn the border blue with the halo: Login's e-mail and PIN, the VersionsPage create field, the roster search, the MarkdownEditor card;
   - an invalid field stays red when focused (MiniProjectModal after a failed save, mocked);
   - after a keyboard Cancel, the VersionsPage `<h1>` and the side-panel title show no ring.
