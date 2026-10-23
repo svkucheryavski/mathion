@@ -177,6 +177,13 @@
     };
   });
 
+  // D70: the block's crumb, numbered by its place in the course as the player
+  // and the course page number it.
+  const currentBlock = $derived(
+    data ? (currentCourse.value?.blocks.find((b) => b.id === data!.block_id) ?? null) : null,
+  );
+  const blockNo = $derived(currentBlock ? (currentCourse.value?.blocks.indexOf(currentBlock) ?? -1) + 1 : 0);
+
   // D16 — empty/whitespace block_title falls back to "Untitled block".
   const titleForHeading = $derived.by(() => {
     if (!data) return '';
@@ -460,12 +467,17 @@
         </ErrorState>
       </div>
     {:else if data}
+      <!-- D70: the player's breadcrumb (SequencePlayer `crumbs`), ending in the page:
+           course / "{n}. {block}" / Mini-project. -->
       <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a href="/courses">Courses</a>
+        <a href="/courses/{courseSlug}"
+          onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>{currentCourse.value?.course.name ?? ''}</a>
+        {#if currentBlock}
+          <span class="sep" aria-hidden="true">/</span>
+          <span class="crumb">{blockNo}. {currentBlock.title}</span>
+        {/if}
         <span class="sep" aria-hidden="true">/</span>
-        <a href="/courses/{courseSlug}">{currentCourse.value?.course.name ?? '<Course Name>'}</a>
-        <span class="sep" aria-hidden="true">/</span>
-        <span class="current" aria-current="page">{titleForHeading}</span>
+        <span class="current" aria-current="page">Mini-project</span>
       </nav>
       <!-- D56: the white reading sheet; the crumbs stay on the ground, as the player's do. -->
       <div class="sheet">
@@ -489,136 +501,141 @@
           {/if}
         </header>
 
-        <section class="assignment">
-          <h2>Assignment</h2>
-          <!-- D58/D59: the attachment and {@html} on the SAME div, so the links follow a content change; data-testid is the test seam. -->
-          <div class="assignment-html prose" data-testid="assignment-html" {@attach externalLinks(data.assignment_html)}>
-            {@html data.assignment_html}
-          </div>
-        </section>
-
-        <div class="grid2">
-          <section class="group-block">
-            <h2>Your group</h2>
-            {#if data.group === null}
-              <!-- D4 friendly banner. -->
-              <p class="members">You're not yet assigned to a group. Once your teacher assigns you, you'll be able to submit.</p>
-            {:else if data.group.members.length === 1}
-              {@const me = data.group.members[0]}
-              <p class="members">Group {data.group.name} — <strong>{me.full_name} (you)</strong> — you're the only member so far.</p>
-            {:else}
-              <p class="members">
-                Group {data.group.name} —
-                {#each orderedMembers as m, i (m.user_id)}{#if i > 0}{', '}{/if}{#if m.is_me}<strong>{m.full_name} (you)</strong>{:else}{m.full_name}{/if}{/each}
-              </p>
-            {/if}
-            {#if data.group?.is_disabled}
-              <!-- The disabled meaning is carried by this line alone (Constraint 2: no opacity dim). -->
-              <p class="group-notice">This group is disabled — contact your teacher.</p>
-            {/if}
+        <!-- D69: one body grid. Wide windows put the group and submit cards in a
+             right column beside the assignment and the history; narrow ones keep
+             this DOM order, which is also the reading order. -->
+        <div class="mp-body" class:has-history={data.submission_history.length > 0}>
+          <section class="assignment">
+            <h2>Assignment</h2>
+            <!-- D58/D59: the attachment and {@html} on the SAME div, so the links follow a content change; data-testid is the test seam. -->
+            <div class="assignment-html prose" data-testid="assignment-html" {@attach externalLinks(data.assignment_html)}>
+              {@html data.assignment_html}
+            </div>
           </section>
 
-          <!-- D6 — submit / resubmit section. Renders ONLY when the group is
-               assigned AND can_submit has been resolved (true OR false with a
-               reason). When can_submit=false, render the reason banner only —
-               no file picker, no submit button. -->
-          {#if data.group !== null && data.can_submit !== null}
-            <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
-              {#if data.can_submit === true}
-                <h2>{submitHeading}</h2>
-                <div class="submit-row">
-                  <label
-                    class="drop"
-                    class:dragover={isDragOver}
-                    class:has-file={selectedFile !== null}
-                    ondragover={handleDragOver}
-                    ondragleave={handleDragLeave}
-                    ondrop={handleDrop}
-                  >
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      data-testid="mp-file-input"
-                      disabled={submitState === 'submitting'}
-                      onchange={handleFileChange}
-                      bind:this={fileInputEl}
-                    />
-                    <span class="drop-label">{selectedFile !== null ? selectedFile.name : 'Drop a PDF or click to pick'}</span>
-                  </label>
-                  <Button
-                    variant="primary"
-                    disabled={!canSubmitClick}
-                    loading={submitState === 'submitting'}
-                    onclick={handleSubmit}
-                    title={selectedFile === null && submitState !== 'submitting' ? 'Pick a PDF first' : undefined}
-                  >
-                    {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
-                  </Button>
-                </div>
-                {#if submitState === 'error' && submitErrorMessage !== null}
-                  <div class="submit-error" data-testid="mp-submit-error">
-                    <ErrorState title="Couldn't submit" message={submitErrorMessage} onretry={submitErrorIsNetwork ? handleSubmit : undefined} />
-                  </div>
-                {/if}
-              {:else if data.can_submit_reason_if_not !== null}
-                <div class="precondition" data-testid="mp-cannot-submit">{REASON_LABELS[data.can_submit_reason_if_not]}</div>
+          <div class="mp-side">
+            <section class="group-block">
+              <h2>Your group</h2>
+              {#if data.group === null}
+                <!-- D4 friendly banner. -->
+                <p class="members">You're not yet assigned to a group. Once your teacher assigns you, you'll be able to submit.</p>
+              {:else if data.group.members.length === 1}
+                {@const me = data.group.members[0]}
+                <p class="members">Group {data.group.name} — <strong>{me.full_name} (you)</strong> — you're the only member so far.</p>
+              {:else}
+                <p class="members">
+                  Group {data.group.name} —
+                  {#each orderedMembers as m, i (m.user_id)}{#if i > 0}{', '}{/if}{#if m.is_me}<strong>{m.full_name} (you)</strong>{:else}{m.full_name}{/if}{/each}
+                </p>
               {/if}
+              {#if data.group?.is_disabled}
+                <!-- The disabled meaning is carried by this line alone (Constraint 2: no opacity dim). -->
+                <p class="group-notice">This group is disabled — contact your teacher.</p>
+              {/if}
+            </section>
+
+            <!-- D6 — submit / resubmit section. Renders ONLY when the group is
+                 assigned AND can_submit has been resolved (true OR false with a
+                 reason). When can_submit=false, render the reason banner only —
+                 no file picker, no submit button. -->
+            {#if data.group !== null && data.can_submit !== null}
+              <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
+                {#if data.can_submit === true}
+                  <h2>{submitHeading}</h2>
+                  <div class="submit-row">
+                    <label
+                      class="drop"
+                      class:dragover={isDragOver}
+                      class:has-file={selectedFile !== null}
+                      ondragover={handleDragOver}
+                      ondragleave={handleDragLeave}
+                      ondrop={handleDrop}
+                    >
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        data-testid="mp-file-input"
+                        disabled={submitState === 'submitting'}
+                        onchange={handleFileChange}
+                        bind:this={fileInputEl}
+                      />
+                      <span class="drop-label">{selectedFile !== null ? selectedFile.name : 'Drop a PDF or click to pick'}</span>
+                    </label>
+                    <Button
+                      variant="primary"
+                      disabled={!canSubmitClick}
+                      loading={submitState === 'submitting'}
+                      onclick={handleSubmit}
+                      title={selectedFile === null && submitState !== 'submitting' ? 'Pick a PDF first' : undefined}
+                    >
+                      {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
+                    </Button>
+                  </div>
+                  {#if submitState === 'error' && submitErrorMessage !== null}
+                    <div class="submit-error" data-testid="mp-submit-error">
+                      <ErrorState title="Couldn't submit" message={submitErrorMessage} onretry={submitErrorIsNetwork ? handleSubmit : undefined} />
+                    </div>
+                  {/if}
+                {:else if data.can_submit_reason_if_not !== null}
+                  <div class="precondition" data-testid="mp-cannot-submit">{REASON_LABELS[data.can_submit_reason_if_not]}</div>
+                {/if}
+              </section>
+            {/if}
+          </div>
+
+          {#if data.submission_history.length > 0}
+            <section class="history">
+              <h2>Submission history</h2>
+              {#each data.submission_history as entry (entry.submission_id)}
+                <section class="history-entry">
+                  <!-- D15 (restated in Slice-4 enumerated 19): the Late pill is never inside <h3>;
+                       its parent is .pills, the h3's sibling. -->
+                  <div class="history-entry-header">
+                    <h3>Submission <span class="mono">{entry.submission_number}</span></h3>
+                    <span class="entry-meta mono">{formatLocalWithTz(entry.submitted_at)} · {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}</span>
+                    <span class="pills">
+                      {#if entry.is_late}
+                        <span
+                          class="pill pill-late"
+                          title={data.soft_deadline
+                            ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
+                            : 'Submitted past the soft deadline'}
+                        >Late</span>
+                      {/if}
+                      {#if entry.evaluation}
+                        <StatusPill status={entry.evaluation.result} />
+                      {/if}
+                    </span>
+                  </div>
+                  <div class="history-entry-body">
+                    <div class="file">
+                      <span class="file-kind mono" aria-hidden="true">PDF</span>
+                      <span class="file-name">
+                        <span class="name">{entry.filename}</span>
+                        <span class="size mono">{formatFileSize(entry.file_size)}</span>
+                      </span>
+                      <a class="dl" href="/api/submissions/{entry.submission_id}/file" download title="Download" aria-label="Download {entry.filename}">
+                        <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="3" x2="8" y2="10.6"/><polyline points="4.8,7.6 8,10.8 11.2,7.6"/><line x1="3.4" y1="13" x2="12.6" y2="13"/></svg>
+                      </a>
+                    </div>
+                    {#if entry.evaluation}
+                      {@const ev = entry.evaluation}
+                      <div class="feedback {ev.result === 'rejected' ? 'rejected' : ev.result === 'accepted' ? 'accepted' : 'needs-revision'}">
+                        <!-- Separators as string expressions: Svelte trims whitespace at block edges, and a
+                             bare " · score " as the first node of the {#if} would lose its leading space. -->
+                        <p class="feedback-meta">{evaluationResultLabel(ev.result)}{#if ev.score !== null}{' · score '}<span class="mono">{ev.score}/100</span>{/if}{' · '}{ev.evaluated_by_full_name}, <span class="mono">{formatLocalWithTz(ev.evaluated_at)}</span></p>
+                        <p class="feedback-text">{ev.feedback_text || 'No written feedback'}</p>
+                        {#if ev.has_feedback_file}
+                          <a class="feedback-file" href="/api/evaluations/{ev.eval_id}/feedback-file" download>Download feedback</a>
+                        {/if}
+                      </div>
+                    {/if}
+                  </div>
+                </section>
+              {/each}
             </section>
           {/if}
         </div>
-
-        {#if data.submission_history.length > 0}
-          <section class="history">
-            <h2>Submission history</h2>
-            {#each data.submission_history as entry (entry.submission_id)}
-              <section class="history-entry">
-                <!-- D15 (restated in Slice-4 enumerated 19): the Late pill is never inside <h3>;
-                     its parent is .pills, the h3's sibling. -->
-                <div class="history-entry-header">
-                  <h3>Submission <span class="mono">{entry.submission_number}</span></h3>
-                  <span class="entry-meta mono">{formatLocalWithTz(entry.submitted_at)} · {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}</span>
-                  <span class="pills">
-                    {#if entry.is_late}
-                      <span
-                        class="pill pill-late"
-                        title={data.soft_deadline
-                          ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
-                          : 'Submitted past the soft deadline'}
-                      >Late</span>
-                    {/if}
-                    {#if entry.evaluation}
-                      <StatusPill status={entry.evaluation.result} />
-                    {/if}
-                  </span>
-                </div>
-                <div class="history-entry-body">
-                  <div class="file">
-                    <span class="file-kind mono" aria-hidden="true">PDF</span>
-                    <span class="file-name">
-                      <span class="name">{entry.filename}</span>
-                      <span class="size mono">{formatFileSize(entry.file_size)}</span>
-                    </span>
-                    <a class="dl" href="/api/submissions/{entry.submission_id}/file" download title="Download" aria-label="Download {entry.filename}">
-                      <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="3" x2="8" y2="10.6"/><polyline points="4.8,7.6 8,10.8 11.2,7.6"/><line x1="3.4" y1="13" x2="12.6" y2="13"/></svg>
-                    </a>
-                  </div>
-                  {#if entry.evaluation}
-                    {@const ev = entry.evaluation}
-                    <div class="feedback {ev.result === 'rejected' ? 'rejected' : ev.result === 'accepted' ? 'accepted' : 'needs-revision'}">
-                      <!-- Separators as string expressions: Svelte trims whitespace at block edges, and a
-                           bare " · score " as the first node of the {#if} would lose its leading space. -->
-                      <p class="feedback-meta">{evaluationResultLabel(ev.result)}{#if ev.score !== null}{' · score '}<span class="mono">{ev.score}/100</span>{/if}{' · '}{ev.evaluated_by_full_name}, <span class="mono">{formatLocalWithTz(ev.evaluated_at)}</span></p>
-                      <p class="feedback-text">{ev.feedback_text || 'No written feedback'}</p>
-                      {#if ev.has_feedback_file}
-                        <a class="feedback-file" href="/api/evaluations/{ev.eval_id}/feedback-file" download>Download feedback</a>
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-              </section>
-            {/each}
-          </section>
-        {/if}
       </div>
     {/if}
   </div>
@@ -626,10 +643,10 @@
 
 <style>
   /* The shared page column (--page-max), so the content starts under the logo
-     (6a Safari pass); the 760px reading measure of ref 1265-1266 is .mp-col,
-     left-aligned in it. Vertical padding is ref 1265's. */
+     (6a Safari pass). D68: .mp-col sets no width, so the sheet is as wide as the
+     player's; the assignment text keeps the player's 652px measure (below).
+     Vertical padding is ref 1265's. */
   .page { max-width: var(--page-max); margin: 0 auto; padding: 18px var(--space-3) 24px; }
-  .mp-col { max-width: 760px; }
   /* D56: the player's sheet declarations (with D62's 2px border). The cards
      inside keep their own border and fill and read as bordered sections. */
   .sheet { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; }
@@ -637,14 +654,15 @@
   .sheet > :last-child { margin-bottom: 0; }
   header { display: flex; flex-direction: column; }
   /* Breadcrumb — ref 1267. base.css paints links --primary; the crumbs read as chrome. */
-  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; /* ref 1267 */ flex-wrap: wrap; }
+  .breadcrumb { display: flex; align-items: baseline; /* D70: the player's; the bold last crumb is 14px */ gap: 8px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; /* ref 1267 */ flex-wrap: wrap; }
   /* 5(c): the crumbs are flex items, and `min-width:auto` refuses to shrink below their
      content — min-width:0 lets the cell shrink under a long unbroken course or block title
      and overflow-wrap:anywhere lets the token itself break. Without the pair a 320px viewport
      scrolls horizontally; the `.title-row h1` rule below is the same pairing for its sibling row. */
   .breadcrumb a { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
   .breadcrumb .sep { color: var(--faint); /* ref 1267 — separators are the token's documented role */ }
-  .breadcrumb .current { color: var(--text); min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
+  .breadcrumb .crumb { min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
+  .breadcrumb .current { color: var(--text); font-size: 14px; font-weight: 600; /* D70: the player's last crumb */ min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
   .title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; /* ref 1268 */ flex-wrap: wrap; /* 320px viewports: a long block title + the nowrap pill need it */ }
   .title-row h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; /* 5(c): a long unbreakable title shrinks instead of pushing the pill out (PageItem.svelte:80 precedent) */ }
   .deadlines { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; /* ref 1272 */ flex-wrap: wrap; /* 5(b): the mono aside drops under the sentence at narrow widths */ }
@@ -655,11 +673,21 @@
   /* Assignment card — ref 1277-1280. Its content is styled by content.css
      (`.prose`, Polish 2 D51); the box keeps ref 1279's metrics, so lists,
      quotes and headings inherit them. */
-  .assignment { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 16px 18px; margin-bottom: 14px; /* ref 1277 */ }
+  /* D69 (Polish 2 Safari pass): the body grid. The group and submit cards stand in a
+     300px column on the right, beside the assignment and the history below it; the
+     1fr history row takes any height the side column adds. The gap spaces the cards,
+     so they keep no margins. Without a history there is no second row (and no gap
+     below the assignment). At 880px and under it is one column in DOM order. */
+  .mp-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: "main side" "hist side"; grid-template-rows: auto 1fr; gap: 14px; align-items: start; }
+  .mp-body:not(.has-history) { grid-template-areas: "main side"; grid-template-rows: auto; }
+  @media (max-width: 880px) {
+    .mp-body { display: flex; flex-direction: column; align-items: stretch; /* the grid's start would shrink each card to its content */ }
+  }
+  .assignment { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 16px 18px; /* ref 1277 */ grid-area: main; }
   .assignment h2 { font-size: 14px; margin: 0 0 8px; /* ref 1278 */ }
-  .assignment-html { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--text-2); /* ref 1279 */ }
-  /* Group + submit grid — ref 1283-1285. auto-fit collapses to one column under ~600px (5(b)). */
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 14px; margin-bottom: 14px; /* ref 1283; 5(c): min(280px, 100%) so the track never exceeds the container — inside the Polish 2 sheet a 320px viewport leaves well under 280px, so the min() is what keeps one column from overflowing the page */ }
+  .assignment-html { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--text-2); /* ref 1279 */ max-width: 652px; /* D68: the player's reading measure */ }
+  /* Group + submit cards — ref 1284-1285, stacked in the side column (D69). */
+  .mp-side { grid-area: side; display: flex; flex-direction: column; gap: 14px; }
   .group-block, .submit-block { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; /* ref 1284 */ }
   .group-block h2, .submit-block h2 { font-size: 13px; margin: 0 0 8px; /* ref 1285 */ }
   .members { font-size: 13px; line-height: 1.7; color: var(--text-2); margin: 0; /* ref 1286 */ }
@@ -687,6 +715,7 @@
   /* Precondition banner — mathion-visual-spec.md:289-293. */
   .precondition { border-left: 3px solid var(--primary); background: var(--surface-2); padding: 14px 16px; /* 5(b): no artboard box for this banner — matches the inline-state row, ref 1378 */ font-size: 13px; line-height: 1.55; color: var(--text-3); /* ref 1373 */ border-radius: var(--radius); }
   /* Submission history — ref 1297-1332, D6 uniform card per entry. */
+  .history { grid-area: hist; }
   .history h2 { font-size: 14px; margin: 0 0 10px; /* ref 1297 */ }
   .history-entry { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; margin-bottom: 10px; /* ref 1298 */ }
   .history-entry:last-child { margin-bottom: 0; }

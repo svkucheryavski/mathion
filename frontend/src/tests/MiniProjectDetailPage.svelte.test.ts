@@ -870,32 +870,57 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     expect(target.querySelector('.skeleton [data-testid="sr-live"]')).toBeNull();
   });
 
-  it('breadcrumb: Courses / {course} / {block title}, current crumb aria-current, separators hidden', async () => {
-    __test__setSlots({
-      slug: 'course-x', versionId: 1,
-      course: { id: 1, slug: 'course-x', name: 'Course X' },
-      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
-      blocks: [], state: { version_id: 1, items: {} }, miniProjectsByBlockId: {},
-    });
+  // D70 (user, Safari pass): the player's breadcrumb — course / "{n}. {block}" / the page
+  // in bold — with "Mini-project" as the last crumb (the mini-project is named by its block).
+  const seedCourse = (blocks: Array<{ id: number; title: string }>) => __test__setSlots({
+    slug: 'course-x', versionId: 1,
+    course: { id: 1, slug: 'course-x', name: 'Course X' },
+    version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
+    blocks: blocks.map((b, i) => ({ ...b, slug: `b${b.id}`, order: i * 2 + 1, info: '', info_html: '', sequences: [] })),
+    state: { version_id: 1, items: {} }, miniProjectsByBlockId: {},
+  });
+
+  it('D70 breadcrumb: {course} / {n}. {block} / Mini-project, as the player builds it', async () => {
+    seedCourse([{ id: 31, title: 'Intro' }, { id: 33, title: 'Final Project' }]);
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail());
     await mountPage();
     const nav = target.querySelector('nav.breadcrumb');
     expect(nav).not.toBeNull();
     expect(nav!.getAttribute('aria-label')).toBe('Breadcrumb');
-    const links = nav!.querySelectorAll('a');
-    expect(links.length).toBe(2);
-    expect(links[0].getAttribute('href')).toBe('/courses');
-    expect(links[0].textContent).toBe('Courses');
-    expect(links[1].getAttribute('href')).toBe('/courses/course-x');
-    expect(links[1].textContent).toBe('Course X');
-    const seps = nav!.querySelectorAll('.sep');
-    expect(seps.length).toBe(2);
-    seps.forEach((s) => { expect(s.getAttribute('aria-hidden')).toBe('true'); expect(s.textContent).toBe('/'); });
-    const current = nav!.querySelector('.current');
-    expect(current!.getAttribute('aria-current')).toBe('page');
-    expect(current!.textContent).toBe('Final Project');
+    // direct-child order: a → .sep → .crumb → .sep → .current (no "Courses" root)
+    const kids = Array.from(nav!.children);
+    expect(kids.map((k) => k.tagName === 'A' ? 'a' : k.className.split(' ')[0])).toEqual(['a', 'sep', 'crumb', 'sep', 'current']);
+    expect(kids[0].getAttribute('href')).toBe('/courses/course-x');
+    expect(kids[0].textContent!.trim()).toBe('Course X');
+    // Numbered by its place in the list, as the course page and the player number it.
+    expect(kids[2].textContent).toBe('2. Final Project');
+    nav!.querySelectorAll('.sep').forEach((sp) => { expect(sp.getAttribute('aria-hidden')).toBe('true'); expect(sp.textContent).toBe('/'); });
+    expect(kids[4].textContent).toBe('Mini-project');
+    expect(kids[4].getAttribute('aria-current')).toBe('page');
     expect(nav!.textContent).not.toContain('<');
-    expect(nav!.textContent).not.toContain('›');
+  });
+
+  it('D70 breadcrumb: the course link navigates in the app (no full page load)', async () => {
+    seedCourse([{ id: 33, title: 'Final Project' }]);
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail());
+    await mountPage();
+    const link = target.querySelector('nav.breadcrumb a') as HTMLAnchorElement;
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    // navigate() awaits the route guards before it pushes the path.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(window.location.pathname).toBe('/courses/course-x');
+  });
+
+  it('D70 breadcrumb: without the block in the course store, course / Mini-project', async () => {
+    seedCourse([]);
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail());
+    await mountPage();
+    const nav = target.querySelector('nav.breadcrumb');
+    expect(nav!.querySelector('.crumb')).toBeNull();
+    expect(nav!.querySelectorAll('.sep').length).toBe(1);
+    expect(nav!.querySelector('.current')!.textContent).toBe('Mini-project');
   });
 
   it('D56: the breadcrumb sits above the white sheet, which holds the header and everything below it', async () => {
@@ -910,8 +935,32 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     expect(sheet!.querySelector('header .title-row h1')).not.toBeNull();
     expect(sheet!.querySelector('header nav.breadcrumb')).toBeNull();
     expect(sheet!.querySelector('section.assignment')).not.toBeNull();
-    expect(sheet!.querySelector('.grid2')).not.toBeNull();
+    expect(sheet!.querySelector('.mp-side')).not.toBeNull();
     expect(sheet!.querySelector('section.history')).not.toBeNull();
+  });
+
+  it('D69: assignment, the side column (group, submit) and the history share one body grid, in reading order', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true, submission_history: [makeEntry({ submission_number: 1, evaluation: null })] }));
+    await mountPage();
+    const body = target.querySelector('.sheet > .mp-body');
+    expect(body).not.toBeNull();
+    // DOM order is the narrow (one-column) order and the reading order: the grid only
+    // moves the side column to the right on wide windows.
+    const kids = Array.from(body!.children).map((el) => el.className.split(' ')[0]);
+    expect(kids).toEqual(['assignment', 'mp-side', 'history']);
+    const side = body!.querySelector('.mp-side');
+    expect(side!.children[0].classList.contains('group-block')).toBe(true);
+    expect(side!.children[1].getAttribute('data-testid')).toBe('mp-submit-section');
+    expect(body!.classList.contains('has-history')).toBe(true);
+  });
+
+  it('D69: without a history the body grid has no history row', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ submission_history: [] }));
+    await mountPage();
+    const body = target.querySelector('.sheet > .mp-body');
+    expect(body).not.toBeNull();
+    expect(body!.querySelector('section.history')).toBeNull();
+    expect(body!.classList.contains('has-history')).toBe(false);
   });
 
   it('D56: the loading and error states stay on the ground (no sheet)', async () => {
@@ -1016,7 +1065,7 @@ describe('MiniProjectDetailPage 9c assignment + group (Slice-4 T3)', () => {
     expect(strong[0].textContent).toBe('Alice Student (you)');
     expect(card!.querySelector('.group-notice')!.textContent).toBe('This group is disabled — contact your teacher.');
     expect(card!.classList.contains('group-disabled')).toBe(false);
-    expect(card!.closest('.grid2')).not.toBeNull();
+    expect(card!.closest('.mp-side')).not.toBeNull();
   });
 
   it('single-member group sentence', async () => {
@@ -1027,12 +1076,12 @@ describe('MiniProjectDetailPage 9c assignment + group (Slice-4 T3)', () => {
     expect(members!.querySelector('strong')!.textContent).toBe('Alice Student (you)');
   });
 
-  it("submit section is the grid's second direct child with its seam and inner controls", async () => {
+  it("submit section is the side column's second direct child with its seam and inner controls", async () => {
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
     await mountPage();
     const submit = target.querySelector('[data-testid="mp-submit-section"]');
-    // Position, not mere ancestry: `closest('.grid2')` stayed green with the cells swapped.
-    const grid = target.querySelector('.grid2');
+    // Position, not mere ancestry: `closest('.mp-side')` stayed green with the cells swapped.
+    const grid = target.querySelector('.mp-side');
     expect(grid!.children[1]).toBe(submit);
     expect(submit!.classList.contains('can')).toBe(true);
     expect(submit!.querySelector('[data-testid="mp-file-input"]')).not.toBeNull();

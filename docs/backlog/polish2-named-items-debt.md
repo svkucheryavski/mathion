@@ -72,3 +72,12 @@ First verdict, before the fix pass: both ready to merge, 0 Critical / 0 Importan
 - QuestionCard (`QuestionCard.svelte:146`) shows the prompt in `--text`, the student view and the preview in `--text-2` (Opus m2).
 - Safari pass: the strip wrapped at 320px with the current item on an upper row; `.prose h1` inside a `<legend>`; the run tabs' hairline and the superuser dashboard's unfilled boxes on the new ground (Fable, Opus recommendations).
 - For the beta VoiceOver pass: `aria-current` on the strip's current ItemIcon (Fable recommendation).
+
+## Safari pass (2026-10-22/23)
+- Course files linked from content download instead of opening: `api/assets.py:189` returns `FileResponse(..., filename=...)`, which sends `Content-Disposition: attachment`. Pre-existing. A product question: should PDFs (and images) open inline in the new tab?
+- The strip's wrap at 320px could not be checked in Safari: no dev sequence has more than 4 items. Check it when one does.
+- D70 review: while `loadCourse` is in flight (or after it fails, which is non-fatal) the course crumb is an empty, focusable, unnamed link and the row reads "/ Mini-project"; after a cross-course navigation the old course's name shows briefly. The player has the same expression. Fix both: render the course link (and its separator) only when `currentCourse.value?.slug === courseSlug` (Opus m1, Fable m1).
+- Cmd/Ctrl-click on in-app links (the crumbs here, the player's, CourseCard, SequenceLink, AppHeader) is swallowed by the app-wide `preventDefault(); navigate()` idiom; middle-click still opens a tab. App-wide fix: return early on a modifier key or `button !== 0` (Opus m2).
+- `.breadcrumb a` has no hover colour; the player's crumbs darken to `--text` on hover (Fable m2).
+- `.mp-col` is now a wrapper with no CSS, so the D68 `none` row (no `max-width` on `.mp-col`) passes vacuously; drop the wrapper and the row (tests on `.page > .sheet`) or widen the row and pin the wrapper in the markup (Fable m3).
+- Gate comment at `visual-refresh-gate.sh:3656` still cites `.grid2{...}` as its example anchor; say "the former `.grid2`" (Opus m3, Fable m4).

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2282
+EXPECTED_CHECKS=2302
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3544,26 +3544,41 @@ else
   echo "PASS  MP page resolves to one hash ($mp[1])"
   N=MP; H=$mp[1]
   # 6a Safari pass (user, 2026-10-11): the page sits in the shared column, under the
-  # logo; the 760px reading measure (ref 1265-1266) is its inner .mp-col, left-aligned.
+  # logo. D68 (Polish 2 Safari pass): the sheet is as wide as the player's; the
+  # assignment text keeps the player's 652px reading measure.
   d '\.page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:18px var\(--space-3\) 24px'
-  d '\.mp-col' '' 'max-width:760px'
-  d '\.breadcrumb' '' 'gap:8px' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin-bottom:10px' 'flex-wrap:wrap'
+  none "MP .mp-col sets no width of its own; the sheet spans the column like the player's (D68)" "\\.mp-col\\.${H}\\{[^}]*max-width"
+  # D70 (Polish 2 Safari pass): the player's breadcrumb, course / "{n}. {block}" /
+  # Mini-project, with the player's baseline row and bold 14px last crumb.
+  d '\.breadcrumb' '' 'align-items:baseline' 'gap:8px' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin-bottom:10px' 'flex-wrap:wrap'
   chk "\.breadcrumb\.${H} a:where\(\.${H}\)"        'color:var\(--muted\)' 'min-width:0' 'overflow-wrap:anywhere'
   chk "\.breadcrumb\.${H} \.sep:where\(\.${H}\)"     'color:var\(--faint\)'
-  chk "\.breadcrumb\.${H} \.current:where\(\.${H}\)" 'color:var\(--text\)' 'min-width:0' 'overflow-wrap:anywhere'
+  chk "\.breadcrumb\.${H} \.crumb:where\(\.${H}\)"   'min-width:0' 'overflow-wrap:anywhere'
+  chk "\.breadcrumb\.${H} \.current:where\(\.${H}\)" 'color:var\(--text\)' 'font-size:14px' 'font-weight:600' 'min-width:0' 'overflow-wrap:anywhere'
   d '\.title-row' '' 'gap:12px' 'margin-bottom:6px' 'flex-wrap:wrap'
   chk "\.title-row\.${H} h1:where\(\.${H}\)" 'flex:1' 'min-width:0' 'overflow-wrap:anywhere'
   d '\.deadlines' '' 'gap:14px' 'margin-bottom:18px' 'flex-wrap:wrap'
   d '\.deadline' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin:0'
   d '\.deadline-resub' '' 'color:var\(--status-needs-revision-fg\)'
   d '\.deadline-soft' '' 'font-size:11\.5px'
-  d '\.assignment' '' 'padding:16px 18px' 'margin-bottom:14px' 'border:1px solid var\(--border\)'
+  # D69 (Polish 2 Safari pass): one body grid under the header. Wide windows put the
+  # group and submit cards in a 300px right column beside the assignment and the
+  # history; at 880px and under it is one column in DOM order (assignment, group,
+  # submit, history). The grid gap spaces the cards, so they keep no margins.
+  d '\.mp-body' '' 'display:grid' 'grid-template-columns:minmax\(0,1fr\) 300px' 'grid-template-areas:"main side" "hist side"' 'grid-template-rows:auto 1fr' 'gap:14px' 'align-items:start'
+  d '\.mp-body' ':not\(\.has-history\)' 'grid-template-areas:"main side"' 'grid-template-rows:auto'
+  # stretch: the wide grid's align-items:start would shrink each stacked card to its content.
+  chk "@media \(max-width: 880px\)\{\.mp-body\.${H}" 'display:flex' 'flex-direction:column' 'align-items:stretch'
+  d '\.mp-side' '' 'grid-area:side' 'display:flex' 'flex-direction:column' 'gap:14px'
+  d '\.history' '' 'grid-area:hist'
+  none "MP .grid2 is gone (D69: the side column replaces it)" "\.grid2\.${H}"
+  none "MP the body cards keep no bottom margin (the grid gap spaces them, D69)" "\.(assignment|mp-side)\.${H}\{[^}]*margin-bottom"
+  d '\.assignment' '' 'padding:16px 18px' 'grid-area:main' 'border:1px solid var\(--border\)'
   chk "\.assignment\.${H} h2:where\(\.${H}\)" 'font-size:14px' 'margin:0 0 8px'
   # The assignment's content is styled by content.css (Polish 2 D51); the box
   # keeps ref 1279's metrics, which the content inherits.
-  d '\.assignment-html' '' 'overflow-wrap:anywhere' 'font-size:14px' 'line-height:1\.65' 'color:var\(--text-2\)'
+  d '\.assignment-html' '' 'overflow-wrap:anywhere' 'font-size:14px' 'line-height:1\.65' 'color:var\(--text-2\)' 'max-width:652px'
   none "MP .assignment-html has no element rules left (content.css styles them)" "\.assignment-html\.${H} [a-z]"
-  d '\.grid2' '' 'display:grid' 'grid-template-columns:repeat\(auto-fit,minmax\(min\(280px,100%\),1fr\)\)' 'gap:14px' 'margin-bottom:14px'
   chk "\.group-block\.${H},\.submit-block\.${H}"  'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'padding:14px 16px'
   chk "\.group-block\.${H} h2:where\(\.${H}\),\.submit-block\.${H} h2:where\(\.${H}\)" 'font-size:13px' 'margin:0 0 8px'
   d '\.members' '' 'font-size:13px' 'line-height:1\.7' 'color:var\(--text-2\)' 'margin:0'
@@ -4363,8 +4378,8 @@ if [[ $ftok -eq 0 ]]; then echo "PASS  the eight --focus-* tokens are each defin
 else echo "FAIL  the eight --focus-* tokens are each defined once in the theme"; fail=1; fi
 # 6a Safari pass (user, 2026-10-11): one page width for the whole site, 1140px
 # (the teacher drawings' content: 1180 artboard minus 20px gutters). Every page
-# column reads the token; reading measures (652px quiz and page items, 760px
-# mini-project text) keep their own limits.
+# column reads the token; reading measures (652px quiz and page items, and the
+# mini-project assignment text, D68) keep their own limits.
 if [[ $(grep -cE '^[[:space:]]*--page-max:[[:space:]]*1140px;' src/styles/theme-default.css) -eq 1 ]]; then
   echo "PASS  --page-max is 1140px, defined once in the theme"
 else echo "FAIL  --page-max is 1140px, defined once in the theme"; fail=1; fi
