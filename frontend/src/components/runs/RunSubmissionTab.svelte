@@ -326,7 +326,11 @@
     font-size: var(--control-font);
   }
 
-  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* D74 (as D73 in RunProgressTab): keyboard focus scrolls a cell into view beside
+     the pinned Group column (12rem), not under it. +4px: the status and header
+     buttons keep the global outset ring (2px at a 2px offset), and focus scrolling
+     aligns the button's box, not its ring. */
+  .table-scroll { overflow-x: auto; scroll-padding-left: calc(12rem + 4px); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   /* Natural width (Group 12rem, one-line headers): a run with many mini-projects
      scrolls sideways inside .table-scroll instead of squeezing the columns. */
   .submission-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }

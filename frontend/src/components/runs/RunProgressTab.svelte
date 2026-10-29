@@ -460,7 +460,9 @@
   .hl-sw.s3 { background: var(--heat-3); }
   .hl-sw.s4 { background: var(--heat-4); }
 
-  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* D73: keyboard focus scrolls a cell into view beside the pinned Student + Group
+     columns (14rem + 6rem), not under them. */
+  .table-scroll { overflow-x: auto; scroll-padding-left: 20rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .progress-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
   .progress-grid th, .progress-grid td { padding: 0; border-bottom: 1px solid var(--border-soft); text-align: left; }
   .progress-grid thead th { background: var(--surface-2); color: var(--text-3); font-size: 12px; font-weight: 600; }

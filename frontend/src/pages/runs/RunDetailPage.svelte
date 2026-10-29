@@ -547,7 +547,7 @@
     border-radius: var(--radius);
     font-size: 13px;
   }
-  .run-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--border); }
+  .run-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--border-ground); /* D71: drawn on the page ground */ }
   .run-tab {
     padding: 9px 12px;
     background: transparent;
@@ -560,7 +560,9 @@
     font-weight: 500;
     cursor: pointer;
   }
-  .run-tab:hover { color: var(--text); }
+  /* D72: a hovered tab shows its 2px line in the hairline's colour; only the selected
+     tab's line is dark. The selected rule below must stay after this one. */
+  .run-tab:hover { color: var(--text); border-bottom-color: var(--border-ground); }
   .run-tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--primary); }
   .run-panel { padding: 16px 0; }
 </style>

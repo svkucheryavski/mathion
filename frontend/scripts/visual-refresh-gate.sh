@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2302
+EXPECTED_CHECKS=2309
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -498,6 +498,10 @@ else:
 # D63 (user, 2026-10-19, Task 3 look review): one relative heading margin,
 # `1em 0 .5em`, for all six levels and both scales; the h1-h3, h4-h6 and
 # compact heading rules merged into it (26 rules).
+# D71 (user, 2026-10-23, Safari pass): the :root hash moved (7bfdd12a ->
+# 8b9acfd5): +--border-ground #C9CED7, the line colour for lines drawn on the
+# page ground (the run tabs' hairline). The ONLY change (dropping it
+# reproduces 7bfdd12a).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -528,7 +532,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', '7bfdd12a'),
+    ('', ':root', '8b9acfd5'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -4604,7 +4608,16 @@ own run-tabs RunDetailPage.svelte
 uniq1 run-tabs
 if [[ -n $REPLY ]]; then
   N=RunDetailPage; H=$REPLY
+  # D71 (Polish 2 Safari pass, user): the line under the tabs is drawn on the page
+  # ground, where --border (a card edge) all but vanishes; it reads --border-ground.
+  d '\.run-tabs' '' 'border-bottom:1px solid var\(--border-ground\)'
+  check "theme --border-ground is #C9CED7 (D71)" ":root\{[^}]*--border-ground: #C9CED7;"
   d '\.run-tab' '' 'border-bottom:2px solid transparent' 'color:var\(--muted\)'
+  # D72 (user): a hovered tab shows the 2px line in the hairline's colour; only the
+  # selected tab is dark. The selected rule must come AFTER the hover rule (same
+  # specificity), so a hovered selected tab keeps --primary.
+  d '\.run-tab' ':hover' 'color:var\(--text\)' 'border-bottom-color:var\(--border-ground\)'
+  check "RunDetailPage the selected-tab rule follows the hover rule (D72)" "\.run-tab\.${H}:hover\{[^}]*\}\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\]"
   chk "\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'color:var\(--text\)' 'border-bottom-color:var\(--primary\)'
   d '\.run-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)'
   d '\.run-meta' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
@@ -4693,6 +4706,9 @@ if [[ -n $REPLY ]]; then
   # offsets line up; the header rules are qualified by .progress-grid so they
   # outrank `.progress-grid thead th` / `.progress-grid th` (padding 0).
   d '\.progress-grid' '' 'width:max-content'
+  # D73 (Polish 2 Safari pass): keyboard focus scrolls a cell into view beside the
+  # pinned Student + Group columns (14rem + 6rem), not under them.
+  d '\.table-scroll' '' 'scroll-padding-left:20rem'
   chk "\.progress-grid\.${H} \.block-header:where\(\.${H}\)" 'padding:6px 12px' 'font-family:var\(--font-mono\)' 'text-transform:uppercase' 'white-space:nowrap'
   chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'white-space:nowrap'
   # The Student column is exactly 14rem (the sticky Group's offset): the name box
@@ -4714,6 +4730,11 @@ if [[ -n $REPLY ]]; then
   d '\.mp-line2' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)' 'white-space:nowrap'
   # Natural width (Group 12rem, one-line headers): the grid scrolls inside its card.
   d '\.submission-grid' '' 'width:max-content'
+  # D74 (Polish 2 Safari pass, as D73): keyboard focus scrolls a cell into view
+  # beside the pinned Group column (12rem), not under it. +4px: the status and
+  # header buttons keep the global outset ring (2px at a 2px offset), and focus
+  # scrolling aligns the button's box, not its ring.
+  d '\.table-scroll' '' 'scroll-padding-left:calc\(12rem ?\+ ?4px\)'
   d '\.chip-disabled' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
   # 9a centres the mini-project headers and badges; qualified so they outrank
   # `.submission-grid th, .submission-grid td { text-align: left }`.

@@ -32,6 +32,7 @@
   --border-strong: #DDE1E9;   /* interactive controls */
   --border-soft: #F0F1F4;     /* row separators inside a card */
   --border-faint: #EDEFF2;    /* disabled control borders */
+  --border-ground: #C9CED7;   /* structural lines drawn on the page ground (--bg), e.g. under the run tabs (D71); the editor's focus-by-depth shades use --focus-line instead */
 
   /* --- accent --- */
   --primary: #3F5C77;         /* steel blue */
