@@ -151,6 +151,7 @@
       <!-- `{@const}` must stay an immediate {#each} child — Svelte rejects it
            inside a plain element. `r` is still in scope within .q-block. -->
       {@const r = revealById?.[q.id] ?? null}
+      {#if i > 0}<hr class="q-sep" />{/if}
       <div class="q-block">
         <span class="q-counter mono">Question {i + 1} of {item.questions.length}</span>
         {#if q.type === 'single_choice'}
@@ -208,22 +209,27 @@
 
 <style>
   /* The article gap is the sole vertical-rhythm owner, so every surviving
-     child margin below is zeroed against it. */
-  /* max-width 652px = ref 2120's measure ROUNDED DOWN from 652.8px (68ch at the
-     reference document's 16px root, in the IBM Plex Sans its :14 font link
-     loads; see the derivation on SequencePlayer's .content). Not "exactly the
-     reference measure" — 0.8px short of it, which is why this says rounded. This article has
-     `padding:0`, so 652px IS the content measure — no box-sizing adjustment
-     needed, unlike PageItem. Kept as a px literal on purpose: re-expressing it as
-     `68ch` re-introduces the 14px-vs-16px shrink this value exists to correct. */
+     child margin below is zeroed against it — except the separator's 8px,
+     which adds to the gap on purpose (D75). */
   .quiz {
     display: flex;
     flex-direction: column;
     gap: 16px; /* ref 2120 */
     align-items: stretch;
     padding: 0;
-    max-width: 652px;
   }
+  /* The text measure. D75: it sits on each direct child, not the article, so
+     the separator below can span the whole sheet while every block keeps
+     652px; :global so EmptyState's root keeps it too.
+     652px = ref 2120's measure ROUNDED DOWN from 652.8px (68ch at the
+     reference document's 16px root, in the IBM Plex Sans its :14 font link
+     loads; see the derivation on SequencePlayer's .content). Not "exactly the
+     reference measure" — 0.8px short of it, which is why this says rounded. The
+     article has `padding:0`, so 652px IS the content measure — no box-sizing
+     adjustment needed, unlike PageItem. Kept as a px literal on purpose:
+     re-expressing it as `68ch` re-introduces the 14px-vs-16px shrink this value
+     exists to correct. */
+  .quiz > :global(*) { max-width: 652px; }
   .quiz h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
   /* Counter + question + explanation read as one unit. */
   .q-block {
@@ -231,27 +237,22 @@
     flex-direction: column;
     gap: 6px; /* Constraint 5(b) no-ref — the tight intra-group step, as on the player's item strip (ref 2112) */
   }
-  /* GROUP BOUNDARY — a deliberate extension of the deviation spec:124 already
-     records. The reference shows exactly ONE question per quiz card, with the
-     counter inline on the h2 baseline, so it never had to express how two
-     questions separate. This surface renders them all at once, where the
-     article's 16px gap against .q-block's 6px left only 10px of
-     differentiation and six questions read as one wall (browser pass on the
-     real stack, 2026-09-04). The hairline is what the gap alone could not say.
-     `+` not `:not(:first-child)`: only a q-block FOLLOWING another gets the
-     rule, so the submit row and result card below are untouched. */
-  .q-block + .q-block {
-    /* --border, NOT --border-faint: theme-default.css:22 documents that token as
-       "disabled control borders", and all 12 of its other uses in src/ are
-       exactly that — including `.opt.locked .ctl` and `.opt.reveal-neutral .ctl`,
-       which paint it on every option ring in THIS view once the quiz locks, so a
-       divider drawn in it is the colour this design uses to mean "disabled".
-       --border-soft is the semantically-labelled "row separators inside a card",
-       but it is LIGHTER (on the white player sheet: --border 1.26:1,
-       --border-faint 1.15:1, --border-soft 1.13:1), which works against the
-       very complaint this rule answers. --border is also the sheet's own edge. */
-    border-top: 1px solid var(--border);
-    padding-top: 20px; /* Constraint 5(b) no-ref — the group-boundary step, above the 16px article gap */
+  /* GROUP BOUNDARY. The reference shows ONE question per quiz card, so it never
+     had to say how two questions separate; this surface renders them all at
+     once. D75 (Safari pass): the old 1px hairline over the 652px measure was too
+     faint, so the separator is now the sheet's own frame — 2px --border — run
+     edge to edge: the negative inline margin cancels the player's sheet padding
+     (--sheet-pad-x, SequencePlayer's .content), so the line meets the frame on
+     both sides. Outside the player the fallback 0px keeps it inside the box.
+     The 8px margins add to the article's 16px gap: 24px above and below.
+     --border, NOT --border-faint: that token means "disabled control" here (it
+     paints every locked option ring in this view). */
+  .quiz > .q-sep {
+    border: 0;
+    border-top: 2px solid var(--border);
+    height: 0;
+    margin: 8px calc(-1 * var(--sheet-pad-x, 0px));
+    max-width: none;
   }
   /* 12.5px, NOT ref 2123's 11.5px. In the reference the counter sits beside a
      16px h2, where 11.5px reads as a subordinate annotation on the same line.

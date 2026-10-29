@@ -337,8 +337,9 @@
      value: that is the round trip that caused this. */
   /* D56: the white reading sheet. The padding is artboard 2c's card (measured
      above); the crumbs, the strip and the footer stay on the ground. D62: a 2px
-     border, shared with the current item's tab. */
-  .content { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; }
+     border, shared with the current item's tab. --sheet-pad-x repeats the
+     inline padding for QuizItem's edge-to-edge separator (D75); keep the two equal. */
+  .content { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; --sheet-pad-x: 20px; }
   footer {
     display: flex;
     justify-content: space-between;

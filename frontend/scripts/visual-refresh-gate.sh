@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2309
+EXPECTED_CHECKS=2314
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -416,6 +416,12 @@ GLOBAL_ALLOW = {
     # so the rule matches only while VersionEditPage is mounted; no quiz
     # question renders under it (the editor never mounts SequencePlayer).
     ('src/pages/editor/VersionEditPage.svelte', 'body'),
+    # Polish 2 D75: `.quiz > :global(*) { max-width: 652px }` -- the quiz measure
+    # moved from the article onto each DIRECT child so the separator can span the
+    # sheet. Child-combinator scoped under the hashed `.quiz`; the T3 question
+    # components render INSIDE a .q-block, a level below, so it never reaches
+    # them. :global so EmptyState's root (the empty-quiz branch) keeps the cap.
+    ('src/components/items/QuizItem.svelte', '*'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -807,8 +813,12 @@ qh=(${(f)"$(grep -ohE '\.quiz\.svelte-[a-z0-9]+' $CSS | sort -u)"})
 if [[ ${#qh[@]} -eq 1 ]]; then
   echo "PASS  .quiz resolves to exactly one hash ($qh[1]) -- QuizItem-unique"
   QS="${qh[1]//./\\.}"
-  check "quiz measure max-width:652px"          "${QS}\{([^}]*;)?max-width:652px[;}]"
-  check "quiz padding:0 (so 652px IS the text)" "${QS}\{([^}]*;)?padding:0[;}]"
+  # D75: the measure moved from the article onto each CHILD, so the question
+  # separator can span the sheet while every block keeps 652px.
+  check "quiz measure max-width:652px on each child" "${QS}>\*\{([^}]*;)?max-width:652px[;}]"
+  check "quiz separator lifts the child measure"     "${QS}>\.q-sep:where\(\.svelte-[a-z0-9]+\)\{([^}]*;)?max-width:none[;}]"
+  none  "quiz article carries no max-width of its own" "${QS}\{[^}]*max-width"
+  check "quiz padding:0 (its children's 652px IS the text)" "${QS}\{([^}]*;)?padding:0[;}]"
 else
   echo "FAIL  .quiz is not dist-unique (${#qh[@]} hashes: $qh)"; fail=1
 fi
@@ -845,12 +855,17 @@ else
 fi
 
 # --- the group divider: --border, never the disabled-control token -----------
-check "q-block divider uses var(--border)" \
-      '\.q-block\.svelte-[a-z0-9]+\+\.q-block:where\(\.svelte-[a-z0-9]+\)\{([^}]*;)?border-top:1px solid var\(--border\)[;}]'
-check "q-block divider padding-top:20px" \
-      '\.q-block\.svelte-[a-z0-9]+\+\.q-block:where\(\.svelte-[a-z0-9]+\)\{([^}]*;)?padding-top:20px[;}]'
-none  "q-block divider does NOT use --border-faint (the disabled-control token)" \
-      '\.q-block\.svelte-[a-z0-9]+\+\.q-block:where\(\.svelte-[a-z0-9]+\)\{[^}]*var\(--border-faint\)'
+# D75: an hr.q-sep between questions, 2px like the sheet's frame, running edge
+# to edge (the negative inline margin is the player's --sheet-pad-x).
+check "quiz separator uses 2px var(--border), the sheet frame" \
+      '\.quiz\.svelte-[a-z0-9]+>\.q-sep:where\(\.svelte-[a-z0-9]+\)\{([^}]*;)?border-top:2px solid var\(--border\)[;}]'
+check "quiz separator bleeds by the sheet padding, 8px above and below" \
+      '\.quiz\.svelte-[a-z0-9]+>\.q-sep:where\(\.svelte-[a-z0-9]+\)\{([^}]*;)?margin:8px calc\(-1 ?\* ?var\(--sheet-pad-x, ?0px\)\)[;}]'
+none  "quiz separator does NOT use --border-faint (the disabled-control token)" \
+      '\.q-sep[^{]*\{[^}]*var\(--border-faint\)'
+none  "the old q-block hairline is gone" '\.q-block\.svelte-[a-z0-9]+\+\.q-block'
+check "player .content defines --sheet-pad-x:20px = its inline padding" \
+      "\.content\.${SP_H}\{([^}]*;)?--sheet-pad-x: ?20px[;}]"
 
 # --- both positional counters at 12.5px -- the PAIRING is the point ----------
 check "quiz .q-counter is 12.5px"           '\.q-counter\.svelte-[a-z0-9]+\{([^}]*;)?font-size:12\.5px[;}]'
@@ -952,7 +967,8 @@ TARGETS = [
     ('player .content',       r'\.content\.' + re.escape(SP_H) + r'$', 1),
     ('quiz .q-counter',       r'\.q-counter\.svelte-[a-z0-9]+$', 1),
     ('player .counter',       r'\.counter\.svelte-[a-z0-9]+$', 1),
-    ('q-block divider',       r'\.q-block\.svelte-[a-z0-9]+\+\.q-block:where\(\.svelte-[a-z0-9]+\)$', 1),
+    ('quiz child measure',    r'\.quiz\.svelte-[a-z0-9]+>\*$', 1),
+    ('quiz separator',        r'\.quiz\.svelte-[a-z0-9]+>\.q-sep:where\(\.svelte-[a-z0-9]+\)$', 1),
     # T5 item components
     ('video-item article',    r'\.video-item\.svelte-[a-z0-9]+$', 1),
     ('video-item h2',         r'\.video-item\.svelte-[a-z0-9]+ h2:where\(\.svelte-[a-z0-9]+\)$', 1),
@@ -1355,7 +1371,7 @@ const SPEC = {
   "SequencePlayer.svelte":  { nodes: BASE.concat("EachBlock", "RenderTag", "SnippetBlock"),
                               tags: ["a", "div", "footer", "h1", "main", "nav", "p", "span"] },
   "QuizItem.svelte":        { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
-                              tags: ["article", "div", "h2", "p", "span", "strong"],
+                              tags: ["article", "div", "h2", "hr", "p", "span", "strong"],
                               attachOn: { "div:exp.prose.compact": "{@attach externalLinks(r.explanation_html)}" } },
   "SingleChoiceQuestion.svelte": { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
                               tags: ["div", "fieldset", "input", "label", "legend",
@@ -1528,7 +1544,8 @@ const SIG = {
      "span:next-label[class=\"next-label\"]", "span:next-title[class=\"next-title\"]", "#else:"],
   "QuizItem.svelte":
     ["#if:", "article:quiz[class=\"quiz\"]", "h2:", "EmptyState:[title]", "#else:",
-     "article:quiz[class=\"quiz\"]", "h2:", "#each:", "div:q-block[class=\"q-block\"]",
+     "article:quiz[class=\"quiz\"]", "h2:", "#each:", "#if:", "hr:q-sep[class=\"q-sep\"]",
+     "div:q-block[class=\"q-block\"]",
      "span:q-counter.mono[class=\"q-counter mono\"]", "#if:",
      "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
@@ -2748,7 +2765,8 @@ WANT = [
     # with it: each would run parallel to the sheet's edge.
     ('.content' + W,
      'background:var(--surface);border:2px solid var(--border);'
-     'border-radius:var(--radius-lg);padding:16px 20px 20px;min-height:200px'),
+     'border-radius:var(--radius-lg);padding:16px 20px 20px;min-height:200px;'
+     '--sheet-pad-x: 20px'),
     ('footer' + W,
      'display:flex;justify-content:space-between;align-items:center;margin-top:24px'),
     ('.next-label' + W, 'white-space:nowrap;min-width:0'),
@@ -3102,7 +3120,7 @@ fi
 
 # --- (o) T4: QuizItem shell --------------------------------------------------
 # WHY THIS EXISTS (whole-branch review C1): T4 was covered only by section (g)'s
-# greps, which pin the `.quiz` measure, the `.q-block` divider and the two
+# greps, which pin the `.quiz` measure, the question separator and the two
 # positional counters — four values out of a twelve-rule component. `.submit-row`,
 # `.hint`, `.result`, `.meta` and `.exp` had NO pin at all, so the second lane
 # deleted `.result`'s border and background outright (the evaluation panel
@@ -3164,14 +3182,15 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 
 # Stated in FULL. The values a reviewer would otherwise "tidy":
 #
-#   `.quiz` max-width is 652px, NOT 68ch. The handoff sets no root font-size, so
+#   The 652px measure sits on `.quiz > *` (D75: the article itself is uncapped
+#   so the separator can span the sheet). It is 652px, NOT 68ch. The handoff sets no root font-size, so
 #   its `ch` resolves against 16px while this app sets 14px on BODY — an
 #   inherit-relative unit therefore shrinks the measure 12.5% here and nowhere in
 #   the reference. 652px is that measure expressed absolutely.
 #   `align-items: stretch` is load-bearing on a COLUMN flex: without it the
-#   children shrink to content and the divider hairline stops spanning the block.
+#   children shrink to content and the edge-to-edge separator stops bleeding.
 #
-#   `.q-block + .q-block` takes `--border`, never `--border-faint` — section (g)
+#   `.quiz > .q-sep` takes `--border`, never `--border-faint` — section (g)
 #   states the same pin as a `none` grep, and it is repeated here because this
 #   inventory would otherwise accept the swap silently.
 #
@@ -3192,11 +3211,13 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 W = '.%s' % h
 WANT = [
     ('.quiz' + W,
-     'display:flex;flex-direction:column;gap:16px;align-items:stretch;padding:0;max-width:652px'),
+     'display:flex;flex-direction:column;gap:16px;align-items:stretch;padding:0'),
+    ('.quiz%s>*' % W, 'max-width:652px'),
     ('.quiz%s h2:where(%s)' % (W, W), 'font-size:16px;font-weight:600;color:var(--text)'),
     ('.q-block' + W, 'display:flex;flex-direction:column;gap:6px'),
-    ('.q-block%s+.q-block:where(%s)' % (W, W),
-     'border-top:1px solid var(--border);padding-top:20px'),
+    ('.quiz%s>.q-sep:where(%s)' % (W, W),
+     'border:0;border-top:2px solid var(--border);height:0;'
+     'margin:8px calc(-1 * var(--sheet-pad-x, 0px));max-width:none'),
     ('.q-counter' + W, 'font-size:12.5px;color:var(--muted)'),
     ('.submit-row' + W, 'display:flex;align-items:center;gap:12px'),
     ('.hint' + W, 'color:var(--muted);font-size:12.5px;margin:0'),

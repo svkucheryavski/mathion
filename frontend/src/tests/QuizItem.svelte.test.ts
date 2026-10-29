@@ -220,6 +220,24 @@ describe('QuizItem shell (T4)', () => {
     blocks.forEach((b) => expect(b.querySelector('.q-counter')).not.toBeNull());
   });
 
+  // D75: a full-width rule BETWEEN questions, as its own article child (the
+  // q-blocks keep the 652px measure, the rule spans the sheet).
+  it('puts one hr.q-sep between consecutive questions and none around them', () => {
+    seed({ 1: 0 });
+    render(quiz(1, 'Check yourself', 3));
+
+    const kids = [...host.querySelector('article.quiz')!.children].map((el) =>
+      [el.tagName.toLowerCase(), ...[...el.classList].filter((c) => !c.startsWith('svelte-'))].join('.'));
+    expect(kids).toEqual(['h2', 'div.q-block', 'hr.q-sep', 'div.q-block', 'hr.q-sep', 'div.q-block', 'div.submit-row']);
+  });
+
+  it('draws no separator for a one-question quiz', () => {
+    seed({ 1: 0 });
+    render(quiz(1, 'Check yourself', 1));
+
+    expect(host.querySelector('hr')).toBeNull();
+  });
+
   it('explains why Submit is disabled (enumerated (C)15)', () => {
     seed({ 1: 0 });
     render(quiz(1, 'Check yourself', 1));
