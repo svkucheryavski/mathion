@@ -20,6 +20,10 @@ type CourseSnapshot = {
   // guard checks `item` presence before mutating, so an empty map (e.g.,
   // 403-swallow case) is safe.
   miniProjectsByBlockId: Record<string, StudentMiniProjectListItem>;
+  // D80: the names of the teachers of the student's run (the course page's
+  // Teachers card). Reference only: any failed load leaves [] (no card) and
+  // never fails the course load.
+  teachers: string[];
 };
 
 export const currentCourse = $state<{ value: CourseSnapshot | null }>({ value: null });
@@ -56,10 +60,12 @@ export function loadCourse(slug: string): Promise<void> {
         `/api/courses/${encodeURIComponent(startedSlug)}/my-version`,
         { signal: controller.signal },
       );
-      const [content, state, miniProjectsByBlockId] = await Promise.all([
+      const [content, state, miniProjectsByBlockId, teachers] = await Promise.all([
         api.get<VersionContent>(`/api/versions/${my.version_id}/content`, { signal: controller.signal }),
         api.get<VersionState>(`/api/versions/${my.version_id}/state`, { signal: controller.signal }),
         fetchListSwallow403(startedSlug, controller.signal),
+        api.get<{ full_name: string }[]>(`/api/courses/${encodeURIComponent(startedSlug)}/my-teachers`, { signal: controller.signal })
+          .then((rows) => rows.map((r) => r.full_name), () => [] as string[]),
       ]);
       // Stale-write guard.
       if (inflight?.slug !== startedSlug) return;
@@ -71,6 +77,7 @@ export function loadCourse(slug: string): Promise<void> {
         blocks: content.blocks,
         state,
         miniProjectsByBlockId,
+        teachers,
       };
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return;

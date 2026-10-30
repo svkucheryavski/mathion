@@ -56,7 +56,7 @@ function seed(mapBlocks: (b: BlockContent[]) => BlockContent[] = (b) => b): void
       },
     ]),
     state: { version_id: 1, items: {} },
-    miniProjectsByBlockId: {},
+    miniProjectsByBlockId: {}, teachers: [],
   });
 }
 
@@ -211,7 +211,7 @@ describe('SequencePlayer footer (T1 / D4)', () => {
         },
       ],
       state: { version_id: 1, items: {} },
-      miniProjectsByBlockId: {},
+      miniProjectsByBlockId: {}, teachers: [],
     });
     seedRoute(100, '#item=1001'); // flatIndex 0; the next flat item (1002) has a whitespace-only title
     const el = render('100');

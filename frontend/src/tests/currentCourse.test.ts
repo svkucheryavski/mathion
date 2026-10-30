@@ -58,7 +58,7 @@ describe('stores/currentCourse', () => {
       version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
-      miniProjectsByBlockId: {},
+      miniProjectsByBlockId: {}, teachers: [],
     });
     expect(currentCourse.value).not.toBeNull();
     clearCourse();
@@ -78,7 +78,7 @@ describe('stores/currentCourse', () => {
           '42': { is_covered: false, time_spent: 0, last_visited_at: null, last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null },
         },
       },
-      miniProjectsByBlockId: {},
+      miniProjectsByBlockId: {}, teachers: [],
     });
     markItemCovered(42);
     expect(currentCourse.value!.state.items['42'].is_covered).toBe(true);
@@ -97,7 +97,7 @@ describe('stores/currentCourse', () => {
           '42': { is_covered: false, time_spent: 0, last_visited_at: null, last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null },
         },
       },
-      miniProjectsByBlockId: {},
+      miniProjectsByBlockId: {}, teachers: [],
     });
     recordItemVisit(42);
     expect(currentCourse.value!.state.items['42'].last_visited_at).not.toBeNull();
@@ -111,7 +111,7 @@ describe('stores/currentCourse', () => {
       version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
-      miniProjectsByBlockId: {},
+      miniProjectsByBlockId: {}, teachers: [],
     });
     expect(() => markItemCovered(999)).not.toThrow();
   });
@@ -300,5 +300,40 @@ describe('stores/currentCourse — loadCourse (E1)', () => {
       String(c[0]).includes('/api/courses/algebra/mini-projects'),
     );
     expect(mpCalls).toHaveLength(1);
+  });
+
+  // D80: the Teachers card's names load with the course; any failure leaves an
+  // empty list (the card is reference only and must never break the page).
+  function teachersFetch(teachers: () => Promise<Response>) {
+    return vi.fn((url: string) => {
+      if (url.includes('/my-version')) return Promise.resolve(jres(MY_VERSION_FIXTURE));
+      if (url.includes('/content')) return Promise.resolve(jres(CONTENT_FIXTURE));
+      if (url.includes('/state')) return Promise.resolve(jres(STATE_FIXTURE));
+      if (url.includes('/mini-projects')) return Promise.resolve(jres([]));
+      if (url.includes('/my-teachers')) return teachers();
+      return Promise.reject(new Error('unexpected URL: ' + url));
+    });
+  }
+
+  it('D80: loads the run\'s teacher names with the course', async () => {
+    const fetchMock = teachersFetch(() => Promise.resolve(jres([{ full_name: 'Anna Larsen' }, { full_name: 'Zed Olsen' }])));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await loadCourse('algebra');
+
+    expect(currentCourse.value?.teachers).toEqual(['Anna Larsen', 'Zed Olsen']);
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/courses/algebra/my-teachers'))).toHaveLength(1);
+  });
+
+  it('D80: a failed teachers load (5xx or network) leaves an empty list; the course still loads', async () => {
+    vi.stubGlobal('fetch', teachersFetch(() => Promise.resolve(jres({ detail: 'Server error' }, 500))));
+    await loadCourse('algebra');
+    expect(currentCourse.value).not.toBeNull();
+    expect(currentCourse.value?.teachers).toEqual([]);
+
+    clearCourse();
+    vi.stubGlobal('fetch', teachersFetch(() => Promise.reject(new TypeError('network'))));
+    await loadCourse('algebra');
+    expect(currentCourse.value?.teachers).toEqual([]);
   });
 });

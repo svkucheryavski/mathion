@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2371
+EXPECTED_CHECKS=2405
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -515,6 +515,9 @@ else:
 # D77 (user, 2026-10-30, Safari pass): 1ee5fb64 -> e7cf7114: +--row-hover
 # #F8F9FC, the course page rows' hover fill. The ONLY change (dropping it
 # reproduces 1ee5fb64).
+# D80 (user, 2026-10-30): e7cf7114 -> 42962132: +--due-near #C2410C, the orange
+# of a course-page deadline 7-13 days away. The ONLY change (dropping it
+# reproduces e7cf7114).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -545,7 +548,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', 'e7cf7114'),
+    ('', ':root', '42962132'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -3608,7 +3611,10 @@ else
   d '\.deadlines' '' 'gap:14px' 'margin-bottom:18px' 'flex-wrap:wrap'
   d '\.deadline' '' 'font-size:12\.5px' 'color:var\(--muted\)' 'margin:0'
   d '\.deadline-resub' '' 'color:var\(--status-needs-revision-fg\)'
-  d '\.deadline-soft' '' 'font-size:11\.5px'
+  # D80 (user): a student sees ONE deadline; the soft aside is gone and a passed
+  # deadline with the hidden window still open reads "Overdue since" in crimson.
+  d '\.deadline-overdue' '' 'color:var\(--danger\)'
+  none "MiniProjectDetailPage: no soft-deadline aside (D80)" "\.deadline-soft\.${H}"
   # D69 (Polish 2 Safari pass): one body grid under the header. Wide windows put the
   # group and submit cards in a 300px right column beside the assignment and the
   # history; at 880px and under it is one column in DOM order (assignment, group,
@@ -5608,14 +5614,16 @@ uniq1 all-toggle
 if [[ -n $REPLY ]]; then
   N=CourseView; H=$REPLY
   d '\.info' '' 'color:var\(--muted\)' 'background:var\(--surface-ground\)' 'border:1px solid var\(--border-box\)' 'border-radius:var\(--radius-lg\)' 'padding:12px 16px'
-  # D78 (user, 2026-10-30, Safari pass, layout A): blocks left; the progress
-  # card and the info in a 300px right column; one column under 880px in DOM
-  # order progress, blocks, info. The old info|progress row (.top) is gone.
-  d '\.cv-body' '' 'display:grid' 'grid-template-columns:minmax\(0,1fr\) 300px' 'grid-template-areas:"blocks prog" "blocks info"' 'grid-template-rows:auto 1fr' 'gap:14px' 'align-items:start'
-  d '\.cv-body' ':not\(\.has-info\)' 'grid-template-areas:"blocks prog"' 'grid-template-rows:auto'
-  d '\.cv-prog' '' 'grid-area:prog'
-  d '\.cv-blocks' '' 'grid-area:blocks' 'min-width:0'
-  chk "\.cv-body\.${H}>\.info:where\(\.${H}\)" 'grid-area:info' 'margin:0'
+  # D78 (user, 2026-10-30, Safari pass, layout A): blocks left; a 300px right
+  # column; one column under 880px in DOM order. The old info|progress row
+  # (.top) is gone. D80 (user): the column packs progress, deadlines, teachers
+  # and info in DOM order -- each pinned to column 2 and auto-placed, the
+  # blocks spanning four rows whose last is 1fr (extra height below the cards).
+  d '\.cv-body' '' 'display:grid' 'grid-template-columns:minmax\(0,1fr\) 300px' 'grid-template-rows:auto auto auto 1fr' 'gap:14px' 'align-items:start'
+  chk "\.cv-prog\.${H},\.cv-dl\.${H},\.cv-tch\.${H},\.cv-body\.${H}>\.info:where\(\.${H}\)" 'grid-column:2'
+  d '\.cv-blocks' '' 'grid-column:1' 'grid-row:1 / span 4' 'min-width:0'
+  chk "\.cv-body\.${H}>\.info:where\(\.${H}\)" 'margin:0'
+  none "CourseView: no grid areas or .has-info left (D80)" "grid-template-areas:\"blocks|\.has-info\.${H}"
   chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}" 'display:flex' 'flex-direction:column' 'align-items:stretch'
   d '\.all-toggle' '' 'margin:0 0 4px'
   none "CourseView: the old info|progress row is gone (D78)" "\.top\.${H}"
@@ -5627,7 +5635,34 @@ if [[ -n $REPLY ]]; then
   chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}\{[^}]*\}\.cv-strip\.${H}" 'display:flex'
   # Same specificity both ways, so ORDER decides: the 880px switch must follow
   # the base rules, or a phone shows the text toggle and no progress (Opus r1 m2).
+  # D80: the phone row left the blocks column; with no deadlines card between
+  # them it keeps D78's 4px to the first block (the row's own 4px margin; the
+  # -14px cancels the column's 14px gap; Fable r1 m2).
+  chk "@media \(max-width: ?880px\)\{[^@]*\.cv-strip\.${H}\+\.cv-blocks:where\(\.${H}\)" 'margin-top:-14px'
   check "CourseView: the 880px switch follows the base .all-toggle/.cv-strip rules (D78)" "\.all-toggle\.${H}\{display:flex[^}]*\}\.cv-strip\.${H}\{display:none[^}]*\}.*@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}\{display:none\}\.cv-strip\.${H}\{display:flex\}"
+fi
+# D80 (user): the course page's side cards copy the progress card's look; the
+# deadline line takes an urgency colour from its one date (crimson 0-6 days and
+# overdue, orange 7-13 -- the new --due-near -- grey from 14).
+check "theme --due-near is #C2410C (D80)" ":root\{[^}]*--due-near: #C2410C;"
+uniq1 cdl
+if [[ -n $REPLY ]]; then
+  N=CourseDeadlines; H=$REPLY
+  d '\.cdl' '' 'box-sizing:border-box' 'padding:10px 14px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  chk "h2\.${H}" 'margin:0 0 6px' 'font-size:11\.5px' 'font-weight:400' 'color:var\(--muted\)'
+  chk "li\.${H}\+li:where\(\.${H}\)" 'margin-top:8px' 'padding-top:8px' 'border-top:1px solid var\(--border-soft\)'
+  chk "a\.${H}" 'color:var\(--text\)' 'text-decoration:none' 'overflow-wrap:anywhere'
+  d '\.when' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.when\.soon' '' 'color:var\(--danger\)'
+  d '\.when\.near' '' 'color:var\(--due-near\)'
+  none "CourseDeadlines: no revision amber or soft aside (D80)" "\.(resub|soft)\.${H}"
+fi
+uniq1 ctch
+if [[ -n $REPLY ]]; then
+  N=CourseTeachers; H=$REPLY
+  d '\.ctch' '' 'box-sizing:border-box' 'padding:10px 14px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  chk "h2\.${H}" 'margin:0 0 6px' 'font-size:11\.5px' 'font-weight:400' 'color:var\(--muted\)'
+  chk "li\.${H}" 'font-size:13px' 'overflow-wrap:anywhere'
 fi
 uniq1 acc
 if [[ -n $REPLY ]]; then

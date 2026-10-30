@@ -52,6 +52,7 @@
   /* --- semantic --- */
   --danger: #C8102E;          /* 5.9:1 on white, 4.6:1 on --focus-2 (Polish 1 D32) */
   --danger-press: #A50D26;    /* a pressed danger button */
+  --due-near: #C2410C;        /* D80: a deadline 7-13 days away (orange), 5.2:1 on white */
   --success: #065F46;
 
   /* --- geometry --- */

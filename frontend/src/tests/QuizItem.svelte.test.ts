@@ -94,7 +94,7 @@ function seed(attemptsByItemId: Record<number, number>, max = MAX): void {
         Object.entries(attemptsByItemId).map(([id, n]) => [id, entry(n)]),
       ),
     },
-    miniProjectsByBlockId: {},
+    miniProjectsByBlockId: {}, teachers: [],
   });
 }
 

@@ -10,6 +10,9 @@
   import IconButton from '../components/ui/IconButton.svelte';
   import CourseProgress from '../components/course/CourseProgress.svelte';
   import ProgressMeter from '../components/course/ProgressMeter.svelte';
+  import CourseDeadlines from '../components/course/CourseDeadlines.svelte';
+  import CourseTeachers from '../components/course/CourseTeachers.svelte';
+  import { comingDeadlines } from '../lib/courseDeadlines';
   import { progressOf, progressPhrase, firstUnfinishedBlockId } from '../lib/progress';
   import { externalLinks } from '../lib/externalLinks';
 
@@ -54,6 +57,13 @@
       : null,
   );
 
+  // D80: the side cards. The deadlines are computed at render time (no live
+  // countdown); a block's number is its position, as BlockGroup's `n`.
+  const deadlines = $derived(
+    currentCourse.value ? comingDeadlines(Object.values(currentCourse.value.miniProjectsByBlockId)) : [],
+  );
+  const blockPos = $derived(new Map((currentCourse.value?.blocks ?? []).map((b, i) => [b.id, i + 1])));
+
   // Page-level error copy (Slice-4 §2): the three branches, text verbatim.
   const errorTitle = $derived.by(() => {
     if (error === null) return '';
@@ -91,27 +101,32 @@
       <EmptyState title="This course has no published blocks yet." />
     {:else}
       <!-- D78 (user, layout A): the blocks on the left; the course summary card
-           and the info in a right-hand column. Under 880px one column in this
-           DOM order -- summary, blocks, info -- so the blocks come before a long
-           info on a phone, and the reading order is the order on screen. -->
-      <div class="cv-body" class:has-info={!!currentCourse.value.version.info_html}>
+           and the info in a right-hand column. D80 (user): the deadlines and
+           teachers cards join that column -- progress, deadlines, teachers,
+           info. Under 880px one column in this DOM order -- progress row,
+           deadlines, blocks, teachers, info -- so what is due comes first and
+           the blocks come before a long info on a phone, and the reading order
+           is the order on screen. -->
+      <div class="cv-body">
         {#if courseP}
           <div class="cv-prog"><CourseProgress p={courseP} /></div>
-        {/if}
-        <div class="cv-blocks">
           <!-- D78 (user): at 880px and below the card and the text toggle give way
                to this bare row -- the course meter in the block columns and a
                chevron that replaces "Collapse all / Expand all". Only one of the
                two forms is displayed at a time (CSS), so a screen reader meets
                one. The meter is aria-hidden; the sentence states it, first, as
-               the card does. -->
-          {#if courseP}
-            <div class="cv-strip">
-              <p class="sr-only">Your progress: {progressPhrase(courseP)}.</p>
-              <span class="cv-meter"><ProgressMeter p={courseP} onStrip /></span>
-              <IconButton borderless glyph={anyOpen ? 'chevron' : 'chevron-right'} title={anyOpen ? 'Collapse all' : 'Expand all'} onclick={() => setAll(!anyOpen)} />
-            </div>
-          {/if}
+               the card does. D80: a child of the body, so on a phone it leads
+               the deadlines card too. -->
+          <div class="cv-strip">
+            <p class="sr-only">Your progress: {progressPhrase(courseP)}.</p>
+            <span class="cv-meter"><ProgressMeter p={courseP} onStrip /></span>
+            <IconButton borderless glyph={anyOpen ? 'chevron' : 'chevron-right'} title={anyOpen ? 'Collapse all' : 'Expand all'} onclick={() => setAll(!anyOpen)} />
+          </div>
+        {/if}
+        {#if deadlines.length > 0}
+          <div class="cv-dl"><CourseDeadlines {courseSlug} lines={deadlines} blockN={(id) => blockPos.get(id)} /></div>
+        {/if}
+        <div class="cv-blocks">
           <!-- One small control over every block (user, 2026-10-08): "Collapse all"
                while any block is open, "Expand all" when none is. -->
           <div class="all-toggle">
@@ -122,6 +137,9 @@
               bind:expanded={() => open[b.id] ?? false, (v) => (open[b.id] = v)} />
           {/each}
         </div>
+        {#if currentCourse.value.teachers.length > 0}
+          <div class="cv-tch"><CourseTeachers names={currentCourse.value.teachers} /></div>
+        {/if}
         {#if currentCourse.value.version.info_html}
           <div class="info prose compact" {@attach externalLinks(currentCourse.value.version.info_html)}>{@html currentCourse.value.version.info_html}</div>
         {/if}
@@ -145,15 +163,18 @@
     border-radius: var(--radius-lg);
     padding: 12px 16px;
   }
-  /* D78: blocks left, the summary card over the info in a 300px right column
-     (the mini-project page's column, D69). Without info the column holds the
-     card alone. Under 880px one column in DOM order; stretch, because the
-     grid's start would shrink each part to its content. */
-  .cv-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: "blocks prog" "blocks info"; grid-template-rows: auto 1fr; gap: 14px; align-items: start; }
-  .cv-body:not(.has-info) { grid-template-areas: "blocks prog"; grid-template-rows: auto; }
-  .cv-prog { grid-area: prog; }
-  .cv-blocks { grid-area: blocks; min-width: 0; }
-  .cv-body > .info { grid-area: info; margin: 0; }
+  /* D78: blocks left, a 300px right column (the mini-project page's column,
+     D69). D80: the column holds whichever of progress, deadlines, teachers and
+     info are there, packed in DOM order: each is pinned to column 2 and
+     auto-placed into the next row, while the blocks span all four rows. The
+     fourth row is 1fr, so when the blocks are taller the extra height goes
+     there, below the cards, and never between them. Under 880px one column in
+     DOM order; stretch, because the grid's start would shrink each part to its
+     content. */
+  .cv-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto auto auto 1fr; gap: 14px; align-items: start; }
+  .cv-prog, .cv-dl, .cv-tch, .cv-body > .info { grid-column: 2; }
+  .cv-blocks { grid-column: 1; grid-row: 1 / span 4; min-width: 0; }
+  .cv-body > .info { margin: 0; }
   /* Right-aligned over the blocks' chevron column, at the top of the left column. */
   .all-toggle { display: flex; justify-content: flex-end; margin: 0 0 4px; }
   /* D78: the phone row, in the block header's columns. The 28px chevron button
@@ -179,5 +200,9 @@
     .cv-body { display: flex; flex-direction: column; align-items: stretch; }
     .cv-prog, .all-toggle { display: none; }
     .cv-strip { display: flex; }
+    /* D80: the row left the blocks column; with no deadlines card between
+       them, D78's 4px to the first block: the row's own 4px margin, the
+       -14px cancelling the column's 14px gap (flex margins don't collapse). */
+    .cv-strip + .cv-blocks { margin-top: -14px; }
   }
 </style>

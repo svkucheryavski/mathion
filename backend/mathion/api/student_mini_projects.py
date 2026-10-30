@@ -3,6 +3,7 @@
 Router is included in `mathion.main`. Exposes:
 - GET /api/courses/{slug}/mini-projects (B2 list)
 - GET /api/courses/{slug}/blocks/{block_slug}/mini-project (B3 detail)
+- GET /api/courses/{slug}/my-teachers (D80: the run's teacher names)
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from mathion.models import (
     MiniProject,
     Run,
     RunStudent,
+    RunTeacher,
     Submission,
 )
 from mathion.models_auth import StudentEnrollment, User
@@ -36,6 +38,7 @@ from mathion.schemas import (
     StudentGroupSummary,
     StudentMiniProjectDetail,
     StudentMiniProjectListItem,
+    StudentRunTeacher,
     StudentSubmissionHistoryEntry,
     StudentSubmissionHistoryEvaluation,
 )
@@ -220,6 +223,37 @@ def list_student_mini_projects(
     ).scalars().all()
 
     return [_serialize_list_item(db, mp, group) for mp in mps]
+
+
+@router.get(
+    "/api/courses/{slug}/my-teachers",
+    response_model=list[StudentRunTeacher],
+)
+def list_my_teachers(
+    slug: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[StudentRunTeacher]:
+    """D80: the names of the teachers of the student's own run, sorted by
+    name (case-insensitive), for the course page's Teachers card.
+
+    Names only -- a teacher's email is their PIN sign-in name, so it never
+    leaves the server, not even as `_display_name`'s local-part fallback:
+    a teacher without a name is skipped, as is a disabled one.
+
+    Errors mirror `_resolve_student_run` (as the list endpoint above).
+    """
+    run = _resolve_student_run(db, user, slug)
+    teachers = db.execute(
+        select(User)
+        .join(RunTeacher, RunTeacher.user_id == User.id)
+        .where(
+            RunTeacher.run_id == run.id,
+            User.is_disabled == False,  # noqa: E712 — SQL boolean comparison
+        )
+    ).scalars().all()
+    names = [n for n in ((t.full_name or "").strip() for t in teachers) if n]
+    return [StudentRunTeacher(full_name=n) for n in sorted(names, key=str.casefold)]
 
 
 # ============================================================================

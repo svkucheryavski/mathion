@@ -18,6 +18,7 @@ import { __test__setSlots, loadCourse, markItemCovered } from '../stores/current
 import { ApiError } from '../lib/api';
 import CourseView from '../pages/CourseView.svelte';
 import type { StudentMiniProjectListItem } from '../lib/types';
+import { formatShortDeadline } from '../lib/datetime';
 
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -75,7 +76,7 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
         },
       ],
       state: { version_id: 1, items: {} },
-      miniProjectsByBlockId: { '42': mpItem },
+      miniProjectsByBlockId: { '42': mpItem }, teachers: [],
     });
 
     component = mount(CourseView, {
@@ -123,7 +124,7 @@ describe('CourseView header and course summary', () => {
       slug: 'course-x', versionId: 1,
       course: { id: 1, slug: 'course-x', name: 'Course X' },
       version: { id: 1, state: 'published', info_html, max_quiz_attempts: 3 },
-      blocks: blocks as never, state: { version_id: 1, items: items as never }, miniProjectsByBlockId: {},
+      blocks: blocks as never, state: { version_id: 1, items: items as never }, miniProjectsByBlockId: {}, teachers: [],
     });
   }
   const twoBlocks = [
@@ -181,13 +182,12 @@ describe('CourseView header and course summary', () => {
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
     // D78: one body in DOM order progress, blocks, info -- the phone order; on a
-    // wide screen the grid puts the blocks left, progress and info right.
+    // wide screen the grid puts the blocks left, progress and info right. D80:
+    // the phone row (.cv-strip) sits in the body before the blocks (and before
+    // the deadlines card, when there is one); the text toggle leads the blocks.
     const body = target.querySelector('.cv-body') as HTMLElement;
-    expect(Array.from(body.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-blocks', 'info']);
-    expect(body.classList.contains('has-info')).toBe(true);
-    // D78: the phone row (.cv-strip) leads the blocks column, then the text toggle.
-    expect(Array.from((body.querySelector('.cv-blocks') as HTMLElement).children).slice(0, 2).map((e) => e.className.split(' ')[0]))
-      .toEqual(['cv-strip', 'all-toggle']);
+    expect(Array.from(body.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-strip', 'cv-blocks', 'info']);
+    expect((body.querySelector('.cv-blocks') as HTMLElement).firstElementChild!.className.split(' ')[0]).toBe('all-toggle');
     expect(body.querySelectorAll('.cv-blocks > section.block').length).toBe(2);
     expect(target.querySelector('.top')).toBeNull();
     const sum = body.querySelector('.summary') as HTMLElement;
@@ -205,8 +205,7 @@ describe('CourseView header and course summary', () => {
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
     const top = target.querySelector('.cv-body') as HTMLElement;
-    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-blocks']);
-    expect(top.classList.contains('has-info')).toBe(false);
+    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-strip', 'cv-blocks']);
     expect((top.querySelector('.sq') as HTMLElement).textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz score –');
     // No check mark beside a dash: the row chip's "Quiz –" carries none either.
     expect(top.querySelector('.sq svg')).toBeNull();
@@ -280,7 +279,7 @@ describe('CourseView header and course summary', () => {
   // D78 (user): at 880px and below the card and the text toggle give way to one
   // bare row -- the course meter in the block columns and a chevron button that
   // replaces "Collapse all / Expand all". CSS picks which one shows; both render.
-  const strip = () => target.querySelector('.cv-blocks > .cv-strip') as HTMLElement;
+  const strip = () => target.querySelector('.cv-body > .cv-strip') as HTMLElement;
   const chev = () => strip().querySelector('button') as HTMLButtonElement;
 
   it('D78: the phone row shows the course meter, white chip, and one sentence for screen readers', async () => {
@@ -358,7 +357,7 @@ describe('CourseView 9d states (Slice-4 T2)', () => {
       slug: 'course-x', versionId: 1,
       course: { id: 1, slug: 'course-x', name: 'Course X' },
       version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
-      blocks: [], state: { version_id: 1, items: {} }, miniProjectsByBlockId: {},
+      blocks: [], state: { version_id: 1, items: {} }, miniProjectsByBlockId: {}, teachers: [],
     });
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
@@ -383,5 +382,100 @@ describe('CourseView 9d states (Slice-4 T2)', () => {
     const back = err!.querySelector<HTMLButtonElement>('.action .btn');
     expect(back!.textContent?.trim()).toBe('Back to courses');
     expect(back!.classList.contains('secondary')).toBe(true);
+  });
+});
+
+// D80 (user): the course page's side cards -- "Coming deadlines" (what the
+// student must still act on, nearest first) and "Teachers" (names only).
+// Wide: progress, deadlines, teachers, info in the right column; 880px and
+// below, in DOM order: progress row, deadlines, blocks, teachers, info.
+describe('CourseView side cards (D80)', () => {
+  const NOW = new Date(2026, 9, 30, 12, 0);
+  const at = (day: number, h = 23, m = 59) => new Date(2026, 9, day, h, m).toISOString();
+  const block = (id: number, title: string) => ({ id, title, slug: `b${id}`, order: id, info: '', info_html: '', sequences: [] });
+  const mp = (block_id: number, title: string, latest_status: StudentMiniProjectListItem['latest_status'],
+    d: { hard?: string; soft?: string; resub?: string }): StudentMiniProjectListItem => ({
+    mp_id: block_id * 10, block_id, block_slug: `b${block_id}`, block_order: block_id, block_title: title,
+    hard_deadline: d.hard ?? null, soft_deadline: d.soft ?? null, resubmission_deadline: d.resub ?? null, latest_status,
+  });
+  function seed(mps: StudentMiniProjectListItem[], teachers: string[], info_html = '<p>Info</p>') {
+    __test__setSlots({
+      slug: 'course-x', versionId: 1,
+      course: { id: 1, slug: 'course-x', name: 'Course X' },
+      version: { id: 1, state: 'published', info_html, max_quiz_attempts: 3 },
+      blocks: [block(1, 'Intro'), block(2, 'Practice'), block(3, 'Modelling')] as never,
+      state: { version_id: 1, items: {} },
+      miniProjectsByBlockId: Object.fromEntries(mps.map((m) => [String(m.block_id), m])),
+      teachers,
+    });
+  }
+  async function mountIt() {
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+  }
+  const kids = () => Array.from((target.querySelector('.cv-body') as HTMLElement).children).map((e) => e.className.split(' ')[0]);
+  const text = (el: Element | null) => el!.textContent!.replace(/\s+/g, ' ').trim();
+
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('DOM order: progress, phone row, deadlines, blocks, teachers, info', async () => {
+    seed([mp(2, 'Practice', 'not_submitted', { hard: at(40) })], ['Anna Larsen']);
+    await mountIt();
+    expect(kids()).toEqual(['cv-prog', 'cv-strip', 'cv-dl', 'cv-blocks', 'cv-tch', 'info']);
+  });
+
+  it('one deadline per line, nearest first, each linking to its mini-project page', async () => {
+    seed([
+      mp(3, 'Modelling', 'not_submitted', { hard: at(55), soft: at(50) }),
+      mp(2, 'Practice', 'major_revision', { hard: at(29), resub: at(39) }),
+      mp(1, 'Intro', 'accepted', { hard: at(40) }),
+    ], []);
+    await mountIt();
+    const card = target.querySelector('.cv-dl') as HTMLElement;
+    expect(text(card.querySelector('h2'))).toBe('Coming deadlines');
+    const rows = Array.from(card.querySelectorAll('li'));
+    expect(rows).toHaveLength(2);
+    const a0 = rows[0].querySelector('a') as HTMLAnchorElement;
+    expect(a0.getAttribute('href')).toBe('/courses/course-x/blocks/b2/mini-project');
+    expect(text(a0)).toBe('B2 · Practice');
+    expect(text(rows[0].querySelector('.when'))).toBe(`Resubmit by ${formatShortDeadline(at(39))} · in 9 days`);
+    expect(text(rows[1].querySelector('a'))).toBe('B3 · Modelling');
+    // The soft deadline is THE deadline; the hard one never shows (user's rule).
+    expect(text(rows[1].querySelector('.when'))).toBe(`Due ${formatShortDeadline(at(50))} · in 20 days`);
+    expect(card.textContent).not.toContain(formatShortDeadline(at(55)));
+    expect(card.textContent!.toLowerCase()).not.toContain('soft');
+    expect(card.textContent!.toLowerCase()).not.toContain('hard');
+  });
+
+  it('urgency colour by the shown date: soon (0-6 days, overdue), near (7-13), none (14+)', async () => {
+    seed([
+      mp(1, 'Intro', 'not_submitted', { hard: at(40), soft: at(29, 10) }),
+      mp(2, 'Practice', 'not_submitted', { soft: at(40) }),
+      mp(3, 'Modelling', 'not_submitted', { soft: at(50) }),
+    ], []);
+    await mountIt();
+    const whens = Array.from(target.querySelectorAll('.cv-dl .when')) as HTMLElement[];
+    expect(whens.map(text)).toEqual([
+      `Overdue since ${formatShortDeadline(at(29, 10))}`,
+      `Due ${formatShortDeadline(at(40))} · in 10 days`,
+      `Due ${formatShortDeadline(at(50))} · in 20 days`,
+    ]);
+    expect(whens.map((w) => [w.classList.contains('soon'), w.classList.contains('near')]))
+      .toEqual([[true, false], [false, true], [false, false]]);
+  });
+
+  it('nothing due and no named teacher: neither card renders', async () => {
+    seed([mp(1, 'Intro', 'awaiting_evaluation', { hard: at(40) })], []);
+    await mountIt();
+    expect(kids()).toEqual(['cv-prog', 'cv-strip', 'cv-blocks', 'info']);
+  });
+
+  it('the Teachers card lists the names, in the order given', async () => {
+    seed([], ['Anna Larsen', 'Zed Olsen']);
+    await mountIt();
+    const card = target.querySelector('.cv-tch') as HTMLElement;
+    expect(text(card.querySelector('h2'))).toBe('Teachers');
+    expect(Array.from(card.querySelectorAll('li')).map(text)).toEqual(['Anna Larsen', 'Zed Olsen']);
   });
 });

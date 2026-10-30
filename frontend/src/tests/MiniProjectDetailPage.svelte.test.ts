@@ -752,7 +752,7 @@ describe('MiniProjectDetailPage (D6 — misc)', () => {
       version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
       blocks: [],
       state: { version_id: 1, items: {} },
-      miniProjectsByBlockId: { '33': existingItem },
+      miniProjectsByBlockId: { '33': existingItem }, teachers: [],
     });
 
     clickSubmit();
@@ -877,7 +877,7 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     course: { id: 1, slug: 'course-x', name: 'Course X' },
     version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: 3 },
     blocks: blocks.map((b, i) => ({ ...b, slug: `b${b.id}`, order: i * 2 + 1, info: '', info_html: '', sequences: [] })),
-    state: { version_id: 1, items: {} }, miniProjectsByBlockId: {},
+    state: { version_id: 1, items: {} }, miniProjectsByBlockId: {}, teachers: [],
   });
 
   it('D70 breadcrumb: {course} / {n}. {block} / Mini-project, as the player builds it', async () => {
@@ -986,22 +986,113 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     expect(row!.querySelector('.pill')).not.toBeNull();
   });
 
-  it('deadlines: hard-deadline sentence + mono soft aside; no resubmission line outside a revision state', async () => {
-    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-      hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z',
-      resubmission_deadline: '2026-07-05T23:59:00Z', latest_status: 'not_submitted',
-    }));
-    await mountPage();
-    const dl = target.querySelector('.deadlines');
-    expect(dl).not.toBeNull();
-    const hard = dl!.querySelector('.deadline-hard');
-    expect(hard).not.toBeNull();
-    expect(hard!.querySelector('strong')!.textContent).toBe('Hard deadline');
-    expect(hard!.textContent).toMatch(/^Hard deadline · 2026-07-01 01:59 GMT\+2 — /);   // TZ=Europe/Copenhagen (package.json test script)
-    expect(dl!.querySelector('.deadline-resub')).toBeNull();
-    const soft = dl!.querySelector('.deadline-soft');
-    expect(soft!.classList.contains('mono')).toBe(true);
-    expect(soft!.textContent).toBe('soft deadline · 2026-06-21 01:59 GMT+2');
+  // D80 (user): a student sees ONE deadline -- the soft one, or the hard one
+  // only when no soft one is set; the hard deadline is a hidden grace window.
+  describe('one student deadline (D80)', () => {
+    afterEach(() => { vi.useRealTimers(); });
+    const at = (iso: string) => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(iso)); };
+    const line = () => target.querySelector('.deadlines .deadline') as HTMLElement;
+
+    it('the soft deadline is "Deadline"; no hard date, no "hard"/"soft" wording', async () => {
+      at('2026-06-10T23:59:00Z');
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z',
+        resubmission_deadline: '2026-07-05T23:59:00Z', latest_status: 'not_submitted',
+      }));
+      await mountPage();
+      const dl = target.querySelector('.deadlines') as HTMLElement;
+      expect(dl.querySelectorAll('p')).toHaveLength(1);
+      expect(line().querySelector('strong')!.textContent).toBe('Deadline');
+      expect(line().textContent).toBe('Deadline · 2026-06-21 01:59 GMT+2 — 10 days remaining');   // TZ=Europe/Copenhagen
+      expect(dl.textContent).not.toContain('2026-07-01');
+      expect(dl.textContent!.toLowerCase()).not.toMatch(/hard|soft/);
+      // Nowhere on the page either: text, titles, aria labels.
+      const attrs = [...target.querySelectorAll('*')].flatMap((el) => [...el.attributes].map((a) => a.value));
+      for (const s of [target.textContent!, ...attrs]) {
+        expect(s).not.toContain('2026-07-01');
+        expect(s).not.toContain('2026-06-30');
+        expect(s.toLowerCase()).not.toMatch(/hard deadline|soft deadline/);
+      }
+    });
+
+    it('the hard deadline is "Deadline" only when no soft one is set', async () => {
+      at('2026-06-10T23:59:00Z');
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: null, latest_status: 'not_submitted',
+      }));
+      await mountPage();
+      expect(line().textContent).toBe('Deadline · 2026-07-01 01:59 GMT+2 — 20 days remaining');
+    });
+
+    it('past it while the hidden window is open, with work to submit: "Overdue since", crimson', async () => {
+      at('2026-06-25T23:59:00Z');
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'not_submitted',
+      }));
+      await mountPage();
+      expect(line().classList.contains('deadline-overdue')).toBe(true);
+      expect(line().querySelector('strong')!.textContent).toBe('Overdue since');
+      expect(line().textContent).toBe('Overdue since 2026-06-21 01:59 GMT+2');
+    });
+
+    it('past it and closed, or nothing left to submit: "Deadline · … — passed N days ago"', async () => {
+      at('2026-07-04T23:59:00Z');
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'not_submitted',
+      }));
+      await mountPage();
+      expect(line().textContent).toBe('Deadline · 2026-06-21 01:59 GMT+2 — passed 14 days ago');
+      expect(line().classList.contains('deadline-overdue')).toBe(false);
+      unmount(component!); component = null;
+      target.innerHTML = '';
+      at('2026-06-25T23:59:00Z');
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'awaiting_evaluation',
+        can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation',
+      }));
+      await mountPage();
+      expect(line().textContent).toBe('Deadline · 2026-06-21 01:59 GMT+2 — passed 5 days ago');
+    });
+
+    it('a revision with no resubmission deadline shows no deadline at all', async () => {
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        latest_status: 'minor_revision', resubmission_deadline: null,
+        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z',
+        submission_history: [makeEntry({ evaluation: makeEval({ result: 'minor_revision' }) })],
+      }));
+      await mountPage();
+      expect(target.querySelector('.deadlines')).toBeNull();
+    });
+
+    it('the history\'s Late pill names no other deadline: "Submitted late"', async () => {
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'awaiting_evaluation',
+        can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation',
+        submission_history: [makeEntry({ submission_number: 1, is_late: true })],
+      }));
+      await mountPage();
+      expect((target.querySelector('.pill-late') as HTMLElement).title).toBe('Submitted late (deadline 2026-06-21 01:59 GMT+2)');
+    });
+
+    // D80 (user): a resubmission is bound only by the resubmission deadline,
+    // past which the server refuses it -- so it is never late. The server's
+    // is_late compares every submission with the soft deadline; the student
+    // page shows no Late pill on a resubmission.
+    it('no Late pill on a resubmission; a first submission keeps it', async () => {
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'awaiting_evaluation',
+        can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation',
+        submission_history: [
+          makeEntry({ submission_id: 2, submission_number: 2, is_late: true, is_resubmission: true }),
+          makeEntry({ submission_id: 1, submission_number: 1, is_late: true, evaluation: makeEval({ result: 'major_revision' }) }),
+        ],
+      }));
+      await mountPage();
+      const entries = [...target.querySelectorAll('.history-entry')];
+      expect(entries).toHaveLength(2);
+      expect(entries[0].querySelector('.pill-late')).toBeNull();
+      expect(entries[1].querySelector('.pill-late')).not.toBeNull();
+    });
   });
 
   it('deadlines: resubmission line wins in a revision state', async () => {
@@ -1013,7 +1104,7 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     const resub = target.querySelector('.deadline-resub');
     expect(resub).not.toBeNull();
     expect(resub!.querySelector('strong')!.textContent).toBe('Resubmission deadline');
-    expect(target.querySelector('.deadline-hard')).toBeNull();
+    expect(target.querySelectorAll('.deadlines p')).toHaveLength(1);
   });
 
   // The `showResub ||` conjunct of the row predicate is load-bearing ONLY here:

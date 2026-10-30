@@ -37,6 +37,7 @@
   import { pushToast } from '../stores/toasts.svelte';
   import { navigate } from '../lib/router.svelte';
   import { formatLocalWithTz } from '../lib/datetime';
+  import { studentDeadline } from '../lib/courseDeadlines';
   import { formatFileSize } from '../lib/format';
 
   let { courseSlug, blockSlug }: { courseSlug: string; blockSlug: string } = $props();
@@ -190,28 +191,31 @@
     return data.block_title.trim() || 'Untitled block';
   });
 
-  // Deadline row (Slice-4 §3.2): the resubmission line takes prominence in a
-  // revision state (the former :429 predicate); the row itself renders only
-  // when it would have content.
+  // Deadline row. D80 (user): ONE deadline -- the soft one, or the hard one
+  // only when no soft one is set (the hard deadline is a hidden grace window;
+  // lib/courseDeadlines has the rules); in a revision the resubmission
+  // deadline, in the page's one amber. Past it while the window is still open
+  // and with work to submit, the line reads "Overdue since" in crimson. The
+  // row renders only when there is a deadline.
   //
   // `$derived.by` and not a bare `$derived(expr)`: `data` is declared
   // `let data: StudentMiniProjectDetail | null = $state(null)`, so TS narrows it
   // to `null` at the declaration site and every later assignment happens inside
-  // a closure it does not follow — a top-level `data !== null && data.x` then
-  // narrows to `never` (3 svelte-check errors). Reading `data` inside a closure
-  // restores the annotation, which is why every other derived in this file uses
-  // `.by` (`titleForHeading`, `fetchErrorMessage`, `orderedMembers`).
-  const showResub = $derived.by(() => {
-    if (data === null) return false;
-    return (
-      data.resubmission_deadline !== null &&
-      (data.latest_status === 'major_revision' || data.latest_status === 'minor_revision')
-    );
+  // a closure it does not follow -- a top-level `data !== null && data.x` then
+  // narrows to `never`. Reading `data` inside a closure restores the
+  // annotation, which is why every other derived in this file uses `.by`.
+  const deadline = $derived.by(() => {
+    if (data === null) return null;
+    const sd = studentDeadline(data);
+    if (sd === null) return null;
+    const toSubmit = data.latest_status === 'not_submitted' || data.latest_status === 'rejected'
+      || data.latest_status === 'pending_group_assignment';
+    const overdue = sd.kind === 'due' && toSubmit && sd.open && new Date(sd.at).getTime() < Date.now();
+    return { ...sd, overdue };
   });
 
-  // Deadline summary text. Resubmission deadline takes prominence when the
-  // student is in a revision state. Hard deadline shows relative-days
-  // (forward/passed). Soft deadline appears inline in parentheses.
+  // The deadline line's relative text (forward/passed), for the one deadline
+  // the row shows (D80).
   //
   // IMPORTANT: branch on the RAW millisecond diff sign BEFORE rounding —
   // `Math.round(-1h / 24h)` is `-0` which compares `>= 0` and would
@@ -486,16 +490,14 @@
             <h1>Mini-project — {titleForHeading}</h1>
             <StatusPill status={data.latest_status} />
           </div>
-          {#if showResub || data.hard_deadline !== null || data.soft_deadline !== null}
+          {#if deadline}
             <div class="deadlines">
-              <!-- `&& data.resubmission_deadline !== null` narrows for TS; showResub already implies it. -->
-              {#if showResub && data.resubmission_deadline !== null}
-                <p class="deadline deadline-resub"><strong>Resubmission deadline</strong> · {formatRelativeDeadline(data.resubmission_deadline)}</p>
-              {:else if data.hard_deadline !== null}
-                <p class="deadline deadline-hard"><strong>Hard deadline</strong> · {formatRelativeDeadline(data.hard_deadline)}</p>
-              {/if}
-              {#if data.soft_deadline !== null}
-                <p class="deadline-soft mono">soft deadline · {formatLocalWithTz(data.soft_deadline)}</p>
+              {#if deadline.kind === 'resubmit'}
+                <p class="deadline deadline-resub"><strong>Resubmission deadline</strong> · {formatRelativeDeadline(deadline.at)}</p>
+              {:else if deadline.overdue}
+                <p class="deadline deadline-overdue"><strong>Overdue since</strong> {formatLocalWithTz(deadline.at)}</p>
+              {:else}
+                <p class="deadline"><strong>Deadline</strong> · {formatRelativeDeadline(deadline.at)}</p>
               {/if}
             </div>
           {/if}
@@ -594,12 +596,15 @@
                     <h3>Submission <span class="mono">{entry.submission_number}</span></h3>
                     <span class="entry-meta mono">{formatLocalWithTz(entry.submitted_at)} · {entry.submitted_by_full_name}{entry.submitter_is_me ? ' (you)' : ''}</span>
                     <span class="pills">
-                      {#if entry.is_late}
+                      <!-- D80 (user): a resubmission is bound only by its resubmission
+                           deadline, past which the server refuses it, so it is never late
+                           (the server's is_late compares with the soft deadline). -->
+                      {#if entry.is_late && !entry.is_resubmission}
                         <span
                           class="pill pill-late"
                           title={data.soft_deadline
-                            ? `Submitted past the soft deadline (${formatLocalWithTz(data.soft_deadline)})`
-                            : 'Submitted past the soft deadline'}
+                            ? `Submitted late (deadline ${formatLocalWithTz(data.soft_deadline)})`
+                            : 'Submitted late'}
                         >Late</span>
                       {/if}
                       {#if entry.evaluation}
@@ -665,11 +670,11 @@
   .breadcrumb .current { color: var(--text); font-size: 14px; font-weight: 600; /* D70: the player's last crumb */ min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
   .title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; /* ref 1268 */ flex-wrap: wrap; /* 320px viewports: a long block title + the nowrap pill need it */ }
   .title-row h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; /* 5(c): a long unbreakable title shrinks instead of pushing the pill out (PageItem.svelte:80 precedent) */ }
-  .deadlines { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; /* ref 1272 */ flex-wrap: wrap; /* 5(b): the mono aside drops under the sentence at narrow widths */ }
+  .deadlines { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; /* ref 1272 */ flex-wrap: wrap; /* 5(b); D80 left one line in the row */ }
   .deadline { font-size: 12.5px; color: var(--muted); margin: 0; /* ref 1273 */ }
   .deadline strong { font-weight: 600; }
   .deadline-resub { color: var(--status-needs-revision-fg); /* ref 1273 — the one amber: names the revision the student must act on */ }
-  .deadline-soft { font-size: 11.5px; color: var(--muted); margin: 0; /* ref 1274 */ }
+  .deadline-overdue { color: var(--danger); /* D80: past the one deadline, a submission still possible */ }
   /* Assignment card — ref 1277-1280. Its content is styled by content.css
      (`.prose`, Polish 2 D51); the box keeps ref 1279's metrics, so lists,
      quotes and headings inherit them. */

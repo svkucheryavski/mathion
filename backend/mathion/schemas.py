@@ -665,6 +665,12 @@ class MiniProjectResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# D80 (Polish 2): one teacher of the student's run, for the course page's
+# Teachers card. The name only: a teacher's email is their PIN sign-in name.
+class StudentRunTeacher(BaseModel):
+    full_name: str
+
+
 # Student-facing mini-projects (see backend/mathion/api/student_mini_projects.py).
 # `latest_status` is derived per spec §3.1: from group presence + the most recent
 # submission's evaluation result. The 7-value Literal enforces the contract at

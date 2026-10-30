@@ -59,7 +59,7 @@ function seed(): void {
       },
     ],
     state: { version_id: 1, items: {} },
-    miniProjectsByBlockId: {},
+    miniProjectsByBlockId: {}, teachers: [],
   });
 }
 
