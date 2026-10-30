@@ -57,9 +57,9 @@ const BASE_MP: StudentMiniProjectListItem = {
   block_slug: 'block-42',
   block_order: 1,
   block_title: 'Block 42',
-  hard_deadline: null,
-  soft_deadline: null,
-  resubmission_deadline: null,
+  deadline: null,
+  deadline_kind: null,
+  deadline_open: true,
   latest_status: 'not_submitted',
 };
 

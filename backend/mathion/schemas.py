@@ -681,9 +681,11 @@ class StudentMiniProjectListItem(BaseModel):
     block_slug: str
     block_order: int
     block_title: str
-    hard_deadline: datetime | None
-    soft_deadline: datetime | None
-    resubmission_deadline: datetime | None
+    # D81 (user): ONE deadline, never the hidden hard one (see
+    # api/student_mini_projects._student_deadline).
+    deadline: datetime | None
+    deadline_kind: Literal["due", "resubmit"] | None
+    deadline_open: bool
     latest_status: Literal[
         "pending_group_assignment",
         "not_submitted",
@@ -748,9 +750,10 @@ class StudentMiniProjectDetail(BaseModel):
     block_slug: str
     block_title: str
     assignment_html: str
-    soft_deadline: datetime | None
-    hard_deadline: datetime | None
-    resubmission_deadline: datetime | None
+    # D81 (user): ONE deadline, never the hidden hard one.
+    deadline: datetime | None
+    deadline_kind: Literal["due", "resubmit"] | None
+    deadline_open: bool
     group: StudentGroupSummary | None
     submission_history: list[StudentSubmissionHistoryEntry]
     latest_status: Literal[
@@ -769,7 +772,7 @@ class StudentMiniProjectDetail(BaseModel):
         "group_disabled",
         "already_accepted",
         "awaiting_evaluation",
-        "hard_deadline_passed",
+        "deadline_passed",
         "resubmission_deadline_passed",
     ] | None
 

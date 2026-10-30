@@ -53,9 +53,9 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
       block_slug: 'intro',
       block_order: 0,
       block_title: 'Intro Project',
-      hard_deadline: null,
-      soft_deadline: null,
-      resubmission_deadline: null,
+      deadline: null,
+      deadline_kind: null,
+      deadline_open: true,
       latest_status: 'not_submitted',
     };
 
@@ -394,9 +394,10 @@ describe('CourseView side cards (D80)', () => {
   const at = (day: number, h = 23, m = 59) => new Date(2026, 9, day, h, m).toISOString();
   const block = (id: number, title: string) => ({ id, title, slug: `b${id}`, order: id, info: '', info_html: '', sequences: [] });
   const mp = (block_id: number, title: string, latest_status: StudentMiniProjectListItem['latest_status'],
-    d: { hard?: string; soft?: string; resub?: string }): StudentMiniProjectListItem => ({
+    d: { at: string; kind?: 'due' | 'resubmit'; open?: boolean }): StudentMiniProjectListItem => ({
     mp_id: block_id * 10, block_id, block_slug: `b${block_id}`, block_order: block_id, block_title: title,
-    hard_deadline: d.hard ?? null, soft_deadline: d.soft ?? null, resubmission_deadline: d.resub ?? null, latest_status,
+    // D81: the server sends the one deadline (never the hidden hard one).
+    deadline: d.at, deadline_kind: d.kind ?? 'due', deadline_open: d.open ?? true, latest_status,
   });
   function seed(mps: StudentMiniProjectListItem[], teachers: string[], info_html = '<p>Info</p>') {
     __test__setSlots({
@@ -420,16 +421,16 @@ describe('CourseView side cards (D80)', () => {
   afterEach(() => { vi.useRealTimers(); });
 
   it('DOM order: progress, phone row, deadlines, blocks, teachers, info', async () => {
-    seed([mp(2, 'Practice', 'not_submitted', { hard: at(40) })], ['Anna Larsen']);
+    seed([mp(2, 'Practice', 'not_submitted', { at: at(40) })], ['Anna Larsen']);
     await mountIt();
     expect(kids()).toEqual(['cv-prog', 'cv-strip', 'cv-dl', 'cv-blocks', 'cv-tch', 'info']);
   });
 
   it('one deadline per line, nearest first, each linking to its mini-project page', async () => {
     seed([
-      mp(3, 'Modelling', 'not_submitted', { hard: at(55), soft: at(50) }),
-      mp(2, 'Practice', 'major_revision', { hard: at(29), resub: at(39) }),
-      mp(1, 'Intro', 'accepted', { hard: at(40) }),
+      mp(3, 'Modelling', 'not_submitted', { at: at(50) }),
+      mp(2, 'Practice', 'major_revision', { at: at(39), kind: 'resubmit' }),
+      mp(1, 'Intro', 'accepted', { at: at(40) }),
     ], []);
     await mountIt();
     const card = target.querySelector('.cv-dl') as HTMLElement;
@@ -441,18 +442,17 @@ describe('CourseView side cards (D80)', () => {
     expect(text(a0)).toBe('B2 · Practice');
     expect(text(rows[0].querySelector('.when'))).toBe(`Resubmit by ${formatShortDeadline(at(39))} · in 9 days`);
     expect(text(rows[1].querySelector('a'))).toBe('B3 · Modelling');
-    // The soft deadline is THE deadline; the hard one never shows (user's rule).
+    // One deadline, worded without "soft"/"hard" (user's rule).
     expect(text(rows[1].querySelector('.when'))).toBe(`Due ${formatShortDeadline(at(50))} · in 20 days`);
-    expect(card.textContent).not.toContain(formatShortDeadline(at(55)));
     expect(card.textContent!.toLowerCase()).not.toContain('soft');
     expect(card.textContent!.toLowerCase()).not.toContain('hard');
   });
 
   it('urgency colour by the shown date: soon (0-6 days, overdue), near (7-13), none (14+)', async () => {
     seed([
-      mp(1, 'Intro', 'not_submitted', { hard: at(40), soft: at(29, 10) }),
-      mp(2, 'Practice', 'not_submitted', { soft: at(40) }),
-      mp(3, 'Modelling', 'not_submitted', { soft: at(50) }),
+      mp(1, 'Intro', 'not_submitted', { at: at(29, 10) }),
+      mp(2, 'Practice', 'not_submitted', { at: at(40) }),
+      mp(3, 'Modelling', 'not_submitted', { at: at(50) }),
     ], []);
     await mountIt();
     const whens = Array.from(target.querySelectorAll('.cv-dl .when')) as HTMLElement[];
@@ -466,7 +466,7 @@ describe('CourseView side cards (D80)', () => {
   });
 
   it('nothing due and no named teacher: neither card renders', async () => {
-    seed([mp(1, 'Intro', 'awaiting_evaluation', { hard: at(40) })], []);
+    seed([mp(1, 'Intro', 'awaiting_evaluation', { at: at(40) })], []);
     await mountIt();
     expect(kids()).toEqual(['cv-prog', 'cv-strip', 'cv-blocks', 'info']);
   });

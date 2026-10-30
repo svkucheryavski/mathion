@@ -174,19 +174,56 @@ def _derive_latest_status_from_snapshot(
     return eval_row.result
 
 
+def _student_deadline(
+    mp: MiniProject, latest_status: str, now: datetime | None = None,
+) -> tuple[datetime | None, str | None, bool]:
+    """D81 (user): the ONE deadline a student sees, as (deadline, kind, open).
+
+    The hard deadline is a hidden grace window: "they should not know the
+    submission will be accepted between soft and hard, otherwise nobody will
+    respect soft deadlines". Mirrors the submit gate (api/submissions.py):
+    - a revision is bound only by the resubmission deadline: it is the one
+      shown, and submitting stays open until it; none set = no deadline;
+    - otherwise the soft deadline is shown, or the hard one when no soft one is
+      set; submitting stays open until the hard deadline, or always with none.
+    A window closing at this very moment is still open (the gate refuses only
+    strictly after). With no deadline the window has no end: open is True.
+    Accepted work has no deadline: nothing is due (user, D81 review r1; a
+    resubmission is accepted when it is sent).
+    """
+    if latest_status == "accepted":
+        return None, None, True
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    def not_past(dt: datetime) -> bool:
+        return not now > to_utc_aware(dt)
+
+    if latest_status in ("major_revision", "minor_revision"):
+        resub = mp.resubmission_deadline
+        if resub is None:
+            return None, None, True
+        return resub, "resubmit", not_past(resub)
+    shown = mp.soft_deadline if mp.soft_deadline is not None else mp.hard_deadline
+    if shown is None:
+        return None, None, True
+    return shown, "due", mp.hard_deadline is None or not_past(mp.hard_deadline)
+
+
 def _serialize_list_item(
     db: Session, mp: MiniProject, group
 ) -> StudentMiniProjectListItem:
     status = _derive_latest_status(db, mp, group)
+    deadline, kind, is_open = _student_deadline(mp, status)
     return StudentMiniProjectListItem(
         mp_id=mp.id,
         block_id=mp.block.id,
         block_slug=mp.block.slug,
         block_order=mp.block.order,
         block_title=mp.block.title,
-        hard_deadline=mp.hard_deadline,
-        soft_deadline=mp.soft_deadline,
-        resubmission_deadline=mp.resubmission_deadline,
+        deadline=deadline,
+        deadline_kind=kind,
+        deadline_open=is_open,
         latest_status=status,
     )
 
@@ -333,7 +370,7 @@ def _compute_can_submit(
     if latest_result in (None, "rejected"):
         hard_aware = to_utc_aware(mp.hard_deadline)
         if hard_aware is not None and now > hard_aware:
-            return False, "hard_deadline_passed"
+            return False, "deadline_passed"  # D81: the reason names no hidden deadline
         return True, None
     # 7. resubmission path (last eval = major/minor revision)
     if latest_result in ("major_revision", "minor_revision"):
@@ -506,6 +543,8 @@ def get_student_mini_project_detail(
         group, submissions, eval_by_sub,
     )
 
+    deadline, kind, is_open = _student_deadline(mp, latest_status)
+
     group_summary: StudentGroupSummary | None = None
     if group is not None:
         group_summary = _serialize_group(db, group, members, user.id)
@@ -522,9 +561,9 @@ def get_student_mini_project_detail(
         block_slug=block.slug,
         block_title=block.title,
         assignment_html=mp.assignment_html,
-        soft_deadline=mp.soft_deadline,
-        hard_deadline=mp.hard_deadline,
-        resubmission_deadline=mp.resubmission_deadline,
+        deadline=deadline,
+        deadline_kind=kind,
+        deadline_open=is_open,
         group=group_summary,
         submission_history=history,
         latest_status=latest_status,

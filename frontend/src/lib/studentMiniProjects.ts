@@ -29,7 +29,7 @@ export const REASON_LABELS = {
   group_disabled: 'Your group is disabled. Contact your teacher.',
   already_accepted: 'Your project has been accepted — no further submission needed.',
   awaiting_evaluation: 'Your previous submission is awaiting evaluation.',
-  hard_deadline_passed: 'The submission deadline has passed.',
+  deadline_passed: 'The submission deadline has passed.',
   resubmission_deadline_passed: 'The resubmission deadline has passed.',
 } as const;
 

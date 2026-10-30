@@ -37,7 +37,6 @@
   import { pushToast } from '../stores/toasts.svelte';
   import { navigate } from '../lib/router.svelte';
   import { formatLocalWithTz } from '../lib/datetime';
-  import { studentDeadline } from '../lib/courseDeadlines';
   import { formatFileSize } from '../lib/format';
 
   let { courseSlug, blockSlug }: { courseSlug: string; blockSlug: string } = $props();
@@ -192,8 +191,9 @@
   });
 
   // Deadline row. D80 (user): ONE deadline -- the soft one, or the hard one
-  // only when no soft one is set (the hard deadline is a hidden grace window;
-  // lib/courseDeadlines has the rules); in a revision the resubmission
+  // only when no soft one is set (the hard deadline is a hidden grace window);
+  // D81: the server picks it and sends `deadline`, `deadline_kind`,
+  // `deadline_open`, never the hard one. In a revision it is the resubmission
   // deadline, in the page's one amber. Past it while the window is still open
   // and with work to submit, the line reads "Overdue since" in crimson. The
   // row renders only when there is a deadline.
@@ -205,13 +205,13 @@
   // narrows to `never`. Reading `data` inside a closure restores the
   // annotation, which is why every other derived in this file uses `.by`.
   const deadline = $derived.by(() => {
-    if (data === null) return null;
-    const sd = studentDeadline(data);
-    if (sd === null) return null;
+    if (data === null || data.deadline === null || data.deadline_kind === null) return null;
+    const at = data.deadline;
     const toSubmit = data.latest_status === 'not_submitted' || data.latest_status === 'rejected'
       || data.latest_status === 'pending_group_assignment';
-    const overdue = sd.kind === 'due' && toSubmit && sd.open && new Date(sd.at).getTime() < Date.now();
-    return { ...sd, overdue };
+    const overdue = data.deadline_kind === 'due' && toSubmit && data.deadline_open
+      && new Date(at).getTime() < Date.now();
+    return { kind: data.deadline_kind, at, overdue };
   });
 
   // The deadline line's relative text (forward/passed), for the one deadline
@@ -598,14 +598,10 @@
                     <span class="pills">
                       <!-- D80 (user): a resubmission is bound only by its resubmission
                            deadline, past which the server refuses it, so it is never late
-                           (the server's is_late compares with the soft deadline). -->
+                           (D81: the server no longer marks it; kept for safety). The title
+                           names no date: the page knows only the one deadline. -->
                       {#if entry.is_late && !entry.is_resubmission}
-                        <span
-                          class="pill pill-late"
-                          title={data.soft_deadline
-                            ? `Submitted late (deadline ${formatLocalWithTz(data.soft_deadline)})`
-                            : 'Submitted late'}
-                        >Late</span>
+                        <span class="pill pill-late" title="Submitted late">Late</span>
                       {/if}
                       {#if entry.evaluation}
                         <StatusPill status={entry.evaluation.result} />

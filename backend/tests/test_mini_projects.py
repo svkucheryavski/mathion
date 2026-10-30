@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from mathion.models import Block, Group, MiniProject, Run, Submission
+from mathion.models import Block, Group, MiniProject, Run, RunTeacher, Submission
 from mathion.models_auth import User
 
 from tests.conftest import NEAR_DEADLINE_ISO, FAR_DEADLINE_ISO, RUN_END_DATE_FAR
@@ -85,17 +85,16 @@ def test_publish_succeeds(admin_client, db, seed_run_with_groups):
     assert response.json()["is_published"] is True
 
 
-def test_student_sees_only_published(auth_client, admin_client, db, seed_run_with_groups):
+def test_non_teacher_gets_403_published_or_not(auth_client, admin_client, db, seed_run_with_groups):
+    # D81 (user): these endpoints carry all three deadlines, so they are for
+    # the run's admins and teachers only; students read their one deadline
+    # from /api/courses/{slug}/mini-projects.
     run, mp = _create_mp(admin_client, db, seed_run_with_groups)
-    # Before publish, student gets empty list (or 403 on direct GET)
-    response = auth_client.get(f"/api/runs/{run['id']}/mini-projects")
-    # auth_client is not enrolled — but list endpoint here doesn't enforce enrollment.
-    # Filtered to is_published=True; mp is unpublished so visible list is empty.
-    assert response.status_code == 200
-    assert response.json() == []
+    assert auth_client.get(f"/api/runs/{run['id']}/mini-projects").status_code == 403
+    assert auth_client.get(f"/api/mini-projects/{mp['id']}").status_code == 403
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
-    response = auth_client.get(f"/api/runs/{run['id']}/mini-projects")
-    assert len(response.json()) == 1
+    assert auth_client.get(f"/api/runs/{run['id']}/mini-projects").status_code == 403
+    assert auth_client.get(f"/api/mini-projects/{mp['id']}").status_code == 403
 
 
 def test_delete_unpublished_no_force(admin_client, db, seed_run_with_groups):
@@ -184,20 +183,46 @@ def test_patch_soft_deadline_recomputes_is_late(admin_client, db, seed_run_with_
     assert sub.is_late is True
 
 
-def test_disabled_version_allows_historical_read(admin_client, auth_client, db, seed_run_with_groups):
-    """Disabled version still allows students to read historical mini-projects.
+def test_patch_soft_deadline_never_marks_a_resubmission_late(admin_client, db, seed_run_with_groups):
+    """D81 (user): a resubmission is never late -- also when a teacher moves
+    the soft deadline before it (review r1 I1)."""
+    run, mp = _create_mp(admin_client, db, seed_run_with_groups)
+    group = db.execute(select(Group).where(Group.run_id == run["id"])).scalars().first()
+    user = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one()
+    first_at = datetime(2026, 5, 10, 12, 0, tzinfo=timezone.utc)
+    rows = [
+        Submission(mini_project_id=mp["id"], group_id=group.id, submitted_by=user.id,
+                   submission_number=n, submitted_at=first_at + timedelta(days=n - 1),
+                   file_path=f"x{n}.zip", file_size=1, is_late=False, is_resubmission=(n == 2))
+        for n in (1, 2)
+    ]
+    db.add_all(rows); db.commit()
+    new_soft = (first_at - timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    response = admin_client.patch(f"/api/mini-projects/{mp['id']}", json={"soft_deadline": new_soft})
+    assert response.status_code == 200
+    for r in rows:
+        db.refresh(r)
+    assert [r.is_late for r in rows] == [True, False]
+
+
+def test_disabled_version_allows_historical_read(admin_client, teacher_client, teacher_user, db, seed_run_with_groups):
+    """Disabled version still allows reading historical mini-projects.
 
     Under Semantics 2 ("no new work; reads still allowed"), a disabled version
-    must preserve students' academic record. The run's end_date is set to a past
-    date so the version can be disabled (no active runs invariant).
+    must preserve the academic record. The run's end_date is set to a past
+    date so the version can be disabled (no active runs invariant). D81: the
+    reader is the run's teacher -- this endpoint is for admins and teachers.
     """
     run, mp = _create_mp(admin_client, db, seed_run_with_groups)
+    if db.query(RunTeacher).filter_by(run_id=run["id"], user_id=teacher_user.id).first() is None:
+        db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
+        db.commit()
     admin_client.post(f"/api/mini-projects/{mp['id']}/publish")
     # Make run inactive (past end_date) so the version can be disabled
     admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-01-01"})
     disable_resp = admin_client.post(f"/api/versions/{run['version_id']}/disable")
     assert disable_resp.status_code == 200
-    response = auth_client.get(f"/api/runs/{run['id']}/mini-projects")
+    response = teacher_client.get(f"/api/runs/{run['id']}/mini-projects")
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 1

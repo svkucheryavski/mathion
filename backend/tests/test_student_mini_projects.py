@@ -241,9 +241,12 @@ def test_list_returns_pending_group_assignment_when_no_group(
     item = body[0]
     assert item["mp_id"] == mp["id"]
     assert item["latest_status"] == "pending_group_assignment"
-    # Deadlines reflected (from the fixture).
-    assert item["hard_deadline"] is not None
-    assert item["resubmission_deadline"] is not None
+    # D81: one deadline -- the fixture sets no soft one, so the hard one is
+    # shown; the three raw dates are never sent.
+    assert item["deadline"] is not None
+    assert item["deadline_kind"] == "due"
+    assert item["deadline_open"] is True
+    assert "hard_deadline" not in item and "resubmission_deadline" not in item
     # Block fields populated from the fixture's single block.
     assert item["block_slug"] == "b"
     assert item["block_order"] == 1
@@ -527,11 +530,11 @@ def test_detail_awaiting_evaluation_blocks_submit(
     assert body["can_submit_reason_if_not"] == "awaiting_evaluation"
 
 
-def test_detail_hard_deadline_passed_blocks_initial(
+def test_detail_deadline_passed_blocks_initial(
     student_client_for, db, seed_run_with_published_mp,
 ):
     """No prior submission AND hard_deadline in the past → can_submit=False,
-    reason='hard_deadline_passed'.
+    reason='deadline_passed' (D81).
 
     Manually rewind mp.hard_deadline (the publish gate forbids past deadlines
     at publish time, but post-publish a previously valid hard_deadline may
@@ -549,7 +552,7 @@ def test_detail_hard_deadline_passed_blocks_initial(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["can_submit"] is False
-    assert body["can_submit_reason_if_not"] == "hard_deadline_passed"
+    assert body["can_submit_reason_if_not"] == "deadline_passed"  # D81: names no hidden deadline
 
 
 def test_detail_resubmission_deadline_passed_blocks_resub(

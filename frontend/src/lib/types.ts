@@ -473,11 +473,14 @@ export type StudentMiniProjectListItem = {
   block_slug: string;
   block_order: number;
   block_title: string;
-  hard_deadline: string | null;        // ISO datetime
-  soft_deadline: string | null;
-  resubmission_deadline: string | null;
+  // D81 (user): ONE deadline, picked by the server; never the hidden hard one.
+  deadline: string | null;             // ISO datetime
+  deadline_kind: StudentDeadlineKind | null;
+  deadline_open: boolean;              // the deadline's window is still open, status aside (no deadline = true)
   latest_status: LatestStatus;
 };
+
+export type StudentDeadlineKind = 'due' | 'resubmit';
 
 export type StudentGroupMember = {
   user_id: number;
@@ -522,9 +525,9 @@ export type StudentMiniProjectDetail = {
   block_slug: string;
   block_title: string;
   assignment_html: string;
-  soft_deadline: string | null;
-  hard_deadline: string | null;
-  resubmission_deadline: string | null;
+  deadline: string | null;             // D81: as on the list item
+  deadline_kind: StudentDeadlineKind | null;
+  deadline_open: boolean;
   group: StudentGroupSummary | null;
   submission_history: StudentSubmissionHistoryEntry[];
   latest_status: LatestStatus;
@@ -535,7 +538,7 @@ export type StudentMiniProjectDetail = {
     | 'group_disabled'
     | 'already_accepted'
     | 'awaiting_evaluation'
-    | 'hard_deadline_passed'
+    | 'deadline_passed'
     | 'resubmission_deadline_passed'
     | null;
 };

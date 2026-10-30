@@ -161,9 +161,9 @@ function makeDetail(overrides: Partial<StudentMiniProjectDetail> = {}): StudentM
     block_slug: 'block-y',
     block_title: 'Final Project',
     assignment_html: '<p>Write your project.</p>',
-    soft_deadline: '2026-06-20T23:59:00Z',
-    hard_deadline: '2026-06-30T23:59:00Z',
-    resubmission_deadline: null,
+    deadline: '2026-06-20T23:59:00Z',
+    deadline_kind: 'due',
+    deadline_open: true,
     group: makeGroup(),
     submission_history: [],
     latest_status: 'not_submitted',
@@ -285,7 +285,7 @@ describe('MiniProjectDetailPage (D5 scope)', () => {
       submission_history: [entry],
       latest_status: 'minor_revision',
       can_submit: true,
-      resubmission_deadline: '2026-06-25T23:59:00Z',
+      deadline: '2026-06-25T23:59:00Z', deadline_kind: 'resubmit',
     }));
     await mountPage();
 
@@ -740,9 +740,9 @@ describe('MiniProjectDetailPage (D6 — misc)', () => {
       block_slug: 'block-y',
       block_order: 0,
       block_title: 'Final Project',
-      hard_deadline: null,
-      soft_deadline: null,
-      resubmission_deadline: null,
+      deadline: null,
+      deadline_kind: null,
+      deadline_open: true,
       latest_status: 'not_submitted',
     };
     __test__setSlots({
@@ -986,49 +986,32 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     expect(row!.querySelector('.pill')).not.toBeNull();
   });
 
-  // D80 (user): a student sees ONE deadline -- the soft one, or the hard one
-  // only when no soft one is set; the hard deadline is a hidden grace window.
-  describe('one student deadline (D80)', () => {
+  // D80/D81 (user): a student sees ONE deadline -- the server picks it
+  // (deadline, deadline_kind, deadline_open) and never sends the hidden hard
+  // one; the page shows it on one line.
+  describe('one student deadline (D80/D81)', () => {
     afterEach(() => { vi.useRealTimers(); });
     const at = (iso: string) => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(iso)); };
     const line = () => target.querySelector('.deadlines .deadline') as HTMLElement;
 
-    it('the soft deadline is "Deadline"; no hard date, no "hard"/"soft" wording', async () => {
+    it('the one deadline is "Deadline"; no "hard"/"soft" wording anywhere on the page', async () => {
       at('2026-06-10T23:59:00Z');
-      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z',
-        resubmission_deadline: '2026-07-05T23:59:00Z', latest_status: 'not_submitted',
-      }));
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ latest_status: 'not_submitted' }));
       await mountPage();
       const dl = target.querySelector('.deadlines') as HTMLElement;
       expect(dl.querySelectorAll('p')).toHaveLength(1);
       expect(line().querySelector('strong')!.textContent).toBe('Deadline');
       expect(line().textContent).toBe('Deadline · 2026-06-21 01:59 GMT+2 — 10 days remaining');   // TZ=Europe/Copenhagen
-      expect(dl.textContent).not.toContain('2026-07-01');
-      expect(dl.textContent!.toLowerCase()).not.toMatch(/hard|soft/);
-      // Nowhere on the page either: text, titles, aria labels.
+      // Nowhere on the page: text, titles, aria labels.
       const attrs = [...target.querySelectorAll('*')].flatMap((el) => [...el.attributes].map((a) => a.value));
       for (const s of [target.textContent!, ...attrs]) {
-        expect(s).not.toContain('2026-07-01');
-        expect(s).not.toContain('2026-06-30');
         expect(s.toLowerCase()).not.toMatch(/hard deadline|soft deadline/);
       }
     });
 
-    it('the hard deadline is "Deadline" only when no soft one is set', async () => {
-      at('2026-06-10T23:59:00Z');
-      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: null, latest_status: 'not_submitted',
-      }));
-      await mountPage();
-      expect(line().textContent).toBe('Deadline · 2026-07-01 01:59 GMT+2 — 20 days remaining');
-    });
-
-    it('past it while the hidden window is open, with work to submit: "Overdue since", crimson', async () => {
+    it('past it while the window is open, with work to submit: "Overdue since", crimson', async () => {
       at('2026-06-25T23:59:00Z');
-      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'not_submitted',
-      }));
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ latest_status: 'not_submitted', deadline_open: true }));
       await mountPage();
       expect(line().classList.contains('deadline-overdue')).toBe(true);
       expect(line().querySelector('strong')!.textContent).toBe('Overdue since');
@@ -1038,7 +1021,8 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     it('past it and closed, or nothing left to submit: "Deadline · … — passed N days ago"', async () => {
       at('2026-07-04T23:59:00Z');
       vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'not_submitted',
+        latest_status: 'not_submitted', deadline_open: false,
+        can_submit: false, can_submit_reason_if_not: 'deadline_passed',
       }));
       await mountPage();
       expect(line().textContent).toBe('Deadline · 2026-06-21 01:59 GMT+2 — passed 14 days ago');
@@ -1047,40 +1031,46 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
       target.innerHTML = '';
       at('2026-06-25T23:59:00Z');
       vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'awaiting_evaluation',
+        latest_status: 'awaiting_evaluation', deadline_open: true,
         can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation',
       }));
       await mountPage();
       expect(line().textContent).toBe('Deadline · 2026-06-21 01:59 GMT+2 — passed 5 days ago');
     });
 
+    it('a closed window reads "The submission deadline has passed."', async () => {
+      vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
+        deadline_open: false, can_submit: false, can_submit_reason_if_not: 'deadline_passed',
+      }));
+      await mountPage();
+      expect(target.textContent).toContain('The submission deadline has passed.');
+    });
+
     it('a revision with no resubmission deadline shows no deadline at all', async () => {
       vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        latest_status: 'minor_revision', resubmission_deadline: null,
-        hard_deadline: '2026-06-30T23:59:00Z', soft_deadline: '2026-06-20T23:59:00Z',
+        latest_status: 'minor_revision', deadline: null, deadline_kind: null, deadline_open: true,
         submission_history: [makeEntry({ evaluation: makeEval({ result: 'minor_revision' }) })],
       }));
       await mountPage();
       expect(target.querySelector('.deadlines')).toBeNull();
     });
 
-    it('the history\'s Late pill names no other deadline: "Submitted late"', async () => {
+    it('the history\'s Late pill names no deadline: "Submitted late"', async () => {
       vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'awaiting_evaluation',
+        latest_status: 'awaiting_evaluation',
         can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation',
         submission_history: [makeEntry({ submission_number: 1, is_late: true })],
       }));
       await mountPage();
-      expect((target.querySelector('.pill-late') as HTMLElement).title).toBe('Submitted late (deadline 2026-06-21 01:59 GMT+2)');
+      expect((target.querySelector('.pill-late') as HTMLElement).title).toBe('Submitted late');
     });
 
     // D80 (user): a resubmission is bound only by the resubmission deadline,
-    // past which the server refuses it -- so it is never late. The server's
-    // is_late compares every submission with the soft deadline; the student
-    // page shows no Late pill on a resubmission.
+    // past which the server refuses it -- so it is never late (D81: the server
+    // no longer marks it; the page keeps the rule for older data).
     it('no Late pill on a resubmission; a first submission keeps it', async () => {
       vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-        soft_deadline: '2026-06-20T23:59:00Z', latest_status: 'awaiting_evaluation',
+        latest_status: 'awaiting_evaluation',
         can_submit: false, can_submit_reason_if_not: 'awaiting_evaluation',
         submission_history: [
           makeEntry({ submission_id: 2, submission_number: 2, is_late: true, is_resubmission: true }),
@@ -1095,9 +1085,9 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     });
   });
 
-  it('deadlines: resubmission line wins in a revision state', async () => {
+  it('deadlines: the resubmission line in a revision state', async () => {
     vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-      latest_status: 'minor_revision', resubmission_deadline: '2026-06-25T23:59:00Z',
+      latest_status: 'minor_revision', deadline: '2026-06-25T23:59:00Z', deadline_kind: 'resubmit',
       submission_history: [makeEntry({ evaluation: makeEval({ result: 'minor_revision' }) })],
     }));
     await mountPage();
@@ -1107,24 +1097,8 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     expect(target.querySelectorAll('.deadlines p')).toHaveLength(1);
   });
 
-  // The `showResub ||` conjunct of the row predicate is load-bearing ONLY here:
-  // in a revision state whose resubmission deadline is the sole date, the row
-  // must still render. Every other T3 deadline fixture carries makeDetail()'s
-  // default hard_deadline, which keeps the row alive on its own — so without
-  // this case, dropping `showResub ||` is a mutation no test can see.
-  it('deadlines row renders on the resubmission line alone (no hard/soft deadline)', async () => {
-    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({
-      latest_status: 'minor_revision', resubmission_deadline: '2026-06-25T23:59:00Z',
-      hard_deadline: null, soft_deadline: null,
-      submission_history: [makeEntry({ evaluation: makeEval({ result: 'minor_revision' }) })],
-    }));
-    await mountPage();
-    expect(target.querySelector('.deadlines')).not.toBeNull();
-    expect(target.querySelector('.deadline-resub')).not.toBeNull();
-  });
-
   it('deadlines row is absent when nothing would render in it', async () => {
-    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ hard_deadline: null, soft_deadline: null, resubmission_deadline: null }));
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ deadline: null, deadline_kind: null }));
     await mountPage();
     expect(target.querySelector('.deadlines')).toBeNull();
   });

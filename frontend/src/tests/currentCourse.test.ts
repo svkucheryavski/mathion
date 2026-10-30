@@ -140,9 +140,9 @@ const MP_ITEM_FIXTURE = {
   block_slug: 'final-project',
   block_order: 3,
   block_title: 'Final Project',
-  hard_deadline: null,
-  soft_deadline: null,
-  resubmission_deadline: null,
+  deadline: null,
+  deadline_kind: null,
+  deadline_open: true,
   latest_status: 'not_submitted' as const,
 };
 
