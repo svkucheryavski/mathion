@@ -6,6 +6,7 @@
   --surface: #FFFFFF;         /* cards, rows, inputs */
   --surface-2: #F5F6F9;       /* table headers, accordion header strips */
   --surface-3: #FCFCFD;       /* a near-white tint inside a white surface; never on the ground */
+  --surface-ground: #FDFDFE;  /* near-white boxes that sit ON the page ground: the course info, closed blocks (D76) */
   --disabled-bg: #FBFBFC;     /* disabled and blocked controls: a step above the ground (D50) */
   /* Slice-5c focus by depth: the open container is --focus-0; each level
      further out is one step darker (spec D1/D2). */
@@ -33,11 +34,13 @@
   --border-soft: #F0F1F4;     /* row separators inside a card */
   --border-faint: #EDEFF2;    /* disabled control borders */
   --border-ground: #C9CED7;   /* structural lines drawn on the page ground (--bg), e.g. under the run tabs (D71); the editor's focus-by-depth shades use --focus-line instead */
+  --border-box: #D5D9E0;      /* the edge of a --surface-ground box on the page ground (D76) */
 
   /* --- accent --- */
   --primary: #3F5C77;         /* steel blue */
   --primary-text: #fff;
-  --primary-soft: #EAEFF4;    /* code badges, current item, hover fills */
+  --primary-soft: #EAEFF4;    /* code badges, current item, selected fills (the course page rows hover --row-hover, D77) */
+  --row-hover: #F8F9FC;       /* hover fill of the course page's sequence and mini-project rows: lighter than the open block's --surface-2 strip, still visible on white (D77) */
   --primary-press: #2F465B;   /* a pressed primary confirm (Polish 1 D31) */
 
   /* --- gold: the logo's second peak, and chrome that marks "you are here" ---

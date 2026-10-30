@@ -7,7 +7,8 @@
   // parent states the same facts in words (progressPhrase).
   //
   // `onStrip`: the chip's fill on a tinted header strip, where the row tint
-  // (`--surface-2`) would vanish.
+  // (`--surface-2`) would vanish. BlockGroup passes it only for an OPEN block;
+  // a closed header is near-white (D76), where the row tint reads instead.
   let { p, onStrip = false }: { p: Progress; onStrip?: boolean } = $props();
 </script>
 
@@ -40,7 +41,7 @@
     height: 6px;
     border-radius: var(--radius-pill);
     /* `--border`, one step darker than CourseCard's `--border-soft` track: rows
-       turn `--primary-soft` on hover, where the softer track vanishes. */
+       turn `--row-hover` on hover (D77), where the softer track vanishes. */
     background: var(--border);
     overflow: hidden;
   }

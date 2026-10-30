@@ -69,7 +69,7 @@
     color: var(--text);
   }
   .row:hover {
-    background: var(--primary-soft);
+    background: var(--row-hover); /* D77: lighter than --primary-soft */
     text-decoration: none;
   }
   /* An INSET ring, the twin of SequenceLink's. The global outline (base.css)

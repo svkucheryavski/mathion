@@ -43,7 +43,7 @@
   }
   /* `text-decoration:none` suppresses the global `a:hover` underline. */
   .row:hover {
-    background: var(--primary-soft);
+    background: var(--row-hover); /* D77: lighter than --primary-soft */
     text-decoration: none;
   }
   /* An INSET ring. The global outline would be clipped by the card's

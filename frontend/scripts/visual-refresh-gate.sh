@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2314
+EXPECTED_CHECKS=2328
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -508,6 +508,13 @@ else:
 # 8b9acfd5): +--border-ground #C9CED7, the line colour for lines drawn on the
 # page ground (the run tabs' hairline). The ONLY change (dropping it
 # reproduces 7bfdd12a).
+# D76 (user, 2026-10-30, Safari pass): the :root hash moved (8b9acfd5 ->
+# 1ee5fb64): +--surface-ground #FDFDFE and +--border-box #D5D9E0, the fill and
+# edge of near-white boxes on the page ground (course info, closed blocks). The
+# ONLY change (dropping the two reproduces 8b9acfd5).
+# D77 (user, 2026-10-30, Safari pass): 1ee5fb64 -> e7cf7114: +--row-hover
+# #F8F9FC, the course page rows' hover fill. The ONLY change (dropping it
+# reproduces 1ee5fb64).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -538,7 +545,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', '8b9acfd5'),
+    ('', ':root', 'e7cf7114'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -1638,10 +1645,10 @@ const SIG = {
      "line:[x1=\"11.8\" y1=\"4.2\" x2=\"4.2\" y2=\"11.8\"]", "#if:",
      "span:sr-only[class=\"sr-only\"]"],
   "BlockGroup.svelte":
-    ["section:block[class=\"block\"]", "header:", "h2:",
+    ["section:block.class:collapsed[class=\"block\"]", "header:", "h2:",
      "button:acc[id class=\"acc\" aria-expanded aria-controls aria-label onclick]",
      "span:num[class=\"num\" aria-hidden]", "span:acc-title[class=\"acc-title\"]",
-     "ProgressMeter:[{p} onStrip]",
+     "ProgressMeter:[{p} onStrip={expanded}]",
      "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
      "ul:", "#each:", "li:",
@@ -2238,7 +2245,10 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 # bar/chip columns sit exactly under the block header totals (follow-up 2).
 ROW   = ('display:flex;align-items:center;gap:10px;padding:8px 35px 8px 12px;'
          'border-bottom:1px solid var(--border-soft);color:var(--text)')
-HOVER = 'background:var(--primary-soft);text-decoration:none'
+# D77 (user, 2026-10-30, Safari pass): the rows hover a lighter --row-hover
+# (#F8F9FC, lighter than the open block's --surface-2 strip), not --primary-soft,
+# which stays for badges and the current item.
+HOVER = 'background:var(--row-hover);text-decoration:none'
 # An INSET ring. The global outline (base.css) would be clipped by T8a's
 # `overflow:hidden` card, whose rows span its padding box EXACTLY, and paint
 # over the neighbouring rows; so the row drops it (`outline:none`) and draws
@@ -2278,7 +2288,7 @@ SPECS = [
     ('ProgressMeter', pm_h, [
         # A FIXED column so the bars line up row to row (layout A).
         ('', '.progress.%s' % pm_h, 'display:flex;align-items:center;gap:8px;flex:0 0 150px'),
-        # --border, not CourseCard --border-soft: the row hovers --primary-soft.
+        # --border, not CourseCard --border-soft: the row hovers --row-hover (D77).
         ('', '.track.%s' % pm_h,
              'flex:1 1 auto;height:6px;border-radius:var(--radius-pill);'
              'background:var(--border);overflow:hidden'),
@@ -2488,6 +2498,10 @@ WANT = [
     # `[role='region']` but the dist minifier strips quotes from a value that is a
     # valid identifier, and dist is what ships and what this section grades.
     ('[role=region].%s' % h, 'border-top:1px solid var(--border)'),
+    # D76: a CLOSED card stands off the page ground -- near-white header and a
+    # --border-box edge. Open cards keep the two rules above unchanged.
+    ('.block.collapsed.%s' % h, 'border-color:var(--border-box)'),
+    ('.block.collapsed.%s header:where(.%s)' % (h, h), 'background:var(--surface-ground)'),
     # Without flex:1 the h2 shrink-wraps, `.acc width:100%` resolves against a
     # content-width box, and the chevron margin-left:auto has no free space.
     ('header.%s h2:where(.%s)' % (h, h), 'flex:1;min-width:0'),
@@ -5564,6 +5578,27 @@ if [[ -n $REPLY ]]; then
   N=MiniProjectDetailPage; H=$REPLY
   d '\.sheet' '' 'background:var\(--surface\)' 'border:2px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'padding:16px 20px 20px' 'min-height:200px'
   chk "\.sheet\.${H}>(:where\(\.${H}\))?:last-child(:where\(\.${H}\))?" 'margin-bottom:0'
+fi
+# D76 (user, 2026-10-30, Safari pass 9j, option C): boxes on the page ground --
+# the course info and the closed blocks -- take the near-white --surface-ground
+# and a --border-box edge, so they stand off the ground. The open block keeps its
+# --surface-2 header strip and --border edge, so open and closed stay apart.
+check "theme --surface-ground is #FDFDFE (D76)" ":root\{[^}]*--surface-ground: #FDFDFE;"
+check "theme --border-box is #D5D9E0 (D76)"     ":root\{[^}]*--border-box: #D5D9E0;"
+check "theme --row-hover is #F8F9FC (D77)"      ":root\{[^}]*--row-hover: #F8F9FC;"
+uniq1 all-toggle
+if [[ -n $REPLY ]]; then
+  N=CourseView; H=$REPLY
+  d '\.info' '' 'color:var\(--muted\)' 'background:var\(--surface-ground\)' 'border:1px solid var\(--border-box\)' 'border-radius:var\(--radius-lg\)' 'padding:12px 16px'
+  # D76 review m1: on a phone the column stretches, so a short info is a
+  # full-width box, not one as narrow as its text.
+  chk "@media \(max-width: ?640px\)\{\.top\.${H}" 'flex-direction:column' 'align-items:stretch'
+fi
+uniq1 acc
+if [[ -n $REPLY ]]; then
+  N=BlockGroup; H=$REPLY
+  d '\.block\.collapsed' '' 'border-color:var\(--border-box\)'
+  chk "\.block\.collapsed\.${H} header:where\(\.${H}\)" 'background:var\(--surface-ground\)'
 fi
 # One page ground: no page re-shades the body with it any more.
 none "no body:has() rule sets --focus-page (Polish 2 D50)" "body:has\([^)]*\)\{[^}]*--focus-page"

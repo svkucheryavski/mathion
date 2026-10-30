@@ -44,7 +44,7 @@
   const label = $derived(`${n}. ${block.title}, ${progressPhrase(p)}`);
 </script>
 
-<section class="block">
+<section class="block" class:collapsed={!expanded}>
   <header>
     <!-- A real <button>, not the former `<header onclick>`: that form was not
          focusable or keyboard-operable and raised both of this file's a11y
@@ -65,7 +65,10 @@
              button's aria-label states "1. Title" in words. -->
         <span class="num" aria-hidden="true">{n}.</span>
         <span class="acc-title">{block.title}</span>
-        <ProgressMeter {p} onStrip />
+        <!-- The strip's white chip fill only on an OPEN header: on a closed
+             card's near-white --surface-ground (D76) a white chip vanishes, so a
+             closed header takes the row chip's --surface-2 instead. -->
+        <ProgressMeter {p} onStrip={expanded} />
         <!-- One down-chevron, rotated when collapsed. A STATIC icon would drop the
              only visible collapsed cue, because `{expanded ? '▾' : '▸'}` encoded
              the state as direction and `aria-expanded` alone is invisible.
@@ -166,6 +169,12 @@
   [role='region'] {
     border-top: 1px solid var(--border);
   }
+  /* D76: a CLOSED card shows only its header, which on the --surface-2 strip and
+     --border edge all but vanished into the page ground. It takes the
+     near-white --surface-ground and the darker --border-box edge instead; an
+     open card keeps the strip and edge above, so open and closed stay apart. */
+  .block.collapsed { border-color: var(--border-box); }
+  .block.collapsed header { background: var(--surface-ground); }
   /* Load-bearing: the default `flex: 0 1 auto` shrink-wraps the <h2> to its
      max-content, so `.acc { width: 100% }` would resolve against a content-width
      box — the chevron could not reach the card edge and the click target would

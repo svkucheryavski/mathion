@@ -115,13 +115,23 @@
   header { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-3); }
   /* The admin versions page's title size (VersionsPage .heading h1). */
   h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
-  .info { color: var(--muted); margin: var(--space-3) 0; }
+  /* D76: the course info is a near-white box on the page ground, so it reads as
+     its own panel beside the white progress card, not as loose text. */
+  .info {
+    color: var(--muted);
+    margin: var(--space-3) 0;
+    background: var(--surface-ground);
+    border: 1px solid var(--border-box);
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+  }
   .top { display: flex; align-items: flex-start; gap: 24px; margin-bottom: var(--space-3); }
   .top .info { flex: 1 1 auto; min-width: 0; margin: 0; }
   /* Right-aligned over the blocks' chevron column; the -6px pulls it up beside
      the summary card's bottom margin so it reads as part of the list. */
   .all-toggle { display: flex; justify-content: flex-end; margin: -6px 0 4px; }
   @media (max-width: 640px) {
-    .top { flex-direction: column; gap: var(--space-3); }
+    /* stretch: a short info is a full-width box, like the card below it (D76). */
+    .top { flex-direction: column; gap: var(--space-3); align-items: stretch; }
   }
 </style>

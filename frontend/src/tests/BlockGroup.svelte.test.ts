@@ -281,6 +281,41 @@ describe('BlockGroup', () => {
     expect(btn.getAttribute('aria-expanded')).toBe('true');
   });
 
+  // D76: a closed block stands off the page ground (near-white header, darker
+  // edge); the card's class carries the state the CSS keys on.
+  it('marks the card .collapsed exactly while the block is closed', () => {
+    component = mount(BlockGroup, {
+      target,
+      props: { n: 1, courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE, mpByBlockId: {}, expanded: false },
+    });
+    flushSync();
+    const card = target.querySelector('section.block') as HTMLElement;
+    const btn = target.querySelector('header h2 button.acc') as HTMLButtonElement;
+    expect(card.classList.contains('collapsed')).toBe(true);
+    btn.click();
+    flushSync();
+    expect(card.classList.contains('collapsed')).toBe(false);
+    btn.click();
+    flushSync();
+    expect(card.classList.contains('collapsed')).toBe(true);
+  });
+
+  // D76 review (both lanes): the strip's white chip fill vanishes on a closed
+  // card's near-white header, so only an OPEN header gets `on-strip`.
+  it('gives the header chip the strip fill only while the block is open', () => {
+    component = mount(BlockGroup, {
+      target,
+      props: { n: 1, courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE, mpByBlockId: {}, expanded: false },
+    });
+    flushSync();
+    const chip = () => target.querySelector('header .quiz-chip') as HTMLElement;
+    const btn = target.querySelector('header h2 button.acc') as HTMLButtonElement;
+    expect(chip().classList.contains('on-strip')).toBe(false);
+    btn.click();
+    flushSync();
+    expect(chip().classList.contains('on-strip')).toBe(true);
+  });
+
   it('rotates the chevron exactly when the header reads collapsed', () => {
     // `{expanded ? "▾" : "▸"}` encoded the state as DIRECTION, so a static SVG
     // would drop the only VISIBLE collapsed cue and leave just aria-expanded.
