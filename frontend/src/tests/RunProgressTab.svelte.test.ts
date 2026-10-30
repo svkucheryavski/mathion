@@ -752,6 +752,257 @@ describe('RunProgressTab', () => {
       .toEqual(['S1 Vectors', 'S2 Spaces', 'S1 As a map']);
   });
 
+  // D79 (user): a compact table -- the headers read "B1" and "S1"; the full
+  // names stay in the accessible text (visually hidden) and show in a tooltip
+  // on hover and on keyboard focus, rendered outside the scroll box.
+  describe('compact headers (D79)', () => {
+    const twoBlocks = () => progressMock({
+      sequences: [
+        { sequence_id: 10, sequence_title: 'Vectors', sequence_order: 1, block_id: 5, block_order: 1, block_title: 'Vectors',
+          total_items: 4, has_quiz_items: true },
+        { sequence_id: 11, sequence_title: 'Spaces', sequence_order: 4, block_id: 5, block_order: 1, block_title: 'Vectors',
+          total_items: 4, has_quiz_items: true },
+        { sequence_id: 12, sequence_title: 'As a map', sequence_order: 2, block_id: 7, block_order: 3, block_title: 'Matrices',
+          total_items: 4, has_quiz_items: true },
+      ],
+      students: [],
+    });
+    const blocks = [
+      { id: 5, version_id: 1, title: 'Vectors', slug: 'v', order: 1, info: '', info_html: '' },
+      { id: 7, version_id: 1, title: 'Matrices', slug: 'm', order: 3, info: '', info_html: '' },
+    ];
+    // The text a sighted user sees: everything outside .sr-only.
+    const visible = (el: Element) => {
+      const c = el.cloneNode(true) as Element;
+      c.querySelectorAll('.sr-only').forEach((n) => n.remove());
+      return c.textContent!.replace(/\s+/g, ' ').trim();
+    };
+    const tip = () => document.querySelector('.pg-tip') as HTMLElement | null;
+    const seqBtn = (i: number) => host.querySelectorAll('th.seq-header button')[i] as HTMLButtonElement;
+    async function mountCompact() {
+      vi.stubGlobal('fetch', mockFetch(200, twoBlocks()));
+      mountTab(1, { blocks });
+      await settle();
+    }
+
+    it('shows short labels; the full names stay in the accessible text', async () => {
+      await mountCompact();
+      const bh = Array.from(host.querySelectorAll('th.block-header'));
+      expect(bh.map(visible)).toEqual(['B1', 'B2']);
+      expect(bh.map((th) => th.textContent!.trim())).toEqual(['B1 · Vectors', 'B2 · Matrices']);
+      const sh = Array.from(host.querySelectorAll('th.seq-header button'));
+      expect(sh.map(visible)).toEqual(['S1', 'S2', 'S1']);
+      expect(sh.map((b) => b.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['S1 Vectors', 'S2 Spaces', 'S1 As a map']);
+    });
+
+    it('a sequence header shows its block and title in a tooltip on hover, outside the scroll box', async () => {
+      await mountCompact();
+      expect(tip()).toBeNull();
+      seqBtn(2).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.textContent).toBe('B2 · Matrices — S1 · As a map');
+      expect(tip()!.getAttribute('aria-hidden')).toBe('true');
+      expect(host.querySelector('.table-scroll .pg-tip')).toBeNull();
+      seqBtn(2).dispatchEvent(new MouseEvent('mouseleave'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    it('keyboard focus shows the tooltip; blur and Escape hide it', async () => {
+      await mountCompact();
+      seqBtn(1).dispatchEvent(new FocusEvent('focus'));
+      flushSync();
+      expect(tip()!.textContent).toBe('B1 · Vectors — S2 · Spaces');
+      seqBtn(1).dispatchEvent(new FocusEvent('blur'));
+      flushSync();
+      expect(tip()).toBeNull();
+      seqBtn(0).dispatchEvent(new FocusEvent('focus'));
+      flushSync();
+      expect(tip()).not.toBeNull();
+      seqBtn(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    it('a block header shows its full name in the tooltip on hover', async () => {
+      await mountCompact();
+      const bh = host.querySelectorAll('th.block-header')[1] as HTMLElement;
+      bh.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.textContent).toBe('B2 · Matrices');
+      bh.dispatchEvent(new MouseEvent('mouseleave'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    // Round-1 review (both lanes): the tip sits on the VISIBLE part of its header
+    // (right of the pinned Student + Group columns, inside the scroll box), at
+    // least 8px from the window edges, and below the header near the top.
+    const rect = (left: number, right: number, top = 300, bottom = 330) =>
+      ({ left, right, top, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    function place(el: Element, r: DOMRect) { (el as HTMLElement).getBoundingClientRect = () => r; }
+    async function mountPlaced(header: DOMRect) {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 280, 340));
+      place(seqBtn(0), header);
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      return tip()!;
+    }
+
+    it('on the window\'s left half the tip starts at the header\'s visible left edge', async () => {
+      const t = await mountPlaced(rect(250, 380));   // half under the pinned columns
+      expect(t.style.left).toBe('300px');
+      expect(t.style.right).toBe('');
+      expect(t.style.top).toBe('294px');
+      expect(t.classList.contains('below')).toBe(false);
+    });
+
+    it('on the right half it ends at the visible right edge, clipped by the scroll box', async () => {
+      const t = await mountPlaced(rect(700, 1300));  // runs past the scroll box (right 1000)
+      expect(t.style.right).toBe(`${window.innerWidth - 1000}px`);
+      expect(t.style.left).toBe('');
+    });
+
+    it('keeps at least 8px from the window edge', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(-50, window.innerWidth + 50, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(-100, -40, 280, 340));
+      place(seqBtn(0), rect(window.innerWidth - 60, window.innerWidth + 40));
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.style.right).toBe('8px');
+    });
+
+    it('near the top of the window the tip flips below the header', async () => {
+      const t = await mountPlaced(rect(400, 480, 20, 50));
+      expect(t.classList.contains('below')).toBe(true);
+      expect(t.style.top).toBe('56px');
+    });
+
+    it('Escape anywhere hides a hover tip; a page scroll hides it too', async () => {
+      await mountCompact();
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      flushSync();
+      expect(tip()).toBeNull();
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      window.dispatchEvent(new Event('scroll'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    it('a block missing from `blocks` keeps its title and shows no tip', async () => {
+      vi.stubGlobal('fetch', mockFetch(200, twoBlocks()));
+      mountTab(1, { blocks: [blocks[0]] });
+      await settle();
+      const bh = host.querySelectorAll('th.block-header')[1] as HTMLElement;
+      expect(bh.textContent!.trim()).toBe('Matrices');
+      bh.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    it('scrolling the table hides the tooltip', async () => {
+      await mountCompact();
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()).not.toBeNull();
+      host.querySelector('.table-scroll')!.dispatchEvent(new Event('scroll'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    // Round-2 review (both lanes): focusing a header that is out of view scrolls
+    // it in, and that scroll fires after the focus. A focus tip follows its
+    // header through a scroll; a hover tip still hides.
+    it('a focus tip survives the scroll its focus causes, at the header\'s new place', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 280, 340));
+      place(seqBtn(0), rect(1100, 1180));            // off the scroll box's right edge
+      seqBtn(0).focus();
+      flushSync();
+      place(seqBtn(0), rect(400, 480));              // scrolled into view
+      host.querySelector('.table-scroll')!.dispatchEvent(new Event('scroll'));
+      flushSync();
+      expect(tip()!.style.left).toBe('400px');
+      window.dispatchEvent(new Event('scroll'));
+      flushSync();
+      expect(tip()).not.toBeNull();
+      seqBtn(0).blur();
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    it('a focus tip hides once a scroll leaves its header under the pinned columns', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 280, 340));
+      place(seqBtn(0), rect(400, 480));
+      seqBtn(0).focus();
+      flushSync();
+      expect(tip()).not.toBeNull();
+      place(seqBtn(0), rect(210, 290));              // wholly behind Student + Group
+      host.querySelector('.table-scroll')!.dispatchEvent(new Event('scroll'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    // Round-3 review (minors): the focused header's tip is the one that stays.
+    it('a mouse-out returns the tip to the header that has keyboard focus', async () => {
+      await mountCompact();
+      seqBtn(0).focus();
+      flushSync();
+      const focusText = tip()!.textContent;
+      seqBtn(2).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.textContent).not.toBe(focusText);
+      seqBtn(2).dispatchEvent(new MouseEvent('mouseleave'));
+      flushSync();
+      expect(tip()!.textContent).toBe(focusText);
+    });
+
+    it('a resize re-places a focus tip; Escape keeps it dismissed through a scroll or resize', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 280, 340));
+      place(seqBtn(0), rect(400, 480));
+      seqBtn(0).focus();
+      flushSync();
+      place(seqBtn(0), rect(420, 500));
+      window.dispatchEvent(new Event('resize'));
+      flushSync();
+      expect(tip()!.style.left).toBe('420px');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      flushSync();
+      expect(tip()).toBeNull();
+      host.querySelector('.table-scroll')!.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event('resize'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+
+    // Round-4 review (Fable): Chrome and Firefox focus a button on click (a sort),
+    // without :focus-visible. That tip is a hover tip: a mouse-out hides it.
+    it('a click focus (not :focus-visible) does not keep the tip after a mouse-out', async () => {
+      await mountCompact();
+      const b = seqBtn(1);
+      const m = b.matches.bind(b);
+      b.matches = (sel: string) => (sel === ':focus-visible' ? false : m(sel));
+      b.dispatchEvent(new MouseEvent('mouseenter'));
+      b.focus();
+      flushSync();
+      expect(tip()).not.toBeNull();
+      b.dispatchEvent(new MouseEvent('mouseleave'));
+      flushSync();
+      expect(tip()).toBeNull();
+    });
+  });
+
   it('a block missing from `blocks` shows its title without "B{n} · "', async () => {
     vi.stubGlobal('fetch', mockFetch(200, progressMock()));
     mountTab();

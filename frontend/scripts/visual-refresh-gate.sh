@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2357
+EXPECTED_CHECKS=2371
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4755,6 +4755,15 @@ if [[ -n $REPLY ]]; then
   d '\.table-scroll' '' 'scroll-padding-left:20rem'
   chk "\.progress-grid\.${H} \.block-header:where\(\.${H}\)" 'padding:6px 12px' 'font-family:var\(--font-mono\)' 'text-transform:uppercase' 'white-space:nowrap'
   chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'white-space:nowrap'
+  # D79 (user, compact table): short headers, a 4rem floor per sequence column,
+  # and one fixed tooltip above the header, outside the scroll box.
+  chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'min-width:4rem'
+  d '\.pg-tip' '' 'position:fixed' 'z-index:10' 'transform:translateY\(-100%\)' 'max-width:min\(320px,calc\(100vw - 16px\)\)' 'overflow-wrap:anywhere' 'background:var\(--text\)' 'color:var\(--surface\)' 'pointer-events:none'
+  # Review round 1: the tip flips below a header near the window top, keeps an
+  # edge in High Contrast, and the full names stay hidden only while .sr-only does.
+  d '\.pg-tip\.below' '' 'transform:none'
+  chk "@media \(forced-colors: ?active\)\{\.pg-tip\.${H}" 'border:1px solid CanvasText'
+  d '\.sr-only' '' 'position:absolute' 'width:1px' 'clip-path:inset\(50%\)'
   # The Student column is exactly 14rem (the sticky Group's offset): the name box
   # is 14rem less the cell's 12px side paddings and 1px right border, and a long
   # email wraps inside it.

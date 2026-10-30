@@ -205,6 +205,69 @@
     const n = blockPos.get(blockId);
     return n === undefined ? title : `B${n} · ${title}`;
   }
+
+  // D79 (user): a compact table. The headers read "B1" / "S1"; the full names
+  // stay in the accessible text (visually hidden) and show in ONE tooltip on
+  // hover and on keyboard focus. It is position: fixed and rendered outside
+  // .table-scroll, whose overflow would clip it (a one-row table above all).
+  // aria-hidden: a screen reader already hears the full names.
+  // Placed on the header's VISIBLE part (right of the pinned Student + Group
+  // columns, inside the scroll box): it starts at that part's left edge, or ends
+  // at its right edge when the part's centre is on the window's right half, and
+  // keeps 8px from the window edge. Within 48px of the window top (the tip is
+  // one or two 17px lines plus padding) it flips below the header.
+  // A scroll or resize hides a hover tip. A focus tip follows its header
+  // instead: focusing an out-of-view header scrolls it in, and that scroll event
+  // comes AFTER the focus (round 2, both lanes). While no part of the header
+  // shows there is no tip, but its source stays, so the scroll that brings the
+  // header in shows it. A mouse-out returns the tip to the keyboard-focused header; Escape
+  // dismisses it until a header is focused or hovered again (round 3).
+  let tip = $state<{ text: string; top: number; below: boolean; left?: number; right?: number } | null>(null);
+  type TipSrc = { el: HTMLElement; text: string };
+  let tipSrc: TipSrc | null = null;
+  let focusSrc: TipSrc | null = null;
+  function showTip(e: Event, text: string) {
+    tipSrc = { el: e.currentTarget as HTMLElement, text };
+    placeTip(tipSrc.el, text);
+  }
+  // Only keyboard focus keeps a tip: Chrome and Firefox also focus a button on a
+  // click (a sort), without :focus-visible, and that tip stays a hover tip.
+  function focusTip(e: Event, text: string) {
+    showTip(e, text);
+    focusSrc = tipSrc?.el.matches(':focus-visible') ? tipSrc : null;
+  }
+  function blurTip(e: Event) {
+    if (focusSrc?.el === e.currentTarget) focusSrc = null;
+    if (tipSrc?.el === e.currentTarget) hideTip();
+  }
+  function placeTip(el: HTMLElement, text: string) {
+    const r = el.getBoundingClientRect();
+    const box = el.closest('.table-scroll')?.getBoundingClientRect();
+    const pin = el.closest('table')?.querySelector('thead .sticky-group')?.getBoundingClientRect();
+    const visL = Math.max(r.left, pin?.right ?? -Infinity, box?.left ?? -Infinity);
+    const visR = Math.min(r.right, box?.right ?? Infinity);
+    if (visR < visL || r.bottom < 0 || r.top > window.innerHeight) { tip = null; return; }
+    const below = r.top < 48;
+    const top = below ? r.bottom + 6 : r.top - 6;
+    const w = window.innerWidth;
+    tip = (visL + visR) / 2 > w / 2
+      ? { text, top, below, right: Math.max(8, w - visR) }
+      : { text, top, below, left: Math.max(8, visL) };
+  }
+  function hideTip() { tip = null; tipSrc = null; }
+  // Mouse-out, scroll, resize: the focused header's tip if it still has focus, else none.
+  function restoreTip() {
+    if (focusSrc && document.activeElement === focusSrc.el) {
+      tipSrc = focusSrc;
+      placeTip(focusSrc.el, focusSrc.text);
+    } else hideTip();
+  }
+  function tipKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') { hideTip(); focusSrc = null; }
+  }
+  function seqTipText(seq: DashboardProgressResponse['sequences'][number]): string {
+    return `${blockLabel(seq.block_id, seq.block_title)} — S${seqPos.get(seq.sequence_id)} · ${seq.sequence_title}`;
+  }
   const legendName = $derived(`${mode === 'coverage' ? 'Coverage' : 'Score'} scale, 0 to 100 percent`);
 
   // --- Cell helpers ---
@@ -300,6 +363,11 @@
   }
 </script>
 
+<!-- D79: Escape anywhere dismisses the tip (a hover tip too); a page scroll or
+     resize would leave the fixed tip behind, so they hide a hover tip and
+     re-place a focus tip (restoreTip). -->
+<svelte:window onkeydown={tipKey} onscroll={restoreTip} onresize={restoreTip} />
+
 <div class="tab-container">
   {#if loading}<LoadingPlaceholder />{/if}
   {#if error}
@@ -345,7 +413,7 @@
     {#if data.sequences.length === 0}
       <div class="empty">No sequences in this run.</div>
     {:else}
-    <div class="table-scroll">
+    <div class="table-scroll" onscroll={restoreTip}>
       <table class="progress-grid">
         <thead>
           <tr class="block-row">
@@ -356,14 +424,22 @@
               <button type="button" onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
             </th>
             {#each blockGroupedSequences as bg (bg.block_id)}
-              <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{blockLabel(bg.block_id, bg.block_title)}</th>
+              {@const bn = blockPos.get(bg.block_id)}
+              {#if bn === undefined}
+                <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{bg.block_title}</th>
+              {:else}
+                <th class="block-header" scope="colgroup" colspan={bg.sequences.length}
+                    onmouseenter={(e) => showTip(e, blockLabel(bg.block_id, bg.block_title))} onmouseleave={restoreTip}>B{bn}<span class="sr-only">{` · ${bg.block_title}`}</span></th>
+              {/if}
             {/each}
           </tr>
           <tr class="seq-row">
             {#each data.sequences as seq (seq.sequence_id)}
               <th class="seq-header" scope="col" aria-sort={sortAria(`seq:${seq.sequence_id}`)}>
-                <button type="button" onclick={() => toggleSort(`seq:${seq.sequence_id}`)}>
-                  <span class="seq-n">S{seqPos.get(seq.sequence_id)}</span> {seq.sequence_title}{#if sortKey === `seq:${seq.sequence_id}`}<SortMark dir={sortDir} />{/if}
+                <button type="button" onclick={() => toggleSort(`seq:${seq.sequence_id}`)}
+                        onmouseenter={(e) => showTip(e, seqTipText(seq))} onmouseleave={restoreTip}
+                        onfocus={(e) => focusTip(e, seqTipText(seq))} onblur={blurTip}>
+                  <span class="seq-n">S{seqPos.get(seq.sequence_id)}</span><span class="sr-only">{` ${seq.sequence_title}`}</span>{#if sortKey === `seq:${seq.sequence_id}`}<SortMark dir={sortDir} />{/if}
                 </button>
               </th>
             {/each}
@@ -404,6 +480,10 @@
         </tbody>
       </table>
     </div>
+    {/if}
+    {#if tip}
+      <!-- The ONE inline style here besides the cells': the tip's place is data. -->
+      <div class="pg-tip" class:below={tip.below} aria-hidden="true" style="top:{tip.top}px;{tip.left !== undefined ? `left:${tip.left}px` : `right:${tip.right}px`}">{tip.text}</div>
     {/if}
 
     {#if panelOpen && panelTarget}
@@ -499,9 +579,43 @@
     white-space: nowrap;
   }
   /* One line per header (2d): a wide run scrolls sideways inside .table-scroll
-     with Student and Group pinned, instead of squeezing every title. */
-  .progress-grid .seq-header { font-weight: 500; white-space: nowrap; }
+     with Student and Group pinned, instead of squeezing every title. D79: the
+     headers are short ("S1"), so the cells set each column's width; every
+     sequence column keeps 4rem, so the columns line up and stay easy to click. */
+  .progress-grid .seq-header { font-weight: 500; white-space: nowrap; min-width: 4rem; }
   .seq-n { font-family: var(--font-mono); }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* D79: the header tooltip, above its header (translateY -100%), on top of the
+     sticky header cells. Its place comes from the header's on-screen box. */
+  .pg-tip {
+    position: fixed;
+    z-index: 10;
+    transform: translateY(-100%);
+    max-width: min(320px, calc(100vw - 16px));
+    overflow-wrap: anywhere;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    background: var(--text);
+    color: var(--surface);
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: none;
+  }
+  .pg-tip.below { transform: none; }
+  /* Its fill is repainted in High Contrast; an edge keeps it apart from the header. */
+  @media (forced-colors: active) {
+    .pg-tip { border: 1px solid CanvasText; }
+  }
 
   /* Holds the Student column at exactly 14rem (the sticky Group's left offset)
      under the table's max-content width: a long name or email wraps here
