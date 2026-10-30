@@ -9,6 +9,7 @@
   // `onStrip`: the chip's fill on a tinted header strip, where the row tint
   // (`--surface-2`) would vanish. BlockGroup passes it only for an OPEN block;
   // a closed header is near-white (D76), where the row tint reads instead.
+  // CourseView's phone row (D78) passes it too: it sits on the page ground.
   let { p, onStrip = false }: { p: Progress; onStrip?: boolean } = $props();
 </script>
 

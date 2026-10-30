@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2328
+EXPECTED_CHECKS=2357
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -2317,9 +2317,10 @@ SPECS = [
         (FC, '.fill.%s,.fill.done.%s' % (pm_h, pm_h), 'forced-color-adjust:none;background:CanvasText'),
     ]),
     ('CourseProgress', cp_h, [
-        # The summary card: right of the info text, full width on a phone.
+        # The summary card. D78: it fills the cell CourseView gives it (the 300px
+        # right column, or the full width on a phone) -- no own width, no push.
         ('', '.summary.%s' % cp_h,
-             'box-sizing:border-box;flex:none;width:250px;margin-left:auto;padding:10px 14px;'
+             'box-sizing:border-box;padding:10px 14px;'
              'border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)'),
         ('', '.sl.%s' % cp_h, 'margin:0 0 6px;font-size:11.5px;color:var(--muted)'),
         ('', '.sb.%s' % cp_h, 'display:flex;align-items:center;gap:10px'),
@@ -2337,7 +2338,6 @@ SPECS = [
         ('', '.sr-only.%s' % cp_h,
              'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;'
              'clip-path:inset(50%);white-space:nowrap;border:0'),
-        ('@media (max-width:640px)', '.summary.%s' % cp_h, 'width:100%'),
         (FC, '.track.%s' % cp_h, 'border:1px solid CanvasText'),
         (FC, '.fill.%s,.fill.done.%s' % (cp_h, cp_h), 'forced-color-adjust:none;background:CanvasText'),
     ]),
@@ -3566,6 +3566,15 @@ if [[ $(print -r -- "$cv" | grep -cF '<Button variant="ghost" onclick={() => set
   echo "PASS  CourseView collapse/expand-all is the one ghost Button inside .all-toggle"
 else
   echo "FAIL  CourseView collapse/expand-all control is not the pinned ghost Button"; fail=1
+fi
+# D78 (user): the phone row -- the progress sentence first (read before the
+# toggle), the course meter (white chip, onStrip), then ONE borderless chevron
+# IconButton that collapses or expands every block.
+if [[ $(print -r -- "$cv" | grep -cF 'onclick={() => setAll(!anyOpen)} />') -eq 1 ]] \
+   && print -r -- "$cv" | perl -0ne 'exit(m{<div class="cv-strip">\s*<p class="sr-only">Your progress: \{progressPhrase\(courseP\)\}\.</p>\s*<span class="cv-meter"><ProgressMeter p=\{courseP\} onStrip /></span>\s*<IconButton borderless glyph=\{anyOpen \? .chevron. : .chevron-right.\} title=\{anyOpen \? .Collapse all. : .Expand all.\} onclick=\{\(\) => setAll\(!anyOpen\)\} />} ? 0 : 1)'; then
+  echo "PASS  CourseView phone row is the course meter plus one chevron IconButton (D78)"
+else
+  echo "FAIL  CourseView phone row is not the pinned meter + chevron IconButton (D78)"; fail=1
 fi
 
 echo
@@ -5590,9 +5599,26 @@ uniq1 all-toggle
 if [[ -n $REPLY ]]; then
   N=CourseView; H=$REPLY
   d '\.info' '' 'color:var\(--muted\)' 'background:var\(--surface-ground\)' 'border:1px solid var\(--border-box\)' 'border-radius:var\(--radius-lg\)' 'padding:12px 16px'
-  # D76 review m1: on a phone the column stretches, so a short info is a
-  # full-width box, not one as narrow as its text.
-  chk "@media \(max-width: ?640px\)\{\.top\.${H}" 'flex-direction:column' 'align-items:stretch'
+  # D78 (user, 2026-10-30, Safari pass, layout A): blocks left; the progress
+  # card and the info in a 300px right column; one column under 880px in DOM
+  # order progress, blocks, info. The old info|progress row (.top) is gone.
+  d '\.cv-body' '' 'display:grid' 'grid-template-columns:minmax\(0,1fr\) 300px' 'grid-template-areas:"blocks prog" "blocks info"' 'grid-template-rows:auto 1fr' 'gap:14px' 'align-items:start'
+  d '\.cv-body' ':not\(\.has-info\)' 'grid-template-areas:"blocks prog"' 'grid-template-rows:auto'
+  d '\.cv-prog' '' 'grid-area:prog'
+  d '\.cv-blocks' '' 'grid-area:blocks' 'min-width:0'
+  chk "\.cv-body\.${H}>\.info:where\(\.${H}\)" 'grid-area:info' 'margin:0'
+  chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}" 'display:flex' 'flex-direction:column' 'align-items:stretch'
+  d '\.all-toggle' '' 'margin:0 0 4px'
+  none "CourseView: the old info|progress row is gone (D78)" "\.top\.${H}"
+  # D78 (user): at 880px and below the card and the text toggle give way to one
+  # bare row -- the course meter in the block columns plus a chevron button.
+  d '\.cv-strip' '' 'display:none' 'align-items:center' 'justify-content:flex-end' 'gap:2px' 'padding:4px 6px 4px 0' 'margin:0 0 4px'
+  d '\.cv-meter' '' 'display:flex' 'align-items:center' 'gap:10px'
+  chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}" 'display:none'
+  chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}\{[^}]*\}\.cv-strip\.${H}" 'display:flex'
+  # Same specificity both ways, so ORDER decides: the 880px switch must follow
+  # the base rules, or a phone shows the text toggle and no progress (Opus r1 m2).
+  check "CourseView: the 880px switch follows the base .all-toggle/.cv-strip rules (D78)" "\.all-toggle\.${H}\{display:flex[^}]*\}\.cv-strip\.${H}\{display:none[^}]*\}.*@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}\{display:none\}\.cv-strip\.${H}\{display:flex\}"
 fi
 uniq1 acc
 if [[ -n $REPLY ]]; then

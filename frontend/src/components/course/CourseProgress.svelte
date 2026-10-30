@@ -27,13 +27,10 @@
 </div>
 
 <style>
-  /* A small card at the right of the course info; alone at the right when
-     there is no info text; full width under it on a phone. */
+  /* A small card. D78: it fills the cell the course page gives it -- the 300px
+     right-hand column, or the full width on a phone -- so it sets no width. */
   .summary {
     box-sizing: border-box;
-    flex: none;
-    width: 250px;
-    margin-left: auto;
     padding: 10px 14px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -93,9 +90,6 @@
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
-  }
-  @media (max-width: 640px) {
-    .summary { width: 100%; }
   }
   @media (forced-colors: active) {
     .track { border: 1px solid CanvasText; }

@@ -153,12 +153,12 @@ describe('CourseView header and course summary', () => {
     expect(btns[1].getAttribute('aria-label')!.startsWith('2. B,')).toBe(true);
   });
 
-  it('Polish 2: course info is compact prose, beside the summary and alone; links follow D58', async () => {
+  it('Polish 2: course info is compact prose, in the side column and alone; links follow D58', async () => {
     const html = `<p><a href="https://example.org/c">ext</a> <a href="${location.origin}/courses/y">page</a></p>`;
     seedCourse(twoBlocks, {}, html);
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
-    const info = target.querySelector('.top .info')!;
+    const info = target.querySelector('.cv-body > .info')!;
     expect(info.classList.contains('prose')).toBe(true);
     expect(info.classList.contains('compact')).toBe(true);
     expect(info.querySelector('a[href="https://example.org/c"]')!.getAttribute('target')).toBe('_blank');
@@ -169,18 +169,28 @@ describe('CourseView header and course summary', () => {
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
     const alone = target.querySelector('.info')!;
+    // D78: no blocks, no two-column body -- the info stands alone.
+    expect(target.querySelector('.cv-body')).toBeNull();
     expect(alone.classList.contains('prose')).toBe(true);
     expect(alone.querySelector('a[href="https://example.org/c"]')!.getAttribute('target')).toBe('_blank');
   });
 
-  it('summarises the WHOLE course beside the info: items over every block, quiz score over the quizzes tried', async () => {
+  it('summarises the WHOLE course in the side column: items over every block, quiz score over the quizzes tried', async () => {
     // 2 of 4 items → 50%; quizzes (3 + 1) / (4 + 4) = 50%.
     seedCourse(twoBlocks, { '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(false, [1, 4]) });
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
-    const top = target.querySelector('.top') as HTMLElement;
-    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['info', 'summary']);
-    const sum = top.querySelector('.summary') as HTMLElement;
+    // D78: one body in DOM order progress, blocks, info -- the phone order; on a
+    // wide screen the grid puts the blocks left, progress and info right.
+    const body = target.querySelector('.cv-body') as HTMLElement;
+    expect(Array.from(body.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-blocks', 'info']);
+    expect(body.classList.contains('has-info')).toBe(true);
+    // D78: the phone row (.cv-strip) leads the blocks column, then the text toggle.
+    expect(Array.from((body.querySelector('.cv-blocks') as HTMLElement).children).slice(0, 2).map((e) => e.className.split(' ')[0]))
+      .toEqual(['cv-strip', 'all-toggle']);
+    expect(body.querySelectorAll('.cv-blocks > section.block').length).toBe(2);
+    expect(target.querySelector('.top')).toBeNull();
+    const sum = body.querySelector('.summary') as HTMLElement;
     expect((sum.querySelector('.sp') as HTMLElement).textContent).toBe('50%');
     expect((sum.querySelector('.fill') as HTMLElement).style.width).toBe('50%');
     expect((sum.querySelector('.sq') as HTMLElement).textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz score 50%');
@@ -190,12 +200,13 @@ describe('CourseView header and course summary', () => {
       .toBe('Your progress: 2 of 4 items completed, quiz score 50%.');
   });
 
-  it('no info text: the summary still shows, alone at the top', async () => {
+  it('no info text: the summary still shows, alone in the side column', async () => {
     seedCourse(twoBlocks, {}, '');
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
-    const top = target.querySelector('.top') as HTMLElement;
-    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['summary']);
+    const top = target.querySelector('.cv-body') as HTMLElement;
+    expect(Array.from(top.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-blocks']);
+    expect(top.classList.contains('has-info')).toBe(false);
     expect((top.querySelector('.sq') as HTMLElement).textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz score –');
     // No check mark beside a dash: the row chip's "Quiz –" carries none either.
     expect(top.querySelector('.sq svg')).toBeNull();
@@ -266,6 +277,48 @@ describe('CourseView header and course summary', () => {
     expect(toggle().textContent!.trim()).toBe('Collapse all');
   });
 
+  // D78 (user): at 880px and below the card and the text toggle give way to one
+  // bare row -- the course meter in the block columns and a chevron button that
+  // replaces "Collapse all / Expand all". CSS picks which one shows; both render.
+  const strip = () => target.querySelector('.cv-blocks > .cv-strip') as HTMLElement;
+  const chev = () => strip().querySelector('button') as HTMLButtonElement;
+
+  it('D78: the phone row shows the course meter, white chip, and one sentence for screen readers', async () => {
+    await mountWith({ '1': entry(true, null), '2': entry(true, [3, 4]), '3': entry(false, [1, 4]) });
+    expect((strip().querySelector('.pct') as HTMLElement).textContent).toBe('50%');
+    expect((strip().querySelector('.fill') as HTMLElement).style.width).toBe('50%');
+    const chip = strip().querySelector('.quiz-chip') as HTMLElement;
+    expect(chip.textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz 50%');
+    expect(chip.classList.contains('on-strip')).toBe(true);
+    expect((strip().querySelector('.sr-only') as HTMLElement).textContent)
+      .toBe('Your progress: 2 of 4 items completed, quiz score 50%.');
+    // Read before the toggle, as the card states the progress first (Fable r1 m1).
+    expect((strip().firstElementChild as HTMLElement).classList.contains('sr-only')).toBe(true);
+    // No visible label: the only text outside the sr-only sentence is the meter's.
+    const visible = Array.from(strip().querySelectorAll(':scope > :not(.sr-only)')).map((e) => e.textContent!.replace(/\s+/g, ' ').trim()).join(' ');
+    expect(visible).not.toContain('progress');
+  });
+
+  it('D78: the row chevron collapses every block, then expands every block, and follows the headers', async () => {
+    await mountWith({});
+    expect(panels()).toEqual([true, false]);
+    expect(chev().getAttribute('aria-label')).toBe('Collapse all');
+    expect(chev().dataset.glyph).toBe('chevron');
+    chev().click();
+    flushSync();
+    expect(panels()).toEqual([false, false]);
+    expect(chev().getAttribute('aria-label')).toBe('Expand all');
+    expect(chev().dataset.glyph).toBe('chevron-right');
+    chev().click();
+    flushSync();
+    expect(panels()).toEqual([true, true]);
+    expect(chev().getAttribute('aria-label')).toBe('Collapse all');
+    header(0).click();
+    header(1).click();
+    flushSync();
+    expect(chev().dataset.glyph).toBe('chevron-right');
+  });
+
   it('the default is applied ONCE per load: progress made afterwards never re-opens or closes a block', async () => {
     // Block 1 is current on load. The student closes it, then finishes it (the
     // player marks items covered in the store). Re-applying the default would
@@ -287,6 +340,7 @@ describe('CourseView header and course summary', () => {
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
     await settle();
     expect(target.querySelector('.all-toggle')).toBeNull();
+    expect(target.querySelector('.cv-strip')).toBeNull();
   });
 });
 
