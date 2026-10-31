@@ -89,7 +89,7 @@ Each states what it costs if wrong. P-numbers continue from Polish 2's P116.
 - **P122 — F13 uses the last-press record, not `returnTo` props.** Fall back to `returnTo` only if Task 3's tests show the record unreliable; ledger it if so. *Cost:* the fallback touches six openers.
 - **P123 — A "modal panel itself" in `repairFocus` means `document.activeElement.matches('section.modal-panel')`.** That is the Modal panel's own element, which is focusable through `tabindex="-1"`. *Cost:* none.
 - **P124 — The new `.sp-error` gate row and all other Polish 3 rows go in a new gate section `(ao) Polish 3 — minors`,** before the summary line; each task appends to it. Changed existing rows stay in place. *Cost:* none.
-- **P125 — The gate gains one source-scan row in Task 2:** no file under `src/` except `lib/router.svelte.ts` contains `preventDefault()` followed by `navigate(` within the same handler. The pattern is `grep -rEn 'preventDefault\(\);[[:space:]]*(void )?navigate\('`. A second count asserts that `grep -rEn 'function go\(e' src` finds nothing, since the three `go(e, href)` helpers are deleted. That makes the click-helper sweep complete and keeps it so. *Cost:* a future hand-rolled handler reds the gate, which is the point.
+- **P125 — The gate gains one source-scan row in Task 2:** no file under `src/` (tests aside) contains `preventDefault();` followed by `navigate(`, on one line or across lines. The scan reads each file whole (`perl -0777`, pattern `preventDefault\(\);?\s*(?:(?:void|await|return)\s+)?navigate\(`); a line-based grep missed the two-line form (Task 2 review). A second count asserts that `grep -rEn 'function go\(e' src` finds nothing, since the three `go(e, href)` helpers are deleted. That makes the click-helper sweep complete and keeps it so. *Cost:* a future hand-rolled handler reds the gate, which is the point.
 
 ## Review Focus
 
@@ -114,7 +114,8 @@ The inputs most likely to bite a student, teacher or author that the spec's own 
 | `frontend/src/stores/currentCourse.svelte.ts` | 1 | `recordQuizAttempt` |
 | `frontend/src/components/items/QuizItem.svelte` | 1 | draft mirror, `recordQuizAttempt`, `holdsAnswers` |
 | `frontend/src/lib/auth.svelte.ts` | 1 | drafts cleared on logout, dropped for a different user |
-| `frontend/src/lib/router.svelte.ts` | 2, 8 | `routeClick` (2); `landingLabel` (8) |
+| `frontend/src/lib/routeClick.ts` (new) | 2 | `routeClick` |
+| `frontend/src/lib/router.svelte.ts` | 8 | `landingLabel` |
 | `frontend/src/lib/linkRouter.ts` (new) | 2 | the app-wide link handler |
 | `frontend/src/App.svelte` | 2 | installs the link router |
 | link sites (CourseCard, SequenceLink, AppHeader, SequencePlayer, MiniProjectDetailPage, TeachingCrumbs, TeacherRunListPage, RunListPage, RunDetailPage, VersionEditPage, VersionsPage) | 2 | adopt `routeClick` |
@@ -227,10 +228,11 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
 - Test: `frontend/src/tests/router.test.ts`, each site's existing test file (or `tests/routeClickSites.svelte.test.ts` for a site without one), `tests/VersionsPage.slots.svelte.test.ts:530`, the MiniProjectDetailPage test file
 
 **Interfaces:**
-- Produces, in `lib/router.svelte.ts`: `routeClick(e: MouseEvent, href: string): void`.
+- Produces, in `lib/routeClick.ts` (executor's ruling: a module of its own, so a test's `vi.mock` of `navigate` in `router.svelte` still applies): `routeClick(e: MouseEvent, href: string): void`.
   - On a modifier (`metaKey`, `ctrlKey`, `shiftKey`, `altKey`) or `e.button !== 0` it returns without `preventDefault`.
   - Otherwise it calls `e.preventDefault()`. Then, if `(e.target as Element).closest('a, button')` has `aria-disabled="true"`, it returns; else `void navigate(href)`. It reads the target, not `e.currentTarget`, so delegated events cannot fool it.
 - Produces, in `lib/linkRouter.ts`: `installLinkRouter(): () => void` (P121, ref-counted; the teardown removes the listener when the count reaches 0).
+- Changes, in `lib/router.svelte.ts` (Task 2 review): `navigate(…): Promise<boolean>`, true only when that call moved the route. The handler scrolls on it.
 
 - [ ] **Step 1: Write the failing tests.**
   - `router.test.ts`:
@@ -273,9 +275,8 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
 
   Then:
   - `preventDefault`;
-  - capture `before = path + search + hash`;
-  - `await navigate(u.pathname + u.search + u.hash)`;
-  - `window.scrollTo(0, 0)` only if the route string changed.
+  - `const moved = await navigate(u.pathname + u.search + u.hash)`;
+  - `window.scrollTo(0, 0)` only if `moved` (the address is not compared: the player rewrites it on mount).
 
   Call it from `App.svelte` as `$effect(() => installLinkRouter())`.
 

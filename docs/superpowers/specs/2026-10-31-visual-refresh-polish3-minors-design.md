@@ -1,11 +1,12 @@
 # Visual refresh — Polish 3: the reviewers' minors that users meet
 
-**Status:** rev 5 (2026-10-31). Rev 4 approved by the user (`23f8afb`).
+**Status:** rev 6 (2026-10-31). Rev 4 approved by the user (`23f8afb`).
 - Rev 1 (`e10671b`): the user's decisions D82–D87, the controller's calls C1–C15, after the builder check.
 - Rev 2 folds in spec review round 1 (`spec-r1-opus-a.md`, `spec-r1-opus-b.md`, `spec-r1-fable.md`: 4 Critical, 18 Important, 34 Minor across the three lanes) and adds C16–C19.
 - Rev 3 folds in round 2 (`spec-r2-opus.md`, `spec-r2-fable.md`: 1 Critical, 8 Important, 20 Minor; round 2 found 18 of round 1's 22 Critical/Important resolved, 4 partly, all four finished here).
 - Rev 4 folds in round 3 (`spec-r3-opus.md`, `spec-r3-fable.md`: 0 Critical, 2 Important, 16 Minor; every round-2 Critical/Important resolved) and round 4's Minors (`spec-r4-opus.md`, `spec-r4-fable.md`: 0 Critical, 0 Important, 13 Minor; every round-3 finding resolved).
 - Rev 5 records the 400px shots (`shots-400.html`) and the user's D88: only the student screens must work at phone width.
+- Rev 6 records Task 2's review (rounds `t2-r1..r3-*.md`): `navigate()` reports whether it moved, and the handler scrolls on that; the player re-resolves its item after an in-app move to another sequence without `#item=`; `//` paths and empty fragments are left to the browser.
 
 **Branch:** `feat/visual-refresh-polish3-minors`, cut from the Polish 2 tip `71dd8cc`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-31-visual-refresh-polish3-minors/` (`inventory.html`: the grouped backlog and the recon; the review rounds `spec-r*-*.md`).
@@ -142,15 +143,16 @@ The Versions page row title (`VersionsPage.svelte:311-313`), a `<button disabled
 - the target is inside an `<a href>` with no `download` attribute, and no `target` other than `_self`;
 - `opensInNewTab(href)` (`externalLinks.ts:15-25`) is false. This is checked at click time, so other sites and `/assets/…` and `/api/…` files are left to the browser whether or not the `externalLinks` attachment has run;
 - the resolved URL (`new URL(href, location.href)`) is on Mathion's own origin, and `matchRoute(routes, pathname)` knows its path, or the path is `/`. `/` is not in `routes.ts`, but `App.svelte:44-45` handles it as the role redirect, so a pasted Mathion root address is routed too. A same-origin backend path such as `/version` is left to the browser and does not land on the SPA's 404. `matchRoute` decodes path segments (`decodeURIComponent` throws on a malformed `%`), so the call sits in a `try`, and a throw leaves the link to the browser;
-- it is not a same-page anchor, meaning the href has a fragment and the resolved path and search equal the current ones. Such a link keeps the browser's default. A same-path link without a fragment (`/courses/x/seq/5` from `…/seq/5#item=7`) is routed, because left to the browser it reloads.
+- it is not a same-page anchor, meaning the href has a fragment and the resolved path and search equal the current ones. An empty fragment counts (`href="#"`, whose `URL.hash` is `''`). A path starting with `//` is left to the browser too: `pushState` would read it as another host (rev 6). Such a link keeps the browser's default. A same-path link without a fragment (`/courses/x/seq/5` from `…/seq/5#item=7`) is routed, because left to the browser it reloads.
 
-It passes `u.pathname + u.search + u.hash` to `navigate()`, not the raw href: `navigate()` compares strings (`router.svelte.ts:105`), and `isHashOnlyChange` parses only path-form input (`:88-95`). After the move it scrolls to the top, **only if the route actually changed**. `navigate()` returns nothing, and it is a no-op on the same address (`:106`), on a DirtyGuard Cancel and when a newer navigate supersedes it. So the handler compares `currentRoute.path + currentRoute.search + currentRoute.hash` before and after the awaited `navigate()`. The path alone would miss a routed same-path link (`…/seq/5#item=7` → `…/seq/5`) and a query-only move. Otherwise a Cancel in the editor preview's discard question would scroll the page under the modal. `navigate()` never scrolls by itself, and the reload used to.
+It passes `u.pathname + u.search + u.hash` to `navigate()`, not the raw href: `navigate()` compares strings (`router.svelte.ts:105`), and `isHashOnlyChange` parses only path-form input (`:88-95`). After the move it scrolls to the top, **only if the route actually changed**. `navigate()` is a no-op on the same address (`:106`), on a DirtyGuard Cancel and when a newer navigate supersedes it, so it resolves a boolean: true only when that call moved the route (rev 6). The handler scrolls on it. Comparing the address before and after the move does not work: the player adds `#item=` as it mounts, and RunsRedirect replaces the path, before the handler reads the address (Task 2 review). Otherwise a Cancel in the editor preview's discard question would scroll the page under the modal. `navigate()` never scrolls by itself, and the reload used to.
 
 This covers:
 - links in authored content (`.prose`). The editor preview (`MarkdownEditor.svelte:332`) is included, where `navigate()` runs DirtyGuard;
 - the two plain links that reload the app today: the course page's mini-project row (`MiniProjectLink.svelte:40-44`) and the Coming deadlines card (`CourseDeadlines.svelte:38`). With drafts, a reload there would raise the browser's leave-page warning on what the student sees as an in-app move. They may also adopt `routeClick`; either way the handler catches the next plain link someone adds.
 
 Notes for the builder:
+- A content link to another sequence of the course keeps the same SequencePlayer instance (one route). Without `#item=` in the link, the player re-resolves its item as a fresh load does, instead of keeping the previous sequence's (rev 6). A link with a non-member `#item=` still shows an empty player, as a test pins for a stale hash (backlog).
 - The player keeps `#item=` in its own address, and a content `#heading` link does not match that pattern (`SequencePlayer.svelte:80-88`). Authored headings carry no `id` (`markdown.py` `_ALLOWED_ATTRS`), so such a link scrolls nowhere today. A test pins only that it leaves the player on its item.
 - A link to the current address is a no-op: `navigate()` returns at `router.svelte.ts:106`. A test pins that it neither reloads nor scrolls.
 - `externalLinks.ts` itself is unchanged, so its Polish 2 gate rows hold.
