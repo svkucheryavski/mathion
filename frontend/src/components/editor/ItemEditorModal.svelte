@@ -5,11 +5,11 @@
   // tracker registered in the page's dirty registry, and the D9 delete freeze.
   // The type body owns everything else through ItemBodyApi (lib/itemBody.ts).
   import { getContext, onDestroy, tick, untrack } from 'svelte';
-  import Modal from '../ui/Modal.svelte';
+  import Modal, { isTopModal } from '../ui/Modal.svelte';
   import IconButton from '../ui/IconButton.svelte';
   import Button from '../ui/Button.svelte';
   import AskSlot from '../ui/AskSlot.svelte';
-  import { focusAfter, modalClose, usable, useModalAsk } from '../../lib/askInPlace.svelte';
+  import { focusAfter, modalClose, modalPanel, repairFocus, usable, useModalAsk } from '../../lib/askInPlace.svelte';
   import ItemMark from '../course/ItemMark.svelte';
   import PageBody from './item/PageBody.svelte';
   import VideoBody from './item/VideoBody.svelte';
@@ -89,6 +89,15 @@
   const saveDirty = $derived(titleDirty || bodySaveDirty);    // footer, Save, Discard
   const guardDirty = $derived(titleDirty || bodyGuardDirty);  // the prompt, D9's delete gate
   const saveBlocked = $derived(!canEditText || !saveDirty || frozen || bodyBusy);
+  // Polish 3 C7 (F3): "nothing to save / discard" and a body upload block the
+  // footer with aria-disabled, which keeps focus; a busy Save keeps its
+  // spinner. Native disabled stays only for the delete freeze (Save) and for
+  // `frozen` (Discard).
+  const saveAriaBlocked = $derived(!saving && (!canEditText || !saveDirty || bodyBusy));
+  const discardAriaBlocked = $derived(!saveDirty || bodyBusy);
+  let saveBtn = $state<HTMLButtonElement>();
+  const footTitle = (none: string) =>
+    (saving ? undefined : bodyBusy ? 'Wait for the upload to finish' : saveDirty ? undefined : none);
 
   let alive = true;
   onDestroy(() => { alive = false; });
@@ -152,6 +161,13 @@
     el.select();
     return untrack(() => titleEdit!.attach(el));
   };
+  // Polish 3 F6 (InlineInput's R10): a 403/409 reload can take the right to
+  // save away while ✓ holds focus. Before the DOM disables it, focus moves to
+  // the field the author must cancel.
+  let titleOkEl = $state<HTMLButtonElement>();
+  $effect.pre(() => {
+    if (titleEdit && !titleEdit.canSave && titleOkEl && document.activeElement === titleOkEl) titleEdit.fieldEl?.focus();
+  });
 
   // ---- One tracker in the page registry (D5): the page's DirtyGuard prompts
   //      on ×, Escape, Back and every in-app navigation. ----
@@ -222,12 +238,17 @@
         else pushToast('Saved', 'success');
       }
     } finally {
-      if (alive) saving = false;
+      if (alive) {
+        saving = false;
+        // Discard and × were disabled while it ran; a ⌘S from one of them left
+        // focus on <body>.
+        void repairFocus(saveBtn, titleEl, modalClose(labelId));
+      }
     }
   }
 
   function discard() {
-    if (frozen || bodyBusy) return;
+    if (frozen || bodyBusy || !saveDirty) return;
     resetTitle();
     body?.discard();
   }
@@ -235,11 +256,13 @@
   // ⌘S / Ctrl+S inside this dialog only (D10). Default-prevented even when
   // blocked, so the browser's own Save dialog never opens over the editor.
   // Slice-5d: a level-3 modal on top handles its own ⌘S, and a quiz has no
-  // Save, so there it is only swallowed.
+  // Save, so there it is only swallowed. Polish 3 C7: with focus on <body>
+  // (a control disabled under it), the top modal takes it.
   function onWindowKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
     if (!(e.target instanceof Element)) return;
-    if (e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
+    const loose = (e.target === document.body || e.target === document.documentElement) && isTopModal(modalPanel(labelId));
+    if (!loose && e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
     e.preventDefault();
     if (!isQuiz && !asking) void save();   // R48: nothing saves while a question asks
   }
@@ -343,7 +366,7 @@
   {#if titleEdit}
     <IconButton glyph="check" size="sm"
                 title={titleEdit.saving ? 'Saving…' : titleEdit.canSave ? 'Save title' : FORBIDDEN_TITLE}
-                disabled={!titleEdit.canSave} onclick={() => void titleEdit?.commit()} />
+                disabled={!titleEdit.canSave} bind:element={titleOkEl} onclick={() => void titleEdit?.commit()} />
     <IconButton glyph="close" size="sm" title="Cancel" disabled={titleEdit.saving}
                 onclick={() => titleEdit?.cancel()} />
   {:else if isQuiz && canEditText}
@@ -375,15 +398,18 @@
   {:else}
     <Button
       variant="ghost"
-      disabled={!saveDirty || frozen || bodyBusy}
-      title={saveDirty ? undefined : 'No changes to discard'}
+      disabled={frozen}
+      aria-disabled={discardAriaBlocked}
+      title={footTitle('No changes to discard')}
       onclick={discard}
     >Discard</Button>
     <Button
       variant="primary"
-      disabled={saveBlocked}
-      title={saveDirty ? undefined : 'No changes to save'}
+      disabled={deleting}
+      aria-disabled={saveAriaBlocked}
+      title={footTitle('No changes to save')}
       loading={saving}
+      bind:element={saveBtn}
       onclick={() => void save()}
     >Save</Button>
   {/if}

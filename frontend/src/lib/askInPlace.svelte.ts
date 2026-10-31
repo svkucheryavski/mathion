@@ -54,6 +54,33 @@ export function usable(el: Element | null | undefined): el is HTMLElement {
     && !el.closest('[inert]');
 }
 
+/** Polish 3 C7: an element that can hold focus — connected, not natively
+ *  disabled, not inert. A blocked (aria-disabled) control holds focus, so it
+ *  counts here, unlike usable(), which asks whether a control can act. */
+export function canHoldFocus(el: Element | null | undefined): el is HTMLElement {
+  return el instanceof HTMLElement && el.isConnected
+    && !(el as HTMLButtonElement).disabled
+    && !el.closest('[inert]');
+}
+
+/** Polish 3 C7: a repair after a control dropped focus. After the re-render,
+ *  and only while focus is nowhere, on <body> or on a modal panel itself
+ *  (P123), focus the first element of `chain` that takes it — on a panel, only
+ *  one inside that panel. Never moves focus the user put elsewhere. Returns
+ *  whether it focused. */
+export async function repairFocus(...chain: (Element | null | undefined)[]): Promise<boolean> {
+  await tick();
+  const a = document.activeElement;
+  const panel = a?.matches('section.modal-panel') ? a : null;
+  if (a && a !== document.body && !panel) return false;
+  for (const el of chain) {
+    if (!canHoldFocus(el) || (panel && !panel.contains(el))) continue;
+    el.focus();
+    if (document.activeElement === el) return true;
+  }
+  return false;
+}
+
 /** After an answer: wait for the re-render, then focus the target if R57 allows and it counts. */
 export async function focusAfter(target: () => Element | null | undefined): Promise<void> {
   await tick();

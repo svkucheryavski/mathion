@@ -254,14 +254,24 @@ describe('ItemEditorModal — header and Title (T3a)', () => {
 });
 
 describe('ItemEditorModal — footer, Save, Discard (T3a, page body)', () => {
-  it('clean: Save and Discard are disabled with reasons and nothing reads "unsaved changes"', async () => {
+  // Polish 3 C7 point 2 (F3): blocked, not natively disabled, so they keep focus.
+  it('a clean Save and Discard are aria-disabled, not disabled, and clicking them does nothing', async () => {
     await render();
-    expect(footBtn('Save').disabled).toBe(true);
+    for (const label of ['Save', 'Discard']) {
+      expect(footBtn(label).disabled).toBe(false);
+      expect(footBtn(label).getAttribute('aria-disabled')).toBe('true');
+    }
     expect(footBtn('Save').title).toBe('No changes to save');
-    expect(footBtn('Discard').disabled).toBe(true);
     expect(footBtn('Discard').title).toBe('No changes to discard');
     expect(dirtyText()).toBe('');
     expect(anyDirty()).toBe('false');
+    const reload = vi.spyOn(editorStore, 'loadAdminTree');
+    footBtn('Save').click();
+    footBtn('Discard').click();
+    await settle();
+    expect(patchBodies()).toEqual([]);
+    expect(reload).not.toHaveBeenCalled();
+    expect(titleInput().value).toBe('Eigenvalues');
   });
 
   it('editing the title marks the footer and the page registry dirty', async () => {
@@ -347,7 +357,8 @@ describe('ItemEditorModal — footer, Save, Discard (T3a, page body)', () => {
     expect(patchBodies()).toEqual([{ content_md: 'typed' }]);
     expect(textarea().hasAttribute('readonly')).toBe(true);
     expect(titleInput().hasAttribute('readonly')).toBe(true);
-    expect(footBtn('Save').disabled).toBe(true);
+    // Polish 3 C7 point 1: busy keeps the spinner and stays focusable (flipped from disabled).
+    expect(footBtn('Save').disabled).toBe(false);
     expect(document.activeElement).toBe(textarea());
     release();
     await settle();
@@ -366,7 +377,127 @@ describe('ItemEditorModal — footer, Save, Discard (T3a, page body)', () => {
     outside.remove();
   });
 
-  it('Save is disabled while an asset upload is in flight (busy interlock)', async () => {
+  // ---- Polish 3 C7 (F3): focus after a Save, and ⌘S with focus on <body>.
+  const cmdS = (on: EventTarget) => {
+    const ev = new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true });
+    on.dispatchEvent(ev);
+    return ev;
+  };
+
+  it('⌘S with focus on body saves once and is defaultPrevented', async () => {
+    await render();
+    type(titleInput(), 'Eigen');
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    const ev = cmdS(document.body);
+    await settle();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(patchBodies()).toEqual([{ title: 'Eigen' }]);
+    type(titleInput(), 'Eigen 2');
+    (document.activeElement as HTMLElement).blur();
+    const ev2 = cmdS(document.documentElement);
+    await settle();
+    expect(ev2.defaultPrevented).toBe(true);
+    expect(patchBodies()).toEqual([{ title: 'Eigen' }, { title: 'Eigen 2' }]);
+  });
+
+  // r2 Opus 2: from <body>, a clean modal and an open question still swallow ⌘S.
+  it('⌘S with focus on body on a clean modal, or while a question asks, is prevented and sends nothing', async () => {
+    await render();
+    (document.activeElement as HTMLElement).blur();
+    expect(cmdS(document.body).defaultPrevented).toBe(true);
+    await settle();
+    expect(patchBodies()).toEqual([]);
+    // The delete question asks (clean, so the trash is live); then a change.
+    trash().click();
+    await settle();
+    expect(bodyAsk()).not.toBeNull();
+    type(titleInput(), 'Eigen');
+    (document.activeElement as HTMLElement).blur();
+    expect(cmdS(document.body).defaultPrevented).toBe(true);
+    await settle();
+    expect(patchBodies()).toEqual([]);
+  });
+
+  // r2 Fable 2: the busy Save is never labelled "No changes to save".
+  it('during the refresh after a save, the busy Save has no "nothing to save" title', async () => {
+    let releaseTree!: () => void;
+    serve((u) => (u.endsWith('/admin-tree')
+      ? new Promise<Response>((r) => { releaseTree = () => r(resp({ course: { id: 1, name: 'C', slug: 'c' }, version: mkVersion(), blocks: [] })); })
+      : undefined));
+    await render();
+    type(titleInput(), 'Eigen');
+    footBtn('Save').click();
+    await settle();
+    expect(dirtyText()).toBe('');                       // the echo is in: clean
+    expect(footBtn('Save').getAttribute('aria-busy')).toBe('true');
+    expect(footBtn('Save').title).toBe('');
+    releaseTree();
+    await settle();
+    expect(footBtn('Save').title).toBe('No changes to save');
+  });
+
+  it('a successful Save leaves focus on Save', async () => {
+    await render();
+    type(titleInput(), 'Eigen');
+    footBtn('Save').focus();
+    footBtn('Save').click();
+    await settle();
+    await settle();
+    expect(patchBodies()).toEqual([{ title: 'Eigen' }]);
+    expect(dirtyText()).toBe('');
+    // A browser drops focus from a control that turns natively disabled; jsdom
+    // does not, so the clean Save must stay enabled (aria-disabled) to hold it.
+    expect(footBtn('Save').disabled).toBe(false);
+    expect(document.activeElement).toBe(footBtn('Save'));
+  });
+
+  it('while saving, Save shows loading and is not natively disabled', async () => {
+    let release!: () => void;
+    serve((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? new Promise<Response>((r) => { release = () => r(resp({ ...mkItem(), title: 'Eigen' })); })
+      : undefined));
+    await render();
+    type(titleInput(), 'Eigen');
+    footBtn('Save').focus();
+    footBtn('Save').click();
+    await settle();
+    expect(footBtn('Save').getAttribute('aria-busy')).toBe('true');
+    expect(footBtn('Save').disabled).toBe(false);
+    expect(footBtn('Save').hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(footBtn('Save'));
+    footBtn('Save').click();                  // busy: the handler returns at once
+    await settle();
+    expect(patchBodies().length).toBe(1);
+    release();
+    await settle();
+  });
+
+  it('a ⌘S with focus on Discard repairs focus to Save once the save settles', async () => {
+    let release!: () => void;
+    serve((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? new Promise<Response>((r) => { release = () => r(resp({ ...mkItem(), title: 'Eigen' })); })
+      : undefined));
+    await render();
+    type(titleInput(), 'Eigen');
+    footBtn('Discard').focus();
+    cmdS(footBtn('Discard'));
+    await settle();
+    expect(footBtn('Discard').disabled).toBe(true);   // frozen: it drops focus
+    // A browser drops focus from it to <body>; jsdom keeps it (and blur() on a
+    // disabled button is a no-op there), so drop it through a removed stand-in.
+    const standIn = document.createElement('button');
+    panel().appendChild(standIn);
+    standIn.focus();
+    standIn.remove();
+    expect(document.activeElement).toBe(document.body);
+    release();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(footBtn('Save'));
+  });
+
+  it('Save is blocked while an asset upload is in flight (busy interlock)', async () => {
     serve((u, init) => (u.endsWith('/assets') && init?.method === 'POST' ? new Promise(() => {}) : undefined));
     await render();
     type(titleInput(), 'Eigen');
@@ -374,9 +505,14 @@ describe('ItemEditorModal — footer, Save, Discard (T3a, page body)', () => {
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
     textarea().dispatchEvent(ev);
     await settle();
-    // The title is dirty, so only the in-flight upload can be disabling Save.
-    expect(footBtn('Save').disabled).toBe(true);
-    expect(footBtn('Discard').disabled).toBe(true);
+    // The title is dirty, so only the in-flight upload can be blocking Save.
+    // Polish 3 C7: blocked (aria-disabled), no longer natively disabled.
+    expect(footBtn('Save').getAttribute('aria-disabled')).toBe('true');
+    expect(footBtn('Discard').getAttribute('aria-disabled')).toBe('true');
+    expect(footBtn('Save').disabled).toBe(false);
+    // r1 (both lanes): focusable now, so it says why it does nothing.
+    expect(footBtn('Save').title).toBe('Wait for the upload to finish');
+    expect(footBtn('Discard').title).toBe('Wait for the upload to finish');
   });
 
   it('a confirmed close (registry discard) resets title and content', async () => {
@@ -678,13 +814,14 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(toastTexts()).toContain('App uploaded');
   });
 
-  it('busy: while the upload is out, Save and the script buttons are disabled', async () => {
+  it('busy: while the upload is out, Save is blocked and the script buttons are disabled', async () => {
     serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? new Promise(() => {}) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     type(titleInput(), 'App 2');
     chooseFile(jsFile("getElementById('app-root')"));
     await waitUntil(() => uploadPosts().length > 0);
-    expect(footBtn('Save').disabled).toBe(true);
+    // Polish 3 C7: Save is blocked (aria-disabled), no longer natively disabled.
+    expect(footBtn('Save').getAttribute('aria-disabled')).toBe('true');
     expect(scriptBtn('Upload').disabled).toBe(true);
   });
 

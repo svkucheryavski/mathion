@@ -4,6 +4,11 @@
   // takes the scroll lock and the last one out releases it.
   const stack: HTMLElement[] = [];
   let savedOverflow = '';
+
+  /** Polish 3 C7: `panel` is the top open modal's panel. */
+  export function isTopModal(panel: Element | null | undefined): boolean {
+    return !!panel && stack[stack.length - 1] === panel;
+  }
 </script>
 
 <script lang="ts">
@@ -80,14 +85,23 @@
     }
     panelEl.focus();
   }
-  const isTop = () => !!panelEl && stack[stack.length - 1] === panelEl;
+  const isTop = () => isTopModal(panelEl);
 
   function onKeydown(e: KeyboardEvent) {
     if (!isTop()) return;
+    // Polish 3 C7: a control that turned disabled dropped focus to <body>; any
+    // key brings it back to the panel first. From there (or from the panel
+    // itself) a Tab goes straight to the first control, a Shift+Tab to the
+    // last: from the panel the browser would step out of it backwards.
+    const loose = !document.activeElement || document.activeElement === document.body;
+    if (loose) panelEl?.focus();
     if (e.key === 'Tab') {
       // FocusTrap wraps Tab only on the exact first/last focusable; with
       // nothing focusable left (body inert, buttons disabled) hold the panel.
-      if (candidates().length === 0) { e.preventDefault(); panelEl?.focus(); }
+      if (loose || document.activeElement === panelEl || candidates().length === 0) {
+        e.preventDefault();
+        refocus(e.shiftKey);
+      }
       return;
     }
     // keyCode 229 is Safari's IME-composition signal; inner widgets that own

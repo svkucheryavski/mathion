@@ -1018,3 +1018,24 @@ describe('RunMiniProjectsTab — 6b editor hand-off', () => {
     unmount(cmp);
   });
 });
+
+// Polish 3 F13 (spec §Focus, Tests): Safari leaves a clicked opener unfocused.
+// The edit path, because the create path refocuses on its own.
+describe('RunMiniProjectsTab — focus after a mouse-opened editor (F13)', () => {
+  it('a mouse-opened edit returns focus to its pencil on close', async () => {
+    const { target } = mountMpTab({ runIsPublished: false, miniProjects: [mkMp({ id: 1, block_id: 1 })] });
+    await settle();
+    const pencil = target.querySelector<HTMLButtonElement>('button[aria-label="Edit mini-project for Block 1"]')!;
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    expect(document.activeElement).toBe(document.body);
+    pencil.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    pencil.click();
+    await settle();
+    const dialog = target.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog.querySelector('#mp-modal-title')?.textContent ?? '').toMatch(/^Edit —/);
+    dialog.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!.click();
+    await settle();
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(pencil);
+  });
+});

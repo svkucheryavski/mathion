@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import Harness from './support/ModalHarness.svelte';
 import NestedHarness from './support/NestedModalHarness.svelte';
+import { isTopModal } from '../components/ui/Modal.svelte';
 
 let target: HTMLDivElement | null = null;
 let cmp: ReturnType<typeof mount> | null = null;
@@ -281,5 +282,85 @@ describe('Modal — right placement (6c R30)', () => {
     expect(closeBtn().getAttribute('title')).toBe('Wait for the save to finish');
     expect(closeBtn().getAttribute('aria-label')).toBe('Close');
     expect(closeBtn().disabled).toBe(true);
+  });
+});
+
+describe('Modal — focus on <body> (Polish 3 C7 point 4)', () => {
+  it('isTopModal is true only for the top panel', async () => {
+    render();
+    await settle();
+    const t2 = document.createElement('div');
+    document.body.appendChild(t2);
+    const pb = $state({ onRequestClose: vi.fn() });
+    const b = mount(Harness, { target: t2, props: pb });
+    flushSync();
+    await settle();
+    const [bottom, top] = [...document.querySelectorAll<HTMLElement>('section.modal-panel')];
+    expect(isTopModal(top)).toBe(true);
+    expect(isTopModal(bottom)).toBe(false);
+    expect(isTopModal(null)).toBe(false);
+    expect(isTopModal(document.body)).toBe(false);
+    unmount(b);
+    t2.remove();
+    expect(isTopModal(bottom)).toBe(true);
+  });
+
+  it('a key pressed with focus on body moves focus to the top panel', async () => {
+    const p = render();
+    await settle();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    // A Tab goes on to a control (next test); any other key stops at the panel.
+    const e = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(e);
+    expect(document.activeElement).toBe(panel());
+    expect(p.onRequestClose).not.toHaveBeenCalled();
+  });
+
+  // r1 M1 (both lanes): Shift+Tab from <body> must not step out of the panel
+  // and come back on the first control.
+  it('Shift+Tab with focus on body lands on the last control; Tab on the first', async () => {
+    render();
+    await settle();
+    (document.activeElement as HTMLElement).blur();
+    const shiftTab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(shiftTab);
+    expect(shiftTab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('save'));
+    (document.activeElement as HTMLElement).blur();
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('head-trash'));
+  });
+
+  it('with two modals open, a key with focus on body moves focus into the top one only', async () => {
+    render();
+    await settle();
+    const t2 = document.createElement('div');
+    document.body.appendChild(t2);
+    const pb = $state({ onRequestClose: vi.fn() });
+    const b = mount(Harness, { target: t2, props: pb });
+    flushSync();
+    await settle();
+    const [bottom, top] = [...document.querySelectorAll<HTMLElement>('section.modal-panel')];
+    (document.activeElement as HTMLElement).blur();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(top);
+    expect(bottom.contains(document.activeElement)).toBe(false);
+    unmount(b);
+    t2.remove();
+  });
+
+  // r2 Opus 1: focus left on the panel itself (the key backstop, a blocked
+  // ⌘S, Escape while × is disabled) — Shift+Tab must not step out of it.
+  it('Shift+Tab with focus on the panel lands on the last control', async () => {
+    render();
+    await settle();
+    panel().focus();
+    const e = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    panel().dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('save'));
   });
 });

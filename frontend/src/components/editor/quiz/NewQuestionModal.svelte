@@ -4,10 +4,10 @@
   // and the Number / Text answer. "Add question" sends ONE create with all
   // fields; on success the quiz body closes this modal and moves focus.
   import { getContext, untrack } from 'svelte';
-  import Modal from '../../ui/Modal.svelte';
+  import Modal, { isTopModal } from '../../ui/Modal.svelte';
   import Button from '../../ui/Button.svelte';
   import AskSlot from '../../ui/AskSlot.svelte';
-  import { DISCARD_ASK, focusAfter, modalClose, useModalAsk } from '../../../lib/askInPlace.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, modalPanel, useModalAsk } from '../../../lib/askInPlace.svelte';
   import MarkdownEditor from '../MarkdownEditor.svelte';
   import QuestionTypePicker from '../QuestionTypePicker.svelte';
   import { ApiError } from '../../../lib/api';
@@ -127,7 +127,10 @@
   function onWindowKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
     if (!(e.target instanceof Element)) return;
-    if (e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
+    // Polish 3 C7: with focus on <body> (a control disabled under it while
+    // saving), the top modal takes it.
+    const loose = (e.target === document.body || e.target === document.documentElement) && isTopModal(modalPanel(labelId));
+    if (!loose && e.target.closest('section.modal-panel')?.getAttribute('aria-labelledby') !== labelId) return;
     e.preventDefault();
     if (!asking) void save();
   }

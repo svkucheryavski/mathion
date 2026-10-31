@@ -481,3 +481,56 @@ describe('Level 3 — the page question (Polish 1 R46, R53)', () => {
     expect(r.anyDirty()).toBe('false');
   });
 });
+
+// Polish 3 C7 point 4: a level-3 modal's ⌘S with focus on <body> (its disabled
+// Cancel, ×, type picker or toolbar dropped it there during a save).
+describe('Level 3 — ⌘S with focus on <body>', () => {
+  const fromBody = () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    expect(document.activeElement).toBe(document.body);
+    const e = new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true });
+    const pd = vi.spyOn(e, 'preventDefault');
+    document.body.dispatchEvent(e);
+    return { e, pd };
+  };
+
+  it('Question text: ⌘S with focus on body saves once', async () => {
+    const s = new QuizServer([q({ id: 1 })]);
+    await renderQuiz(s);
+    await openText();
+    typeInto(area(), 'From body');
+    const { e, pd } = fromBody();
+    await settle();
+    expect(e.defaultPrevented).toBe(true);
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(qWrites(s).map((c) => c.body)).toEqual([{ text_md: 'From body' }]);
+  });
+
+  it('Explanation: ⌘S with focus on body saves once', async () => {
+    const s = new QuizServer([q({ id: 1 })]);
+    await renderQuiz(s);
+    byName(cards()[0], 'Add explanation to question 1')!.click();
+    await settle();
+    typeInto(area(), 'Because');
+    const { e, pd } = fromBody();
+    await settle();
+    expect(e.defaultPrevented).toBe(true);
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(qWrites(s).map((c) => c.body)).toEqual([{ explanation_md: 'Because' }]);
+  });
+
+  it('New question: ⌘S with focus on body saves once', async () => {
+    const s = new QuizServer([q({ id: 1 })]);
+    await renderQuiz(s);
+    byName(panel(), '+ Add question')!.click();
+    await settle();
+    typeInto(area(), 'Pick one');
+    const { e, pd } = fromBody();
+    await settle();
+    await settle();
+    expect(e.defaultPrevented).toBe(true);
+    expect(pd).toHaveBeenCalledTimes(1);
+    expect(s.writes().filter((c) => c.method === 'POST' && c.path === '/api/items/7/questions').map((c) => c.body))
+      .toEqual([{ text_md: 'Pick one', type: 'single_choice' }]);
+  });
+});

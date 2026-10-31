@@ -179,6 +179,26 @@ describe('Quiz header (5d T4)', () => {
     expect(document.activeElement).toBe(closeX());
   });
 
+  // Polish 3 C7 point 7 (F6), as InlineInput does (R10).
+  it('F6: a 403 reload that disables the header ✓ moves focus off it first', async () => {
+    const s = new QuizServer([q({ id: 1 })]);
+    s.failNext('PATCH', /\/api\/items\/7$/, 403, 'Forbidden');
+    const r = await renderQuiz(s);
+    await openTitle();
+    typeInto(field(), 'Late rename');
+    const ok = byName(panel(), 'Save title')!;
+    ok.focus();
+    ok.click();
+    await settle();
+    expect(document.activeElement).toBe(ok);
+    const archived = mkVersion({ state: 'archived' });
+    r.props.modal.version = archived;
+    r.props.modal.perms = versionPermissions(archived);
+    await settle();
+    expect(byName(panel(), FORBIDDEN_TITLE)!.disabled).toBe(true);
+    expect(document.activeElement).toBe(field());
+  });
+
   it('⌘S in the quiz modal is swallowed and sends nothing', async () => {
     const s = new QuizServer([q({ id: 1 })]);
     await renderQuiz(s);

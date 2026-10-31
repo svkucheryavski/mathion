@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { flushSync } from 'svelte';
-import { InPlaceAsk, PageAsk, focusIsFree, usable, refused, settleTo, moveOn, withdraw, firstUsable, DISCARD_ASK, type Answer, type Ask, type AskHost } from '../lib/askInPlace.svelte';
+import { InPlaceAsk, PageAsk, focusIsFree, usable, refused, settleTo, moveOn, withdraw, firstUsable, canHoldFocus, repairFocus, DISCARD_ASK, type Answer, type Ask, type AskHost } from '../lib/askInPlace.svelte';
 import { DISCARD, DISCARD_CONTINUE } from '../lib/editorReasons';
 
 const Q = (over: Partial<Ask> = {}): Ask =>
@@ -320,5 +320,77 @@ describe('settleTo / moveOn / withdraw (Task 3, R54, R57, R49)', () => {
     host.innerHTML = '';                       // the slot unmounts
     await flush();
     expect(document.activeElement).toBe(t);
+  });
+});
+
+describe('repairFocus and canHoldFocus (C7 point 3)', () => {
+  let box: HTMLDivElement;
+  beforeEach(() => { box = document.createElement('div'); document.body.appendChild(box); });
+  afterEach(() => { box.remove(); });
+  function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, parent: Element = box): HTMLElementTagNameMap[K] {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  }
+
+  it('canHoldFocus accepts aria-disabled and rejects disabled, disconnected and inert', () => {
+    expect(canHoldFocus(el('button', { 'aria-disabled': 'true' }))).toBe(true);
+    expect(canHoldFocus(el('button', { disabled: '' }))).toBe(false);
+    expect(canHoldFocus(document.createElement('button'))).toBe(false);
+    const frozen = el('div', { inert: '' });
+    expect(canHoldFocus(el('button', {}, frozen))).toBe(false);
+    expect(canHoldFocus(null)).toBe(false);
+    expect(canHoldFocus(undefined)).toBe(false);
+  });
+
+  it('repairFocus focuses the first holder when focus is on body', async () => {
+    const off = el('button', { disabled: '' });
+    const blocked = el('button', { 'aria-disabled': 'true' });
+    const next = el('button');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    expect(await repairFocus(null, off, blocked, next)).toBe(true);
+    expect(document.activeElement).toBe(blocked);
+  });
+
+  it('repairFocus acts when focus is on the modal panel', async () => {
+    const panel = el('section', { class: 'modal-panel', tabindex: '-1' });
+    const save = el('button', {}, panel);
+    panel.focus();
+    expect(document.activeElement).toBe(panel);
+    expect(await repairFocus(save)).toBe(true);
+    expect(document.activeElement).toBe(save);
+  });
+
+  it('repairFocus never moves focus the user put elsewhere', async () => {
+    const save = el('button');
+    const field = el('input');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    const p = repairFocus(save);
+    field.focus();                            // during the tick repairFocus awaits
+    expect(await p).toBe(false);
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('repairFocus skips a target whose focus() does not take', async () => {
+    const h2 = el('h2');                       // no tabindex: focus() is ignored
+    const ok = el('button');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    expect(await repairFocus(h2, ok)).toBe(true);
+    expect(document.activeElement).toBe(ok);
+    ok.blur();
+    expect(await repairFocus(h2)).toBe(false);
+  });
+
+  // r1 Fable M2: focus on a modal panel is that modal's to repair.
+  it('repairFocus on a panel skips chain elements outside that panel', async () => {
+    const panel = el('section', { class: 'modal-panel', tabindex: '-1' });
+    const inside = el('button', {}, panel);
+    const outside = el('button');
+    panel.focus();
+    expect(await repairFocus(outside)).toBe(false);
+    expect(document.activeElement).toBe(panel);
+    expect(await repairFocus(outside, inside)).toBe(true);
+    expect(document.activeElement).toBe(inside);
   });
 });

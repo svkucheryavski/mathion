@@ -33,6 +33,16 @@ describe('focusFirst (spec §Focus order)', () => {
     expect(focusFirst([h2, ok])).toBe(true);
     expect(document.activeElement).toBe(ok);
   });
+  it('skips a candidate inside [inert]', () => {
+    const frozen = document.createElement('div');
+    frozen.setAttribute('inert', '');
+    document.body.appendChild(frozen);
+    const inside = document.createElement('button');
+    frozen.appendChild(inside);
+    const ok = btn();
+    expect(focusFirst([inside, ok])).toBe(true);
+    expect(document.activeElement).toBe(ok);
+  });
   it('returns false when nothing can take focus', () => {
     expect(focusFirst([null, btn({ disabled: '' })])).toBe(false);
   });
