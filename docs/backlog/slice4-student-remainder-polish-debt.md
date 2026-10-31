@@ -9,14 +9,6 @@ deferred with a ruling in the SDD ledger; none changes behaviour the spec enumer
 the final Polish slice.
 
 **Visual / behaviour (all spec-literal today)**
-- `.drop:has(input:disabled) { color: var(--faint) }` never paints: `.drop-label` sets `color` directly
-  and `submitting` implies `.has-file`. Confirm on the browser pass, then drop the declaration or move
-  it to `.drop:has(input:disabled) .drop-label`.
-- No page-level `dragover`/`drop` cancel: dropping a PDF just outside the dashed zone navigates the
-  browser to the file. Decide whether a page-level cancel is wanted.
-- `header` has no bottom spacing when the deadlines row is absent (spec §3.1 as written): the `<h1>`
-  sits 6px above the assignment card.
-- `.members` has no `overflow-wrap` (one unbreakable name would widen the grid track).
 - Three loading primitives coexist by slice order, not by rule: `Skeleton` (student surfaces),
   `Spinner` (App/Login/editor pages), `LoadingPlaceholder` (teacher pages). Write the rule or merge.
 - The file input's accessible name is the wrapping label's text (the picked filename once one is

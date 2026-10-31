@@ -505,6 +505,8 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
   - The CSS goes to spec §The look rows "Loose lists", "Crumb hover", "Mini-project header" and "Long words" (`.members`). The compact values (e.g. `--space-1` / `--space-2`) are proposed at the look check. Extend the header comment at `content.css:22-28` with one sentence on the list rules.
   - The window `dragover` / `drop` cancel runs while the page is mounted, for drags whose `dataTransfer.types` includes `Files`.
   - Drop the dead `data.can_submit !== null` conjunct.
+  - Review r1 (user): the inside-an-item rule covers every block (`:where(p, ul, ol, pre, blockquote, hr, div.math)`), not only `p`; the window `dragover` sets `dropEffect = 'none'` beside the zone.
+  - Review r2: a heading in a loose item keeps its em margins (ruling); while submitting `handleDragOver` returns before `preventDefault`, so the window shows the no-drop cursor over the disabled zone too (test: "the disabled zone while submitting shows no drop cursor"); a loose list with no `<p>` goes to the backlog.
 
 - [ ] **Step 5: Run the gate, vitest and svelte-check.** Expected: PASS.
 
