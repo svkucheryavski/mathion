@@ -1,6 +1,6 @@
 ---
 worth: later
-where: frontend/src/components/editor/ItemRow.svelte:99
+where: frontend/src/components/editor/AssetSidebar.svelte:462
 added: 2026-09-05
 ---
 # other `flex: 1` titles may collapse to 0px the way SequenceLink's did
@@ -14,12 +14,12 @@ so the shrink is shared in proportion to content.
 
 The same shape appears elsewhere and nobody has checked whether any of them is exposed:
 
-- `frontend/src/components/editor/ItemRow.svelte:99` — `.item-title { font-weight: 600; flex: 1 }`
-- `frontend/src/components/editor/AssetSidebar.svelte:336,340` — `.row-click`, `.meta`
-- `frontend/src/components/editor/AccordionHeader.svelte:92` — `.toggle`
-- `frontend/src/components/editor/OptionRow.svelte:72` — `.opt-input`
-- `frontend/src/components/chrome/AppHeader.svelte:83` — `.links`
-- `frontend/src/pages/CourseList.svelte:49` — `.page-head h1`
+- `frontend/src/components/editor/AssetSidebar.svelte:449, 462, 490` — `.msg`, `.row-click`, `.meta`
+- `frontend/src/components/chrome/AppHeader.svelte:87` — `.links`
+- `frontend/src/pages/CourseList.svelte:60` — `.page-head h1`
+
+(Re-checked 2026-10-31, Polish 3: `ItemRow.svelte` and `AccordionHeader.svelte` were rewritten and no
+longer use a bare `flex: 1` on a title; `OptionRow.svelte` is gone.)
 
 **What settles the value call:** most of these sit beside fixed-width controls (buttons, pills, icons),
 where free space never goes negative and `flex: 1` is exactly right — the bug needs a sibling whose

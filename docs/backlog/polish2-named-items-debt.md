@@ -21,7 +21,6 @@ Plan: `docs/superpowers/plans/2026-10-18-visual-refresh-polish2-named-items.md`.
 - On a phone, a long sequence wraps the strip; a current item on an upper row cannot touch the sheet and reads as a white button (spec §The player strip, known limit).
 - The gate row `none … "body:has\([^)]*\)\{[^}]*--focus-page"` misses a selector with nested parentheses (`body:has(.page:not(.x))`); loosen to `body:has\([^{]*\{[^}]*--focus-page` (Opus r1 M3).
 - `theme-default.css`, the `--focus-page` comment: "below --focus-1/--focus-2" is ambiguous, since `--bg` is lighter than both (Fable r1).
-- **Polish 3:** at 320px wide the AppHeader overflows sideways on every page ("Dev" and Logout run to 390px). Not Task 2's: the header is unchanged; found during the Task 2 shots.
 - Two stale words from the D62 fix (r2): the spec's §The player strip Gate bullet says the ItemMark inventory "gains the five rules", now four (Fable r2); the gate comment above the (i) SPECS (`visual-refresh-gate.sh:2062-2064`) still says `.icon` is the whole of what ItemIcon may keep, now `.icon` and `.icon.current` (Opus r2 m1).
 
 ## Task 3 — authored content, page scale
@@ -70,12 +69,11 @@ First verdict, before the fix pass: both ready to merge, 0 Critical / 0 Importan
 - `externalLinks` "stays in the tab" cases assert that `rel` is absent, which is true only of the hand-built anchor; in production nh3 adds `rel` (Fable m4).
 - The `validateLink` branch in `_link_tokens` cannot fail for an `http(s)://` match; comment or remove it (Fable m5).
 - QuestionCard (`QuestionCard.svelte:146`) shows the prompt in `--text`, the student view and the preview in `--text-2` (Opus m2).
-- Safari pass: the strip wrapped at 320px with the current item on an upper row; `.prose h1` inside a `<legend>`; the run tabs' hairline and the superuser dashboard's unfilled boxes on the new ground (Fable, Opus recommendations).
+- Safari pass: `.prose h1` inside a `<legend>`; the run tabs' hairline and the superuser dashboard's unfilled boxes on the new ground (Fable, Opus recommendations).
 - For the beta VoiceOver pass: `aria-current` on the strip's current ItemIcon (Fable recommendation).
 
 ## Safari pass (2026-10-22/23)
 - Course files linked from content download instead of opening: `api/assets.py:189` returns `FileResponse(..., filename=...)`, which sends `Content-Disposition: attachment`. Pre-existing. A product question: should PDFs (and images) open inline in the new tab?
-- The strip's wrap at 320px could not be checked in Safari: no dev sequence has more than 4 items. Check it when one does.
 - D70 review: while `loadCourse` is in flight (or after it fails, which is non-fatal) the course crumb is an empty, focusable, unnamed link and the row reads "/ Mini-project"; after a cross-course navigation the old course's name shows briefly. The player has the same expression. Fix both: render the course link (and its separator) only when `currentCourse.value?.slug === courseSlug` (Opus m1, Fable m1).
 - Cmd/Ctrl-click on in-app links (the crumbs here, the player's, CourseCard, SequenceLink, AppHeader) is swallowed by the app-wide `preventDefault(); navigate()` idiom; middle-click still opens a tab. App-wide fix: return early on a modifier key or `button !== 0` (Opus m2).
 - `.breadcrumb a` has no hover colour; the player's crumbs darken to `--text` on hover (Fable m2).

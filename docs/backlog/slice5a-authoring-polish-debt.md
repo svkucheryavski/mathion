@@ -5,35 +5,15 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 
 ## T1 — primitives
 
-- **InlineField: IME edge cases.** `if (e.isComposing) return;` runs before the Escape branch, so an
-  Escape that cancels an IME composition still bubbles (a future modal's `svelte:window` Escape handler
-  would close the modal). Safari also sends the Enter that confirms an IME conversion with
-  `isComposing === false` and `keyCode === 229`, which would commit mid-composition. Fix: stop Escape
-  propagation even while composing; treat `keyCode === 229` as composing.
-- **InlineField: focus after a mouse ✓ then a read-only flip.** A mouse-clicked ✓ holds focus, becomes
-  disabled while busy, and Chrome blurs it; a flip during that window sees `hadFocus === false`, so focus
-  lands on `<body>` instead of the row. Cosmetic; the keyboard path parks focus correctly.
-- **InlineField: a late-failure toast has no field context.** After a discard-then-navigate, the toast
-  reads e.g. "Label taken" with nothing naming the field. Consider prefixing the label
-  (`${label}: …`); the spec currently pins `msg(e)`.
-- **InlineField: a busy (saving) draft still counts as dirty**, so DirtyGuard's "Discard unsaved
-  changes?" and the D3 suffix appear for a draft that is already being saved (sub-second window).
-  Spec-consistent; wording only.
-- **Tests: InlineField "late failure toasts once, no inline error, no focus"** does not assert the
-  "no focus" part; **"reopening clears a stale error"** cannot catch the removal of `error = null` in
-  `openEditor` (`close()` already clears it); the ✓/✕ `if (!busy)` onclick guards are defensive and
-  untestable (a disabled button never fires `onclick`); busy-ignore is pinned via the keydown path.
-- **InlineField: the pencil disabled during a discarded in-flight commit** (the T1 fix) shows the
-  plain `editTitle` tooltip with no reason. Sub-second; cosmetic.
 - **Tests: dirtyRegistry "unregistering mid-loop"** does not discriminate the `[...registry]`
   snapshot in `discardAll` — JS `Set` iteration already tolerates deletes. The snapshot is harmless
   defensive code; soften its comment or the test's claim.
 
 ## T2 — Versions page (3a)
 
-- **Focus after a row action.** Duplicate's Cancel unmounts the focused button, and a Disable click
-  disables the button (busy) and swaps it for Enable, so focus falls to `<body>`. Spec only requires
-  focus on open. Return focus to the row's Duplicate / Enable / Disable slot once the action settles.
+- **Focus after a row action.** Duplicate's Cancel unmounts the focused button, so focus falls to
+  `<body>`. Return focus to the row's Duplicate once the action settles. (The Disable / Enable half was
+  fixed in Polish 1; Polish 3 F1 takes the rest.)
 - **The versions count has no screen-reader context.** `<span class="mono count">2</span>` after the
   `<h2>` is announced as a bare "2". Add a visually-hidden " versions" (or an `aria-label`).
 - **Create-version 422 with an array detail** toasts "Please correct the highlighted fields." with
@@ -91,8 +71,6 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
   `onPlus` guard line, leaves the suite green (each guard covers the other). The arrows have a "busy
   disables" test; add one for the `+` (start a sequence reorder against an unresolved fetch, assert the
   `+` is disabled, then resolve).
-- **Slug / code badge wrap at narrow widths.** `.slug` and `.code` have no `white-space: nowrap`, so a
-  hyphenated slug wraps onto a second line inside the toggle; the reference row is single-line.
 - **`onPlus`'s `await tick()` before the `expanded` check is belt-and-braces** — the `$derived` is
   already fresh after `navigate`; removing it passes the suite. Keep or drop.
 - **Focus after `+` on a collapsed block depends on microtask order** (the page focus `$effect` runs one
@@ -125,10 +103,6 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 
 ## T6 — item rows + item type picker
 
-- **A long slug can squeeze the item title at narrow widths.** `.item-title` has `min-width: 0;
-  overflow-wrap: anywhere`, but `.item-slug` keeps its min-content width (its longest hyphen segment), so
-  on a narrow viewport the title can collapse to a few characters. Consider `.item-slug { min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap }`. Same family as the T5a slug-wrap item.
 - **Forced colors: the selected picker card grows by 1px.** `label.selected { border: 2px solid Highlight }`
   shifts layout; use `outline: 2px solid Highlight; outline-offset: -1px` (or keep the 1px border and add
   an outline).
@@ -137,15 +111,6 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 
 ## Final whole-branch review (both lanes)
 
-- **Focus falls to `<body>` after a 3b action.** Deleting the expanded block unmounts the trash button and the
-  page's focus effect has no header target at the version root; a successful create-block / create-sequence
-  unmounts the focused Title input (a create-item success navigates into the new item's editor by design). A
-  keyboard author restarts at the top of the page. Return focus to the owning `+` (create) or the Blocks
-  heading / next block header (delete). Extends the T2 item.
-- **N identical "Editing closed" toasts** on archive / disable with N dirty inline fields (the read-only flip
-  runs per field), after the author already confirmed "Unsaved edits may be lost." Dedupe or word it once.
-- **Create inputs lack `maxlength={200}`** (create-block, create-sequence, create-item Title) while the matching
-  inline fields have it; an over-long title round-trips to a Pydantic 422 message. Pre-existing.
 - ~~**Every accordion expand / collapse prompts for an open dirty Version-info draft**~~ — **resolved, keep as
   specified (D3).** Browser pass 2026-10-07: the user found the prompt natural ("prevent the next step if the
   previous one is not complete"). No change.

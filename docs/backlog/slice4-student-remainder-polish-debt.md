@@ -17,8 +17,6 @@ the final Polish slice.
 - `header` has no bottom spacing when the deadlines row is absent (spec §3.1 as written): the `<h1>`
   sits 6px above the assignment card.
 - `.members` has no `overflow-wrap` (one unbreakable name would widen the grid track).
-- Two back-navigation conventions coexist: `Back to course` (SequencePlayer, MP page, no arrow) vs
-  `← Courses` (CourseView header, out of Slice-4 scope). Converge.
 - Three loading primitives coexist by slice order, not by rule: `Skeleton` (student surfaces),
   `Spinner` (App/Login/editor pages), `LoadingPlaceholder` (teacher pages). Write the rule or merge.
 - The file input's accessible name is the wrapping label's text (the picked filename once one is

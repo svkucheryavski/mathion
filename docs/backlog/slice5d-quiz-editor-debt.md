@@ -55,8 +55,6 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
 ### T3 — the overview
 - `QuizBody.load()` and `ChoiceAnswers.load()` guard their writes by token only, not `live()`; unreachable
   today (Opus M2 / Fable M5).
-- The Retry button unmounts while it reloads, so focus sits on `<body>` for a moment before the repair
-  (Fable M3).
 - Cosmetic: the wording of the (ai) emoji row's label ("all Slice-5d quiz files carry no emoji or decorative
   glyphs") (Opus M4).
 

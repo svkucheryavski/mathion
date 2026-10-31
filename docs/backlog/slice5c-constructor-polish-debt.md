@@ -104,12 +104,6 @@ rule (Critical/Important are fixed in-task; Minor lands here).
 - **CourseView CSS has no gate pin** (both lanes): `h1 {font-size:18px}`, `.top` flex row and the
   `@media (max-width:640px)` column stack are unpinned; only the round back-button markup is. A small
   parse-based CourseView inventory like section (k) would hold them.
-- **Phone width is tight** (both lanes): at 390px a row/header title gets ~90-100px beside the 80px bar +
-  86px chip; 15px/600 block titles wrap to two lines, and a course with NO quizzes still reserves the
-  empty 86px chip slot on every line. Candidate: `@media (max-width:560px) .quiz-chip.empty { flex-basis:0 }`
-  (+ gap compensation) or a narrower chip. Decide during the Safari/phone pass.
-  **Decided 2026-10-09 (Safari pass): keep as is** — rows stay aligned; portrait-phone use is not expected
-  to be common. Revisit only if real course titles wrap badly.
 - **Heading / region names carry the progress phrase** (both lanes): the header button's aria-label is
   also the `<h2>` name and, via `aria-labelledby`, the panel region name ("1. Vectors, 2 of 3 items
   completed, quiz score 50%, region"). Alternative: `aria-describedby` to a hidden span keeps the

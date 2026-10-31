@@ -29,7 +29,6 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - The StatusBadge label test's title says "the colours stay" but asserts only `data-status`.
 
 ### T3 — DangerConfirm, InlineName, InlineConfirm takeFocus
-- While `busy`, DangerConfirm natively disables the focused box or button, so Chrome and Safari drop focus to `<body>`; the caller restores focus after the action (§Focus, T10/T11). Check in the browser pass.
 - InlineName shows "Please correct the highlighted fields." for a 422 with a list detail, though nothing else is highlighted; an empty-string detail shows no error. Callers pass `maxlength={80}`, so a 422 is unlikely.
 - InlineName's last test cannot tell the ApiError branch from the Error branch (`ApiError(500, 'Server exploded')` has message === displayMessage); a list-detail 422 would pin it.
 - DangerConfirm's Esc handler sits on its three controls, not the root; a focusable element inside a caller's message snippet would not cancel on Esc. Today's messages hold only text and `<code>`.
@@ -112,7 +111,6 @@ Fixed in the review pass: inline confirms are now groups named by their question
 - `withTab`/`withoutTab` re-serialise other search parameters (`%20` → `+`); none exist on run addresses today.
 - `RunListPage` actions header uses `<th aria-label>` where the tabs use a visually-hidden span.
 - P19: Progress and Submissions have no h2 header row, while the spec says the header row is common to all six tabs — confirm with the user at the Safari pass.
-- Carried to 6c: the publish bar's Unpublish confirm and the Publish ↔ Unpublish swap drop focus to `<body>`.
 - "Delete N selected" stays enabled while a bulk delete runs; a second deliberate confirm starts a duplicate loop and a misleading "deleted by another user" banner (pre-existing).
 - The Teaching list's status pill is not kept in the address, so Back from a run resets it to Active (pre-existing).
 - The Mini-projects and Assets single-row delete confirms are named "Delete this mini-project?" / "Delete this asset?", not after their row (the three new labels are); pass `label="Delete {name}?"` if wanted.
