@@ -1,10 +1,11 @@
 # Visual refresh — Polish 3: the reviewers' minors that users meet
 
-**Status:** rev 4 (2026-10-31), draft for the user's read.
+**Status:** rev 5 (2026-10-31). Rev 4 approved by the user (`23f8afb`).
 - Rev 1 (`e10671b`): the user's decisions D82–D87, the controller's calls C1–C15, after the builder check.
 - Rev 2 folds in spec review round 1 (`spec-r1-opus-a.md`, `spec-r1-opus-b.md`, `spec-r1-fable.md`: 4 Critical, 18 Important, 34 Minor across the three lanes) and adds C16–C19.
 - Rev 3 folds in round 2 (`spec-r2-opus.md`, `spec-r2-fable.md`: 1 Critical, 8 Important, 20 Minor; round 2 found 18 of round 1's 22 Critical/Important resolved, 4 partly, all four finished here).
 - Rev 4 folds in round 3 (`spec-r3-opus.md`, `spec-r3-fable.md`: 0 Critical, 2 Important, 16 Minor; every round-2 Critical/Important resolved) and round 4's Minors (`spec-r4-opus.md`, `spec-r4-fable.md`: 0 Critical, 0 Important, 13 Minor; every round-3 finding resolved).
+- Rev 5 records the 400px shots (`shots-400.html`) and the user's D88: only the student screens must work at phone width.
 
 **Branch:** `feat/visual-refresh-polish3-minors`, cut from the Polish 2 tip `71dd8cc`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-31-visual-refresh-polish3-minors/` (`inventory.html`: the grouped backlog and the recon; the review rounds `spec-r*-*.md`).
@@ -29,6 +30,7 @@ Polish 1 (confirms) and Polish 2 (named items) are done. After Polish 3 comes th
 - gate hardening and test-gap notes, except the gate rows and tests each change needs;
 - the beta carry list: VoiceOver, forced colors / Windows High Contrast, reduced motion, iframe focus, touch devices, the 13d superuser page;
 - anything below 400px wide (D82);
+- the authoring and teaching screens at phone width (D88);
 - the user-visible entries listed in §Left in the backlog, each with its reason.
 
 ## Decisions
@@ -41,6 +43,7 @@ The user's, made in the brainstorm on 2026-10-31.
 - **D85 — Loose lists group by item.** In authored content, paragraphs inside one list item sit closer together than the items do: on the page scale 8px inside an item and 16px between items. Tight lists are unchanged. (Today it is the reverse: items 8px apart, paragraphs inside an item 16px.)
 - **D86 — One loading look: the skeleton rows.** The five teacher screens that show an italic "Loading…" line (`LoadingPlaceholder`) show the grey skeleton rows (`Skeleton`), like the student and editor pages. `LoadingPlaceholder` is deleted. The boot spinner in `App.svelte` and `Login.svelte` stays, because there is no page yet to hold skeleton rows.
 - **D87 — "0 uses" is a label, not a button.** On a run's Assets tab, a file used by no mini-project shows its grey "0 uses" chip as plain text. It has no button and no empty "used by" panel, so there is one Tab stop fewer. A chip with uses keeps opening its list.
+- **D88 — Only the student screens must work on a phone.** "This service can not be fully functional on small screen. We keep this option so student can do some quick actions on mobile phone, like check video, quiz or progress, but the part about course admin and teaching admin is not intended to be functional on small screens." (user, after the 400px shots). The 400px rule of D82 covers Login, the course list, the course page, the player and the mini-project page. The authoring screens (Versions, the editor and its modals) and the teaching screens (Teaching, a course's runs, a run's tabs) are laptop screens: a sideways scroll or a cramped header there at 400px is not a defect.
 
 ### The controller's calls
 
@@ -65,7 +68,7 @@ Not decided by the user. They are listed here so the user can check them while r
 - **C12** File responses from both file endpoints carry `X-Content-Type-Options: nosniff`.
 - **C13** Each player item gets its own component instance, which fixes quiz → quiz carrying the first quiz's result and answers. A submit records its attempt count in the course store, so coming back to a quiz shows the right attempts left, or the reveal once they are used up.
 - **C14** Drafts survive an expired session (the 401 → sign-in round trip) and belong to the user who typed them. An explicit sign-out, or a different user signing in, drops them.
-- **C15** The 400px shots are taken before the plan. A finding is real breakage (sideways scroll, a clipped or unreachable control, unreadable text) or anything the user flags in the shots.
+- **C15** The 400px shots are taken before the plan (done; §Narrow screens has the results). A finding is real breakage (sideways scroll, a clipped or unreachable control, unreadable text) or anything the user flags in the shots.
 - **C16** A busy Save or Create shows the primary colour with its spinner, as the quiz modals already do, instead of grey with a spinner. This is shown at the look check.
 - **C17** On Progress and Submissions the skeleton shows only on the first load. A Refresh over data keeps the table and shows a short muted "Refreshing…" beside the Refresh control.
 - **C18** Taken from the reviewers' list of omitted user-visible entries. Each is cheap and sits in or beside a file this slice edits; the details are in §Behaviour, item C18:
@@ -252,7 +255,7 @@ Tests: each site gets a jsdom test that disables or unmounts the focused control
 | Group column (C4) | `RunProgressTab` (6rem), `RunSubmissionTab` (12rem) | A wrapper like Progress's `.name-box` holds the name and the "disabled" chip. Its width is the column width less 24px of padding and the 1px `border-right` (`.name-box` is `calc(14rem - 25px)`), with `overflow-wrap: anywhere`. The scroll padding (D73, D74) then holds for any name. At 6rem the Progress cap leaves 71px; the look check shows a long name. | polish1 2.4.11; polish2 D73/D74 review |
 | Code in a question | `InlineConfirm.svelte:109` | The chip's background changes from `--surface` to `--surface-2`. | polish1 Task 1 |
 | Long words | `RunGroupsTab .g-name`, `RunRosterTab .ro-err`, `MiniProjectDetailPage .members` | `overflow-wrap: anywhere`. | slice6a T9, slice6c whole-branch, slice4 |
-| Table corners | `.mp-table` (`RunMiniProjectsTab:400`), `.assets-table` (`RunAssetsTab:916`), `.teach-table` (`TeacherRunListPage:141`), `.runs-table` (`RunListPage:218`) | Each table's outer border and radius move to a wrapper with `overflow-x: auto`, as Progress and Submissions do with `.table-scroll` (`RunProgressTab.svelte:545`, `RunSubmissionTab.svelte:333`). It clips the corners just as well, and unlike `overflow: hidden` it does not cut off a table wider than its container: at 400px the assets and mini-project tables are, and `hidden` would put Replace and Delete out of reach. The table takes `border-collapse: separate; border-spacing: 0`. A table's own radius does not clip its grey `th` corner cells. With the wrapper, RunAssetsTab's drag-over `outline` moves to it, and `.teach-table`'s `margin-top: 14px` (`TeacherRunListPage.svelte:141`) moves to its wrapper. Left on the table, it would be a blank band inside the border. On `.mp-table` and `.assets-table`, `th` has `border-bottom` and the first row's `td` has `border-top`; under `separate` both would draw, so the first body row drops its `border-top` and the header line draws once. Shots of all four, zoomed on a corner, and at 400px after the change (the C15 recon shots predate it). | slice6a T10, T11 |
+| Table corners | `.mp-table` (`RunMiniProjectsTab:400`), `.assets-table` (`RunAssetsTab:916`), `.teach-table` (`TeacherRunListPage:141`), `.runs-table` (`RunListPage:218`) | Each table's outer border and radius move to a wrapper with `overflow-x: auto`, as Progress and Submissions do with `.table-scroll` (`RunProgressTab.svelte:545`, `RunSubmissionTab.svelte:333`). It clips the corners just as well, and unlike `overflow: hidden` it does not cut off a table wider than its container: at 400px the assets and mini-project tables are, and `hidden` would put Replace and Delete out of reach. The table takes `border-collapse: separate; border-spacing: 0`. A table's own radius does not clip its grey `th` corner cells. With the wrapper, RunAssetsTab's drag-over `outline` moves to it, and `.teach-table`'s `margin-top: 14px` (`TeacherRunListPage.svelte:141`) moves to its wrapper. Left on the table, it would be a blank band inside the border. On `.mp-table` and `.assets-table`, `th` has `border-bottom` and the first row's `td` has `border-top`; under `separate` both would draw, so the first body row drops its `border-top` and the header line draws once. Shots of all four at a laptop width, zoomed on a corner. They are teaching screens, so no 400px shot (D88). | slice6a T10, T11 |
 | Crumb hover | `MiniProjectDetailPage .breadcrumb a` | `color: var(--text); text-decoration: underline` on hover, the player's rule (`SequencePlayer.svelte:259-260`). | polish2 Safari pass |
 | Mini-project header | `MiniProjectDetailPage` `header`, `.drop:has(input:disabled)` | The header keeps its bottom space when there is no deadline row. The disabled colour moves to `.drop:has(input:disabled) .drop-label`. The faint colour fails to paint today because `submitting` implies `.has-file`, and `.drop.has-file .drop-label` (`:703`) wins. The new rule's specificity beats it. | slice4 |
 | 0 uses (D87) | `RunAssetsTab.svelte:773-777` | At 0 uses the chip is a `<span class="uses-chip uses-off">` with `cursor: default; display: inline-block`; the button's `cursor: pointer` (`:933`) must not carry over. If a reload drops a chip with an open panel to 0, `openSubPanelAssetId` closes, and a focused chip that becomes a span repairs focus (point 3). The tests at `RunAssetsTab.svelte.test.ts:2353, 2441`, which query a 0-uses `button.uses-chip`, change with it. | slice6a "0 uses" |
@@ -329,7 +332,7 @@ User-visible entries the review round named, not taken, with the reason. They st
 - **Focusing a pinned sort button scrolls the grid back to the start** (`polish2…debt.md`). Mild, and fixing it means a scroll-restoring rule on both grids. Left for the beta pass's look.
 - **The mini-project editor's server-error banner can sit below the fold at 1000px** (`slice6b…debt.md`). Not reachable without a failed Save; check it at the beta pass.
 
-## Narrow screens (D82, C15)
+## Narrow screens (D82, D88, C15)
 
 **When:** the 400px shots come first, as recon before the plan is written. Each finding is then planned into the task that owns its file instead of reopening a committed task. A finding with no owning task becomes one small task of its own.
 
@@ -340,20 +343,17 @@ User-visible entries the review round named, not taken, with the reason. They st
 
 Anything else that looks off counts only if the user flags it while looking at the shots.
 
-Shots of every screen family:
-- Login;
-- the course list and the course page;
-- the player (page, quiz, video);
-- the mini-project page;
-- Teaching, and a run's tabs;
-- the editor and the Versions page;
-- the 404.
+**Results (2026-10-31, `shots-400.html`, 26 screens signed in as dev@):**
+- **Student screens pass.** Login, the course list, the course page, the player (page, quiz, video, strip and "Item N of M"), the mini-project page and the 404: no sideways scroll, nothing clipped. The AppHeader fits at 400px. So no narrow-screen task is planned.
+- **Authoring and teaching screens are out of scope (D88).** The shots found the Roster tab at 621px (Group column and row actions cut off), the Mini-projects tab at 702px, Teaching at 416px, the editor's item row breaking "Warm-up quiz" inside the word, the quiz editor header showing "Warm…", and the editor title wrapping to three lines. None of them is planned. The Overview `.ov-row` with a date field open fits anyway.
 
-Known entries to re-check:
-- the AppHeader: "Dev" and Logout ran to 390px at 320px wide, so at 400px it likely fits (polish2 Task 2; also the memory's beta "375px top-bar" item);
-- the run Overview's `.ov-row` (`RunOverviewTab.svelte:439`, 132px + 1fr + 54px) with a date field open (slice6c T1);
-- the player strip wrapping with a long sequence (polish2 Task 2, Safari pass);
-- the course page at 390px, "keep as is" (`slice5c…debt.md` student-view follow-up 2), which is below D82: reword it to 400px or close it.
+**Backlog entries this closes:**
+- the AppHeader overflow measured at 320px (polish2 Task 2) and the memory's beta "375px top-bar" item: fits at 400px, closed;
+- the course page at 390px, "keep as is" (`slice5c…debt.md` student-view follow-up 2): passes at 400px, closed;
+- the run Overview's `.ov-row` at 375px (slice6c T1): a teaching screen (D88), closed;
+- the player strip wrap (polish2 Task 2): wraps cleanly at 400px, closed.
+
+Later student-screen changes in this slice are still shot at 400px (§Process).
 
 ## What the builder decides
 
@@ -416,7 +416,7 @@ Entries measured below 400px are reworded to 400px or closed by §Narrow screens
 Per task, as in Polish 1 and 2:
 1. TDD (for CSS, the gate row first);
 2. vitest (`TZ=Europe/Copenhagen`), svelte-check and the gate (absolute `TMPDIR`); for backend tasks also `backend/.venv` pytest;
-3. screenshots or a look check, at a laptop width and at 400px;
+3. screenshots or a look check, at a laptop width, and at 400px for a student screen (D88);
 4. the user's OK;
 5. Opus and Fable review lanes on the uncommitted diff, re-run after every fix until clean;
 6. the user's commit OK, then a docs commit and the code commit, with exact paths and the trailer;
@@ -452,6 +452,6 @@ Then a whole-branch review (fresh Opus and Fable) and a Safari pass, one step at
   - the 0-uses label;
   - a loose list;
   - the teacher screens loading (throttled network), and a Refresh over data on Progress and Submissions.
-- **400px:** every screen family.
+- **400px:** the student screens (D88).
 
 No VoiceOver steps. The beta VoiceOver list gains two checks: whether an in-app link move is announced (focus and title after `navigate()`), and the Versions row title as a link, aria-disabled while busy.
