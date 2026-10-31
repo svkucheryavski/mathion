@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 
-// Stub only `markItemCovered` (a store WRITE we assert the argument of); keep
-// the real reactive `currentCourse` + `__test__setSlots` so the attempts line
-// reads a genuinely seeded snapshot.
+// Spy on `recordQuizAttempt` (a store WRITE we assert the argument of) but let
+// it write through; keep the real reactive `currentCourse` + `__test__setSlots`
+// so the attempts line reads a genuinely seeded snapshot.
 vi.mock('../stores/currentCourse.svelte', async (importOriginal) => {
   const real = await importOriginal<typeof import('../stores/currentCourse.svelte')>();
-  return { ...real, markItemCovered: vi.fn() };
+  return { ...real, recordQuizAttempt: vi.fn(real.recordQuizAttempt) };
 });
 
-import { __test__setSlots, markItemCovered } from '../stores/currentCourse.svelte';
+import { __test__setSlots, recordQuizAttempt } from '../stores/currentCourse.svelte';
+import { session } from '../stores/session.svelte';
+import { getDraft, clearAllDrafts } from '../stores/quizDrafts.svelte';
 import { api } from '../lib/api';
 import QuizItem from '../components/items/QuizItem.svelte';
 import type {
@@ -179,7 +181,9 @@ afterEach(() => {
   if (component) { unmount(component); component = null; }
   if (host?.parentNode) host.parentNode.removeChild(host);
   __test__setSlots(null);
-  vi.mocked(markItemCovered).mockClear();
+  vi.mocked(recordQuizAttempt).mockClear();
+  clearAllDrafts();
+  session.user = null;
   vi.restoreAllMocks();
 });
 
@@ -549,6 +553,9 @@ describe('QuizItem result card (T4)', () => {
 describe('QuizItem lastAttempt memo (enumerated (A)3, T4)', () => {
   it('keeps the attempts line accurate across Try again', async () => {
     seed({ 1: 0 });
+    // Hold the store at 0 used (as when no course snapshot is loaded), so the
+    // line can only come from the response memo.
+    vi.mocked(recordQuizAttempt).mockImplementationOnce(() => {});
     render(quiz(1, 'Check yourself', 1));
     answerAll();
     submitButton().click();
@@ -557,8 +564,8 @@ describe('QuizItem lastAttempt memo (enumerated (A)3, T4)', () => {
     buttonNamed('Try again').click();
     flushSync();
 
-    // The store still says 0 used (submit never bumps it); the response memo
-    // says 1, so 2 remain — not the stale 3.
+    // The store still says 0 used; the response memo says 1, so 2 remain —
+    // not the stale 3.
     expect(host.querySelector('.hint')?.textContent?.trim()).toBe('2 attempts left');
   });
 
@@ -597,9 +604,9 @@ describe('QuizItem lastAttempt memo (enumerated (A)3, T4)', () => {
     resolveSubmit(submitResponse({ item_id: 1, attempt_count: 1, can_retry: true }));
     await settle();
 
-    // A's continuation credits coverage to A, not to the item now on screen.
-    expect(markItemCovered).toHaveBeenCalledWith(1);
-    expect(markItemCovered).not.toHaveBeenCalledWith(2);
+    // A's continuation records the attempt on A, not on the item now on screen.
+    expect(recordQuizAttempt).toHaveBeenCalledWith(expect.objectContaining({ item_id: 1 }));
+    expect(recordQuizAttempt).not.toHaveBeenCalledWith(expect.objectContaining({ item_id: 2 }));
 
     // Clear the result card so the attempts line renders again.
     buttonNamed('Try again').click();
@@ -607,5 +614,100 @@ describe('QuizItem lastAttempt memo (enumerated (A)3, T4)', () => {
 
     // B's own store count (2 of 3 used) — A's memo is id-guarded away.
     expect(host.querySelector('.hint')?.textContent?.trim()).toBe('1 attempt left');
+  });
+});
+
+// --- Polish 3: a remount sees the recorded attempt and the draft (C13, D83) ---
+describe('QuizItem across a remount (C13, D83)', () => {
+  const student = {
+    id: 7, email: 's@x.test', full_name: null, is_superuser: false, is_disabled: false,
+    photo_url: null, has_course_admin: false, has_run_teacher: false,
+  };
+  function remount(item: QuizItemType): void {
+    if (component) { unmount(component); component = null; }
+    if (host?.parentNode) host.parentNode.removeChild(host);
+    render(item);
+  }
+
+  it('submit on the last attempt, then a remount: the reveal loads and no Submit shows', async () => {
+    seed({ 1: 2 });
+    postSpy.mockResolvedValue(submitResponse({ item_id: 1, attempt_count: 3, can_retry: false }));
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    submitButton().click();
+    await settle();
+    getSpy.mockReset();
+    getSpy.mockResolvedValue({
+      item_id: 1, attempt_count: 3, score_correct: 1, score_total: 1,
+      questions: [{ id: 101, type: 'single_choice', text_html: '<p>Prompt 101</p>', explanation_html: null,
+        correct_option_ids: [1011], correct_numeric: null, correct_text: null, student_answer: [1011] }],
+    });
+    remount(quiz(1, 'Quiz A', 1));
+    await settle();
+    expect(getSpy).toHaveBeenCalledWith('/api/items/1/reveal');
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Submit'))).toBe(false);
+    expect(host.querySelector('.result')?.textContent).toContain('Attempt 3 of 3');
+  });
+
+  it('submit with attempts left, then a remount: an empty form and the right number left', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    postSpy.mockResolvedValue(submitResponse({ item_id: 1, attempt_count: 1, can_retry: true }));
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    submitButton().click();
+    await settle();
+    remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.hint')?.textContent?.trim()).toBe('2 attempts left');
+    expect([...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(false);
+  });
+
+  it('a never-visited quiz (no store entry) keeps its count across a remount', async () => {
+    seed({});
+    postSpy.mockResolvedValue(submitResponse({ item_id: 1, attempt_count: 1, can_retry: true }));
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    submitButton().click();
+    await settle();
+    remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.hint')?.textContent?.trim()).toBe('2 attempts left');
+  });
+
+  it('a quiz that mounts used up drops its leftover draft', () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    expect(getDraft(1)).toBeDefined();
+    // Another tab used the last attempt; the store now says so.
+    seed({ 1: MAX });
+    remount(quiz(1, 'Quiz A', 1));
+    expect(getDraft(1)).toBeUndefined();
+    // While the reveal loads, the restored answers must not re-enable Submit.
+    expect(submitButton().disabled).toBe(true);
+    expect([...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(false);
+  });
+
+  it('a remount restores the unsubmitted answers', () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 2));
+    answerAll();
+    remount(quiz(1, 'Quiz A', 2));
+    const checked = [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter((r) => r.checked);
+    expect(checked).toHaveLength(2);
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('a successful submit clears the draft but keeps the shown answers', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    expect(getDraft(1)).toBeDefined();
+    submitButton().click();
+    await settle();
+    expect(getDraft(1)).toBeUndefined();
+    expect([...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(true);
   });
 });

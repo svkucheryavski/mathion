@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2405
+EXPECTED_CHECKS=2406
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5735,6 +5735,13 @@ for f in $CONTENT_SURFACES; do
 done
 if [[ $nbind -eq 0 ]]; then echo "PASS  every content surface imports externalLinks once, from the lib, and binds the name nowhere else"
 else echo "FAIL  a content surface imports or binds externalLinks otherwise ($nbind)"; fail=1; fi
+
+echo "--- (ao) Polish 3 — minors ---"
+# P124: every new Polish 3 row lands here; changed earlier rows stay in place.
+# C13: ItemRouter keys its branch chain on the item, so each player item gets
+# its own component (quiz → quiz never carries the first quiz over). The key
+# lives in ItemRouter, not SequencePlayer, whose AST pin allows no KeyBlock.
+src_count "ItemRouter keys its branch chain on the item id (C13)" 1 src/components/items/ItemRouter.svelte '{#key item.id}'
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

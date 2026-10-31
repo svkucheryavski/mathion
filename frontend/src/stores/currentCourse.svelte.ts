@@ -4,6 +4,7 @@ import { fetchListSwallow403 } from '../lib/studentMiniProjects';
 import type {
   BlockContent,
   ItemStateEntry,
+  QuizSubmitResponse,
   StudentMiniProjectListItem,
   VersionContent,
   VersionState,
@@ -105,6 +106,31 @@ export function markItemCovered(itemId: number): void {
   const entry = currentCourse.value.state.items[String(itemId)];
   if (entry === undefined) return;
   entry.is_covered = true; // deep mutation: $state proxies make this reactive
+}
+
+// C13: a submit's attempt is written into the store, so a remounted quiz
+// shows the right attempts left, or loads the reveal once they are used up.
+// A page load straight onto a never-visited quiz records the visit before the
+// course is loaded, so the entry may be missing: create it, as a visit does.
+export function recordQuizAttempt(res: QuizSubmitResponse): void {
+  if (currentCourse.value === null) return;
+  const items = currentCourse.value.state.items;
+  const key = String(res.item_id);
+  items[key] ??= {
+    is_covered: true,
+    time_spent: 0,
+    last_visited_at: new Date().toISOString(),
+    attempt_count: 0,
+    max_attempts: res.max_attempts,
+    last_score: null,
+    last_answers: null,
+  };
+  // Read it back: the assignment evaluates to the literal, not the proxy.
+  const entry = items[key]!;
+  entry.attempt_count = res.attempt_count;
+  entry.max_attempts = res.max_attempts;
+  entry.last_score = { correct: res.score_correct, total: res.score_total };
+  entry.is_covered = true;
 }
 
 export function recordItemVisit(itemId: number): void {

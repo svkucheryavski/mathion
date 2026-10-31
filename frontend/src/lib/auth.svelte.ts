@@ -2,12 +2,14 @@ import { api, ApiError } from './api';
 import { session, clearSession } from '../stores/session.svelte';
 import { clearCourse } from '../stores/currentCourse.svelte';
 import { clearToasts } from '../stores/toasts.svelte';
+import { clearAllDrafts, dropDraftsNotOwnedBy } from '../stores/quizDrafts.svelte';
 import type { User } from './types';
 
 export async function bootstrapSession(): Promise<void> {
   try {
     const u = await api.get<User>('/api/auth/me', { skipAuthRedirect: true });
     session.user = u;
+    dropDraftsNotOwnedBy(u.id);
   } catch (e: unknown) {
     if (e instanceof ApiError && e.status === 401) {
       session.user = null;
@@ -38,6 +40,7 @@ export async function verifyPin(
     { skipAuthRedirect: true },
   );
   session.user = user;
+  dropDraftsNotOwnedBy(user.id);
   return user;
 }
 
@@ -53,5 +56,6 @@ export async function logout(): Promise<void> {
     clearSession();
     clearCourse();
     clearToasts();
+    clearAllDrafts();
   }
 }

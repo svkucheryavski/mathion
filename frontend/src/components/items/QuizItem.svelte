@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { QuizItem, Question, QuizSubmitResponse, QuizRevealResponse } from '../../lib/types';
   import { api, ApiError } from '../../lib/api';
-  import { markItemCovered, currentCourse } from '../../stores/currentCourse.svelte';
+  import { recordQuizAttempt, currentCourse } from '../../stores/currentCourse.svelte';
+  import { getDraft, setDraft, clearDraft, holdsAnswers } from '../../stores/quizDrafts.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import { assertNever } from '../../lib/types';
   import { externalLinks } from '../../lib/externalLinks';
@@ -14,17 +15,19 @@
 
   let { item }: { item: QuizItem } = $props();
 
-  let answers = $state<Record<string, number[] | string>>({});
+  // D83: start from the draft kept while the student was elsewhere. ItemRouter
+  // keys this component on the item id (C13), so `item` never changes under it.
+  // svelte-ignore state_referenced_locally
+  let answers = $state<Record<string, number[] | string>>(getDraft(item.id) ?? {});
   let inflight = $state<Promise<QuizSubmitResponse> | null>(null);
   let lastResult = $state<QuizSubmitResponse | null>(null);
   let revealed = $state<QuizRevealResponse | null>(null);
   let autoRevealed = $state(false); // tracks "exhausted on mount" branch so we hide retry UI
   // Attempt count from the most recent successful submit, kept across
   // `tryAgain()` (which clears `lastResult`) so the attempts line does not fall
-  // back to the never-bumped store count. Keyed off the RESPONSE's `item_id`,
-  // not the reactive `item` prop: `item` is read after the `await`, so a
-  // navigation while the submit is in flight would otherwise tag this item's
-  // count onto the next one.
+  // back to a store count that `recordQuizAttempt` could not bump (no course
+  // snapshot is loaded). Keyed off the RESPONSE's `item_id`, not
+  // the `item` prop: a late response must only ever describe its own item.
   let lastAttempt = $state<{ id: number; count: number } | null>(null);
 
   const revealById = $derived(
@@ -72,21 +75,21 @@
       inflight === null
     ) {
       autoRevealed = true;
+      // Nothing left to submit: drop a restored draft, so it neither keeps
+      // the leave-page warning on nor re-enables Submit while the reveal loads.
+      clearDraft(item.id);
+      answers = {};
       void revealAnswers();
     }
   });
 
   const allAnswered = $derived(
-    item.questions.every((q) => {
-      const a = answers[String(q.id)];
-      if (a === undefined) return false;
-      if (Array.isArray(a)) return a.length > 0;
-      return typeof a === 'string' && a.trim().length > 0;
-    })
+    item.questions.every((q) => holdsAnswers(answers[String(q.id)]))
   );
 
   function setAnswer(qid: number, ans: number[] | string): void {
     answers[String(qid)] = ans;
+    setDraft(item.id, $state.snapshot(answers));
   }
 
   async function submit(): Promise<void> {
@@ -99,7 +102,8 @@
       const res = await inflight;
       lastResult = res;
       lastAttempt = { id: res.item_id, count: res.attempt_count };
-      markItemCovered(res.item_id);
+      recordQuizAttempt(res);
+      clearDraft(res.item_id);
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Submit failed.';
       pushToast(msg, 'error');
