@@ -42,6 +42,7 @@ import { emitUnauthorized } from '../lib/events';
 import { currentCourse, __test__setSlots } from '../stores/currentCourse.svelte';
 import { formatFileSize } from '../lib/format';
 import MiniProjectDetailPage from '../pages/MiniProjectDetailPage.svelte';
+import { expectRoutesInApp } from './support/routeClickProbe';
 import type {
   StudentMiniProjectDetail,
   StudentSubmissionHistoryEntry,
@@ -911,6 +912,45 @@ describe('MiniProjectDetailPage 9c frame + header (Slice-4 T3)', () => {
     // navigate() awaits the route guards before it pushes the path.
     await new Promise((r) => setTimeout(r, 0));
     expect(window.location.pathname).toBe('/courses/course-x');
+  });
+
+  it('C6: the course crumb lets a ⌘-click through and routes a plain click', async () => {
+    seedCourse([{ id: 33, title: 'Final Project' }]);
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail());
+    await mountPage();
+    await expectRoutesInApp(target.querySelector('nav.breadcrumb a')!, '/courses/course-x');
+  });
+
+  it('the course crumb and its separator render only when the loaded course is this one', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail());
+    // No course loaded yet (or the load failed): no empty, nameless link.
+    __test__setSlots(null);
+    await mountPage();
+    let nav = target.querySelector('nav.breadcrumb')!;
+    expect(nav.querySelector('a')).toBeNull();
+    expect(Array.from(nav.children).map((k) => k.className.split(' ')[0])).toEqual(['current']);
+    unmount(component!);
+    component = null;
+
+    // Another course still in the store, after a cross-course move.
+    __test__setSlots({
+      slug: 'other', versionId: 2,
+      course: { id: 2, slug: 'other', name: 'Other course' },
+      version: { id: 2, state: 'published', info_html: '', max_quiz_attempts: 3 },
+      blocks: [{ id: 99, title: 'Elsewhere', slug: 'b99', order: 1, info: '', info_html: '', sequences: [] }],
+      state: { version_id: 2, items: {} }, miniProjectsByBlockId: {}, teachers: [],
+    });
+    await mountPage();
+    nav = target.querySelector('nav.breadcrumb')!;
+    expect(nav.querySelector('a')).toBeNull();
+    expect(nav.textContent).not.toContain('Other course');
+    unmount(component!);
+    component = null;
+
+    seedCourse([{ id: 33, title: 'Final Project' }]);
+    await mountPage();
+    nav = target.querySelector('nav.breadcrumb')!;
+    expect(nav.querySelector('a')!.textContent!.trim()).toBe('Course X');
   });
 
   it('D70 breadcrumb: without the block in the course store, course / Mini-project', async () => {

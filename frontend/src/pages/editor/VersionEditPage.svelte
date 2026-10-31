@@ -2,6 +2,7 @@
   import { setContext, onDestroy, tick, untrack } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
@@ -544,15 +545,6 @@
     }
   }
 
-  // The course name in the <h1> is the way back to the version list (§5.2).
-  // Plain left clicks route in-app; modifier / middle clicks fall through so
-  // the list can open in a new tab (the router has no global anchor capture).
-  function onCourseLink(e: MouseEvent) {
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-    e.preventDefault();
-    void navigate(`/courses/${courseSlug}/edit`);
-  }
-
   async function deleteVersion() {
     if (busy) return;
     const savedVid = vid;
@@ -613,7 +605,7 @@
         </div>
       {/if}
       <div class="editor-heading">
-        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" data-action="course-link" bind:this={courseLinkEl} onclick={onCourseLink}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
+        <h1><a href={`/courses/${courseSlug}/edit`} title="Back to versions" data-action="course-link" bind:this={courseLinkEl} onclick={(e) => routeClick(e, `/courses/${courseSlug}/edit`)}>{tree.course.name}</a>{#if v.label}<span class="vlabel">{` · ${v.label}`}</span>{/if}</h1>
         <!-- 5c T5 (user): the id and the attempt limit as quiet chips, then the state badge last. -->
         <span class="hchip">v. {v.id}</span>
         <span class="hchip">max {v.max_quiz_attempts} quiz {v.max_quiz_attempts === 1 ? 'attempt' : 'attempts'}</span>

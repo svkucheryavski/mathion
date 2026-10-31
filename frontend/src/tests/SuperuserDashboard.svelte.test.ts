@@ -57,7 +57,7 @@ it('renders a panel-specific expired state on 404 (not generic NotFound)', async
 });
 
 it('on 401 stashes the panel path in sessionStorage and navigates to /login', async () => {
-  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   router.currentRoute.path = '/superuser/tok401';
   vi.stubGlobal('fetch', mockFetch(401, { detail: 'Not authenticated' }));
   component = mount(SuperuserDashboard, { target, props: { token: 'tok401' } });

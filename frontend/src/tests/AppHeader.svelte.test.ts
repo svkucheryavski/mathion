@@ -200,7 +200,7 @@ describe('AppHeader', () => {
     let resolveLogout: () => void = () => {};
     const logoutPromise = new Promise<void>((res) => { resolveLogout = res; });
     vi.mocked(logout).mockImplementationOnce(() => logoutPromise);
-    const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+    const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
     component = mount(AppHeader, { target });
     flushSync();
     const buttons = Array.from(target.querySelectorAll('button')) as HTMLButtonElement[];

@@ -16,6 +16,8 @@ import { ApiError } from '../lib/api';
 import { currentRoute } from '../lib/router.svelte';
 import SequencePlayer from '../pages/SequencePlayer.svelte';
 import type { BlockContent, Item } from '../lib/types';
+import { expectRoutesInApp } from './support/routeClickProbe';
+import { installLinkRouter } from '../lib/linkRouter';
 
 const SLUG = 'algebra';
 
@@ -94,6 +96,54 @@ describe('SequencePlayer breadcrumb (T1)', () => {
     seedRoute(100, '#item=1001');
     const el = render('100');
     expect(el.querySelector('nav.crumbs .crumb')!.textContent).toBe('2. Vectors');
+  });
+
+  it('C6: the course crumb routes a plain click in-app and leaves a ⌘-click to the browser', async () => {
+    seed();
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    await expectRoutesInApp(el.querySelector('nav.crumbs a')!, `/courses/${SLUG}`);
+  });
+
+  // C6: a content link to another sequence of the course routes in-app, and
+  // without #item= the player picks that sequence's item, as a fresh load does.
+  it('a move to another sequence without #item= opens an item of that sequence', async () => {
+    seed();
+    seedRoute(100, '#item=1001');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = $state({ courseSlug: SLUG, sequenceId: '100' });
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    expect(host.querySelector('.counter')!.textContent).toBe('Item 1 of 2');
+    seedRoute(200, '');
+    props.sequenceId = '200';
+    flushSync();
+    await new Promise((r) => setTimeout(r, 0));
+    flushSync();
+    expect(currentRoute.hash).toBe('#item=1003');
+    expect(host.querySelector('.counter')!.textContent).toBe('Item 1 of 1');
+  });
+
+  it('C6: a #heading link in the item text leaves the player on its item', async () => {
+    const teardown = installLinkRouter();
+    try {
+      seed();
+      seedRoute(100, '#item=1001');
+      const el = render('100');
+      const prose = el.querySelector('.prose')!;
+      prose.insertAdjacentHTML('beforeend', '<a id="to-heading" href="#intro">x</a><a id="to-top" href="#">y</a>');
+      for (const id of ['to-heading', 'to-top']) {
+        el.querySelector<HTMLAnchorElement>(`#${id}`)!.click();
+        await new Promise((r) => setTimeout(r, 0));
+        flushSync();
+        expect(currentRoute.path).toBe(`/courses/${SLUG}/seq/100`);
+        // The same item instance: the inserted link is still in its text.
+        expect(prose.isConnected && prose.querySelector('#to-heading')).not.toBeNull();
+      }
+    } finally {
+      teardown();
+    }
   });
 
   it('renders a semantic breadcrumb ending in the sequence title, and a screen-reader-only h1', () => {

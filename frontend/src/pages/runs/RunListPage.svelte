@@ -6,7 +6,7 @@
   import { runStatus } from '../../lib/runStatus';
   import { formatShortDate } from '../../lib/datetime';
   import { focusFirst } from '../../lib/focusFirst';
-  import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { pushToast } from '../../stores/toasts.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
   import NewRunModal from '../../components/runs/NewRunModal.svelte';
@@ -95,16 +95,11 @@
     }
   }
 
-  function go(e: MouseEvent, href: string) {
-    e.preventDefault();
-    void navigate(href);
-  }
-
   onMount(load);
 </script>
 
 {#snippet backToTeaching()}
-  <a href="/teaching" onclick={(e) => go(e, '/teaching')}>Back to Teaching</a>
+  <a href="/teaching" onclick={(e) => routeClick(e, '/teaching')}>Back to Teaching</a>
 {/snippet}
 
 {#snippet firstRun()}
@@ -151,7 +146,7 @@
               {@const status = runStatus(run)}
               {@const v = versionById.get(run.version_id)}
               <tr>
-                <td><a href={runHref(run.id)} onclick={(e) => go(e, runHref(run.id))}>{run.title}</a></td>
+                <td><a href={runHref(run.id)} onclick={(e) => routeClick(e, runHref(run.id))}>{run.title}</a></td>
                 <td><RunStatusChip {status} /></td>
                 <td>{#if v?.label}{v.label}{' '}·{' '}{/if}<span class="ver-id">v. {run.version_id}</span></td>
                 <td class="num">{formatShortDate(run.start_date)}</td>
@@ -191,7 +186,7 @@
           <tbody>
             {#each teacherRows as row (row.run.id)}
               <tr>
-                <td><a href={runHref(row.run.id)} onclick={(e) => go(e, runHref(row.run.id))}>{row.run.title}</a></td>
+                <td><a href={runHref(row.run.id)} onclick={(e) => routeClick(e, runHref(row.run.id))}>{row.run.title}</a></td>
                 <td><RunStatusChip status={runStatus(row.run)} /></td>
                 <td class="num">{row.student_count}</td>
                 <td class="num">{formatShortDate(row.run.start_date)}</td>

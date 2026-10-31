@@ -1,6 +1,7 @@
 <script lang="ts">
   import { session } from '../../stores/session.svelte';
   import { currentRoute, navigate, defaultLandingPath } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { logout } from '../../lib/auth.svelte';
   import { PRODUCT_NAME } from '../../lib/branding';
   import Logo from '../ui/Logo.svelte';
@@ -21,7 +22,7 @@
   <nav aria-label="Primary">
     <a class="brand"
        href={brandHref}
-       onclick={(e) => { e.preventDefault(); navigate(brandHref); }}>
+       onclick={(e) => routeClick(e, brandHref)}>
       <span class="brand-mark"><Logo /></span>
       <span class="wordmark">{PRODUCT_NAME}</span>
     </a>
@@ -30,12 +31,12 @@
       {#if session.user?.has_course_admin}
         <a href="/courses"
            aria-current={isAuthoringActive ? 'page' : undefined}
-           onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Authoring</a>
+           onclick={(e) => routeClick(e, '/courses')}>Authoring</a>
       {/if}
       {#if session.user?.has_run_teacher || session.user?.has_course_admin}
         <a href="/teaching"
            aria-current={isTeachingActive ? 'page' : undefined}
-           onclick={(e) => { e.preventDefault(); navigate('/teaching'); }}>Teaching</a>
+           onclick={(e) => routeClick(e, '/teaching')}>Teaching</a>
       {/if}
     </div>
 

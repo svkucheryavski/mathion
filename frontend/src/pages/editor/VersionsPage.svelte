@@ -2,6 +2,7 @@
   import { onDestroy, tick, untrack } from 'svelte';
   import { api, ApiError } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import Button from '../../components/ui/Button.svelte';
   import IconButton from '../../components/ui/IconButton.svelte';
   import Skeleton from '../../components/ui/Skeleton.svelte';
@@ -302,15 +303,18 @@
           {@const dupReason = duplicateVersionReason(v)}
           {@const delReason = deleteVersionReason(v)}
           {@const vtitle = v.label || `Version ${v.id}`}
+          {@const editHref = `/courses/${courseSlug}/edit/v/${v.id}`}
           <li class="vrow">
             <!-- D43 (user, Task 4 look): the box holds the row line and, while it asks, the question. -->
             <div class="vline">
               <!-- 5c follow-up (user): the label is the row title, as a block's; it opens the version like the pencil.
                    The label is mandatory; "Version <id>" (the backfill's name) only guards an empty one.
                    The name carries the id: two versions may share a label. -->
-              <button type="button" class="vtitle" class:off={v.is_disabled} disabled={busy} id={`v-${v.id}-title`}
-                aria-label={`${vtitle} (v${v.id})`}
-                onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)}>{vtitle}</button>
+              <!-- C6: a link, so a ⌘-click opens it in a new tab. An anchor cannot be
+                   disabled: while busy it is aria-disabled and routeClick ignores a plain click. -->
+              <a class="vtitle" class:off={v.is_disabled} href={editHref} id={`v-${v.id}-title`}
+                aria-label={`${vtitle} (v${v.id})`} aria-disabled={busy ? 'true' : undefined}
+                onclick={(e) => routeClick(e, editHref)}>{vtitle}</a>
               <span class="hchip">v. {v.id}</span>
               <span class="badges"><VersionBadges state={v.state} isDisabled={v.is_disabled} /></span>
               <span class="slots">
@@ -465,10 +469,11 @@
     font-size: 15px;
     font-weight: 600;
     text-align: left;
+    text-decoration: none;
     overflow-wrap: anywhere;
     cursor: pointer;
   }
-  .vtitle:disabled { cursor: default; }
+  .vtitle[aria-disabled='true'] { cursor: default; }
   /* D5: a disabled version recedes to --muted (ref 1495). */
   .vtitle.off { color: var(--muted); }
   .badges { margin-left: auto; display: flex; /* ref 1485 */ }

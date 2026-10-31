@@ -132,11 +132,11 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
 
   // 5c follow-up (user, 2026-10-08): the row reads like a block row — the label
   // as the title (a button that opens the version), then the id as a chip.
-  it('a row is: the label as a title button, then a v{id} chip, then the state badge', async () => {
+  it('a row is: the label as a title link, then a v{id} chip, then the state badge', async () => {
     versionsPageState.versions = [mkVersion({ id: 11, label: 'Draft B' })];
     await render();
     const row = byLabel('Open v11')!.closest('li')!;
-    const title = row.querySelector<HTMLButtonElement>('button.vtitle')!;
+    const title = row.querySelector<HTMLAnchorElement>('a.vtitle')!;
     expect(title.textContent).toBe('Draft B');
     const chip = row.querySelector('.hchip')!;
     expect(chip.textContent).toBe('v. 11'); // "v. N" (user, 2026-10-08)
@@ -149,7 +149,7 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
   it('clicking the title opens the version, as the pencil does', async () => {
     versionsPageState.versions = [mkVersion({ id: 11, label: 'Draft B' })];
     await render();
-    target.querySelector<HTMLButtonElement>('button.vtitle')!.click();
+    target.querySelector<HTMLAnchorElement>('a.vtitle')!.click();
     expect(navigateMock).toHaveBeenCalledWith('/courses/c/edit/v/11');
   });
 
@@ -158,7 +158,7 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
   it("the title's accessible name carries the id", async () => {
     versionsPageState.versions = [mkVersion({ id: 11, label: 'Fall' }), mkVersion({ id: 12, label: 'Fall' })];
     await render();
-    expect([...target.querySelectorAll('button.vtitle')].map((b) => b.getAttribute('aria-label'))).toEqual(['Fall (v11)', 'Fall (v12)']);
+    expect([...target.querySelectorAll('a.vtitle')].map((b) => b.getAttribute('aria-label'))).toEqual(['Fall (v11)', 'Fall (v12)']);
   });
 
   // The label is mandatory and the migration names old versions "Version <id>";
@@ -166,7 +166,7 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
   it('an empty label falls back to "Version <id>", the migration\'s name', async () => {
     versionsPageState.versions = [mkVersion({ id: 10, label: '' })];
     await render();
-    const title = target.querySelector<HTMLButtonElement>('button.vtitle')!;
+    const title = target.querySelector<HTMLAnchorElement>('a.vtitle')!;
     expect(title.textContent).toBe('Version 10');
     expect(title.getAttribute('aria-label')).toBe('Version 10 (v10)');
   });
@@ -174,7 +174,7 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
   it('a disabled version title takes the muted hook (D5)', async () => {
     versionsPageState.versions = [mkVersion({ id: 3, label: 'A', is_disabled: true }), mkVersion({ id: 4, label: 'B' })];
     await render();
-    const titles = [...target.querySelectorAll('button.vtitle')];
+    const titles = [...target.querySelectorAll('a.vtitle')];
     expect(titles[0].classList.contains('off')).toBe(true);
     expect(titles[1].classList.contains('off')).toBe(false);
     expect([...target.querySelectorAll('.vrow .hchip')].map((c) => c.textContent)).toEqual(['v. 3', 'v. 4']);
@@ -517,6 +517,46 @@ describe('VersionsPage — row actions through the slots', () => {
     expect(document.activeElement).toBe(byLabel('Delete v8'));
   });
 
+  // C6: the title is a link, so a ⌘-click opens the version in a new tab. An
+  // anchor cannot be disabled: while busy it is aria-disabled and takes no
+  // plain click, and it keeps focus.
+  it('the row title is a link; while busy it is aria-disabled and a plain click does nothing', async () => {
+    let release!: () => void;
+    postMock.mockReturnValue(new Promise<undefined>((r) => { release = () => r(undefined); }));
+    versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8 })];
+    await render();
+    const title = target.querySelector<HTMLAnchorElement>('#v-8-title')!;
+    expect(title.tagName).toBe('A');
+    expect(title.getAttribute('href')).toBe('/courses/c/edit/v/8');
+    expect(title.hasAttribute('aria-disabled')).toBe(false);
+
+    const meta = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, metaKey: true });
+    let prevented: boolean | null = null;
+    const probe = (e: Event) => { prevented = e.defaultPrevented; e.preventDefault(); };
+    window.addEventListener('click', probe);
+    try { title.dispatchEvent(meta); } finally { window.removeEventListener('click', probe); }
+    expect(prevented).toBe(false);
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    byLabel('Disable v7')!.click();
+    await settle();
+    rowBtn('confirm').click();
+    await settle();
+    expect(title.getAttribute('aria-disabled')).toBe('true');
+    // Unlike a disabled button, the busy link keeps focus.
+    title.focus();
+    await settle();
+    expect(document.activeElement).toBe(title);
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    title.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(title);
+    expect(navigateMock).not.toHaveBeenCalled();
+    release();
+    await settle();
+    expect(title.hasAttribute('aria-disabled')).toBe(false);
+  });
+
   it('while a request is in flight every slot and "+ Add version" are disabled', async () => {
     let release!: () => void;
     postMock.mockReturnValue(new Promise<undefined>((r) => { release = () => r(undefined); }));
@@ -527,7 +567,7 @@ describe('VersionsPage — row actions through the slots', () => {
     rowBtn('confirm').click();
     await settle();
     for (const id of [7, 8]) expect(slots(id).every((b) => b.disabled)).toBe(true);
-    expect([...target.querySelectorAll<HTMLButtonElement>('button.vtitle')].every((b) => b.disabled)).toBe(true);
+    expect([...target.querySelectorAll('a.vtitle')].map((a) => a.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
     expect(addLine()!.disabled).toBe(true);
     release();
     await settle();

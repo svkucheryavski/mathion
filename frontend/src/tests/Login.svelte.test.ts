@@ -55,7 +55,7 @@ it('renders neither form until config resolves (render-gate) and fires no reques
 });
 
 it('send_pin_enabled=false: direct email+PIN entry submits to verify-pin, never request-pin', async () => {
-  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const f = vi.fn((url: string) => {
     const s = String(url);
     if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
@@ -112,7 +112,7 @@ it('config-fetch failure resolves to two-step and enables submit', async () => {
 
 it('captures + clears superuser_return_path on mount and navigates there after verify', async () => {
   sessionStorage.setItem('superuser_return_path', '/superuser/tok');
-  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const f = vi.fn((url: string) => {
     const s = String(url);
     if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
@@ -147,7 +147,7 @@ it('a stale return path from a prior mount does not survive to a later login', a
 });
 
 it('§2a: segmented duration in a card+logo; selecting 30 submits numeric duration_days', async () => {
-  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const calls: Array<[string, RequestInit]> = [];
   const f = vi.fn((url: string, init?: RequestInit) => {
     calls.push([String(url), init ?? {}]);

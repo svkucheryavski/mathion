@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { SequenceContent, VersionState } from '../../lib/types';
-  import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { progressOf, progressPhrase } from '../../lib/progress';
   import ItemMark from './ItemMark.svelte';
   import ProgressMeter from './ProgressMeter.svelte';
@@ -17,7 +17,7 @@
   const label = $derived(`Sequence: ${sequence.title}, ${progressPhrase(p)}`);
 </script>
 
-<a class="row" {href} aria-label={label} onclick={(e) => { e.preventDefault(); navigate(href); }}>
+<a class="row" {href} aria-label={label} onclick={(e) => routeClick(e, href)}>
   <!-- The open book replaces the `S{order}` badge (user, 2026-10-08). Always the
        not-yet outline: completion is the bar's job, as with the mini-project flag. -->
   <span class="seq-glyph" aria-hidden="true"><ItemMark type="sequence" /></span>

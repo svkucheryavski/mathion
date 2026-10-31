@@ -1,7 +1,7 @@
 <script lang="ts">
   // Teaching / Course [/ Run] (spec §The breadcrumb). The last item is plain
   // text with aria-current; the drawn "/" separators are hidden from AT.
-  import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
 
   let { course, runTitle = undefined }: {
     course: { slug: string; name: string };
@@ -9,18 +9,13 @@
   } = $props();
 
   const courseHref = $derived(`/teaching/${course.slug}`);
-
-  function go(e: MouseEvent, href: string) {
-    e.preventDefault();
-    void navigate(href);
-  }
 </script>
 
 <nav class="teach-crumbs" aria-label="Breadcrumb">
-  <a href="/teaching" onclick={(e) => go(e, '/teaching')}>Teaching</a>
+  <a href="/teaching" onclick={(e) => routeClick(e, '/teaching')}>Teaching</a>
   <span class="tc-sep" aria-hidden="true">/</span>
   {#if runTitle !== undefined}
-    <a href={courseHref} onclick={(e) => go(e, courseHref)}>{course.name}</a>
+    <a href={courseHref} onclick={(e) => routeClick(e, courseHref)}>{course.name}</a>
     <span class="tc-sep" aria-hidden="true">/</span>
     <span class="tc-current" aria-current="page">{runTitle}</span>
   {:else}

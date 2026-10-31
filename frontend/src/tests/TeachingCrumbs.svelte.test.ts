@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import TeachingCrumbs from '../components/runs/TeachingCrumbs.svelte';
 import * as router from '../lib/router.svelte';
+import { expectRoutesInApp } from './support/routeClickProbe';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -37,12 +38,12 @@ describe('TeachingCrumbs (spec §The breadcrumb)', () => {
     expect(nav.querySelectorAll('.tc-sep')).toHaveLength(1);
   });
 
-  it('links navigate in-app', () => {
-    const spy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  it('links navigate in-app; a ⌘-click is left to the browser (C6)', async () => {
+    history.replaceState(null, '', '/x');
+    Object.assign(router.currentRoute, { path: '/x', search: '', hash: '' });
     const nav = render({ course: { slug: 'algebra', name: 'Algebra' }, runTitle: 'Spring' });
-    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
-    nav.querySelectorAll('a')[1]!.dispatchEvent(ev);
-    expect(ev.defaultPrevented).toBe(true);
-    expect(spy).toHaveBeenCalledWith('/teaching/algebra');
+    const [teaching, course] = Array.from(nav.querySelectorAll('a'));
+    await expectRoutesInApp(course, '/teaching/algebra');
+    await expectRoutesInApp(teaching, '/teaching');
   });
 });

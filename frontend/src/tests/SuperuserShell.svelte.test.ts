@@ -62,7 +62,7 @@ it('renders nav + sign-out and mounts the dashboard', async () => {
 
 it('sign-out logs out then navigates to /login (not the panel path)', async () => {
   const auth = await import('../lib/auth.svelte');
-  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   vi.stubGlobal('fetch', dispatchFetch());
   component = mount(SuperuserShell, { target, props: { token: 'tok' } });
   await settle();
@@ -75,7 +75,7 @@ it('sign-out logs out then navigates to /login (not the panel path)', async () =
 it('navigates to /login even when logout() rejects (token URL never lingers)', async () => {
   const auth = await import('../lib/auth.svelte');
   (auth.logout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network'));
-  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   vi.stubGlobal('fetch', dispatchFetch());
   component = mount(SuperuserShell, { target, props: { token: 'tok' } });
   await settle();
@@ -86,7 +86,7 @@ it('navigates to /login even when logout() rejects (token URL never lingers)', a
 });
 
 it('suppresses AppHeader on /superuser paths but shows it on /courses', async () => {
-  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   vi.stubGlobal('fetch', dispatchFetch());
   session.user = {
     id: 1, email: 'z@x.com', full_name: 'ZED_HEADER_NAME', is_superuser: true,

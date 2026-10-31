@@ -36,6 +36,7 @@
   import { currentCourse, loadCourse } from '../stores/currentCourse.svelte';
   import { pushToast } from '../stores/toasts.svelte';
   import { navigate } from '../lib/router.svelte';
+  import { routeClick } from '../lib/routeClick';
   import { formatLocalWithTz } from '../lib/datetime';
   import { formatFileSize } from '../lib/format';
 
@@ -474,13 +475,17 @@
       <!-- D70: the player's breadcrumb (SequencePlayer `crumbs`), ending in the page:
            course / "{n}. {block}" / Mini-project. -->
       <nav class="breadcrumb" aria-label="Breadcrumb">
-        <a href="/courses/{courseSlug}"
-          onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>{currentCourse.value?.course.name ?? ''}</a>
-        {#if currentBlock}
+        <!-- The course crumb waits for its own course: while it loads, after a
+             failed load or a move from another course, no empty or stale link. -->
+        {#if currentCourse.value?.slug === courseSlug}
+          <a href="/courses/{courseSlug}"
+            onclick={(e) => routeClick(e, `/courses/${courseSlug}`)}>{currentCourse.value.course.name}</a>
           <span class="sep" aria-hidden="true">/</span>
-          <span class="crumb">{blockNo}. {currentBlock.title}</span>
         {/if}
-        <span class="sep" aria-hidden="true">/</span>
+        {#if currentBlock}
+          <span class="crumb">{blockNo}. {currentBlock.title}</span>
+          <span class="sep" aria-hidden="true">/</span>
+        {/if}
         <span class="current" aria-current="page">Mini-project</span>
       </nav>
       <!-- D56: the white reading sheet; the crumbs stay on the ground, as the player's do. -->

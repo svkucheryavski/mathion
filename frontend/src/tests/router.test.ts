@@ -6,6 +6,7 @@ import {
   currentRoute,
   __resetGuardsForTests,
 } from '../lib/router.svelte';
+import { routeClick } from '../lib/routeClick';
 import { routes as appRoutes } from '../routes';
 
 describe('lib/router', () => {
@@ -100,6 +101,24 @@ describe('navigation guards', () => {
     currentRoute.path = '/';
     currentRoute.search = '';
     currentRoute.hash = '';
+  });
+
+  it('navigate reports whether it moved (C6)', async () => {
+    expect(await navigate('/courses')).toBe(true);
+    expect(await navigate('/courses')).toBe(false);
+    const dispose = registerNavigationGuard(() => false);
+    expect(await navigate('/teaching')).toBe(false);
+    dispose();
+    let answer!: (ok: boolean) => void;
+    const slow = registerNavigationGuard(() => new Promise<boolean>((r) => { answer = r; }));
+    const first = navigate('/teaching');
+    await Promise.resolve();
+    slow();
+    const second = navigate('/courses/x');
+    answer(true);
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(await navigate('/courses/x#item=3')).toBe(true);
   });
 
   it('cancels navigate when a guard returns false', async () => {
@@ -468,5 +487,68 @@ describe('safeNext fallback parameter', () => {
   });
   it('malformed pathname (%) falls back via decodeURI guard', () => {
     expect(safeNext('%', origin, '/teaching')).toBe('/teaching');
+  });
+});
+
+describe('routeClick (C6)', () => {
+  beforeEach(() => {
+    __resetGuardsForTests();
+    history.replaceState(null, '', '/');
+    currentRoute.path = '/';
+    currentRoute.search = '';
+    currentRoute.hash = '';
+  });
+
+  function clickOn(el: Element, init: MouseEventInit = {}): MouseEvent {
+    const e = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
+    el.addEventListener('click', (ev) => routeClick(ev as MouseEvent, '/courses'), { once: true });
+    el.dispatchEvent(e);
+    return e;
+  }
+
+  it('routeClick navigates on a plain click', async () => {
+    const a = document.createElement('a');
+    a.href = '/courses';
+    document.body.append(a);
+    const e = clickOn(a);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.defaultPrevented).toBe(true);
+    expect(currentRoute.path).toBe('/courses');
+    a.remove();
+  });
+
+  it('routeClick leaves meta/ctrl/shift/alt and middle clicks to the browser', async () => {
+    const a = document.createElement('a');
+    a.href = '/courses';
+    document.body.append(a);
+    // Runs after the handler: records what it left, then stops jsdom's own navigation.
+    const left: boolean[] = [];
+    const probe = (e: Event) => { left.push(!e.defaultPrevented); e.preventDefault(); };
+    window.addEventListener('click', probe);
+    try {
+      for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+        clickOn(a, init);
+        await new Promise((r) => setTimeout(r, 0));
+        expect(currentRoute.path).toBe('/');
+      }
+      expect(left).toEqual([true, true, true, true, true]);
+    } finally {
+      window.removeEventListener('click', probe);
+      a.remove();
+    }
+  });
+
+  it('routeClick on an aria-disabled anchor prevents the default and does not navigate', async () => {
+    const a = document.createElement('a');
+    a.href = '/courses';
+    a.setAttribute('aria-disabled', 'true');
+    const inner = document.createElement('span');
+    a.append(inner);
+    document.body.append(a);
+    const e = clickOn(inner);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.defaultPrevented).toBe(true);
+    expect(currentRoute.path).toBe('/');
+    a.remove();
   });
 });

@@ -2,6 +2,7 @@
   import { ApiError } from '../lib/api';
   import { currentCourse, loadCourse, recordItemVisit } from '../stores/currentCourse.svelte';
   import { currentRoute, navigate } from '../lib/router.svelte';
+  import { routeClick } from '../lib/routeClick';
   import ItemRouter from '../components/items/ItemRouter.svelte';
   import ItemIcon from '../components/course/ItemIcon.svelte';
   import Skeleton from '../components/ui/Skeleton.svelte';
@@ -68,8 +69,12 @@
 
   let currentItemId = $state<number | null>(null);
 
+  // C6: an in-app link to another sequence without #item= keeps this player
+  // (same route), so the previous sequence's item must not stay selected.
   $effect(() => {
-    if (sequence && currentItemId === null) {
+    const stale = currentItemId !== null && !currentRoute.hash.startsWith('#item=')
+      && !sequence?.items.some((it) => it.id === currentItemId);
+    if (sequence && (currentItemId === null || stale)) {
       const initial = resolveInitialItemId(sequence);
       if (initial !== null) {
         navigate(`/courses/${courseSlug}/seq/${sequenceId}#item=${initial}`, { replace: true });
@@ -161,7 +166,7 @@
 {#snippet crumbs(seq: SequenceContent)}
   <nav class="crumbs" aria-label="Breadcrumb">
     <a href={`/courses/${courseSlug}`}
-      onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>
+      onclick={(e) => routeClick(e, `/courses/${courseSlug}`)}>
       {currentCourse.value?.course.name}
     </a>
     {#if currentBlock}

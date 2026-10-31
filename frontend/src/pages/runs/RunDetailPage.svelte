@@ -7,6 +7,7 @@
   import { listRunStudents } from '../../lib/runRoster';
   import { runStatus } from '../../lib/runStatus';
   import { currentRoute, navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { pushToast } from '../../stores/toasts.svelte';
   import { session } from '../../stores/session.svelte';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
@@ -389,7 +390,7 @@
 </script>
 
 {#snippet backToTeaching()}
-  <a href="/teaching" onclick={(e) => { e.preventDefault(); void navigate('/teaching'); }}>Back to Teaching</a>
+  <a href="/teaching" onclick={(e) => routeClick(e, '/teaching')}>Back to Teaching</a>
 {/snippet}
 
 <div class="run-page">

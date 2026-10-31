@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CourseListItem } from '../../lib/types';
-  import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   let { course }: { course: CourseListItem } = $props();
   // $derived keeps these reactive if `course` props update (e.g. after a list refetch).
   const adminOnly = $derived(course.is_admin && course.version_id === null);
@@ -31,10 +31,10 @@
 {#snippet adminFooter()}
   <div class="footer">
     <a class="foot-link" href={editHref}
-       onclick={(e) => { e.preventDefault(); navigate(editHref); }}
+       onclick={(e) => routeClick(e, editHref)}
        aria-label={`Edit ${course.course.name}`}>Edit</a>
     <a class="foot-link" href={runsHref}
-       onclick={(e) => { e.preventDefault(); navigate(runsHref); }}
+       onclick={(e) => routeClick(e, runsHref)}
        aria-label={`Runs for ${course.course.name}`}>Runs</a>
     {#if isDraft}
       <span class="badge-draft">DRAFT</span>
@@ -50,7 +50,7 @@
   <div class="card">
     <div class="body">
       <h3 class="title"><a class="title-link" href={editHref}
-        onclick={(e) => { e.preventDefault(); navigate(editHref); }}>{course.course.name}</a></h3>
+        onclick={(e) => routeClick(e, editHref)}>{course.course.name}</a></h3>
       <span class="hint">No active enrolment</span>
     </div>
     {@render adminFooter()}
@@ -61,12 +61,12 @@
   <div class="card">
     <div class="body">
       <h3 class="title"><a class="title-link" href={studentHref}
-        onclick={(e) => { e.preventDefault(); navigate(studentHref); }}>{course.course.name}</a></h3>
+        onclick={(e) => routeClick(e, studentHref)}>{course.course.name}</a></h3>
       {@render bar()}
       <span class="meta">
         <span class="count">{countText}</span>
         <a class="cta" href={studentHref}
-           onclick={(e) => { e.preventDefault(); navigate(studentHref); }}>{ctaText}</a>
+           onclick={(e) => routeClick(e, studentHref)}>{ctaText}</a>
       </span>
     </div>
     {@render adminFooter()}
@@ -74,7 +74,7 @@
 {:else}
   <!-- Pure student: the whole card is the link (no nested anchors inside). -->
   <a class="card card-link" href={studentHref}
-     onclick={(e) => { e.preventDefault(); navigate(studentHref); }}>
+     onclick={(e) => routeClick(e, studentHref)}>
     <div class="body">
       <h3 class="title">{course.course.name}</h3>
       {@render bar()}

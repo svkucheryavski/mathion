@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunListPage from '../pages/runs/RunListPage.svelte';
 import * as routerModule from '../lib/router.svelte';
+import { expectRoutesInApp } from './support/routeClickProbe';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { session } from '../stores/session.svelte';
 
@@ -183,6 +184,44 @@ describe('RunListPage', () => {
     expect(btn.classList.contains('md')).toBe(true);
     expect(btn.getAttribute('aria-label')).toBe('New run');
     expect(btn.getAttribute('title')).toBe('New run');
+    unmount(cmp);
+  });
+
+  it('C6: the run title, the teacher row and the error page link route in-app; a ⌘-click is left to the browser', async () => {
+    const at = (p: string) => {
+      history.replaceState(null, '', p);
+      Object.assign(routerModule.currentRoute, { path: p, search: '', hash: '' });
+    };
+    at('/teaching/algebra');
+    adminFetch([draftRun, pubRun]);
+    let { target, cmp } = open();
+    await settle();
+    await expectRoutesInApp(target.querySelector('tbody tr a')!, '/teaching/algebra/runs/10');
+    unmount(cmp);
+
+    at('/teaching/algebra');
+    session.user = {
+      id: 5, email: 't@x', full_name: 'T', is_superuser: false, is_disabled: false, photo_url: null,
+      has_course_admin: false, has_run_teacher: true,
+    };
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes('/courses/by-slug/')) return ok({ ...adminCourse, is_admin: false });
+      if (url.endsWith('/api/teaching/runs')) return ok([
+        { run: { ...pubRun, created_at: '2026-01-01T00:00:00Z', updated_at: null }, course_id: 1, course_name: 'Algebra', course_slug: 'algebra', student_count: 7 },
+      ]);
+      return Promise.reject(new Error('unexpected ' + url));
+    });
+    ({ target, cmp } = open());
+    await settle();
+    await expectRoutesInApp(target.querySelector('tbody tr a')!, `/teaching/algebra/runs/${pubRun.id}`);
+    unmount(cmp);
+
+    at('/teaching/algebra');
+    fetchSpy.mockImplementation((url: string) =>
+      url.includes('/courses/by-slug/') ? err(404, 'Not found') : Promise.reject(new Error('unexpected ' + url)));
+    ({ target, cmp } = open());
+    await settle();
+    await expectRoutesInApp(target.querySelector('.error-state.page a')!, '/teaching');
     unmount(cmp);
   });
 

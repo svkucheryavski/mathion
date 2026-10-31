@@ -4,7 +4,7 @@
   import { listTeachingRuns, type TeachingRunRow } from '../../lib/teaching';
   import { runStatus, RUN_STATUS_LABEL } from '../../lib/runStatus';
   import { formatShortDate } from '../../lib/datetime';
-  import { navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
   import EmptyState from '../../components/ui/EmptyState.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
@@ -85,10 +85,6 @@
   const pillOptions = $derived(PILLS.map((p) => ({ key: p, label: cap(pillLabel(p)), count: counts[p] })));
   const runUrl = (slug: string, id: number) => `/teaching/${slug}/runs/${id}`;
   const courseUrl = (slug: string) => `/teaching/${slug}`;
-  function go(e: MouseEvent, href: string) {
-    e.preventDefault();
-    void navigate(href);
-  }
 </script>
 
 <div class="teach-page">
@@ -120,8 +116,8 @@
         <tbody>
           {#each visible as { row, status } (row.run.id)}
             <tr>
-              <td><a href={runUrl(row.course_slug, row.run.id)} onclick={(e) => go(e, runUrl(row.course_slug, row.run.id))}>{row.run.title}</a></td>
-              <td><a class="course-link" href={courseUrl(row.course_slug)} onclick={(e) => go(e, courseUrl(row.course_slug))}>{row.course_name}</a></td>
+              <td><a href={runUrl(row.course_slug, row.run.id)} onclick={(e) => routeClick(e, runUrl(row.course_slug, row.run.id))}>{row.run.title}</a></td>
+              <td><a class="course-link" href={courseUrl(row.course_slug)} onclick={(e) => routeClick(e, courseUrl(row.course_slug))}>{row.course_name}</a></td>
               <td><RunStatusChip {status} /></td>
               <td class="num">{row.student_count}</td>
               <td class="num">{formatShortDate(row.run.start_date)}</td>

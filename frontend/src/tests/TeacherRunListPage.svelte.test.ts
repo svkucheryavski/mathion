@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import TeacherRunListPage from '../pages/teaching/TeacherRunListPage.svelte';
 import * as router from '../lib/router.svelte';
+import { expectRoutesInApp } from './support/routeClickProbe';
 import { runStatus } from '../lib/runStatus';
 
 function mockFetch(status: number, body: unknown) {
@@ -460,22 +461,19 @@ describe('TeacherRunListPage', () => {
     expect(target.querySelector('tbody tr')).toBeNull();
   });
 
-  it('cell-anchor click calls navigate with the run URL and prevents default', async () => {
+  it('the run and course cells route in-app; a ⌘-click is left to the browser (C6)', async () => {
     vi.stubGlobal('fetch', mockFetch(200, [row({
       run: makeRun({ id: 42, title: 'Spring' }),
       course_slug: 'calc',
+      course_name: 'Calculus',
     })]));
-    const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+    history.replaceState(null, '', '/teaching');
+    Object.assign(router.currentRoute, { path: '/teaching', search: '', hash: '' });
     component = mount(TeacherRunListPage, { target });
     flushSync();
     await settle();
-    const link = linkByText(target, 'Spring');
-    expect(link).not.toBeNull();
-    // Dispatch a cancelable click event so we can observe defaultPrevented.
-    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
-    link!.dispatchEvent(ev);
-    expect(ev.defaultPrevented).toBe(true);
-    expect(navSpy).toHaveBeenCalledWith('/teaching/calc/runs/42');
+    await expectRoutesInApp(linkByText(target, 'Spring')!, '/teaching/calc/runs/42');
+    await expectRoutesInApp(linkByText(target, 'Calculus')!, '/teaching/calc');
   });
 
   it('mocked-fetch row uses the exact backend contract key set', () => {

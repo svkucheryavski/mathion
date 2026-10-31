@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2406
+EXPECTED_CHECKS=2411
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3827,7 +3827,11 @@ if [[ -n $REPLY ]]; then
   # 5c follow-up (user, 2026-10-08): the label is the row title (the block title's
   # 15px/600), the id a .hchip after it; a disabled version is muted. The label is
   # mandatory (2026-10-08), so there is no "(no label)" placeholder.
-  d '\.vtitle' '' 'border:0' 'background:transparent' 'color:var\(--text\)' 'font-size:15px' 'font-weight:600' 'cursor:pointer'
+  # C6: the title is a link now (a ⌘-click opens a tab): no underline, and while
+  # busy it is aria-disabled, not disabled.
+  d '\.vtitle' '' 'border:0' 'background:transparent' 'color:var\(--text\)' 'font-size:15px' 'font-weight:600' 'cursor:pointer' \
+                'text-decoration:none'
+  d '\.vtitle\[aria-disabled=true\]' '' 'cursor:default'
   d '\.vtitle\.off' '' 'color:var\(--muted\)'
   none "VersionsPage has no .untitled placeholder (the label is mandatory)" "\.untitled\.${H}"
   none "VersionsPage has no .vnum / .vlabel (the id is a chip, the label the title)" "\.(vnum|vlabel)\.${H}"
@@ -5742,6 +5746,16 @@ echo "--- (ao) Polish 3 — minors ---"
 # its own component (quiz → quiz never carries the first quiz over). The key
 # lives in ItemRouter, not SequencePlayer, whose AST pin allows no KeyBlock.
 src_count "ItemRouter keys its branch chain on the item id (C13)" 1 src/components/items/ItemRouter.svelte '{#key item.id}'
+# C6 (P125): an in-app link that handles its own click goes through routeClick,
+# which lets modifier and middle clicks reach the browser. No hand-rolled
+# preventDefault-then-navigate handler is left, on one line or across lines
+# (perl reads each file whole), and the local go(e, href) helpers are gone.
+n_pd=$(find src \( -name '*.svelte' -o -name '*.ts' \) -not -path 'src/tests/*' -print0 \
+  | xargs -0 perl -0777 -ne '$c += () = /preventDefault\(\);?\s*(?:(?:void|await|return)\s+)?navigate\(/g; END { print $c + 0 }')
+if [[ $n_pd -eq 0 ]]; then echo "PASS  no hand-rolled preventDefault-then-navigate link handler (C6)"; else echo "FAIL  no hand-rolled preventDefault-then-navigate link handler (C6): $n_pd"; fail=1; fi
+n_go=$(grep -rEn 'function go\(e' src | grep -v '^src/tests/' | wc -l | tr -d ' ')
+if [[ $n_go -eq 0 ]]; then echo "PASS  no local go(e, href) click helper is left (C6)"; else echo "FAIL  no local go(e, href) click helper is left (C6): $n_go"; fail=1; fi
+src_count "App installs the app-wide link router (C6)" 1 src/App.svelte '$effect(() => installLinkRouter());'
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

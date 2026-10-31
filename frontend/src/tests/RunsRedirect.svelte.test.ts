@@ -61,7 +61,7 @@ describe('RunsRedirect (spec §Navigation, Redirects)', () => {
 
   it('renders nothing', async () => {
     at('/courses/s/runs');
-    const spy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+    const spy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
     component = mount(RunsRedirect, { target, props: { courseSlug: 's' } });
     await settle();
     expect(spy).toHaveBeenCalledTimes(1);

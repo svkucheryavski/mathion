@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
 import { session } from '../stores/session.svelte';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
+import { expectRoutesInApp } from './support/routeClickProbe';
 
 const fetchSpy = vi.fn();
 
@@ -305,6 +306,10 @@ describe('RunDetailPage shell', () => {
     const card = target.querySelector('.error-state.page') as HTMLElement;
     expect(card.querySelector('h1')?.textContent).toBe('Course not found');
     expect(card.querySelector('a')?.getAttribute('href')).toBe('/teaching');
+    // C6: a plain click routes in-app, a ⌘-click is left to the browser.
+    history.replaceState(null, '', '/teaching/algebra/runs/10');
+    Object.assign(currentRoute, { path: '/teaching/algebra/runs/10', search: '', hash: '' });
+    await expectRoutesInApp(card.querySelector('a')!, '/teaching');
     unmount(cmp);
   });
 

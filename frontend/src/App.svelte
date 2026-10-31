@@ -2,6 +2,7 @@
   import type { Component } from 'svelte';
   import { currentRoute, matchRoute, navigate, defaultLandingPath } from './lib/router.svelte';
   import { routes } from './routes';
+  import { installLinkRouter } from './lib/linkRouter';
   import { session } from './stores/session.svelte';
   import Toaster from './components/chrome/Toaster.svelte';
   import AppHeader from './components/chrome/AppHeader.svelte';
@@ -36,6 +37,9 @@
   };
 
   const matched = $derived(matchRoute(routes, currentRoute.path));
+
+  // C6: plain same-origin links (authored content, the course page's rows) route in-app.
+  $effect(() => installLinkRouter());
 
   // Path-level guard. Hash-only changes do not re-evaluate (intentional).
   $effect(() => {
