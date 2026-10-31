@@ -85,7 +85,7 @@ Each states what it costs if wrong. P-numbers continue from Polish 2's P116.
 - **P118 — `recordQuizAttempt(res)` copies `attempt_count`, `max_attempts`, `last_score` (`{correct: res.score_correct, total: res.score_total}`) and `is_covered = true`.** The response carries no answers, so `last_answers` is left alone. It replaces QuizItem's `markItemCovered(res.item_id)` call; `markItemCovered` stays for its other callers. Bonus: the course page's quiz chip is current after a submit. *Cost:* none.
 - **P119 — The unload warning is one `beforeunload` listener that the drafts module adds on its first write and keeps.** It warns only while `hasUnsavedDrafts()`. This is the spec's second form, chosen because it needs no add/remove bookkeeping. *Cost:* one idle listener per session.
 - **P120 — The two plain course-page links (`MiniProjectLink`, `CourseDeadlines`) do not adopt `routeClick`.** The app-wide handler routes them, so their SIG rows stay. *Cost:* none; the handler's test covers both.
-- **P121 — The link router and the press recorder are module-level and idempotent.** `installLinkRouter()` is called from an `App.svelte` `$effect` and ref-counts its one listener (jsdom mounts App repeatedly). `ensurePressRecorder()` is called by each FocusTrap mount and registers once per document. *Cost:* none.
+- **P121 — The link router and the press recorder are module-level and idempotent.** `installLinkRouter()` is called from an `App.svelte` `$effect` and ref-counts its one listener (jsdom mounts App repeatedly). `ensurePressRecorder()` is called from FocusTrap's module script and registers once per document. *Cost:* none.
 - **P122 — F13 uses the last-press record, not `returnTo` props.** Fall back to `returnTo` only if Task 3's tests show the record unreliable; ledger it if so. *Cost:* the fallback touches six openers.
 - **P123 — A "modal panel itself" in `repairFocus` means `document.activeElement.matches('section.modal-panel')`.** That is the Modal panel's own element, which is focusable through `tabindex="-1"`. *Cost:* none.
 - **P124 — The new `.sp-error` gate row and all other Polish 3 rows go in a new gate section `(ao) Polish 3 — minors`,** before the summary line; each task appends to it. Changed existing rows stay in place. *Cost:* none.
@@ -313,7 +313,7 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
   - `canHoldFocus(el: Element | null | undefined): el is HTMLElement`: connected, not natively disabled, not inside `[inert]`. It accepts `aria-disabled`;
   - `repairFocus(...chain: (Element | null | undefined)[]): Promise<boolean>`. It awaits `tick()`, then acts only if `document.activeElement` is null, `document.body`, or matches `section.modal-panel` (P123). It focuses the first element of the chain that `canHoldFocus` and verifies that focus took, moving down the chain otherwise. It returns whether it focused.
 - Produces, in `lib/pressRecorder.ts`:
-  - `ensurePressRecorder(): void`: a capture-phase `pointerdown` that records `target.closest('button, a[href], [role=button]')`, or null when the press hit no such control. A capture-phase `keydown` clears the record;
+  - `ensurePressRecorder(): void`: a capture-phase `pointerdown` that records `target.closest('button, a[href], [role=button][tabindex]')` for a primary press (`button === 0`), or null otherwise. A capture-phase `keydown` clears the record. Called once from FocusTrap's module script (on import), so the press that opens the first trap is seen (Task 3 ruling);
   - `lastPressed(): HTMLElement | null`.
 - Produces, in Modal's module script: `export function isTopModal(panel: Element | null | undefined): boolean`.
 - `focusFirst(candidates)` keeps its signature and returns `boolean`.
@@ -352,7 +352,7 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
   - Create `pressRecorder.ts`.
 
 - [ ] **Step 4: Implement FocusTrap.**
-  - At mount: call `ensurePressRecorder()`. If `document.activeElement` is body or null, or contains `lastPressed()`, and `lastPressed()?.isConnected`, take `lastPressed()` as `previousFocus`.
+  - At mount: if `document.activeElement` is body or null, or contains `lastPressed()`, and `canHoldFocus(lastPressed())`, take `lastPressed()` as `previousFocus`.
   - The autofocus loop skips matches that are not `canHoldFocus`, in both the priority and the DOM-order branches. Then fall back to `containerEl.querySelector('[tabindex="-1"]')`.
 
 - [ ] **Step 5: Implement Modal.**
