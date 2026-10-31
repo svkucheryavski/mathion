@@ -143,8 +143,8 @@
   .qcard { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
   .qhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 10px 12px 6px; }
   .qnum { flex: 0 0 auto; min-width: 18px; color: var(--ordinal); font-weight: 600; font-size: 14.5px; }
-  .qtext { flex: 1 1 260px; min-width: 0; font-size: 14.5px; color: var(--text); overflow-wrap: anywhere; }
-  .qsrc { flex: 1 1 260px; min-width: 0; margin: 0; font: inherit; font-size: 13px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .qtext { flex: 1 1 260px; min-width: 0; font-size: 14.5px; color: var(--text-2); overflow-wrap: anywhere; }
+  .qsrc { flex: 1 1 260px; min-width: 0; margin: 0; font: inherit; font-size: 13px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
   .qmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
   .qchip { font-size: 11px; font-weight: 500; color: var(--muted); background: var(--surface-2); border-radius: 3px; padding: 2px 7px; white-space: nowrap; }
   .qhint { font-size: 11px; font-weight: 500; color: var(--status-needs-revision-fg); white-space: nowrap; }

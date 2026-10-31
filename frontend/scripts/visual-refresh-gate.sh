@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2411
+EXPECTED_CHECKS=2427
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -518,6 +518,9 @@ else:
 # D80 (user, 2026-10-30): e7cf7114 -> 42962132: +--due-near #C2410C, the orange
 # of a course-page deadline 7-13 days away. The ONLY change (dropping it
 # reproduces e7cf7114).
+# Polish 3 C2: 42962132 -> 17366996: --cancel-border var(--focus-line-strong)
+# -> #71839E, the lightest grey of that hue at >=3:1 on every ground a Cancel
+# meets (3.03:1 on --focus-2). The ONLY change.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -548,7 +551,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', '42962132'),
+    ('', ':root', '17366996'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -3905,6 +3908,8 @@ add_row_common() {
   # Load-bearing layout (review T3): the field fills the row.
   d '\.add-field' '' 'flex:1 1 auto' 'min-width:0'
   d '\.add-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)'
+  # C3: an invalid title keeps a red edge, focused too ((0,3,0) beats base.css's focus rule).
+  chk "\.add-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
   d '\.add-err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
   none "$N no create-form / interim + rules (5c T3)" "\.(cr-form|cr-actions|field-err|form-err|blocks-tools|body-tools)\.${H}"
 }
@@ -3961,6 +3966,8 @@ if [[ -n $REPLY ]]; then
   d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
   # 5c D8: the inline title field — the open-editor ring, tokens only.
   d '\.title-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text\)'
+  # C3: an invalid title keeps a red edge, focused too ((0,3,0) beats base.css's focus rule).
+  chk "\.title-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
   d '\.err' '' 'font-size:12\.5px' 'color:var\(--danger\)'
   none "AccordionHeader pre-5a .accordion-row gone" "\.accordion-row\.${H}"
   sweep AccordionHeader $H
@@ -4509,7 +4516,8 @@ if [[ -n $REPLY ]]; then
   d '\.qcard' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
   d '\.qhead' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px' 'padding:10px 12px 6px'
   d '\.qnum' '' 'color:var\(--ordinal\)' 'font-weight:600' 'font-size:14\.5px'
-  d '\.qtext' '' 'font-size:14\.5px' 'color:var\(--text\)'
+  # C5: the prompt takes --text-2, as the student view and the preview do.
+  d '\.qtext' '' 'font-size:14\.5px' 'color:var\(--text-2\)'
   d '\.qchip' '' 'font-size:11px' 'font-weight:500' 'color:var\(--muted\)' 'background:var\(--surface-2\)' 'border-radius:3px' 'padding:2px 7px'
   d '\.qanswers' '' 'padding:2px 12px 8px 38px'
   d '\.qexpl' '' 'margin:0 12px 10px 38px' 'padding:7px 10px' 'border-left:3px solid var\(--border-strong\)' 'background:var\(--surface-2\)' 'font-size:12\.5px' 'color:var\(--muted\)'
@@ -4873,7 +4881,8 @@ if [[ -n $REPLY ]]; then
   # Safari pass (user, 2026-10-11): the deadline labels stand apart from the dates.
   d '\.dl-kind' '' 'font-weight:600' 'color:var\(--text\)'
   d '\.mp-banner' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
-  d '\.mp-banner-err' '' 'background:var\(--status-rejected-bg\)' 'border-left-color:var\(--danger\)'
+  # C1: an error banner takes the danger panel's colours; statuses keep --status-rejected-*.
+  d '\.mp-banner-err' '' 'background:var\(--danger-panel-bg\)' 'border-left-color:var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   sweep RunMiniProjectsTab $H
 fi
 
@@ -4892,7 +4901,8 @@ if [[ -n $REPLY ]]; then
   d '\.uses-chip' '' 'white-space:nowrap'
   d '\.uses-on' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   d '\.uses-off' '' 'background:var\(--status-not-submitted-bg\)' 'color:var\(--status-not-submitted-fg\)'
-  d '\.banner-error' '' 'background:var\(--status-rejected-bg\)' 'border-left-color:var\(--danger\)'
+  # C1: an error banner takes the danger panel's colours.
+  d '\.banner-error' '' 'background:var\(--danger-panel-bg\)' 'border-left-color:var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   d '\.banner-info' '' 'background:var\(--surface-2\)' 'border-left-color:var\(--primary\)'
   d '\.num' '' 'font-family:var\(--font-mono\)'
   sweep RunAssetsTab $H
@@ -4961,7 +4971,8 @@ if [[ -n $REPLY ]]; then
   d '\.nr-help' '' 'font-size:12px' 'color:var\(--muted\)'
   d '\.nr-strip' '' 'padding:9px 11px' 'background:var\(--surface-2\)' 'border-radius:var\(--radius\)'
   d '\.nr-ver' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.nr-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  # C1: an error banner takes the danger panel's colours.
+  d '\.nr-banner' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   d '\.nr-foot-note' '' 'flex:1' 'color:var\(--muted\)'
   sweep NewRunModal $H
 fi
@@ -4986,7 +4997,8 @@ if [[ -n $REPLY ]]; then
   d '\.ri-added' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   d '\.ri-failed' '' 'background:var\(--status-rejected-bg\)' 'color:var\(--status-rejected-fg\)'
   d '\.ri-chip' '' 'border-radius:3px'
-  d '\.ri-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  # C1: the banner takes the danger panel's colours; the per-row .ri-failed chip above is a status and keeps --status-rejected-*.
+  d '\.ri-banner' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   d '\.ri-paste' '' 'font-family:var\(--font-mono\)'
   sweep RosterImportModal $H
 fi
@@ -5004,7 +5016,8 @@ if [[ -n $REPLY ]]; then
   d '\.mpm-input' '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)'
   d '\.mpm-input\.mpm-invalid' '' 'border-color:var\(--danger\)'
   d '\.mpm-dirty' '' 'flex:1' 'font-size:11\.5px' 'color:var\(--status-needs-revision-fg\)'
-  d '\.mpm-banner' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)'
+  # C1: an error banner takes the danger panel's colours.
+  d '\.mpm-banner' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   d '\.mpm-box' '' 'padding:8px 10px' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)' 'border-radius:0 5px 5px 0' 'color:var\(--status-needs-revision-fg\)'
   d '\.mpm-box-head' '' 'font-weight:600'
   d '\.mpm-box-list' '' 'gap:4px' 'line-height:1\.5'
@@ -5058,7 +5071,8 @@ if [[ -n $REPLY ]]; then
   d '\.ov-foot-note' '' 'flex:1' 'font-size:12\.5px' 'color:var\(--muted\)'
   d '\.ov-del-card' '' 'padding:14px 18px'
   d '\.ov-del-title' '' 'font-size:13px' 'font-weight:600'
-  d '\.ov-err' '' 'background:var\(--status-rejected-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--status-rejected-fg\)'
+  # C1: an error banner takes the danger panel's colours.
+  d '\.ov-err' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   none "RunOverviewTab's pre-6c rules are gone (.readiness, .danger-zone, .run-summary, .run-settings)" "\.(readiness|danger-zone|run-summary|run-settings)\.${H}"
   sweep RunOverviewTab $H
 fi
@@ -5756,6 +5770,24 @@ if [[ $n_pd -eq 0 ]]; then echo "PASS  no hand-rolled preventDefault-then-naviga
 n_go=$(grep -rEn 'function go\(e' src | grep -v '^src/tests/' | wc -l | tr -d ' ')
 if [[ $n_go -eq 0 ]]; then echo "PASS  no local go(e, href) click helper is left (C6)"; else echo "FAIL  no local go(e, href) click helper is left (C6): $n_go"; fail=1; fi
 src_count "App installs the app-wide link router (C6)" 1 src/App.svelte '$effect(() => installLinkRouter());'
+# C1: the side panel's error banner takes the danger panel's colours (unpinned before).
+uniq1 sp-title
+if [[ -n $REPLY ]]; then
+  N=DashboardSidePanel; H=$REPLY
+  d '\.sp-error' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
+fi
+# The code chip in an InlineConfirm question: --surface-2, so it reads on a white row.
+uniq1 inline-confirm
+if [[ -n $REPLY ]]; then
+  N=InlineConfirm; H=$REPLY
+  chk "\.warning\.${H} code" 'background:var\(--surface-2\)'
+fi
+# C5: a closed version's raw prompt (.qsrc) takes the same --text-2 as the open .qtext.
+uniq1 qcard
+if [[ -n $REPLY ]]; then
+  N=QuestionCard; H=$REPLY
+  d '\.qsrc' '' 'color:var\(--text-2\)'
+fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

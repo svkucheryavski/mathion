@@ -509,6 +509,20 @@ describe('BlockAccordion — "+ Add sequence" (Slice-5c T3)', () => {
     expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
     expect(err.id).toBe('block-3-add-err');
   });
+
+  it('a failure that is not about the title shows under the row but leaves the title valid (review t5-r1)', async () => {
+    serve((u, i) => (u === '/api/blocks/3/sequences' && i?.method === 'POST' ? jres({ detail: 'Server exploded' }, 500) : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'x');
+    addInput()!.form!.requestSubmit(); await settle();
+    const err = target.querySelector('.add-err')!;
+    expect(err.textContent).toContain('Server exploded');
+    expect(addInput()!.hasAttribute('aria-invalid')).toBe(false);
+    expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
+  });
 });
 
 describe('BlockAccordion — focus shading (Slice-5c T1)', () => {

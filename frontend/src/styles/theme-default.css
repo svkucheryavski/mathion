@@ -81,7 +81,7 @@
   --danger-off-text: #DFA3AE;
 
   /* --- confirm buttons (Polish 1 D31): Cancel's outline and fills --- */
-  --cancel-border: var(--focus-line-strong);
+  --cancel-border: #71839E;   /* Polish 3 C2: the lightest grey of --focus-line-strong's hue at >=3:1 on all 12 grounds and fills a Cancel meets (probe contrast.py), from 3.03 on --focus-2 (its press fill) to 3.86 on --surface; --danger-panel-bg 3.48 */
   --cancel-hover: var(--focus-1);
   --cancel-press: var(--focus-2);
 

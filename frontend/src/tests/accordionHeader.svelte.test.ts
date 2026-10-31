@@ -261,6 +261,27 @@ describe('AccordionHeader — inline title (D8)', () => {
     type('New'); key('Enter'); await settle();
     expect(target.querySelector('.err')!.textContent).toBe('Title already taken');
   });
+  it('a failure that is not about the title leaves the title valid (review t5-r1)', async () => {
+    render({ onRename: vi.fn(() => Promise.reject(new Error('nope'))) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(target.querySelector('.err')!.textContent).toBe('Save failed');
+    expect(input()!.hasAttribute('aria-invalid')).toBe(false);
+    expect(input()!.getAttribute('aria-describedby')).toBe(target.querySelector('.err')!.id);
+  });
+  it('a server validation error on the title (422) marks the title invalid (review t5-r2)', async () => {
+    render({ onRename: vi.fn(() => Promise.reject(new ApiError(422, [{ loc: ['body', 'title'], msg: 'Must contain a Latin letter or digit', type: 'value_error' }]))) });
+    pencil()!.click(); await settle();
+    type('???'); key('Enter'); await settle();
+    expect(target.querySelector('.err')!.textContent).toBe('Must contain a Latin letter or digit');
+    expect(input()!.getAttribute('aria-invalid')).toBe('true');
+  });
+  it('a title conflict (409) marks the title invalid (review t5-r1)', async () => {
+    render({ onRename: vi.fn(() => Promise.reject(new ApiError(409, 'Title already taken'))) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(input()!.getAttribute('aria-invalid')).toBe('true');
+  });
   it('while saving, a second Enter sends nothing and the field is read-only', async () => {
     let release!: () => void;
     const p = render({ onRename: vi.fn(() => new Promise<void>((r) => { release = r; })) });

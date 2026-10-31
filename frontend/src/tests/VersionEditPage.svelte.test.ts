@@ -435,6 +435,22 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     expect(err.id).not.toBe('');
   });
 
+  it('a failure that is not about the title shows under the row but leaves the title valid (review t5-r1)', async () => {
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? jres({ detail: 'Server exploded' }, 500)
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('x');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const err = target.querySelector('section.blocks .add-err')!;
+    expect(err.textContent).toContain('Server exploded');
+    expect(addInput()!.hasAttribute('aria-invalid')).toBe(false);
+    expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
+  });
+
   it('the line is not blocked by an open draft (D3)', async () => {
     await render();
     await makeDirty();

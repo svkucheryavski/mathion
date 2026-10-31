@@ -974,11 +974,11 @@
   .sp-error {
     margin: 0;
     padding: 8px 12px;
-    background: var(--status-rejected-bg);
+    background: var(--danger-panel-bg);
     border-left: 3px solid var(--danger);
     border-radius: var(--radius);
     font-size: 13px;
-    color: var(--status-rejected-fg);
+    color: var(--danger-panel-fg);
   }
   .sp-info {
     margin: 0;

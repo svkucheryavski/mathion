@@ -478,6 +478,6 @@
   .ov-del-title:focus { outline: none; }
   .ov-del-sub { margin: 0; font-size: 12px; color: var(--muted); }
   .ov-del-panel { margin-top: 12px; }
-  .ov-err { margin: 12px 0 0; padding: 8px 12px; background: var(--status-rejected-bg); border-left: 3px solid var(--danger); border-radius: var(--radius); font-size: 13px; color: var(--status-rejected-fg); }
+  .ov-err { margin: 12px 0 0; padding: 8px 12px; background: var(--danger-panel-bg); border-left: 3px solid var(--danger); border-radius: var(--radius); font-size: 13px; color: var(--danger-panel-fg); }
   .ov-vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

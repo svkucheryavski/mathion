@@ -390,9 +390,9 @@
   }
   .mp-banner-err {
     justify-content: space-between;
-    background: var(--status-rejected-bg);
+    background: var(--danger-panel-bg);
     border-left-color: var(--danger);
-    color: var(--status-rejected-fg);
+    color: var(--danger-panel-fg);
   }
   .linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
   .mp-empty { margin: 0; font-size: 13px; color: var(--muted); }

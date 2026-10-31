@@ -202,11 +202,11 @@
   .nr-banner {
     margin: 0;
     padding: 8px 12px;
-    background: var(--status-rejected-bg);
+    background: var(--danger-panel-bg);
     border-left: 3px solid var(--danger);
     border-radius: var(--radius);
     font-size: 13px;
-    color: var(--status-rejected-fg);
+    color: var(--danger-panel-fg);
   }
   .nr-form { display: flex; flex-direction: column; gap: 12px; margin: 0; }
   .nr-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

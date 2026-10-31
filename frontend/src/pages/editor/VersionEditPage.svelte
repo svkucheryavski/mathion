@@ -668,7 +668,7 @@
                   class="add-input"
                   placeholder="New block title"
                   aria-label="New block title"
-                  aria-invalid={createErrors.title || createGlobalError ? 'true' : undefined}
+                  aria-invalid={createErrors.title ? 'true' : undefined}
                   aria-describedby={createErrors.title || createGlobalError ? addErrId : undefined}
                   bind:value={newTitle}
                   maxlength={200}
@@ -822,6 +822,8 @@
     color: var(--text);
     font-size: 14px;
   }
+  /* C3: an invalid title keeps a red edge when focused: (0,3,0) beats base.css's focus rule (0,2,1). */
+  .add-input[aria-invalid='true'] { border: 1.5px solid var(--danger); }
   .add-err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
   .blocks-list { list-style: none; padding: 0; margin: 0; }
   .state-actions {

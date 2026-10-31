@@ -879,7 +879,7 @@
   .run-assets-tab.drag-over .empty-state { outline: 2px dashed var(--primary); outline-offset: 2px; }
 
   .banner { margin: 0; padding: 8px 12px; border-left: 3px solid; border-radius: var(--radius); font-size: 13px; }
-  .banner-error { background: var(--status-rejected-bg); border-left-color: var(--danger); color: var(--status-rejected-fg); }
+  .banner-error { background: var(--danger-panel-bg); border-left-color: var(--danger); color: var(--danger-panel-fg); }
   .banner-info { background: var(--surface-2); border-left-color: var(--primary); color: var(--text-2); }
 
   .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

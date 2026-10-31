@@ -106,7 +106,7 @@
   /* A long title or an unbroken name wraps inside the question, so the
      buttons stay on screen (Review Focus 1). */
   .warning { font-size: 12.5px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
-  .warning :global(code) { font-family: var(--font-mono); background: var(--surface); padding: 0 4px; border-radius: var(--radius-pill); }
+  .warning :global(code) { font-family: var(--font-mono); background: var(--surface-2); padding: 0 4px; border-radius: var(--radius-pill); }
   .warning :global(strong) { color: var(--text-2); font-weight: 600; }
   .actions { display: inline-flex; gap: 6px; }
   /* D31, D34: small real buttons. Outlined at rest; filled on hover (pointer

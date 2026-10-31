@@ -18,6 +18,7 @@
   import { getContext, onDestroy, tick } from 'svelte';
   import { labelFor } from '../../lib/labelFor';
   import { ApiError } from '../../lib/api';
+  import { mapCreateError } from '../../lib/formErrors';
   import { pushToast } from '../../stores/toasts.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import IconButton from '../ui/IconButton.svelte';
@@ -76,6 +77,9 @@
   let renaming = $state(false);
   let draft = $state('');
   let error = $state<string | null>(null);
+  // Only an error about the title marks the field invalid (red, C3); a network
+  // or server failure shows the same line under a valid title.
+  let errorIsTitle = $state(false);
   let saving = $state(false);
   let inputEl = $state<HTMLInputElement>();
   let pencilEl = $state<HTMLButtonElement>();
@@ -107,7 +111,7 @@
   async function commitRename() {
     if (saving) return;
     const next = draft.trim();
-    if (next === '') { error = 'Title is required'; return; }
+    if (next === '') { error = 'Title is required'; errorIsTitle = true; return; }
     if (next === (title ?? '').trim()) { await cancelRename(); return; }
     saving = true;
     try {
@@ -118,6 +122,7 @@
       // show the error inline.
       if (!alive || !renaming) { pushToast(msg(e), 'error'); return; }
       error = msg(e);
+      errorIsTitle = 'title' in mapCreateError(e, ['title']).fieldErrors;
       await tick();
       if (alive) inputEl?.focus();
       return;
@@ -191,7 +196,7 @@
         maxlength={200}
         readonly={saving}
         aria-label={`${Level} title`}
-        aria-invalid={error ? 'true' : undefined}
+        aria-invalid={error && errorIsTitle ? 'true' : undefined}
         aria-describedby={error ? errId : undefined}
         oninput={(e) => { draft = e.currentTarget.value; error = null; }}
         onkeydown={onKeydown}
@@ -303,5 +308,7 @@
     font-weight: 600;
   }
   .seq .title-input { font-size: 14.5px; }
+  /* C3: an invalid title keeps a red edge when focused: (0,3,0) beats base.css's focus rule (0,2,1). */
+  .title-input[aria-invalid='true'] { border: 1.5px solid var(--danger); }
   .err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
 </style>
