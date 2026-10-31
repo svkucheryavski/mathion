@@ -460,6 +460,7 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
   - `.qtext` ~4508: `color:var(--text-2)`.
 
 - [ ] **Step 3: Implement** the CSS to spec §The look rows 1–3, 5 and 10. Use the scoped selectors as written; a bare `[aria-invalid]` loses to the focus rule.
+  - Review r1: the three fields set `aria-invalid` only for a title error (VersionEditPage and BlockAccordion drop `createGlobalError` from it; AccordionHeader keeps `errorIsTitle` via `mapCreateError`); `.qsrc` takes `--text-2` with a new `(ao)` row (N 2427).
 
 - [ ] **Step 4: Run the gate (green), vitest and svelte-check.** Expected: PASS.
 

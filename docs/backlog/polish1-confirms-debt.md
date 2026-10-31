@@ -13,9 +13,7 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 - **AssetSidebar's click-stop wrapper comment is inaccurate** (`AssetSidebar.svelte`, the `<span onclick>` around the question): `button.row-click` is a sibling, not an ancestor, so no row click runs under the question anyway. Reword to "keeps the question's clicks inside the sidebar" or pin it with a test. (Opus)
 - **Gate (am) coverage gaps:** the InlineConfirm `none` pattern does not catch an unguarded fill on `.ic-btn.H:hover` / `.confirm.H:hover` (widen to `(danger|primary|cancel|ic-btn|confirm)`); P57's `box-shadow:none` is not pinned on `.ic-btn:focus-visible`, `.dc-btn:focus-visible`, Button `.danger:focus-visible` (+3 checks). (Opus)
 - **RunAssetsTab tests' shared `/^(Delete|Replace)$/`** (P59) lets a delete-path test pass on a Replace button and vice versa; safe today (no row button has visible text). Fix: `/^Delete$/` in the delete tests. (Opus)
-- **The `code` chip in a question is white on white** (`InlineConfirm.svelte`, `.warning :global(code)` `background: var(--surface)`): in RunAssetsTab's replace row (no tinted panel since P58) the chip shows only as padding. Fix: drop the background or use `--surface-2`. (Fable)
 - **Unarmed Force delete label is 1.99:1** (`--danger-off-text` on `--danger-off-bg`; was 2.35:1). Spec exempts the unarmed state; look at it deliberately in the Safari pass. (Fable)
-- **`--cancel-border` is 1.8:1 on white**, below the 3:1 non-text guideline for a control boundary (better than the old 1.3:1; the label carries the affordance). Polish 3 candidate. (Fable)
 - **Focus ring clearance in `tr.delete-row` / `.ro-confirm-row`:** `td` has 0 top padding, so the ring (2px offset + 2px) overlaps the row above's border. Cosmetic; check in the Safari pass. (Fable)
 - **D42 with a wrapped warning:** with `align="end"` and a long email or filename, the `.warning` lines stay left-ragged while the block sits at the right edge. Check at 1000px in the Safari pass. (Fable)
 - **AssetSidebar's disable effect finds the row by its `data-testid`** (`AssetSidebar.svelte`, `asset-row-${id}`): a testid rename would silently break the dismissal focus path. Fix: a `data-asset-id` on the `li`, or a `rowEls` record like `trashEls`. (Fable, round 2)
@@ -117,10 +115,8 @@ Checked:
 
 ## Polish 2 / Polish 3 candidates (spec §Scope, "Not in")
 
-- The error banners keep `--status-rejected-*`; beside the danger panel there are two pinks. Aligning them with the panel tokens is a Polish 3 candidate.
 - VersionsPage's create form: Cancel and in-app links discard silently; only Esc asks. A guard there is a Polish 3 candidate.
 - ~~The global focus halo on other Button variants~~ — done in Polish 2 Task 1 (D48: the 2px ring, and an outline in forced colors).
 - **Focus not obscured (WCAG 2.4.11) in the Progress and Submissions grids:** a focused cell scrolled under the sticky columns or header. Polish 3 candidate. (Polish 2 D73/D74 fixed the sideways case with scroll padding. The sticky header rules are inert: `.table-scroll` never scrolls vertically. What remains is a Group column wider than its set width.)
-- **Three fields carry `aria-invalid` with no error border:** the VersionEditPage and BlockAccordion create fields and the AccordionHeader title field. They turn blue on focus like any field. Polish 3 candidate.
 - **Internal links in authored content do a full page reload.** A mid-quiz click on one still loses unsubmitted answers; routing same-origin links through `navigate()` is the candidate fix. Polish 3 candidate.
 - **No-op focus rules kept by Polish 2:** the hidden inputs' `input:focus-visible { box-shadow: none }` (Login, Single/MultiChoice, the mini-project `.drop`), and the seven `:focus { outline: none }` heading rules. Polish 3: remove them with their gate pins. The 16 per-component forced-colors blocks are only partly redundant: the outline colour is global now, but their `-2px` offsets (SequenceLink, MiniProjectLink, `.num`, `.txt`, `.inline-input`, `.key-input`) and the label outlines (`.opt`, `.segment`, `.drop`, the pickers, `.sp-seg-opt`) are not covered. Polish 3 keeps those.
