@@ -300,10 +300,23 @@
     acceptFile(input.files && input.files.length > 0 ? input.files[0] : null);
   }
 
+  // While submitting the zone does not accept the drag: the window's
+  // cancelFileDrag then shows the no-drop cursor and keeps the file from opening.
   function handleDragOver(e: DragEvent): void {
-    e.preventDefault();
     if (submitState === 'submitting') return;
+    e.preventDefault();
     isDragOver = true;
+  }
+
+  // A file dropped beside the zone would make the browser open it in place of
+  // the page. While the page is mounted, a drag carrying files is cancelled
+  // anywhere on the window; the zone's own handlers run first and pick the file.
+  // Beside the zone (nothing has accepted the drag yet) the cursor shows that a
+  // drop does nothing.
+  function cancelFileDrag(e: DragEvent): void {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    if (e.type === 'dragover' && !e.defaultPrevented) e.dataTransfer.dropEffect = 'none';
+    e.preventDefault();
   }
 
   function handleDragLeave(): void {
@@ -450,6 +463,8 @@
   });
 </script>
 
+<svelte:window ondragover={cancelFileDrag} ondrop={cancelFileDrag} />
+
 <div class="page">
   <div class="mp-col">
     <!--
@@ -542,10 +557,9 @@
             </section>
 
             <!-- D6 — submit / resubmit section. Renders ONLY when the group is
-                 assigned AND can_submit has been resolved (true OR false with a
-                 reason). When can_submit=false, render the reason banner only —
+                 assigned. When can_submit=false, render the reason banner only —
                  no file picker, no submit button. -->
-            {#if data.group !== null && data.can_submit !== null}
+            {#if data.group !== null}
               <section class="submit-block" class:can={data.can_submit === true} data-testid="mp-submit-section">
                 {#if data.can_submit === true}
                   <h2>{submitHeading}</h2>
@@ -666,11 +680,13 @@
      and overflow-wrap:anywhere lets the token itself break. Without the pair a 320px viewport
      scrolls horizontally; the `.title-row h1` rule below is the same pairing for its sibling row. */
   .breadcrumb a { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .breadcrumb a:hover { color: var(--text); text-decoration: underline; /* the player's crumb hover (SequencePlayer .crumbs a:hover) */ }
   .breadcrumb .sep { color: var(--faint); /* ref 1267 — separators are the token's documented role */ }
   .breadcrumb .crumb { min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
   .breadcrumb .current { color: var(--text); font-size: 14px; font-weight: 600; /* D70: the player's last crumb */ min-width: 0; overflow-wrap: anywhere; /* 5(c): same pairing as `.breadcrumb a` */ }
   .title-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; /* ref 1268 */ flex-wrap: wrap; /* 320px viewports: a long block title + the nowrap pill need it */ }
   .title-row h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; /* 5(c): a long unbreakable title shrinks instead of pushing the pill out (PageItem.svelte:80 precedent) */ }
+  .title-row:only-child { margin-bottom: 18px; /* no deadline row: the header keeps the space .deadlines would give */ }
   .deadlines { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; /* ref 1272 */ flex-wrap: wrap; /* 5(b); D80 left one line in the row */ }
   .deadline { font-size: 12.5px; color: var(--muted); margin: 0; /* ref 1273 */ }
   .deadline strong { font-weight: 600; }
@@ -696,7 +712,7 @@
   .mp-side { grid-area: side; display: flex; flex-direction: column; gap: 14px; }
   .group-block, .submit-block { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; /* ref 1284 */ }
   .group-block h2, .submit-block h2 { font-size: 13px; margin: 0 0 8px; /* ref 1285 */ }
-  .members { font-size: 13px; line-height: 1.7; color: var(--text-2); margin: 0; /* ref 1286 */ }
+  .members { font-size: 13px; line-height: 1.7; color: var(--text-2); margin: 0; /* ref 1286 */ overflow-wrap: anywhere; /* a long unbroken name wraps */ }
   .group-notice { font-size: 12.5px; color: var(--text-3); margin: 6px 0 0; /* 5(b): the hint scale; `.notice` is scoped in InteractiveAppItem, hence the name */ }
   /* Submit card, can submit — ref 1288-1293. The only card with an emphasised border: it is the one action on the page. */
   .submit-block.can { border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); /* ref 1288 */ }
@@ -716,7 +732,9 @@
     .drop:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
     .drop.dragover { outline: 2px dashed; }
   }
-  .drop:has(input:disabled) { background: var(--disabled-bg); border-color: var(--border-faint); color: var(--faint); cursor: not-allowed; /* mathion-visual-spec.md:159 disabled recipe — tokens, no opacity */ }
+  .drop:has(input:disabled) { background: var(--disabled-bg); border-color: var(--border-faint); cursor: not-allowed; /* mathion-visual-spec.md:159 disabled recipe — tokens, no opacity */ }
+  /* The label carries the disabled colour: `.drop.has-file .drop-label` (a file is always picked while submitting) would win over a colour on .drop. */
+  .drop:has(input:disabled) .drop-label { color: var(--faint); }
   .submit-error { margin-top: 10px; /* 5(b): the history body gap */ }
   /* Precondition banner — mathion-visual-spec.md:289-293. */
   .precondition { border-left: 3px solid var(--primary); background: var(--surface-2); padding: 14px 16px; /* 5(b): no artboard box for this banner — matches the inline-state row, ref 1378 */ font-size: 13px; line-height: 1.55; color: var(--text-3); /* ref 1373 */ border-radius: var(--radius); }

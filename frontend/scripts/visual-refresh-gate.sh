@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2427
+EXPECTED_CHECKS=2432
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -521,6 +521,11 @@ else:
 # Polish 3 C2: 42962132 -> 17366996: --cancel-border var(--focus-line-strong)
 # -> #71839E, the lightest grey of that hue at >=3:1 on every ground a Cancel
 # meets (3.03:1 on --focus-2). The ONLY change.
+# D85 (user, 2026-10-31, Polish 3 Task 6): a loose list groups by item. Inside
+# an item every block but the last (a heading keeps its em margins) takes
+# --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
+# the compact scale has its own pair (--space-1 / --space-2), written in full so
+# it beats the page pair. +3 rules (49 -> 52).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -528,7 +533,8 @@ WANT_FULL = [
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
     ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)', '13af6f60'),
     ('', '.prose :where(ul,ol)', '17bebee9'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li+li', 'ca5345b0'),
+    ('', '.prose :where(ul,ol):has(>li>p)>li+li', 'dc00e0ee'),
+    ('', '.prose :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
     ('', '.prose a', '0be0b8c6'),
     ('', '.prose a:hover', '98e62ed4'),
     ('', '.prose blockquote', '5fe22df0'),
@@ -545,6 +551,8 @@ WANT_FULL = [
     ('', '.prose pre code', 'f4859c1f'),
     ('', '.prose ul>li', '20d7366f'),
     ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)', 'e291811a'),
+    ('', '.prose.compact :where(ul,ol):has(>li>p)>li+li', 'ca5345b0'),
+    ('', '.prose.compact :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
     ('', '.prose.compact h1', 'a5b38d68'),
     ('', '.prose.compact h2', 'c2943c7b'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
@@ -561,7 +569,7 @@ WANT_FULL = [
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
 ]
-# Document ORDER of the same 49 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 52 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -584,7 +592,10 @@ WANT_ORDER = [
     ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child'),
+    ('', '.prose :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
     ('', '.prose :where(ul,ol):has(>li>p)>li+li'),
+    ('', '.prose.compact :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose.compact :where(ul,ol):has(>li>p)>li+li'),
     ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
     ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
     ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),
@@ -3704,7 +3715,8 @@ else
   FCM="@media \(forced-colors: ?active\)\{(\.[^{]*\{[^}]*\})*"
   chk "${FCM}\.drop\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
   chk "${FCM}\.drop\.dragover\.${H}"                                 'outline:2px dashed'
-  chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)"    'background:var\(--disabled-bg\)' 'border-color:var\(--border-faint\)' 'color:var\(--faint\)' 'cursor:not-allowed'
+  # Polish 3: the disabled colour moved to .drop-label (a row in (ao)).
+  chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)"    'background:var\(--disabled-bg\)' 'border-color:var\(--border-faint\)' 'cursor:not-allowed'
   none  "MP disabled drop uses no opacity"   "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)\{[^}]*opacity"
   d '\.submit-error' '' 'margin-top:10px'
   d '\.precondition' '' 'border-left:3px solid var\(--primary\)' 'background:var\(--surface-2\)' 'padding:14px 16px' 'font-size:13px' 'line-height:1\.55' 'color:var\(--text-3\)' 'border-radius:var\(--radius\)'
@@ -5787,6 +5799,17 @@ uniq1 qcard
 if [[ -n $REPLY ]]; then
   N=QuestionCard; H=$REPLY
   d '\.qsrc' '' 'color:var\(--text-2\)'
+fi
+# The mini-project page (Task 6): the crumb hover is the player's, the header
+# keeps its bottom space without a deadline row, the disabled label paints
+# (.drop.has-file .drop-label won before), long member names wrap.
+uniq1 history-entry-header
+if [[ -n $REPLY ]]; then
+  N=MiniProjectDetailPage; H=$REPLY
+  chk "\.breadcrumb\.${H} a:where\(\.${H}\):hover" 'color:var\(--text\)' 'text-decoration:underline'
+  chk "\.title-row\.${H}:only-child" 'margin-bottom:18px'
+  chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\) \.drop-label:where\(\.${H}\)" 'color:var\(--faint\)'
+  d '\.members' '' 'overflow-wrap:anywhere'
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

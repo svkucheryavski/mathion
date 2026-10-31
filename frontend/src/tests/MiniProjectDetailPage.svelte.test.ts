@@ -1417,7 +1417,8 @@ describe('MiniProjectDetailPage (Slice-4 T4 — submit card)', () => {
     clickSubmit();
     await settle();
     const zone = dropZone();
-    const over = dropEvent('dragover');
+    // A real file drag lists 'Files'; while submitting the window cancels it, not the zone (Polish 3 t6-r2).
+    const over = fileDrag('dragover');
     zone.dispatchEvent(over); flushSync();
     expect(over.defaultPrevented).toBe(true);
     expect(zone.classList.contains('dragover')).toBe(false);
@@ -1450,5 +1451,112 @@ describe('MiniProjectDetailPage (Slice-4 T4 — submit card)', () => {
     expect(pre!.textContent?.trim()).toBe(REASON_LABELS.awaiting_evaluation);
     expect(section.querySelector('h2')).toBeNull();
     expect(section.querySelector('input, .btn')).toBeNull();
+  });
+});
+
+// ---- Polish 3 Task 6 — a file dropped beside the zone ----
+
+// A drag as the browser reports it: `types` lists 'Files' when files are carried.
+function fileDrag(type: 'dragover' | 'drop', files: File[] = [], types: string[] = ['Files']): Event {
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'dataTransfer', {
+    configurable: true,
+    value: { types, dropEffect: 'copy', files: Object.assign(files.slice(), { item: (i: number) => files[i] ?? null }) },
+  });
+  return e;
+}
+
+describe('MiniProjectDetailPage (Polish 3 — a drop beside the zone)', () => {
+  it('a file dropped beside the zone is defaultPrevented', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const over = fileDrag('dragover');
+    const drop = fileDrag('drop', [makePdf('beside.pdf')]);
+    document.body.dispatchEvent(over);
+    document.body.dispatchEvent(drop);
+    expect(over.defaultPrevented).toBe(true);
+    expect(drop.defaultPrevented).toBe(true);
+    // Nothing is picked: the zone's label is unchanged.
+    expect(dropZone().querySelector('.drop-label')!.textContent).toBe('Drop a PDF or click to pick');
+  });
+
+  it('a file dragged beside the zone shows no drop cursor; over the zone it keeps the copy cursor (review t6-r1)', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const beside = fileDrag('dragover');
+    document.body.dispatchEvent(beside);
+    expect((beside as unknown as { dataTransfer: { dropEffect: string } }).dataTransfer.dropEffect).toBe('none');
+    const over = fileDrag('dragover');
+    dropZone().dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect((over as unknown as { dataTransfer: { dropEffect: string } }).dataTransfer.dropEffect).toBe('copy');
+  });
+
+  it('a drag without files beside the zone is left to the browser', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const over = fileDrag('dragover', [], ['text/plain']);
+    document.body.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(false);
+    expect((over as unknown as { dataTransfer: { dropEffect: string } }).dataTransfer.dropEffect).toBe('copy');
+    const drop = fileDrag('drop', [], ['text/plain']);
+    document.body.dispatchEvent(drop);
+    expect(drop.defaultPrevented).toBe(false);
+  });
+
+  it('a drop on the zone still picks the file', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const drop = fileDrag('drop', [makePdf('on-zone.pdf')]);
+    dropZone().dispatchEvent(drop);
+    await settle();
+    expect(drop.defaultPrevented).toBe(true);
+    expect(dropZone().querySelector('.drop-label')!.textContent).toBe('on-zone.pdf');
+  });
+
+  it('a drop on the disabled zone while submitting does nothing', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    let resolveSubmit: () => void = () => {};
+    vi.mocked(submit).mockReturnValue(new Promise<void>((res) => { resolveSubmit = res; }));
+    await mountPage();
+    await pickFile(makePdf('first.pdf'));
+    clickSubmit();
+    await settle();
+    const drop = fileDrag('drop', [makePdf('late.pdf')]);
+    dropZone().dispatchEvent(drop);
+    await settle();
+    expect(drop.defaultPrevented).toBe(true);
+    expect(dropZone().querySelector('.drop-label')!.textContent).toBe('first.pdf');
+    resolveSubmit();
+    await settle();
+  });
+
+  it('the disabled zone while submitting shows no drop cursor (review t6-r2)', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    let resolveSubmit: () => void = () => {};
+    vi.mocked(submit).mockReturnValue(new Promise<void>((res) => { resolveSubmit = res; }));
+    await mountPage();
+    await pickFile(makePdf('first.pdf'));
+    clickSubmit();
+    await settle();
+    const over = fileDrag('dragover');
+    dropZone().dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(true);
+    expect((over as unknown as { dataTransfer: { dropEffect: string } }).dataTransfer.dropEffect).toBe('none');
+    expect(dropZone().classList.contains('dragover')).toBe(false);
+    resolveSubmit();
+    await settle();
+  });
+
+  it('the window listeners are removed on unmount', async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ can_submit: true }));
+    await mountPage();
+    const before = fileDrag('drop', [makePdf('before.pdf')]);
+    document.body.dispatchEvent(before);
+    expect(before.defaultPrevented).toBe(true);
+    unmount(component!); component = null;
+    const drop = fileDrag('drop', [makePdf('after.pdf')]);
+    document.body.dispatchEvent(drop);
+    expect(drop.defaultPrevented).toBe(false);
   });
 });
