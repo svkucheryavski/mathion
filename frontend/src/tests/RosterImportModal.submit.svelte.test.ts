@@ -509,7 +509,35 @@ describe('RosterImportModal — result stage (10g)', () => {
     await settle();
     expect(refetch).toHaveBeenCalledTimes(2);
     expect(onClose).not.toHaveBeenCalled();
-    expect((target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).disabled).toBe(true);
+    // F10: × stays enabled while Done's refetch runs; closeForCurrentStage ignores it.
+    expect((target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).disabled).toBe(false);
+    resolveDone({ students: [], groups: [] });
+    await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    unmount(cmp);
+  });
+
+  // F10: closing leaves closeDisabled, so a focused × keeps focus while Done's refetch runs.
+  it('Done at the summary keeps × enabled (closing leaves closeDisabled)', async () => {
+    fetchSpy.mockImplementation(() => jres({ results: [{ email: 'a@x.com', status: 'added' }] }));
+    let resolveDone!: (v: unknown) => void;
+    const refetch = vi.fn()
+      .mockResolvedValueOnce({ students: [], groups: [] })
+      .mockImplementationOnce(() => new Promise((r) => { resolveDone = r; }));
+    const onClose = vi.fn();
+    const { target, cmp } = mountModal({ onRefetchBeforeSubmit: refetch, onClose });
+    await settle();
+    await importWith(target, 'a@x.com');
+    const x = target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement;
+    x.focus();
+    x.click();
+    await settle();
+    expect(x.disabled).toBe(false);
+    expect(document.activeElement).toBe(x);
+    x.click();   // ignored while closing
+    await settle();
+    expect(refetch).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
     resolveDone({ students: [], groups: [] });
     await settle();
     expect(onClose).toHaveBeenCalledTimes(1);

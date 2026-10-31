@@ -11,10 +11,11 @@
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import AskSlot from '../ui/AskSlot.svelte';
-  import { DISCARD_ASK, focusAfter, modalClose, useModalAsk } from '../../lib/askInPlace.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, repairFocus, useModalAsk } from '../../lib/askInPlace.svelte';
   import ItemTypePicker from './ItemTypePicker.svelte';
   import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { focusFirst } from '../../lib/focusFirst';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
 
   type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
@@ -37,6 +38,9 @@
   let errors = $state<FieldErrors>({});
   let globalError = $state<string | null>(null);
   let busy = $state(false);
+  let titleEl = $state<HTMLInputElement>();
+  let createEl = $state<HTMLButtonElement>();
+  let videoEl = $state<HTMLInputElement>();
   let alive = true;
   onDestroy(() => { alive = false; });
 
@@ -101,8 +105,11 @@
       }
       errors = mapped.fieldErrors;
       globalError = mapped.globalMessage ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);
+      // F4: to the field the error names (a 409 "title taken"); otherwise focus stays on Create.
+      focusFirst([errors.title ? titleEl : null, errors.video_url ? videoEl : null]);
     } finally {
-      if (alive) busy = false;
+      // F4: Cancel and × are disabled while busy; a focus the browser dropped there comes back.
+      if (alive) { busy = false; void repairFocus(createEl, titleEl); }
     }
   }
 </script>
@@ -121,7 +128,8 @@
     <AskSlot ask={page!.ask} />
   {:else}
     <Button variant="ghost" disabled={busy} bind:element={cancelEl} onclick={() => void requestClose('cancel')}>Cancel</Button>
-    <Button variant="primary" disabled={!ready || busy} loading={busy} onclick={() => void submit()}>Create</Button>
+    <!-- F4: busy keeps Create focusable with its spinner; submit() returns while busy. -->
+    <Button variant="primary" disabled={!busy && !ready} loading={busy} bind:element={createEl} onclick={() => void submit()}>Create</Button>
   {/if}
 {/snippet}
 
@@ -132,7 +140,7 @@
     <div class="field-row">
       <span class="field-label">Title</span>
       <div class="field">
-        <input class="plain-input" data-autofocus aria-label="Title" maxlength={200} bind:value={title} readonly={busy}
+        <input class="plain-input" data-autofocus aria-label="Title" maxlength={200} bind:value={title} bind:this={titleEl} readonly={busy}
           aria-invalid={errors.title ? 'true' : undefined}
           aria-describedby={errors.title ? errId('title') : undefined}
           oninput={() => { if (errors.title) errors = { ...errors, title: '' }; }} />
@@ -143,7 +151,7 @@
       <div class="field-row">
         <span class="field-label">Video URL</span>
         <div class="field">
-          <input class="plain-input" type="url" aria-label="Video URL" placeholder="https://…" bind:value={videoUrl} readonly={busy}
+          <input class="plain-input" type="url" aria-label="Video URL" placeholder="https://…" bind:value={videoUrl} bind:this={videoEl} readonly={busy}
             aria-invalid={errors.video_url ? 'true' : undefined}
             aria-describedby={errors.video_url ? errId('video') : undefined}
             oninput={() => { if (errors.video_url) errors = { ...errors, video_url: '' }; }} />

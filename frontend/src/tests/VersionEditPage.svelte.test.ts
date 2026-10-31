@@ -342,6 +342,50 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     expect(document.activeElement).toBe(addLine());
   });
 
+  // F2 (C7 point 1): the ✓ is blocked, not disabled, while the create is in flight.
+  it('a failed create from a clicked ✓ keeps focus on the ✓ (aria-disabled while busy)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Matrices');
+    const ok = () => target.querySelector<HTMLButtonElement>('button[aria-label="Create block"]')!;
+    ok().focus();
+    ok().click();
+    await settle();
+    expect(ok().disabled).toBe(false);
+    expect(ok().getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(ok());
+    ok().click();   // blocked: the form's guard stops a second POST
+    await settle();
+    expect(fetchSpy.mock.calls.filter(([u, i]) => String(u) === '/api/versions/1/blocks' && (i as RequestInit)?.method === 'POST')).toHaveLength(1);
+    release();
+    await settle();
+    expect(ok().hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(ok());
+  });
+
+  it('a failed create repairs a focus the browser dropped from the disabled × (review r2)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const stand = document.createElement('button');
+    target.append(stand); stand.focus(); stand.remove();
+    release();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('button[aria-label="Create block"]'));
+  });
+
   it('published: no "+ Add block"', async () => {
     tree.version = mkVersion({ state: 'published' });
     await render();

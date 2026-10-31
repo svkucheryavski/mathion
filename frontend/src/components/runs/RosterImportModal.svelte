@@ -38,6 +38,7 @@
   let stage = $state<Stage>('paste');
   let submitting = $state(false);
   // Done's refetch is running: Done, ×, Esc and Copy wait (spec §Import › Fixes).
+  // × stays enabled, so it keeps focus (F10); closeForCurrentStage ignores it.
   let closing = $state(false);
   let resultRows = $state<RunStudentBatchResultRow[] | null>(null);
   // The roster and groups onRefetchBeforeSubmit returned for this import: the
@@ -258,7 +259,7 @@
   width={760}
   maxHeight={720}
   onRequestClose={closeForCurrentStage}
-  closeDisabled={submitting || closing}
+  closeDisabled={submitting}
   header={head}
   footer={foot}
 >

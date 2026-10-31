@@ -22,6 +22,7 @@
   import { updateRun } from '../../lib/runs';
   import { formatShortDate } from '../../lib/datetime';
   import { focusFirst } from '../../lib/focusFirst';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
@@ -171,6 +172,8 @@
   async function publish() {
     if (runWrite || publishBlocked) return;
     const outcome = await onPublish();
+    // F7: the failure's refetch can reveal a violation that disables Publish run under focus.
+    if (outcome === 'failed') { void repairFocus(publishEl, readyHead); return; }
     if (outcome !== 'published') return;
     await tick();
     focusFirst([unpublishEl, readyHead]);

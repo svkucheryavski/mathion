@@ -407,6 +407,46 @@ describe('BlockAccordion — "+ Add sequence" (Slice-5c T3)', () => {
     expect(document.activeElement).toBe(addLine());
   });
 
+  // F2 (C7 point 1): the ✓ is blocked, not disabled, while the create is in flight.
+  it('a failed create from a clicked ✓ keeps focus on the ✓ (aria-disabled while busy)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    submitBtn()!.focus();
+    submitBtn()!.click(); await settle();
+    expect(submitBtn()!.disabled).toBe(false);
+    expect(submitBtn()!.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(submitBtn());
+    submitBtn()!.click(); await settle();   // blocked: the form's guard stops a second POST
+    expect(fetchSpy.mock.calls.filter(([u, i]) => String(u) === '/api/blocks/3/sequences' && i?.method === 'POST')).toHaveLength(1);
+    release(); await settle();
+    expect(submitBtn()!.hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(submitBtn());
+  });
+
+  it('a failed create repairs a focus the browser dropped from the disabled × (review r2)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    const stand = document.createElement('button');
+    target.append(stand); stand.focus(); stand.remove();
+    release(); await settle();
+    expect(document.activeElement).toBe(submitBtn());
+  });
+
   it('✓ is a submit button, disabled until a title is typed', async () => {
     await expand();
     mountBlock();

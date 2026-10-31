@@ -7,7 +7,7 @@
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
   import TreeAskRow from './TreeAskRow.svelte';
-  import { useTreeAsk, settleTo, moveOn, withdraw, firstUsable, focusAfter, type Ask } from '../../lib/askInPlace.svelte';
+  import { useTreeAsk, settleTo, moveOn, withdraw, firstUsable, focusAfter, repairFocus, type Ask } from '../../lib/askInPlace.svelte';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -213,6 +213,7 @@
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
+  let okEl = $state<HTMLButtonElement>();
   let titleEl = $state<HTMLInputElement>();
   let addLineEl = $state<HTMLButtonElement>();
   const addErrId = $derived(`block-${String(block.id)}-add-err`);
@@ -296,7 +297,7 @@
       // The row is gone; give a keyboard author the line back for the next
       // one — unless focus already moved somewhere on purpose.
       await tick();
-      if (document.activeElement === document.body) addLineEl?.focus();
+      await repairFocus(addLineEl);
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }
@@ -320,6 +321,8 @@
       }
     } finally {
       createBusy = false;
+      // F2: × is disabled while busy; a focus the browser dropped there comes back to the ✓.
+      if (creating) void repairFocus(okEl, titleEl);
     }
   }
 </script>
@@ -395,7 +398,8 @@
               />
               {#if createErrors.title || createGlobalError}<p id={addErrId} class="add-err" role="alert">{createErrors.title || createGlobalError}</p>{/if}
             </div>
-            <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create sequence" disabled={createBusy || busy || parentBusy || !newTitle.trim()} />
+            <!-- F2: blocked, not disabled, while its create runs, so it keeps focus; submitCreate's guard stops a second submit. -->
+            <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create sequence" bind:element={okEl} aria-disabled={createBusy} disabled={!createBusy && (busy || parentBusy || !newTitle.trim())} />
             <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new sequence" disabled={createBusy} onclick={() => void cancelAdd()} />
           </form>
         {:else}

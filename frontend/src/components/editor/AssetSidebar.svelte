@@ -8,6 +8,7 @@
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import { MAX_FILE_SIZE_BYTES, ALLOWED_EXTENSIONS } from '../../lib/runAssets';
   import { formatFileSize } from '../../lib/format';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
@@ -67,7 +68,13 @@
       }
     } catch (e) {
       if (myToken === loadToken) {
+        // F11: the error line takes the rows' place, with any focus in them.
+        const hadFocus = asideEl?.querySelector('ul.list')?.contains(document.activeElement) ?? false;
+        // An idle question goes with its row, or a later reload would re-open it
+        // and take focus (R57); a busy one waits for its DELETE (R54).
+        if (confirmId !== null && !deletingIds.has(confirmId)) confirmId = null;
         listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
+        if (hadFocus) void repairFocus(dropZoneEl, asideEl?.closest('section.modal-panel'));
       }
     } finally {
       if (myToken === loadToken) loading = false;

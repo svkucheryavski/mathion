@@ -7,7 +7,7 @@
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import AskSlot from '../ui/AskSlot.svelte';
-  import { DISCARD_ASK, focusAfter, modalClose, useModalAsk } from '../../lib/askInPlace.svelte';
+  import { DISCARD_ASK, focusAfter, modalClose, repairFocus, useModalAsk } from '../../lib/askInPlace.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
@@ -38,6 +38,7 @@
   let globalError = $state<string | null>(null);
   let saving = $state(false);
   let alive = true;
+  let saveEl = $state<HTMLButtonElement>();
   onDestroy(() => { alive = false; });
 
   const dirty = $derived(editable && (label !== initial.label || info !== initial.info || attempts !== initial.attempts));
@@ -109,6 +110,8 @@
       if (alive) {
         saving = false;
         globalError = e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : 'Save failed';
+        // F4: Discard and × are disabled while saving; a focus the browser dropped there comes back.
+        void repairFocus(saveEl);
       } else {
         pushToast('Save failed', 'error');
       }
@@ -134,7 +137,8 @@
     <AskSlot ask={page!.ask} />
   {:else}
     <Button variant="ghost" disabled={!dirty || saving} onclick={discard}>Discard</Button>
-    <Button variant="primary" disabled={!dirty || saving} loading={saving} onclick={() => void save()}>Save</Button>
+    <!-- F4: busy keeps Save focusable with its spinner; save() returns while saving. -->
+    <Button variant="primary" disabled={!saving && !dirty} loading={saving} bind:element={saveEl} onclick={() => void save()}>Save</Button>
   {/if}
 {/snippet}
 

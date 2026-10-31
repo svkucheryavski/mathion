@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import {
@@ -10,6 +10,7 @@
     bulkDeleteRunStudents,
   } from '../../lib/runRoster';
   import { focusFirst } from '../../lib/focusFirst';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
   import EmptyState from '../ui/EmptyState.svelte';
@@ -118,6 +119,17 @@
   let addOpen = $state(false);
   let adding = $state(false);
   const addShown = $derived(addOpen && runIsPublished);
+  // F8: a draft flip unmounts the open add row and disables the toolbar's
+  // buttons under focus. `.pre`: read where focus is before the DOM changes.
+  let toolsEl = $state<HTMLElement>();
+  let emptyLinksEl = $state<HTMLElement>();
+  $effect.pre(() => {
+    if (runIsPublished) return;
+    untrack(() => {
+      const a = document.activeElement;
+      if (addOpen || toolsEl?.contains(a) || emptyLinksEl?.contains(a)) void repairFocus(toggleEl, searchEl);
+    });
+  });
 
   const pendingGroupId = new SvelteMap<number, number | null>();
   const selected = new SvelteSet<number>();
@@ -531,7 +543,7 @@
     }
   }
 
-  async function onGroupChange(s: RunStudentResponse, raw: string) {
+  async function onGroupChange(s: RunStudentResponse, raw: string, sel: HTMLSelectElement) {
     const targetGroupId: number | null = raw === '__unassigned' ? null : Number(raw);
     pendingGroupId.set(s.user_id, targetGroupId);
     try {
@@ -542,6 +554,8 @@
       s.group_id = updated.group_id;
       pendingGroupId.delete(s.user_id);
       markFixed(s.user_id);
+      // F8: the select is enabled again; focus goes back now, not after the groups refetch.
+      void repairFocus(sel, searchEl);
       await onRefetchGroupsOnly();
     } catch (e) {
       // Delete from pendingGroupId on EVERY error path (incl. network failures),
@@ -559,6 +573,10 @@
           pushToast(e.displayMessage, 'error');
         }
       }
+    } finally {
+      // F8: the select is natively disabled while its request runs, which drops focus.
+      // A newer change of the same select still in flight repairs for itself.
+      if (!pendingGroupId.has(s.user_id)) void repairFocus(sel, searchEl);
     }
   }
 
@@ -620,7 +638,7 @@
         </button>
       </span>
     {/if}
-    <div class="ro-tools-right">
+    <div class="ro-tools-right" bind:this={toolsEl}>
       <Button
         variant="secondary"
         data-action="open-import"
@@ -824,7 +842,7 @@
                     aria-label="Group for {s.user_email}"
                     value={selectValueFor(s)}
                     disabled={pendingGroupId.has(s.user_id)}
-                    onchange={(e) => onGroupChange(s, (e.currentTarget as HTMLSelectElement).value)}
+                    onchange={(e) => onGroupChange(s, e.currentTarget.value, e.currentTarget)}
                   >
                     <option value="__unassigned">Unassigned</option>
                     {#each groups as g (g.id)}
@@ -871,7 +889,7 @@
   {#if students.length === 0}
     <EmptyState title="No students yet.">
       {#snippet action()}
-        <span class="ro-empty-links">
+        <span class="ro-empty-links" bind:this={emptyLinksEl}>
           <button
             type="button"
             class="ro-link"

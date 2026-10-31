@@ -13,7 +13,7 @@
   import { externalLinks } from '../../lib/externalLinks';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
-  import { PageAsk, PAGE_ASK_KEY, InPlaceAsk, focusIsFree, usable, useTreeAsk, focusAfter, firstUsable, settleTo, withdraw, type Ask, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import { PageAsk, PAGE_ASK_KEY, InPlaceAsk, focusIsFree, usable, useTreeAsk, focusAfter, firstUsable, settleTo, withdraw, repairFocus, type Ask, type GuardAsk } from '../../lib/askInPlace.svelte';
   import VersionSettingsModal from '../../components/editor/VersionSettingsModal.svelte';
   import BlockAccordion from '../../components/editor/BlockAccordion.svelte';
   import Button from '../../components/ui/Button.svelte';
@@ -354,6 +354,7 @@
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
+  let okEl = $state<HTMLButtonElement>();
   let titleEl = $state<HTMLInputElement>();
   let addLineEl = $state<HTMLButtonElement>();
   const addErrId = `${uid}-add-err`;
@@ -434,7 +435,7 @@
       // The row is gone; give a keyboard author the line back for the next
       // one — unless focus already moved somewhere on purpose.
       await tick();
-      if (document.activeElement === document.body) addLineEl?.focus();
+      await repairFocus(addLineEl);
       if (!stillOnVid(savedVid)) return;
       await loadAdminTree(savedVid, { force: true });
       pushToast('Block created', 'success');
@@ -456,6 +457,8 @@
       }
     } finally {
       createBusy = false;
+      // F2: × is disabled while busy; a focus the browser dropped there comes back to the ✓.
+      if (creating) void repairFocus(okEl, titleEl);
     }
   }
 
@@ -675,7 +678,8 @@
                 />
                 {#if createErrors.title || createGlobalError}<p id={addErrId} class="add-err" role="alert">{createErrors.title || createGlobalError}</p>{/if}
               </div>
-              <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create block" disabled={createBusy || busy || !newTitle.trim()} />
+              <!-- F2: blocked, not disabled, while its create runs, so it keeps focus; submitCreateBlock's guard stops a second submit. -->
+              <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create block" bind:element={okEl} aria-disabled={createBusy} disabled={!createBusy && (busy || !newTitle.trim())} />
               <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new block" disabled={createBusy} onclick={() => void cancelAdd()} />
             </form>
           {:else}

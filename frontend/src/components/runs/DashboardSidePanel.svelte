@@ -33,7 +33,7 @@
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import DirtyGuard from '../editor/DirtyGuard.svelte';
   import { DISCARD, DISCARD_CONTINUE } from '../../lib/editorReasons';
-  import { refused, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import { refused, repairFocus, type GuardAsk } from '../../lib/askInPlace.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatFileSize } from '../../lib/format';
   import { focusFirst } from '../../lib/focusFirst';
@@ -200,8 +200,11 @@
     getSubmissionThread(runId, mpId, groupId, { signal: ctl.signal })
       .then((res) => {
         if (ctl.signal.aborted) return;
+        const wasForm = formShown;
         threadState = res.submissions;
         threadLoading = false;
+        // F9: the thread can swap a focused create form for the evaluation card.
+        void tick().then(() => { if (wasForm && !formShown) void repairFocus(evalHead(), closeX()); });
         // Drop the post-write bridge once the refetch supersedes it: the newest
         // submission now carries its own evaluation, OR the newest is a DIFFERENT
         // submission than the bridge was created for (a concurrent resubmission

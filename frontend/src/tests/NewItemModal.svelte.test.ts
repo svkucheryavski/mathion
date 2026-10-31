@@ -152,6 +152,43 @@ describe('NewItemModal (Slice-5c T4, D10)', () => {
     registry.discardAll();
     expect(p.onClose).toHaveBeenCalledTimes(1);
   });
+  // F4 (C7 point 1): Create stays focusable while busy, so a failure leaves focus on it.
+  it('a failed Create keeps focus on Create', async () => {
+    let fail!: () => void;
+    render({ onCreate: vi.fn(() => new Promise<void>((_, rej) => { fail = () => rej(new ApiError(500, 'boom')); })) });
+    await settle();   // the open's autofocus lands first
+    pick('quiz'); type(titleIn(), 'Q');
+    const btn = create();
+    btn.focus();
+    btn.click(); await settle();
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(btn);
+    fail(); await settle();
+    expect(create()).toBe(btn);
+    expect(document.activeElement).toBe(btn);
+  });
+  it('a failed Create repairs a focus the browser dropped during the request (review r1)', async () => {
+    let fail!: () => void;
+    render({ onCreate: vi.fn(() => new Promise<void>((_, rej) => { fail = () => rej(new ApiError(500, 'boom')); })) });
+    await settle();
+    pick('quiz'); type(titleIn(), 'Q');
+    create().click(); await settle();
+    // Cancel is natively disabled while busy: a Safari focus there drops.
+    const stand = document.createElement('button');
+    panel().append(stand); stand.focus(); stand.remove();
+    fail(); await settle();
+    expect(document.activeElement).toBe(create());
+  });
+  it('a 409 moves focus to the title field', async () => {
+    render({ onCreate: vi.fn(() => Promise.reject(new ApiError(409, 'Title already taken'))) });
+    await settle();   // the open's autofocus lands first
+    pick('quiz'); type(titleIn(), 'Q');
+    create().focus();
+    create().click(); await settle();
+    expect(titleIn().getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(titleIn());
+  });
   it('while creating: × and Escape are frozen', async () => {
     let release!: () => void;
     const p = render({ onCreate: vi.fn(() => new Promise<void>((r) => { release = r; })) });

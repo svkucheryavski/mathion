@@ -113,6 +113,39 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     expect(panel().querySelector('[role="alert"]')!.textContent).toContain('Nope');
     expect(footBtn('Save')!.disabled).toBe(false);
   });
+  // F4 (C7 point 1): Save stays focusable while busy, so a failure leaves focus on it.
+  it('a failed Save keeps focus on Save', async () => {
+    let release!: () => void;
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'Nope' }, 409))
+      : jres({})));
+    render();
+    await settle();   // the open's autofocus lands first
+    type(input('Label'), 'L2');
+    const save = footBtn('Save')!;
+    save.focus();
+    save.click(); await settle();
+    expect(save.disabled).toBe(false);
+    expect(save.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(save);
+    release(); await settle();
+    expect(footBtn('Save')).toBe(save);
+    expect(document.activeElement).toBe(save);
+  });
+  it('a failed Save repairs a focus the browser dropped during the request (review r1)', async () => {
+    let release!: () => void;
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'Nope' }, 409))
+      : jres({})));
+    render();
+    await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    const stand = document.createElement('button');
+    panel().append(stand); stand.focus(); stand.remove();
+    release(); await settle();
+    expect(document.activeElement).toBe(footBtn('Save'));
+  });
   it('a save that lands after a version switch does not reload the other version', async () => {
     const p = render({ stillOnVid: () => false });
     type(input('Label'), 'L2');

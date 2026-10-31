@@ -12,7 +12,7 @@
   import { deleteVersionReason, duplicateVersionReason } from '../../lib/editorReasons';
   import { pushToast } from '../../stores/toasts.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
-  import { InPlaceAsk, DISCARD_ASK, focusAfter, firstUsable, settleTo, moveOn, withdraw, type Ask } from '../../lib/askInPlace.svelte';
+  import { InPlaceAsk, DISCARD_ASK, focusAfter, firstUsable, settleTo, moveOn, withdraw, repairFocus, type Ask } from '../../lib/askInPlace.svelte';
   import type { Version } from '../../lib/types';
   import {
     loadVersionsPage,
@@ -39,6 +39,12 @@
   // Disable / Enable / Delete) while a POST/DELETE is awaiting completion,
   // preventing double-submit / racing transitions on the same row.
   let busy = $state(false);
+  // Which form's own request holds `busy`: only that button shows the spinner
+  // (C16); another action's busy leaves it blocked (aria-disabled).
+  let createBusy = $state(false);
+  let dupBusy = $state(false);
+  let createBtn = $state<HTMLButtonElement>();
+  let copyBtn = $state<HTMLButtonElement>();
 
   // Polish 1: the create form's question (#16) in place of its Cancel/Create,
   // and one question for the list (#17, #18) under the row that asked, keyed
@@ -47,6 +53,7 @@
   const rowAsk = new InPlaceAsk();
   let h1El = $state<HTMLHeadingElement>();
   const toggleBtn = (id: number) => document.getElementById(`v-${id}-toggle`);
+  const dupBtn = (id: number) => document.getElementById(`v-${id}-duplicate`);
   const trashBtn = (id: number) => document.getElementById(`v-${id}-delete`);
 
   // R49: a row question goes with its row — a reload (the Skeleton takes the
@@ -79,9 +86,28 @@
   // Re-runs whenever `courseSlug` changes — App.svelte updates the prop in
   // place rather than remounting the component, so onMount(load) would only
   // fire on the first slug. (Same pattern as CourseView.svelte:14.)
+  // F12: the create form and its question belong to the course they were
+  // opened on. untrack: dismiss() reads `current`, and a question would
+  // otherwise re-run this effect and reload the list.
+  let switched = false;
+  let seenSlug: string | undefined;
   $effect(() => {
-    void courseSlug;
+    const slug = courseSlug;
+    untrack(() => {
+      if (seenSlug !== undefined && seenSlug !== slug) switched = true;
+      seenSlug = slug;
+      createAsk.dismiss();
+      resetCreateForm();
+      creating = false;
+      duplicatingId = null;
+    });
     void load();
+  });
+  // F12: the switch unmounted the whole frame; focus waits on the new <h1>.
+  $effect(() => {
+    if (!h1El || loading || !switched) return;
+    switched = false;
+    void repairFocus(h1El);
   });
 
   // Reset module state on unmount so a fresh entry doesn't briefly render the
@@ -126,7 +152,8 @@
   }
 
   async function createVersion() {
-    if (!course || !newLabel.trim() || createAsk.open) return; // the label is mandatory; R48
+    // F1: Create stays focusable while busy, so the guard is here.
+    if (busy || !course || !newLabel.trim() || createAsk.open) return; // the label is mandatory; R48
     // bind:value on <input type="number"> yields null when empty and NaN on
     // partial input; decimals (e.g. 5.5) parse cleanly but the backend
     // requires int (Pydantic ge=1/le=10) and 422s with an opaque message.
@@ -143,6 +170,7 @@
     const savedCourseId = course.id;
     const savedSlug = courseSlug;
     busy = true;
+    createBusy = true;
     try {
       const v = await api.post<Version>(`/api/courses/${savedCourseId}/versions`, { info_md, max_quiz_attempts: n, label: newLabel });
       navigate(`/courses/${savedSlug}/edit/v/${v.id}`);
@@ -151,6 +179,9 @@
       pushToast(msg, 'error');
     } finally {
       busy = false;
+      createBusy = false;
+      // F1: Cancel is disabled while busy; a focus the browser dropped there comes back to Create.
+      void repairFocus(createBtn);
     }
   }
 
@@ -252,12 +283,13 @@
   }
 
   async function duplicateVersion(v: Version) {
-    if (!dupLabel.trim()) return; // the label is mandatory
+    if (busy || !dupLabel.trim()) return; // the label is mandatory; F1: Create copy stays focusable while busy
     // Pin id + slug before the await (prop-change-mid-await guard, mirroring
     // createVersion above).
     const savedId = v.id;
     const savedSlug = courseSlug;
     busy = true;
+    dupBusy = true;
     try {
       const nv = await api.post<Version>(`/api/versions/${savedId}/duplicate`, { label: dupLabel });
       pushToast('Version duplicated', 'success');
@@ -267,6 +299,8 @@
       pushToast(msg, 'error');
     } finally {
       busy = false;
+      dupBusy = false;
+      void repairFocus(copyBtn);
     }
   }
 </script>
@@ -320,7 +354,7 @@
               <span class="slots">
                 <IconButton size="sm" glyph="pencil" title="Open" aria-label="Open v{v.id}" disabled={busy}
                   onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)} />
-                <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}"
+                <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}" id={`v-${v.id}-duplicate`}
                   disabled={busy || dupReason !== null} onclick={() => void openDuplicate(v)} />
                 {#if v.is_disabled}
                   <IconButton size="sm" glyph="enable" title="Enable" aria-label="Enable v{v.id}" id={`v-${v.id}-toggle`} disabled={busy}
@@ -343,10 +377,12 @@
             <li class="dup-row" {@attach (el) => { el.toggleAttribute('inert', rowAsk.current?.key === v.id); }}>
               <form class="dup" onsubmit={(e) => { e.preventDefault(); duplicateVersion(v); }}>
                 <label>New draft label
-                  <input class="dup-label" type="text" maxlength="200" required bind:value={dupLabel} bind:this={dupInputEl} disabled={busy} />
+                  <!-- F1: readonly, not disabled, so Enter keeps focus here. -->
+                  <input class="dup-label" type="text" maxlength="200" required bind:value={dupLabel} bind:this={dupInputEl} readonly={busy} />
                 </label>
-                <Button type="submit" disabled={busy || !dupLabel.trim()} loading={busy}>Create copy</Button>
-                <Button variant="ghost" onclick={() => (duplicatingId = null)} disabled={busy}>Cancel</Button>
+                <Button type="submit" disabled={!dupLabel.trim()} loading={dupBusy} aria-disabled={busy && !dupBusy} bind:element={copyBtn}>Create copy</Button>
+                <!-- F1: Cancel unmounts itself; focus goes back to the row's Duplicate. -->
+                <Button variant="ghost" onclick={() => { duplicatingId = null; void repairFocus(dupBtn(v.id), h1El); }} disabled={busy}>Cancel</Button>
               </form>
             </li>
           {/if}
@@ -371,7 +407,7 @@
             <AskSlot ask={createAsk} />
           {:else}
             <Button variant="ghost" disabled={busy} onclick={() => void cancelCreate()}>Cancel</Button>
-            <Button type="submit" disabled={busy || !newLabel.trim()} loading={busy}>Create</Button>
+            <Button type="submit" disabled={!newLabel.trim()} loading={createBusy} aria-disabled={busy && !createBusy} bind:element={createBtn}>Create</Button>
           {/if}
         </div>
       </form>

@@ -174,6 +174,30 @@ describe('Publish and Unpublish focus (R33, spec §Focus)', () => {
     unmount(cmp);
   });
 
+  // F7: the failure's refetch reveals a violation, which natively disables the
+  // focused Publish run. jsdom keeps focus on a button that turns disabled, so
+  // a stand-in drops it the way a browser does.
+  it('a failed Publish that reveals a violation leaves focus on Publish, else the readiness heading', async () => {
+    const { target, cmp, props } = mountTab();
+    props.onPublish = vi.fn(async (): Promise<PublishOutcome> => {
+      props.readiness = { checks: [NO_TEACHER, VERSION, ASSIGNED_NA, SIZES_NA] };
+      flushSync();
+      const stand = document.createElement('button');
+      target.append(stand);
+      stand.focus();
+      stand.remove();
+      return 'failed';
+    });
+    const pub = btn(target, 'publish')!;
+    pub.focus();
+    pub.click();
+    await settle();
+    expect(pub.disabled).toBe(true);
+    expect(document.activeElement).toBe(target.querySelector('h2.ov-title[tabindex="-1"]'));
+    expect(document.activeElement!.textContent).toBe('Publish readiness');
+    unmount(cmp);
+  });
+
   it('Unpublish opens the one-line confirm with focus on its Cancel; Cancel returns focus to Unpublish', async () => {
     const { target, cmp } = mountTab({ run: { is_published: true } });
     btn(target, 'unpublish')!.click();

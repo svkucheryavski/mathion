@@ -2274,6 +2274,41 @@ describe('DashboardSidePanel — earlier submissions and Retry (6c T6)', () => {
       .toContain('Auto-accepted on resubmission. No manual evaluation needed.');
   });
 
+  // F9: the first load can find the newest already evaluated (another teacher), which
+  // swaps the focused create form for the evaluation card.
+  it('the first thread load moves focus to the Evaluation heading, else ×', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    const evaluated = { submissions: [{ ...t.entry.latest_submission!, evaluation: {
+      id: 77, evaluated_at: '2026-06-05T12:00:00Z', evaluated_by: { user_id: 9, full_name: 'Other Prof' },
+      result: 'accepted', score: 88, feedback_text: 'Done', has_feedback_file: false } }] };
+    let resolveThread!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { resolveThread = r; })));
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    resultRadio('accepted').focus();
+    expect(document.activeElement).toBe(resultRadio('accepted'));
+    resolveThread(new Response(JSON.stringify(evaluated), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe('Evaluation');
+    expect(document.activeElement?.tagName).toBe('H3');
+  });
+
+  it('a thread load that swaps nothing leaves focus where it is, even on the panel (review r1)', async () => {
+    const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
+    let resolveThread!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { resolveThread = r; })));
+    mountPanel({ target: t, isAdmin: true });
+    await settle();
+    // Safari: a click on a radio focuses the nearest focusable ancestor, the panel.
+    const panel = host.querySelector<HTMLElement>('section.modal-panel')!;
+    panel.focus();
+    resolveThread(new Response(JSON.stringify(echoThread(t)), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await settle();
+    expect(host.querySelector('form[aria-label="Write evaluation"]')).not.toBeNull();
+    expect(document.activeElement).toBe(panel);
+  });
+
   it('Retry → focus on the panel title', async () => {
     const t = submissionTarget({ status: 'awaiting_eval', submissionId: 100 });
     let calls = 0;

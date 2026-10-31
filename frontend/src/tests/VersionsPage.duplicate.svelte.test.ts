@@ -197,3 +197,322 @@ describe('VersionsPage — Duplicate', () => {
     expect(target.querySelector<HTMLButtonElement>('button[aria-label="Duplicate v7"]')!.disabled).toBe(true);
   });
 });
+
+// C7 point 1 and 3: F1 (the duplicate row and the create form) and F12 (a course switch).
+describe('VersionsPage — focus after an action (F1, F12)', () => {
+  const field = (sel: string) => target.querySelector<HTMLInputElement>(sel)!;
+  const btn = (form: string, text: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>(`${form} button`)].find((b) => b.textContent?.trim() === text)!;
+  function type(input: HTMLInputElement, value: string) {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+  function hold() {
+    let release!: () => void;
+    postMock.mockReturnValue(new Promise((_, rej) => { release = () => rej(new Error('boom')); }));
+    return () => release();
+  }
+
+  it('F1: Duplicate Cancel returns focus to the row\'s Duplicate, else the h1', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    btn('form.dup', 'Cancel').focus();
+    btn('form.dup', 'Cancel').click();
+    await settle();
+    expect(target.querySelector('form.dup')).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('button[aria-label="Duplicate v7"]'));
+
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    // Duplicate turns unavailable meanwhile: the chain goes on to the <h1>.
+    const dup = target.querySelector<HTMLButtonElement>('button[aria-label="Duplicate v7"]')!;
+    btn('form.dup', 'Cancel').focus();
+    dup.disabled = true;
+    btn('form.dup', 'Cancel').click();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('h1'));
+    dup.disabled = false;
+  });
+
+  it('F1: Enter in the busy label input keeps focus (readonly, not disabled)', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    const release = hold();
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    const input = field('input.dup-label');
+    expect(document.activeElement).toBe(input);
+    target.querySelector<HTMLFormElement>('form.dup')!.requestSubmit();
+    await settle();
+    expect(input.disabled).toBe(false);
+    expect(input.readOnly).toBe(true);
+    expect(document.activeElement).toBe(input);
+    release();
+    await settle();
+    expect(input.readOnly).toBe(false);
+  });
+
+  it('F1: Create copy and Create stay focusable while busy and show loading', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    let release = hold();
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    const copy = btn('form.dup', 'Create copy');
+    copy.focus();
+    copy.click();
+    await settle();
+    expect(copy.disabled).toBe(false);
+    expect(copy.getAttribute('aria-busy')).toBe('true');
+    expect(copy.hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(copy);
+    release();
+    await settle();
+    expect(document.activeElement).toBe(copy);   // a failure keeps focus where it was
+    btn('form.dup', 'Cancel').click();
+    await settle();
+
+    release = hold();
+    clickButtonByText(target, '+ Add version');
+    await settle();
+    type(field('input.new-label'), 'Spring');
+    const create = btn('form.create', 'Create');
+    create.focus();
+    create.click();
+    await settle();
+    expect(create.disabled).toBe(false);
+    expect(create.getAttribute('aria-busy')).toBe('true');
+    expect(create.hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(create);
+    release();
+    await settle();
+    expect(document.activeElement).toBe(create);
+  });
+
+  it('F1: Enter twice in the create form sends one POST', async () => {
+    const release = hold();
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickButtonByText(target, '+ Add version');
+    await settle();
+    type(field('input.new-label'), 'Spring');
+    const form = target.querySelector<HTMLFormElement>('form.create')!;
+    form.requestSubmit();
+    await settle();
+    form.requestSubmit();
+    await settle();
+    expect(postMock).toHaveBeenCalledTimes(1);
+    release();
+    await settle();
+  });
+
+  it('F1: Enter twice in the duplicate form sends one POST', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    const release = hold();
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    const form = target.querySelector<HTMLFormElement>('form.dup')!;
+    form.requestSubmit();
+    await settle();
+    form.requestSubmit();
+    await settle();
+    expect(postMock).toHaveBeenCalledTimes(1);
+    release();
+    await settle();
+  });
+
+  function switchTo(props: { courseSlug: string }, slug: string, name: string, versions: Version[]) {
+    props.courseSlug = slug;
+    flushSync();
+    // The loader is stubbed: land the new course as it would.
+    versionsPageState.course = { id: 2, slug, name, description: '', is_admin: true };
+    versionsPageState.versions = versions;
+    flushSync();
+  }
+
+  it('F12: a course switch focuses the new h1 once loaded', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    const props = $state({ courseSlug: 'c' });
+    component = mount(VersionsPage, { target, props });
+    await settle();
+    target.querySelector<HTMLAnchorElement>('#v-7-title')!.focus();
+    props.courseSlug = 'd';
+    flushSync();
+    expect(target.querySelector('h1')).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    await settle();
+    switchTo(props, 'd', 'D', [mkVersion({ id: 9, course_id: 2, label: 'Winter' })]);
+    await settle();
+    const h1 = target.querySelector('h1')!;
+    expect(h1.textContent).toBe('D');
+    expect(document.activeElement).toBe(h1);
+  });
+
+  it('F12: a course switch dismisses the create question, resets the form and closes it', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    const props = $state({ courseSlug: 'c' });
+    component = mount(VersionsPage, { target, props });
+    await settle();
+    clickButtonByText(target, '+ Add version');
+    await settle();
+    type(field('input.new-label'), 'Draft');
+    field('input.new-label').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('form.create .inline-confirm')).not.toBeNull();
+
+    switchTo(props, 'd', 'D', []);
+    await settle();
+    expect(target.querySelector('form.create')).toBeNull();
+    clickButtonByText(target, '+ Add version');
+    await settle();
+    expect(target.querySelector('form.create .inline-confirm')).toBeNull();
+    expect(field('input.new-label').value).toBe('');
+  });
+});
+
+// Task 4 review r1.
+describe('VersionsPage — focus after an action, review r1', () => {
+  const field = (sel: string) => target.querySelector<HTMLInputElement>(sel)!;
+  const btn = (form: string, text: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>(`${form} button`)].find((b) => b.textContent?.trim() === text)!;
+  function type(input: HTMLInputElement, value: string) {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+  // jsdom keeps focus on a control that turns disabled; a browser drops it.
+  function dropFocus() {
+    const stand = document.createElement('button');
+    target.append(stand);
+    stand.focus();
+    stand.remove();
+  }
+
+  it('Create and Create copy show the spinner only for their own request; another action blocks them', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' }), mkVersion({ id: 8, label: 'Spring' })];
+    let release!: () => void;
+    postMock.mockReturnValue(new Promise<undefined>((r) => { release = () => r(undefined); }));
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    // A row action on v8 holds the page's busy flag.
+    clickByLabel(target, 'Disable v8');
+    await settle();
+    target.querySelector<HTMLButtonElement>('li.vrow > .ask-row .inline-confirm button.confirm')!.click();
+    await settle();
+    const copy = btn('form.dup', 'Create copy');
+    expect(copy.hasAttribute('aria-busy')).toBe(false);
+    expect(copy.getAttribute('aria-disabled')).toBe('true');
+    expect(copy.disabled).toBe(false);
+    copy.click();
+    await settle();
+    expect(postMock).toHaveBeenCalledTimes(1);   // only the Disable
+    release();
+    await settle();
+    expect(copy.hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('the create form\'s Create shows the spinner only for its own request', async () => {
+    versionsPageState.versions = [mkVersion({ id: 8, label: 'Spring' })];
+    let release!: () => void;
+    postMock.mockReturnValue(new Promise<undefined>((r) => { release = () => r(undefined); }));
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickButtonByText(target, '+ Add version');
+    await settle();
+    type(field('input.new-label'), 'Winter');
+    clickByLabel(target, 'Disable v8');
+    await settle();
+    target.querySelector<HTMLButtonElement>('li.vrow > .ask-row .inline-confirm button.confirm')!.click();
+    await settle();
+    const create = btn('form.create', 'Create');
+    expect(create.hasAttribute('aria-busy')).toBe(false);
+    expect(create.getAttribute('aria-disabled')).toBe('true');
+    expect(create.disabled).toBe(false);
+    release();
+    await settle();
+  });
+
+  it('a failed Create copy or Create repairs a focus the browser dropped during the request', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    let fail!: () => void;
+    postMock.mockImplementation(() => new Promise((_, rej) => { fail = () => rej(new Error('boom')); }));
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    target.querySelector<HTMLFormElement>('form.dup')!.requestSubmit();
+    await settle();
+    dropFocus();
+    fail();
+    await settle();
+    expect(document.activeElement).toBe(btn('form.dup', 'Create copy'));
+    btn('form.dup', 'Cancel').click();
+    await settle();
+
+    clickButtonByText(target, '+ Add version');
+    await settle();
+    type(field('input.new-label'), 'Winter');
+    target.querySelector<HTMLFormElement>('form.create')!.requestSubmit();
+    await settle();
+    dropFocus();
+    fail();
+    await settle();
+    expect(document.activeElement).toBe(btn('form.create', 'Create'));
+  });
+
+  it('F12: a switch away and back does not re-open the duplicate row', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    const props = $state({ courseSlug: 'c' });
+    component = mount(VersionsPage, { target, props });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    await settle();
+    expect(target.querySelector('form.dup')).not.toBeNull();
+    props.courseSlug = 'd';
+    flushSync();
+    versionsPageState.course = { id: 2, slug: 'd', name: 'D', description: '', is_admin: true };
+    versionsPageState.versions = [];
+    flushSync();
+    await settle();
+    props.courseSlug = 'c';
+    flushSync();
+    versionsPageState.course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    flushSync();
+    await settle();
+    expect(target.querySelector('form.dup')).toBeNull();
+  });
+
+  it('F12: the first entry does not focus the <h1>; a switch focuses it only once the new course has loaded', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7, label: 'Fall' })];
+    const props = $state({ courseSlug: 'c' });
+    component = mount(VersionsPage, { target, props });
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+    props.courseSlug = 'd';
+    versionsPageState.loading = true;
+    flushSync();
+    await settle();
+    // Still loading: the new frame is not up.
+    versionsPageState.course = { id: 2, slug: 'd', name: 'D', description: '', is_admin: true };
+    versionsPageState.versions = [];
+    flushSync();
+    await settle();
+    expect(target.querySelector('h1')!.textContent).toBe('D');
+    expect(document.activeElement).toBe(document.body);
+    versionsPageState.loading = false;
+    flushSync();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('h1'));
+  });
+});

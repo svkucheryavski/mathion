@@ -763,6 +763,46 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       panel.querySelector('[data-testid="asset-row-2"] [data-testid="delete-trash"] button'));
   });
 
+  // F11: the error line takes the rows' place, the focused question with them.
+  it('a failed list reload moves focus to the drop zone, else the panel', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
+      .mockRejectedValue(new Error('down'));
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    flushSync();
+    expect(document.activeElement).toBe(panel.querySelector('.inline-confirm button.cancel'));
+    props.refreshKey = 1;
+    await settleAll();
+    expect(panel.querySelector('.error-inline')!.textContent).toBe('Could not load assets.');
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(panel.querySelector('[data-testid="drop-zone"]'));
+  });
+
+  it('a failed reload closes an idle question; a later good reload neither re-opens it nor takes focus (review r1)', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    flushSync();
+    props.refreshKey = 1;
+    await settleAll();
+    // The author goes back to the editor.
+    const text = document.createElement('textarea');
+    panel.append(text);
+    text.focus();
+    props.refreshKey = 2;
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-1"]')).not.toBeNull();
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(text);
+    text.remove();
+  });
+
   it('a reload that keeps the row of an idle question leaves focus where the author moved it (R57, whole-branch review)', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
     const { panel, props } = mountInPanel();
