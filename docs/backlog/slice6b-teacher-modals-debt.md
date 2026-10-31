@@ -14,7 +14,6 @@ Review round 1 (Opus + Fable), both CLEAN; minors:
 - **Layout loop test leak.** In "shows the drawn note in all three layouts" a throwing `expect` skips `unmount(cmp)`, leaving a Modal on the stack and failing the scroll-lock test for the wrong reason. Fix: `try/finally`, or assign to `component`.
 - **Gate (ak) pins.** `.pc-runs` `gap:12px` and the ellipsis trio on `.pc-title` / `.pc-emails li` are not pinned (not in the spec's key list). Optional hardening.
 - **Gate (ak) D11 row reads comments.** It greps raw source, so a later comment naming `closeOnBackdrop` would red the gate. Keep the convention of never naming the prop in a comment, or strip comments as `emoji_scan` does.
-- **Observation (pre-existing, every `ui/Modal` since 5b):** a mouse click in Safari does not focus Publish, so focus returns to `<body>` after Close. For the browser-pass notes, not a 6b change.
 
 ## Task 2 — New run and Switch
 
@@ -65,7 +64,6 @@ Review round 1 (Opus + Fable), both CLEAN. Minors:
 ## Whole-branch review (8074983..ac57cdc)
 
 Fresh Opus + Fable, both "with fixes". Fixed: a failed refresh after a successful Publish now closes with "Published (refresh failed — reload to see latest)" (the Task 4 minor above, re-graded Important); the empty-roster "Import roster from CSV" link now hands focus to the toolbar's Import roster, so Done returns focus to a button that survives the refetch. Fix-pass check (Opus + Fable) CLEAN. Minors:
-- **Import result stage: Enter/Esc on × disables the focused ×.** `onDone` sets `closing`, and `closeDisabled={submitting || closing}`, so × is disabled under focus until the refetch ends (Chrome blurs it to `<body>`; FocusTrap then restores the opener). Fix: drop `closing` from `closeDisabled` (`closeForCurrentStage` already ignores × and Esc while closing), or move focus to Done first.
 - **The server-error banner sits at the bottom of the editor body.** At 1000px the assets sidebar stacks and the body scrolls, so a failed Save can show its banner below the fold (pre-6b position; New run puts its banner at the top). Glance in the browser pass.
 - **Review Focus 3 has no stacked-modal test.** No 6b path opens one modal while another closes; 5b's `Modal.svelte.test.ts` covers out-of-order unmounts.
 - **`openImportFromLink` should not scroll.** `importBtnEl?.focus({ preventScroll: true })`, in case the roster header moves in 6c.

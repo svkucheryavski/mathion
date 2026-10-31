@@ -37,7 +37,6 @@ Review round 1 (Opus + Fable). Both lanes reported one shared Minor that the con
 
 ## Task 4
 
-- **A course switch mid-question** (VersionsPage stays mounted; only `courseSlug` rebinds): a row question is dismissed but its `<h1>` target is gone under the Skeleton, so focus stays on `<body>`; an open #16 question survives the switch with the form (`creating` was never reset — today's behaviour). Fix: dismiss `createAsk` and reset `creating` in the `courseSlug` effect; optionally focus the new `<h1>` once it loads. (both lanes)
 - **Test gaps, VersionsPage:** the R49 effect (an idle or busy row question while an external reload starts, or while its row disappears), an R49 `withdraw` after confirm (state flipped / row deleted while asking), the last row's delete falling back to "+ Add version", a failed #17 (focus to the trigger), and #16's R48 / R53 (Enter in a field does not submit while it asks; a second Esc refocuses its Cancel). (both lanes)
 - **Test gaps, VersionEditPage:** `withdraw` when `offered(action)` turns false while asking, and a failed #21 (focus back to Delete). (both lanes)
 - **`VersionsPage.svelte` comment "load() pins courseSlug internally"** is inaccurate (it reads the live prop; `loadGen` makes the race harmless). Pre-existing wording; fix when the file is next touched. (Fable lane)
@@ -76,7 +75,6 @@ Fresh Opus + Fable on 7e02f70..ec0d5bc. Fixed in this pass (test-first): the pub
 
 - **Two questions on screen in the quiz item modal**: with an inline edit's own question open (D10 at an answer row, or the key question), × or Back draws the page question in the body-top row; the inline one sits inert beneath it. Cancel brings it back; nothing is lost. Fix: `ownOpen()` also reports the open edit's question, so the guard refuses and focuses it (R53). (Fable)
 - **Body-top precedence is not defended**: `{#if bodyAsk.open}` comes before the page question; a `bodyAsk.ask()` while the page question is drawn would hide it with its navigation pending. Unreachable today (the body is inert; `openTitle` / `askDelete` check `asking`). (Fable)
-- **AssetSidebar: a failed list reload with an idle question focused** — the list error replaces the list, and focus falls to `<body>`. Contrived (a list GET failing right after a click). (controller)
 - **AssetSidebar: an `assetContext` swap with focus in the sidebar's question** drops focus to `<body>` (the rows go before anything refocuses). Unreachable today: a version or run change unmounts the host modal. Fix: read `untrack(questionHasFocus)` before clearing, then fall back to the drop zone or panel. (Fable, round 4)
 - Ruling (not fixed): ChoiceAnswers' `onDestroy` dismisses the key question without moving focus — the key question exists only on a published version, where no question can be deleted, so its card cannot leave while it asks; a whole-modal teardown has its own focus. (Opus)
 

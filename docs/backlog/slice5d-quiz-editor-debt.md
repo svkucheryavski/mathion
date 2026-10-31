@@ -61,8 +61,6 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
 ### T4 — the quiz header
 - A tree reload that lands while the title field is open is not applied on Cancel: the header keeps the
   pre-rename title until `item.title` changes again (a `pendingTitle` fix) (Opus M1 / Fable M1).
-- The header title's ✓ loses focus on a 403/409 permission flip (no `$effect.pre` repair there, unlike
-  InlineInput) (T5 lane carry-over).
 - The title error renders as the modal body's first line, not literally after the h2 (user approved; Opus M4).
 
 ### T5 — choice answers

@@ -11,9 +11,6 @@ codex unavailable). None blocks the slice; each is input for the final polish sl
 
 ## T2 — Versions page (3a)
 
-- **Focus after a row action.** Duplicate's Cancel unmounts the focused button, so focus falls to
-  `<body>`. Return focus to the row's Duplicate once the action settles. (The Disable / Enable half was
-  fixed in Polish 1; Polish 3 F1 takes the rest.)
 - **The versions count has no screen-reader context.** `<span class="mono count">2</span>` after the
   `<h2>` is announced as a bare "2". Add a visually-hidden " versions" (or an `aria-label`).
 - **Create-version 422 with an array detail** toasts "Please correct the highlighted fields." with

@@ -11,10 +11,6 @@ badges) never had entries here.
 
 ## T1 — Modal shell
 
-- **Modal: autofocus on a disabled or inert target.** FocusTrap's priority chain picks the first
-  selector that *matches*, so a disabled `[data-autofocus]` (or one under `bodyInert`) wins, `.focus()`
-  is a no-op, and focus stays behind the modal until the first Tab. Fix: after autofocus, if the panel
-  does not contain `document.activeElement`, run `refocus(false)`.
 - **Modal: a drag-select released on the backdrop closes the modal** when `closeOnBackdrop` is set
   (mousedown in a field, mouseup outside → the click target is the backdrop). Fix: record the mousedown
   target and close only when both ends are the backdrop. No 5b caller sets `closeOnBackdrop`.
@@ -93,10 +89,6 @@ badges) never had entries here.
 
 ## T3a — ItemEditorModal + PageBody (interim quiz/app)
 
-- **ItemEditorModal: a mouse-clicked Save or Discard drops focus to `<body>`** (the button disables while
-  saving / once clean). The next ⌘S then misses the dialog scope and opens the browser's own Save
-  dialog; the next Tab starts behind the modal. Fix: in `save()`'s finally and `discard()`, refocus Title
-  (or Save / ×) when focus fell to `<body>`. (Both lanes.)
 - **ItemEditorModal: ⌘S is scoped to any `section.modal-panel`**, not this modal's own — a stacked modal
   (Slice 6) would save the item underneath. Fix: compare against the own panel.
 - **PageBody: plain / readOnly branches have no accessible name** (the T2 hand-off was not applied here).
@@ -196,7 +188,6 @@ badges) never had entries here.
 - **A stale `save-error` / `save-note` after the author types the value back.** A failed question that is typed back to its baseline is clean, so it is skipped by Save and by `discardAll`, and the red message stays until the accordion remounts. Fix: clear `lastError` / `saveNote` in an effect when `!dirty`.
 - **A two-correct single-choice key takes two clicks to repair.** When the server holds two correct options, the browser shows only the last radio (B) checked. Clicking B fires no `change` (OptionRow `onchange`), while the header still reads "2 correct". Fix: `onclick={() => onMark(true)}` on the radio. `mark()` is idempotent.
 - **The question editor isn't focused when it is on its Preview tab.** `focusInvalidNow` looks for `[data-field="text"] textarea`, which MarkdownEditor renders only in edit mode. The error text and header mark still show. Fix: switch the editor to edit mode, or focus its tab button.
-- **⌘S with focus on a correct-mark radio or checkbox drops focus to `<body>`.** `frozen` disables checkables, and a disabled control loses focus. This is the same family as the mouse-Save focus loss. Fix: refocus in the modal's `save()` `finally` when `activeElement === body`.
 - **The add-question inputs stay writable while frozen** (QuizEditor `new-question-text` / `new-numeric` / `new-precision` / `new-text-answer`). This is harmless because Save never sends them, and T5b rewrites these forms. Fix: `readonly={frozen}`.
 - **The toast "Save again to send the rest."** also appears when the failing question was the only dirty part. The wording is mandated by the brief.
 - **A test describes the server as trimming option text, but it doesn't.** QA test ~:289 says the server's normalised echo is written back, but `OptionUpdate.text` has no strip, so the real echo is `'Alpha '`. Behaviour matches the old blur-commit. Fix: reword the test, or trim client-side as the question fields do.
@@ -265,5 +256,4 @@ badges) never had entries here.
 - **A typed add-question/add-option form keeps the trash disabled while the footer shows nothing to discard** (Opus). The tooltip says "save or discard changes first", but Discard is disabled. This is the twin of the T5b footer-Discard vs × entry. Fix: a tooltip that names the open form.
 - **Plan ruling R15 is stale** (both lanes). Since the T5a fix, a question that landed part of its PATCHes returns `'partial'`. The spec was updated in T7; the plan wasn't. Doc-only.
 - **× has no reason tooltip while frozen** (saving/deleting). It is disabled with the plain "Close" title.
-- **⌘S with focus on × drops focus to `<body>`** (final round 2, Opus). Since the fix, × disables while saving, so focus on it falls to `<body>`, and the next ⌘S opens the browser's Save dialog. This is the same family as the mouse-Save focus loss (T3a entry, :90). The `save()` `finally` refocus suggested there covers this too.
 - **A server failure mid-plan after a confirmed browser Back is silent** (final round 2, Fable). The plan now finishes after unmount, but `QuizEditor.svelte:161` gates the partial-failure toast on `alive && stillOnVid`, so a failing `{is_correct:false}` PATCH leaves two correct options with no feedback. Rare: it needs both a confirmed discard and a server error. The Toaster is global. Fix: drop `alive &&` for the failure toast when `stillOnVid(savedVid)`.

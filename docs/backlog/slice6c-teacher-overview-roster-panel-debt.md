@@ -20,7 +20,6 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **Network failures on Publish / Unpublish are silent.** `doPublish` / `doUnpublish` in `RunDetailPage.svelte` toast only for an `ApiError`. A `TypeError` (offline) returns `'failed'` with no message: the button stops spinning, or the confirm closes, with no reason given. This predates 6c. Fix: an `else` toast "Could not publish the run." / "Could not unpublish the run.".
 - **The Unpublish confirm's own Unpublish says nothing during a field save.** With the confirm open, a teacher can still ✎ a field and press Enter. While that PATCH runs, the confirm's Unpublish returns without a word: it isn't greyed and has no title. R32 names only the footer Unpublish. Fix: a disabled reason passed through `InlineConfirm`, or close the confirm when a field save starts.
 - **🗑 still closes the open panel while it is `aria-disabled`** during a field save or the switch request. `toggleDelete`'s close branch runs before the `runWrite` guard. This is harmless, since no delete request is running, but R44 says the handler returns at once. Fix: guard the close branch with `runWrite` too.
-- **Focus can drop to `<body>` after a failed publish whose refetch reveals a new violation** (e.g. the last teacher was removed elsewhere). Publish run becomes natively disabled and loses focus. The case is rare. Fix: on `'failed'`, `await tick(); if (publishBlocked) focusFirst([readyHead]);`.
 - **Backend: the published check reads the row loaded before the advisory locks** (`api/runs.py`, delete). The window against a concurrent publish is accepted per D28 and documented in the comment. A `db.refresh(run)` after the lock loop would narrow it at no cost.
 
 ## Task 3 — Roster toolbar and add row
@@ -33,7 +32,6 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
   - a network `TypeError` says nothing.
   
   Fix: refetch outside the add's error branch, and add an `else` with a generic message.
-- **The open add row unmounts under focus if the run turns draft** (a refetch after another session unpublished it). Focus falls to `<body>`, since the toggle is disabled by then. Only reachable across sessions.
 - **No success announcement after an add.** The row just clears, with focus back in the e-mail field. Collect for the VoiceOver pass at beta.
 - **Untested:** `open-add-link` while the row is already open (it only refocuses the e-mail field).
 - **The `IconButton` link variant** never binds `element`, which is typed `HTMLButtonElement`. It does not pass `tabindex` or `aria-hidden` either. Task 6's download link needs none of these. Document or widen this if a later caller needs them.
@@ -50,7 +48,7 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **Cancel during a slow row Remove is overridden.** The confirm shows no busy state while the DELETE runs. Clicking Cancel puts focus on the row's 🗑, but the success chain then moves it to the next row's 🗑. A second Remove is ignored silently.
 - **Other rows' 🗑 are ignored silently while a remove runs** (`askRemove` returns). They have no `aria-disabled` or reason. R44 names only the strip 🗑.
 - **Row actions and the add row are not blocked during a bulk op.** This applies to the row 🗑, the row group select and Add. It matches today's behaviour, and the spec doesn't ask for more. The server stays consistent and the last refetch wins.
-- **The row group select is natively `disabled` while its request runs,** so a keyboard user's focus drops to `<body>`. This predates 6c and the spec says "disabled while that row's request runs". Check it in the VoiceOver pass at beta.
+- **The row group select is natively `disabled` while its request runs.** Since Polish 3 F8 focus comes back to it when the request lands, but it is on `<body>` meanwhile. Check what VoiceOver announces in the VoiceOver pass at beta.
 - **The strip can count a student whose row a refresh removed** ("1 selected" with no row). Found in plan review; this predates 6c.
 - **The roster's strip-gone focus fallback is unreachable today,** because failed rows stay selected, so the strip stays up. The comment says so; there is no test.
 
@@ -67,7 +65,6 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 - **T19b's `toContain('accepted')` is always true,** because the auto-accept banner contains "Auto-accepted". Fix: assert the card's badge text "Accepted".
 - **The prefill effect re-runs when `effectiveEvaluation` changes identity mid-edit** (this predates 6c). A thread that lands after an early Edit, or a grid refresh that refetches the thread, re-fills the form over in-progress edits. Focus also jumps back to the checked radio.
 - Fixed in the Safari pass (spec rev 8): ~~**A 409 doesn't reset the form**~~. The 409 branch now resets it, and × asks about unsaved edits only while the form is on screen.
-- **Focus drops to `<body>` when the first thread load replaces a focused create form** (Safari-pass review, both lanes). For example, the confirm is open from a stale cell and the thread brings an evaluation: the form and the confirm go, and focus is left on `<body>` inside the drawer. Tab re-enters the drawer, so this is no trap; a focused field already did this before 6c. Fix: after the form goes, focus the Evaluation heading, else ×.
 - **"Result is required." is effectively unreachable,** because Save is natively disabled whenever the form is invalid (this predates 6c).
 - **After a PATCH, the "Evaluated" line names the previous evaluator** until the refetch lands (this predates 6c).
 - **The `awaiting-evaluation-placeholder` hook repeats inside opened earlier submissions,** so `querySelector` returns whichever comes first. The tests scope it today.
@@ -94,7 +91,7 @@ Every step was run on a console mock that answers every write, so no dev data ch
 - `04016d5` (spec rev 8): the drawer's discard confirm sits in the form's button row, because the teacher missed it at the drawer's edge (user decision). Closing asks only while the form is on screen, and a 409 clears the lost edits.
 - `80dd43a`: a Safari click on blank drawer space focuses the panel itself, so the panel is no return target for the confirm's Cancel.
 
-Known and as specified: Safari shows no focus ring after a mouse click, Tab skips buttons by default, and focus after the drawer closes by a mouse click is `<body>`.
+Known and as specified: Safari shows no focus ring after a mouse click and Tab skips buttons by default. (Focus after the drawer closes by a mouse click now returns to the clicked cell: Polish 3 F13.)
 
 ## For the Polish slice (user, 6c Safari pass)
 

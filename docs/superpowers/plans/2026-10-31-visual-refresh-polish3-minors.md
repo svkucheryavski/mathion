@@ -421,11 +421,12 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
 - [ ] **Step 2: Run them.** Expected: FAIL, each red for its own reason (ledger the red lines).
 
 - [ ] **Step 3: Implement** to spec point 1 and the chains in point 3. In particular:
-  - `createVersion` and `duplicateVersion` start with `if (busy) return;`;
+  - `createVersion` and `duplicateVersion` start with `if (busy) return;`; each keeps its own busy flag for `loading`, with `aria-disabled` while another action holds `busy`, and repairs focus to its button after a failure (review r1);
   - busy buttons use `loading`, not `disabled`;
   - the add rows' ✓ is `aria-disabled={createBusy}`, with the re-entry guard staying in the form's `onsubmit`;
   - F10 removes `closing` from `closeDisabled`;
-  - F12's `courseSlug` effect runs `createAsk.dismiss()`, `resetCreateForm()` and `creating = false` inside `untrack`. A separate effect focuses the `<h1>` once the new course has loaded, if focus is on `<body>`.
+  - F12's `courseSlug` effect runs `createAsk.dismiss()`, `resetCreateForm()`, `creating = false` and `duplicatingId = null` inside `untrack`. A separate effect focuses the `<h1>` once the new course has loaded after a real switch, if focus is on `<body>`.
+  - Review r1–r3: F2's failures repair to the ✓ (then the field), F4's to Create (then Title) and Save; F9 repairs only on a form → card swap; F8's draft flip is an `$effect.pre` that also covers the toolbar's buttons and the empty roster's links, and the select repairs as soon as its PATCH lands (its `finally` skips while a newer change of the same select runs); F11's failed reload closes an idle question.
 
   Replace a scattered `document.activeElement === document.body` check in these files with `repairFocus`.
 
