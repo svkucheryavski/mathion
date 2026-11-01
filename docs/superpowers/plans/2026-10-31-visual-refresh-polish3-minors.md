@@ -570,6 +570,7 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
   These are teaching screens, so no 400px shots.
 
 - [ ] **Step 7: Review loop, then the commits.** Code commit: `style(polish3): teacher tables keep their corners and scroll, capped Group columns, a 0-uses label, one skeleton loading look (C4, D86, D87, C17)`.
+  - Look check (user OK): the legend on Progress moving aside while "Refreshing…" shows is accepted. Rulings: a change of run clears `data` in Progress and Submissions; the 0-uses `$effect.pre` drops the open panel id; the table-wrapper gate rows sit in their owners' blocks, new selectors in (ao), new declarations on pinned selectors (`.uses-off`, `.ro-err`) extend those rows.
 
 ### Task 8: Frontend behaviour (C8, §Behaviour, C18)
 

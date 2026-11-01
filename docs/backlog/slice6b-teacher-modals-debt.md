@@ -20,7 +20,6 @@ Review round 1 (Opus + Fable), both CLEAN; minors:
 Found while taking the shots: the plan's heading id and the Title input id collided (`${uid}-title`), so Title had no accessible name. Fixed in the task (heading `${uid}-heading`, plus a label/id test).
 
 Review round 1 (Opus + Fable), both CLEAN; minors:
-- **No-version sentence cut off.** `NewRunModal.svelte` `.nr-strip-val` is `nowrap` with an ellipsis and has no `title` in the no-version branch. In a narrow window the reason Create run is disabled reads "No published version — close this mo…", and the full text is only the disabled button's tooltip, which keyboard users never see. Fix: let that span wrap, or give it `title={NO_VERSION}`.
 - **Stale server banner.** A server-error banner from an earlier attempt stays when the next submit fails validation (pre-existing). Fix: `submitError = null` at the top of `submit()` after the guard, or on the validation-failure branch.
 - **Cross-field date error.** Editing Start date does not clear "End date must be on or after start date" even when it fixes it (meets the spec's wording). Fix if wanted: also clear the end-date error when `start_date` changes.
 - **Switch in forced-colors mode.** `border: 0` and state by background only; in Windows High Contrast on/off differ only by knob position. Fix: a `@media (forced-colors: active)` block (border `ButtonText`, on-knob `Highlight`).

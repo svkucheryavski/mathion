@@ -9,8 +9,6 @@ deferred with a ruling in the SDD ledger; none changes behaviour the spec enumer
 the final Polish slice.
 
 **Visual / behaviour (all spec-literal today)**
-- Three loading primitives coexist by slice order, not by rule: `Skeleton` (student surfaces),
-  `Spinner` (App/Login/editor pages), `LoadingPlaceholder` (teacher pages). Write the rule or merge.
 - The file input's accessible name is the wrapping label's text (the picked filename once one is
   chosen); verify with a screen reader before adding an `aria-label`.
 - Pending group (`data.group === null`): the submit cell does not render and `auto-fit` collapses the

@@ -75,7 +75,6 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 Fixed: **a late Overview save no longer overwrites another run** (Fable, Important). `setRun` now ignores a response whose `id` is not the current run, so a field or groups PATCH that lands after Back/Forward to another run can't put the old run's data on the new run's page.
 
 Deferred minors:
-- **A long e-mail doesn't wrap in the add-row error `.ro-err`.** With an e-mail that has no break points, the table grows past its column. Fix: `overflow-wrap: anywhere` on `.ro-err`. (The row-confirm warning half is stale: `InlineConfirm .warning` already wraps.)
 - **A failed forced delete is lost when the admin has left the Overview.** The `'failed'` outcome only shows in the Overview's card, which is gone after the remount. `localWrite` resets, so a second DELETE can start. Fix: a toast in `onDeleteRun`'s failure branch, or a page-level `deleting` flag.
 - **`onDeleteRun` navigates without a load-token check.** If the admin moves to another run while the DELETE runs, success still sends them to the course page. Fix: `if (myToken === loadToken)` before the navigation.
 - **A delete that returns 404** (the run was deleted elsewhere) re-arms the panel with "Run not found". Kinder: take the "Run deleted." path.

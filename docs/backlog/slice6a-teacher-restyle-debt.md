@@ -79,7 +79,6 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 
 ### T9 — Groups and Teachers
 - The "invited" chip sits inline after "—" (the plan's markup); drawing 10d puts it at the row's right, before 🗑. The user approved the screenshots as they are.
-- `.g-name` has no `overflow-wrap`: one long unbreakable group name (up to 80 characters) runs into the capacity badge. `overflow-wrap: anywhere` (as T7's `.name-box`) fixes it.
 - `addGroup`: if `createGroup` succeeds but `onRefetchGroups()` throws, the refetch error shows under the field, which still holds the created name; Save again reports "already exists".
 - `confirmDelete` (Groups): the refetch awaited inside `catch` is unguarded, so a failing refetch rejects `confirmDelete`, and InlineConfirm does not await `onConfirm`, which leaves an unhandled rejection. Pre-existing shape.
 - A non-ApiError (network) failure on group delete or teacher remove is silent (no toast). Pre-existing in both components.
@@ -89,7 +88,6 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 
 ### T10 — Mini-projects
 - P20 (user-approved): the plain "Delete this mini-project?" confirm sits beside ✎ 🗑 in the actions cell, which widens it, so the columns shift while it is open.
-- `.mp-table` uses `border-collapse: collapse`, which ignores `border-radius`, so the card corners are square (10j draws them rounded). `border-collapse: separate; border-spacing: 0` (as the Progress/Submissions grids) or a wrapper with `overflow: hidden` fixes it. T6's `.runs-table` has the same pattern.
 - After a failed force delete, focus goes to the row's 🗑 (the panel rule), and the panel stays open unarmed below it; focusing the panel's checkbox would keep a retrying user in place.
 - An admin's 409 whose refetched row is still not locked leaves the inline confirm open with no feedback (pre-existing).
 - The empty text keys off `rows.length` (mini-projects whose block is in `blocks`), so a mini-project whose block is missing from the pinned version shows "No mini-projects yet…" and "0 of N". The data model should not allow that.
@@ -97,7 +95,6 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 
 ### T11 — Assets
 - At 1000px, an extreme filename together with a very long uploader email (and the plain delete confirm open in the actions cell) squeezes the Filename column; the replace confirm already sits in its own full-width row (browser pass).
-- `.assets-table` uses `border-collapse: collapse`, so the card corners are square (same as T6 `.runs-table` and T10 `.mp-table`).
 - Tests: after a delete, the "next row's 🗑" and "previous row's 🗑" focus steps are not pinned (only the last-row → + Upload step is), and the 403 force-delete path has no focus assertion.
 
 ### Final whole-branch review (fresh Opus + Fable: no Critical; two minors re-graded Important and fixed; the rest deferred)
@@ -120,4 +117,3 @@ Fixed in the review pass: inline confirms are now groups named by their question
 - **One way to confirm a delete: in place, everywhere.** The Teaching screens confirm in the row (InlineConfirm) or in a danger panel under it (DangerConfirm), as the handoff's "never opens a second dialog" rule says; the authoring screens still use the browser's `confirm()` (~12 places: block/sequence/item deletes in BlockAccordion, SequenceAccordion, VersionEditPage; question delete in QuizBody; explanation remove; app-script remove in AppBody; version archive/revert/disable/delete in VersionsPage and VersionEditPage; the published-key confirm in KeyAnswer/ChoiceAnswers). Convert them to in-place confirms. The in-app "Discard unsaved changes?" prompts (DirtyGuard, modal closes) are part of the same question; only the close-tab/reload warning must stay the browser's (beforeunload allows nothing else).
   **Done in Polish 1** (`docs/superpowers/plans/2026-10-14-visual-refresh-polish1-confirms.md`): all 21 `confirm()` sites ask in place; only `beforeunload` stays the browser's.
 - The `download` glyph in IconButton has no consumer since Submissions' CSV became a text button (Safari pass); keep or drop.
-- Assets: the "0 uses" chip opens an empty "used by" panel (just "file — used by"). Suggest the panel say "Not used by any mini-project." (or the chip not open at 0). Seen in the Safari pass; pre-existing.
