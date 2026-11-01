@@ -7,7 +7,7 @@ Plan: `docs/superpowers/plans/2026-10-31-visual-refresh-polish3-minors.md`.
 ## Task 1 — each item its own instance, the attempt count, quiz drafts
 
 - **A submit in flight keeps its draft.** The draft is cleared only when the response arrives (`QuizItem.svelte` `submit()`). Two effects:
-  - leaving the quiz and coming back before then shows a filled, unlocked form, so the same answers can be submitted twice. The late response then drops the draft while the remounted form still shows the answers (harmless: those answers were sent). Fix: clear the draft when the request is sent and put it back if it fails;
+  - leaving the quiz and coming back before then shows a filled, unlocked form, so the same answers can be submitted twice. The late response then drops the draft while the remounted form still shows the answers (harmless: those answers were sent). Since D89 the return should show the result card; the draft present at mount keeps the open form instead. Fix: clear the draft when the request is sent and put it back if it fails, which also lets D89's card show (D89 r1, Opus M1);
   - an answer changed during the request is written to the draft and then dropped on success, while the locked form still shows it. Fix: lock the questions while `inflight`.
 
   (both lanes, r1; Opus r2)

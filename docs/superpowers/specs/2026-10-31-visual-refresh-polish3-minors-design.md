@@ -1,6 +1,6 @@
 # Visual refresh — Polish 3: the reviewers' minors that users meet
 
-**Status:** rev 13 (2026-11-01). Rev 4 approved by the user (`23f8afb`).
+**Status:** rev 14 (2026-11-01). Rev 4 approved by the user (`23f8afb`).
 - Rev 1 (`e10671b`): the user's decisions D82–D87, the controller's calls C1–C15, after the builder check.
 - Rev 2 folds in spec review round 1 (`spec-r1-opus-a.md`, `spec-r1-opus-b.md`, `spec-r1-fable.md`: 4 Critical, 18 Important, 34 Minor across the three lanes) and adds C16–C19.
 - Rev 3 folds in round 2 (`spec-r2-opus.md`, `spec-r2-fable.md`: 1 Critical, 8 Important, 20 Minor; round 2 found 18 of round 1's 22 Critical/Important resolved, 4 partly, all four finished here).
@@ -14,6 +14,7 @@
 - Rev 11 records Task 7's look check (user OK, the legend on Progress moves aside while "Refreshing…" shows): on a change of run, Progress and Submissions drop the old run's rows, so the new run loads with the Skeleton, not "Refreshing…"; a chip that drops to 0 uses also drops its open "used by" panel, so the panel does not come back with the uses; the Assets drag-over outline marks the wrapper. Review rounds `t7-r1..r3-*.md`: focus inside the open panel is repaired too; at rest the empty "Refreshing…" status cancels its flex gap, so the toolbar spacing is as before, and the gate pins that gap.
 - Rev 12 records Task 8's look check (user OK) and its calls: the create form asks nothing while Create's request runs, and its navigation question is the D37 wording; every offline write says "Could not reach server. Check your connection."; a bulk refetch that fails is quiet; New item's form is `novalidate`; the video body's prefix and length messages; the Teaching pill's address. Its review (r1) adds: a list error drops the create form, and InlineName shows the message of a plain `Error` only.
 - Rev 13 records Task 9's look check (user OK: a PDF and a PNG open in the browser's viewer, a CSV downloads, the run date message at 1280) and its calls: the run date messages give the day with two digits, as `formatShortDate` does ("01 Jan 2026"); a stripped link is found on the markdown tokens, not by a pattern over nh3's output; the range is checked only when a PATCH sends a date (review r1).
+- Rev 14 records the user's D89 from the Safari pass: a quiz submitted with attempts left shows that result again on return, replacing C13's "Showing the last result again is not in scope".
 
 **Branch:** `feat/visual-refresh-polish3-minors`, cut from the Polish 2 tip `71dd8cc`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-31-visual-refresh-polish3-minors/` (`inventory.html`: the grouped backlog and the recon; the review rounds `spec-r*-*.md`).
@@ -52,6 +53,7 @@ The user's, made in the brainstorm on 2026-10-31.
 - **D86 — One loading look: the skeleton rows.** The five teacher screens that show an italic "Loading…" line (`LoadingPlaceholder`) show the grey skeleton rows (`Skeleton`), like the student and editor pages. `LoadingPlaceholder` is deleted. The boot spinner in `App.svelte` and `Login.svelte` stays, because there is no page yet to hold skeleton rows.
 - **D87 — "0 uses" is a label, not a button.** On a run's Assets tab, a file used by no mini-project shows its grey "0 uses" chip as plain text. It has no button and no empty "used by" panel, so there is one Tab stop fewer. A chip with uses keeps opening its list.
 - **D88 — Only the student screens must work on a phone.** "This service can not be fully functional on small screen. We keep this option so student can do some quick actions on mobile phone, like check video, quiz or progress, but the part about course admin and teaching admin is not intended to be functional on small screens." (user, after the 400px shots). The 400px rule of D82 covers Login, the course list, the course page, the player and the mini-project page. The authoring screens (Versions, the editor and its modals) and the teaching screens (Teaching, a course's runs, a run's tabs) are laptop screens: a sideways scroll or a cramped header there at 400px is not a defect.
+- **D89 — A submitted quiz shows its result when the student comes back.** "I submitted my answers and did not ask for make a new attempt, why they disappeared? Why I do not see them and I do not see how many were correct?" (user, Safari pass, step 6). A quiz with attempts used and some left opens on the last result: the answers locked, the score, "Attempt N of M" and Try again, as right after the submit. This holds after moving away and after a reload. The correct answers stay hidden until the last attempt is used (the reveal). Details in §Each item its own instance, and the attempt count.
 
 ### The controller's calls
 
@@ -104,11 +106,13 @@ Not decided by the user. They are listed here so the user can check them while r
 ### Each item its own instance, and the attempt count (C13)
 
 - `{#key item.id}` wraps `ItemRouter`'s whole `{#if}` chain, inside `ItemRouter.svelte`. It is not placed in `SequencePlayer`: the gate's AST pin for SequencePlayer (`visual-refresh-gate.sh` ~`:1381`) allows no `KeyBlock`, and its SIG list pins `ItemRouter:[item={currentItem} …]`. The ItemRouter grep rows (~`:1171`) are unaffected by the `{#key}`. This also remounts `VideoItem` and `InteractiveAppItem` between two items of the same type. That is new: today video → video reuses the instance and carries its `busy` over.
-- A successful submit also writes the response into the course store's item entry: `attempt_count`, plus any other per-item field the response carries that the store holds. A `recordQuizAttempt(res)` beside `markItemCovered` would do it. Coming back to a quiz then shows the right attempts left, or auto-loads the reveal once they are used up. Showing the last result again is not in scope.
+- A successful submit also writes the response into the course store's item entry: `attempt_count`, plus any other per-item field the response carries that the store holds. A `recordQuizAttempt(res, answers)` beside `markItemCovered` does it (the answers since rev 14). Coming back to a quiz then shows the right attempts left, or auto-loads the reveal once they are used up.
+- **The last result on return (D89, rev 14).** The course state already carries each quiz's `last_score` and `last_answers` (`api/student.py`, from `user_item_states`), and `recordQuizAttempt(res, answers)` now writes the answers sent as well as the score, so a return in the same session and a reload read the same fields. When `QuizItem` mounts on a quiz with at least one attempt used, attempts left and a `last_score`, it shows the result card from them: the answers locked, "Score: N / M", "Attempt N of M" and Try again. Try again opens an empty form, as after a submit. Try again lasts while the student stays on the quiz: leaving before answering anything and coming back shows the result again, since no new attempt has started. A draft present at mount wins over the stored result, since it is a new attempt in progress. With no `last_score` the quiz opens an empty form, as before.
 - Tests:
   - quiz A → submit → Next to quiz B: B opens unanswered and unlocked, and B's submit sends only B's question ids;
   - submit A on its last attempt → Next → Previous: A shows the reveal, not an open form;
-  - a submit with attempts left → Next → Previous: A shows an empty form and the right number left.
+  - a submit with attempts left → Next → Previous: A shows its result, locked, with Try again (D89); Try again gives an empty form and the right number left;
+  - a result stored before the page load shows when the quiz opens, also when the course snapshot arrives after the mount; a draft started after Try again wins on a remount.
 
 ### Drafts (D83, C14)
 
@@ -116,7 +120,7 @@ Not decided by the user. They are listed here so the user can check them while r
 - `QuizItem` keeps its own `answers`; the store is a mirror. `QuizItem` starts from the stored draft when one exists and writes every change back.
 - Drafts are written only while a user is signed in (`session.user` is not null). Unit tests set a session user.
 - **"Holds answers"** uses the same test as `allAnswered` (`QuizItem.svelte:79-86`): a non-empty array, or a string that is not blank. A draft with no such entry is removed. Otherwise text typed and erased leaves `{qid: ''}`, and the leave-page warning stays on with nothing to lose.
-- A successful submit deletes the store entry, keyed by `res.item_id`. `item` must not be read after the `await`; `:22-27` explains why. The component's own `answers` stays, because the locked result reads it through `valueFor()` (`:53-59`). "Try again" starts from an empty draft, as today.
+- A successful submit deletes the store entry, keyed by `res.item_id`. `item` must not be read after the `await`; `:22-27` explains why. The component's own `answers` stays, because the locked result reads it through `valueFor()` (`QuizItem.svelte:71-78`). "Try again" starts from an empty draft, as today.
 - **Sign-out versus an expired session (C14).** The session store has one `clearSession()` (`stores/session.svelte.ts:11`) with two callers:
   - `logout()` (`lib/auth.svelte.ts:49`), when the user chooses to sign out;
   - the 401 handler (`main.ts:12-17`), which sends the student to `/login?next=…` without a reload.
@@ -451,7 +455,8 @@ Then a whole-branch review (fresh Opus and Fable) and a Safari pass, one step at
   - reload with answers: the browser warns;
   - sign out and in: no answers;
   - two quizzes in a row: submit the first, Next: the second opens unanswered and unlocked;
-  - use the last attempt, leave, come back: the reveal shows.
+  - use the last attempt, leave, come back: the reveal shows;
+  - submit with attempts left, leave, come back, and reload: the result shows with Try again (D89).
 - **In-app links:**
   - a link to another Mathion page in a quiz prompt mid-quiz moves without a reload (the top bar does not flash), the answers stay, and the new page opens at its top;
   - a `#heading` link leaves the player on its item;
