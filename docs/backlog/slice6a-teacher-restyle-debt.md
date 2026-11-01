@@ -36,7 +36,6 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - Round 2: the DangerConfirm group and its button are announced with the same words ("Force delete, group" … "Force delete, button"); a name like "Confirm force delete" would read better. Cosmetic.
 
 ### T4 — run pages under /teaching
-- Staff notification emails still link to `/courses/{slug}/runs/{id}` (`backend/mathion/notifications/templates.py:35` `_staff_url`, pinned by `backend/tests/test_notifications_templates.py:44,58`). They work through RunsRedirect, which is why the two redirect routes must never be removed. Switch `_staff_url` to `/teaching/...` in 6b/6c (the spec allows only T1's backend change in 6a).
 - The gate's D3 grep cannot see an address built by concatenation (`'/courses/' + slug + '/runs'`) or from a variable; and excluding all of `routes.ts` would hide a future third old route. None exists today.
 - No test pins the route table itself (`/teaching/s/runs/8` → RunDetailPage, the old address → RunsRedirect); the App-level test covers it indirectly.
 - `RunDetailPage.svelte:276` encodes `courseSlug` (a decoded route param) while the other links interpolate `course.slug` raw (API slugs are `[a-z0-9-]`). Harmless; noted so nobody "fixes" one side.

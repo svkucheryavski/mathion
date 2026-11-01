@@ -37,8 +37,6 @@ Collected from the per-task review lanes (T1–T8). Each line: what, where, why 
   not widened by 5d.
 - `delete_option` can leave a single-choice question with no correct answer. Pre-existing; publish validation
   blocks publishing it.
-- A PATCH with an explicit `{"is_correct": null}` or `{"text": null}` returns a 500 (IntegrityError) instead of
-  a 422. Pre-existing.
 - No test pins the SQL order "the question's lock SELECT comes before any answer-row write".
 - Closed, not deferred: item / sequence / block / version / course deletes no longer cascade answer rows before
   the question — `passive_deletes=True` on `Question.options` lets Postgres cascade after the question row is

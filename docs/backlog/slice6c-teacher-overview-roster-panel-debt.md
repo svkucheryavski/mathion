@@ -7,7 +7,6 @@ Review minors and browser-pass findings, by task. Each entry says where it lives
 
 ## Task 1 — Overview details and settings
 
-- **Backend: a PATCH of only `start_date` past `end_date` is accepted** (`backend/mathion/api/runs.py:91-93` compares the new end against the old start only). Pre-existing; the per-field editor makes it as easy as before. Fix: compare against `updates.get("start_date", run.start_date)` and add a test.
 - **Leaving mid-save resets the Overview's lock** (by design, Review Focus 1): a remounted Overview can start a second write while the first is in flight, and a failure of the first is lost (its `InlineName` is gone). Fix if it bites: lift the in-flight flag to the page, as Task 2 does for publish.
 - **A 422 field list reads "Please correct the highlighted fields."** (only for a date the server cannot parse, e.g. a 6-digit year). The first item's `msg` would read better.
 - **After a save, focus returns to ✎ even if the teacher tabbed away during the request.** Consistent with 6a §Focus ("back to the control that started the action"); noted so the browser pass expects it.

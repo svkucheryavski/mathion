@@ -696,6 +696,8 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
 
 - [ ] **Step 7: Review loop, then the commits.** Code commit: `fix(polish3): course PDFs and images open in the tab with nosniff, staff links to /teaching, run dates checked both ways, explicit nulls 422 where a field cannot be empty, stripped links stay text (D84, C9–C12)`.
 
+  Done 2026-11-01 (spec rev 13): the run date messages pad the day ("01 Jan 2026"), as `formatShortDate` does; the stripped-link check is a markdown-it core rule that asks nh3 whether it keeps each `href`, not a regex over nh3's output (nh3 leaves `<` and `>` unescaped in attribute values); the range is checked only when a date is sent (review r1); the locale test sets `de_DE.UTF-8` when the machine has it. The look check needed a fresh sign-in and three uploads (dev rows: PIN 43, session 44, assets 12–14 on Draft v15), deleted at slice end.
+
 ### After Task 9
 
 - [ ] Whole-branch review, `71dd8cc..HEAD`: one fresh Opus and one fresh Fable lane. Fix every Critical and Important, re-running both after every fix.
