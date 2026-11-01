@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2432
+EXPECTED_CHECKS=2486
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4739,6 +4739,12 @@ uniq1 teach-table
 if [[ -n $REPLY ]]; then
   N=TeacherRunListPage; H=$REPLY
   chk "\.teach-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)' 'color:var\(--text-3\)'
+  # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
+  # wrapper. It clips the grey header corners and scrolls a table wider than its
+  # container instead of cutting it off; the table's borders stay separate.
+  d '\.table-scroll' '' 'overflow-x:auto' 'margin-top:14px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.teach-table' '' 'border-collapse:separate' 'border-spacing:0'
+  none "TeacherRunListPage .teach-table has no border, radius or margin of its own (Polish 3)" "\.teach-table\.${H}\{[^}]*(border:|border-radius:|margin-top:)"
   # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
   d '\.teach-page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
   sweep TeacherRunListPage $H
@@ -4749,6 +4755,12 @@ uniq1 runs-table
 if [[ -n $REPLY ]]; then
   N=RunListPage; H=$REPLY
   chk "\.runs-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)'
+  # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
+  # wrapper. It clips the grey header corners and scrolls a table wider than its
+  # container instead of cutting it off; the table's borders stay separate.
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.runs-table' '' 'border-collapse:separate' 'border-spacing:0'
+  none "RunListPage .runs-table has no border or radius of its own (Polish 3)" "\.runs-table\.${H}\{[^}]*(border:|border-radius:)"
   d '\.runs-count' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
   # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
   d '\.runs-page' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:var\(--space-3\) var\(--space-3\) var\(--space-4\)'
@@ -4817,7 +4829,8 @@ if [[ -n $REPLY ]]; then
   # beside the pinned Group column (12rem), not under it. +4px: the status and
   # header buttons keep the global outset ring (2px at a 2px offset), and focus
   # scrolling aligns the button's box, not its ring.
-  d '\.table-scroll' '' 'scroll-padding-left:calc\(12rem ?\+ ?4px\)'
+  # C18 (Polish 3): and 4px on the right, so a focused button's outset ring stays inside the scrollport.
+  d '\.table-scroll' '' 'scroll-padding-left:calc\(12rem ?\+ ?4px\)' 'scroll-padding-right:4px'
   d '\.chip-disabled' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
   # 9a centres the mini-project headers and badges; qualified so they outrank
   # `.submission-grid th, .submission-grid td { text-align: left }`.
@@ -4890,6 +4903,15 @@ if [[ -n $REPLY ]]; then
   d '\.chip-published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
   d '\.chip-locked' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
   d '\.mp-dl' '' 'font-family:var\(--font-mono\)'
+  # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
+  # wrapper. It clips the grey header corners and scrolls a table wider than its
+  # container instead of cutting it off; the table's borders stay separate.
+  # Under separate borders the header's line and the first row's would both
+  # draw, so the first body row drops its top border.
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.mp-table' '' 'border-collapse:separate' 'border-spacing:0'
+  none "RunMiniProjectsTab .mp-table has no border or radius of its own (Polish 3)" "\.mp-table\.${H}\{[^}]*(border:|border-radius:)"
+  chk "\.mp-table\.${H} tbody:where\(\.${H}\) tr:where\(\.${H}\):first-child td:where\(\.${H}\)" 'border-top:0'
   # Safari pass (user, 2026-10-11): the deadline labels stand apart from the dates.
   d '\.dl-kind' '' 'font-weight:600' 'color:var\(--text\)'
   d '\.mp-banner' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
@@ -4909,10 +4931,21 @@ uniq1 assets-table
 if [[ -n $REPLY ]]; then
   N=RunAssetsTab; H=$REPLY
   d '\.bulk-strip' '' 'background:var\(--surface-2\)'
+  # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
+  # wrapper. It clips the grey header corners and scrolls a table wider than its
+  # container instead of cutting it off; the table's borders stay separate.
+  # The first body row drops its top border (the header line draws once), and
+  # the drag-over outline marks the wrapper.
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.assets-table' '' 'border-collapse:separate' 'border-spacing:0'
+  none "RunAssetsTab .assets-table has no border or radius of its own (Polish 3)" "\.assets-table\.${H}\{[^}]*(border:|border-radius:)"
+  chk "\.assets-table\.${H} tbody:where\(\.${H}\) tr:where\(\.${H}\):first-child td:where\(\.${H}\)" 'border-top:0'
+  chk "\.run-assets-tab\.drag-over\.${H} \.table-scroll:where\(\.${H}\)(,[^{]*)?" 'outline:2px dashed var\(--primary\)'
   # The Uses chip stays on one line when the table narrows (browser-found, 6a T11).
   d '\.uses-chip' '' 'white-space:nowrap'
   d '\.uses-on' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
-  d '\.uses-off' '' 'background:var\(--status-not-submitted-bg\)' 'color:var\(--status-not-submitted-fg\)'
+  # D87 (Polish 3): at 0 uses the chip is a plain span; the button's pointer does not carry over.
+  d '\.uses-off' '' 'background:var\(--status-not-submitted-bg\)' 'color:var\(--status-not-submitted-fg\)' 'cursor:default' 'display:inline-block'
   # C1: an error banner takes the danger panel's colours.
   d '\.banner-error' '' 'background:var\(--danger-panel-bg\)' 'border-left-color:var\(--danger\)' 'color:var\(--danger-panel-fg\)'
   d '\.banner-info' '' 'background:var\(--surface-2\)' 'border-left-color:var\(--primary\)'
@@ -5123,7 +5156,7 @@ if [[ -n $REPLY ]]; then
   # The draft banner is the 6a info precondition banner.
   d '\.ro-info' '' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)'
   d '\.ro-add' '' 'display:flex' 'background:var\(--surface-2\)' 'border:1px solid var\(--border\)'
-  d '\.ro-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  d '\.ro-err' '' 'font-size:12px' 'color:var\(--danger\)' 'overflow-wrap:anywhere'
   d '\.ro-link' '' 'color:var\(--primary\)' 'text-decoration:underline'
   none "RunRosterTab has no add-row form under the table (D25)" "\.add-row\.${H}"
   d '\.ro-strip' '' 'display:flex' 'padding:8px 12px' 'background:var\(--primary-soft\)' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)'
@@ -5811,6 +5844,47 @@ if [[ -n $REPLY ]]; then
   chk "\.drop\.${H}:has\(input:where\(\.${H}\):disabled\) \.drop-label:where\(\.${H}\)" 'color:var\(--faint\)'
   d '\.members' '' 'overflow-wrap:anywhere'
 fi
+# The teacher screens (Task 7). C4: the Group columns are capped at their set
+# width (less the cell's 24px of padding and 1px right border) and a long name
+# wraps, so the D73/D74 scroll padding holds. C17: a Refresh over data keeps the
+# table and says "Refreshing…" in muted text beside the control; at rest the
+# empty status cancels its flex gap. (C18's scroll padding extends the pinned
+# Submissions .table-scroll row.)
+uniq1 heat-legend
+if [[ -n $REPLY ]]; then
+  N=RunProgressTab; H=$REPLY
+  d '\.group-box' '' 'width:calc\(6rem - 25px\)' 'overflow-wrap:anywhere'
+  d '\.refreshing' '' 'color:var\(--muted\)'
+  d '\.refreshing' ':empty' 'margin-left:-8px'
+  d '\.pg-right' '' 'gap:8px'   # the gap the :empty margin cancels
+fi
+uniq1 submission-grid
+if [[ -n $REPLY ]]; then
+  N=RunSubmissionTab; H=$REPLY
+  d '\.group-box' '' 'width:calc\(12rem - 25px\)' 'overflow-wrap:anywhere'
+  d '\.refreshing' '' 'color:var\(--muted\)'
+  d '\.refreshing' ':empty' 'margin-left:-6px'
+  d '\.sub-right' '' 'gap:6px'  # the gap the :empty margin cancels
+fi
+# Long words: a group name without spaces wraps in its row.
+uniq1 group-list
+if [[ -n $REPLY ]]; then
+  N=RunGroupsTab; H=$REPLY
+  d '\.g-name' '' 'overflow-wrap:anywhere'
+fi
+# The New run strip: with no published version the reason wraps, no ellipsis.
+uniq1 nr-strip
+if [[ -n $REPLY ]]; then
+  N=NewRunModal; H=$REPLY
+  d '\.nr-strip-val\.wrap' '' 'white-space:normal'
+fi
+# D86: one loading look. LoadingPlaceholder is gone; the teacher screens show Skeleton.
+if [[ ! -e src/components/ui/LoadingPlaceholder.svelte ]] && ! grep -rq 'LoadingPlaceholder' src; then
+  echo "PASS  LoadingPlaceholder is deleted and nothing names it (D86)"
+else
+  echo "FAIL  LoadingPlaceholder still exists or is named in src (D86)"; fail=1
+fi
+none "no .loading-placeholder rule in the bundle (D86)" "\.loading-placeholder"
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail

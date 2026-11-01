@@ -10,7 +10,7 @@
   import { routeClick } from '../../lib/routeClick';
   import { pushToast } from '../../stores/toasts.svelte';
   import { session } from '../../stores/session.svelte';
-  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
   import RunOverviewTab, {
     type DeleteOutcome, type PublishOutcome, type Readiness, type ReadinessRow, type UnpublishOutcome,
   } from '../../components/runs/RunOverviewTab.svelte';
@@ -399,7 +399,7 @@
   {:else if loadError}
     <ErrorState variant="page" title={loadError.displayMessage} action={backToTeaching} />
   {:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null || blocks === null || miniProjects === null || assets === null}
-    <LoadingPlaceholder label="Loading run…" />
+    <Skeleton rows={3} label="Loading run…" />
   {:else}
     <header class="run-head">
       <TeachingCrumbs course={course} runTitle={run.title} />

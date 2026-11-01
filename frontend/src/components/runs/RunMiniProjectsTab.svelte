@@ -293,59 +293,61 @@
         <strong>Click + New mini-project to assign one to a block.</strong>
       </p>
     {:else}
-      <table class="mp-table">
-        <thead>
-          <tr>
-            <th scope="col">Block</th>
-            <th scope="col">{dlHeader}</th>
-            <th scope="col">State</th>
-            <th scope="col"><span class="vh">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each rows as r (r.mp.id)}
-            {@const status = rowStatus(r.mp)}
-            {@const reason = editReason(r.mp)}
-            <tr data-role="mp-row">
-              <td class="mp-block">{r.label}</td>
-              <td class="mp-dl">
-                {#each deadlineParts(r.mp) as p, i (p.kind)}
-                  {#if i > 0}<span class="mp-sep" aria-hidden="true">·</span>{/if}
-                  <span class="dl" title={formatLocalWithTz(p.iso)}><span class="dl-kind">{p.kind}</span> {formatShortDeadline(p.iso)}</span>
-                {/each}
-              </td>
-              <td><span class="mp-chip chip-{status}">{status}</span></td>
-              <td class="mp-actions">
-                <span class="row-icons">
-                  <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? 'Edit'}
-                              disabled={reason !== undefined} data-action="edit" bind:element={pencilEls[r.mp.id]}
-                              onclick={() => { editTarget = r.mp; modalMode = 'edit'; }} />
-                  <IconButton glyph="trash" size="sm" danger aria-label="Delete {r.aria}" title="Delete"
-                              data-action="delete" bind:element={trashEls[r.mp.id]}
-                              onclick={() => (deleteConfirmId = r.mp.id)} />
-                </span>
-              </td>
+      <div class="table-scroll">
+        <table class="mp-table">
+          <thead>
+            <tr>
+              <th scope="col">Block</th>
+              <th scope="col">{dlHeader}</th>
+              <th scope="col">State</th>
+              <th scope="col"><span class="vh">Actions</span></th>
             </tr>
-            {#if deleteConfirmId === r.mp.id}
-              <!-- Both confirms open as a full-width row under their row (Safari
-                   pass): the plain one on one line, the danger panel for a locked row. -->
-              <tr class="mp-panel-row">
-                <td colspan="4">
-                  {#if status === 'locked'}
-                    <DangerConfirm message={forceMessage} busy={forceBusy}
-                                   disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
-                                   onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
-                  {:else}
-                    <InlineConfirm row align="end" takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
-                                   confirmDataAction="confirm-delete"
-                                   onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
-                  {/if}
+          </thead>
+          <tbody>
+            {#each rows as r (r.mp.id)}
+              {@const status = rowStatus(r.mp)}
+              {@const reason = editReason(r.mp)}
+              <tr data-role="mp-row">
+                <td class="mp-block">{r.label}</td>
+                <td class="mp-dl">
+                  {#each deadlineParts(r.mp) as p, i (p.kind)}
+                    {#if i > 0}<span class="mp-sep" aria-hidden="true">·</span>{/if}
+                    <span class="dl" title={formatLocalWithTz(p.iso)}><span class="dl-kind">{p.kind}</span> {formatShortDeadline(p.iso)}</span>
+                  {/each}
+                </td>
+                <td><span class="mp-chip chip-{status}">{status}</span></td>
+                <td class="mp-actions">
+                  <span class="row-icons">
+                    <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? 'Edit'}
+                                disabled={reason !== undefined} data-action="edit" bind:element={pencilEls[r.mp.id]}
+                                onclick={() => { editTarget = r.mp; modalMode = 'edit'; }} />
+                    <IconButton glyph="trash" size="sm" danger aria-label="Delete {r.aria}" title="Delete"
+                                data-action="delete" bind:element={trashEls[r.mp.id]}
+                                onclick={() => (deleteConfirmId = r.mp.id)} />
+                  </span>
                 </td>
               </tr>
-            {/if}
-          {/each}
-        </tbody>
-      </table>
+              {#if deleteConfirmId === r.mp.id}
+                <!-- Both confirms open as a full-width row under their row (Safari
+                     pass): the plain one on one line, the danger panel for a locked row. -->
+                <tr class="mp-panel-row">
+                  <td colspan="4">
+                    {#if status === 'locked'}
+                      <DangerConfirm message={forceMessage} busy={forceBusy}
+                                     disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
+                                     onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
+                    {:else}
+                      <InlineConfirm row align="end" takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
+                                     confirmDataAction="confirm-delete"
+                                     onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
+                    {/if}
+                  </td>
+                </tr>
+              {/if}
+            {/each}
+          </tbody>
+        </table>
+      </div>
     {/if}
   </section>
 
@@ -397,7 +399,11 @@
   .linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
   .mp-empty { margin: 0; font-size: 13px; color: var(--muted); }
 
-  .mp-table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 13px; }
+  /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
+     as on Progress and Submissions. It clips the grey header corners, which a
+     table's own radius does not, and scrolls a table wider than its container. */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .mp-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   .mp-table th {
     padding: 8px 12px;
     text-align: left;
@@ -408,6 +414,8 @@
     border-bottom: 1px solid var(--border);
   }
   .mp-table td { padding: 6px 12px; border-top: 1px solid var(--border-soft); color: var(--text); vertical-align: middle; }
+  /* Separate borders: the header's line draws once, not again as the first row's top. */
+  .mp-table tbody tr:first-child td { border-top: 0; }
   .mp-dl { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
   .mp-sep { margin: 0 6px; color: var(--faint); }
   .mp-actions { width: 1%; white-space: nowrap; text-align: right; }

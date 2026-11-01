@@ -5,7 +5,7 @@
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
   import { blockPositions } from '../../lib/blockNumbers';
   import type { BlockResponse } from '../../lib/types';
-  import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
+  import Skeleton from '../ui/Skeleton.svelte';
   import ErrorState from '../ui/ErrorState.svelte';
   import IconButton from '../ui/IconButton.svelte';
   import Button from '../ui/Button.svelte';
@@ -58,6 +58,7 @@
     // previous run can silently empty the new run's grid).
     groupFilter = 'all';
     selectedIds = null;
+    data = null;          // another run's grid never stands in while this one loads
     loading = true;
     error = null;
     getMiniProjectsDashboard(runId, { signal: ctl.signal })
@@ -229,8 +230,10 @@
 <div class="tab-container" data-test="run-submission-tab" data-can-write={canWrite ? 'true' : 'false'}>
   {#if error}<ErrorState title="Could not load submissions." message={error} onretry={refresh} />{/if}
 
-  {#if loading}
-    <LoadingPlaceholder />
+  <!-- D86/C17: the Skeleton is the first load only; a Refresh over data (after
+       every evaluation save) keeps the grid and says so beside the control. -->
+  {#if loading && !data}
+    <Skeleton rows={6} />
   {/if}
 
   {#if data}
@@ -248,6 +251,8 @@
             {/each}
           </select>
           <div class="sub-right">
+            <!-- Mounted while the grid is: a live region inserted with its text is often not announced. -->
+            <span class="refreshing" role="status">{loading ? 'Refreshing…' : ''}</span>
             <IconButton glyph="refresh" title="Refresh" onclick={refresh} />
             <!-- A text button, as on Progress (Safari pass: one look for one action). -->
             <Button variant="secondary" data-action="download-csv" onclick={handleDownloadCSV}>Download CSV</Button>
@@ -273,8 +278,10 @@
               {#each visibleGroups as g (g.group_id)}
                 <tr>
                   <th scope="row" class="sticky-group">
-                    <span class="g-name" class:off={g.group_is_disabled}>{g.group_name}</span>
-                    {#if g.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                    <div class="group-box">
+                      <span class="g-name" class:off={g.group_is_disabled}>{g.group_name}</span>
+                      {#if g.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                    </div>
                   </th>
                   {#each data.mini_projects as mp (mp.id)}
                     {@const cell = mp.groups.find((x) => x.group_id === g.group_id)}
@@ -313,7 +320,7 @@
 
 <style>
   .sub-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .sub-right { margin-left: auto; display: flex; gap: 6px; }
+  .sub-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
   .sub-control {
     box-sizing: border-box;
     height: var(--control-h-sm);
@@ -330,7 +337,7 @@
      the pinned Group column (12rem), not under it. +4px: the status and header
      buttons keep the global outset ring (2px at a 2px offset), and focus scrolling
      aligns the button's box, not its ring. */
-  .table-scroll { overflow-x: auto; scroll-padding-left: calc(12rem + 4px); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .table-scroll { overflow-x: auto; scroll-padding-left: calc(12rem + 4px); scroll-padding-right: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   /* Natural width (Group 12rem, one-line headers): a run with many mini-projects
      scrolls sideways inside .table-scroll instead of squeezing the columns. */
   .submission-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
@@ -357,7 +364,13 @@
   .mp-head { position: sticky; top: 0; z-index: 1; min-width: 11rem; }
   .mp-line2 { display: block; margin-top: 2px; font-family: var(--font-mono); font-size: 11px; font-weight: 400; color: var(--muted); white-space: nowrap; }
 
+  /* C4: the Group column holds at 12rem less the cell's 24px of padding and 1px
+     right border; a long group name wraps, so the scroll padding (D74) holds. */
+  .group-box { width: calc(12rem - 25px); overflow-wrap: anywhere; }
   .g-name.off { color: var(--muted); }
+  .refreshing { font-size: 12px; color: var(--muted); }
+  /* At rest the empty status takes no room: -6px cancels .sub-right's 6px gap. */
+  .refreshing:empty { margin-left: -6px; }
   .chip-disabled {
     display: inline-block;
     margin-left: 6px;

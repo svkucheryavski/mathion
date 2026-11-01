@@ -190,7 +190,7 @@
       {#if pinned}
         <span class="nr-strip-val" title={pinned.label ? `will use ${pinned.label} · v. ${pinned.id}` : undefined}>will use {#if pinned.label}{pinned.label}{' '}·{' '}{/if}<span class="nr-ver mono">v. {pinned.id}</span></span>
       {:else}
-        <span class="nr-strip-val">{NO_VERSION}</span>
+        <span class="nr-strip-val wrap">{NO_VERSION}</span>
       {/if}
     </p>
   </form>
@@ -258,6 +258,8 @@
   }
   .nr-strip-key { color: var(--muted); }
   .nr-strip-val { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  /* The no-version reason is an instruction: it wraps rather than ending in an ellipsis. */
+  .nr-strip-val.wrap { white-space: normal; }
   .nr-ver {
     font-size: 11.5px;
     color: var(--muted);

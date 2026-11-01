@@ -95,10 +95,10 @@ function submissionMock(overrides: Record<string, unknown> = {}) {
 describe('RunSubmissionTab', () => {
 
   // T1 – Loading state
-  it('renders LoadingPlaceholder before fetch resolves', () => {
+  it('renders the Skeleton before fetch resolves', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     mountTab();
-    expect(host.querySelector('.loading-placeholder, [role="status"]')).toBeTruthy();
+    expect(host.querySelector('.skeleton')).toBeTruthy();
   });
 
   // T2 – Status grid renders when data loads
@@ -438,8 +438,9 @@ describe('RunSubmissionTab', () => {
     const refreshBtn = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
     refreshBtn.click();
     flushSync();
-    // LoadingPlaceholder shows
-    expect(host.querySelector('.loading-placeholder, [role="status"]')).toBeTruthy();
+    // "Refreshing…" shows, no Skeleton (C17)
+    expect(host.textContent).toContain('Refreshing…');
+    expect(host.querySelector('.skeleton')).toBeNull();
     // Table rows still visible (stale data not cleared)
     expect(host.textContent).toContain('G1');
     // Cleanup
@@ -464,7 +465,7 @@ describe('RunSubmissionTab', () => {
     flushSync();
     // INTERMEDIATE STATE: error cleared, loading is showing (spec §13 line 1676)
     expect(host.querySelector('.banner-error, [role="alert"]')).toBeFalsy();
-    expect(host.querySelector('.loading-placeholder, [aria-busy="true"]')).toBeTruthy();
+    expect(host.querySelector('.skeleton')).toBeTruthy();   // no data yet: the first-load Skeleton
     // Resolve the retry fetch with success data
     resolveRetry(new Response(JSON.stringify(submissionMock()), { status: 200 }));
     await settle();
@@ -887,4 +888,85 @@ describe('RunSubmissionTab', () => {
     resolveRefresh(new Response(JSON.stringify(submissionMock()), { status: 200 }));
   });
 
+});
+
+// ---- Polish 3 Task 7 — one loading look (D86, C17) ----
+
+const refreshingEl = () => Array.from(host.querySelectorAll('[role="status"]')).find((e) => !e.closest('.skeleton')) ?? null;
+
+describe('RunSubmissionTab (Polish 3 — loading)', () => {
+  it('the first load shows the Skeleton', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    mountTab();
+    flushSync();
+    const sk = host.querySelector('.skeleton');
+    expect(sk).not.toBeNull();
+    expect(sk!.getAttribute('role')).toBe('status');
+    expect(sk!.querySelectorAll('.row')).toHaveLength(6);
+    expect(sk!.textContent).toContain('Loading…');
+  });
+
+  it('a Refresh over data keeps the rows and shows "Refreshing…", with no Skeleton', async () => {
+    let resolveRefresh!: (v: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(submissionMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveRefresh = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab();
+    await settle();
+    (host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(host.querySelector('.skeleton')).toBeNull();
+    expect(host.textContent).toContain('G1');
+    expect(host.textContent).toContain('Refreshing…');
+    resolveRefresh(new Response(JSON.stringify(submissionMock()), { status: 200 }));
+    await settle();
+    expect(host.textContent).not.toContain('Refreshing…');
+  });
+
+  it('the status element stays mounted and empty between refreshes', async () => {
+    let resolveRefresh!: (v: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(submissionMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveRefresh = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab();
+    await settle();
+    const status = refreshingEl();
+    expect(status).not.toBeNull();
+    expect(status!.textContent).toBe('');
+    (host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(refreshingEl()).toBe(status);
+    expect(status!.textContent).toBe('Refreshing…');
+    resolveRefresh(new Response(JSON.stringify(submissionMock()), { status: 200 }));
+    await settle();
+    expect(refreshingEl()).toBe(status);
+    expect(status!.textContent).toBe('');
+  });
+
+  it('a change of run shows the Skeleton, not "Refreshing…" over the old run\'s rows (rev 11)', async () => {
+    let resolveNext!: (v: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(submissionMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveNext = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    const props = $state({ runId: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(RunSubmissionTab, { target: host, props });
+    await settle();
+    expect(host.textContent).toContain('G1');
+    props.runId = 2;
+    flushSync();
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/runs/2/dashboard/mini-projects');   // run 2 is asked for
+    expect(host.querySelector('.skeleton')).not.toBeNull();
+    expect(host.textContent).not.toContain('G1');
+    expect(host.textContent).not.toContain('Refreshing…');
+    resolveNext(new Response(JSON.stringify(submissionMock()), { status: 200 }));
+    await settle();
+    expect(host.querySelector('.skeleton')).toBeNull();
+    expect(host.textContent).toContain('G1');           // the new run's rows
+    expect(host.textContent).not.toContain('Refreshing…');
+  });
 });

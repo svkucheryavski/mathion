@@ -4,7 +4,7 @@
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
   import { blockPositions } from '../../lib/blockNumbers';
   import type { BlockResponse } from '../../lib/types';
-  import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
+  import Skeleton from '../ui/Skeleton.svelte';
   import ErrorState from '../ui/ErrorState.svelte';
   import IconButton from '../ui/IconButton.svelte';
   import Button from '../ui/Button.svelte';
@@ -53,6 +53,7 @@
     nameQuery = '';
     panelOpen = false;
     panelTarget = null;
+    data = null;          // another run's rows never stand in while this one loads
     loading = true;
     error = null;
     getProgressDashboard(runId, { signal: ctl.signal })
@@ -369,7 +370,9 @@
 <svelte:window onkeydown={tipKey} onscroll={restoreTip} onresize={restoreTip} />
 
 <div class="tab-container">
-  {#if loading}<LoadingPlaceholder />{/if}
+  <!-- D86/C17: the Skeleton is the first load only; a Refresh over data keeps
+       the table and says so beside the control. -->
+  {#if loading && !data}<Skeleton rows={6} />{/if}
   {#if error}
     <ErrorState title="Could not load progress." message={error} onretry={refresh} />
   {/if}
@@ -405,6 +408,8 @@
           </span>
           <span class="hl-end">100%</span>
         </span>
+        <!-- Mounted while the table is: a live region inserted with its text is often not announced. -->
+        <span class="refreshing" role="status">{loading ? 'Refreshing…' : ''}</span>
         <IconButton glyph="refresh" title="Refresh" onclick={refresh} />
         <Button variant="secondary" data-action="download-csv" onclick={handleDownloadCSV}>Download CSV</Button>
       </div>
@@ -456,8 +461,10 @@
                 </div>
               </th>
               <td class="sticky-group">
-                {s.group_name ?? '—'}
-                {#if s.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                <div class="group-box">
+                  {s.group_name ?? '—'}
+                  {#if s.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                </div>
               </td>
               {#each data.sequences as seq, i (seq.sequence_id)}
                 <td class="cell" style={cellInlineStyle(s, i, mode)}>
@@ -622,6 +629,12 @@
      instead of widening the column under the Group cell. 25px = the cell's
      12px side paddings + its 1px right border. */
   .name-box { width: calc(14rem - 25px); white-space: normal; overflow-wrap: anywhere; }
+  /* C4: the same for the Group column (6rem): a long group name wraps instead of
+     widening the column, so the 20rem scroll padding (D73) holds. */
+  .group-box { width: calc(6rem - 25px); overflow-wrap: anywhere; }
+  .refreshing { font-size: 12px; color: var(--muted); }
+  /* At rest the empty status takes no room: -8px cancels .pg-right's 8px gap. */
+  .refreshing:empty { margin-left: -8px; }
   .pg-name.off { font-style: italic; color: var(--muted); }
   .chip-disabled {
     display: inline-block;

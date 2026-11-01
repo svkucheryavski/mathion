@@ -315,3 +315,18 @@ describe('RunListPage', () => {
     unmount(cmp);
   });
 });
+
+// ---- Polish 3 Task 7 — one loading look (D86) ----
+describe('RunListPage (Polish 3 — loading)', () => {
+  it('the first load shows the Skeleton', () => {
+    fetchSpy.mockImplementation(() => new Promise<Response>(() => {}));
+    const { target, cmp } = open();
+    flushSync();
+    const sk = target.querySelector('.skeleton');
+    expect(sk).not.toBeNull();
+    expect(sk!.getAttribute('role')).toBe('status');
+    expect(sk!.querySelectorAll('.row')).toHaveLength(3);
+    expect(sk!.textContent).toContain('Loading runs…');
+    unmount(cmp);
+  });
+});

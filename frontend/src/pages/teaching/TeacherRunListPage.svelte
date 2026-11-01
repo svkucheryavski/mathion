@@ -5,7 +5,7 @@
   import { runStatus, RUN_STATUS_LABEL } from '../../lib/runStatus';
   import { formatShortDate } from '../../lib/datetime';
   import { routeClick } from '../../lib/routeClick';
-  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
   import EmptyState from '../../components/ui/EmptyState.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
   import FilterPills from '../../components/ui/FilterPills.svelte';
@@ -91,7 +91,7 @@
   <h1>Teaching</h1>
 
   {#if loading}
-    <LoadingPlaceholder label="Loading runs…" />
+    <Skeleton rows={3} label="Loading runs…" />
   {:else if error}
     <ErrorState title="Could not load runs." message={error} onretry={load} retryLabel="Try again" />
   {:else if rows.length === 0}
@@ -102,30 +102,32 @@
     {#if visible.length === 0}
       <p class="empty">No {pillLabel(pill)} runs.</p>
     {:else}
-      <table class="teach-table">
-        <thead>
-          <tr>
-            <th scope="col">Title</th>
-            <th scope="col">Course</th>
-            <th scope="col">Status</th>
-            <th scope="col">Students</th>
-            <th scope="col">Start</th>
-            <th scope="col">End</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each visible as { row, status } (row.run.id)}
+      <div class="table-scroll">
+        <table class="teach-table">
+          <thead>
             <tr>
-              <td><a href={runUrl(row.course_slug, row.run.id)} onclick={(e) => routeClick(e, runUrl(row.course_slug, row.run.id))}>{row.run.title}</a></td>
-              <td><a class="course-link" href={courseUrl(row.course_slug)} onclick={(e) => routeClick(e, courseUrl(row.course_slug))}>{row.course_name}</a></td>
-              <td><RunStatusChip {status} /></td>
-              <td class="num">{row.student_count}</td>
-              <td class="num">{formatShortDate(row.run.start_date)}</td>
-              <td class="num">{formatShortDate(row.run.end_date)}</td>
+              <th scope="col">Title</th>
+              <th scope="col">Course</th>
+              <th scope="col">Status</th>
+              <th scope="col">Students</th>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {#each visible as { row, status } (row.run.id)}
+              <tr>
+                <td><a href={runUrl(row.course_slug, row.run.id)} onclick={(e) => routeClick(e, runUrl(row.course_slug, row.run.id))}>{row.run.title}</a></td>
+                <td><a class="course-link" href={courseUrl(row.course_slug)} onclick={(e) => routeClick(e, courseUrl(row.course_slug))}>{row.course_name}</a></td>
+                <td><RunStatusChip {status} /></td>
+                <td class="num">{row.student_count}</td>
+                <td class="num">{formatShortDate(row.run.start_date)}</td>
+                <td class="num">{formatShortDate(row.run.end_date)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
     {/if}
   {/if}
 </div>
@@ -134,7 +136,11 @@
   .teach-page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3) var(--space-3) var(--space-4); }
   h1 { margin: 0 0 14px; font-size: 22px; font-weight: 600; color: var(--text); }
   .empty { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
-  .teach-table { width: 100%; border-collapse: collapse; margin-top: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
+     as on Progress and Submissions. It clips the grey header corners, which a
+     table's own radius does not, and scrolls a table wider than its container. */
+  .table-scroll { overflow-x: auto; margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .teach-table { width: 100%; border-collapse: separate; border-spacing: 0; }
   .teach-table th {
     text-align: left;
     padding: 8px 12px;

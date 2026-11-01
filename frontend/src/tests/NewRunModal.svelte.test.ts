@@ -260,6 +260,7 @@ describe('NewRunModal — on ui/Modal (10k)', () => {
     const row = target.querySelector('.version-row')!;
     expect(row.textContent).toMatch(/will use Spring 2026 · v\. 12/);
     expect(row.querySelector('.mono')?.textContent).toBe('v. 12');
+    expect(row.querySelector('.nr-strip-val')?.classList.contains('wrap')).toBe(false);   // the pinned label keeps its ellipsis
     unmount(cmp);
   });
 
@@ -268,6 +269,8 @@ describe('NewRunModal — on ui/Modal (10k)', () => {
     const { target, cmp } = mountModal({ versions: [draft] });
     await settle();
     expect(target.querySelector('.version-row')?.textContent).toContain(NO_VERSION);
+    // The reason wraps (Polish 3): only this branch carries .wrap.
+    expect(target.querySelector('.version-row .nr-strip-val')?.classList.contains('wrap')).toBe(true);
     expect(createBtn(target).disabled).toBe(true);
     expect(createBtn(target).title).toBe(NO_VERSION);
     unmount(cmp);

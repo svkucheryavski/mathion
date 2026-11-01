@@ -210,7 +210,7 @@
   .group-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .g-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 12px; border-top: 1px solid var(--border-soft); }
   .g-row:first-child { border-top: 0; }
-  .g-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text); }
+  .g-name { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
   .g-actions { display: flex; align-items: center; gap: 4px; }
 
   .cap { padding: 1px 8px; border-radius: var(--radius-pill); font-size: 11.5px; white-space: nowrap; }

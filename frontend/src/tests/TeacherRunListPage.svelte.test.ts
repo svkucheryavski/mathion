@@ -102,7 +102,7 @@ describe('TeacherRunListPage', () => {
     component = mount(TeacherRunListPage, { target });
     flushSync();
     // BEFORE settle: loading branch should be visible (the fetch promise
-    // has not resolved yet). This locks the `{#if loading} <LoadingPlaceholder/>`
+    // has not resolved yet). This locks the `{#if loading} <Skeleton/>`
     // branch — a mutation removing the initial `loading = true` would fail here.
     expect(pageTextContains(target, /Loading runs/)).toBe(true);
     expect(target.querySelector('table')).toBeNull();
@@ -515,5 +515,19 @@ describe('TeacherRunListPage', () => {
     flushSync();
     await settle();
     expect(target.querySelectorAll('tbody tr:first-child a')).toHaveLength(2);
+  });
+});
+
+// ---- Polish 3 Task 7 — one loading look (D86) ----
+describe('TeacherRunListPage (Polish 3 — loading)', () => {
+  it('the first load shows the Skeleton', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    component = mount(TeacherRunListPage, { target });
+    flushSync();
+    const sk = target.querySelector('.skeleton');
+    expect(sk).not.toBeNull();
+    expect(sk!.getAttribute('role')).toBe('status');
+    expect(sk!.querySelectorAll('.row')).toHaveLength(3);
+    expect(sk!.textContent).toContain('Loading runs…');
   });
 });

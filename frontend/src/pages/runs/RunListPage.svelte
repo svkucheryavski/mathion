@@ -8,7 +8,7 @@
   import { focusFirst } from '../../lib/focusFirst';
   import { routeClick } from '../../lib/routeClick';
   import { pushToast } from '../../stores/toasts.svelte';
-  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
   import NewRunModal from '../../components/runs/NewRunModal.svelte';
   import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
   import IconButton from '../../components/ui/IconButton.svelte';
@@ -113,7 +113,7 @@
   {:else if loadError}
     <ErrorState title={loadError.title} onretry={load} retryLabel="Try again" />
   {:else if course === null || (course.is_admin ? runs === null || versions === null : teacherRows === null)}
-    <LoadingPlaceholder label="Loading runs…" />
+    <Skeleton rows={3} label="Loading runs…" />
   {:else}
     <TeachingCrumbs course={course} />
     <div class="runs-head">
@@ -130,71 +130,75 @@
       {#if runs.length === 0}
         <EmptyState title="No runs yet" action={firstRun} />
       {:else}
-        <table class="runs-table">
-          <thead>
-            <tr>
-              <th scope="col">Title</th>
-              <th scope="col">Status</th>
-              <th scope="col">Version</th>
-              <th scope="col">Start</th>
-              <th scope="col">End</th>
-              <th scope="col" aria-label="Actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each runs as run (run.id)}
-              {@const status = runStatus(run)}
-              {@const v = versionById.get(run.version_id)}
+        <div class="table-scroll">
+          <table class="runs-table">
+            <thead>
               <tr>
-                <td><a href={runHref(run.id)} onclick={(e) => routeClick(e, runHref(run.id))}>{run.title}</a></td>
-                <td><RunStatusChip {status} /></td>
-                <td>{#if v?.label}{v.label}{' '}·{' '}{/if}<span class="ver-id">v. {run.version_id}</span></td>
-                <td class="num">{formatShortDate(run.start_date)}</td>
-                <td class="num">{formatShortDate(run.end_date)}</td>
-                <td class="row-actions">
-                  {#if pendingDelete === run.id}
-                    <InlineConfirm takeFocus label="Delete run {run.title}?" confirmLabel="Delete"
-                                   onConfirm={() => confirmDelete(run.id)}
-                                   onCancel={() => cancelDelete(run.id)} />
-                  {:else}
-                    <IconButton glyph="trash" size="sm" danger data-action="delete-run"
-                                aria-label="Delete run {run.title}"
-                                title={status === 'draft' ? 'Delete' : 'Only a draft run can be deleted'}
-                                disabled={status !== 'draft'} bind:element={trashEls[run.id]}
-                                onclick={() => (pendingDelete = run.id)} />
-                  {/if}
-                </td>
+                <th scope="col">Title</th>
+                <th scope="col">Status</th>
+                <th scope="col">Version</th>
+                <th scope="col">Start</th>
+                <th scope="col">End</th>
+                <th scope="col" aria-label="Actions"></th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each runs as run (run.id)}
+                {@const status = runStatus(run)}
+                {@const v = versionById.get(run.version_id)}
+                <tr>
+                  <td><a href={runHref(run.id)} onclick={(e) => routeClick(e, runHref(run.id))}>{run.title}</a></td>
+                  <td><RunStatusChip {status} /></td>
+                  <td>{#if v?.label}{v.label}{' '}·{' '}{/if}<span class="ver-id">v. {run.version_id}</span></td>
+                  <td class="num">{formatShortDate(run.start_date)}</td>
+                  <td class="num">{formatShortDate(run.end_date)}</td>
+                  <td class="row-actions">
+                    {#if pendingDelete === run.id}
+                      <InlineConfirm takeFocus label="Delete run {run.title}?" confirmLabel="Delete"
+                                     onConfirm={() => confirmDelete(run.id)}
+                                     onCancel={() => cancelDelete(run.id)} />
+                    {:else}
+                      <IconButton glyph="trash" size="sm" danger data-action="delete-run"
+                                  aria-label="Delete run {run.title}"
+                                  title={status === 'draft' ? 'Delete' : 'Only a draft run can be deleted'}
+                                  disabled={status !== 'draft'} bind:element={trashEls[run.id]}
+                                  onclick={() => (pendingDelete = run.id)} />
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
     {:else if teacherRows}
       {#if teacherRows.length === 0}
         <EmptyState title="No runs yet" />
       {:else}
-        <table class="runs-table">
-          <thead>
-            <tr>
-              <th scope="col">Title</th>
-              <th scope="col">Status</th>
-              <th scope="col">Students</th>
-              <th scope="col">Start</th>
-              <th scope="col">End</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each teacherRows as row (row.run.id)}
+        <div class="table-scroll">
+          <table class="runs-table">
+            <thead>
               <tr>
-                <td><a href={runHref(row.run.id)} onclick={(e) => routeClick(e, runHref(row.run.id))}>{row.run.title}</a></td>
-                <td><RunStatusChip status={runStatus(row.run)} /></td>
-                <td class="num">{row.student_count}</td>
-                <td class="num">{formatShortDate(row.run.start_date)}</td>
-                <td class="num">{formatShortDate(row.run.end_date)}</td>
+                <th scope="col">Title</th>
+                <th scope="col">Status</th>
+                <th scope="col">Students</th>
+                <th scope="col">Start</th>
+                <th scope="col">End</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each teacherRows as row (row.run.id)}
+                <tr>
+                  <td><a href={runHref(row.run.id)} onclick={(e) => routeClick(e, runHref(row.run.id))}>{row.run.title}</a></td>
+                  <td><RunStatusChip status={runStatus(row.run)} /></td>
+                  <td class="num">{row.student_count}</td>
+                  <td class="num">{formatShortDate(row.run.start_date)}</td>
+                  <td class="num">{formatShortDate(row.run.end_date)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
     {/if}
 
@@ -210,7 +214,11 @@
   .runs-head h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text); }
   .runs-head h1:focus { outline: none; }
   .runs-count { font-family: var(--font-mono); font-size: 13px; font-weight: 400; color: var(--muted); }
-  .runs-table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
+     as on Progress and Submissions. It clips the grey header corners, which a
+     table's own radius does not, and scrolls a table wider than its container. */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .runs-table { width: 100%; border-collapse: separate; border-spacing: 0; }
   .runs-table th {
     text-align: left;
     padding: 8px 12px;

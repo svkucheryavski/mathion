@@ -18,6 +18,7 @@
   } from '../../lib/runAssets';
   import { blockPositions } from '../../lib/blockNumbers';
   import { focusFirst } from '../../lib/focusFirst';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
   import FilterPills from '../ui/FilterPills.svelte';
@@ -536,6 +537,23 @@
     return ids;
   }
 
+  // D87: a reload can drop a chip to 0 uses, and a 0-uses chip is a label. Its
+  // "used by" panel closes (so it does not reopen when uses come back), and
+  // focus on the chip or in its panel goes to the row's ↻, else the heading.
+  // .pre: this runs before the DOM update, while both are still there.
+  $effect.pre(() => {
+    const used = new Set(assets.filter((a) => referencingMpIds(a).length > 0).map((a) => a.id));
+    untrack(() => {
+      if (openSubPanelAssetId !== null && !used.has(openSubPanelAssetId)) openSubPanelAssetId = null;
+      const a = document.activeElement;
+      if (!(a instanceof HTMLElement)) return;
+      const panel = a.closest('tr.sub-panel-row');
+      const id = a.matches('button.uses-chip') ? Number(a.closest('tr')?.dataset.assetId)
+        : panel ? Number(panel.id.replace('uses-', '')) : NaN;
+      if (!Number.isNaN(id) && !used.has(id)) void repairFocus(replaceEls[id], headingEl);
+    });
+  });
+
   const counts = $derived.by(() => {
     let orphan = 0;
     let referenced = 0;
@@ -723,159 +741,162 @@
       <p>No {activeFilter} assets.</p>
     </div>
   {:else}
-    <table class="assets-table">
-      <thead>
-        <tr>
-          <th scope="col" class="col-check">
-            <input
-              type="checkbox"
-              aria-label="Select all"
-              checked={sortedAssets.length > 0 && sortedAssets.every((a) => selectedIds.has(a.id))}
-              disabled={versionIsDisabled}
-              onclick={toggleSelectAll}
-            />
-          </th>
-          {@render sortTh('filename', 'Filename')}
-          {@render sortTh('size', 'Size')}
-          {@render sortTh('uploaded', 'Uploaded')}
-          <th scope="col">Uploaded by</th>
-          <th scope="col">Uses</th>
-          <th scope="col"><span class="vh">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each sortedAssets as a (a.id)}
-          {@const refIds = miniProjects == null ? [] : referencingMpIds(a)}
-          {@const subOpen = openSubPanelAssetId === a.id && miniProjects != null}
-          {@const rc = confirmFor(a.id)}
-          <tr data-asset-id={a.id}>
-            <td class="col-check">
+    <div class="table-scroll">
+      <table class="assets-table">
+        <thead>
+          <tr>
+            <th scope="col" class="col-check">
               <input
                 type="checkbox"
-                aria-label="Select {a.filename}"
-                checked={selectedIds.has(a.id)}
+                aria-label="Select all"
+                checked={sortedAssets.length > 0 && sortedAssets.every((a) => selectedIds.has(a.id))}
                 disabled={versionIsDisabled}
-                onclick={() => toggleRow(a.id)}
+                onclick={toggleSelectAll}
               />
-            </td>
-            <td class="a-name">
-              <a href={serveUrl(a.filename)} target="_blank" rel="noopener noreferrer">{a.filename}</a>
-            </td>
-            <td class="num">{formatFileSize(a.file_size)}</td>
-            <td class="num">{formatLocalWithTz(a.uploaded_at)}</td>
-            <td class="num">{a.uploaded_by_email ?? '—'}</td>
-            <td>
-              {#if miniProjects == null}
-                —
-              {:else}
-                <button
-                  type="button"
-                  class="uses-chip"
-                  class:uses-on={refIds.length > 0}
-                  class:uses-off={refIds.length === 0}
-                  aria-expanded={subOpen}
-                  aria-controls="uses-{a.id}"
-                  onclick={() => toggleSubPanel(a.id)}
-                  onkeydown={(e) => {
-                    if (e.key === 'Escape' && subOpen) openSubPanelAssetId = null;
-                  }}
-                >{refIds.length} use{refIds.length === 1 ? '' : 's'}</button>
-              {/if}
-            </td>
-            <td class="actions-cell">
-              <span class="row-icons">
-                <IconButton glyph="refresh" size="sm" aria-label="Replace {a.filename}"
-                            title={versionIsDisabled ? VERSION_OFF : 'Replace'} disabled={versionIsDisabled}
-                            data-action="replace" bind:element={replaceEls[a.id]}
-                            onclick={() => handleReplaceClick(a.id)} />
-                <IconButton glyph="trash" size="sm" danger aria-label="Delete {a.filename}"
-                            title={versionIsDisabled ? VERSION_OFF : 'Delete'} disabled={versionIsDisabled}
-                            data-action="delete-asset" bind:element={trashEls[a.id]}
-                            onclick={() => handleDeleteClick(a.id, a.is_referenced)} />
-              </span>
-            </td>
+            </th>
+            {@render sortTh('filename', 'Filename')}
+            {@render sortTh('size', 'Size')}
+            {@render sortTh('uploaded', 'Uploaded')}
+            <th scope="col">Uploaded by</th>
+            <th scope="col">Uses</th>
+            <th scope="col"><span class="vh">Actions</span></th>
           </tr>
-          {#if rc?.kind === 'delete' && !rc.isReferenced}
-            <!-- A one-line full-width row under its row, like the replace confirm
-                 and the danger panel (Safari pass). -->
-            <tr class="delete-row">
-              <td colspan="7">
-                <InlineConfirm row align="end" takeFocus warning="Delete this asset?" confirmLabel="Delete" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
-              </td>
-            </tr>
-          {/if}
-          {#if rc?.kind === 'replace'}
-            <tr class="replace-row">
-              <td colspan="7">
-                <!-- A full-width row under its row (browser pass): in the 1%-wide
-                     actions cell the text squeezed to a narrow column. -->
-                {#snippet replaceMessage()}
-                  Replace <code>{a.filename}</code> (new size: {formatFileSize(rc.file.size)})?
-                  The current content will be overwritten and cannot be recovered.
-                  {#if refIds.length > 0}
-                    {refIds.length} mini-project{refIds.length === 1 ? '' : 's'} that reference this file will continue to point at the new content.
-                  {/if}
-                {/snippet}
-                <InlineConfirm takeFocus layout="column" label="Replace {a.filename}?" message={replaceMessage}
-                               confirmLabel="Replace" onConfirm={performReplace} onCancel={() => onReplaceCancel(a.id)} />
-              </td>
-            </tr>
-          {/if}
-          {#if rc?.kind === 'delete' && rc.isReferenced}
-            {#snippet rowMessage()}
-              {#if miniProjects == null}
-                This asset is referenced by other mini-projects.
-              {:else}
-                This asset is referenced by {refIds.length} mini-project{refIds.length === 1 ? '' : 's'}.
-              {/if}
-              Deleting it will leave their <code>![ref]</code> markdown broken. This cannot be undone.
-            {/snippet}
-            <tr class="danger-row">
-              <td colspan="7">
-                <DangerConfirm
-                  message={rowMessage}
-                  disabledReason={course.is_admin ? undefined : 'Only course admins can force-delete a referenced asset.'}
-                  onConfirm={performDelete}
-                  onCancel={() => cancelDelete(a.id)}
+        </thead>
+        <tbody>
+          {#each sortedAssets as a (a.id)}
+            {@const refIds = miniProjects == null ? [] : referencingMpIds(a)}
+            {@const subOpen = openSubPanelAssetId === a.id && miniProjects != null}
+            {@const rc = confirmFor(a.id)}
+            <tr data-asset-id={a.id}>
+              <td class="col-check">
+                <input
+                  type="checkbox"
+                  aria-label="Select {a.filename}"
+                  checked={selectedIds.has(a.id)}
+                  disabled={versionIsDisabled}
+                  onclick={() => toggleRow(a.id)}
                 />
               </td>
-            </tr>
-          {:else if subOpen}
-            <tr id="uses-{a.id}" class="sub-panel-row">
-              <td colspan="7">
-                <div class="sub-panel">
-                  <p class="sp-head"><code>{a.filename}</code> — used by</p>
-                  <ul>
-                    {#each refIds as mpId (mpId)}
-                      {@const mp = mpById(mpId)}
-                      {#if mp}
-                        <li>
-                          <span class="sp-mp">{mpLabel(mp)}</span>
-                          <button
-                            type="button"
-                            class="linklike"
-                            onclick={() => {
-                              openSubPanelAssetId = null;
-                              onEditMiniProject(mp);
-                            }}
-                          >Edit</button>
-                        </li>
-                      {/if}
-                    {/each}
-                  </ul>
-                </div>
+              <td class="a-name">
+                <a href={serveUrl(a.filename)} target="_blank" rel="noopener noreferrer">{a.filename}</a>
+              </td>
+              <td class="num">{formatFileSize(a.file_size)}</td>
+              <td class="num">{formatLocalWithTz(a.uploaded_at)}</td>
+              <td class="num">{a.uploaded_by_email ?? '—'}</td>
+              <td>
+                {#if miniProjects == null}
+                  —
+                {:else if refIds.length === 0}
+                  <!-- D87: nothing to list, so a label, not a button. -->
+                  <span class="uses-chip uses-off">0 uses</span>
+                {:else}
+                  <button
+                    type="button"
+                    class="uses-chip uses-on"
+                    aria-expanded={subOpen}
+                    aria-controls="uses-{a.id}"
+                    onclick={() => toggleSubPanel(a.id)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Escape' && subOpen) openSubPanelAssetId = null;
+                    }}
+                  >{refIds.length} use{refIds.length === 1 ? '' : 's'}</button>
+                {/if}
+              </td>
+              <td class="actions-cell">
+                <span class="row-icons">
+                  <IconButton glyph="refresh" size="sm" aria-label="Replace {a.filename}"
+                              title={versionIsDisabled ? VERSION_OFF : 'Replace'} disabled={versionIsDisabled}
+                              data-action="replace" bind:element={replaceEls[a.id]}
+                              onclick={() => handleReplaceClick(a.id)} />
+                  <IconButton glyph="trash" size="sm" danger aria-label="Delete {a.filename}"
+                              title={versionIsDisabled ? VERSION_OFF : 'Delete'} disabled={versionIsDisabled}
+                              data-action="delete-asset" bind:element={trashEls[a.id]}
+                              onclick={() => handleDeleteClick(a.id, a.is_referenced)} />
+                </span>
               </td>
             </tr>
-          {/if}
-        {/each}
-      </tbody>
-    </table>
+            {#if rc?.kind === 'delete' && !rc.isReferenced}
+              <!-- A one-line full-width row under its row, like the replace confirm
+                   and the danger panel (Safari pass). -->
+              <tr class="delete-row">
+                <td colspan="7">
+                  <InlineConfirm row align="end" takeFocus warning="Delete this asset?" confirmLabel="Delete" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
+                </td>
+              </tr>
+            {/if}
+            {#if rc?.kind === 'replace'}
+              <tr class="replace-row">
+                <td colspan="7">
+                  <!-- A full-width row under its row (browser pass): in the 1%-wide
+                       actions cell the text squeezed to a narrow column. -->
+                  {#snippet replaceMessage()}
+                    Replace <code>{a.filename}</code> (new size: {formatFileSize(rc.file.size)})?
+                    The current content will be overwritten and cannot be recovered.
+                    {#if refIds.length > 0}
+                      {refIds.length} mini-project{refIds.length === 1 ? '' : 's'} that reference this file will continue to point at the new content.
+                    {/if}
+                  {/snippet}
+                  <InlineConfirm takeFocus layout="column" label="Replace {a.filename}?" message={replaceMessage}
+                                 confirmLabel="Replace" onConfirm={performReplace} onCancel={() => onReplaceCancel(a.id)} />
+                </td>
+              </tr>
+            {/if}
+            {#if rc?.kind === 'delete' && rc.isReferenced}
+              {#snippet rowMessage()}
+                {#if miniProjects == null}
+                  This asset is referenced by other mini-projects.
+                {:else}
+                  This asset is referenced by {refIds.length} mini-project{refIds.length === 1 ? '' : 's'}.
+                {/if}
+                Deleting it will leave their <code>![ref]</code> markdown broken. This cannot be undone.
+              {/snippet}
+              <tr class="danger-row">
+                <td colspan="7">
+                  <DangerConfirm
+                    message={rowMessage}
+                    disabledReason={course.is_admin ? undefined : 'Only course admins can force-delete a referenced asset.'}
+                    onConfirm={performDelete}
+                    onCancel={() => cancelDelete(a.id)}
+                  />
+                </td>
+              </tr>
+            {:else if subOpen}
+              <tr id="uses-{a.id}" class="sub-panel-row">
+                <td colspan="7">
+                  <div class="sub-panel">
+                    <p class="sp-head"><code>{a.filename}</code> — used by</p>
+                    <ul>
+                      {#each refIds as mpId (mpId)}
+                        {@const mp = mpById(mpId)}
+                        {#if mp}
+                          <li>
+                            <span class="sp-mp">{mpLabel(mp)}</span>
+                            <button
+                              type="button"
+                              class="linklike"
+                              onclick={() => {
+                                openSubPanelAssetId = null;
+                                onEditMiniProject(mp);
+                              }}
+                            >Edit</button>
+                          </li>
+                        {/if}
+                      {/each}
+                    </ul>
+                  </div>
+                </td>
+              </tr>
+            {/if}
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 </section>
 
 <style>
   .run-assets-tab { display: flex; flex-direction: column; gap: 10px; }
-  .run-assets-tab.drag-over .assets-table,
+  .run-assets-tab.drag-over .table-scroll,
   .run-assets-tab.drag-over .empty-state { outline: 2px dashed var(--primary); outline-offset: 2px; }
 
   .banner { margin: 0; padding: 8px 12px; border-left: 3px solid; border-radius: var(--radius); font-size: 13px; }
@@ -913,7 +934,11 @@
   }
   .empty-state p { margin: 0; }
 
-  .assets-table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 13px; }
+  /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
+     as on Progress and Submissions. It clips the grey header corners, which a
+     table's own radius does not, and scrolls a table wider than its container. */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .assets-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   .assets-table th {
     padding: 8px 10px;
     text-align: left;
@@ -924,6 +949,8 @@
     border-bottom: 1px solid var(--border);
   }
   .assets-table td { padding: 6px 10px; border-top: 1px solid var(--border-soft); color: var(--text); vertical-align: middle; }
+  /* Separate borders: the header's line draws once, not again as the first row's top. */
+  .assets-table tbody tr:first-child td { border-top: 0; }
   .col-check { width: 1%; }
   .sort-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; }
   .a-name a { color: var(--primary); text-decoration: none; }
@@ -932,7 +959,7 @@
 
   .uses-chip { padding: 1px 8px; border: 0; border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 11.5px; white-space: nowrap; cursor: pointer; }
   .uses-on { background: var(--status-accepted-bg); color: var(--status-accepted-fg); }
-  .uses-off { background: var(--status-not-submitted-bg); color: var(--status-not-submitted-fg); }
+  .uses-off { display: inline-block; background: var(--status-not-submitted-bg); color: var(--status-not-submitted-fg); cursor: default; }
   .uses-chip[aria-expanded='true'] { box-shadow: 0 0 0 1px var(--border-strong); }
 
   .actions-cell { width: 1%; white-space: nowrap; text-align: right; }

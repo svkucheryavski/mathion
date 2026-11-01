@@ -2350,10 +2350,11 @@ describe('RunAssetsTab — 6a restyle', () => {
       props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }),
     });
     flushSync();
-    const chips = Array.from(target.querySelectorAll('button.uses-chip'));
+    const chips = Array.from(target.querySelectorAll('.uses-chip'));
     expect(chips.map((c) => c.textContent)).toEqual(['1 use', '0 uses']);
     expect(chips[0]!.classList.contains('uses-on')).toBe(true);
     expect(chips[1]!.classList.contains('uses-off')).toBe(true);
+    expect(chips.map((c) => c.tagName)).toEqual(['BUTTON', 'SPAN']);   // D87: 0 uses is a label
     expect(target.querySelector('tr[data-asset-id="1"]')!.querySelectorAll('td.num')).toHaveLength(3);
   });
 
@@ -2436,9 +2437,10 @@ describe('RunAssetsTab — 6a restyle', () => {
   });
 
   it('the plain delete row and the "used by" panel never show together, either way round (R14)', () => {
-    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    // A chip with uses (D87: 0 uses has no panel); is_referenced stays false, so Delete asks the plain row.
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }) });
     flushSync();
-    const chip = findButton(target, /0 uses$/)!;
+    const chip = findButton(target, /1 use$/)!;
     chip.click();
     flushSync();
     expect(target.querySelector('#uses-1')).not.toBeNull();
@@ -2684,5 +2686,83 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
     expect(Array.from(target.querySelectorAll('tbody tr a')).map((a) => a.textContent?.trim()))
       .toEqual(['b.pdf', 'c.pdf', 'a.pdf']);
     expect(document.activeElement).toBe(rb());
+  });
+});
+
+// ---- Polish 3 Task 7 — "0 uses" is a label (D87) ----
+describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
+  it('0 uses renders a span, not a button, with no panel', () => {
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    const row = target.querySelector('tr[data-asset-id="1"]')!;
+    const chip = row.querySelector('.uses-chip')!;
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.textContent).toBe('0 uses');
+    expect(chip.classList.contains('uses-off')).toBe(true);
+    expect(chip.hasAttribute('aria-expanded')).toBe(false);
+    expect(chip.hasAttribute('aria-controls')).toBe(false);
+    expect(row.querySelector('button.uses-chip')).toBeNull();
+    (chip as HTMLElement).click();
+    flushSync();
+    expect(target.querySelector('#uses-1')).toBeNull();
+  });
+
+  it('a focused chip that drops to 0 on reload repairs focus to the row\'s next control, else the heading', async () => {
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    const chip = target.querySelector('button.uses-chip') as HTMLButtonElement;
+    chip.click();
+    flushSync();
+    chip.focus();
+    expect(target.querySelector('#uses-1')).not.toBeNull();
+    // A reload: no mini-project uses a.pdf any more.
+    box.miniProjects = [mkMp(10, 'M', 'no files')];
+    await settle();
+    expect(target.querySelector('button.uses-chip')).toBeNull();
+    expect(target.querySelector('#uses-1')).toBeNull();
+    expect(document.activeElement).toBe(replaceBtn());
+    // The uses come back: the panel stays closed (the open id was dropped).
+    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)')];
+    await settle();
+    expect(target.querySelector('#uses-1')).toBeNull();
+    unmount(component); component = null;
+
+    // A closed version disables Replace and Delete: focus goes to the heading.
+    const off: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')], versionIsDisabled: true }));
+    component = mount(RunAssetsTab, { target, props: off });
+    flushSync();
+    (target.querySelector('button.uses-chip') as HTMLButtonElement).focus();
+    off.miniProjects = [];
+    await settle();
+    expect(document.activeElement?.tagName).toBe('H2');
+    expect(document.activeElement?.textContent).toContain('Assets');
+  });
+
+  it('a chip that keeps its uses on reload keeps the focus', async () => {
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    const chip = target.querySelector('button.uses-chip') as HTMLButtonElement;
+    chip.focus();
+    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', '![](a.pdf)')];
+    await settle();
+    expect(document.activeElement).toBe(chip);
+    expect(chip.textContent).toBe('2 uses');
+  });
+
+  it('focus inside the open "used by" panel also repairs when the uses drop to 0', async () => {
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    (target.querySelector('button.uses-chip') as HTMLButtonElement).click();
+    flushSync();
+    const edit = target.querySelector('#uses-1 button') as HTMLButtonElement;
+    edit.focus();
+    expect(document.activeElement).toBe(edit);
+    box.miniProjects = [mkMp(10, 'M', 'no files')];
+    await settle();
+    expect(target.querySelector('#uses-1')).toBeNull();
+    expect(document.activeElement).toBe(replaceBtn());
   });
 });

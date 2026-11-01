@@ -1013,7 +1013,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
   }
-  .ro-err { margin: 0; font-size: 12px; color: var(--danger); }
+  .ro-err { margin: 0; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
 
   .ro-strip {
     display: flex;

@@ -482,3 +482,21 @@ describe('RunDetailPage — isThisRunTeacher derivation', () => {
     unmount(cmp);
   });
 });
+
+// ---- Polish 3 Task 7 — one loading look (D86) ----
+describe('RunDetailPage (Polish 3 — loading)', () => {
+  it('the first load shows the Skeleton', () => {
+    mockHappyPath();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunDetailPage, { target, props: { courseSlug: 'algebra', runId: '10' } });
+    flushSync();
+    const sk = target.querySelector('.skeleton');
+    expect(sk).not.toBeNull();
+    expect(sk!.getAttribute('role')).toBe('status');
+    expect(sk!.querySelectorAll('.row')).toHaveLength(3);
+    expect(sk!.textContent).toContain('Loading run…');
+    unmount(cmp);
+    target.remove();
+  });
+});

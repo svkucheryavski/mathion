@@ -60,11 +60,11 @@ async function settle() {
 
 describe('RunProgressTab', () => {
   // T1 – Loading state
-  it('renders LoadingPlaceholder before fetch resolves', () => {
+  it('renders the Skeleton before fetch resolves', () => {
     let resolve!: (v: Response) => void;
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { resolve = r; })));
     mountTab();
-    expect(host.querySelector('[role="status"], .loading-placeholder')).toBeTruthy();
+    expect(host.querySelector('.skeleton')).toBeTruthy();
     resolve(new Response(JSON.stringify(progressMock()), { status: 200 }));
   });
 
@@ -473,8 +473,9 @@ describe('RunProgressTab', () => {
     const refreshBtn = host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
     refreshBtn.click();
     flushSync();
-    // LoadingPlaceholder shows
-    expect(host.querySelector('.loading-placeholder, [role="status"]')).toBeTruthy();
+    // "Refreshing…" shows, no Skeleton (C17)
+    expect(host.textContent).toContain('Refreshing…');
+    expect(host.querySelector('.skeleton')).toBeNull();
     // Table rows still visible (stale data not cleared)
     expect(host.textContent).toContain('Alice');
     // Cleanup
@@ -1031,5 +1032,86 @@ describe('RunProgressTab', () => {
     const csv = host.querySelector('button[data-action="download-csv"]') as HTMLButtonElement;
     expect(csv.getAttribute('data-variant')).toBe('secondary');
     expect(csv.textContent?.trim()).toBe('Download CSV');
+  });
+});
+
+// ---- Polish 3 Task 7 — one loading look (D86, C17) ----
+
+const refreshingEl = () => Array.from(host.querySelectorAll('[role="status"]')).find((e) => !e.closest('.skeleton')) ?? null;
+
+describe('RunProgressTab (Polish 3 — loading)', () => {
+  it('the first load shows the Skeleton', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    mountTab();
+    flushSync();
+    const sk = host.querySelector('.skeleton');
+    expect(sk).not.toBeNull();
+    expect(sk!.getAttribute('role')).toBe('status');
+    expect(sk!.querySelectorAll('.row')).toHaveLength(6);
+    expect(sk!.textContent).toContain('Loading…');
+  });
+
+  it('a Refresh over data keeps the rows and shows "Refreshing…", with no Skeleton', async () => {
+    let resolveRefresh!: (v: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveRefresh = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab();
+    await settle();
+    (host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(host.querySelector('.skeleton')).toBeNull();
+    expect(host.textContent).toContain('Alice');
+    expect(host.textContent).toContain('Refreshing…');
+    resolveRefresh(new Response(JSON.stringify(progressMock()), { status: 200 }));
+    await settle();
+    expect(host.textContent).not.toContain('Refreshing…');
+  });
+
+  it('the status element stays mounted and empty between refreshes', async () => {
+    let resolveRefresh!: (v: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveRefresh = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab();
+    await settle();
+    const status = refreshingEl();
+    expect(status).not.toBeNull();
+    expect(status!.textContent).toBe('');
+    (host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(refreshingEl()).toBe(status);
+    expect(status!.textContent).toBe('Refreshing…');
+    resolveRefresh(new Response(JSON.stringify(progressMock()), { status: 200 }));
+    await settle();
+    expect(refreshingEl()).toBe(status);
+    expect(status!.textContent).toBe('');
+  });
+
+  it('a change of run shows the Skeleton, not "Refreshing…" over the old run\'s rows (rev 11)', async () => {
+    let resolveNext!: (v: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressMock()), { status: 200 }))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { resolveNext = r; }));
+    vi.stubGlobal('fetch', fetchMock);
+    const props = $state({ runId: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(RunProgressTab, { target: host, props });
+    await settle();
+    expect(host.textContent).toContain('Alice');
+    props.runId = 2;
+    flushSync();
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/runs/2/dashboard/progress');   // run 2 is asked for
+    expect(host.querySelector('.skeleton')).not.toBeNull();
+    expect(host.textContent).not.toContain('Alice');
+    expect(host.textContent).not.toContain('Refreshing…');
+    resolveNext(new Response(JSON.stringify(progressMock()), { status: 200 }));
+    await settle();
+    expect(host.querySelector('.skeleton')).toBeNull();
+    expect(host.textContent).toContain('Alice');           // the new run's rows
+    expect(host.textContent).not.toContain('Refreshing…');
   });
 });
