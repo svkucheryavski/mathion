@@ -642,6 +642,8 @@ test('verifyPin as another user drops drafts; the same user keeps them', ...);
 
 - [ ] **Step 7: Review loop, then the commits.** Code commit: `fix(polish3): the create form asks before discarding, errors say what failed, offline failures show, and the C18 extras`.
 
+  Done 2026-11-01 (spec rev 12): the create form's guard skips Create's own request; one offline message (`OFFLINE_MESSAGE`); a quiet bulk refetch failure; New item's form is `novalidate`; the Teaching pill is a writable `$derived` of `?status=`. The look check needed a fresh sign-in (dev rows: PIN 42, session 43).
+
 ### Task 9: Backend — course files, staff e-mails, run dates, explicit nulls, stripped links (D84, C9–C12)
 
 **Files:**

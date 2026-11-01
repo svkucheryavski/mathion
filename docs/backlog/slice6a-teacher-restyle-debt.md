@@ -29,7 +29,7 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - The StatusBadge label test's title says "the colours stay" but asserts only `data-status`.
 
 ### T3 — DangerConfirm, InlineName, InlineConfirm takeFocus
-- InlineName shows "Please correct the highlighted fields." for a 422 with a list detail, though nothing else is highlighted; an empty-string detail shows no error. Callers pass `maxlength={80}`, so a 422 is unlikely.
+- InlineName shows "Please correct the highlighted fields." for a 422 with a list detail, though nothing else is highlighted. Callers pass `maxlength={80}`, so a 422 is unlikely.
 - InlineName's last test cannot tell the ApiError branch from the Error branch (`ApiError(500, 'Server exploded')` has message === displayMessage); a list-detail 422 would pin it.
 - DangerConfirm's Esc handler sits on its three controls, not the root; a focusable element inside a caller's message snippet would not cancel on Esc. Today's messages hold only text and `<code>`.
 - No test for the Force delete title while busy, or for InlineName's ✓ title ("Save" / `saveTitle`); T9 exercises the Groups rename title.
@@ -81,7 +81,6 @@ Collected from the per-task review lanes (T1–T11). Each line: what, where, why
 - The "invited" chip sits inline after "—" (the plan's markup); drawing 10d puts it at the row's right, before 🗑. The user approved the screenshots as they are.
 - `addGroup`: if `createGroup` succeeds but `onRefetchGroups()` throws, the refetch error shows under the field, which still holds the created name; Save again reports "already exists".
 - `confirmDelete` (Groups): the refetch awaited inside `catch` is unguarded, so a failing refetch rejects `confirmDelete`, and InlineConfirm does not await `onConfirm`, which leaves an unhandled rejection. Pre-existing shape.
-- A non-ApiError (network) failure on group delete or teacher remove is silent (no toast). Pre-existing in both components.
 - Teachers `submit` always moves focus back to the email field when the request settles; during a slow add, a user who moved on (e.g. opened a remove confirm) gets focus pulled back. Guard on `activeElement` being `<body>` or inside the tab if it shows up.
 - The disabled-groups text now reads "Overview › Settings" (brief P7) where it used to read "→".
 - Test strength: only the "last row → + toggle / email field", Cancel and failure focus paths are pinned; "next row's 🗑" and "previous row's 🗑" after a delete are not (a three-row middle-delete test would pin them). Same as the T6 minor.
@@ -103,13 +102,11 @@ Fixed in the review pass: inline confirms are now groups named by their question
 - Assets "used by → Edit" opens the mini-project modal even when that mini-project is locked (its ✎ is disabled on Mini-projects); saving then fails with 409. Take with 6b's modal work.
   6b (Task 4): fixed — the "used by → Edit" path toasts the row's edit reason and opens nothing (P17).
 - Assets 403 on force delete reloads the whole run page, so the "no longer have permission" banner disappears and focus lands on `<body>` (pre-existing, rare). Toast it, or refetch only the course.
-- Teachers add: a network (non-API) failure shows nothing.
 - Spec R14 still says the Replace confirm stays in the actions cell; T11 moved it to a full-width row (browser pass). Update the spec line.
 - `withTab`/`withoutTab` re-serialise other search parameters (`%20` → `+`); none exist on run addresses today.
 - `RunListPage` actions header uses `<th aria-label>` where the tabs use a visually-hidden span.
 - P19: Progress and Submissions have no h2 header row, while the spec says the header row is common to all six tabs — confirm with the user at the Safari pass.
 - "Delete N selected" stays enabled while a bulk delete runs; a second deliberate confirm starts a duplicate loop and a misleading "deleted by another user" banner (pre-existing).
-- The Teaching list's status pill is not kept in the address, so Back from a run resets it to Active (pre-existing).
 - The Mini-projects and Assets single-row delete confirms are named "Delete this mini-project?" / "Delete this asset?", not after their row (the three new labels are); pass `label="Delete {name}?"` if wanted.
 - Every InlineConfirm with a warning is now a group named by it, including the confirms outside 6a (Unpublish, MiniProjectModal publish, discard prompts); the MiniProjectModal publish group's name is its whole two-sentence warning. Keep in mind for 6b/6c.
 

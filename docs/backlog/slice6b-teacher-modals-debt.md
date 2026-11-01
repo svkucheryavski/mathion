@@ -20,8 +20,6 @@ Review round 1 (Opus + Fable), both CLEAN; minors:
 Found while taking the shots: the plan's heading id and the Title input id collided (`${uid}-title`), so Title had no accessible name. Fixed in the task (heading `${uid}-heading`, plus a label/id test).
 
 Review round 1 (Opus + Fable), both CLEAN; minors:
-- **Stale server banner.** A server-error banner from an earlier attempt stays when the next submit fails validation (pre-existing). Fix: `submitError = null` at the top of `submit()` after the guard, or on the validation-failure branch.
-- **Cross-field date error.** Editing Start date does not clear "End date must be on or after start date" even when it fixes it (meets the spec's wording). Fix if wanted: also clear the end-date error when `start_date` changes.
 - **Switch in forced-colors mode.** `border: 0` and state by background only; in Windows High Contrast on/off differ only by knob position. Fix: a `@media (forced-colors: active)` block (border `ButtonText`, on-knob `Highlight`).
 - **Switch's accessible name rests on `<label for>`.** Its subtree is an empty `aria-hidden` span. Browsers honour it; the VoiceOver pass should confirm "Groups enabled, switch, off". If not, add an optional `labelledby` prop.
 - **Reduced motion.** `.knob` `transition: transform .12s` has no `prefers-reduced-motion` guard; nothing in the app handles it yet. Polish slice.
@@ -44,7 +42,6 @@ Review round 1 (Opus + Fable), both CLEAN; the two csv regressions they found we
 
 Review round 1 (Opus + Fable), both CLEAN. Minors:
 - **A failed refresh after a successful Publish reads as a publish error** (both lanes). `confirmPublish` awaits `onSaved()` inside the publish `try`, so the refresh's message shows as a red banner, Publish stays (stale `initial.is_published`), and a retry hits the backend's already-published 409. The spec keeps publish "as today"; it is the same class as D19. Fix: own `try` around `onSaved()`, toast "Published (refresh failed — reload to see latest)", still close.
-- **Discard during an upload** (both lanes). Discard restores the saved text, then the finished upload inserts its reference into it at the old offset: the form is dirty again and the asset is orphaned. Fix: `uploadAbortController?.abort()` in `discard()`, or `discardReason = uploading ? UPLOAD_WAIT : …` like Save and Publish.
 - **The drawn "·" is read aloud** (both lanes). `.mpm-box-list li::before { content: '· ' }` enters the accessible name, so VoiceOver says "middle dot" before each bullet (and in the inputs' `aria-describedby` text); `list-style: none` also drops list semantics in Safari. Fix: `content: '· ' / ''` and `role="list"`. Check in the Safari pass; Task 5 touches the box.
 - **Stale snapshot comment.** The comment above `initialBlockId` says the modal remounts when its props change; since D19 it stays mounted across the refresh. The snapshot is still right (the baseline is re-based after a save). Fix: reword.
 - **The zone slice trusts the label's shape.** `localTzLabel().slice(1, -1)` and the frame test build the expectation the same way, so a change to the label's parentheses would cut two real characters with the test green. Fix: `.replace(/^\(|\)$/g, '')` and a literal-shape assertion.

@@ -109,11 +109,6 @@ badges) never had entries here.
 
 ## T3c — VideoBody
 
-- **A server-rejected URL shows only a toast.** A scheme-less paste (`www.youtube.com/watch?v=…`),
-  `ftp://…`, an uppercase `HTTPS://`, or a URL over 500 characters passes `normalizeVideoUrl` unchanged
-  and the server 422s ("Please correct the highlighted fields" / "URL must start with http:// or
-  https://") with no inline error, `aria-invalid` or focus. Fix: mirror the backend's prefix and length
-  rules in `validate()`, or prefix `https://` for scheme-less YouTube/Vimeo URLs in `normalizeVideoUrl`.
 - **VideoBody duplicates ItemEditorModal's field CSS** (`.field-row`, `.field-label`, `.field`,
   `.plain-input` ×3, `.field-err`, `.ro-value`). Until T4's (ad) they are unchecked; T4 must repeat the
   full D12 `d`/`chk` set plus `sweep VideoBody`. Longer term: one shared field component (5a create form,
@@ -157,7 +152,6 @@ badges) never had entries here.
 
 ## T4 — Video preview card, AppBody, frame heights
 
-- **The app preview restarts on every tree reload** (both lanes; this predates T4). AppBody's fetch effect reads `item?.script_url` off a fresh `item` object after every `loadAdminTree`. A title Save therefore refetches the source, unmounts the iframe and loses the app's state. Fix: `const filename = $derived(item?.script_url ?? null)` and read `filename` in the effect. Add a test: no second `/assets` GET after a title Save.
 - **The wrong message when the link PATCH fails** (predates T4). Scenario: the version is archived in another tab mid-upload. `PATCH script_url` returns 409, the user sees "A file with that name already exists…", and the 403/409 forced reload never happens. Fix: show the duplicate-name message only when `!uploaded`. On 403/409 with `stillOnVid`, force `loadAdminTree`.
 - **"App uploaded" / "App removed" toast success even when the refresh fails.** `loadAdminTree` returns `'error'` rather than rejecting, so the row keeps showing the stale value. Fix: check the result and use the modal's "(refresh failed — reload to see latest)" info toast. The "linked asset kept when only the refresh fails" test mocks a rejection that cannot occur in practice. It still guards the `linked` gate.
 - **AppBody `.field-err` sits under the label column**, not under the value as in the D12 Title/Video URL pattern. Fix: wrap `.script-row` and the error in a `.field` column, as VideoBody does.
