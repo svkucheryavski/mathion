@@ -62,6 +62,17 @@ describe('AccordionHeader — block number', () => {
     // Outside the aria-labelled toggle now: hidden, so "3." isn't read before the field (review r1).
     expect(target.querySelector('.num')!.getAttribute('aria-hidden')).toBe('true');
   });
+  // Safari pass (D90): while the title is edited the row aligns to the top, so
+  // an error line under the field does not pull ✓/× and the number down.
+  it('the row is marked renaming only while the title is being edited', async () => {
+    render(blk);
+    const row = () => target.querySelector('.acc-row')!;
+    expect(row().classList.contains('renaming')).toBe(false);
+    btn('Edit the block title')!.click(); await settle();
+    expect(row().classList.contains('renaming')).toBe(true);
+    btn('Cancel editing the block title')!.click(); await settle();
+    expect(row().classList.contains('renaming')).toBe(false);
+  });
   it('a sequence header has no number', () => {
     render({ index: 2 });
     expect(target.querySelector('.num')).toBeNull();

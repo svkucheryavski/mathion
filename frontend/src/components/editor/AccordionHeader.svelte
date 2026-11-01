@@ -185,7 +185,7 @@
   {#if level === 'block'}<span class="num" aria-hidden="true">{index}.</span>{/if}
 {/snippet}
 
-<div class="acc-row" class:block={level === 'block'} class:seq={level === 'sequence'}>
+<div class="acc-row" class:block={level === 'block'} class:seq={level === 'sequence'} class:renaming>
   {#if renaming}
     {@render num()}
     <div class="rename">
@@ -293,6 +293,12 @@
   .seq .title { font-size: 14.5px; }
   .num { flex: none; margin-right: 6px; font-size: 15px; font-weight: 600; color: var(--ordinal); font-variant-numeric: tabular-nums; }
   .actions { display: flex; align-items: center; gap: 6px; }
+  /* D90 (Safari pass): while renaming, the row aligns to the top, and ✓/× and
+     the number keep the field's height, so an error line under the field
+     leaves them level with it instead of centring them on field + message. */
+  .acc-row.renaming { align-items: flex-start; }
+  .renaming .actions { height: var(--control-h); }
+  .renaming .num { line-height: var(--control-h); }
   .rename { flex: 1 1 auto; min-width: 0; }
   .title-input {
     box-sizing: border-box;

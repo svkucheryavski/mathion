@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2486
+EXPECTED_CHECKS=2489
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3976,6 +3976,12 @@ if [[ -n $REPLY ]]; then
   # User, 2026-10-08: blocks are numbered "1. Title", muted, at the title's size.
   d '\.num' '' 'margin-right:6px' 'font-size:15px' 'font-weight:600' 'color:var\(--ordinal\)' 'font-variant-numeric:tabular-nums'
   d '\.actions' '' 'display:flex' 'align-items:center' 'gap:6px'
+  # D90 (Safari pass): while renaming, the row aligns to the top and the buttons
+  # and the number keep the field's height, so an error line under the field
+  # leaves them level with it.
+  d '\.acc-row\.renaming' '' 'align-items:flex-start'
+  chk "\.renaming\.${H} \.actions:where\(\.${H}\)" 'height:var\(--control-h\)'
+  chk "\.renaming\.${H} \.num:where\(\.${H}\)" 'line-height:var\(--control-h\)'
   # 5c D8: the inline title field — the open-editor ring, tokens only.
   d '\.title-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'box-shadow:0 0 0 3px var\(--primary-soft\)' 'background:var\(--surface\)' 'color:var\(--text\)'
   # C3: an invalid title keeps a red edge, focused too ((0,3,0) beats base.css's focus rule).
