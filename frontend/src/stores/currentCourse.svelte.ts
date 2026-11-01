@@ -110,9 +110,14 @@ export function markItemCovered(itemId: number): void {
 
 // C13: a submit's attempt is written into the store, so a remounted quiz
 // shows the right attempts left, or loads the reveal once they are used up.
+// D89: the answers sent go in too, so it can show that result again, as the
+// backend's own `last_answers` does after a reload.
 // A page load straight onto a never-visited quiz records the visit before the
 // course is loaded, so the entry may be missing: create it, as a visit does.
-export function recordQuizAttempt(res: QuizSubmitResponse): void {
+export function recordQuizAttempt(
+  res: QuizSubmitResponse,
+  answers: Record<string, number[] | string>,
+): void {
   if (currentCourse.value === null) return;
   const items = currentCourse.value.state.items;
   const key = String(res.item_id);
@@ -130,6 +135,7 @@ export function recordQuizAttempt(res: QuizSubmitResponse): void {
   entry.attempt_count = res.attempt_count;
   entry.max_attempts = res.max_attempts;
   entry.last_score = { correct: res.score_correct, total: res.score_total };
+  entry.last_answers = answers;
   entry.is_covered = true;
 }
 

@@ -23,17 +23,17 @@ function seed(): void {
 
 afterEach(() => clearCourse());
 
-it('recordQuizAttempt sets attempt_count, max_attempts, last_score and is_covered (C13, P118)', () => {
+it('recordQuizAttempt sets attempt_count, max_attempts, last_score, last_answers and is_covered (C13, D89, P118)', () => {
   seed();
   recordQuizAttempt({
     item_id: 5, attempt_count: 2, max_attempts: 3, score_correct: 1, score_total: 2, can_retry: true,
-  });
+  }, { '51': [511], '52': '4' });
   const e = currentCourse.value!.state.items['5']!;
   expect(e.attempt_count).toBe(2);
   expect(e.max_attempts).toBe(3);
   expect(e.last_score).toEqual({ correct: 1, total: 2 });
   expect(e.is_covered).toBe(true);
-  expect(e.last_answers).toBeNull();
+  expect(e.last_answers).toEqual({ '51': [511], '52': '4' });
 });
 
 // A page load straight onto a never-visited quiz (#item= in the address)
@@ -46,13 +46,13 @@ it('recordQuizAttempt creates the entry when the store does not hold the item', 
   const warn = vi.spyOn(console, 'warn');
   recordQuizAttempt({
     item_id: 9, attempt_count: 1, max_attempts: 3, score_correct: 0, score_total: 1, can_retry: true,
-  });
+  }, { '91': [912] });
   const e = currentCourse.value!.state.items['9']!;
   expect(e.attempt_count).toBe(1);
   expect(e.max_attempts).toBe(3);
   expect(e.last_score).toEqual({ correct: 0, total: 1 });
   expect(e.is_covered).toBe(true);
-  expect(e.last_answers).toBeNull();
+  expect(e.last_answers).toEqual({ '91': [912] });
   expect(e.time_spent).toBe(0);
   expect(e.last_visited_at).not.toBeNull();
   expect(warn.mock.calls.flat().join(' ')).not.toContain('assignment_value_stale');
@@ -62,6 +62,6 @@ it('recordQuizAttempt creates the entry when the store does not hold the item', 
 it('recordQuizAttempt does nothing without a course snapshot', () => {
   recordQuizAttempt({
     item_id: 5, attempt_count: 1, max_attempts: 3, score_correct: 0, score_total: 1, can_retry: true,
-  });
+  }, {});
   expect(currentCourse.value).toBeNull();
 });

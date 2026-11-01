@@ -605,8 +605,8 @@ describe('QuizItem lastAttempt memo (enumerated (A)3, T4)', () => {
     await settle();
 
     // A's continuation records the attempt on A, not on the item now on screen.
-    expect(recordQuizAttempt).toHaveBeenCalledWith(expect.objectContaining({ item_id: 1 }));
-    expect(recordQuizAttempt).not.toHaveBeenCalledWith(expect.objectContaining({ item_id: 2 }));
+    expect(recordQuizAttempt).toHaveBeenCalledWith(expect.objectContaining({ item_id: 1 }), { '101': [1011] });
+    expect(recordQuizAttempt).not.toHaveBeenCalledWith(expect.objectContaining({ item_id: 2 }), expect.anything());
 
     // Clear the result card so the attempts line renders again.
     buttonNamed('Try again').click();
@@ -649,17 +649,100 @@ describe('QuizItem across a remount (C13, D83)', () => {
     expect(host.querySelector('.result')?.textContent).toContain('Attempt 3 of 3');
   });
 
-  it('submit with attempts left, then a remount: an empty form and the right number left', async () => {
+  function radios(): HTMLInputElement[] {
+    return [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  }
+  function hasSubmit(): boolean {
+    return [...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Submit'));
+  }
+  /** Seed one item whose last attempt the store already holds (a reload, D89). */
+  function seedResult(attempts: number, score: { correct: number; total: number } | null,
+    answers: Record<string, number[] | string> | null): void {
+    seed({ 1: attempts });
+    const e = entry(attempts);
+    e.last_score = score;
+    e.last_answers = answers;
+    __test__setSlots({
+      slug: 'algebra', versionId: 1,
+      course: { id: 1, slug: 'algebra', name: 'Linear Algebra' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: MAX },
+      blocks: [], state: { version_id: 1, items: { '1': e } },
+      miniProjectsByBlockId: {}, teachers: [],
+    });
+  }
+
+  // D89 (Safari pass): coming back to a submitted quiz shows that result, not
+  // an empty form; the student never asked for a new attempt.
+  it('submit with attempts left, then a remount: the last result shows locked, with Try again', async () => {
     session.user = student;
     seed({ 1: 0 });
-    postSpy.mockResolvedValue(submitResponse({ item_id: 1, attempt_count: 1, can_retry: true }));
+    postSpy.mockResolvedValue(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 1, score_total: 1, can_retry: true }));
     render(quiz(1, 'Quiz A', 1));
     answerAll();
     submitButton().click();
     await settle();
     remount(quiz(1, 'Quiz A', 1));
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1011']);
+    expect(radios().every((r) => r.disabled)).toBe(true);
+    const result = host.querySelector('.result')?.textContent ?? '';
+    expect(result).toContain('1 / 1');
+    expect(result).toContain('Attempt 1 of 3');
+    expect(buttonNamed('Try again')).toBeDefined();
+    expect(hasSubmit()).toBe(false);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  it('a result stored before this page load shows when the quiz opens', () => {
+    seedResult(2, { correct: 0, total: 1 }, { '101': [1012] });
+    render(quiz(1, 'Quiz A', 1));
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1012']);
+    expect(radios().every((r) => r.disabled)).toBe(true);
+    expect(host.querySelector('.result')?.textContent).toContain('0 / 1');
+    expect(host.querySelector('.result')?.textContent).toContain('Attempt 2 of 3');
+    expect(hasSubmit()).toBe(false);
+  });
+
+  it('the stored result shows once the course snapshot arrives after the quiz mounts', () => {
+    __test__setSlots(null);
+    render(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')).toBeNull();
+    seedResult(1, { correct: 1, total: 1 }, { '101': [1011] });
+    flushSync();
+    expect(host.querySelector('.result')?.textContent).toContain('Attempt 1 of 3');
+    expect(radios().every((r) => r.disabled)).toBe(true);
+  });
+
+  it('Try again on a shown result opens an empty form with the right number left', () => {
+    seedResult(1, { correct: 1, total: 1 }, { '101': [1011] });
+    render(quiz(1, 'Quiz A', 1));
+    buttonNamed('Try again').click();
+    flushSync();
+    expect(host.querySelector('.result')).toBeNull();
+    expect(radios().some((r) => r.checked)).toBe(false);
+    expect(radios().some((r) => r.disabled)).toBe(false);
     expect(host.querySelector('.hint')?.textContent?.trim()).toBe('2 attempts left');
-    expect([...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(false);
+  });
+
+  it('a new attempt started after Try again wins over the stored result on a remount', () => {
+    session.user = student;
+    seedResult(1, { correct: 1, total: 1 }, { '101': [1011] });
+    render(quiz(1, 'Quiz A', 1));
+    buttonNamed('Try again').click();
+    flushSync();
+    radios()[1]!.click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')).toBeNull();
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1012']);
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('an attempt without a stored score opens an empty form, as before', () => {
+    seedResult(1, null, null);
+    render(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')).toBeNull();
+    expect(radios().some((r) => r.disabled)).toBe(false);
+    expect(host.querySelector('.hint')?.textContent?.trim()).toBe('2 attempts left');
   });
 
   it('a never-visited quiz (no store entry) keeps its count across a remount', async () => {
@@ -670,6 +753,9 @@ describe('QuizItem across a remount (C13, D83)', () => {
     submitButton().click();
     await settle();
     remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')?.textContent).toContain('Attempt 1 of 3');
+    buttonNamed('Try again').click();
+    flushSync();
     expect(host.querySelector('.hint')?.textContent?.trim()).toBe('2 attempts left');
   });
 

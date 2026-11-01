@@ -29,6 +29,20 @@
   // snapshot is loaded). Keyed off the RESPONSE's `item_id`, not
   // the `item` prop: a late response must only ever describe its own item.
   let lastAttempt = $state<{ id: number; count: number } | null>(null);
+  // D89: a quiz opened after a submit with attempts left shows that result
+  // (the store's last answers and score), until Try again. A draft kept from
+  // a new attempt wins, so it is read once, as `answers` is.
+  // svelte-ignore state_referenced_locally
+  const openedWithDraft = getDraft(item.id) !== undefined;
+  let retried = $state(false);
+  const stored = $derived.by(() => {
+    if (openedWithDraft || retried || lastResult !== null || revealed !== null) return null;
+    const max = currentCourse.value?.version.max_quiz_attempts;
+    const st = currentCourse.value?.state.items[String(item.id)];
+    if (max === undefined || st === undefined || st.last_score === null) return null;
+    if (st.attempt_count < 1 || st.attempt_count >= max) return null;
+    return { answers: st.last_answers ?? {}, score: st.last_score, attempt: st.attempt_count, max };
+  });
 
   const revealById = $derived(
     revealed === null
@@ -36,7 +50,7 @@
       : Object.fromEntries(revealed.questions.map((r) => [r.id, r])),
   );
 
-  const locked = $derived(lastResult !== null || revealed !== null);
+  const locked = $derived(lastResult !== null || revealed !== null || stored !== null);
 
   const attemptsUsed = $derived(
     lastResult?.attempt_count
@@ -52,8 +66,10 @@
 
   // Resolve the value to display per question: pre-fill from the student's
   // last submitted answers (revealed.student_answer) when we auto-loaded the
-  // reveal; otherwise use the in-progress `answers` map.
+  // reveal, or from the stored result (D89); otherwise use the in-progress
+  // `answers` map.
   function valueFor(qid: number): number[] | string | undefined {
+    if (stored !== null) return stored.answers[String(qid)];
     const r = revealById?.[qid];
     if (r && autoRevealed && r.student_answer !== null && r.student_answer !== undefined) {
       return r.student_answer;
@@ -98,11 +114,12 @@
       return;
     }
     try {
-      inflight = api.post<QuizSubmitResponse>(`/api/items/${item.id}/submit`, { answers });
+      const sent = $state.snapshot(answers);
+      inflight = api.post<QuizSubmitResponse>(`/api/items/${item.id}/submit`, { answers: sent });
       const res = await inflight;
       lastResult = res;
       lastAttempt = { id: res.item_id, count: res.attempt_count };
-      recordQuizAttempt(res);
+      recordQuizAttempt(res, sent);
       clearDraft(res.item_id);
     } catch (e: unknown) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Submit failed.';
@@ -113,6 +130,7 @@
   }
 
   function tryAgain(): void {
+    retried = true;
     answers = {};
     lastResult = null;
     revealed = null;
@@ -195,7 +213,7 @@
       </div>
     {:else}
       {@const max = currentCourse.value?.version.max_quiz_attempts ?? 0}
-      {@const score = lastResult ? { correct: lastResult.score_correct, total: lastResult.score_total, attempt: lastResult.attempt_count, max: lastResult.max_attempts, canRetry: lastResult.can_retry } : revealed ? { correct: revealed.score_correct, total: revealed.score_total, attempt: revealed.attempt_count, max, canRetry: revealed.attempt_count < max } : null}
+      {@const score = lastResult ? { correct: lastResult.score_correct, total: lastResult.score_total, attempt: lastResult.attempt_count, max: lastResult.max_attempts, canRetry: lastResult.can_retry } : revealed ? { correct: revealed.score_correct, total: revealed.score_total, attempt: revealed.attempt_count, max, canRetry: revealed.attempt_count < max } : stored ? { correct: stored.score.correct, total: stored.score.total, attempt: stored.attempt, max: stored.max, canRetry: true } : null}
       {#if score}
         <div class="result">
           <p><strong>Score:</strong> <span class="mono">{score.correct} / {score.total}</span></p>
