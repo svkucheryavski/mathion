@@ -1,6 +1,6 @@
 # Visual refresh — Polish 3: the reviewers' minors that users meet
 
-**Status:** rev 14 (2026-11-01). Rev 4 approved by the user (`23f8afb`).
+**Status:** rev 15 (2026-11-01). Rev 4 approved by the user (`23f8afb`).
 - Rev 1 (`e10671b`): the user's decisions D82–D87, the controller's calls C1–C15, after the builder check.
 - Rev 2 folds in spec review round 1 (`spec-r1-opus-a.md`, `spec-r1-opus-b.md`, `spec-r1-fable.md`: 4 Critical, 18 Important, 34 Minor across the three lanes) and adds C16–C19.
 - Rev 3 folds in round 2 (`spec-r2-opus.md`, `spec-r2-fable.md`: 1 Critical, 8 Important, 20 Minor; round 2 found 18 of round 1's 22 Critical/Important resolved, 4 partly, all four finished here).
@@ -15,6 +15,7 @@
 - Rev 12 records Task 8's look check (user OK) and its calls: the create form asks nothing while Create's request runs, and its navigation question is the D37 wording; every offline write says "Could not reach server. Check your connection."; a bulk refetch that fails is quiet; New item's form is `novalidate`; the video body's prefix and length messages; the Teaching pill's address. Its review (r1) adds: a list error drops the create form, and InlineName shows the message of a plain `Error` only.
 - Rev 13 records Task 9's look check (user OK: a PDF and a PNG open in the browser's viewer, a CSV downloads, the run date message at 1280) and its calls: the run date messages give the day with two digits, as `formatShortDate` does ("01 Jan 2026"); a stripped link is found on the markdown tokens, not by a pattern over nh3's output; the range is checked only when a PATCH sends a date (review r1).
 - Rev 14 records the user's D89 from the Safari pass: a quiz submitted with attempts left shows that result again on return, replacing C13's "Showing the last result again is not in scope".
+- Rev 15 records the user's D90 from the Safari pass: a block or sequence rename that shows an error line keeps ✓, × and the block number level with the field.
 
 **Branch:** `feat/visual-refresh-polish3-minors`, cut from the Polish 2 tip `71dd8cc`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-31-visual-refresh-polish3-minors/` (`inventory.html`: the grouped backlog and the recon; the review rounds `spec-r*-*.md`).
@@ -54,6 +55,7 @@ The user's, made in the brainstorm on 2026-10-31.
 - **D87 — "0 uses" is a label, not a button.** On a run's Assets tab, a file used by no mini-project shows its grey "0 uses" chip as plain text. It has no button and no empty "used by" panel, so there is one Tab stop fewer. A chip with uses keeps opening its list.
 - **D88 — Only the student screens must work on a phone.** "This service can not be fully functional on small screen. We keep this option so student can do some quick actions on mobile phone, like check video, quiz or progress, but the part about course admin and teaching admin is not intended to be functional on small screens." (user, after the 400px shots). The 400px rule of D82 covers Login, the course list, the course page, the player and the mini-project page. The authoring screens (Versions, the editor and its modals) and the teaching screens (Teaching, a course's runs, a run's tabs) are laptop screens: a sideways scroll or a cramped header there at 400px is not a defect.
 - **D89 — A submitted quiz shows its result when the student comes back.** "I submitted my answers and did not ask for make a new attempt, why they disappeared? Why I do not see them and I do not see how many were correct?" (user, Safari pass, step 6). A quiz with attempts used and some left opens on the last result: the answers locked, the score, "Attempt N of M" and Try again, as right after the submit. This holds after moving away and after a reload. The correct answers stay hidden until the last attempt is used (the reveal). Details in §Each item its own instance, and the attempt count.
+- **D90 — An error under a rename field leaves the row's buttons in line.** Found in the Safari pass (step 15, the user's screenshot): renaming a block or sequence to `!!!` shows "Title must contain at least one Latin letter or digit" under the field, and ✓ and × dropped below the field's line. The cause predates Polish 3: `AccordionHeader`'s `.acc-row` centres its children, so the buttons and the block number centred on the field plus its message. Fix (user: fix now): while renaming, the row carries `.renaming`; `.acc-row.renaming { align-items: flex-start }`, `.renaming .actions { height: var(--control-h) }` and `.renaming .num { line-height: var(--control-h) }`, so they sit level with the field whatever shows under it. Without an error nothing moves. The create rows (`.add-row`) already align to the top.
 
 ### The controller's calls
 
@@ -406,6 +408,7 @@ The plan names each, so every red/green is planned. Line numbers are from `visua
 - content.css `WANT_FULL` / `WANT_ORDER` (~521-590) and the "49 rules" comment (D85);
 - `.uses-chip` ~4888 stays (the span keeps the class);
 - `.add-input` ~3903 and `.title-input` ~3959 stay, and gain the qualified `[aria-invalid]` rows (C3);
+- three new AccordionHeader rows for D90 (rev 15): `.acc-row.renaming` `align-items:flex-start`, `.renaming .actions` `height:var(--control-h)`, `.renaming .num` `line-height:var(--control-h)`; EXPECTED_CHECKS 2486 → 2489;
 - `.vtitle` ~3830 (the row title as a link);
 - the SequencePlayer AST/SIG rows (~1381, ~1540-1553) stay unchanged by C13's placement, and the ItemRouter grep rows (~1171) are unaffected by the `{#key}`;
 - the MiniProjectLink SIG row, if the mini-project row adopts `routeClick` (its markup gains an `onclick`);
