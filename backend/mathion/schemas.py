@@ -48,6 +48,15 @@ def _strip_label_value(v: str | None) -> str | None:
     return v.strip() if isinstance(v, str) else v
 
 
+def _reject_null(v):
+    """Polish 3 C10: an explicit null on a field whose column is NOT NULL
+    is a 422, not a NOT NULL error (500). Omitting the field still leaves it
+    unchanged: a before-validator does not run on the default."""
+    if v is None:
+        raise ValueError("may not be null")
+    return v
+
+
 class VersionCreate(BaseModel):
     info_md: str = ""
     max_quiz_attempts: int = Field(default=3, ge=1, le=10)
@@ -332,10 +341,13 @@ class QuestionCreate(BaseModel):
 
 class QuestionUpdate(BaseModel):
     text_md: str | None = Field(default=None, min_length=1)
+    # null is meaningful here: Remove explanation sends explanation_md: null.
     explanation_md: str | None = None
     correct_numeric: Decimal | None = Field(default=None, max_digits=20, decimal_places=10)
     precision: int | None = Field(default=None, ge=0, le=10)
     correct_text: str | None = Field(default=None, max_length=500)
+
+    _no_null = field_validator("text_md", mode="before")(_reject_null)
 
 
 class QuestionResponse(BaseModel):
@@ -367,6 +379,8 @@ class OptionCreate(BaseModel):
 class OptionUpdate(BaseModel):
     text: str | None = Field(default=None, min_length=1, max_length=500)
     is_correct: bool | None = None
+
+    _no_null = field_validator("text", "is_correct", mode="before")(_reject_null)
 
 
 class OptionResponse(BaseModel):
@@ -456,6 +470,8 @@ class RunUpdate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     groups_enabled: bool | None = None
+
+    _no_null = field_validator("title", "start_date", "end_date", "groups_enabled", mode="before")(_reject_null)
 
 
 class RunResponse(BaseModel):

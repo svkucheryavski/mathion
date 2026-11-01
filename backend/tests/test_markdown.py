@@ -302,3 +302,40 @@ def test_render_address_before_a_space_or_line_break_still_links(md):
 def test_render_address_last_inside_emphasis_links(md, href):
     # A closing delimiter is not a letter: the address before it is whole (D66).
     assert f'href="{href}"' in render_markdown(md)
+
+
+# Polish 3 C11: a link whose address nh3 strips stays plain text, not an
+# <a> with no href.
+@pytest.mark.parametrize("url", [
+    "https://a.b:99999999",
+    "https://%zz.org",
+    "https:///",
+    "https://[::1]/x",
+])
+def test_bare_urls_nh3_strips_stay_plain_text(url):
+    result = render_markdown(f"see {url} here")
+    assert "<a" not in result
+    assert url in result
+
+
+@pytest.mark.parametrize("src,text", [
+    ("[t](https://%zz.org)", "t"),
+    ("<https://%zz.org>", "https://%zz.org"),
+    ('[**bold** t](https://%zz.org "a title")', "<strong>bold</strong> t"),
+    # nh3 does not escape < or > inside an attribute value (probed), so the
+    # check is not a pattern over its output.
+    ('[t](https://%zz.org "a>b")', "<p>t</p>"),
+    ('[t](https://%zz.org "<a href=x>")', "<p>t</p>"),
+    ('[![pic](x.png "</a>")](https://%zz.org)', '<img src="x.png" alt="pic" title="</a>">'),
+])
+def test_authored_link_with_a_bad_href_stays_plain_text(src, text):
+    result = render_markdown(src)
+    assert "<a" not in result
+    assert text in result
+
+
+def test_good_links_next_to_a_stripped_one_keep_their_href():
+    result = render_markdown("[ok](https://example.com) and [bad](https://%zz.org) and https://x.org")
+    assert result.count("<a ") == 2
+    assert 'href="https://example.com"' in result and 'href="https://x.org"' in result
+    assert "bad" in result

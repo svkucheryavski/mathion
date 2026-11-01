@@ -71,7 +71,7 @@ class Settings(BaseSettings):
         except ValueError as exc:
             raise ValueError(f"MATHION_BASE_URL has invalid port: {v!r}") from exc
         # Reject path-prefix URLs. `MATHION_BASE_URL=http://example.com/admin`
-        # would produce links like `http://example.com/admin/courses/<slug>/runs/<id>`,
+        # would produce links like `http://example.com/admin/teaching/<slug>/runs/<id>`,
         # which is almost always a config typo. Path-prefix support is a real
         # but separate feature (reverse-proxy mounting) and would need a
         # dedicated design — out of scope this slice. Accept "" and "/" only.

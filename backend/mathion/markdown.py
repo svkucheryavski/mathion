@@ -1,3 +1,4 @@
+import html
 import re
 import unicodedata
 
@@ -151,8 +152,41 @@ def _bare_urls(state: StateCore) -> None:
         block.children = children
 
 
+def _href_survives(href: str) -> bool:
+    """Whether nh3 keeps this href, asked of nh3 itself with the same schemes."""
+    probe = nh3.clean(
+        f'<a href="{html.escape(href, quote=True)}">x</a>',
+        tags={"a"}, attributes={"a": {"href"}}, url_schemes=_URL_SCHEMES, link_rel=None,
+    )
+    return "href=" in probe
+
+
+def _drop_bad_links(state: StateCore) -> None:
+    """Polish 3 C11: nh3 drops an href it cannot parse (a bad port, a bad escape,
+    no host) and would keep an <a> with none, a dead link. Such a link, bare or
+    authored, stays its text. Checked on the tokens, not on nh3's output: nh3
+    leaves < and > unescaped inside attribute values, so no pattern over its
+    HTML is exact. Links do not nest, so the next link_close is the partner.
+    """
+    for block in state.tokens:
+        if block.type != "inline" or not block.children:
+            continue
+        children: list[Token] = []
+        dropping = False
+        for tok in block.children:
+            if tok.type == "link_open" and not _href_survives(tok.attrGet("href") or ""):
+                dropping = True
+                continue
+            if tok.type == "link_close" and dropping:
+                dropping = False
+                continue
+            children.append(tok)
+        block.children = children
+
+
 _md = MarkdownIt("commonmark", {"html": False})
 _md.core.ruler.before("text_join", "bare_url", _bare_urls)
+_md.core.ruler.after("bare_url", "drop_bad_links", _drop_bad_links)
 dollarmath_plugin(_md)
 
 _ALLOWED_TAGS = {
@@ -193,9 +227,9 @@ def render_markdown(text: str | None) -> str:
     """
     if not text:
         return ""
-    html = _md.render(text)
+    rendered = _md.render(text)
     return nh3.clean(
-        html,
+        rendered,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRS,
         url_schemes=_URL_SCHEMES,
@@ -223,13 +257,13 @@ def extract_asset_filenames(text: str) -> set[str]:
     return filenames
 
 
-def resolve_asset_urls(html: str, version_id: int, asset_filenames: set[str]) -> str:
+def resolve_asset_urls(rendered: str, version_id: int, asset_filenames: set[str]) -> str:
     """Replace bare asset filenames with /assets/{version_id}/{filename} paths.
 
     Only replaces filenames in asset_filenames. Must be called AFTER
     render_markdown() / nh3 sanitization.
     """
     for filename in asset_filenames:
-        html = html.replace(f'src="{filename}"', f'src="/assets/{version_id}/{filename}"')
-        html = html.replace(f'href="{filename}"', f'href="/assets/{version_id}/{filename}"')
-    return html
+        rendered = rendered.replace(f'src="{filename}"', f'src="/assets/{version_id}/{filename}"')
+        rendered = rendered.replace(f'href="{filename}"', f'href="/assets/{version_id}/{filename}"')
+    return rendered

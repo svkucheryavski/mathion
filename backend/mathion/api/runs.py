@@ -1,5 +1,6 @@
 import os
 import shutil
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -31,6 +32,14 @@ from mathion.models_auth import User
 from mathion.schemas import RunCreate, RunResponse, RunUpdate
 
 router = APIRouter(tags=["runs"])
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _short_date(d: date) -> str:
+    """The app's short date, "01 Sep 2026", as the frontend's formatShortDate
+    shows it. A fixed English month list: strftime('%b') follows the locale."""
+    return f"{d.day:02d} {_MONTHS[d.month - 1]} {d.year}"
 
 
 @router.post("/api/courses/{course_id}/runs", status_code=201, response_model=RunResponse)
@@ -88,9 +97,24 @@ def patch_run(run_id: int, data: RunUpdate, db: Session = Depends(get_db), user:
         if mp_count and mp_count > 0:
             raise HTTPException(status_code=409, detail="Cannot disable groups; mini-projects exist")
 
+    # Polish 3 C10: each date is checked against the other one in force, so
+    # neither alone can invert the range; when both are sent, the end date's
+    # message wins. Only when a date is sent: a title or groups edit of a run
+    # the old check left inverted is not about its dates (review r1).
+    new_start = updates.get("start_date", run.start_date)
     new_end = updates.get("end_date", run.end_date)
-    if new_end < run.start_date:
-        raise HTTPException(status_code=422, detail="end_date must be on or after start_date")
+    if ("start_date" in updates or "end_date" in updates) and new_end < new_start:
+        if "end_date" in updates:
+            raise HTTPException(
+                status_code=422,
+                detail=f"End date must be on or after the start date ({_short_date(new_start)}). "
+                       "To move the run earlier, change the start date first.",
+            )
+        raise HTTPException(
+            status_code=422,
+            detail=f"Start date must be on or before the end date ({_short_date(new_end)}). "
+                   "To move the run later, change the end date first.",
+        )
 
     # Phase 7b: lowering end_date blocked when submissions exist
     if "end_date" in updates and updates["end_date"] < run.end_date:

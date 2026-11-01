@@ -19,6 +19,9 @@ from mathion.schemas import AssetResponse
 
 router = APIRouter(tags=["assets"])
 
+# Polish 3 D84: the course-file types the browser shows in the tab.
+INLINE_MIME = frozenset({"application/pdf", "image/png", "image/jpeg", "image/gif"})
+
 
 def _asset_dir(version_id: int) -> str:
     return os.path.join(settings.asset_path, "courses", str(version_id))
@@ -186,7 +189,15 @@ def serve_asset(
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Asset file missing")
 
-    return FileResponse(filepath, media_type=asset.mime_type, filename=filename)
+    # Polish 3 D84: a PDF or an image opens in the browser's own viewer; every
+    # other type downloads. C12: no type sniffing on any file.
+    return FileResponse(
+        filepath,
+        media_type=asset.mime_type,
+        filename=filename,
+        content_disposition_type="inline" if asset.mime_type in INLINE_MIME else "attachment",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.delete("/api/assets/{asset_id}", status_code=204)

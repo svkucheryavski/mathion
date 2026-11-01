@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import update
 
 from mathion.models import AnswerOption, Item
@@ -373,3 +374,35 @@ def test_text_only_update_does_not_touch_the_marks(admin_client):
     q, (a, b) = _single_choice(admin_client, True, False)
     assert admin_client.patch(f"/api/options/{b['id']}", json={"text": "Renamed"}).status_code == 200
     assert _marks(admin_client, q["id"]) == [True, False]
+
+
+# Polish 3 C10: an explicit null is a 422 only where the column cannot be empty.
+def test_update_question_text_md_null_is_422(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={"text_md": "Q?", "type": "single_choice"}).json()
+    response = admin_client.patch(f"/api/questions/{q['id']}", json={"text_md": None})
+    assert response.status_code == 422
+
+
+# A guard: green before Task 9 too; Remove explanation sends explanation_md: null.
+def test_explanation_md_null_still_clears_the_explanation(admin_client):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice", "explanation_md": "Because.",
+    }).json()
+    assert q["explanation_md"] == "Because."
+    response = admin_client.patch(f"/api/questions/{q['id']}", json={"explanation_md": None})
+    assert response.status_code == 200
+    assert response.json()["explanation_md"] is None
+    assert response.json()["explanation_html"] in (None, "")
+
+
+@pytest.mark.parametrize("field", ["text", "is_correct"])
+def test_update_option_field_null_is_422(admin_client, field):
+    ids = _make_quiz_via_api(admin_client)
+    q = admin_client.post(f"/api/items/{ids['item']['id']}/questions", json={
+        "text_md": "Q?", "type": "single_choice",
+    }).json()
+    opt = admin_client.post(f"/api/questions/{q['id']}/options", json={"text": "A", "is_correct": False}).json()
+    response = admin_client.patch(f"/api/options/{opt['id']}", json={field: None})
+    assert response.status_code == 422

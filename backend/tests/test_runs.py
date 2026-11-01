@@ -1,5 +1,7 @@
 import io
 
+import pytest
+
 from sqlalchemy import func, select
 
 from mathion.models import Block, Evaluation, Group, MiniProject, Run, RunStudent, Submission
@@ -358,3 +360,102 @@ def test_extend_end_date_on_disabled_version_run_409(admin_client, db, seed_publ
     response = admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2026-12-31"})
     assert response.status_code == 409
     assert "disabled" in response.json()["detail"].lower()
+
+
+# Polish 3 C10: run dates are checked against the date in force, both ways,
+# in the app's short format; an explicit null on a NOT NULL field is a 422.
+def _run_jan_to_mar(admin_client, seed_publishable_version):
+    course, _ = seed_publishable_version()
+    return admin_client.post(f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-03-31"}).json()
+
+
+def test_patch_start_after_existing_end_is_422(admin_client, seed_publishable_version):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"start_date": "2026-04-15"})
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Start date must be on or before the end date (31 Mar 2026). "
+        "To move the run later, change the end date first."
+    )
+    assert admin_client.get(f"/api/runs/{run['id']}").json()["start_date"] == "2026-01-01"
+
+
+def test_patch_end_before_existing_start_is_422(admin_client, seed_publishable_version):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"end_date": "2025-12-01"})
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "End date must be on or after the start date (01 Jan 2026). "
+        "To move the run earlier, change the start date first."
+    )
+
+
+def test_patch_both_dates_inverted_gives_the_end_date_message(admin_client, seed_publishable_version):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}",
+        json={"start_date": "2026-05-01", "end_date": "2026-04-01"})
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("End date must be on or after the start date (01 May 2026).")
+
+
+# A guard: green before Task 9 too; pins that the new check keeps same-day runs.
+def test_patch_same_day_start_and_end_is_allowed(admin_client, seed_publishable_version):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"start_date": "2026-03-31"})
+    assert response.status_code == 200
+    assert response.json()["start_date"] == "2026-03-31"
+
+
+# A guard: green before Task 9 too; one PATCH may move the whole run.
+def test_patch_both_dates_moving_later_together_is_allowed(admin_client, seed_publishable_version):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}",
+        json={"start_date": "2026-05-01", "end_date": "2026-06-30"})
+    assert response.status_code == 200
+
+
+def test_patch_title_on_a_run_with_inverted_stored_dates_is_allowed(admin_client, seed_publishable_version, db):
+    """Review r1: the range is checked only when a date is sent. A run the old
+    start-date bug left inverted can still get its title or groups edited."""
+    from datetime import date
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    row = db.get(Run, run["id"])
+    row.start_date = date(2026, 5, 1)
+    db.commit()
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"title": "Renamed"})
+    assert response.status_code == 200
+    assert response.json()["title"] == "Renamed"
+
+
+def test_patch_start_date_null_is_422_not_500(admin_client, seed_publishable_version):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={"start_date": None})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["title", "end_date", "groups_enabled"])
+def test_patch_run_field_null_is_422(admin_client, seed_publishable_version, field):
+    run = _run_jan_to_mar(admin_client, seed_publishable_version)
+    response = admin_client.patch(f"/api/runs/{run['id']}", json={field: None})
+    assert response.status_code == 422
+
+
+def test_short_date_uses_english_months_whatever_the_locale():
+    import locale
+    from datetime import date
+    from mathion.api.runs import _short_date
+    # The format itself, whatever locale this machine runs in (CI may lack de_DE).
+    assert _short_date(date(2026, 3, 31)) == "31 Mar 2026"
+    assert _short_date(date(2026, 9, 1)) == "01 Sep 2026"
+    saved = locale.setlocale(locale.LC_TIME)
+    try:
+        try:
+            locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
+        except locale.Error:
+            pytest.skip("no de_DE.UTF-8 locale on this machine")
+        assert date(2026, 3, 31).strftime("%b") != "Mar"   # the locale took
+        assert _short_date(date(2026, 3, 31)) == "31 Mar 2026"
+        assert _short_date(date(2026, 9, 1)) == "01 Sep 2026"
+    finally:
+        locale.setlocale(locale.LC_TIME, saved)

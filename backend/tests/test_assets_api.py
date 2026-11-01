@@ -680,3 +680,67 @@ def test_version_copy_fails_if_source_file_missing(admin_client, asset_tmpdir):
     )
     assert response.status_code == 500
     assert "missing" in response.json()["detail"].lower()
+
+
+# Polish 3 D84, C12: the browser shows a PDF or an image in the tab; every
+# other type downloads. Both file endpoints send nosniff.
+_INLINE_CASES = [
+    ("doc.pdf", b"%PDF-1.4\n", "application/pdf"),
+    ("pic.png", b"png-bytes", "image/png"),
+    ("pic.jpg", b"jpeg-bytes", "image/jpeg"),
+    ("pic.gif", b"gif-bytes", "image/gif"),
+]
+
+
+def _upload_course_file(admin_client, version, name, content, mime):
+    r = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": (name, io.BytesIO(content), mime)},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+@pytest.mark.parametrize("name,content,mime", _INLINE_CASES)
+def test_inline_types_are_inline(admin_client, asset_tmpdir, name, content, mime):
+    _, version = _create_published_version(admin_client)
+    _upload_course_file(admin_client, version, name, content, mime)
+    response = admin_client.get(f"/assets/{version['id']}/{name}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(mime)
+    disposition = response.headers["content-disposition"]
+    assert disposition.startswith("inline;")
+    assert f'filename="{name}"' in disposition
+
+
+# A guard: green before Task 9 too (attachment was the default); pins that
+# only the four inline types change.
+@pytest.mark.parametrize("name,content,mime", [
+    ("data.csv", b"a,b\n1,2\n", "text/csv"),
+    ("app.js", b"console.log(1)", "text/javascript"),
+])
+def test_csv_and_js_download(admin_client, asset_tmpdir, name, content, mime):
+    _, version = _create_published_version(admin_client)
+    _upload_course_file(admin_client, version, name, content, mime)
+    response = admin_client.get(f"/assets/{version['id']}/{name}")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("attachment;")
+
+
+def test_pdf_with_uppercase_extension_is_inline(admin_client, asset_tmpdir):
+    _, version = _create_published_version(admin_client)
+    asset = _upload_course_file(admin_client, version, "Notes.PDF", b"%PDF-1.4\n", "application/pdf")
+    assert asset["filename"] == "notes.pdf"
+    response = admin_client.get(f"/assets/{version['id']}/notes.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("inline;")
+
+
+def test_asset_file_response_has_nosniff(admin_client, asset_tmpdir):
+    _, version = _create_published_version(admin_client)
+    _upload_course_file(admin_client, version, "data.csv", b"a,b\n", "text/csv")
+    _upload_course_file(admin_client, version, "pic.png", b"png-bytes", "image/png")
+    for name in ("data.csv", "pic.png"):
+        response = admin_client.get(f"/assets/{version['id']}/{name}")
+        assert response.status_code == 200
+        assert response.headers["x-content-type-options"] == "nosniff"
