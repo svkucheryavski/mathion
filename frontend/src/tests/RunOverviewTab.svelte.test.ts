@@ -349,6 +349,16 @@ describe('Settings (R42)', () => {
     unmount(cmp);
   });
 
+  it('a rejected TypeError sets the switch back and shows a toast (Polish 3)', async () => {
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const { target, cmp } = mountOverview({ run: { groups_enabled: true } });
+    sw(target).click();
+    await settle();
+    expect(sw(target).getAttribute('aria-checked')).toBe('true');
+    expect(pushToast).toHaveBeenCalledWith('Could not reach server. Check your connection.', 'error');
+    unmount(cmp);
+  });
+
   it('a draft: the visible label names the switch and the help line describes it; no lock line', () => {
     const { target, cmp } = mountOverview();
     const s = sw(target);

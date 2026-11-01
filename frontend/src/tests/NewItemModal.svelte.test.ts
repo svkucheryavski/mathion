@@ -56,15 +56,34 @@ describe('NewItemModal (Slice-5c T4, D10)', () => {
     type(panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!, 'https://youtu.be/x');
     expect(create().disabled).toBe(false);
   });
-  it('Video: Create stays disabled until the URL starts with http(s):// (spec D10)', () => {
+  it('Video: Create stays disabled until the URL starts with http(s):// (spec D10), once normalised (Polish 3)', () => {
     render();
     pick('video');
     type(titleIn(), 'Clip');
     const url = panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!;
-    type(url, 'youtu.be/x');
+    type(url, 'example.com/v.mp4');   // an unknown host gains no scheme
     expect(create().disabled).toBe(true);
-    type(url, 'HTTP://youtu.be/x');
+    type(url, 'youtu.be/x');
     expect(create().disabled).toBe(false);
+    type(url, 'HTTP://example.com/v.mp4');
+    expect(create().disabled).toBe(false);
+  });
+  it('a scheme-less YouTube URL is accepted and sent normalised', async () => {
+    const p = render();
+    pick('video');
+    type(titleIn(), 'Clip');
+    type(panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!, 'youtu.be/x');
+    create().click(); await settle();
+    expect(p.onCreate).toHaveBeenLastCalledWith({ title: 'Clip', type: 'video', video_url: 'https://www.youtube.com/embed/x' });
+  });
+  it('Enter in the Video URL field submits a scheme-less URL too (the form does its own checks)', async () => {
+    const p = render();
+    pick('video');
+    type(titleIn(), 'Clip');
+    const url = panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!;
+    type(url, 'youtu.be/x');
+    url.form!.requestSubmit(); await settle();
+    expect(p.onCreate).toHaveBeenLastCalledWith({ title: 'Clip', type: 'video', video_url: 'https://www.youtube.com/embed/x' });
   });
   it('Create sends exactly the body the backend expects per type', async () => {
     const p = render();
@@ -83,7 +102,7 @@ describe('NewItemModal (Slice-5c T4, D10)', () => {
     pick('video');
     type(panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!, 'https://youtu.be/x');
     create().click(); await settle();
-    expect(p.onCreate).toHaveBeenLastCalledWith({ title: 'Dot', type: 'video', video_url: 'https://youtu.be/x' });
+    expect(p.onCreate).toHaveBeenLastCalledWith({ title: 'Dot', type: 'video', video_url: 'https://www.youtube.com/embed/x' });
   });
   it('Enter in Title submits', async () => {
     const p = render();

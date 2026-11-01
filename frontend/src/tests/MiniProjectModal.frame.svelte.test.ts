@@ -233,6 +233,31 @@ describe('MiniProjectModal — footer (D12, R20)', () => {
     resolveUpload({ ok: true, status: 200, json: () => Promise.resolve({ id: 1, filename: 'x.png' }) });
     await settle();
   });
+
+  // Polish 3 C18 (slice6b Task 4): the finished upload would re-dirty the form and orphan its asset.
+  it('Discard waits while an upload runs (UPLOAD_WAIT)', async () => {
+    let resolveUpload!: (v: unknown) => void;
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) =>
+      String(url).includes('/api/runs/10/assets') && init?.method === 'POST'
+        ? new Promise((r) => { resolveUpload = r; })
+        : jres([]));
+    open();
+    await settle();
+    type('changed');
+    await settle();
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })] } });
+    ta().dispatchEvent(drop);
+    await settle();
+    expect(btn('discard')!.disabled).toBe(true);
+    expect(btn('discard')!.title).toBe('Wait for the upload to finish');
+    btn('discard')!.click();
+    await settle();
+    expect(ta().value).toContain('changed');
+    resolveUpload({ ok: true, status: 200, json: () => Promise.resolve({ id: 1, filename: 'x.png' }) });
+    await settle();
+    expect(btn('discard')!.disabled).toBe(false);
+  });
 });
 
 describe('MiniProjectModal — Save keeps the editor open (D19)', () => {

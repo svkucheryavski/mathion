@@ -8,7 +8,9 @@
 
   let loading = $state(true);
   let courses = $state<CourseListItem[]>([]);
-  let error = $state('');
+  // An object, not a string: an empty message still shows the error. The shape
+  // mirrors CourseView's; nothing here branches on `status` yet.
+  let error = $state<{ status: number; message: string } | null>(null);
   // Retry counter (Slice-4 enumerated (A)2): the load effect reads it at its
   // top, so incrementing it re-runs the fetch. Retry is reachable only from
   // the error branch — i.e. after the previous request settled — so at most
@@ -23,10 +25,14 @@
   $effect(() => {
     void reloadTick;
     loading = true;
-    error = '';
+    error = null;
     api.get<CourseListItem[]>('/api/my-courses')
       .then((cs) => { courses = cs; })
-      .catch((e: unknown) => { error = e instanceof ApiError ? e.displayMessage : 'Failed to load courses.'; })
+      .catch((e: unknown) => {
+        error = e instanceof ApiError
+          ? { status: e.status, message: e.displayMessage || 'Something went wrong on the server. Try again.' }
+          : { status: 0, message: 'Check your connection and try again.' };   // a network failure
+      })
       .finally(() => { loading = false; });
   });
 
@@ -41,8 +47,8 @@
 
   {#if loading}
     <Skeleton />
-  {:else if error}
-    <ErrorState title="Couldn't load courses" message={error} onretry={retry} />
+  {:else if error !== null}
+    <ErrorState title="Couldn't load courses" message={error.message} onretry={retry} />
   {:else if courses.length === 0}
     <EmptyState title="You're not enrolled in any courses yet — ask your teacher for an invite." />
   {:else}

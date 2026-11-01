@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunTeachersTab from '../components/runs/RunTeachersTab.svelte';
 import type { Course, RunTeacherResponse } from '../lib/types';
+import { toasts } from '../stores/toasts.svelte';
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
@@ -343,6 +344,49 @@ describe('RunTeachersTab', () => {
     await settle();
     expect(target.querySelector('.t-err')?.textContent).toBe('Teacher already assigned to this run.');
     expect(document.activeElement).toBe(input);
+    unmount(cmp);
+  });
+});
+
+// Polish 3 §Behaviour "Offline failures say so".
+describe('RunTeachersTab — offline failures', () => {
+  const teacher: RunTeacherResponse = {
+    id: 1, run_id: 10, user_id: 1, user_email: 't@x.com', user_full_name: 'T One', created_at: '2026-05-22T00:00:00Z',
+  };
+  function mountTab(teachers: RunTeacherResponse[] = []) {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, {
+      target,
+      props: { runId: 10, teachers, onRefetch: vi.fn().mockResolvedValue(undefined), course: baseCourse },
+    });
+    return { target, cmp };
+  }
+
+  it('a rejected TypeError on add shows the inline error', async () => {
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const { target, cmp } = mountTab();
+    await settle();
+    const emailInput = target.querySelector('input[name="email"]') as HTMLInputElement;
+    emailInput.value = 't@x.com';
+    emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Could not reach server. Check your connection.');
+    expect(emailInput.getAttribute('aria-invalid')).toBe('true');
+    unmount(cmp);
+  });
+
+  it('a rejected TypeError on Remove shows a toast', async () => {
+    toasts.list.length = 0;
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const { target, cmp } = mountTab([teacher]);
+    await settle();
+    (target.querySelector('button[data-action="remove"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('button[data-action="confirm-remove"]') as HTMLButtonElement).click();
+    await settle();
+    expect(toasts.list.map((t) => t.message)).toContain('Could not reach server. Check your connection.');
     unmount(cmp);
   });
 });

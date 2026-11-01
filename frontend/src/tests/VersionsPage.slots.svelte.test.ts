@@ -208,7 +208,19 @@ describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
     expect(document.activeElement).toBe(target.querySelector('input.new-label'));
   });
 
-  it('Cancel closes the form, focuses the line again and resets the fields', async () => {
+  it('C8: Cancel on a clean create form closes it and focuses the line', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    await render();
+    addLine()!.click();
+    await settle();
+    [...target.querySelectorAll<HTMLButtonElement>('form.create button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
+    await settle();
+    expect(target.querySelector('form.create')).toBeNull();
+    expect(target.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('C8: Cancel on a dirty create form asks DISCARD_ASK; Cancel returns to Cancel; Discard closes and resets', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 })];
     await render();
     addLine()!.click();
@@ -217,10 +229,46 @@ describe('VersionsPage — "+ Add version" line (5c follow-up)', () => {
     label.value = 'Draft';
     label.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    [...target.querySelectorAll<HTMLButtonElement>('form.create button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
+    const submit = () => target.querySelector<HTMLElement>('form.create .submit')!;
+    const cancelBtn = () => [...submit().querySelectorAll<HTMLButtonElement>(':scope > button')].find((b) => b.textContent?.trim() === 'Cancel');
+    cancelBtn()!.focus();
+    cancelBtn()!.click();
+    await settle();
+    expect(submit().querySelector('.inline-confirm .warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
+    expect([...submit().querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Discard', 'Cancel']);
+    expect(document.activeElement).toBe(submit().querySelector('button.cancel'));
+    submit().querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(target.querySelector<HTMLInputElement>('input.new-label')!.value).toBe('Draft');
+    expect(document.activeElement).toBe(cancelBtn());
+    cancelBtn()!.click();
+    await settle();
+    submit().querySelector<HTMLButtonElement>('button.confirm')!.click();
     await settle();
     expect(target.querySelector('form.create')).toBeNull();
     expect(document.activeElement).toBe(addLine());
+    addLine()!.click();
+    await settle();
+    expect(target.querySelector<HTMLInputElement>('input.new-label')!.value).toBe('');
+  });
+
+  // C8 (review r1 m1): a successful Create closes the form before it navigates.
+  it('a successful Create closes and resets the form before navigate()', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    vi.mocked(api.post).mockReset().mockResolvedValueOnce(mkVersion({ id: 9, label: 'Spring' }));
+    let formAtNav: boolean | null = null;
+    navigateMock.mockImplementation(() => { flushSync(); formAtNav = target.querySelector('form.create') !== null; return Promise.resolve(true); });
+    await render();
+    addLine()!.click();
+    await settle();
+    const label = target.querySelector<HTMLInputElement>('input.new-label')!;
+    label.value = 'Spring';
+    label.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    target.querySelector<HTMLFormElement>('form.create')!.requestSubmit();
+    await settle();
+    expect(navigateMock).toHaveBeenCalledWith('/courses/c/edit/v/9');
+    expect(formAtNav).toBe(false);
     addLine()!.click();
     await settle();
     expect(target.querySelector<HTMLInputElement>('input.new-label')!.value).toBe('');

@@ -12,7 +12,8 @@
   import { deleteVersionReason, duplicateVersionReason } from '../../lib/editorReasons';
   import { pushToast } from '../../stores/toasts.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
-  import { InPlaceAsk, DISCARD_ASK, focusAfter, firstUsable, settleTo, moveOn, withdraw, repairFocus, type Ask } from '../../lib/askInPlace.svelte';
+  import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import { InPlaceAsk, DISCARD_ASK, DISCARD_NAV_ASK, refused, focusAfter, firstUsable, settleTo, moveOn, withdraw, repairFocus, type Ask, type GuardAsk } from '../../lib/askInPlace.svelte';
   import type { Version } from '../../lib/types';
   import {
     loadVersionsPage,
@@ -109,6 +110,17 @@
     switched = false;
     void repairFocus(h1El);
   });
+  // C8: a failed reload puts the ErrorState in place of the frame; the create
+  // form and its question go with it, so the guard has no hidden form to ask
+  // about (review r1).
+  $effect(() => {
+    if (!error || loading) return;
+    untrack(() => {
+      createAsk.dismiss();
+      resetCreateForm();
+      creating = false;
+    });
+  });
 
   // Reset module state on unmount so a fresh entry doesn't briefly render the
   // previous course's data before its own fetch resolves. Mirrors
@@ -128,11 +140,25 @@
     newLabelEl?.focus();
   }
 
-  async function cancelCreate() {
+  async function closeCreate() {
     resetCreateForm();
     creating = false;
     await tick();
     addLineEl?.focus();
+  }
+
+  // C8: Cancel asks before dropping typed input, as Esc does; its question's
+  // Cancel returns to the form's Cancel, or to Label while a row action holds
+  // `busy` and disables it (review r1).
+  let cancelBtn = $state<HTMLButtonElement>();
+  async function cancelCreate() {
+    if (busy) return;
+    if (!createDirty()) { void closeCreate(); return; }
+    const a = await createAsk.ask(DISCARD_ASK);
+    if (a === 'cancel') { void focusAfter(() => firstUsable(cancelBtn, newLabelEl)); return; }
+    if (a !== 'confirm') return;
+    createAsk.settle();   // a close: nothing to wait for (R54)
+    void closeCreate();
   }
 
   // Escape in a field cancels, as the editor's add rows do — but a stray
@@ -142,13 +168,31 @@
   async function escCancels(e: KeyboardEvent) {
     if (e.key !== 'Escape' || e.isComposing || busy) return;
     e.preventDefault();
-    if (!createDirty()) { void cancelCreate(); return; }
+    if (!createDirty()) { void closeCreate(); return; }
     const field = e.currentTarget as HTMLElement;
     const a = await createAsk.ask(DISCARD_ASK);
     if (a === 'cancel') { void focusAfter(() => field); return; }
     if (a !== 'confirm') return;
     createAsk.settle();   // a close: nothing to wait for (R54)
-    void cancelCreate();
+    void closeCreate();
+  }
+
+  // C8: DirtyGuard's `ask` — the navigation question in place of Cancel/Create.
+  // While the form's own question is open, the navigation is refused and focus
+  // goes back to that question (R53). Not while Create's POST runs: a success
+  // navigates on its own.
+  const navDirty = () => creating && !createBusy && createDirty();
+  function askNav(): GuardAsk {
+    if (createAsk.open) { createAsk.focusCancel(); return refused(); }
+    const promise = createAsk.ask(DISCARD_NAV_ASK).then((a) => {
+      if (a === 'cancel') void focusAfter(() => firstUsable(cancelBtn, newLabelEl));
+      if (a !== 'confirm') return false;
+      createAsk.settle();
+      resetCreateForm();
+      creating = false;
+      return true;
+    });
+    return { promise, dismiss: () => createAsk.dismiss(), focusCancel: () => createAsk.focusCancel() };
   }
 
   async function createVersion() {
@@ -173,6 +217,10 @@
     createBusy = true;
     try {
       const v = await api.post<Version>(`/api/courses/${savedCourseId}/versions`, { info_md, max_quiz_attempts: n, label: newLabel });
+      // C8: the form closes before navigate(); the guard also stays quiet while
+      // createBusy holds, as it does here.
+      resetCreateForm();
+      creating = false;
       navigate(`/courses/${savedSlug}/edit/v/${v.id}`);
     } catch (e) {
       const msg = e instanceof ApiError ? e.displayMessage : 'Failed to create version';
@@ -309,6 +357,8 @@
   <Button variant="secondary" onclick={() => navigate('/courses')}>Back to courses</Button>
 {/snippet}
 
+<DirtyGuard isDirty={navDirty} ask={askNav} />
+
 <div class="page">
   {#if error && !loading}
     <ErrorState variant="page" title="Couldn't load" message={error.message} action={backToCourses} />
@@ -406,7 +456,7 @@
             <!-- #16: in place of Cancel / Create. -->
             <AskSlot ask={createAsk} />
           {:else}
-            <Button variant="ghost" disabled={busy} onclick={() => void cancelCreate()}>Cancel</Button>
+            <Button variant="ghost" disabled={busy} bind:element={cancelBtn} onclick={() => void cancelCreate()}>Cancel</Button>
             <Button type="submit" disabled={!newLabel.trim()} loading={createBusy} aria-disabled={busy && !createBusy} bind:element={createBtn}>Create</Button>
           {/if}
         </div>

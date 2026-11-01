@@ -17,6 +17,11 @@ export function defaultLandingPath(user: User | null): string {
   return '/courses';
 }
 
+/** The name of a landing path, for a button that goes there (Polish 3: the 404). */
+export function landingLabel(path: string): string {
+  return path === '/teaching' ? 'Back to teaching' : 'Back to courses';
+}
+
 export type Route = {
   path: string;            // pattern: '/courses/:courseSlug'
   component: string;       // logical name; App.svelte maps to imported component

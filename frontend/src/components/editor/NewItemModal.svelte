@@ -17,6 +17,7 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import { focusFirst } from '../../lib/focusFirst';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
+  import { normalizeVideoUrl } from '../../lib/normalizeVideoUrl';
 
   type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
   type Props = {
@@ -47,10 +48,13 @@
   const dirty = $derived(
     title.trim() !== '' || (type === 'video' && videoUrl.trim() !== ''),
   );
+  // Polish 3 C18: checked and sent as normalised (a scheme-less YouTube or Vimeo
+  // address gains https://), against the backend's case-sensitive prefix.
+  const normalisedUrl = $derived(normalizeVideoUrl(videoUrl));
   const ready = $derived(
     title.trim() !== ''
       // Spec D10: the URL is required and http(s)://.
-      && (type !== 'video' || /^https?:\/\/\S/i.test(videoUrl.trim())),
+      && (type !== 'video' || /^https?:\/\/\S/.test(normalisedUrl)),
   );
 
   const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
@@ -88,7 +92,7 @@
     if (busy || !ready) return;
     const body: Record<string, unknown> = { title, type };
     if (type === 'static_page') body.content_md = `# ${title.trim()}\n`;
-    if (type === 'video') body.video_url = videoUrl;
+    if (type === 'video') body.video_url = normalisedUrl;
     errors = {};
     globalError = null;
     busy = true;
@@ -135,7 +139,8 @@
 
 <Modal labelledby={labelId} width={640} maxHeight={600} onRequestClose={() => void requestClose('x')} closeDisabled={busy}
   bodyInert={footAsk.open || here()} header={head} footer={foot}>
-  <form class="form" onsubmit={(e) => { e.preventDefault(); void submit(); }}>
+  <!-- novalidate: `ready` is the check; type="url" would block Enter on "youtu.be/x". -->
+  <form class="form" novalidate onsubmit={(e) => { e.preventDefault(); void submit(); }}>
     <ItemTypePicker bind:value={type} />
     <div class="field-row">
       <span class="field-label">Title</span>

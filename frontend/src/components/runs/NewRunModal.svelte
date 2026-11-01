@@ -19,6 +19,7 @@
   const formId = `${uid}-form`;
   const fid = (key: string) => `${uid}-${key}`;
   const NO_VERSION = 'No published version — close this modal and publish one first.';
+  const RANGE = 'End date must be on or after start date';
 
   let title = $state('');
   let start_date = $state('');
@@ -47,7 +48,7 @@
     if (!start_date) next.start_date = 'Start date is required';
     if (!end_date) next.end_date = 'End date is required';
     if (start_date && end_date && end_date < start_date) {
-      next.end_date = 'End date must be on or after start date';
+      next.end_date = RANGE;
     }
     errors = next;
     return Object.keys(next).length === 0;
@@ -57,11 +58,18 @@
     if (errors[field]) errors = { ...errors, [field]: undefined };
   }
 
+  // C18: a start date that fixes the range also clears the end date's range error.
+  function startChanged() {
+    clearError('start_date');
+    if (errors.end_date === RANGE && !(start_date && end_date && end_date < start_date)) clearError('end_date');
+  }
+
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     // R20: Enter in a (readonly) field or the busy button submits again while
     // a create runs; that second submit does nothing.
     if (submitting || pinned === null) return;
+    submitError = null;   // C18: no stale server banner over the new attempt
     if (!validate()) {
       await tick();
       const first = FIELD_ORDER.find((f) => errors[f]);
@@ -69,7 +77,6 @@
       return;
     }
     submitting = true;
-    submitError = null;
     try {
       const run = await createRun(course.id, {
         title: title.trim(),
@@ -156,7 +163,7 @@
           aria-describedby={errors.start_date ? fid('start-err') : undefined}
           bind:value={start_date}
           bind:this={inputEls.start_date}
-          oninput={() => clearError('start_date')}
+          oninput={startChanged}
         />
         {#if errors.start_date}<span class="nr-err" id={fid('start-err')}>{errors.start_date}</span>{/if}
       </div>

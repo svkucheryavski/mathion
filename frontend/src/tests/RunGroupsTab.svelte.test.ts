@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunGroupsTab from '../components/runs/RunGroupsTab.svelte';
 import type { Course } from '../lib/types';
+import { toasts } from '../stores/toasts.svelte';
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
@@ -389,6 +390,22 @@ describe('RunGroupsTab — groupsEnabled=true CRUD is teacher-allowed', () => {
     expect(target.querySelector('.g-name')?.textContent).toBe('Alpha');
     expect(byAction(target, 'rename-group')).toHaveLength(1);
     expect(byAction(target, 'delete-group')).toHaveLength(1);
+    unmount(cmp);
+  });
+});
+
+// Polish 3 §Behaviour "Offline failures say so".
+describe('RunGroupsTab — offline failures', () => {
+  it('a rejected TypeError on group delete shows a toast', async () => {
+    toasts.list.length = 0;
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha')] });
+    await settle();
+    (target.querySelector('button[data-action="delete-group"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('button[data-action="confirm-delete-group"]') as HTMLButtonElement).click();
+    await settle();
+    expect(toasts.list.map((t) => t.message)).toContain('Could not reach server. Check your connection.');
     unmount(cmp);
   });
 });

@@ -690,4 +690,16 @@ describe('RunRosterTab — the row confirm', () => {
     expect(toasts.list.map((t) => t.message)).toContain('Student has submissions');
     expect(document.activeElement).toBe(trash(2));
   });
+
+  it('a rejected TypeError on Remove shows a toast (Polish 3)', async () => {
+    fetchSpy.mockImplementation((_url: string, init?: RequestInit) =>
+      (init?.method === 'DELETE' ? Promise.reject(new TypeError('Failed to fetch')) : jres([])));
+    open();
+    trash(2).click();
+    await settle();
+    act('confirm-delete-student')!.click();
+    await settleAll();
+    expect(toasts.list.map((t) => t.message)).toContain('Could not reach server. Check your connection.');
+    expect(document.activeElement).toBe(trash(2));
+  });
 });

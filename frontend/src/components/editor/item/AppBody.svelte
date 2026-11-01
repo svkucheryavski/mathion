@@ -61,10 +61,13 @@
   let status = $state<'empty' | 'loading' | 'ready' | 'error'>('empty');
 
   // Re-previews on Replace/Remove (the item prop follows the reloaded tree).
+  // A derived, not `item?.script_url`: every tree reload (a title Save) hands
+  // in a fresh item, and the same script must not restart the preview (C18).
   // AbortController + `stale` stop an out-of-order fetch flashing old source.
   // D6/R5: a disabled version fetches nothing (the asset route is a 403).
+  const scriptUrl = $derived(item?.script_url ?? null);
   $effect(() => {
-    const filename = item?.script_url ?? null;
+    const filename = scriptUrl;
     if (versionDisabled || !filename) { status = 'empty'; source = null; return; }
     status = 'loading';
     source = null;

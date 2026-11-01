@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { matchRoute, safeNext, defaultLandingPath } from '../lib/router.svelte';
+import { matchRoute, safeNext, defaultLandingPath, landingLabel } from '../lib/router.svelte';
 import {
   navigate,
   registerNavigationGuard,
@@ -435,6 +435,13 @@ describe('navigation guards', () => {
     expect(currentRoute.path).toBe('/l');
     expect(location.pathname).toBe('/l');
     g.dispose();
+  });
+});
+
+describe('landingLabel (Polish 3)', () => {
+  it('names each landing path', () => {
+    expect(landingLabel('/teaching')).toBe('Back to teaching');
+    expect(landingLabel('/courses')).toBe('Back to courses');
   });
 });
 

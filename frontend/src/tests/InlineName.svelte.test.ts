@@ -148,6 +148,21 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
     expect(host.querySelector('p.in-err')?.textContent).toBe(new ApiError(500, 'Server exploded').displayMessage);
   });
 
+  // Polish 3: never an empty error, never the browser's raw fetch text.
+  it.each([
+    ['a TypeError', new TypeError('Failed to fetch'), 'Could not save.'],
+    ["an ApiError with detail ''", new ApiError(500, ''), 'Could not save.'],
+    ['a plain Error', new Error('Wait for the setting to save'), 'Wait for the setting to save'],
+    ['a SyntaxError (a malformed 2xx body)', new SyntaxError('Unexpected token < in JSON'), 'Could not save.'],
+  ])('%s shows the right message', async (_name, err, shown) => {
+    const { input } = render({ onSave: vi.fn().mockRejectedValue(err) });
+    type(input, 'Group H');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-err')?.textContent).toBe(shown);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
+
   it('a subject names × and ✓ after their row; the tooltips stay short (final review)', () => {
     const { close, check } = render({ subject: 'Group A' });
     expect(close.getAttribute('aria-label')).toBe('Cancel renaming Group A');

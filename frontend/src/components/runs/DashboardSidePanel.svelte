@@ -40,7 +40,7 @@
   import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
   import { ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
 
   type ProgressTarget = {
     kind: 'progress';
@@ -254,21 +254,29 @@
     });
   });
 
+  // The evaluation the edit form was filled from; null when not editing.
+  let filledId: number | null = null;
+  // C18: `effectiveEvaluation` changes identity on every grid Refresh. The form
+  // re-fills only when editing starts, the evaluation's id changes, or it is
+  // clean — read untracked, so typing does not re-run this effect.
   $effect(() => {
-    if (editing && effectiveEvaluation) {
-      formResult = effectiveEvaluation.result as EvaluationResult;
-      formScore = effectiveEvaluation.score;
-      formFeedbackText = effectiveEvaluation.feedback_text ?? '';
-      formFeedbackFile = null;
-      fileError = null;
-      prefillSnapshot = {
-        result: effectiveEvaluation.result as EvaluationResult,
-        score: effectiveEvaluation.score,
-        feedback_text: effectiveEvaluation.feedback_text ?? '',
-      };
-      // §Focus: Edit → the checked Result radio (Accepted when locked).
-      tick().then(() => focusFirst([checkedRadio(), acceptedRadio()]));
-    }
+    const ev = effectiveEvaluation;
+    if (!editing || !ev) { if (!editing) filledId = null; return; }
+    const starting = filledId === null;
+    if (!starting && ev.id === filledId && untrack(() => isDirty)) return;
+    filledId = ev.id;
+    formResult = ev.result as EvaluationResult;
+    formScore = ev.score;
+    formFeedbackText = ev.feedback_text ?? '';
+    formFeedbackFile = null;
+    fileError = null;
+    prefillSnapshot = {
+      result: ev.result as EvaluationResult,
+      score: ev.score,
+      feedback_text: ev.feedback_text ?? '',
+    };
+    // §Focus: Edit → the checked Result radio (Accepted when locked); never on a re-fill.
+    if (starting) tick().then(() => focusFirst([checkedRadio(), acceptedRadio()]));
   });
 
   const isDirty = $derived.by(() => {

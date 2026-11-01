@@ -138,6 +138,49 @@ describe('NewRunModal', () => {
     unmount(cmp);
   });
 
+  // Polish 3 C18 (slice6b Task 2).
+  it('a new submit clears the old server banner before validation', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve({
+      ok: false, status: 409,
+      json: () => Promise.resolve({ detail: 'Title already exists in this course' }),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    } as unknown as Response));
+    const { target, cmp } = mountModal();
+    await settle();
+    fillValid(target);
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('.nr-banner')?.textContent).toBe('Title already exists in this course');
+    fill(target, 'title', '');
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.textContent).toContain('Title is required');
+    expect(target.querySelector('.nr-banner')).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    unmount(cmp);
+  });
+
+  it('a start date change that fixes the range clears the end-date error', async () => {
+    const { target, cmp } = mountModal();
+    await settle();
+    fill(target, 'title', 'Spring');
+    fill(target, 'start_date', '2026-06-15');
+    fill(target, 'end_date', '2026-06-01');
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.textContent).toContain('End date must be on or after start date');
+    fill(target, 'start_date', '2026-06-10');   // still after the end: the error stays
+    flushSync();
+    expect(target.textContent).toContain('End date must be on or after start date');
+    fill(target, 'start_date', '2026-05-20');   // fixed
+    flushSync();
+    expect(target.textContent).not.toContain('End date must be on or after start date');
+    expect(input(target, 'end_date').getAttribute('aria-invalid')).toBeNull();
+    unmount(cmp);
+  });
+
   it('the strip shows the NEWEST published, non-disabled version (not the oldest), as "v. {id}" (D18)', async () => {
     const oldVersion: Version = { id: 88, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false, label: '' } as Version;
     const newVersion: Version = { id: 99, course_id: 1, created_at: '2026-02-01', published_at: '2026-02-02', is_disabled: false, label: '' } as Version;

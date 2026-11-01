@@ -12,6 +12,10 @@
 // (after a trim) so users can still paste arbitrary embed URLs from other
 // hosts. Empty / non-URL input also passes through. Validation of the
 // resulting URL is done separately by safeIframeUrl before iframing.
+//
+// Polish 3: a scheme-less address on a host recognised here ("youtu.be/x")
+// gains https://, and every return lowercases its http(s):// prefix in place
+// (the backend's prefix check is case-sensitive); the rest stays as typed.
 
 const YT_HOSTS = new Set([
   'youtube.com',
@@ -20,16 +24,33 @@ const YT_HOSTS = new Set([
   'music.youtube.com',
 ]);
 
+// Every host a branch below handles; player.vimeo.com passes through.
+const KNOWN_HOSTS = new Set([...YT_HOSTS, 'youtu.be', 'vimeo.com', 'player.vimeo.com']);
+
+/** Lowercases only a leading http:// or https://, never the rest. */
+function lowerScheme(s: string): string {
+  return s.replace(/^https?:\/\//i, (m) => m.toLowerCase());
+}
+
 export function normalizeVideoUrl(input: string): string {
-  const trimmed = (input ?? '').trim();
+  let trimmed = (input ?? '').trim();
   if (!trimmed) return trimmed;
 
   let u: URL;
   try {
     u = new URL(trimmed);
   } catch {
-    return trimmed;
+    // A scheme-less address on a known host is retried with https://.
+    const bare = trimmed.split(/[/?#]/)[0].toLowerCase();
+    if (!KNOWN_HOSTS.has(bare)) return trimmed;
+    trimmed = `https://${trimmed}`;
+    try {
+      u = new URL(trimmed);
+    } catch {
+      return trimmed;
+    }
   }
+  trimmed = lowerScheme(trimmed);
 
   const host = u.hostname.toLowerCase();
 

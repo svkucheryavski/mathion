@@ -94,6 +94,9 @@ afterEach(() => {
   if (component) { unmount(component); component = null; }
   document.body.removeChild(target);
   vi.restoreAllMocks();
+  // A pill click writes ?status= (Polish 3): the next test starts at a bare address.
+  history.replaceState(null, '', '/');
+  Object.assign(router.currentRoute, { path: '/', search: '', hash: '' });
 });
 
 describe('TeacherRunListPage', () => {
@@ -459,6 +462,42 @@ describe('TeacherRunListPage', () => {
     expect(pageTextContains(target, 'No draft runs.')).toBe(true);
     expect(pageTextContains(target, /You have/)).toBe(false);
     expect(target.querySelector('tbody tr')).toBeNull();
+  });
+
+  // Polish 3 C18 (slice6a final): Back from a run restores the filter.
+  it('the status pill is kept in ?status= and restored from it', async () => {
+    const active = row({ run: makeRun({ id: 1, title: 'ACTIVE_ROW' }) });
+    const draft = row({ run: makeRun({ id: 2, title: 'DRAFT_ROW', is_published: false }) });
+    vi.stubGlobal('fetch', mockFetch(200, [active, draft]));
+    await router.navigate('/teaching', { force: true });
+    component = mount(TeacherRunListPage, { target });
+    await settle();
+    buttonByText(target, /^Draft/)!.click();
+    flushSync();
+    expect(pageTextContains(target, 'DRAFT_ROW')).toBe(true);
+    await settle();
+    expect(location.pathname + location.search).toBe('/teaching?status=draft');
+    // Leave for a run and come Back: a fresh page reads the address.
+    unmount(component); component = null;
+    await router.navigate('/teaching/c/runs/2');
+    const popped = new Promise((r) => window.addEventListener('popstate', r, { once: true }));
+    history.back();
+    await popped;
+    await settle();
+    expect(router.currentRoute.search).toBe('?status=draft');
+    component = mount(TeacherRunListPage, { target });
+    await settle();
+    expect(buttonByText(target, /^Draft/)!.getAttribute('aria-pressed')).toBe('true');
+    expect(pageTextContains(target, 'DRAFT_ROW')).toBe(true);
+    expect(pageTextContains(target, 'ACTIVE_ROW')).toBe(false);
+    // The default pill keeps a bare address; an unknown value reads as the default.
+    buttonByText(target, /^Active/)!.click();
+    await settle();
+    expect(location.search).toBe('');
+    await router.navigate('/teaching?status=bogus', { force: true });
+    await settle();
+    expect(buttonByText(target, /^Active/)!.getAttribute('aria-pressed')).toBe('true');
+    await router.navigate('/', { force: true });
   });
 
   it('the run and course cells route in-app; a ⌘-click is left to the browser (C6)', async () => {

@@ -1189,6 +1189,30 @@ describe('DashboardSidePanel', () => {
     expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('Needs work');
   });
 
+  // Polish 3 C18 (slice6c T6): a grid Refresh hands in a fresh target whose
+  // evaluation is a new object with the same id; the edit in progress stays.
+  it('a refresh during an edit keeps the text and the focus; a new evaluation id re-fills', async () => {
+    const ev = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision' as const, score: 60, feedback_text: 'Needs work', has_feedback_file: true };
+    const t = () => submissionTarget({ status: 'needs_revision', is_resubmission: false, latest_evaluation: { ...ev } });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const p = $state({ target: t() as PanelTarget, onClose: vi.fn(), isAdmin: true, isTeacher: false, onRefetch: vi.fn() });
+    component = mount(DashboardSidePanel, { target: host, props: p });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    expect(document.activeElement).toBe(resultRadio('major_revision'));
+    const textarea = await typeFeedback('Half a sentence');
+    p.target = t();   // the refresh
+    await settle();
+    expect(textarea.value).toBe('Half a sentence');
+    expect(document.activeElement).toBe(textarea);
+    p.target = submissionTarget({ status: 'needs_revision', is_resubmission: false, latest_evaluation: { ...ev, id: 43, feedback_text: 'Another teacher' } });
+    await settle();
+    expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('Another teacher');
+    expect(document.activeElement).toBe(textarea);   // a re-fill never moves focus
+  });
+
   // T25: result-lock — disabled non-accepted options + verbatim text + Save guarded
   it('T25: result-lock — three radios disabled with the lock line; a click on one changes nothing', async () => {
     const fetchMock = routedFetch();

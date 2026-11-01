@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunRosterTab from '../components/runs/RunRosterTab.svelte';
 import type { GroupResponse, RunStudentResponse } from '../lib/types';
+import { toasts } from '../stores/toasts.svelte';
 
 const fetchSpy = vi.fn();
 beforeEach(() => {
@@ -99,6 +100,20 @@ describe('RunRosterTab optimistic inline group edit', () => {
     await settle();
     expect(sel.disabled).toBe(false);
     expect(onRefetchGroupsOnly).toHaveBeenCalled();
+    unmount(cmp);
+  });
+
+  it('a rejected TypeError on the row group select reverts and shows a toast (Polish 3)', async () => {
+    toasts.list.length = 0;
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const { target, cmp } = mountTab();
+    await settle();
+    const sel = target.querySelector('tbody select') as HTMLSelectElement;
+    sel.value = '100';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(sel.value).toBe('__unassigned');
+    expect(toasts.list.map((t) => t.message)).toContain('Could not reach server. Check your connection.');
     unmount(cmp);
   });
 

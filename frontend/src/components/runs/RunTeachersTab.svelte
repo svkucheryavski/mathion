@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { addRunTeacher, removeRunTeacher } from '../../lib/runTeachers';
   import { focusFirst } from '../../lib/focusFirst';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -43,6 +43,8 @@
     } catch (e) {
       if (e instanceof ApiError) {
         addError = e.status === 409 ? 'Teacher already assigned to this run.' : e.displayMessage;
+      } else {
+        addError = OFFLINE_MESSAGE;
       }
     } finally {
       busy = false;
@@ -72,7 +74,7 @@
       focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], emailInput, headingEl]);
     } catch (e) {
       pendingRemove = null;
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      pushToast(e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE, 'error');
       await tick();
       trashEls[userId]?.focus();
     }

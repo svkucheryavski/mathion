@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { createGroup, deleteGroup, getCapacityClass, updateGroup } from '../../lib/runGroups';
   import { focusFirst } from '../../lib/focusFirst';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -119,6 +119,8 @@
         pushToast(e.displayMessage, 'error');
         if (e.status === 409 && /students/i.test(msg)) await onRefetchGroupsAndStudents();
         else if (e.status === 409 && /submission/i.test(msg)) await onRefetchGroups();
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
       await tick();
       // A "has students" refetch disables this row's trash: fall back to its ✎.

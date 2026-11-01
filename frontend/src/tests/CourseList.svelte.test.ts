@@ -201,4 +201,33 @@ describe('CourseList 9d states (Slice-4 T2)', () => {
     expect(target.querySelector('.error-state')).toBeNull();
     expect(target.querySelectorAll('.grid a').length).toBeGreaterThan(0);
   });
+
+  // Polish 3 (§Behaviour "Course list error"): the error is
+  // an object, so an empty message still shows the error with Retry.
+  it("an ApiError with detail '' shows the server message with Retry, not the empty state", async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false, status: 500, statusText: '',
+      json: () => Promise.resolve({ detail: '' }),
+      headers: new Headers({ 'content-type': 'application/json' }),
+    } as unknown as Response);
+    target = document.createElement('div'); document.body.appendChild(target);
+    cmp = mount(CourseList, { target });
+    await settle();
+    expect(target.querySelector('.empty-state')).toBeNull();
+    const err = target.querySelector('.error-state.inline')!;
+    expect(err.querySelector('.title')!.textContent).toBe("Couldn't load courses");
+    expect(err.querySelector('.message')!.textContent).toBe('Something went wrong on the server. Try again.');
+    expect(err.querySelector('.btn')!.textContent!.trim()).toBe('Retry');
+  });
+
+  it('a rejected TypeError shows "Check your connection and try again."', async () => {
+    fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    target = document.createElement('div'); document.body.appendChild(target);
+    cmp = mount(CourseList, { target });
+    await settle();
+    expect(target.querySelector('.empty-state')).toBeNull();
+    const err = target.querySelector('.error-state.inline')!;
+    expect(err.querySelector('.message')!.textContent).toBe('Check your connection and try again.');
+    expect(err.querySelector('.btn')!.textContent!.trim()).toBe('Retry');
+  });
 });

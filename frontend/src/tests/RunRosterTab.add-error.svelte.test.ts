@@ -130,3 +130,29 @@ describe('RunRosterTab single-add error handling (mp-followup #1)', () => {
     expect(errorText()).toBe('Cannot add students to an unpublished run');
   });
 });
+
+// Polish 3: offline failures show, and the error goes as the teacher types (C18).
+describe('RunRosterTab single-add — offline and typing (Polish 3)', () => {
+  it('a rejected TypeError on add shows the inline error', async () => {
+    fetchSpy.mockImplementation((url: string) =>
+      (/\/api\/runs\/\d+\/students$/.test(url) ? Promise.reject(new TypeError('Failed to fetch')) : jres({}, 200)));
+    mountTab({});
+    await clickAdd('dan@x.com');
+    expect(errorText()).toBe('Could not reach server. Check your connection.');
+  });
+
+  it('the add error clears on typing', async () => {
+    fetchSpy.mockImplementation((url: string) =>
+      (/\/api\/runs\/\d+\/students$/.test(url) ? jres({ detail: 'Group capacity reached' }, 409) : jres({}, 200)));
+    mountTab({});
+    await clickAdd('bob@x.com');
+    expect(errorText()).toBe('Group capacity reached');
+    const input = getTarget().querySelector('input[name="new-email"]') as HTMLInputElement;
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    input.value = 'bob2@x.com';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(errorText()).toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+  });
+});

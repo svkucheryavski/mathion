@@ -246,7 +246,8 @@
 
   // R20: when reasons overlap the first wins; a loading button ignores them.
   const saveReason = $derived(uploading ? UPLOAD_WAIT : (saveError ?? (dirty ? null : 'No changes to save')));
-  const discardReason = $derived(dirty ? null : 'No changes to discard');
+  // C18: Discard waits for an upload too: the finished upload would re-dirty the form.
+  const discardReason = $derived(uploading ? UPLOAD_WAIT : (dirty ? null : 'No changes to discard'));
   const publishReason = $derived(
     uploading
       ? UPLOAD_WAIT
@@ -372,7 +373,7 @@
 
   // D12: put back the saved values (§Focus › After Discard).
   async function discard() {
-    if (submitting || !dirty) return;
+    if (submitting || uploading || !dirty) return;
     Object.assign(formData, $state.snapshot(baseline));
     serverError = null;
     fieldErrors = {};

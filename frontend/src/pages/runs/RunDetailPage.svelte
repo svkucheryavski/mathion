@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { deleteRun, getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
@@ -328,6 +328,8 @@
           await refetchReadiness(rid, myToken);
           if (myToken === loadToken && run?.is_published) return 'published';
         }
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
       return 'failed';
     } finally {
@@ -358,6 +360,8 @@
             if (!r.is_published) return 'draft-now';
           } catch { /* refetch failed; toast already shown */ }
         }
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
       return 'failed';
     } finally {

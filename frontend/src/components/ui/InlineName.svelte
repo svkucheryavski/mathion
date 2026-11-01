@@ -52,8 +52,11 @@
     try {
       await onSave(trimmed);
     } catch (e) {
-      error = e instanceof ApiError ? e.displayMessage
-        : e instanceof Error && e.message ? e.message
+      // Polish 3: only a caller's own plain Error speaks; a network failure (a
+      // fetch TypeError) or a parse error never shows the browser's raw text,
+      // and an empty message never shows at all.
+      error = e instanceof ApiError ? e.displayMessage || 'Could not save.'
+        : e instanceof Error && e.constructor === Error && e.message ? e.message
         : 'Could not save.';
       inputEl?.focus();
     } finally {

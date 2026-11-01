@@ -660,6 +660,37 @@ describe('ItemEditorModal — video body (T3c)', () => {
     expect(document.activeElement).toBe(urlInput());
   });
 
+  // Polish 3 C18: validate() checks the value Save sends, by the backend's rules,
+  // so a rejected URL shows under the field, not only as a toast.
+  it('validate() checks the normalised value', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    type(urlInput(), 'example.com/v.mp4');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([]);
+    expect(panel().querySelector('.field-err')!.textContent).toBe('URL must start with http:// or https://');
+    expect(urlInput().getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(urlInput());
+    type(urlInput(), `https://example.com/${'v'.repeat(490)}`);
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([]);
+    expect(panel().querySelector('.field-err')!.textContent).toBe('URL must be at most 500 characters');
+    type(urlInput(), 'youtu.be/x');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ video_url: 'https://www.youtube.com/embed/x' }]);
+    expect(panel().querySelector('.field-err')).toBeNull();
+  });
+
+  it('an upper-case scheme is sent lower-case, the rest as typed', async () => {
+    await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
+    type(urlInput(), 'HTTPS://Example.com/V.mp4');
+    footBtn('Save').click();
+    await settle();
+    expect(patchBodies()).toEqual([{ video_url: 'https://Example.com/V.mp4' }]);
+  });
+
   it('a title-only change sends no video_url', async () => {
     await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
     type(titleInput(), 'Lecture 2');
@@ -1053,6 +1084,29 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     await settle();
     expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
     expect(calls(/\/api\/assets\/5$/, 'DELETE').length).toBe(0);
+  });
+
+  // Polish 3 C18 (slice5b T4): a title Save reloads the tree, which hands the
+  // body a fresh `item` with the same script; the preview must not restart.
+  it('a title Save makes no second /assets GET', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const p = $state<{ item: AdminTreeItem | undefined; vid: number; editable: boolean; versionDisabled: boolean; frozen: boolean; stillOnVid: () => boolean }>({
+      item: mkItem({ type: 'interactive_app', script_url: 'app.js' }), vid: 1, editable: true,
+      versionDisabled: false, frozen: false, stillOnVid: () => true,
+    });
+    const c = mount(AppBody, { target: host, props: p });
+    await settle();
+    expect(calls(/\/assets\//).length).toBe(1);
+    p.item = mkItem({ type: 'interactive_app', script_url: 'app.js', title: 'Renamed' });   // the reloaded tree's copy
+    await settle();
+    expect(calls(/\/assets\//).length).toBe(1);
+    p.item = mkItem({ type: 'interactive_app', script_url: 'other.js' });   // a new script still re-previews
+    await settle();
+    expect(calls(/\/assets\//).length).toBe(2);
+    unmount(c);
+    host.remove();
   });
 
   it('AppBody tolerates `item` going undefined (a dying branch re-running its effect)', async () => {

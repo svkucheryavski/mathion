@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 
-// Keep the real defaultLandingPath; only navigate is observed.
+// Keep the real defaultLandingPath; navigate is observed, landingLabel spied (Polish 3).
 vi.mock('../lib/router.svelte', async (importOriginal) => {
   const real = await importOriginal<typeof import('../lib/router.svelte')>();
-  return { ...real, navigate: vi.fn() };
+  return { ...real, navigate: vi.fn(), landingLabel: vi.fn(real.landingLabel) };
 });
 
 import NotFound from '../pages/NotFound.svelte';
 import { session } from '../stores/session.svelte';
-import { navigate } from '../lib/router.svelte';
+import { navigate, landingLabel } from '../lib/router.svelte';
 import type { User } from '../lib/types';
 
 function user(over: Partial<User> = {}): User {
@@ -61,6 +61,16 @@ describe('NotFound (Polish 2 D53)', () => {
     expect(btn.classList.contains('secondary')).toBe(true);
     btn.click();
     expect(navigate).toHaveBeenCalledWith(path);
+  });
+
+  // Polish 3: path and name come from one place, beside defaultLandingPath.
+  it.each(['/courses', '/teaching'])('the label comes from landingLabel for %s', (path) => {
+    session.user = user(path === '/teaching' ? { has_run_teacher: true } : {});
+    vi.mocked(landingLabel).mockClear();
+    vi.mocked(landingLabel).mockReturnValueOnce(`label for ${path}`);
+    const btn = render();
+    expect(landingLabel).toHaveBeenCalledWith(path);
+    expect(btn.textContent!.trim()).toBe(`label for ${path}`);
   });
 
   it('signed out: "Sign in" goes to /login (defaultLandingPath(null) would say /courses)', () => {

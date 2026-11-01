@@ -53,9 +53,18 @@
   }
   const provider = $derived(previewUrl ? providerOf(previewUrl) : null);
 
+  // D10: only what this Save would send. The server requires a non-empty URL,
+  // an exact http(s):// prefix and at most 500 characters; Polish 3 checks the
+  // normalised value Save sends, so a rejection shows here, not only as a toast.
+  function urlProblem(raw: string): string | null {
+    if (raw.trim() === '') return 'Video URL is required';
+    const sent = normalizeVideoUrl(raw);
+    if (!/^https?:\/\//.test(sent)) return 'URL must start with http:// or https://';
+    if (sent.length > 500) return 'URL must be at most 500 characters';
+    return null;
+  }
   export function validate(): boolean {
-    // D10: only what this Save would send. The server requires a non-empty URL.
-    urlError = tracker.isDirty && tracker.current.video_url.trim() === '' ? 'Video URL is required' : null;
+    urlError = tracker.isDirty ? urlProblem(tracker.current.video_url) : null;
     if (urlError) urlEl?.focus();
     return urlError === null;
   }

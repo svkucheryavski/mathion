@@ -849,6 +849,27 @@ describe('Publish and Unpublish live in the Overview (R33, R44)', () => {
     expect(q(target, 'edit-title')!.disabled).toBe(false);
     unmount(cmp);
   });
+
+  // Polish 3 §Behaviour "Offline failures say so".
+  it('a rejected TypeError on Publish run shows a toast', async () => {
+    const { target, cmp } = mountWith((url, init) => (isPost(url, init, '/publish') ? Promise.reject(new TypeError('Failed to fetch')) : null));
+    await settle();
+    q(target, 'publish')!.click();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Could not reach server. Check your connection.', 'error');
+    unmount(cmp);
+  });
+
+  it('a rejected TypeError on Unpublish shows a toast', async () => {
+    const { target, cmp } = mountWith((url, init) => (isPost(url, init, '/unpublish') ? Promise.reject(new TypeError('Failed to fetch')) : null), { run: { is_published: true } });
+    await settle();
+    q(target, 'unpublish')!.click();
+    flushSync();
+    q(target, 'confirm-unpublish')!.click();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Could not reach server. Check your connection.', 'error');
+    unmount(cmp);
+  });
 });
 
 describe('Publish readiness rows from the page (R34)', () => {

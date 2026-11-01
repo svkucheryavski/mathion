@@ -18,7 +18,7 @@
 
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { updateRun } from '../../lib/runs';
   import { formatShortDate } from '../../lib/datetime';
   import { focusFirst } from '../../lib/focusFirst';
@@ -156,7 +156,7 @@
       setRun(await updateRun(run.id, { groups_enabled: next }));
     } catch (e) {
       groupsOn = run.groups_enabled;
-      if (e instanceof ApiError) pushToast(`Could not update setting: ${e.displayMessage}`, 'error');
+      pushToast(e instanceof ApiError ? `Could not update setting: ${e.displayMessage}` : OFFLINE_MESSAGE, 'error');
     } finally {
       localWrite = false;
     }

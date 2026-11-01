@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import {
     addRunStudent,
     removeRunStudent,
@@ -318,7 +318,9 @@
     }
 
     // Refetch roster + groups so capacity badges and group_id reflect the server.
-    await onRefetchRosterData();
+    // A failed refetch still settles the banner and unlocks (Polish 3): the
+    // operations' results above are what the banner reports.
+    try { await onRefetchRosterData(); } catch { /* the roster shows what it had */ }
 
     // Selection book-keeping: remove succeeded, keep errored/cancelled selected.
     for (const id of succeededIds) selected.delete(id);
@@ -492,12 +494,8 @@
       // Surface every ApiError (4xx/5xx) inline via the backend-supplied
       // displayMessage — covers run_unpublished, student_already_active_in_course,
       // capacity_reached, group_disabled, and any future error_code without
-      // per-branch wiring. Non-ApiError exceptions (e.g., TypeError from a
-      // fetch network failure) are silently dropped, matching confirmRemove
-      // and onGroupChange below.
-      if (e instanceof ApiError) {
-        addError = e.displayMessage;
-      }
+      // per-branch wiring. A network failure (a fetch TypeError) says so (Polish 3).
+      addError = e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE;
     } finally {
       adding = false;
     }
@@ -535,7 +533,7 @@
       focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], toggleEl, searchEl]);
     } catch (e) {
       pendingDelete = null;
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      pushToast(e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE, 'error');
       await tick();
       focusFirst([trashEls[userId], toggleEl, searchEl]);
     } finally {
@@ -572,6 +570,8 @@
         } else {
           pushToast(e.displayMessage, 'error');
         }
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
     } finally {
       // F8: the select is natively disabled while its request runs, which drops focus.
@@ -681,6 +681,7 @@
         aria-invalid={addError ? 'true' : undefined}
         aria-describedby={addError ? `${uid}-add-err` : undefined}
         bind:value={newEmail}
+        oninput={() => { addError = null; }}
         bind:this={emailEl}
       />
       {#if groupsEnabled}

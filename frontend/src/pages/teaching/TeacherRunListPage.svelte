@@ -5,6 +5,7 @@
   import { runStatus, RUN_STATUS_LABEL } from '../../lib/runStatus';
   import { formatShortDate } from '../../lib/datetime';
   import { routeClick } from '../../lib/routeClick';
+  import { currentRoute, navigate } from '../../lib/router.svelte';
   import Skeleton from '../../components/ui/Skeleton.svelte';
   import EmptyState from '../../components/ui/EmptyState.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
@@ -16,7 +17,24 @@
   let rows = $state<TeachingRunRow[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let pill = $state<Status | 'all'>('active');
+  // C18: the pill lives in the address (?status=, none for the default), so
+  // Back from a run restores it. A click sets it at once (a writable derived);
+  // the address follows, replaced, as the run page's ?tab= does.
+  const PILLS = ['active', 'upcoming', 'ended', 'draft', 'all'] as const;
+  type Pill = (typeof PILLS)[number];
+  function statusFrom(search: string): Pill {
+    const v = new URLSearchParams(search).get('status');
+    return (PILLS as readonly string[]).includes(v ?? '') ? (v as Pill) : 'active';
+  }
+  let pill = $derived<Pill>(statusFrom(currentRoute.search));
+  function setPill(k: Pill) {
+    pill = k;
+    const p = new URLSearchParams(currentRoute.search);
+    if (k === 'active') p.delete('status');
+    else p.set('status', k);
+    const q = p.toString();
+    void navigate(currentRoute.path + (q ? `?${q}` : '') + currentRoute.hash, { replace: true });
+  }
 
   async function load() {
     loading = true; error = null;
@@ -79,7 +97,6 @@
     return byStatus[pill];
   });
 
-  const PILLS = ['active', 'upcoming', 'ended', 'draft', 'all'] as const;
   const pillLabel = (p: Status | 'all') => (p === 'all' ? 'all' : RUN_STATUS_LABEL[p]);
   const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
   const pillOptions = $derived(PILLS.map((p) => ({ key: p, label: cap(pillLabel(p)), count: counts[p] })));
@@ -97,7 +114,7 @@
   {:else if rows.length === 0}
     <EmptyState title="No runs yet. Runs you teach or administer appear here." />
   {:else}
-    <FilterPills label="Filter by status" options={pillOptions} value={pill} onchange={(k) => (pill = k as Status | 'all')} />
+    <FilterPills label="Filter by status" options={pillOptions} value={pill} onchange={(k) => setPill(k as Pill)} />
 
     {#if visible.length === 0}
       <p class="empty">No {pillLabel(pill)} runs.</p>
