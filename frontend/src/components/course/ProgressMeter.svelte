@@ -30,12 +30,16 @@
 </span>
 
 <style>
-  /* A fixed column, so every bar lines up down the list (layout A). */
+  /* A fixed column, so every bar lines up down the list (layout A). D91: a
+     width, not a flex-basis: Safari sizes a shrink-to-fit parent (CourseView's
+     `.cv-meter`, in the phone row) from its items' widths and ignores a basis,
+     so the chip ran over the collapse-all chevron. */
   .progress {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex: 0 0 150px;
+    flex: none;
+    width: 150px;
   }
   .track {
     flex: 1 1 auto;
@@ -74,7 +78,8 @@
     align-items: center;
     justify-content: center;
     gap: 4px;
-    flex: 0 0 86px;
+    flex: none;
+    width: 86px;
     padding: 2px 7px;
     border-radius: var(--radius-pill);
     background: var(--surface-2);
@@ -92,7 +97,7 @@
     background: none;
   }
   @media (max-width: 560px) {
-    .progress { flex-basis: 80px; }
+    .progress { width: 80px; }
   }
   /* Forced colors repaint backgrounds, so the bar would vanish: outline the
      track and paint the fill in the text colour. `.fill.done` is named too —

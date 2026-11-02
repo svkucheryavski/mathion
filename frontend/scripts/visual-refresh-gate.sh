@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2489
+EXPECTED_CHECKS=2490
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -2303,8 +2303,11 @@ SPECS = [
         ('', '.row-title.%s' % sq_h, TITLE),
     ]),
     ('ProgressMeter', pm_h, [
-        # A FIXED column so the bars line up row to row (layout A).
-        ('', '.progress.%s' % pm_h, 'display:flex;align-items:center;gap:8px;flex:0 0 150px'),
+        # A FIXED column so the bars line up row to row (layout A). D91: the
+        # size is a width (flex:none), not a flex-basis: Safari sizes a
+        # shrink-to-fit parent (CourseView's .cv-meter) from the items' widths
+        # and ignores a basis, so the chip overflowed onto the chevron.
+        ('', '.progress.%s' % pm_h, 'display:flex;align-items:center;gap:8px;flex:none;width:150px'),
         # --border, not CourseCard --border-soft: the row hovers --row-hover (D77).
         ('', '.track.%s' % pm_h,
              'flex:1 1 auto;height:6px;border-radius:var(--radius-pill);'
@@ -2318,7 +2321,7 @@ SPECS = [
              'width:34px;text-align:right;font-size:11.5px;font-weight:400;color:var(--muted)'),
         ('', '.quiz-chip.%s' % pm_h,
              'box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;'
-             'gap:4px;flex:0 0 86px;padding:2px 7px;border-radius:var(--radius-pill);'
+             'gap:4px;flex:none;width:86px;padding:2px 7px;border-radius:var(--radius-pill);'
              'background:var(--surface-2);font-size:11.5px;font-weight:500;color:var(--muted);'
              'white-space:nowrap'),
         # On the tinted header strip the --surface-2 chip would vanish.
@@ -2326,7 +2329,7 @@ SPECS = [
         # ONE rule with a selector list, authored that way: "Quiz –" and the
         # empty slot carry no chip fill.
         ('', '.quiz-chip.none.%s,.quiz-chip.empty.%s' % (pm_h, pm_h), 'background:none'),
-        ('@media (max-width:560px)', '.progress.%s' % pm_h, 'flex-basis:80px'),
+        ('@media (max-width:560px)', '.progress.%s' % pm_h, 'width:80px'),
         # Forced colors repaint backgrounds: outline the track, paint the fill.
         (FC, '.track.%s' % pm_h, 'border:1px solid CanvasText'),
         # `.fill.done` too: its theme green out-specifies a bare `.fill`, so a
@@ -3592,6 +3595,15 @@ if [[ $(print -r -- "$cv" | grep -cF 'onclick={() => setAll(!anyOpen)} />') -eq 
   echo "PASS  CourseView phone row is the course meter plus one chevron IconButton (D78)"
 else
   echo "FAIL  CourseView phone row is not the pinned meter + chevron IconButton (D78)"; fail=1
+fi
+# D92 (user, Safari pass): on a phone the row sits on the blocks it collapses,
+# below the deadlines card: the deadlines block closes, then the row in its own
+# `{#if courseP}`, then the blocks ($cv has its comments stripped, so the
+# comment above the row needs no allowance).
+if print -r -- "$cv" | perl -0ne 'exit(m{<CourseDeadlines [^\n]*/></div>\s*\{/if\}\s*\{#if courseP\}\s*<div class="cv-strip">(?:(?!\{/if\}).)*\{/if\}\s*<div class="cv-blocks">}s ? 0 : 1)'; then
+  echo "PASS  CourseView phone row follows the deadlines card, right before the blocks (D92)"
+else
+  echo "FAIL  CourseView phone row is not between the deadlines card and the blocks (D92)"; fail=1
 fi
 
 echo
@@ -5704,9 +5716,9 @@ if [[ -n $REPLY ]]; then
   chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}\{[^}]*\}\.cv-strip\.${H}" 'display:flex'
   # Same specificity both ways, so ORDER decides: the 880px switch must follow
   # the base rules, or a phone shows the text toggle and no progress (Opus r1 m2).
-  # D80: the phone row left the blocks column; with no deadlines card between
-  # them it keeps D78's 4px to the first block (the row's own 4px margin; the
-  # -14px cancels the column's 14px gap; Fable r1 m2).
+  # D80: the phone row left the blocks column; D92: it always comes right
+  # before them, so it keeps D78's 4px to the first block (the row's own 4px
+  # margin; the -14px cancels the column's 14px gap; Fable r1 m2).
   chk "@media \(max-width: ?880px\)\{[^@]*\.cv-strip\.${H}\+\.cv-blocks:where\(\.${H}\)" 'margin-top:-14px'
   check "CourseView: the 880px switch follows the base .all-toggle/.cv-strip rules (D78)" "\.all-toggle\.${H}\{display:flex[^}]*\}\.cv-strip\.${H}\{display:none[^}]*\}.*@media \(max-width: ?880px\)\{\.cv-body\.${H}\{[^}]*\}\.cv-prog\.${H},\.all-toggle\.${H}\{display:none\}\.cv-strip\.${H}\{display:flex\}"
 fi

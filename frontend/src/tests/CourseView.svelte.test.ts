@@ -183,8 +183,8 @@ describe('CourseView header and course summary', () => {
     await settle();
     // D78: one body in DOM order progress, blocks, info -- the phone order; on a
     // wide screen the grid puts the blocks left, progress and info right. D80:
-    // the phone row (.cv-strip) sits in the body before the blocks (and before
-    // the deadlines card, when there is one); the text toggle leads the blocks.
+    // the phone row (.cv-strip) sits in the body right before the blocks (D92:
+    // after the deadlines card, when there is one); the text toggle leads the blocks.
     const body = target.querySelector('.cv-body') as HTMLElement;
     expect(Array.from(body.children).map((e) => e.className.split(' ')[0])).toEqual(['cv-prog', 'cv-strip', 'cv-blocks', 'info']);
     expect((body.querySelector('.cv-blocks') as HTMLElement).firstElementChild!.className.split(' ')[0]).toBe('all-toggle');
@@ -388,7 +388,8 @@ describe('CourseView 9d states (Slice-4 T2)', () => {
 // D80 (user): the course page's side cards -- "Coming deadlines" (what the
 // student must still act on, nearest first) and "Teachers" (names only).
 // Wide: progress, deadlines, teachers, info in the right column; 880px and
-// below, in DOM order: progress row, deadlines, blocks, teachers, info.
+// below, in DOM order: deadlines, progress row, blocks, teachers, info (D92:
+// the phone row sits on the blocks it collapses, below the deadlines).
 describe('CourseView side cards (D80)', () => {
   const NOW = new Date(2026, 9, 30, 12, 0);
   const at = (day: number, h = 23, m = 59) => new Date(2026, 9, day, h, m).toISOString();
@@ -420,10 +421,10 @@ describe('CourseView side cards (D80)', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('DOM order: progress, phone row, deadlines, blocks, teachers, info', async () => {
+  it('DOM order: progress, deadlines, phone row, blocks, teachers, info (D92)', async () => {
     seed([mp(2, 'Practice', 'not_submitted', { at: at(40) })], ['Anna Larsen']);
     await mountIt();
-    expect(kids()).toEqual(['cv-prog', 'cv-strip', 'cv-dl', 'cv-blocks', 'cv-tch', 'info']);
+    expect(kids()).toEqual(['cv-prog', 'cv-dl', 'cv-strip', 'cv-blocks', 'cv-tch', 'info']);
   });
 
   it('one deadline per line, nearest first, each linking to its mini-project page', async () => {

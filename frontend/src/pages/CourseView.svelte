@@ -103,28 +103,30 @@
       <!-- D78 (user, layout A): the blocks on the left; the course summary card
            and the info in a right-hand column. D80 (user): the deadlines and
            teachers cards join that column -- progress, deadlines, teachers,
-           info. Under 880px one column in this DOM order -- progress row,
-           deadlines, blocks, teachers, info -- so what is due comes first and
+           info. Under 880px one column in this DOM order -- deadlines,
+           progress row, blocks, teachers, info -- so what is due comes first and
            the blocks come before a long info on a phone, and the reading order
            is the order on screen. -->
       <div class="cv-body">
         {#if courseP}
           <div class="cv-prog"><CourseProgress p={courseP} /></div>
+        {/if}
+        {#if deadlines.length > 0}
+          <div class="cv-dl"><CourseDeadlines {courseSlug} lines={deadlines} blockN={(id) => blockPos.get(id)} /></div>
+        {/if}
+        {#if courseP}
           <!-- D78 (user): at 880px and below the card and the text toggle give way
                to this bare row -- the course meter in the block columns and a
                chevron that replaces "Collapse all / Expand all". Only one of the
                two forms is displayed at a time (CSS), so a screen reader meets
                one. The meter is aria-hidden; the sentence states it, first, as
-               the card does. D80: a child of the body, so on a phone it leads
-               the deadlines card too. -->
+               the card does. D92 (user): it sits on the blocks it collapses,
+               below the deadlines card. -->
           <div class="cv-strip">
             <p class="sr-only">Your progress: {progressPhrase(courseP)}.</p>
             <span class="cv-meter"><ProgressMeter p={courseP} onStrip /></span>
             <IconButton borderless glyph={anyOpen ? 'chevron' : 'chevron-right'} title={anyOpen ? 'Collapse all' : 'Expand all'} onclick={() => setAll(!anyOpen)} />
           </div>
-        {/if}
-        {#if deadlines.length > 0}
-          <div class="cv-dl"><CourseDeadlines {courseSlug} lines={deadlines} blockN={(id) => blockPos.get(id)} /></div>
         {/if}
         <div class="cv-blocks">
           <!-- One small control over every block (user, 2026-10-08): "Collapse all"
@@ -200,8 +202,8 @@
     .cv-body { display: flex; flex-direction: column; align-items: stretch; }
     .cv-prog, .all-toggle { display: none; }
     .cv-strip { display: flex; }
-    /* D80: the row left the blocks column; with no deadlines card between
-       them, D78's 4px to the first block: the row's own 4px margin, the
+    /* D80: the row left the blocks column. D92: it always comes right before
+       them, so D78's 4px to the first block: the row's own 4px margin, the
        -14px cancelling the column's 14px gap (flex margins don't collapse). */
     .cv-strip + .cv-blocks { margin-top: -14px; }
   }
